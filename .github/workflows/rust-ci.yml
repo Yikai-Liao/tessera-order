@@ -20,6 +20,11 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
         # Keep the second entry in sync with `rust-version` in Cargo.toml.
         toolchain: [stable, "1.85"]
+    env:
+      # Lints are enforced on stable by the lint job. Older compilers report
+      # false positives, such as `unreachable_pub` on 1.85, so MSRV only has
+      # to build and pass the tests.
+      RUSTFLAGS: ${{ matrix.toolchain == 'stable' && '-D warnings' || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master

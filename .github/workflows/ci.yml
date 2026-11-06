@@ -54,3 +54,15 @@ jobs:
     needs: changes
     if: needs.changes.outputs.python == 'true' && needs.changes.outputs.python_present == 'true'
     uses: ./.github/workflows/python-ci.yml
+
+  # The single required check for branch protection. Language jobs are skipped
+  # when their paths did not change, so it passes on success or skip and fails
+  # on any failure or cancellation.
+  ci-ok:
+    if: always()
+    needs: [changes, rust, cpp, python]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<< "$NEEDS"

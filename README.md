@@ -17,158 +17,63 @@
 </p>
 
 > [!IMPORTANT]
-> Tessera is in pre-release. The Rust engine has been ported to Stable Rust and checked against the research prototype ([port record](docs/design/port.md)). Nothing is on crates.io yet; see the [roadmap](#roadmap).
+> Tessera is in pre-release. The Rust engine has been ported to Stable Rust and checked against the research prototype. Nothing is on crates.io yet; see the [roadmap](ROADMAP.md).
 
 ## Why Tessera
 
 An LSD radix sort is stable and runs in linear time, but it needs a second buffer as large as the input. Comparison sorts avoid that buffer and pay O(n log n) comparisons instead. Tessera keeps the radix sort's linear time and stability and bounds the extra memory to O(√n).
 
-- **Stable.** Records with equal keys keep their input order, including under `Reverse` keys.
-- **O(√n) auxiliary memory.** Large inputs are split by a stable in-place block partition; every piece that fits a 64 KiB tile is finished in a bounded scratch buffer.
-- **Adaptive.** Sorted and reverse-sorted inputs are detected and finished without radix passes, nearly sorted inputs take a budgeted insertion pass, constant key bits are skipped, and heavily repeated keys are split off by sampling.
-- **Any record type.** Records do not need `Copy`, `Clone`, `Default` or `Ord`. Values such as `String`, `Box<T>` or `&mut T` are moved, never duplicated, even if the key function misbehaves, and a key function that panics leaves every record in the slice.
-- **Wide keys.** All primitive integers up to 128 bits, `f32` and `f64` in `total_cmp` order, and `std::cmp::Reverse<K>` for descending order.
+- **Stable**, also for descending keys.
+- **O(√n) auxiliary memory**, through a stable in-place block partition and a bounded 64 KiB tile buffer.
+- **Adaptive.** Sorted, reverse-sorted, nearly sorted and heavily repeated inputs take shortcuts, and constant key bits are skipped.
+- **Any record type.** No `Copy`, `Clone`, `Default` or `Ord` needed. Records are moved, never duplicated, even if the key function misbehaves or panics.
+- **Wide keys.** Integers up to 128 bits, `f32` and `f64` in `total_cmp` order, and `Reverse<K>`.
 - **No dependencies.** Pure Rust, `std` only.
 
 ## Quick start
 
-> The crate is not published yet. The examples use the implemented 0.1 API.
+> The crate is not published yet. The example uses the implemented 0.1 API.
 
 ```toml
 [dependencies]
 tessera-sort = "0.1"
 ```
 
-Sort plain keys:
-
-```rust
-let mut values: Vec<u64> = vec![42, 7, 19, 7, 3];
-tessera_sort::stable_sort(&mut values);
-assert_eq!(values, [3, 7, 7, 19, 42]);
-```
-
-Sort records by a key; equal keys keep their order:
-
 ```rust
 use std::cmp::Reverse;
 
-struct Row {
-    timestamp: i64,
-    name: String,
-}
+let mut values: Vec<u64> = vec![42, 7, 19, 7, 3];
+tessera_sort::stable_sort(&mut values);
+assert_eq!(values, [3, 7, 7, 19, 42]);
 
-let mut rows: Vec<Row> = load_rows();
-
-// Ascending by timestamp.
-tessera_sort::stable_sort_by_key(&mut rows, |row| row.timestamp);
-
-// Descending by timestamp; ties still keep their input order.
-tessera_sort::stable_sort_by_key(&mut rows, |row| Reverse(row.timestamp));
+// Sort records by a key; equal keys keep their input order.
+let mut rows = vec![(2u32, "first"), (1, "middle"), (2, "last")];
+tessera_sort::stable_sort_by_key(&mut rows, |row| Reverse(row.0));
+assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 ```
 
-## API
-
-| Function | Records | Notes |
-|---|---|---|
-| `stable_sort(&mut [K])` | Supported key types | Sorts the keys themselves |
-| `stable_sort_by_key(&mut [T], F)` | Any `T` | Sorts records by a key computed by `F` |
-| `Workspace<T>` | Same as above | The same sorts as methods, reusing scratch memory across calls |
-
-`F` is `FnMut(&T) -> K` where `K` is a supported key. The key types are fixed by a sealed `RadixKey` trait, so an unsupported key is a compile error rather than a runtime panic. Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits. Use `slice::sort_by` for those orders.
-
-### Untrusted key functions
-
-A key function is ordinary safe code, so Tessera cannot assume it returns the same key every time it is called. `stable_sort_by_key` therefore computes each record's bucket once per pass, stores it as a two-byte number, and moves records by the stored number. Every output slot is written exactly once, so records are never duplicated or lost, whatever the key function does. `stable_sort` needs none of this: its keys are encoded by Tessera itself, so it moves records by recomputing them.
-
-The research prototype skipped the stored bucket numbers for plain-data (`Copy`) records. Storing them for every record type usually costs a few percent and is sometimes faster. The largest measured cost is on tiny inputs of 128-byte records: 17% at 128 records. The per-case numbers are in the [port record](docs/design/port.md#performance). One code path for every record type is worth that cost.
-
-### Reusing scratch memory
-
-Each free function allocates scratch memory at the start of a call and frees it before returning. When you sort many slices of the same record type, a `Workspace<T>` keeps that memory between calls, so only the first sort, or one that needs more room, allocates:
-
-```rust
-use tessera_sort::Workspace;
-
-#[derive(Clone, Copy)]
-struct Entry {
-    key: u64,
-    row: u32,
-}
-
-let mut ws = Workspace::<Entry>::new();
-for batch in batches.iter_mut() {
-    ws.stable_sort_by_key(batch, |e| e.key);
-}
-
-// A workspace keeps its largest capacity until released.
-if ws.retained_bytes() > 4 << 20 {
-    ws.shrink_to_fit();
-}
-```
-
-A workspace keeps capacity only, never records: every call treats scratch as empty, so results never depend on earlier sorts. It is typed by the record, not the key, and serves one sort at a time; use one per thread. More examples, including thread-local reuse, are in [`docs/guide/workspace.md`](docs/guide/workspace.md).
-
-## Ordering semantics
-
-- **Stability.** Equal keys keep their input order.
-- **Floats.** `f32` and `f64` follow `total_cmp`: `-0.0` sorts before `+0.0`, and NaNs sort by sign and payload. If your data needs all NaNs equal or both zeros equal, normalize the key in the key function.
-- **Key functions.** A key function may be called several times per record, in any order, and should return the same key for the same record during one sort. If it does not, the order is unspecified, but the slice still holds every record exactly once. If it panics, the panic propagates and the slice still holds every record, in an unspecified order.
-- **Descending order.** Wrap the key in `Reverse`. Reversing an ascending result would reverse the order of ties as well.
-
-The full rules, including 128-bit and signed encodings, are in [`conformance/semantics.md`](conformance/semantics.md).
-
-## Memory
-
-| Storage | Bound |
+| API | Use |
 |---|---|
-| Block partition | O(√n) records for a fixed record size |
-| Tile scratch | Up to 64 KiB of records (at least one record), plus up to two bytes per record for user-key bucket IDs; unused cursor space is reused first |
-| Order-probe keys | Up to one tile of encoded keys, at most 65,535 keys × 16 bytes |
-| Stack | Up to 32 KiB of cursor table per tile-local MSD level. Depth is at most ⌈key bits / 6⌉, which is 22 levels for 128-bit keys. Threads with small stacks must budget for this. |
-| `Workspace` | Retains record, probe and block metadata capacity; `retained_bytes()` reports the total heap capacity, and `shrink_to_fit()` releases it |
+| `stable_sort(&mut [K])` | Sort keys themselves |
+| `stable_sort_by_key(&mut [T], F)` | Sort any records by a key computed by `F` |
+| `Workspace<T>` | The same sorts as methods, reusing scratch memory across calls ([guide](docs/guide/workspace.md)) |
 
-## How it works
-
-1. **Probe the order.** A sampled check finds ascending and descending inputs; ascending returns at once and descending is reversed stably. Other inputs get an insertion pass with a swap budget scaled to the input length; it gives up as soon as the budget runs out.
-2. **Find the varying bits.** One scan computes which key bits change. Constant bits are skipped, and a constant input returns without moving anything.
-3. **Partition large nodes.** A slice larger than one tile is split by a stable block partition on the top digit, on a sampled repeated key, or on an end run separated by the highest varying bit. The block partition reuses consumed input blocks and records their logical order, so it needs O(√n) extra space instead of a full buffer.
-4. **Finish tiles.** A slice that fits 64 KiB is finished by insertion sort, a tile-local MSD partition, or LSD counting passes. The choice and the digit widths (6 to 14 bits) come from a cost model of passes and bucket tables.
-
-[`docs/design/engine.md`](docs/design/engine.md) describes each stage and its invariants.
+Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 
 ## Performance
 
-These numbers are from the research prototype, not from a release of this crate. They were measured inside two databases' own benchmark programs, where Tessera replaced the existing sort. The ratio is Tessera's time divided by the existing sort's time; **below 1 means Tessera is faster**.
-
-**ClickHouse** `radix_sort` example, `UInt64` keys, against ClickHouse's LSD radix sort (median of 9 paired blocks):
-
-| Rows | 4,096 | 65,536 | 1,000,000 | 10,000,000 |
-|---|---:|---:|---:|---:|
-| Tessera / LSD radix | 0.971 (within noise) | 0.553 | 0.267 | 0.348 |
-
-**StarRocks** radix sort benchmark from PR #81472, uniformly random keys with a `u32` row index, against the PR's radix sort with pre-allocated scratch. Both sides include the benchmark's input copy and tie detection.
-
-| Key type | 4,096 rows | 65,536 rows | 1,000,000 rows |
-|---|---:|---:|---:|
-| Int32 | 1.608 | 1.204 | 0.505 |
-| Int64 | 0.575 | 0.553 | 0.298 |
-| Float | 1.685 | 1.519 | 0.859 |
-| Double | 1.352 | 0.720 | 0.467 |
-
-Tessera wins on large batches and on 64-bit keys. On batches of a few thousand 32-bit keys, a radix sort specialized for that size is faster.
-
-Conditions: research commit `6804fcb`; Intel Xeon Gold 6140 under KVM; one pinned core; Rust nightly with `target-cpu=native` and thin LTO; Clang 19 for the C++ side. The setup, A/A noise ranges and raw data are in the [research record](https://github.com/Yikai-Liao/sort-research-rs/tree/6c0877f0491dc3b8fc052aa529bce44bf8a53fa8/results/tessera/public-projects-20261105). Release benchmarks will follow the protocol in [`docs/development/benchmarking.md`](docs/development/benchmarking.md).
+> [!NOTE]
+> TODO: performance results will be published with the benchmark runner ([roadmap](ROADMAP.md)). This README provides no performance data until then.
 
 ## When to use something else
 
 - **Orders defined by a comparator**, strings, or other variable-length keys: use `slice::sort_by`.
-- **Many small arrays of a few thousand 32-bit keys** in a hot loop: a radix sort tuned for that size, or `slice::sort_unstable`, may be faster.
 - **Parallel sorting**: Tessera is single-threaded.
 - **`no_std`**: Tessera needs `std` for now.
 
 ## Status by language
 
-Each language package has its own version and release tags (`rust/vX.Y.Z`, `cpp/vX.Y.Z`, `python/vX.Y.Z`); see [`RELEASING.md`](RELEASING.md). No package has been released yet.
+Each language package is versioned and released separately ([`RELEASING.md`](RELEASING.md)). No package has been released yet.
 
 | Capability | Rust (unreleased) | C++ |
 |---|---|---|
@@ -178,26 +83,16 @@ Each language package has its own version and release tags (`rust/vX.Y.Z`, `cpp/
 | Records that own resources or hold `&mut` | Supported | Trivially copyable records only (planned) |
 | Reusable workspace | Supported | Planned |
 
-## Roadmap
+A Python binding is planned as well; see the [roadmap](ROADMAP.md).
 
-- [x] Research prototype, safety validation (Miri, ASan) and external benchmarks
-- [x] Port to Stable Rust and acceptance against the prototype ([port record](docs/design/port.md))
-- [ ] Benchmark runner and the first published result matrix
-- [ ] Release 0.1 on crates.io
-- [ ] Python binding for lists, `array.array` and NumPy
-- [ ] C++17 header-only implementation with the same semantics and test vectors
+## Learn more
 
-Deliverables, completion criteria and open questions are in [`ROADMAP.md`](ROADMAP.md).
-
-## Repository layout
-
-```text
-rust/tessera-sort/   the Rust crate
-conformance/         core ordering contracts and language adapter rules
-bench/               benchmark runners and reports
-docs/                design, benchmarking, port record and decision records
-assets/              logo
-```
+| Topic | Document |
+|---|---|
+| Ordering, key functions, floats, panics and memory bounds | [`conformance/semantics.md`](conformance/semantics.md) |
+| How the engine works | [`docs/design/engine.md`](docs/design/engine.md) |
+| Why every record type caches bucket IDs | [Decision 0002](docs/decisions/0002-cache-bucket-ids-for-every-record.md) |
+| All documentation | [`docs/README.md`](docs/README.md) |
 
 ## Contributing
 

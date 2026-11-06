@@ -27,8 +27,10 @@ mod imp {
 
 #[cfg(not(feature = "std"))]
 mod imp {
-    /// A build without `std` cannot catch a panic, so this type stays empty.
-    pub(crate) type Payload = core::convert::Infallible;
+    /// An opaque, uninhabited payload for a build that cannot catch panics.
+    // The private field keeps shared recovery branches well-formed under
+    // exhaustive uninhabited-type checking outside this module.
+    pub(crate) struct Payload(core::convert::Infallible);
 
     struct AbortOnUnwind;
 
@@ -48,7 +50,7 @@ mod imp {
     }
 
     pub(crate) fn resume(payload: Payload) -> ! {
-        match payload {}
+        match payload.0 {}
     }
 }
 

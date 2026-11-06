@@ -15,6 +15,7 @@ The first crates.io release. It provides the stable sort only.
 
 | Deliverable | Done when |
 |---|---|
+| Continuous benchmarks on Bencher Bare Metal ([setup](docs/development/continuous-benchmarks.md#setup)) | `main` has a seeded baseline and PRs receive reports |
 | Benchmark runner in `bench/rust` with `list`, `validate`, `measure` and `memory` ([protocol](docs/development/benchmarking.md)) | The harness self-tests and `validate --suite smoke` pass in CI |
 | Input generator specification and golden hashes in `conformance/vectors/` | The runner verifies every `core` input hash at startup |
 | First `core` report, `default` and `native` builds, on the Stable toolchain | The report regenerates from raw data; it becomes the regression baseline |

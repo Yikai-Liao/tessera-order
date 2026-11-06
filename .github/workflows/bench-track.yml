@@ -1,0 +1,102 @@
+name: Track benchmarks
+
+# Privileged: runs trusted default-branch code after a build. It packages the
+# untrusted executable without running it and submits it to Bencher.
+on:
+  workflow_run:
+    workflows: [Build benchmarks]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    environment: benchmark
+    timeout-minutes: 30
+    # Bencher Free runs one job per organization; queue rather than replace.
+    concurrency:
+      group: bencher-bare-metal
+      queue: max
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Never check out the triggering PR in this workflow.
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Resolve source commit and PR
+        id: source
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const resolve = require('./.github/scripts/bencher_context.cjs');
+            await resolve({ github, context, core });
+      - uses: actions/download-artifact@v4
+        if: steps.source.outputs.eligible == 'true'
+        with:
+          name: bench-rust
+          path: artifact
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Package and push image
+        if: steps.source.outputs.eligible == 'true'
+        id: image
+        env:
+          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
+          BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
+          TAG: rust-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+        run: |
+          # The image definition is trusted; only the executable comes from the build.
+          image="registry.bencher.dev/$BENCHER_PROJECT:$TAG"
+          chmod +x artifact/bench
+          printf 'FROM scratch\nCOPY bench /bench\n' \
+            | docker build --platform linux/amd64 -t "$image" -f - artifact
+          printf '%s' "$BENCHER_API_KEY" | docker login registry.bencher.dev \
+            --username "$BENCHER_PROJECT" --password-stdin
+          docker push "$image"
+          # Submit immutable content, not a tag.
+          echo "reference=$(docker inspect --format '{{index .RepoDigests 0}}' "$image")" >> "$GITHUB_OUTPUT"
+          docker logout registry.bencher.dev
+      - uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d # v0.6.16
+        if: steps.source.outputs.eligible == 'true'
+        with:
+          version: 0.6.16
+      - name: Measure on Bencher Bare Metal
+        if: steps.source.outputs.eligible == 'true'
+        env:
+          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
+          BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.source.outputs.branch }}
+          HASH: ${{ steps.source.outputs.hash }}
+          BASE: ${{ steps.source.outputs.base }}
+          BASE_HASH: ${{ steps.source.outputs.base_hash }}
+          PR_NUMBER: ${{ steps.source.outputs.number }}
+          IMAGE: ${{ steps.image.outputs.reference }}
+        run: |
+          if [ -n "$PR_NUMBER" ]; then
+            # Compare against the target branch at the PR's base commit.
+            args=(--start-point "$BASE" --start-point-hash "$BASE_HASH"
+              --start-point-clone-thresholds --start-point-reset --ci-number "$PR_NUMBER")
+          else
+            # A t-test against recent main history: noisy cases get wider limits.
+            args=(--threshold-measure latency --threshold-test t_test
+              --threshold-min-sample-size 5 --threshold-max-sample-size 32
+              --threshold-upper-boundary 0.99 --thresholds-reset)
+          fi
+          # Waiting for the remote job holds the concurrency slot until it ends.
+          # Free jobs stop at 5 minutes; the suite takes about 45 s locally.
+          bencher run --project "$BENCHER_PROJECT" --key "$BENCHER_API_KEY" \
+            --branch "$BRANCH" --hash "$HASH" \
+            --testbed intel-v1 --spec intel-v1 \
+            --image "$IMAGE" --job-timeout 240 \
+            --adapter rust_criterion \
+            --github-actions "$GH_TOKEN" --ci-id rust \
+            "${args[@]}" --exec -- /bench --bench

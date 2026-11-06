@@ -1,0 +1,56 @@
+name: Build benchmarks
+
+# Unprivileged: runs PR code, including forks, without secrets. Uploads one
+# static executable per language; bench-track.yml packages and submits it.
+on:
+  pull_request:
+    paths:
+      - "rust/**"
+      - "bench/rust/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/bench-*.yml"
+  # Every push to main, so unchanged code also adds baseline samples.
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-build-${{ github.event.pull_request.number || github.ref }}
+  # A newer PR commit supersedes the old one; main keeps every commit.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  rust:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Attribute measurements to the PR head, not a merge commit.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build a static executable
+        # Static glibc keeps glibc's allocator, which `api` mode measures.
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: |
+          cargo bench --locked -p tessera-bench --bench smoke \
+            --target x86_64-unknown-linux-gnu --no-run --message-format=json \
+            | jq -r 'select(.reason == "compiler-artifact" and .target.name == "smoke")
+                     | .executable // empty' > executable.txt
+          test "$(wc -l < executable.txt)" -eq 1
+          mkdir -p out && cp "$(cat executable.txt)" out/bench
+          ldd out/bench | grep -q 'statically linked'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-rust
+          path: out/bench
+          retention-days: 7
+          if-no-files-found: error

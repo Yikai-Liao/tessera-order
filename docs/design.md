@@ -54,10 +54,12 @@ The leaf and the digit widths are chosen by a cost model that counts passes and 
 
 Records are moved by bitwise copies between the input and `MaybeUninit<T>` scratch. Every record has exactly one live owner at any time; other physical copies are stale bytes that are never dropped, borrowed or returned.
 
-- **Plain-data path** (`stable_sort_by_key`, `T: Copy`). Scatter recomputes each record's key instead of storing its bucket. The first pass of a call that needs more scratch classifies with stored bucket numbers so that every scratch slot holds a valid record; later passes and tiles of the same call reuse that initialized prefix. A key function that returns different keys on different calls can then duplicate or drop records, but never expose uninitialized memory.
-- **Owned path** (`stable_sort_by_key_owned`, any `T`). The histogram stores a two-byte bucket number per record, and scatter reads it without calling the key function again. Bucket ranges are disjoint, so each output slot is written exactly once whatever the key function does. This makes `String`, `Box<T>` and `&mut T` records safe.
+Each counting pass reads the keys twice: once for the histogram and once to scatter the records. How the second read happens depends on who computes the key.
 
-The research prototype selected the path with specialization on `Copy`. This repository selects it by entry point, because stable Rust cannot specialize.
+- **User key functions** (`stable_sort_by_key`). The histogram stores a two-byte bucket number per record, and scatter reads it instead of calling the key function again. Bucket ranges are disjoint, so each output slot is written exactly once whatever the key function returns. This keeps `String`, `Box<T>` and `&mut T` records safe and every record type on one path.
+- **Library-encoded keys** (`stable_sort`). The keys are the records and are encoded by Tessera, so they are deterministic. Scatter recomputes them and stores nothing.
+
+The research prototype instead skipped the stored bucket numbers for every `Copy` record type, filling scratch with valid records on the first pass of a call so that a misbehaving key function could duplicate or drop records but never expose uninitialized memory. Measured on the prototype, storing bucket numbers for `Copy` records changes performance by at most about 4.5% in either direction, with no difference for 128-byte records; the measurement is summarized in the README.
 
 ## Panic safety
 

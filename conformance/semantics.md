@@ -9,14 +9,12 @@ Status: draft for 0.1. Every Tessera implementation (Rust now, C++ later) follow
 | Stable | The output is ordered by key, and records with equal keys appear in their input order. |
 | Unstable | The output is ordered by key. The order of records with equal keys is unspecified. |
 
-Both contracts output a permutation of the input: no record is lost, duplicated or modified, provided the key function is consistent (see below).
+Both contracts output a permutation of the input: no record is lost, duplicated or modified, whatever the key function returns.
 
 ## Key extraction
 
 - The key function may be called any number of times per record, in any order.
-- During one sort, it must return the same key for the same record. If it does not, the order of the result is unspecified and no undefined behavior occurs. What happens to the records depends on the entry point:
-  - entry points for records that may own resources (Rust `stable_sort_by_key_owned`) still output a permutation of the input;
-  - entry points restricted to plain-data records (Rust `stable_sort_by_key` with `T: Copy`) may output some records more than once and omit others. They skip the per-record bookkeeping that would prevent this, because duplicating plain data is memory-safe.
+- During one sort, it should return the same key for the same record. If it does not, the order of the result is unspecified, but the output is still a permutation of the input and no undefined behavior occurs.
 - If the key function panics (Rust) or throws (C++), the error propagates to the caller. The slice then holds every record exactly once, in an unspecified order.
 
 ## Key encoding

@@ -15,7 +15,7 @@
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 
-use crate::key::{Extract, KeyHalf, Unsigned};
+use crate::key::{Encoded, Extract, KeyHalf, RadixKey, Unsigned};
 use crate::{Workspace, block};
 
 type KeyValue<T, E> = <E as Extract<T>>::Value;
@@ -201,19 +201,60 @@ fn outlier_run<T, E: Extract<T>>(
     })
 }
 
+/// Stable insertion sort of plain keys with a swap budget.
+///
+/// Direct extraction sorts the records themselves, so it needs no key
+/// function; the loop lives here to share the swapping rules with
+/// [`insertion_loop`].
+#[inline]
+pub(crate) fn insertion_sort_keys<K: RadixKey>(keys: &mut [K], budget: usize) -> Option<usize> {
+    let mut swaps = 0;
+    let mut start = 0;
+    while let Some(offset) = K::blocked_first_inversion(&keys[start..]) {
+        let index = start + offset + 1;
+        let (prefix, tail) = keys.split_at_mut(index);
+        let (mut current, prefix) = prefix.split_last_mut()?;
+        core::mem::swap(current, &mut tail[0]);
+        swaps += 1;
+        if swaps > budget {
+            return None;
+        }
+        for before in prefix.iter_mut().rev() {
+            if before.encode() <= current.encode() {
+                break;
+            }
+            core::mem::swap(before, current);
+            current = before;
+            swaps += 1;
+            if swaps > budget {
+                return None;
+            }
+        }
+        start = index;
+    }
+    Some(swaps)
+}
+
 /// Scans for inversions and uses budgeted stable insertion on key copies or
 /// records. On failure the input remains a stable permutation.
-fn budgeted_insertion_sort<T, K: Ord>(
+fn budgeted_insertion_sort<T, E: Extract<T>>(
     arr: &mut [T],
     budget: usize,
-    mut key: impl FnMut(&T) -> K,
+    key: &mut E,
+) -> Option<usize> {
+    key.insertion_sort(arr, budget)
+}
+
+/// Stable insertion sort that takes a fresh inversion scan after every swap
+/// run, driven by the extractor's scan.
+pub(crate) fn insertion_loop<T, E: Extract<T>>(
+    arr: &mut [T],
+    budget: usize,
+    key: &mut E,
 ) -> Option<usize> {
     let mut swaps = 0;
     let mut start = 0;
-    while let Some(offset) = arr[start..]
-        .windows(2)
-        .position(|pair| key(&pair[0]) > key(&pair[1]))
-    {
+    while let Some(offset) = key.first_inversion(&arr[start..]) {
         let index = start + offset + 1;
         let (prefix, tail) = arr.split_at_mut(index);
         let (mut current, prefix) = prefix.split_last_mut().unwrap();
@@ -224,7 +265,7 @@ fn budgeted_insertion_sort<T, K: Ord>(
             return None;
         }
         for before in prefix.iter_mut().rev() {
-            if key(before) <= key(current) {
+            if key.key(before) <= key.key(current) {
                 break;
             }
             core::mem::swap(before, current);
@@ -373,7 +414,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
     if sampled == Order::Unsorted {
         let probe = (tile_bytes / record_bytes).max(2).min(arr.len());
         let swaps = if probe == arr.len() {
-            budgeted_insertion_sort(arr, probe, |record| key.key(record))
+            budgeted_insertion_sort(arr, probe, key)
         } else {
             // The buffer holds keys, never records. Its `u128` elements give
             // alignment for every encoded key width.
@@ -394,11 +435,9 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
             // SAFETY: every key slot was initialized above; this borrow ends
             // before the workspace is used by the sorting engine.
             let keys = unsafe { core::slice::from_raw_parts_mut(ptr, probe) };
-            match budgeted_insertion_sort(keys, probe, |&key| key) {
+            match budgeted_insertion_sort(keys, probe, &mut Encoded) {
                 Some(0) => None,
-                Some(swaps) => budgeted_insertion_sort(arr, swaps * arr.len() / probe, |record| {
-                    key.key(record)
-                }),
+                Some(swaps) => budgeted_insertion_sort(arr, swaps * arr.len() / probe, key),
                 None => None,
             }
         };
@@ -528,7 +567,7 @@ fn reverse_stably<T, E: Extract<T>>(arr: &mut [T], extractor: &mut E) {
 
 /// Stable insertion sort on converted keys.
 fn insertion_sort<T, E: Extract<T>>(arr: &mut [T], key: &mut E) {
-    let _ = budgeted_insertion_sort(arr, usize::MAX, |record| key.key(record));
+    let _ = budgeted_insertion_sort(arr, usize::MAX, key);
 }
 
 /// One stable counting pass: histogram, prefix sum, then scatter from `source`

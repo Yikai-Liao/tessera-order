@@ -24,6 +24,32 @@ pub trait RadixKey: sealed::Sealed + Copy {
     type Encoded: Unsigned;
     #[doc(hidden)]
     fn encode(self) -> Self::Encoded;
+
+    /// Returns the offset of the first adjacent pair whose encoded keys
+    /// descend.
+    ///
+    /// This is an implementation detail of `Direct` extraction. `ByKey` scans
+    /// through its own key function instead, and may observe different keys
+    /// for the same record.
+    #[doc(hidden)]
+    #[inline]
+    fn first_inversion(keys: &[Self]) -> Option<usize> {
+        crate::scan::first_inversion(keys)
+    }
+
+    /// Scan that never dispatches, for arrays too short to amortize it.
+    #[doc(hidden)]
+    #[inline]
+    fn blocked_first_inversion(keys: &[Self]) -> Option<usize> {
+        Self::first_inversion(keys)
+    }
+
+    /// Stable insertion sort of keys with a swap budget.
+    #[doc(hidden)]
+    #[inline]
+    fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
+        crate::engine::insertion_sort_keys(keys, budget)
+    }
 }
 
 mod sealed {
@@ -46,6 +72,8 @@ pub trait Unsigned:
     fn from_usize(value: usize) -> Self;
     fn to_usize(self) -> usize;
     fn to_u128(self) -> u128;
+    /// Stable insertion sort of these keys with a swap budget.
+    fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize>;
 }
 
 macro_rules! unsigned {
@@ -56,10 +84,23 @@ macro_rules! unsigned {
             #[inline] fn from_usize(value: usize) -> Self { value as Self }
             #[inline] fn to_usize(self) -> usize { self as usize }
             #[inline] fn to_u128(self) -> u128 { self as u128 }
+            #[cfg(feature = "portable-simd")]
+            #[inline] fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
+                crate::portable_simd::insertion_sort(keys, budget)
+            }
+            #[cfg(not(feature = "portable-simd"))]
+            #[inline] fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
+                crate::engine::insertion_sort_keys(keys, budget)
+            }
         }
         impl RadixKey for $ty {
             type Encoded = Self;
             #[inline] fn encode(self) -> Self { self }
+            #[cfg(feature = "portable-simd")]
+            #[inline]
+            fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
+                crate::portable_simd::insertion_sort(keys, budget)
+            }
         }
     )*};
 }
@@ -72,6 +113,11 @@ macro_rules! signed {
             type Encoded = $u;
             #[inline] fn encode(self) -> $u {
                 (self as $u) ^ (1 << (<$u>::BITS - 1))
+            }
+            #[cfg(feature = "portable-simd")]
+            #[inline]
+            fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
+                crate::portable_simd::insertion_sort(keys, budget)
             }
         }
     )*};
@@ -86,7 +132,7 @@ signed!(
 );
 
 macro_rules! float {
-    ($(($f:ty, $u:ty)),* $(,)?) => {$(
+    ($(($f:ty, $u:ty, $default:path)),* $(,)?) => {$(
         impl sealed::Sealed for $f {}
         impl RadixKey for $f {
             type Encoded = $u;
@@ -95,10 +141,22 @@ macro_rules! float {
                 let sign = 1 << (<$u>::BITS - 1);
                 if bits & sign != 0 { !bits } else { bits ^ sign }
             }
+            #[inline]
+            fn first_inversion(keys: &[Self]) -> Option<usize> {
+                $default(keys)
+            }
+            #[cfg(feature = "portable-simd")]
+            #[inline]
+            fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
+                crate::portable_simd::insertion_sort(keys, budget)
+            }
         }
     )*};
 }
-float!((f32, u32), (f64, u64));
+float!(
+    (f32, u32, crate::scan::first_inversion),
+    (f64, u64, crate::scan::scalar)
+);
 
 impl<K: RadixKey> sealed::Sealed for Reverse<K> {}
 impl<K: RadixKey> RadixKey for Reverse<K> {
@@ -116,6 +174,36 @@ impl<K: RadixKey> RadixKey for Reverse<K> {
 pub(crate) trait Extract<T> {
     type Value: Unsigned;
     fn key(&mut self, record: &T) -> Self::Value;
+
+    /// Returns the offset of the first adjacent pair whose keys descend.
+    ///
+    /// The default keeps the previous key, so it calls the key function once
+    /// per record instead of once per compared pair.
+    #[inline]
+    fn first_inversion(&mut self, records: &[T]) -> Option<usize> {
+        let mut records = records.iter();
+        let first = records.next()?;
+        let mut previous = self.key(first);
+        for (index, record) in records.enumerate() {
+            let current = self.key(record);
+            if previous > current {
+                return Some(index);
+            }
+            previous = current;
+        }
+        None
+    }
+
+    /// Stable insertion sort with the given swap budget.
+    ///
+    /// The default scans through the key function for every pair. Direct
+    /// extraction overrides it to resolve the vector backend once per call.
+    fn insertion_sort(&mut self, arr: &mut [T], budget: usize) -> Option<usize>
+    where
+        Self: Sized,
+    {
+        crate::engine::insertion_loop(arr, budget, self)
+    }
 }
 
 /// Extracts keys with a user key function, which may panic or be inconsistent.
@@ -130,11 +218,38 @@ impl<T, K: RadixKey, F: FnMut(&T) -> K> Extract<T> for ByKey<F> {
 
 /// Uses the record itself as the key; deterministic and panic-free.
 pub(crate) struct Direct;
+
 impl<K: RadixKey> Extract<K> for Direct {
     type Value = K::Encoded;
     #[inline]
     fn key(&mut self, record: &K) -> Self::Value {
         record.encode()
+    }
+
+    #[inline(always)]
+    fn first_inversion(&mut self, records: &[K]) -> Option<usize> {
+        K::first_inversion(records)
+    }
+
+    #[inline]
+    fn insertion_sort(&mut self, arr: &mut [K], budget: usize) -> Option<usize> {
+        K::insertion_sort(arr, budget)
+    }
+}
+
+/// Uses an already encoded key as its own record.
+pub(crate) struct Encoded;
+impl<K: Unsigned> Extract<K> for Encoded {
+    type Value = K;
+    #[inline]
+    fn key(&mut self, record: &K) -> K {
+        *record
+    }
+
+    /// One dispatch for the whole probe, which is a single call per sort.
+    #[inline]
+    fn insertion_sort(&mut self, arr: &mut [K], budget: usize) -> Option<usize> {
+        K::insertion_sort(arr, budget)
     }
 }
 

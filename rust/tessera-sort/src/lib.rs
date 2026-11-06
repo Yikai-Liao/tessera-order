@@ -52,6 +52,13 @@
 //! during block partitioning aborts rather than exposing partially moved
 //! records, even when the host enables unwinding. Panics elsewhere may unwind
 //! safely. Sorting, ordering and the memory bounds above are the same either way.
+//!
+//! `portable-simd` is off by default. It adds
+//! [`fearless_simd`](https://docs.rs/fearless_simd) and dispatches the
+//! first-inversion scans once per insertion pass to SSE2, AVX2, AVX-512, Arm
+//! Neon or WebAssembly SIMD, so one binary uses the instruction set of the
+//! machine that runs it instead of the one it was compiled for. It needs `std`
+//! and a newer compiler than the default features do.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]
@@ -61,6 +68,9 @@ extern crate alloc;
 mod block;
 mod engine;
 mod key;
+#[cfg(feature = "portable-simd")]
+mod portable_simd;
+mod scan;
 mod unwind;
 mod workspace;
 

@@ -55,56 +55,101 @@ struct ScatterPosition {
     output: usize,
 }
 
-/// Block size in records.
+/// Bytes of block tables the partition keeps per block position.
 ///
-/// A block size `b` costs `2 * R * b * record_bytes` bytes of scratch for `R`
-/// buckets and about `9 * n / b` bytes of block tables; the square root
-/// balances the two. Four times that optimum (tuned for 8-bit digits) trades
-/// scratch for less table and rollover work. A floor of about 1 KiB per block
-/// limits bookkeeping for small records, and a block holds at least one record.
+/// The block order is a permutation of the physical blocks. It is stored twice,
+/// so a pass can write the next order while reading the current one, and every
+/// output block carries the id of the bucket that filled it. Rebuilding the
+/// order from those two arrays is what keeps the scheme stable without a
+/// full-size output buffer.
+const DESCRIPTOR_BYTES_PER_POSITION: usize =
+    2 * core::mem::size_of::<u32>() + core::mem::size_of::<u16>();
+
+/// Smallest block, counted in bytes of records.
+///
+/// The compaction pass moves a block with one copy, so a block has to hold
+/// enough bytes for a copy to be worth its own overhead.
+const BLOCK_BYTES_FLOOR: usize = 1024;
+
+/// Smallest block, counted in records.
+///
+/// The bookkeeping of a block — its order entry, its bucket id and one copy
+/// call — costs the same whatever the record width, so a floor in records keeps
+/// it amortised for wide records, where the byte floor alone would allow only a
+/// handful of records per block.
+const BLOCK_RECORDS_FLOOR: usize = 32;
+
+/// Block size in records for a digit partition into `radix`-bit digits.
+///
+/// The partition fills its buckets block by block, so it holds the records it
+/// moves in blocks of `b` records: `2 * R` of those blocks for `R` buckets, one
+/// output block per bucket and as many in reserve, because an input block may
+/// only be recycled as an output block once every record in it has been read.
+/// The tables are indexed by block position and cost
+/// [`DESCRIPTOR_BYTES_PER_POSITION`] bytes per position; records move by
+/// exchanging blocks, not by copying into a second buffer. For `n` records of
+/// `s` bytes, a block size `b` therefore costs
+///
+/// ```text
+/// 2 R b s + 10 n / b
+/// ```
+///
+/// bytes of auxiliary memory, and the two terms are equal at
+/// `b = sqrt(10 n / (2 R s))`. That root minimizes the sum: writing `b = c b*`
+/// turns the total into `(c + 1 / c) / 2` times the minimum, which grows in
+/// both directions. A larger block saves only the per-block work, and the floors
+/// below bound that on their own.
+///
+/// # Memory
+///
+/// Two floors keep the per-block work amortised: a block holds at least
+/// [`BLOCK_BYTES_FLOOR`] bytes of records, and at least
+/// [`BLOCK_RECORDS_FLOOR`] records whatever their width. Their own cost does not
+/// depend on `n` — together they reserve at most `2 R max(1024, 32 s)` bytes of
+/// scratch and `O(R)` table entries — so the auxiliary memory stays
+/// `O(sqrt(n))` in `n` for a fixed record size and digit width.
 pub(crate) fn default_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
-    const BLOCK_BYTES_FLOOR: usize = 1024;
-    scaled_block_size(len, record_bytes, radix)
-        .max(BLOCK_BYTES_FLOOR / record_bytes)
+    let floors = (BLOCK_BYTES_FLOOR / record_bytes).max(BLOCK_RECORDS_FLOOR);
+    balanced_block_size(len, record_bytes, radix)
+        .max(floors)
         .max(1)
 }
 
-/// The four-times-optimum factor of the block size, rounded up.
+/// The balanced block size, rounded up.
 ///
-/// `std` computes it as `ceil(4 * sqrt(9 n / (2 R b)))`. `core` has neither
+/// `std` computes it as `ceil(sqrt(10 n / (2 R s)))`. `core` has neither
 /// `f64::sqrt` nor `f64::ceil`, so an integer solve of
-/// `m * m * R * b >= 72 * n` stands in for it. Both forms agree wherever the
-/// caller can reach them, which `scaled_forms_agree` in this file's tests
+/// `m * m * (2 R s) >= 10 n` stands in for it. Both forms agree wherever the
+/// caller can reach them, which `balanced_forms_agree` in this file's tests
 /// checks.
 #[cfg(feature = "std")]
-fn scaled_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
+fn balanced_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
     let range = 1usize << radix;
-    let descriptor_bytes = 9.0 * len as f64;
-    let scratch_bytes_per_element = 2.0 * range as f64 * record_bytes as f64;
-    let balanced = (descriptor_bytes / scratch_bytes_per_element).sqrt();
-    (4.0 * balanced).ceil() as usize
+    let tables = DESCRIPTOR_BYTES_PER_POSITION as f64 * len as f64;
+    let scratch_per_record = 2.0 * range as f64 * record_bytes as f64;
+    (tables / scratch_per_record).sqrt().ceil() as usize
 }
 
 #[cfg(not(feature = "std"))]
-fn scaled_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
-    scaled_block_size_integer(len, record_bytes, radix)
+fn balanced_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
+    balanced_block_size_integer(len, record_bytes, radix)
 }
 
-/// The integer form of [`scaled_block_size`].
+/// The integer form of [`balanced_block_size`].
 ///
 /// A standard build compiles it only to compare it against the floating-point
 /// form in tests.
 #[cfg(any(not(feature = "std"), test))]
-fn scaled_block_size_integer(len: usize, record_bytes: usize, radix: usize) -> usize {
-    let numerator = 72 * len as u128;
-    let denominator = (1u128 << radix) * record_bytes as u128;
-    let mut scaled = (numerator / denominator).isqrt();
+fn balanced_block_size_integer(len: usize, record_bytes: usize, radix: usize) -> usize {
+    let numerator = DESCRIPTOR_BYTES_PER_POSITION as u128 * len as u128;
+    let denominator = 2 * (1u128 << radix) * record_bytes as u128;
+    let mut balanced = (numerator / denominator).isqrt();
     // `isqrt` floors, so at most one step moves the product to or past
     // `numerator`. `record_bytes` is at least one, so no division by zero.
-    if scaled * scaled * denominator < numerator {
-        scaled += 1;
+    if balanced * balanced * denominator < numerator {
+        balanced += 1;
     }
-    scaled as usize
+    balanced as usize
 }
 
 /// Called on a bucket as soon as its records are contiguous in the input.
@@ -895,12 +940,25 @@ mod tests {
 
     #[test]
     fn integer_block_size_rounds_up_at_square_boundaries() {
-        // With 36-byte records and one radix bit, the ratio is exactly len.
-        for (len, expected) in [(0, 0), (1, 1), (2, 2), (99, 10), (100, 10), (101, 11)] {
-            assert_eq!(scaled_block_size_integer(len, 36, 1), expected);
+        // With 5-byte records and one radix bit, the ratio is exactly len / 2.
+        let table = [
+            (0, 0),
+            (1, 1),
+            (2, 1),
+            (3, 2),
+            (7, 2),
+            (8, 2),
+            (9, 3),
+            (199, 10),
+            (200, 10),
+            (201, 11),
+        ];
+        for (len, expected) in table {
+            assert_eq!(balanced_block_size_integer(len, 5, 1), expected);
         }
         // A remainder must round up even when the integer quotient is a square.
-        assert_eq!(scaled_block_size_integer(101, 3600, 1), 2);
+        assert_eq!(balanced_block_size_integer(20, 50, 1), 1);
+        assert_eq!(balanced_block_size_integer(21, 50, 1), 2);
     }
 
     /// The integer form must reproduce the floating-point block size: a
@@ -908,14 +966,14 @@ mod tests {
     /// the measurements behind the constant.
     #[cfg(feature = "std")]
     #[test]
-    fn scaled_forms_agree() {
+    fn balanced_forms_agree() {
         let lengths = (1..=600).chain([1 << 10, 4096, 10_000, 1 << 16, 1 << 20, 1 << 24]);
         for len in lengths {
             for record_bytes in [1, 2, 4, 8, 16, 24, 32, 64, 128] {
                 for radix in 1..=MAX_RADIX_BITS {
                     assert_eq!(
-                        scaled_block_size(len, record_bytes, radix),
-                        scaled_block_size_integer(len, record_bytes, radix),
+                        balanced_block_size(len, record_bytes, radix),
+                        balanced_block_size_integer(len, record_bytes, radix),
                         "len {len}, {record_bytes}-byte records, {radix} bits"
                     );
                 }

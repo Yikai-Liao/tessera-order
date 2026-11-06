@@ -1,6 +1,6 @@
 # Benchmarks
 
-The benchmark runner lives here once it is built. The protocol it implements is in [`docs/development/benchmarking.md`](../docs/development/benchmarking.md).
+The release runner lives here once it is built; its protocol is in [`docs/development/benchmarking.md`](../docs/development/benchmarking.md). The [continuous benchmarks](../docs/development/continuous-benchmarks.md) in `rust/benches/smoke.rs` run on every PR that changes Rust code.
 
 ```text
 bench/rust/     Rust runner (unpublished crate)

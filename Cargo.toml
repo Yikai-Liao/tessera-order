@@ -1,5 +1,5 @@
 [workspace]
-members = ["rust/tessera-sort"]
+members = ["rust/tessera-sort", "bench/rust"]
 resolver = "3"
 
 [workspace.package]

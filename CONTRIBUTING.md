@@ -14,7 +14,7 @@ The crate builds on stable Rust; the minimum supported version is in `Cargo.toml
 
 ```sh
 cargo test --workspace
-cargo clippy --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
@@ -31,7 +31,11 @@ The engine moves records through uninitialized scratch memory. Every `unsafe` bl
 
 ## Performance changes
 
-A claim that a change is faster or slower needs measurements that follow [`docs/benchmarking.md`](docs/benchmarking.md): paired with the previous version in one process, with the A/A range reported. Please include the raw output or a link to it.
+A claim that a change is faster or slower needs measurements that follow [`docs/development/benchmarking.md`](docs/development/benchmarking.md): paired with the previous version in one process, with the A/A range reported. Please include the raw output or a link to it.
+
+## Documentation
+
+Public items document their behavior completely: a one-line summary, the contract (ordering, stability, what happens to records), and `# Panics`, `# Safety`, `# Memory` and `# Examples` sections where they apply, with examples as compiled doctests. Internal comments explain why the code is the way it is: invariants, hazards and the measurements behind constants. [`docs/README.md`](docs/README.md) says where each kind of document belongs.
 
 ## Semantics
 

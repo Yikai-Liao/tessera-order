@@ -1,0 +1,45 @@
+# Roadmap
+
+Each milestone lists what it delivers and how we know it is done. Decisions that shaped the plan are recorded in [`docs/decisions/`](docs/decisions/README.md).
+
+## Done
+
+- **Repository setup.** License, ordering semantics, design and benchmark protocol, CI, contribution policy.
+- **Stable Rust port.** `stable_sort`, `stable_sort_by_key` and `Workspace<T>` on Rust 1.85, with rewritten tests, Miri and AddressSanitizer.
+- **Port acceptance.** Measured against the research prototype in one binary with A/A and code-placement controls. Median ratios are 0.98–1.00; the slowest cases, rerun at higher precision, come from the planned bucket-ID caching or from code placement. See the [port record](docs/design/port.md).
+
+## Rust 0.1
+
+The first crates.io release. It provides the stable sort only.
+
+| Deliverable | Done when |
+|---|---|
+| Benchmark runner in `bench/rust` with `list`, `validate`, `measure` and `memory` ([protocol](docs/development/benchmarking.md)) | The harness self-tests and `validate --suite smoke` pass in CI |
+| Input generator specification and golden hashes in `conformance/vectors/` | The runner verifies every `core` input hash at startup |
+| First `core` report, `default` and `native` builds, on the Stable toolchain | The report regenerates from raw data; it becomes the regression baseline |
+| Multi-platform CI | Linux, macOS and Windows on x86-64 and AArch64, stable and MSRV, all green |
+| Release | Robert Clausecker has been told before publication; `rust/v0.1.0` follows [`RELEASING.md`](RELEASING.md) |
+
+Open questions for this milestone:
+
+- **Sample duration and prepared-memory cap.** Fix the defaults from the test machine's memory and the time a 10M-record case takes.
+- **Cost of cached bucket IDs on 8-byte rows.** `{u32 key, u32 row}` records have not been measured. If the cost is large, consider an `unsafe` entry point that skips the cache ([decision 0002](docs/decisions/0002-cache-bucket-ids-for-every-record.md)).
+
+## Python binding
+
+An independent track that binds the Rust crate and does not wait for C++. See the [Python binding proposal](docs/proposals/python-binding.md).
+
+## C++
+
+1. **C++ runner.** The same case specification and JSONL output as the Rust runner, with the standard library and pinned third-party sorts as baselines. Done when its generator matches the golden hashes.
+2. **C++17 header-only implementation** for trivially copyable records, with CMake install and a consumer test. Done when it passes the shared vectors and has a direct comparison with Rust.
+
+## Integrations
+
+Rerun the StarRocks and ClickHouse benchmarks against a released crate and link the results from the README. These benchmarks contain upstream Apache-2.0 code, so they live outside this repository ([decision 0001](docs/decisions/0001-single-bsd-2-clause-license.md)).
+
+## Not planned
+
+- A dedicated unstable kernel before 0.1.
+- `no_std` with `alloc`, vcpkg and Conan packages: after the first releases, on demand.
+- Go and parallel sorting: only if a real use case appears.

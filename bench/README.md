@@ -1,6 +1,6 @@
 # Benchmarks
 
-The benchmark runner lives here once it is built. The protocol it implements is in [`docs/benchmarking.md`](../docs/benchmarking.md).
+The benchmark runner lives here once it is built. The protocol it implements is in [`docs/development/benchmarking.md`](../docs/development/benchmarking.md).
 
 ```text
 bench/rust/     Rust runner (unpublished crate)

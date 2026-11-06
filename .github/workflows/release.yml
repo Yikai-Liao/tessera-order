@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags: ['rust/v*', 'cpp/v*', 'python/v*']
+
+permissions:
+  contents: read
+
+# Published tags are immutable. Release jobs are never cancelled by a later tag.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  rust:
+    if: startsWith(github.ref_name, 'rust/v')
+    uses: ./.github/workflows/rust-release.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
+  cpp:
+    if: startsWith(github.ref_name, 'cpp/v')
+    uses: ./.github/workflows/cpp-release.yml
+    permissions:
+      contents: write
+
+  python:
+    if: startsWith(github.ref_name, 'python/v')
+    uses: ./.github/workflows/python-release.yml
+    permissions:
+      contents: read
+
+  # PyPI Trusted Publishing must run in a non-reusable workflow. Keep only
+  # this Python publication job here; language validation/builds stay reusable.
+  python-publish:
+    needs: python
+    if: startsWith(github.ref_name, 'python/v')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: python-wheels-*
+          path: wheel-artifacts
+      - name: Collect wheels without overwriting different builds
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import hashlib, shutil
+          output = Path('dist')
+          output.mkdir()
+          wheels = list(Path('wheel-artifacts').rglob('*.whl'))
+          assert wheels, 'no wheels downloaded'
+          for wheel in wheels:
+              target = output / wheel.name
+              if target.exists():
+                  assert hashlib.sha256(target.read_bytes()).digest() == hashlib.sha256(wheel.read_bytes()).digest(), f'conflicting wheel: {wheel.name}'
+              else:
+                  shutil.copyfile(wheel, target)
+          PYCODE
+      - uses: pypa/gh-action-pypi-publish@release/v1

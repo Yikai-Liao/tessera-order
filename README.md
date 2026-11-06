@@ -17,7 +17,7 @@
 </p>
 
 > [!IMPORTANT]
-> Tessera is in pre-release. The engine is being ported from its research prototype to stable Rust, and the API shown below is the design for 0.1. Nothing is on crates.io yet; see the [roadmap](#roadmap).
+> Tessera is in pre-release. The Rust engine has been ported to Stable Rust and checked against the research prototype ([port record](docs/design/port.md)). Nothing is on crates.io yet; see the [roadmap](#roadmap).
 
 ## Why Tessera
 
@@ -32,7 +32,7 @@ An LSD radix sort is stable and runs in linear time, but it needs a second buffe
 
 ## Quick start
 
-> The crate is not published yet. This is the planned 0.1 usage.
+> The crate is not published yet. The examples use the implemented 0.1 API.
 
 ```toml
 [dependencies]
@@ -80,7 +80,7 @@ tessera_sort::stable_sort_by_key(&mut rows, |row| Reverse(row.timestamp));
 
 A key function is ordinary safe code, so Tessera cannot assume it returns the same key every time it is called. `stable_sort_by_key` therefore computes each record's bucket once per pass, stores it as a two-byte number, and moves records by the stored number. Every output slot is written exactly once, so records are never duplicated or lost, whatever the key function does. `stable_sort` needs none of this: its keys are encoded by Tessera itself, so it moves records by recomputing them.
 
-In the research prototype, plain-data (`Copy`) records skipped the stored bucket numbers. Measured against that path on the research prototype (Xeon Gold 6140, paired in one binary with a code-placement control), storing them costs at most about 4.5% and is faster in some cases: 16-byte records are up to 3.5% slower on random keys from 16K records up and 2–3.4% faster on skewed keys at 1K–4K, and 128-byte records show no difference. A single entry point for every record type is worth that cost.
+The research prototype skipped the stored bucket numbers for plain-data (`Copy`) records. Storing them for every record type usually costs a few percent and is sometimes faster. The largest measured cost is on tiny inputs of 128-byte records: 17% at 128 records. The per-case numbers are in the [port record](docs/design/port.md#performance). One code path for every record type is worth that cost.
 
 ### Reusing scratch memory
 
@@ -106,7 +106,7 @@ if ws.retained_bytes() > 4 << 20 {
 }
 ```
 
-A workspace keeps capacity only, never records: every call treats scratch as empty, so results never depend on earlier sorts. It is typed by the record, not the key, and serves one sort at a time; use one per thread. More examples, including thread-local reuse, are in [`docs/workspace.md`](docs/workspace.md).
+A workspace keeps capacity only, never records: every call treats scratch as empty, so results never depend on earlier sorts. It is typed by the record, not the key, and serves one sort at a time; use one per thread. More examples, including thread-local reuse, are in [`docs/guide/workspace.md`](docs/guide/workspace.md).
 
 ## Ordering semantics
 
@@ -122,9 +122,10 @@ The full rules, including 128-bit and signed encodings, are in [`conformance/sem
 | Storage | Bound |
 |---|---|
 | Block partition | O(√n) records for a fixed record size |
-| Tile scratch | 64 KiB of records (at least one record), plus one `u16` cursor per bucket |
+| Tile scratch | Up to 64 KiB of records (at least one record), plus up to two bytes per record for user-key bucket IDs; unused cursor space is reused first |
+| Order-probe keys | Up to one tile of encoded keys, at most 65,535 keys × 16 bytes |
 | Stack | Up to 32 KiB of cursor table per tile-local MSD level. Depth is at most ⌈key bits / 6⌉, which is 22 levels for 128-bit keys. Threads with small stacks must budget for this. |
-| `Workspace` | Keeps the largest capacity used so far until `shrink_to_fit` |
+| `Workspace` | Retains record, probe and block metadata capacity; `retained_bytes()` reports the total heap capacity, and `shrink_to_fit()` releases it |
 
 ## How it works
 
@@ -133,7 +134,7 @@ The full rules, including 128-bit and signed encodings, are in [`conformance/sem
 3. **Partition large nodes.** A slice larger than one tile is split by a stable block partition on the top digit, on a sampled repeated key, or on an end run separated by the highest varying bit. The block partition reuses consumed input blocks and records their logical order, so it needs O(√n) extra space instead of a full buffer.
 4. **Finish tiles.** A slice that fits 64 KiB is finished by insertion sort, a tile-local MSD partition, or LSD counting passes. The choice and the digit widths (6 to 14 bits) come from a cost model of passes and bucket tables.
 
-[`docs/design.md`](docs/design.md) describes each stage and its invariants.
+[`docs/design/engine.md`](docs/design/engine.md) describes each stage and its invariants.
 
 ## Performance
 
@@ -156,7 +157,7 @@ These numbers are from the research prototype, not from a release of this crate.
 
 Tessera wins on large batches and on 64-bit keys. On batches of a few thousand 32-bit keys, a radix sort specialized for that size is faster.
 
-Conditions: research commit `6804fcb`; Intel Xeon Gold 6140 under KVM; one pinned core; Rust nightly with `target-cpu=native` and thin LTO; Clang 19 for the C++ side. The setup, A/A noise ranges and raw data are in the [research record](https://github.com/Yikai-Liao/sort-research-rs/tree/6c0877f0491dc3b8fc052aa529bce44bf8a53fa8/results/tessera/public-projects-20261105). Release benchmarks will follow the protocol in [`docs/benchmarking.md`](docs/benchmarking.md).
+Conditions: research commit `6804fcb`; Intel Xeon Gold 6140 under KVM; one pinned core; Rust nightly with `target-cpu=native` and thin LTO; Clang 19 for the C++ side. The setup, A/A noise ranges and raw data are in the [research record](https://github.com/Yikai-Liao/sort-research-rs/tree/6c0877f0491dc3b8fc052aa529bce44bf8a53fa8/results/tessera/public-projects-20261105). Release benchmarks will follow the protocol in [`docs/development/benchmarking.md`](docs/development/benchmarking.md).
 
 ## When to use something else
 
@@ -165,23 +166,36 @@ Conditions: research commit `6804fcb`; Intel Xeon Gold 6140 under KVM; one pinne
 - **Parallel sorting**: Tessera is single-threaded.
 - **`no_std`**: Tessera needs `std` for now.
 
+## Status by language
+
+Each language package has its own version and release tags (`rust/vX.Y.Z`, `cpp/vX.Y.Z`, `python/vX.Y.Z`); see [`RELEASING.md`](RELEASING.md). No package has been released yet.
+
+| Capability | Rust (unreleased) | C++ |
+|---|---|---|
+| Stable sort | Implemented | Planned |
+| Unstable sort | Not in 0.1 | Planned |
+| 128-bit keys | Signed and unsigned | Planned |
+| Records that own resources or hold `&mut` | Supported | Trivially copyable records only (planned) |
+| Reusable workspace | Supported | Planned |
+
 ## Roadmap
 
 - [x] Research prototype, safety validation (Miri, ASan) and external benchmarks
-- [ ] Port the engine to stable Rust with the 0.1 API
-- [ ] Acceptance benchmark: the port matches the research prototype
+- [x] Port to Stable Rust and acceptance against the prototype ([port record](docs/design/port.md))
 - [ ] Benchmark runner and the first published result matrix
 - [ ] Release 0.1 on crates.io
-- [ ] Native C++17 header-only implementation sharing the same semantics and test vectors
-- [ ] A dedicated unstable kernel
+- [ ] Python binding for lists, `array.array` and NumPy
+- [ ] C++17 header-only implementation with the same semantics and test vectors
+
+Deliverables, completion criteria and open questions are in [`ROADMAP.md`](ROADMAP.md).
 
 ## Repository layout
 
 ```text
 rust/tessera-sort/   the Rust crate
-conformance/         ordering semantics shared by all implementations
+conformance/         core ordering contracts and language adapter rules
 bench/               benchmark runners and reports
-docs/                design and benchmarking documentation
+docs/                design, benchmarking, port record and decision records
 assets/              logo
 ```
 

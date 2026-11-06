@@ -1,0 +1,41 @@
+name: C++ release
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    uses: ./.github/workflows/cpp-ci.yml
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - run: cmake -S cpp -B build/cpp -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build/cpp --config Release --parallel 2
+      - name: Check CPack version and package
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cat > check-version.cmake <<'CMAKE'
+          include("${CMAKE_CURRENT_LIST_DIR}/build/cpp/CPackConfig.cmake")
+          if(NOT "$ENV{RELEASE_TAG}" STREQUAL "cpp/v${CPACK_PACKAGE_VERSION}")
+            message(FATAL_ERROR "tag/CPack version mismatch")
+          endif()
+          CMAKE
+          cmake -P check-version.cmake
+          mkdir -p dist
+          cpack --config build/cpp/CPackConfig.cmake -G TGZ -B dist
+      - name: Create C++ release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          printf 'C++ package release %s. See CHANGELOG.md and RELEASING.md at this tag.\n' "$RELEASE_TAG" > release-notes.md
+          gh release create "$RELEASE_TAG" dist/*.tar.gz --verify-tag --title "$RELEASE_TAG" --notes-file release-notes.md

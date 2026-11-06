@@ -1,12 +1,10 @@
 # Reusing scratch memory with `Workspace`
 
-> This describes the planned 0.1 API. The examples will become compiled documentation tests once the engine is ported.
-
-Tessera needs scratch memory while it sorts: O(√n) records for the block partition, plus one tile of up to 64 KiB of records and its cursor table. The free functions such as `stable_sort_by_key` allocate this memory at the start of each call and free it before returning.
+Tessera needs scratch memory while it sorts: O(√n) records for the block partition, one tile of up to 64 KiB of records, up to two bytes per record for user-key bucket IDs, and the order probe's encoded keys. Cursor tables live on the stack. The free functions such as `stable_sort_by_key` allocate this memory during each call and free it before returning.
 
 A `Workspace<T>` holds that scratch memory between calls instead. The first sort allocates what it needs; later sorts reuse the capacity and allocate only when they need more. Results are identical either way: a workspace changes who owns the scratch memory and how long it lives, never the output.
 
-Use a workspace when you sort many slices of the same record type, for example one batch of rows at a time. For a single sort, the free functions are simpler and just as fast.
+Use a workspace when you sort many slices of the same record type, for example one batch of rows at a time. For a single sort, the free functions are simpler.
 
 ## API
 
@@ -97,7 +95,7 @@ for column in columns.iter_mut() {
 
 ### Bounding retained memory
 
-A workspace keeps the largest capacity it has used until you release it. After one large sort, it holds that capacity even while it sorts small slices. Long-running services can cap it:
+A workspace keeps the largest capacity it has used until you release it, so after one large sort it still holds that capacity while sorting small slices. (A key-function panic may drop part of the block-partition capacity; the next call allocates it again.) Long-running services can cap it:
 
 ```rust
 const RETAIN_LIMIT: usize = 4 << 20; // 4 MiB

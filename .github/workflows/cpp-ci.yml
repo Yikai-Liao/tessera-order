@@ -1,0 +1,21 @@
+name: C++ CI
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: C++ (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - run: cmake -S cpp -B build/cpp -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build/cpp --config Release --parallel 2
+      - run: ctest --test-dir build/cpp --build-config Release --output-on-failure --no-tests=error

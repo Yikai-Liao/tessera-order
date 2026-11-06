@@ -10,42 +10,47 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
-
 jobs:
-  test:
-    name: test (${{ matrix.os }}, ${{ matrix.toolchain }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        # Keep the second entry in sync with `rust-version` in Cargo.toml.
-        toolchain: [stable, "1.85"]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.toolchain }}
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --all-targets
-      - run: cargo test --workspace --doc
-
-  lint:
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.changes.outputs.rust }}
+      cpp: ${{ steps.changes.outputs.cpp }}
+      cpp_present: ${{ steps.changes.outputs.cpp_present }}
+      python: ${{ steps.changes.outputs.python }}
+      python_present: ${{ steps.changes.outputs.python_present }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets
-      - run: cargo doc --workspace --no-deps
+          fetch-depth: 0
+      - run: python3 -m unittest discover -s .github/scripts -p "test_*.py"
+      - id: changes
         env:
-          RUSTDOCFLAGS: -D warnings
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 .github/scripts/ci_changes.py --base "$BASE" --head "$HEAD" --out "$GITHUB_OUTPUT"
+      - name: Explain deferred C++ checks
+        if: steps.changes.outputs.cpp == 'true' && steps.changes.outputs.cpp_present != 'true'
+        run: echo 'C++ is planned; checks activate when cpp/CMakeLists.txt is added.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Explain deferred Python checks
+        if: steps.changes.outputs.python == 'true' && steps.changes.outputs.python_present != 'true'
+        run: echo 'Python is planned; checks activate when its pyproject.toml and Cargo.toml are added.' >> "$GITHUB_STEP_SUMMARY"
+
+  rust:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    uses: ./.github/workflows/rust-ci.yml
+
+  cpp:
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true' && needs.changes.outputs.cpp_present == 'true'
+    uses: ./.github/workflows/cpp-ci.yml
+
+  python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true' && needs.changes.outputs.python_present == 'true'
+    uses: ./.github/workflows/python-ci.yml

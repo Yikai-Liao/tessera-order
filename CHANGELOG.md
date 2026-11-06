@@ -14,3 +14,7 @@ All notable changes to this project are documented in this file. The format foll
 - `rustfmt.toml` and workspace lints for documentation and unsafe code.
 - Repository structure, ordering semantics, design, benchmarking and workspace documentation.
 - Contribution policy: DCO sign-off checked in CI, AI-assisted contribution rules, code of conduct, and instructions for coding agents.
+
+### Changed
+
+- Derive the block-partition block size from the scratch-versus-tables trade-off instead of a tuned multiple of it, and keep the per-block copy and bookkeeping amortised with a floor in bytes and one in records. The removed factor sat at 2.1 times the minimum auxiliary memory of the scheme; the asymptotic bound is unchanged.

@@ -3,6 +3,12 @@
 //! Record preservation when a key function panics or returns inconsistent
 //! keys, for records that own resources and records that hold `&mut`.
 
+// Catching a panic needs `std`; without it the process aborts, which no test can
+// observe. The gate empties this crate in that build, so it has no documentation
+// to lint.
+#![cfg(feature = "std")]
+#![allow(missing_docs)]
+
 use std::cell::{Cell, RefCell};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;

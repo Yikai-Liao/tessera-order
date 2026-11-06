@@ -48,6 +48,21 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  # The crate is `no_std` without its default feature, so the build target has no
+  # `std` to fall back on. Clippy and the tests run on the host, where `std` exists
+  # for the test harness itself.
+  no_std:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv7em-none-eabi
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p tessera-sort --no-default-features --target thumbv7em-none-eabi
+      - run: cargo clippy -p tessera-sort --no-default-features --all-targets
+      - run: cargo test -p tessera-sort --no-default-features --all-targets
+
   miri:
     runs-on: ubuntu-latest
     steps:

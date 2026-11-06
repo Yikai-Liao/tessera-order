@@ -39,13 +39,15 @@
 //! need neither `Copy` nor `Clone`.
 
 use crate::key::{Extract, Unsigned};
-use std::{marker::PhantomData, mem::MaybeUninit, ptr};
+use crate::unwind;
+use alloc::vec::Vec;
+use core::{marker::PhantomData, mem::MaybeUninit, ptr};
 
 /// Widest digit, in bits, that one pass accepts. Callers that choose their own
 /// digit width (the Tessera engine) bound it by this constant.
 pub(crate) const MAX_RADIX_BITS: usize = 12;
 
-type PanicPayload = Box<dyn std::any::Any + Send>;
+type PanicPayload = unwind::Payload;
 
 // Logical input and output block cursors for the current pass.
 struct ScatterPosition {
@@ -61,14 +63,64 @@ struct ScatterPosition {
 /// scratch for less table and rollover work. A floor of about 1 KiB per block
 /// limits bookkeeping for small records, and a block holds at least one record.
 pub(crate) fn default_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
-    const SQRT_SCALE: f64 = 4.0;
     const BLOCK_BYTES_FLOOR: usize = 1024;
+    scaled_block_size(len, record_bytes, radix)
+        .max(BLOCK_BYTES_FLOOR / record_bytes)
+        .max(1)
+}
+
+/// The four-times-optimum factor of the block size, rounded up.
+///
+/// `std` computes it as `ceil(4 * sqrt(9 n / (2 R b)))`. `core` has neither
+/// `f64::sqrt` nor `f64::ceil`, so an integer solve of
+/// `m * m * R * b >= 72 * n` stands in for it. Both forms agree wherever the
+/// caller can reach them, which `scaled_forms_agree` in this file's tests
+/// checks.
+#[cfg(feature = "std")]
+fn scaled_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
     let range = 1usize << radix;
     let descriptor_bytes = 9.0 * len as f64;
     let scratch_bytes_per_element = 2.0 * range as f64 * record_bytes as f64;
     let balanced = (descriptor_bytes / scratch_bytes_per_element).sqrt();
-    let scaled = (SQRT_SCALE * balanced).ceil() as usize;
-    scaled.max(BLOCK_BYTES_FLOOR / record_bytes).max(1)
+    (4.0 * balanced).ceil() as usize
+}
+
+#[cfg(not(feature = "std"))]
+fn scaled_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
+    scaled_block_size_integer(len, record_bytes, radix)
+}
+
+/// The integer form of [`scaled_block_size`].
+///
+/// A standard build compiles it only to compare it against the floating-point
+/// form in tests.
+#[cfg(any(not(feature = "std"), test))]
+fn scaled_block_size_integer(len: usize, record_bytes: usize, radix: usize) -> usize {
+    let numerator = 72 * len as u128;
+    let denominator = (1u128 << radix) * record_bytes as u128;
+    let mut scaled = isqrt(numerator / denominator);
+    // `isqrt` floors, so at most one step moves the product to or past
+    // `numerator`. `record_bytes` is at least one, so no division by zero.
+    while scaled * scaled * denominator < numerator {
+        scaled += 1;
+    }
+    scaled as usize
+}
+
+/// Floor square root, standing in for `f64::sqrt` without `std`.
+#[cfg(any(not(feature = "std"), test))]
+fn isqrt(value: u128) -> u128 {
+    if value < 2 {
+        return value;
+    }
+    let mut root = 1u128 << value.ilog2().div_ceil(2);
+    loop {
+        let next = (root + value / root) / 2;
+        if next >= root {
+            return root;
+        }
+        root = next;
+    }
 }
 
 /// Called on a bucket as soon as its records are contiguous in the input.
@@ -105,7 +157,7 @@ fn partition_digit_inner<T, E: Extract<T>>(
     buffers: &mut Buffers<T>,
     visit: Option<KeyVisit<'_, T, E>>,
 ) -> Vec<usize> {
-    let record_bytes = std::mem::size_of::<T>();
+    let record_bytes = core::mem::size_of::<T>();
     if arr.len() < 2 || record_bytes == 0 {
         return Vec::new();
     }
@@ -133,9 +185,9 @@ pub(crate) fn partition_by<T, E: Extract<T>>(
     buffers: &mut Buffers<T>,
     mut classify: impl FnMut(&mut E, &T) -> usize,
 ) -> Vec<usize> {
-    let record_bytes = std::mem::size_of::<T>();
+    let record_bytes = core::mem::size_of::<T>();
     if arr.len() < 2 || record_bytes == 0 {
-        return vec![0; buckets];
+        return alloc::vec![0; buckets];
     }
     assert!(buckets.is_power_of_two() && (2..=1 << MAX_RADIX_BITS).contains(&buckets));
     partition_pass(
@@ -159,13 +211,13 @@ fn partition_pass<T, E: Extract<T>>(
     visit: Option<KeyVisit<'_, T, E>>,
 ) -> Vec<usize> {
     let radix = buckets.trailing_zeros() as usize;
-    let block_size = default_block_size(arr.len(), std::mem::size_of::<T>(), radix);
+    let block_size = default_block_size(arr.len(), core::mem::size_of::<T>(), radix);
     let mut sorter = Sorter::new(arr, buckets, block_size, buffers);
     let extractor = &mut *key;
     let (panic, ends) = sorter.step_with_ends(move |record| classify(extractor, record), want_ends);
     if let Some(payload) = panic {
         sorter.compact();
-        std::panic::resume_unwind(payload);
+        unwind::resume(payload);
     }
     // Classification has finished borrowing the extractor before any tile
     // callback starts; both phases use the same FnMut state in sequence.
@@ -176,7 +228,7 @@ fn partition_pass<T, E: Extract<T>>(
         sorter.compact_with(&ends, None)
     };
     if let Some(payload) = panic {
-        std::panic::resume_unwind(payload);
+        unwind::resume(payload);
     }
     ends
 }
@@ -359,7 +411,7 @@ impl<T> Buffers<T> {
         let debug_bytes = {
             #[cfg(debug_assertions)]
             {
-                self.seen.capacity() * std::mem::size_of::<bool>()
+                self.seen.capacity() * core::mem::size_of::<bool>()
             }
             #[cfg(not(debug_assertions))]
             {
@@ -367,17 +419,17 @@ impl<T> Buffers<T> {
             }
         };
         debug_bytes
-            + self.scratch.capacity() * std::mem::size_of::<T>()
+            + self.scratch.capacity() * core::mem::size_of::<T>()
             + (self.block_order.capacity() + self.next_block_order.capacity()) * 4
             + self.bucket_ids.capacity() * 2
-            + self.partial_blocks.capacity() * std::mem::size_of::<PartialBlock>()
-            + self.writers.capacity() * std::mem::size_of::<BucketWriter<T>>()
-            + self.counts.capacity() * std::mem::size_of::<usize>()
-            + self.ends.capacity() * std::mem::size_of::<Vec<usize>>()
+            + self.partial_blocks.capacity() * core::mem::size_of::<PartialBlock>()
+            + self.writers.capacity() * core::mem::size_of::<BucketWriter<T>>()
+            + self.counts.capacity() * core::mem::size_of::<usize>()
+            + self.ends.capacity() * core::mem::size_of::<Vec<usize>>()
             + self
                 .ends
                 .iter()
-                .map(|v| v.capacity() * std::mem::size_of::<usize>())
+                .map(|v| v.capacity() * core::mem::size_of::<usize>())
                 .sum::<usize>()
     }
     pub(crate) fn recycle_ends(&mut self, mut ends: Vec<usize>) {
@@ -416,10 +468,10 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
             input,
             bucket_count,
             block_size,
-            std::mem::take(&mut buffers.scratch),
+            core::mem::take(&mut buffers.scratch),
         );
         let active_blocks_end = bucket_count + full_blocks + 1;
-        let mut block_order = std::mem::take(&mut buffers.block_order);
+        let mut block_order = core::mem::take(&mut buffers.block_order);
         block_order.resize(blocks.block_count, 0);
         for (i, block) in block_order.iter_mut().enumerate() {
             *block = if i < bucket_count {
@@ -430,7 +482,7 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
                 i - (active_blocks_end - 1) + bucket_count
             } as u32;
         }
-        let mut partial_blocks = std::mem::take(&mut buffers.partial_blocks);
+        let mut partial_blocks = core::mem::take(&mut buffers.partial_blocks);
         partial_blocks.clear();
         partial_blocks.resize(
             bucket_count,
@@ -444,9 +496,9 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
             len: tail_len,
         };
         let block_count = blocks.block_count;
-        let mut next_block_order = std::mem::take(&mut buffers.next_block_order);
+        let mut next_block_order = core::mem::take(&mut buffers.next_block_order);
         next_block_order.resize(block_count, 0);
-        let mut bucket_ids = std::mem::take(&mut buffers.bucket_ids);
+        let mut bucket_ids = core::mem::take(&mut buffers.bucket_ids);
         bucket_ids.resize(block_count, 0);
         Self {
             buffers,
@@ -516,9 +568,9 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
         // The classifier is moved into the closure, not borrowed: a digit closure
         // keeps its mask and shift in registers only when the scatter owns it. A
         // &mut here cost 40 % on a digit-only sort (sparse8, 10M).
-        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let panic = unwind::catch(|| {
             self.scatter(&mut buckets, &mut counts, &mut position, 0, classify);
-        }))
+        })
         .err();
         if panic.is_some() {
             // Reconstruct the offset in the current input block: records written
@@ -554,7 +606,7 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
     /// every bucket an empty write cursor. Counts start at one because that
     /// block is already assigned to the bucket.
     fn begin_pass(&mut self) -> (Vec<BucketWriter<T>>, Vec<usize>) {
-        let mut buckets = std::mem::take(&mut self.buffers.writers);
+        let mut buckets = core::mem::take(&mut self.buffers.writers);
         buckets.clear();
         buckets.reserve(self.bucket_count);
         for i in 0..self.bucket_count {
@@ -566,7 +618,7 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
             });
             self.bucket_ids[i] = i as u16;
         }
-        let mut counts = std::mem::take(&mut self.buffers.counts);
+        let mut counts = core::mem::take(&mut self.buffers.counts);
         counts.clear();
         counts.resize(self.bucket_count, 1);
         (buckets, counts)
@@ -634,7 +686,7 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
         self.next_block_order[self.active_blocks_end + self.bucket_count..]
             .copy_from_slice(&self.block_order[self.active_blocks_end + self.bucket_count..]);
         self.active_blocks_end += self.bucket_count;
-        std::mem::swap(&mut self.block_order, &mut self.next_block_order);
+        core::mem::swap(&mut self.block_order, &mut self.next_block_order);
         self.buffers.counts = starts;
         record_ends
     }
@@ -698,7 +750,7 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
             // record at a time on 8 byte records; the size scaling keeps the
             // reload amortization for wider records without spilling cursors.
             let group =
-                (4 * std::mem::size_of::<usize>() / std::mem::size_of::<T>().max(1)).clamp(1, 4);
+                (4 * core::mem::size_of::<usize>() / core::mem::size_of::<T>().max(1)).clamp(1, 4);
             let complete = begin + (length - begin) / group * group;
             for start in (begin..complete).step_by(group) {
                 for offset in 0..group {
@@ -730,7 +782,7 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
     ) -> Option<PanicPayload> {
         // Sorting is finished. Reuse the output buffer as the inverse map:
         // physical block ID -> position in block_order.
-        let mut block_positions = std::mem::take(&mut self.next_block_order);
+        let mut block_positions = core::mem::take(&mut self.next_block_order);
         for i in 0..self.block_order.len() {
             block_positions[self.block_order[i] as usize] = i as u32;
         }
@@ -750,11 +802,9 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
                     // SAFETY: this bucket is fully materialized and no longer a
                     // copy source; its input slice does not overlap scratch.
                     let bucket = unsafe {
-                        std::slice::from_raw_parts_mut(input_ptr.add(begin), end - begin)
+                        core::slice::from_raw_parts_mut(input_ptr.add(begin), end - begin)
                     };
-                    if let Err(payload) =
-                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(bucket)))
-                    {
+                    if let Err(payload) = unwind::catch(|| callback(bucket)) {
                         callback_panic = Some(payload);
                         return;
                     }
@@ -847,10 +897,34 @@ impl<T> Drop for Sorter<'_, '_, T> {
         if !self.input_materialized {
             self.compact();
         }
-        self.buffers.scratch = std::mem::take(&mut self.blocks.scratch);
-        self.buffers.block_order = std::mem::take(&mut self.block_order);
-        self.buffers.next_block_order = std::mem::take(&mut self.next_block_order);
-        self.buffers.bucket_ids = std::mem::take(&mut self.bucket_ids);
-        self.buffers.partial_blocks = std::mem::take(&mut self.partial_blocks);
+        self.buffers.scratch = core::mem::take(&mut self.blocks.scratch);
+        self.buffers.block_order = core::mem::take(&mut self.block_order);
+        self.buffers.next_block_order = core::mem::take(&mut self.next_block_order);
+        self.buffers.bucket_ids = core::mem::take(&mut self.bucket_ids);
+        self.buffers.partial_blocks = core::mem::take(&mut self.partial_blocks);
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+
+    /// The integer form must reproduce the floating-point block size: a
+    /// different block size moves pass and tile boundaries, and so would leave
+    /// the measurements behind the constant.
+    #[test]
+    fn scaled_forms_agree() {
+        let lengths = (1..=600).chain([1 << 10, 4096, 10_000, 1 << 16, 1 << 20, 1 << 24]);
+        for len in lengths {
+            for record_bytes in [1, 2, 4, 8, 16, 24, 32, 64, 128] {
+                for radix in 1..=MAX_RADIX_BITS {
+                    assert_eq!(
+                        scaled_block_size(len, record_bytes, radix),
+                        scaled_block_size_integer(len, record_bytes, radix),
+                        "len {len}, {record_bytes}-byte records, {radix} bits"
+                    );
+                }
+            }
+        }
     }
 }

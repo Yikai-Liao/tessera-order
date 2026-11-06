@@ -3,7 +3,7 @@
 //! Stable radix sort with O(√n) auxiliary memory.
 //!
 //! Tessera sorts slices by a primitive key: an integer up to 128 bits, an
-//! `f32` or `f64`, or [`Reverse`](std::cmp::Reverse) of one of these. It runs
+//! `f32` or `f64`, or [`Reverse`](core::cmp::Reverse) of one of these. It runs
 //! in linear time for a fixed key width, keeps records with equal keys in
 //! input order, and needs no `Copy`, `Clone`, `Default` or `Ord` on the
 //! records it moves.
@@ -11,7 +11,7 @@
 //! # Examples
 //!
 //! ```
-//! use std::cmp::Reverse;
+//! use core::cmp::Reverse;
 //! use tessera_sort::{stable_sort, stable_sort_by_key};
 //!
 //! let mut keys = [42, -7, 42, 0];
@@ -44,12 +44,24 @@
 //!
 //! The free functions allocate this scratch during each call. A [`Workspace`]
 //! keeps it between calls.
+//!
+//! # Cargo features
+//!
+//! `std` is enabled by default. Disable it for `no_std`: the crate then uses
+//! `core` and `alloc`, so it needs a global allocator, and panics must abort,
+//! because a build without `std` cannot catch a key-function panic and move the
+//! records back. Sorting, ordering and the memory bounds above are the same
+//! either way.
 
+#![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]
+
+extern crate alloc;
 
 mod block;
 mod engine;
 mod key;
+mod unwind;
 mod workspace;
 
 pub use key::RadixKey;
@@ -91,7 +103,8 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 ///
 /// If `key` panics, the panic propagates to the caller after every record has
 /// been moved back into `values`, in an unspecified order. No record is
-/// dropped or duplicated.
+/// dropped or duplicated. Without the `std` feature, as in a no-std build, the
+/// process aborts instead.
 ///
 /// # Examples
 ///

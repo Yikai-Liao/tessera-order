@@ -7,3 +7,4 @@ Each file records one decision that shapes the project: the context, the decisio
 | [0001](0001-single-bsd-2-clause-license.md) | One BSD-2-Clause license for the whole repository | 2026-11-06 |
 | [0002](0002-cache-bucket-ids-for-every-record.md) | Cache bucket IDs for every record type | 2026-11-06 |
 | [0003](0003-independent-package-versions.md) | Version and release each language package independently | 2026-11-06 |
+| [0004](0004-no-std-with-alloc.md) | Support no-std with alloc behind a default-on std feature | 2026-11-06 |

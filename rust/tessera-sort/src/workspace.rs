@@ -2,7 +2,8 @@
 
 use crate::key::{ByKey, Direct};
 use crate::{RadixKey, block, engine};
-use std::mem::MaybeUninit;
+use alloc::vec::Vec;
+use core::mem::MaybeUninit;
 
 /// Scratch memory kept between sorts of `T` records.
 ///
@@ -78,6 +79,7 @@ impl<T> Workspace<T> {
     ///
     /// If `key` panics, the panic propagates after every record has been moved
     /// back into `values`, in an unspecified order. The workspace stays usable.
+    /// Without the `std` feature the process aborts instead.
     pub fn stable_sort_by_key<K: RadixKey, F: FnMut(&T) -> K>(&mut self, values: &mut [T], key: F) {
         engine::sort::<T, _, true>(values, &mut ByKey(key), Some(self));
     }
@@ -87,8 +89,8 @@ impl<T> Workspace<T> {
     /// Counts record scratch, cached bucket IDs, order-probe keys and block
     /// partition metadata. Stack storage is not included.
     pub fn retained_bytes(&self) -> usize {
-        self.tile.capacity() * std::mem::size_of::<T>()
-            + self.probe.capacity() * std::mem::size_of::<u128>()
+        self.tile.capacity() * core::mem::size_of::<T>()
+            + self.probe.capacity() * core::mem::size_of::<u128>()
             + self
                 .block
                 .as_ref()

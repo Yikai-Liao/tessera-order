@@ -6,6 +6,7 @@ Each milestone lists what it delivers and how we know it is done. Decisions that
 
 - **Repository setup.** License, ordering semantics, design and benchmark protocol, CI, contribution policy.
 - **Stable Rust port.** `stable_sort`, `stable_sort_by_key` and `Workspace<T>` on Rust 1.85, with rewritten tests, Miri and AddressSanitizer.
+- **`no_std` with `alloc`.** `default-features = false` builds on `core` and `alloc`. Such a build cannot catch a key-function panic, so panics there must abort; everything else, memory bounds and results included, is unchanged ([decision 0004](docs/decisions/0004-no-std-with-alloc.md)).
 - **Multi-platform CI.** Stable and MSRV on Linux (x86-64, AArch64), macOS (AArch64) and Windows (x86-64), plus Miri and AddressSanitizer; `main` requires it to pass.
 - **Port acceptance.** Measured against the research prototype in one binary with A/A and code-placement controls. Median ratios are 0.98–1.00; the slowest cases, rerun at higher precision, come from the planned bucket-ID caching or from code placement, which a rebuild reverses and branch alignment removes on ordered inputs. See the [port record](docs/design/port.md).
 
@@ -41,5 +42,6 @@ Rerun the StarRocks and ClickHouse benchmarks against a released crate and link 
 ## Not planned
 
 - A dedicated unstable kernel before 0.1.
-- `no_std` with `alloc`, vcpkg and Conan packages: after the first releases, on demand.
+- vcpkg and Conan packages: after the first releases, on demand.
+- A `core`-only build that takes its scratch from the caller instead of `alloc`: only if a real use case without a global allocator appears.
 - Go and parallel sorting: only if a real use case appears.

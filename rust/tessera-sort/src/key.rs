@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-use std::cmp::Reverse;
-use std::ops::{BitAnd, BitOrAssign, Not, Shl, Shr};
+use core::cmp::Reverse;
+use core::ops::{BitAnd, BitOrAssign, Not, Shl, Shr};
 
 /// A key type that Tessera can sort by.
 ///

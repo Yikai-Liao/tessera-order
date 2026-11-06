@@ -1,7 +1,7 @@
-# 0005: Guard record movement against unwinding without std
+# 0006: Guard record movement against unwinding without std
 
 Date: 2026-11-07. Status: accepted. Supersedes the panic-strategy requirement
-and safety rationale in [0004](0004-no-std-with-alloc.md).
+and safety rationale in [0005](0005-no-std-with-alloc.md).
 
 ## Context
 

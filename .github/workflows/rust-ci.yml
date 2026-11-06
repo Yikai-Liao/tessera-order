@@ -32,7 +32,8 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-targets
-      - run: cargo test --workspace --all-targets --no-default-features
+      # Benchmark dependencies would otherwise enable the crate's std feature.
+      - run: cargo test -p tessera-sort --all-targets --no-default-features
       - run: cargo test --workspace --doc
 
   lint:

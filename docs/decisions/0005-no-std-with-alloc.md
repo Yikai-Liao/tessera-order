@@ -1,7 +1,7 @@
-# 0004: Support no-std with alloc behind a default-on std feature
+# 0005: Support no-std with alloc behind a default-on std feature
 
 Date: 2026-11-06. Status: accepted. The panic-strategy requirement and its safety
-rationale are superseded by [0005](0005-no-std-unwind-guard.md).
+rationale are superseded by [0006](0006-no-std-unwind-guard.md).
 
 ## Context
 

@@ -71,6 +71,8 @@ Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned int
 
 ## Performance
 
+Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). These continuous measurements flag changes to investigate; performance claims require the [A/B protocol](docs/development/benchmarking.md).
+
 > [!NOTE]
 > TODO: performance results will be published with the benchmark runner ([roadmap](ROADMAP.md)). This README provides no performance data until then.
 

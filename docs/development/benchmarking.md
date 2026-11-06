@@ -1,6 +1,6 @@
 # Benchmarking
 
-This document defines how Tessera is measured. The runner described here is not built yet; until it is, published numbers come from the research prototype and say so.
+This document defines how Tessera is measured. The runner described here is not built yet; until it is, published numbers come from the research prototype and say so. A separate [continuous benchmark suite](continuous-benchmarks.md) runs on Bencher Bare Metal for regression triage; it uses this document's case IDs but not its timing and statistics.
 
 ## Purposes
 
@@ -20,7 +20,7 @@ This document defines how Tessera is measured. The runner described here is not 
 | `validate --suite S` | Checks order, permutation and, for stable variants, the order of equal keys, for every case and variant |
 | `measure --suite S --out DIR` | Times the suite and writes `samples.jsonl` and `manifest.json` |
 
-Cases are selected by exact `case_id`, for example `u64/random/4096/s1`, never by pattern matching.
+Cases are selected by exact `case_id`, `type/distribution/length/seed`, for example `u64/random/4096/s1` or `row_u64/zipf2/65536/s1`, never by pattern matching. Distribution names: `random`, `d256` and `d16` (uniform over 256 and 16 values), `zipf1.1` and `zipf2`, `sorted`, `reverse`, `sorted95` and `sorted99`, `runs`, `equal`.
 
 Variants include the working-tree crate, a baseline release linked under a renamed dependency (`tessera_base = { package = "tessera-sort", git = "...", tag = "rust/v0.1.0" }`), `slice::sort_by_key`, `slice::sort_unstable_by_key`, and other radix sorts from crates.io, such as `radsort` and `rdst`, where they support the task. If Cargo rejects the same package from a path and a git source, the two versions are built as separate binaries and a driver script alternates them.
 
@@ -52,7 +52,7 @@ Payloads carry the record's original index so that permutation and stability can
 
 | Suite | Contents | Use |
 |---|---|---|
-| `smoke` | A few types, distributions and lengths | Every change and CI |
+| `smoke` | A few types, distributions and lengths | Every change and CI; currently implemented as the [continuous suite](continuous-benchmarks.md) |
 | `core` | All tasks × all core distributions × all core lengths | Releases and regression A/B |
 | `extended` | More seeds, float edge cases, compound keys, wide records, cold-cache mode | Investigations |
 

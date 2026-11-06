@@ -6,7 +6,7 @@ Each milestone lists what it delivers and how we know it is done. Decisions that
 
 - **Repository setup.** License, ordering semantics, design and benchmark protocol, CI, contribution policy.
 - **Stable Rust port.** `stable_sort`, `stable_sort_by_key` and `Workspace<T>` on Rust 1.85, with rewritten tests, Miri and AddressSanitizer.
-- **`no_std` with `alloc`.** `default-features = false` builds on `core` and `alloc`. An unwind guard aborts on key-function panics during block partitioning, regardless of the host panic strategy; memory bounds and successful results are unchanged ([decision 0004](docs/decisions/0004-no-std-with-alloc.md), [decision 0005](docs/decisions/0005-no-std-unwind-guard.md)).
+- **`no_std` with `alloc`.** `default-features = false` builds on `core` and `alloc`. An unwind guard aborts on key-function panics during block partitioning, regardless of the host panic strategy; memory bounds and successful results are unchanged ([decision 0005](docs/decisions/0005-no-std-with-alloc.md), [decision 0006](docs/decisions/0006-no-std-unwind-guard.md)).
 - **Multi-platform CI.** Stable and MSRV on Linux (x86-64, AArch64), macOS (AArch64) and Windows (x86-64), plus Miri and AddressSanitizer; `main` requires it to pass.
 - **Port acceptance.** Measured against the research prototype in one binary with A/A and code-placement controls. Median ratios are 0.98–1.00; the slowest cases, rerun at higher precision, come from the planned bucket-ID caching or from code placement, which a rebuild reverses and branch alignment removes on ordered inputs. See the [port record](docs/design/port.md).
 
@@ -16,6 +16,7 @@ The first crates.io release. It provides the stable sort only.
 
 | Deliverable | Done when |
 |---|---|
+| Continuous benchmarks on Bencher Bare Metal ([setup](docs/development/continuous-benchmarks.md#setup)) | `main` has a seeded baseline and PRs receive reports |
 | Benchmark runner in `bench/rust` with `list`, `validate`, `measure` and `memory` ([protocol](docs/development/benchmarking.md)) | The harness self-tests and `validate --suite smoke` pass in CI |
 | Input generator specification and golden hashes in `conformance/vectors/` | The runner verifies every `core` input hash at startup |
 | First `core` report, `default` and `native` builds, on the Stable toolchain | The report regenerates from raw data; it becomes the regression baseline |

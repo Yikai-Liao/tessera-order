@@ -55,4 +55,4 @@ Do not say that a change is faster or slower without measurements that follow [`
 
 ## Commits
 
-Write commit messages in English, with a summary line that says what changed. Do not add `Signed-off-by`; the human author adds it after reviewing the change. Disclose your assistance with an `Assisted-by:` or `Co-authored-by:` trailer.
+Write commit messages in English, with a summary line that says what changed. Sign off every commit (`git commit -s`) with the configured Git identity. Disclose your assistance with an `Assisted-by:` or `Co-authored-by:` trailer.

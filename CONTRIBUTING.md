@@ -47,7 +47,7 @@ Contributions written with AI tools are welcome. They are held to the same stand
 
 - **You are the author.** Read and understand every line you submit. You should be able to explain the change and answer review questions yourself, without relaying them to a tool.
 - **Disclose the tools.** The pull request template asks which tools you used and for what: code, tests, documentation or review. Commit trailers such as `Assisted-by:` or `Co-authored-by:` are welcome but not required.
-- **Only a person signs off.** An agent must not add `Signed-off-by` on a person's behalf. By signing off you certify the [DCO](#sign-off-dco) for the whole change, which includes checking that generated code is not copied from code under an incompatible license.
+- **A sign-off covers the whole change.** It certifies the [DCO](#sign-off-dco) for everything in the commit, including that generated code is not copied from code under an incompatible license.
 - **Verify, do not estimate.** Run the tests, and Miri for engine changes. Performance numbers must come from measurements, never from a tool's prediction.
 - **Reproduce before reporting.** Run the reproduction of a bug or a security issue yourself before filing it, even when a tool found it.
 

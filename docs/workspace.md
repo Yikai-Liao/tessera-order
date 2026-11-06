@@ -14,10 +14,10 @@ Use a workspace when you sort many slices of the same record type, for example o
 impl<T> Workspace<T> {
     pub fn new() -> Self;
 
-    pub fn stable_sort_by_key<K: RadixKey>(&mut self, values: &mut [T], key: impl FnMut(&T) -> K);
-    pub fn stable_sort_by_key_copy<K: RadixKey>(&mut self, values: &mut [T], key: impl FnMut(&T) -> K)
+    pub fn stable_sort_by_key<K: RadixKey>(&mut self, values: &mut [T], key: impl FnMut(&T) -> K)
     where
         T: Copy;
+    pub fn stable_sort_by_key_owned<K: RadixKey>(&mut self, values: &mut [T], key: impl FnMut(&T) -> K);
     pub fn stable_sort(&mut self, values: &mut [T])
     where
         T: RadixKey;
@@ -47,12 +47,12 @@ fn sort_batches(batches: &mut [Vec<Row>]) {
     let mut ws = Workspace::new();
     for batch in batches {
         // Reuses the capacity left by the previous batch.
-        ws.stable_sort_by_key(batch, |row| row.ts);
+        ws.stable_sort_by_key_owned(batch, |row| row.ts);
     }
 }
 ```
 
-`Row` owns a `String`, so it uses the general path, which moves records without ever duplicating them.
+`Row` owns a `String`, so it is not `Copy` and uses `stable_sort_by_key_owned`, which moves records without ever duplicating them.
 
 ### Different keys, one workspace
 
@@ -64,17 +64,17 @@ use std::cmp::Reverse;
 let mut ws = Workspace::<Row>::new();
 
 // Newest first.
-ws.stable_sort_by_key(&mut rows, |row| Reverse(row.ts));
+ws.stable_sort_by_key_owned(&mut rows, |row| Reverse(row.ts));
 
 // Two-level order: by name length, ties by timestamp. Because each sort is
 // stable, sort by the secondary key first and the primary key last.
-ws.stable_sort_by_key(&mut rows, |row| row.ts);         // i64
-ws.stable_sort_by_key(&mut rows, |row| row.user.len()); // usize
+ws.stable_sort_by_key_owned(&mut rows, |row| row.ts);         // i64
+ws.stable_sort_by_key_owned(&mut rows, |row| row.user.len()); // usize
 ```
 
-### Plain-data records: the `_copy` path
+### Plain-data records
 
-When the record type is `Copy`, the `_copy` method lets the engine keep byte copies of records in scratch, which saves bookkeeping. Typical cases are key + row-number pairs:
+Records that are `Copy`, typically key + row-number pairs, use `stable_sort_by_key`, the fast path:
 
 ```rust
 #[derive(Clone, Copy)]
@@ -85,11 +85,11 @@ struct Entry {
 
 let mut ws = Workspace::<Entry>::new();
 for entries in batches.iter_mut() {
-    ws.stable_sort_by_key_copy(entries, |e| e.key);
+    ws.stable_sort_by_key(entries, |e| e.key);
 }
 ```
 
-`stable_sort_by_key` also works for `Entry`; it just takes the general path. A record that is not `Copy` cannot call the `_copy` method; this is checked at compile time.
+`stable_sort_by_key_owned` also accepts `Entry`, but it stores a bucket number per record in every pass and can be slower. Calling `stable_sort_by_key` on a record that is not `Copy` is a compile error that names `stable_sort_by_key_owned`.
 
 ### Sorting keys directly
 
@@ -108,7 +108,7 @@ A workspace keeps the largest capacity it has used until you release it. After o
 const RETAIN_LIMIT: usize = 4 << 20; // 4 MiB
 
 fn handle(ws: &mut Workspace<Entry>, entries: &mut [Entry]) {
-    ws.stable_sort_by_key_copy(entries, |e| e.key);
+    ws.stable_sort_by_key(entries, |e| e.key);
     if ws.retained_bytes() > RETAIN_LIMIT {
         ws.shrink_to_fit();
     }
@@ -127,7 +127,7 @@ std::thread::scope(|s| {
         s.spawn(move || {
             let mut ws = Workspace::<Entry>::new();
             for batch in share {
-                ws.stable_sort_by_key_copy(batch, |e| e.key);
+                ws.stable_sort_by_key(batch, |e| e.key);
             }
         });
     }
@@ -144,7 +144,7 @@ thread_local! {
 }
 
 fn sort_entries(entries: &mut [Entry]) {
-    WS.with_borrow_mut(|ws| ws.stable_sort_by_key_copy(entries, |e| e.key));
+    WS.with_borrow_mut(|ws| ws.stable_sort_by_key(entries, |e| e.key));
 }
 ```
 
@@ -154,7 +154,7 @@ fn sort_entries(entries: &mut [Entry]) {
 |---|---|
 | Allocated capacity | Records, or any knowledge of which scratch slots hold records |
 
-Every call starts by treating all scratch memory as uninitialized. Bytes left by an earlier sort are never read as records. This matters for the `_copy` path, which within one call remembers which part of scratch already holds valid copies; that state is reset at the start of each call.
+Every call starts by treating all scratch memory as uninitialized. Bytes left by an earlier sort are never read as records. This matters for `stable_sort_by_key`, which within one call remembers which part of scratch already holds valid copies; that state is reset at the start of each call.
 
 If a key function panics, the slice still holds every record, and the workspace remains usable for the next sort.
 

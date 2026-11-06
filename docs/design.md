@@ -54,8 +54,10 @@ The leaf and the digit widths are chosen by a cost model that counts passes and 
 
 Records are moved by bitwise copies between the input and `MaybeUninit<T>` scratch. Every record has exactly one live owner at any time; other physical copies are stale bytes that are never dropped, borrowed or returned.
 
-- **General path.** Works for any `T`. Scratch tracks which prefix is initialized, and records are never duplicated, so `String`, `Box<T>` and `&mut T` records are safe.
-- **Copy path.** For `T: Copy`, scratch may keep byte copies of records within one call, which saves bookkeeping. In this repository the path is selected by the `_copy` entry points; the research prototype selected it with specialization.
+- **Plain-data path** (`stable_sort_by_key`, `T: Copy`). Scatter recomputes each record's key instead of storing its bucket. The first pass of a call that needs more scratch classifies with stored bucket numbers so that every scratch slot holds a valid record; later passes and tiles of the same call reuse that initialized prefix. A key function that returns different keys on different calls can then duplicate or drop records, but never expose uninitialized memory.
+- **Owned path** (`stable_sort_by_key_owned`, any `T`). The histogram stores a two-byte bucket number per record, and scatter reads it without calling the key function again. Bucket ranges are disjoint, so each output slot is written exactly once whatever the key function does. This makes `String`, `Box<T>` and `&mut T` records safe.
+
+The research prototype selected the path with specialization on `Copy`. This repository selects it by entry point, because stable Rust cannot specialize.
 
 ## Panic safety
 

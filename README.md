@@ -26,7 +26,7 @@ An LSD radix sort is stable and runs in linear time, but it needs a second buffe
 - **Stable.** Records with equal keys keep their input order, including under `Reverse` keys.
 - **O(√n) auxiliary memory.** Large inputs are split by a stable in-place block partition; every piece that fits a 64 KiB tile is finished in a bounded scratch buffer.
 - **Adaptive.** Sorted and reverse-sorted inputs are detected and finished without radix passes, nearly sorted inputs take a budgeted insertion pass, constant key bits are skipped, and heavily repeated keys are split off by sampling.
-- **Any record type.** Records do not need `Copy`, `Clone`, `Default` or `Ord`. Values such as `String`, `Box<T>` or `&mut T` are moved, never duplicated, and a key function that panics leaves every record in the slice.
+- **Fast path for plain data, safe path for everything else.** Plain-data records such as key + row-number pairs take the fastest path with no extra checks. Records holding `String`, `Box<T>` or `&mut T` use a separate function that moves them without ever duplicating one. Records never need `Clone`, `Default` or `Ord`.
 - **Wide keys.** All primitive integers up to 128 bits, `f32` and `f64` in `total_cmp` order, and `std::cmp::Reverse<K>` for descending order.
 - **No dependencies.** Pure Rust, `std` only.
 
@@ -47,23 +47,36 @@ tessera_sort::stable_sort(&mut values);
 assert_eq!(values, [3, 7, 7, 19, 42]);
 ```
 
-Sort records by a key; equal keys keep their order:
+Sort plain-data records by a key; equal keys keep their order:
 
 ```rust
 use std::cmp::Reverse;
 
+#[derive(Clone, Copy)]
+struct Entry {
+    timestamp: i64,
+    row: u32,
+}
+
+let mut entries: Vec<Entry> = load_entries();
+
+// Ascending by timestamp.
+tessera_sort::stable_sort_by_key(&mut entries, |e| e.timestamp);
+
+// Descending by timestamp; ties still keep their input order.
+tessera_sort::stable_sort_by_key(&mut entries, |e| Reverse(e.timestamp));
+```
+
+Sort records that are not `Copy`:
+
+```rust
 struct Row {
     timestamp: i64,
     name: String,
 }
 
 let mut rows: Vec<Row> = load_rows();
-
-// Ascending by timestamp.
-tessera_sort::stable_sort_by_key(&mut rows, |row| row.timestamp);
-
-// Descending by timestamp; ties still keep their input order.
-tessera_sort::stable_sort_by_key(&mut rows, |row| Reverse(row.timestamp));
+tessera_sort::stable_sort_by_key_owned(&mut rows, |row| row.timestamp);
 ```
 
 ## API
@@ -71,13 +84,19 @@ tessera_sort::stable_sort_by_key(&mut rows, |row| Reverse(row.timestamp));
 | Function | Records | Notes |
 |---|---|---|
 | `stable_sort(&mut [K])` | Supported key types | Sorts the keys themselves |
-| `stable_sort_by_key(&mut [T], F)` | Any `T` | General path; records are moved, never copied |
-| `stable_sort_by_key_copy(&mut [T], F)` | `T: Copy` | Faster scratch path for plain-data records |
+| `stable_sort_by_key(&mut [T], F)` | `T: Copy` | Fast path for plain-data records |
+| `stable_sort_by_key_owned(&mut [T], F)` | Any `T` | Safe path for records that are not `Copy`; records are moved, never duplicated |
 | `Workspace<T>` | Same as above | The same sorts as methods, reusing scratch memory across calls |
 
 `F` is `FnMut(&T) -> K` where `K` is a supported key. The key types are fixed by a sealed `RadixKey` trait, so an unsupported key is a compile error rather than a runtime panic. Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits. Use `slice::sort_by` for those orders.
 
-The separate `_copy` entry point exists because stable Rust cannot specialize on `Copy`. It selects the same engine with a scratch strategy that may keep byte copies of records.
+### Why two functions
+
+Most radix-sorted data is plain: keys, key + row-number pairs, fixed-size records. The short name `stable_sort_by_key` serves that case. It may copy records freely in scratch memory, and after the first pass of a call it recomputes keys instead of storing a bucket number per record. That first pass fills scratch with valid records, which is all it takes to keep a misbehaving key function from causing memory unsafety with plain data; the common case pays no per-pass checks.
+
+A record that owns a resource or holds `&mut T` must never be duplicated, even if its key function returns different keys on different calls. `stable_sort_by_key_owned` guarantees this by computing each record's bucket once per pass and storing it, at the cost of writing and reading a two-byte bucket number per record in every pass. Calling `stable_sort_by_key` on such a record is a compile error that points to `stable_sort_by_key_owned`.
+
+Stable Rust cannot choose between the two automatically: a generic function cannot test whether `T: Copy`.
 
 ### Reusing scratch memory
 
@@ -94,7 +113,7 @@ struct Entry {
 
 let mut ws = Workspace::<Entry>::new();
 for batch in batches.iter_mut() {
-    ws.stable_sort_by_key_copy(batch, |e| e.key);
+    ws.stable_sort_by_key(batch, |e| e.key);
 }
 
 // A workspace keeps its largest capacity until released.
@@ -109,7 +128,7 @@ A workspace keeps capacity only, never records: every call treats scratch as emp
 
 - **Stability.** Equal keys keep their input order.
 - **Floats.** `f32` and `f64` follow `total_cmp`: `-0.0` sorts before `+0.0`, and NaNs sort by sign and payload. If your data needs all NaNs equal or both zeros equal, normalize the key in the key function.
-- **Key functions.** A key function may be called several times per record, in any order. It must return the same key for the same record during one sort. If it panics, the panic propagates and the slice still holds every record, in an unspecified order.
+- **Key functions.** A key function may be called several times per record, in any order, and must return the same key for the same record during one sort. If it does not, the order is unspecified; `stable_sort_by_key_owned` still returns every record exactly once, while `stable_sort_by_key` may repeat some plain-data records and omit others. Neither causes undefined behavior. If a key function panics, the panic propagates and the slice still holds every record, in an unspecified order.
 - **Descending order.** Wrap the key in `Reverse`. Reversing an ascending result would reverse the order of ties as well.
 
 The full rules, including 128-bit and signed encodings, are in [`conformance/semantics.md`](conformance/semantics.md).

@@ -28,7 +28,7 @@ An LSD radix sort is stable and runs in linear time, but it needs a second buffe
 - **Adaptive.** Sorted, reverse-sorted, nearly sorted and heavily repeated inputs take shortcuts, and constant key bits are skipped.
 - **Any record type.** No `Copy`, `Clone`, `Default` or `Ord` needed. Records are moved, never duplicated, even if the key function misbehaves or panics.
 - **Wide keys.** Integers up to 128 bits, `f32` and `f64` in `total_cmp` order, and `Reverse<K>`.
-- **No dependencies.** Pure Rust, `std` only.
+- **No dependencies.** Pure Rust. `std` is optional: without it the crate is `no_std` and needs `alloc`.
 
 ## Quick start
 
@@ -37,6 +37,15 @@ An LSD radix sort is stable and runs in linear time, but it needs a second buffe
 ```toml
 [dependencies]
 tessera-sort = "0.1"
+```
+
+In a `no_std` program, disable the default `std` feature. The crate then uses
+`core` and `alloc`, so a global allocator must exist. A key-function panic during
+block partitioning aborts, even when the host enables unwinding:
+
+```toml
+[dependencies]
+tessera-sort = { version = "0.1", default-features = false }
 ```
 
 ```rust
@@ -71,7 +80,7 @@ Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.de
 
 - **Orders defined by a comparator**, strings, or other variable-length keys: use `slice::sort_by`.
 - **Parallel sorting**: Tessera is single-threaded.
-- **`no_std`**: Tessera needs `std` for now.
+- **No allocator**: Tessera needs O(√n) scratch memory, so it cannot run without `alloc` (or, in C++, without a heap).
 
 ## Status by language
 

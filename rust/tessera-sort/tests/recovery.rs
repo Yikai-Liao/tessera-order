@@ -82,6 +82,7 @@ fn exercise(len: usize, changing: bool) {
     }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn panic_payload_records_edits_and_reuse() {
     for len in if cfg!(miri) {
@@ -90,6 +91,84 @@ fn panic_payload_records_edits_and_reuse() {
         vec![12, 80, 5000]
     } {
         exercise(len, false);
+    }
+}
+
+// A separate process is needed because a panic in the no-std movement guard
+// must abort even when the host supplies an unwinder.
+#[cfg(all(not(feature = "std"), not(miri)))]
+#[test]
+fn no_std_block_panic_aborts() {
+    const CHILD: &str = "TESSERA_NO_STD_PANIC_CHILD";
+    if let Some(mode) = std::env::var_os(CHILD) {
+        let build = || {
+            (0..8192usize)
+                .map(|id| {
+                    let key = if id < 64 {
+                        0
+                    } else {
+                        id.wrapping_mul(73) as u8
+                    };
+                    (key, format!("record {id}"))
+                })
+                .collect::<Vec<_>>()
+        };
+        let reuse = mode == "workspace";
+        let mut probe = build();
+        let mut total = 0;
+        let mut workspace = Workspace::new();
+        let mut key = |x: &(u8, String)| {
+            total += 1;
+            x.0
+        };
+        if reuse {
+            workspace.stable_sort_by_key(&mut probe, &mut key);
+        } else {
+            tessera_sort::stable_sort_by_key(&mut probe, &mut key);
+        }
+        drop(probe);
+
+        let mut input = build();
+        let mut calls = 0;
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let mut key = |x: &(u8, String)| {
+                calls += 1;
+                // The middle of this narrow-key sort is the block scatter,
+                // after consumed input blocks have become output blocks.
+                assert_ne!(calls, total / 2, "no-std block panic probe");
+                x.0
+            };
+            if reuse {
+                workspace.stable_sort_by_key(&mut input, &mut key);
+            } else {
+                tessera_sort::stable_sort_by_key(&mut input, &mut key);
+            }
+        }));
+        // If unwinding escapes the guard, report a successful child exit so
+        // the parent fails. Do not drop possibly duplicated owning records.
+        std::process::exit(0);
+    }
+
+    for mode in ["free", "workspace"] {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "no_std_block_panic_aborts", "--nocapture"])
+            .env(CHILD, mode)
+            .env("RUST_BACKTRACE", "0")
+            .current_dir(std::env::temp_dir())
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{mode}: panic escaped the guard");
+        assert!(stderr.contains("no-std block panic probe"), "{stderr}");
+        assert!(
+            stderr.contains("cannot unwind through record movement without the std feature"),
+            "{stderr}"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            assert_eq!(output.status.signal(), Some(6), "{stderr}");
+        }
     }
 }
 
@@ -108,6 +187,9 @@ fn changing_keys_preserve_exclusive_borrows_without_drop() {
     }
     let len = if cfg!(miri) { 96 } else { 9000 };
     for panic in [false, true] {
+        if panic && !cfg!(feature = "std") {
+            continue;
+        }
         for at in [1, 24, 180, 500, 1200] {
             let mut backing: Vec<_> = (0..len).collect();
             let mut records: Vec<_> = backing

@@ -12,7 +12,8 @@
 //! stack. The depth is at most `ceil(key bits / MIN_TILE_DIGIT_BITS)`, 22
 //! levels for `u128`.
 
-use std::mem::MaybeUninit;
+use alloc::vec::Vec;
+use core::mem::MaybeUninit;
 
 use crate::key::{Extract, KeyHalf, Unsigned};
 use crate::{Workspace, block};
@@ -217,7 +218,7 @@ fn budgeted_insertion_sort<T, K: Ord>(
         let (prefix, tail) = arr.split_at_mut(index);
         let (mut current, prefix) = prefix.split_last_mut().unwrap();
         // The scan already compared this pair, so swap without re-reading keys.
-        std::mem::swap(current, &mut tail[0]);
+        core::mem::swap(current, &mut tail[0]);
         swaps += 1;
         if swaps > budget {
             return None;
@@ -226,7 +227,7 @@ fn budgeted_insertion_sort<T, K: Ord>(
             if key(before) <= key(current) {
                 break;
             }
-            std::mem::swap(before, current);
+            core::mem::swap(before, current);
             current = before;
             swaps += 1;
             if swaps > budget {
@@ -353,7 +354,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
     mut workspace: Option<&mut Workspace<T>>,
     tile_bytes: usize,
 ) {
-    let record_bytes = std::mem::size_of::<T>();
+    let record_bytes = core::mem::size_of::<T>();
     if arr.len() < 2 || record_bytes == 0 {
         return;
     }
@@ -376,7 +377,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
         } else {
             // The buffer holds keys, never records. Its `u128` elements give
             // alignment for every encoded key width.
-            let bytes = probe * std::mem::size_of::<E::Value>();
+            let bytes = probe * core::mem::size_of::<E::Value>();
             let mut local_probe = Vec::new();
             let storage = match workspace.as_deref_mut() {
                 Some(workspace) => &mut workspace.probe,
@@ -392,7 +393,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
             }
             // SAFETY: every key slot was initialized above; this borrow ends
             // before the workspace is used by the sorting engine.
-            let keys = unsafe { std::slice::from_raw_parts_mut(ptr, probe) };
+            let keys = unsafe { core::slice::from_raw_parts_mut(ptr, probe) };
             match budgeted_insertion_sort(keys, probe, |&key| key) {
                 Some(0) => None,
                 Some(swaps) => budgeted_insertion_sort(arr, swaps * arr.len() / probe, |record| {
@@ -616,7 +617,7 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
             };
             // SAFETY: cached classifications or deterministic sealed encoders
             // give disjoint output intervals that initialize every output slot.
-            std::ptr::write(destination.add(target), std::ptr::read(record));
+            core::ptr::write(destination.add(target), core::ptr::read(record));
         }
         largest
     }
@@ -642,7 +643,7 @@ fn choose_split_digit<T, E: Extract<T>>(
     tile_bytes: usize,
     key: &mut E,
 ) -> Digit {
-    let record_bytes = std::mem::size_of::<T>();
+    let record_bytes = core::mem::size_of::<T>();
     let tile_records = (tile_bytes / record_bytes).max(64);
     let target = (tile_records / 2).max(1);
     let children = (arr.len() / target).max(2);
@@ -679,7 +680,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         if records < 2 || varying == 0 {
             return;
         }
-        let record_bytes = std::mem::size_of::<T>();
+        let record_bytes = core::mem::size_of::<T>();
         let node_bytes = records.saturating_mul(record_bytes);
         if node_bytes <= self.tile_bytes {
             self.sort_tile(arr, varying);
@@ -723,7 +724,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
 
     /// Partitions by digit, then sorts each unfinished child.
     fn partition_digit(&mut self, arr: &mut [T], digit: Digit, varying: u128) {
-        let record_bytes = std::mem::size_of::<T>();
+        let record_bytes = core::mem::size_of::<T>();
         // Bucket boundaries come from the block engine. The split digit is
         // constant inside each child, so its bits are excluded from the next scan.
         let candidate = varying & !digit.mask::<E::Value>().to_u128();
@@ -824,8 +825,8 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         // allocation or zero initialization.
         let tail = cache && len + buckets > MAX_DIGIT_BUCKETS;
         if tail {
-            let bytes = std::mem::size_of::<T>();
-            let extra = (len * std::mem::size_of::<u16>() + 1).div_ceil(bytes);
+            let bytes = core::mem::size_of::<T>();
+            let extra = (len * core::mem::size_of::<u16>() + 1).div_ceil(bytes);
             let required = len
                 .checked_add(extra)
                 .expect("tile scratch capacity overflow");
@@ -850,11 +851,11 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             unsafe {
                 let start = records.add(len).cast::<u8>();
                 start
-                    .add(start.align_offset(std::mem::align_of::<u16>()))
+                    .add(start.align_offset(core::mem::align_of::<u16>()))
                     .cast::<u16>()
             }
         } else {
-            std::ptr::null_mut()
+            core::ptr::null_mut()
         };
         (records, ids)
     }
@@ -894,7 +895,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         // measured 48% slower when there was roughly one bucket per record.
         let candidate = varying & !digit.mask::<E::Value>().to_u128();
         // SAFETY: a completed pass initialized exactly this cursor prefix.
-        let ends = unsafe { std::slice::from_raw_parts(counts_ptr, 1usize << digit.width) };
+        let ends = unsafe { core::slice::from_raw_parts(counts_ptr, 1usize << digit.width) };
         let mut start = 0;
         for &end in ends {
             let end = end as usize;
@@ -922,7 +923,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             return;
         }
         // Widest counting table this tile can afford; LSD spreads it over passes.
-        let table_width = tile_digit_bits(len, std::mem::size_of::<T>());
+        let table_width = tile_digit_bits(len, core::mem::size_of::<T>());
         let mut digits = [Digit { shift: 0, width: 0 }; MAX_DIGITS];
         let passes = plan_digits(varying, table_width, &mut digits);
         // Compare an MSD descent against the flat plan in passes over the tile.
@@ -1032,7 +1033,7 @@ impl<T> RestoreTile<T> {
                 cache_tail,
                 key,
             );
-            std::mem::swap(&mut self.source, destination);
+            core::mem::swap(&mut self.source, destination);
             largest
         }
     }
@@ -1044,7 +1045,7 @@ impl<T> Drop for RestoreTile<T> {
             // SAFETY: source holds initialized records in scratch; tile holds
             // Copy values or stale non-Copy bytes. The allocations do not overlap.
             unsafe {
-                std::ptr::copy_nonoverlapping(self.source, self.tile, self.len);
+                core::ptr::copy_nonoverlapping(self.source, self.tile, self.len);
             }
         }
     }
@@ -1054,6 +1055,8 @@ impl<T> Drop for RestoreTile<T> {
 mod tests {
     use super::*;
     use crate::key::ByKey;
+    extern crate std;
+
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     // Tiny tiles exercise block materialization and cache-hot callbacks under
@@ -1079,6 +1082,9 @@ mod tests {
         let steps = if cfg!(miri) { 4 } else { 64 };
         for reuse in [false, true] {
             for changing in [false, true] {
+                if !changing && !cfg!(feature = "std") {
+                    continue;
+                }
                 for step in 0..steps {
                     let at = 1 + step * total / steps;
                     let mut values: Vec<_> = (0..len).collect();

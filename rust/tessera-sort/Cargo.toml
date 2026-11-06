@@ -13,7 +13,17 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+default = ["std"]
+# Catch a key-function panic, move every record back into the caller's slice and
+# resume the panic. Without this feature the crate is `no_std`: it uses `core` and
+# `alloc`, needs a global allocator, and aborts on a panic during block partitioning.
+std = []
+
 [dependencies]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [lints]
 workspace = true

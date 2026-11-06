@@ -8,6 +8,7 @@ All notable changes to this project are documented in this file. The format foll
 
 - Rust crate `tessera-sort`, ported to Stable Rust from the research prototype at `sort-research-rs` commit `6c0877f`: `stable_sort`, `stable_sort_by_key`, the sealed `RadixKey` trait (primitive integers, `f32`, `f64`, `Reverse<K>`) and `Workspace<T>`.
 - Tests for ordering, thresholds, panicking and inconsistent key functions, owned and `&mut` records, and workspace allocation; CI runs them with Miri, AddressSanitizer and the MSRV.
+- `no_std` support through a default-on `std` feature: `default-features = false` builds on `core` and `alloc`, with an unwind guard that aborts on key-function panics during block partitioning ([decision 0005](docs/decisions/0005-no-std-with-alloc.md), [decision 0006](docs/decisions/0006-no-std-unwind-guard.md)).
 - Port record with the acceptance measurements against the prototype (`docs/design/port.md`), roadmap, decision records and the Python binding proposal.
 - Per-language CI and release workflows, selected by changed paths; C++ and Python stay inactive until their projects exist. Release rules in `RELEASING.md`.
 - `rustfmt.toml` and workspace lints for documentation and unsafe code.

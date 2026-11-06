@@ -32,6 +32,8 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-targets
+      # Benchmark dependencies would otherwise enable the crate's std feature.
+      - run: cargo test -p tessera-sort --all-targets --no-default-features
       - run: cargo test --workspace --doc
 
   lint:
@@ -48,6 +50,19 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  # This target has no `std` to link accidentally. Behavioral tests run in the
+  # host matrix above, including MSRV; clippy also checks the no-std code path.
+  no_std:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv7em-none-eabi
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p tessera-sort --no-default-features --target thumbv7em-none-eabi
+      - run: cargo clippy -p tessera-sort --no-default-features --all-targets
+
   miri:
     runs-on: ubuntu-latest
     steps:
@@ -58,6 +73,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo miri setup
       - run: cargo miri test -p tessera-sort
+      - run: cargo miri test -p tessera-sort --no-default-features
 
   asan:
     runs-on: ubuntu-latest

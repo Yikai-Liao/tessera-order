@@ -6,7 +6,8 @@ Each milestone lists what it delivers and how we know it is done. Decisions that
 
 - **Repository setup.** License, ordering semantics, design and benchmark protocol, CI, contribution policy.
 - **Stable Rust port.** `stable_sort`, `stable_sort_by_key` and `Workspace<T>` on Rust 1.85, with rewritten tests, Miri and AddressSanitizer.
-- **Port acceptance.** Measured against the research prototype in one binary with A/A and code-placement controls. Median ratios are 0.98–1.00; the slowest cases, rerun at higher precision, come from the planned bucket-ID caching or from code placement. See the [port record](docs/design/port.md).
+- **Multi-platform CI.** Stable and MSRV on Linux (x86-64, AArch64), macOS (AArch64) and Windows (x86-64), plus Miri and AddressSanitizer; `main` requires it to pass.
+- **Port acceptance.** Measured against the research prototype in one binary with A/A and code-placement controls. Median ratios are 0.98–1.00; the slowest cases, rerun at higher precision, come from the planned bucket-ID caching or from code placement, which a rebuild reverses and branch alignment removes on ordered inputs. See the [port record](docs/design/port.md).
 
 ## Rust 0.1
 
@@ -17,7 +18,6 @@ The first crates.io release. It provides the stable sort only.
 | Benchmark runner in `bench/rust` with `list`, `validate`, `measure` and `memory` ([protocol](docs/development/benchmarking.md)) | The harness self-tests and `validate --suite smoke` pass in CI |
 | Input generator specification and golden hashes in `conformance/vectors/` | The runner verifies every `core` input hash at startup |
 | First `core` report, `default` and `native` builds, on the Stable toolchain | The report regenerates from raw data; it becomes the regression baseline |
-| Multi-platform CI | Linux, macOS and Windows on x86-64 and AArch64, stable and MSRV, all green |
 | Release | Robert Clausecker has been told before publication; `rust/v0.1.0` follows [`RELEASING.md`](RELEASING.md) |
 
 Open questions for this milestone:

@@ -36,8 +36,9 @@ records under panicking and changing key functions, workspace reuse after a
 panic, and allocation counts of a warm workspace.
 
 Run locally on x86-64 Linux: Stable (debug and release), Rust 1.85, Miri,
-AddressSanitizer, Clippy, rustdoc and `cargo package`. The multi-platform
-GitHub CI has not run on this code yet.
+AddressSanitizer, Clippy, rustdoc and `cargo package`. GitHub CI then passed
+on Stable and Rust 1.85 on Linux (x86-64 and AArch64), macOS (AArch64) and
+Windows (x86-64), with Miri and AddressSanitizer on Linux x86-64.
 
 ## Performance
 
@@ -98,12 +99,45 @@ therefore caused by code placement, not by the port.
 
 The same intervention explains the largest gaps in either direction on
 ordered `u32` inputs (0.53–1.01 before, 0.98–1.01 after redirecting six
-instruction-identical probe functions to one address). Neither experiment
-identifies which front-end mechanism is responsible.
+instruction-identical probe functions to one address).
+
+### Rebuild and branch-alignment check
+
+Rebuilding the harness from the final source, which differs from the measured
+source only in comments, reversed these outliers. Building it with the LLVM
+option `-x86-branches-within-32B-boundaries`, which keeps branches from
+crossing or ending on a 32-byte boundary, removed them. The development
+machine is a Xeon Gold 6140 (Skylake-SP). Its microcode mitigation for
+Intel's JCC erratum keeps such branches out of the decoded-µop cache, which
+points to that cache as the mechanism. Each build ran 3 alternating processes
+× 21 rounds:
+
+| Case | API | Measured build | Rebuild | Rebuild, branch-aligned |
+|---|---|---:|---:|---:|
+| `u128` descending, n = 100,000 | keys | 1.275 | 0.785 | 1.017 |
+| `u32` ascending, n = 100,000 | keys | 0.605 | 1.858 | 1.000 |
+| `u32` ascending, n = 100,000 | by key | 0.533 | 1.824 | 0.998 |
+| `u32` descending, n = 100,000 | keys | 0.729 | 1.258 | 0.980 |
+| `u32` ascending, n = 1,000,000 | keys | 0.651 | 1.725 | 1.059 |
+
+The measured-build column comes from the full matrix (1 × 9), except the
+`u128` row, which is the 3 × 21 rerun above.
+
+On these five cases, branch alignment brought the port and the cached
+prototype to 0.92–1.06, close to the identical prototype copy (0.92–1.01).
+It did not help at n ≤ 128, where the identical copy still ranged from 1.00
+to 1.41. Branch alignment is also not a free speedup: across the small cases
+it changed the prototype's own time by −30% to +69% (`u32` random, n = 48:
+20.9 to 14.5 ns per element; `u32` Zipf 1.3, n = 48: 14.5 to 24.5).
+
+The crate therefore has nothing to fix. The final link of each program
+decides where a function lands, and Stable Rust has no attribute for function
+or branch alignment, so a source change that helps one binary can hurt
+another. Benchmarks control for placement instead
+([build profiles](../development/benchmarking.md#build-profiles)).
 
 ## Not yet done
 
 - The standalone benchmark runner, shared input vectors and the release
   report described in [benchmarking.md](../development/benchmarking.md).
-- Multi-platform CI on GitHub.
 - A crates.io release. See [RELEASING.md](../../RELEASING.md).

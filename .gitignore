@@ -1,0 +1,14 @@
+/target/
+**/*.rs.bk
+
+# Benchmark output; release results are attached to GitHub releases.
+/bench/results/
+*.jsonl.zst
+
+# Profiling artifacts
+perf.data*
+*.trace
+
+.DS_Store
+.idea/
+.vscode/

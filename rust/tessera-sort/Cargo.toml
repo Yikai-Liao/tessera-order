@@ -1,0 +1,17 @@
+[package]
+name = "tessera-sort"
+# The engine is being ported from the research prototype; nothing is published
+# until the 0.1 acceptance benchmark passes. See the roadmap in README.md.
+version = "0.0.0"
+publish = false
+description = "Stable radix sort with O(sqrt(n)) auxiliary memory"
+readme = "README.md"
+keywords = ["sort", "radix-sort", "stable-sort", "sorting", "algorithm"]
+categories = ["algorithms"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]

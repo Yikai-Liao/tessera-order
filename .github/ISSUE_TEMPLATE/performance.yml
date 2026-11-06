@@ -1,0 +1,26 @@
+name: Performance report
+description: A workload where Tessera is slower than expected, or results from another machine.
+labels: [performance]
+body:
+  - type: textarea
+    id: workload
+    attributes:
+      label: Workload
+      description: Key and record types, input length, distribution, and how often you sort.
+    validations:
+      required: true
+  - type: textarea
+    id: results
+    attributes:
+      label: Measurements
+      description: Times for Tessera and the alternatives you compared, and how you measured them.
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: CPU model, OS, `rustc -vV`, RUSTFLAGS and LTO settings.
+      render: text
+    validations:
+      required: true

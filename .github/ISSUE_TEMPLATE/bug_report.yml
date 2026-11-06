@@ -1,0 +1,33 @@
+name: Bug report
+description: Wrong output, a crash, or behavior that contradicts the documentation.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected and what you observed instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: A minimal program or input that shows the problem. Include the key type, record type and input length.
+      render: rust
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Tessera version or commit
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Output of `rustc -vV`, the target, and any RUSTFLAGS.
+      render: text
+    validations:
+      required: true

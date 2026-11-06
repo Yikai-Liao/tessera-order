@@ -32,6 +32,7 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-targets
+      - run: cargo test --workspace --all-targets --no-default-features
       - run: cargo test --workspace --doc
 
   lint:
@@ -48,9 +49,8 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
-  # The crate is `no_std` without its default feature, so the build target has no
-  # `std` to fall back on. Clippy and the tests run on the host, where `std` exists
-  # for the test harness itself.
+  # This target has no `std` to link accidentally. Behavioral tests run in the
+  # host matrix above, including MSRV; clippy also checks the no-std code path.
   no_std:
     runs-on: ubuntu-latest
     steps:
@@ -61,7 +61,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build -p tessera-sort --no-default-features --target thumbv7em-none-eabi
       - run: cargo clippy -p tessera-sort --no-default-features --all-targets
-      - run: cargo test -p tessera-sort --no-default-features --all-targets
 
   miri:
     runs-on: ubuntu-latest
@@ -73,6 +72,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo miri setup
       - run: cargo miri test -p tessera-sort
+      - run: cargo miri test -p tessera-sort --no-default-features
 
   asan:
     runs-on: ubuntu-latest

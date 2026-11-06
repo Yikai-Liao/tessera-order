@@ -40,7 +40,8 @@ tessera-sort = "0.1"
 ```
 
 In a `no_std` program, disable the default `std` feature. The crate then uses
-`core` and `alloc`, so a global allocator must exist, and panics abort:
+`core` and `alloc`, so a global allocator must exist. A key-function panic during
+block partitioning aborts, even when the host enables unwinding:
 
 ```toml
 [dependencies]

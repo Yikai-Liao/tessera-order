@@ -1055,12 +1055,12 @@ impl<T> Drop for RestoreTile<T> {
 mod tests {
     use super::*;
     use crate::key::ByKey;
-    #[cfg(feature = "std")]
+    extern crate std;
+
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     // Tiny tiles exercise block materialization and cache-hot callbacks under
     // Miri without requiring thousands of large records.
-    #[cfg(feature = "std")]
     #[test]
     fn block_and_tile_unwind_preserve_exclusive_borrows() {
         let len = if cfg!(miri) { 65 } else { 513 };
@@ -1082,6 +1082,9 @@ mod tests {
         let steps = if cfg!(miri) { 4 } else { 64 };
         for reuse in [false, true] {
             for changing in [false, true] {
+                if !changing && !cfg!(feature = "std") {
+                    continue;
+                }
                 for step in 0..steps {
                     let at = 1 + step * total / steps;
                     let mut values: Vec<_> = (0..len).collect();

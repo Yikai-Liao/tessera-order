@@ -17,7 +17,7 @@ Both contracts output a permutation of the input: no record is lost, duplicated 
 
 - The key function may be called any number of times per record, in any order.
 - During one sort, it should return the same key for the same record. If it does not, the order of the result is unspecified, but the output is still a permutation of the input and no undefined behavior occurs.
-- If the key function panics (Rust) or throws (C++), the error propagates to the caller. The slice then holds every record exactly once, in an unspecified order. A Rust build without the `std` feature cannot catch a panic, so it requires `panic = "abort"` and the process ends there instead.
+- If the key function panics (Rust) or throws (C++), the error propagates to the caller. The slice then holds every record exactly once, in an unspecified order. Without the Rust `std` feature, a key-function panic during block partitioning aborts, even if the host enables unwinding; panics elsewhere may unwind with every record preserved. No particular panic strategy is required of the final binary.
 
 ## Key encoding
 

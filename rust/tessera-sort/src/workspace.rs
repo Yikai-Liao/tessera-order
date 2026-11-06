@@ -79,7 +79,8 @@ impl<T> Workspace<T> {
     ///
     /// If `key` panics, the panic propagates after every record has been moved
     /// back into `values`, in an unspecified order. The workspace stays usable.
-    /// Without the `std` feature the process aborts instead.
+    /// Without the `std` feature, a panic during block partitioning aborts;
+    /// panics elsewhere may unwind with every record preserved.
     pub fn stable_sort_by_key<K: RadixKey, F: FnMut(&T) -> K>(&mut self, values: &mut [T], key: F) {
         engine::sort::<T, _, true>(values, &mut ByKey(key), Some(self));
     }

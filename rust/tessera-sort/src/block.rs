@@ -98,29 +98,13 @@ fn scaled_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
 fn scaled_block_size_integer(len: usize, record_bytes: usize, radix: usize) -> usize {
     let numerator = 72 * len as u128;
     let denominator = (1u128 << radix) * record_bytes as u128;
-    let mut scaled = isqrt(numerator / denominator);
+    let mut scaled = (numerator / denominator).isqrt();
     // `isqrt` floors, so at most one step moves the product to or past
     // `numerator`. `record_bytes` is at least one, so no division by zero.
-    while scaled * scaled * denominator < numerator {
+    if scaled * scaled * denominator < numerator {
         scaled += 1;
     }
     scaled as usize
-}
-
-/// Floor square root, standing in for `f64::sqrt` without `std`.
-#[cfg(any(not(feature = "std"), test))]
-fn isqrt(value: u128) -> u128 {
-    if value < 2 {
-        return value;
-    }
-    let mut root = 1u128 << value.ilog2().div_ceil(2);
-    loop {
-        let next = (root + value / root) / 2;
-        if next >= root {
-            return root;
-        }
-        root = next;
-    }
 }
 
 /// Called on a bucket as soon as its records are contiguous in the input.
@@ -905,13 +889,24 @@ impl<T> Drop for Sorter<'_, '_, T> {
     }
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn integer_block_size_rounds_up_at_square_boundaries() {
+        // With 36-byte records and one radix bit, the ratio is exactly len.
+        for (len, expected) in [(0, 0), (1, 1), (2, 2), (99, 10), (100, 10), (101, 11)] {
+            assert_eq!(scaled_block_size_integer(len, 36, 1), expected);
+        }
+        // A remainder must round up even when the integer quotient is a square.
+        assert_eq!(scaled_block_size_integer(101, 3600, 1), 2);
+    }
 
     /// The integer form must reproduce the floating-point block size: a
     /// different block size moves pass and tile boundaries, and so would leave
     /// the measurements behind the constant.
+    #[cfg(feature = "std")]
     #[test]
     fn scaled_forms_agree() {
         let lengths = (1..=600).chain([1 << 10, 4096, 10_000, 1 << 16, 1 << 20, 1 << 24]);

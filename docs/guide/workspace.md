@@ -149,7 +149,7 @@ fn sort_entries(entries: &mut [Entry]) {
 
 Every call starts by treating all scratch memory as uninitialized. Bytes left by an earlier sort are never read as records.
 
-If a key function panics, the slice still holds every record, and the workspace remains usable for the next sort. Without the `std` feature the process aborts instead, because a `no_std` build cannot catch a panic.
+If a key function panics, the slice still holds every record, and the workspace remains usable for the next sort. Without the `std` feature, a panic during block partitioning aborts, even if the host enables unwinding; panics elsewhere may unwind with every record preserved.
 
 ## Design notes
 

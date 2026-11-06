@@ -48,10 +48,10 @@
 //! # Cargo features
 //!
 //! `std` is enabled by default. Disable it for `no_std`: the crate then uses
-//! `core` and `alloc`, so it needs a global allocator, and panics must abort,
-//! because a build without `std` cannot catch a key-function panic and move the
-//! records back. Sorting, ordering and the memory bounds above are the same
-//! either way.
+//! `core` and `alloc`, so it needs a global allocator. A key-function panic
+//! during block partitioning aborts rather than exposing partially moved
+//! records, even when the host enables unwinding. Panics elsewhere may unwind
+//! safely. Sorting, ordering and the memory bounds above are the same either way.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]
@@ -103,8 +103,8 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 ///
 /// If `key` panics, the panic propagates to the caller after every record has
 /// been moved back into `values`, in an unspecified order. No record is
-/// dropped or duplicated. Without the `std` feature, as in a no-std build, the
-/// process aborts instead.
+/// dropped or duplicated. Without the `std` feature, a panic during block
+/// partitioning aborts; panics elsewhere may unwind with every record preserved.
 ///
 /// # Examples
 ///

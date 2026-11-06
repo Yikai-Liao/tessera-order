@@ -7,7 +7,7 @@ edition = "2024"
 rust-version = "1.85"
 license = "BSD-2-Clause"
 repository = "https://github.com/Yikai-Liao/tessera-sort"
-authors = ["Yikai Liao"]
+authors = ["Yikai Liao <lyk-boya@outlook.com>"]
 
 [profile.bench]
 debug = true

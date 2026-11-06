@@ -9,6 +9,8 @@ Status: draft for 0.1. Every Tessera implementation (Rust now, C++ later) follow
 | Stable | The output is ordered by key, and records with equal keys appear in their input order. |
 | Unstable | The output is ordered by key. The order of records with equal keys is unspecified. |
 
+Release 0.1 provides the stable contract only. The unstable contract is reserved for a dedicated unstable kernel in a later release.
+
 Both contracts output a permutation of the input: no record is lost, duplicated or modified, whatever the key function returns.
 
 ## Key extraction

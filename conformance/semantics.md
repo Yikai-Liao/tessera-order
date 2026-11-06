@@ -47,4 +47,4 @@ Implementations document three quantities separately:
 2. fixed-size storage on the stack;
 3. capacity a reusable workspace retains between calls.
 
-A workspace reuses capacity only. Every call re-establishes which scratch records are live; bytes left by an earlier call are never treated as records.
+A workspace reuses capacity only. Every call re-establishes which scratch records are live; bytes left by an earlier call are never treated as records. Sorting with a workspace produces the same result as the corresponding free function, and a workspace stays usable after a key function panics.

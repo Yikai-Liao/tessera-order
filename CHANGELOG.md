@@ -6,5 +6,5 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
-- Repository structure, ordering semantics draft, design and benchmarking documentation.
+- Repository structure, ordering semantics draft, design, benchmarking and workspace documentation.
 - Contribution policy: DCO sign-off checked in CI, AI-assisted contribution rules, code of conduct, and instructions for coding agents.

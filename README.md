@@ -66,16 +66,6 @@ tessera_sort::stable_sort_by_key(&mut rows, |row| row.timestamp);
 tessera_sort::stable_sort_by_key(&mut rows, |row| Reverse(row.timestamp));
 ```
 
-Reuse scratch memory across many sorts:
-
-```rust
-let mut workspace = tessera_sort::Workspace::new();
-for batch in batches.iter_mut() {
-    workspace.stable_sort_by_key(batch, |row| row.timestamp);
-}
-workspace.shrink_to_fit();
-```
-
 ## API
 
 | Function | Records | Notes |
@@ -83,11 +73,37 @@ workspace.shrink_to_fit();
 | `stable_sort(&mut [K])` | Supported key types | Sorts the keys themselves |
 | `stable_sort_by_key(&mut [T], F)` | Any `T` | General path; records are moved, never copied |
 | `stable_sort_by_key_copy(&mut [T], F)` | `T: Copy` | Faster scratch path for plain-data records |
-| `Workspace<T>` | Same as above | Keeps scratch capacity between calls; `retained_bytes` and `shrink_to_fit` control it |
+| `Workspace<T>` | Same as above | The same sorts as methods, reusing scratch memory across calls |
 
 `F` is `FnMut(&T) -> K` where `K` is a supported key. The key types are fixed by a sealed `RadixKey` trait, so an unsupported key is a compile error rather than a runtime panic. Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits. Use `slice::sort_by` for those orders.
 
 The separate `_copy` entry point exists because stable Rust cannot specialize on `Copy`. It selects the same engine with a scratch strategy that may keep byte copies of records.
+
+### Reusing scratch memory
+
+Each free function allocates scratch memory at the start of a call and frees it before returning. When you sort many slices of the same record type, a `Workspace<T>` keeps that memory between calls, so only the first sort, or one that needs more room, allocates:
+
+```rust
+use tessera_sort::Workspace;
+
+#[derive(Clone, Copy)]
+struct Entry {
+    key: u64,
+    row: u32,
+}
+
+let mut ws = Workspace::<Entry>::new();
+for batch in batches.iter_mut() {
+    ws.stable_sort_by_key_copy(batch, |e| e.key);
+}
+
+// A workspace keeps its largest capacity until released.
+if ws.retained_bytes() > 4 << 20 {
+    ws.shrink_to_fit();
+}
+```
+
+A workspace keeps capacity only, never records: every call treats scratch as empty, so results never depend on earlier sorts. It is typed by the record, not the key, and serves one sort at a time; use one per thread. More examples, including thread-local reuse, are in [`docs/workspace.md`](docs/workspace.md).
 
 ## Ordering semantics
 

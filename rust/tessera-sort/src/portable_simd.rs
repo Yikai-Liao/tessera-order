@@ -10,7 +10,7 @@
 //! The same generic code serves every key width and every backend.
 
 use fearless_simd::prelude::*;
-use fearless_simd::{Level, Simd, dispatch};
+use fearless_simd::{Level, Simd, dispatch, u8x16, u16x8};
 
 /// Pairs examined between mask checks.
 const BLOCK: usize = 32;
@@ -72,6 +72,43 @@ fn insert_loop<S: Simd, K: SimdKey>(simd: S, arr: &mut [K], budget: usize) -> Op
         start = index;
     }
     Some(swaps)
+}
+
+/// Converts per-bucket counts to per-bucket starts, in place.
+///
+/// The scalar loop is a dependent chain of one add per bucket; a vector
+/// prefix sum shortens the chain to log2(lanes) adds per lane group.
+pub(crate) fn prefix_sum(counts: &mut [u16]) {
+    dispatch!(Level::new(), simd => prefix_sum_with(simd, counts))
+}
+
+#[inline(always)]
+fn prefix_sum_with<S: Simd>(simd: S, counts: &mut [u16]) {
+    const SHIFT1: [u8; 16] = [0xFF, 0xFF, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+    const SHIFT2: [u8; 16] = [0xFF, 0xFF, 0xFF, 0xFF, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    const SHIFT4: [u8; 16] = [
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0, 1, 2, 3, 4, 5, 6, 7,
+    ];
+    let shift1 = u8x16::<S>::from_slice(simd, &SHIFT1);
+    let shift2 = u8x16::<S>::from_slice(simd, &SHIFT2);
+    let shift4 = u8x16::<S>::from_slice(simd, &SHIFT4);
+    let mut carry = 0u16;
+    let mut chunks = counts.chunks_exact_mut(8);
+    for chunk in &mut chunks {
+        let mut scan = u16x8::<S>::from_slice(simd, chunk);
+        scan = scan + scan.swizzle_dyn_precise(shift1);
+        scan = scan + scan.swizzle_dyn_precise(shift2);
+        scan = scan + scan.swizzle_dyn_precise(shift4);
+        let starts = scan.swizzle_dyn_precise(shift1) + u16x8::<S>::splat(simd, carry);
+        starts.store_slice(chunk);
+        carry = carry.wrapping_add(scan.to_array()[7]);
+    }
+    let mut offset = carry;
+    for slot in chunks.into_remainder() {
+        let count = *slot;
+        *slot = offset;
+        offset = offset.wrapping_add(count);
+    }
 }
 
 /// Offset of the first adjacent pair that descends in key order.

@@ -6,5 +6,10 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
-- Repository structure, ordering semantics draft, design, benchmarking and workspace documentation.
+- Rust crate `tessera-sort`, ported to Stable Rust from the research prototype at `sort-research-rs` commit `6c0877f`: `stable_sort`, `stable_sort_by_key`, the sealed `RadixKey` trait (primitive integers, `f32`, `f64`, `Reverse<K>`) and `Workspace<T>`.
+- Tests for ordering, thresholds, panicking and inconsistent key functions, owned and `&mut` records, and workspace allocation; CI runs them with Miri, AddressSanitizer and the MSRV.
+- Port record with the acceptance measurements against the prototype (`docs/design/port.md`), roadmap, decision records and the Python binding proposal.
+- Per-language CI and release workflows, selected by changed paths; C++ and Python stay inactive until their projects exist. Release rules in `RELEASING.md`.
+- `rustfmt.toml` and workspace lints for documentation and unsafe code.
+- Repository structure, ordering semantics, design, benchmarking and workspace documentation.
 - Contribution policy: DCO sign-off checked in CI, AI-assisted contribution rules, code of conduct, and instructions for coding agents.

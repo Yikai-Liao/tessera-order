@@ -12,3 +12,6 @@ perf.data*
 .DS_Store
 .idea/
 .vscode/
+
+# Python tooling caches
+__pycache__/

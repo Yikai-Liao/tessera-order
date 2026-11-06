@@ -14,7 +14,7 @@ The crate builds on stable Rust; the minimum supported version is in `Cargo.toml
 
 ```sh
 cargo test --workspace
-cargo clippy --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
@@ -31,7 +31,11 @@ The engine moves records through uninitialized scratch memory. Every `unsafe` bl
 
 ## Performance changes
 
-A claim that a change is faster or slower needs measurements that follow [`docs/benchmarking.md`](docs/benchmarking.md): paired with the previous version in one process, with the A/A range reported. Please include the raw output or a link to it.
+A claim that a change is faster or slower needs measurements that follow [`docs/development/benchmarking.md`](docs/development/benchmarking.md): paired with the previous version in one process, with the A/A range reported. Please include the raw output or a link to it.
+
+## Documentation
+
+Public items document their behavior completely: a one-line summary, the contract (ordering, stability, what happens to records), and `# Panics`, `# Safety`, `# Memory` and `# Examples` sections where they apply, with examples as compiled doctests. Internal comments explain why the code is the way it is: invariants, hazards and the measurements behind constants. [`docs/README.md`](docs/README.md) says where each kind of document belongs.
 
 ## Semantics
 
@@ -43,7 +47,7 @@ Contributions written with AI tools are welcome. They are held to the same stand
 
 - **You are the author.** Read and understand every line you submit. You should be able to explain the change and answer review questions yourself, without relaying them to a tool.
 - **Disclose the tools.** The pull request template asks which tools you used and for what: code, tests, documentation or review. Commit trailers such as `Assisted-by:` or `Co-authored-by:` are welcome but not required.
-- **Only a person signs off.** An agent must not add `Signed-off-by` on a person's behalf. By signing off you certify the [DCO](#sign-off-dco) for the whole change, which includes checking that generated code is not copied from code under an incompatible license.
+- **A sign-off covers the whole change.** It certifies the [DCO](#sign-off-dco) for everything in the commit, including that generated code is not copied from code under an incompatible license.
 - **Verify, do not estimate.** Run the tests, and Miri for engine changes. Performance numbers must come from measurements, never from a tool's prediction.
 - **Reproduce before reporting.** Run the reproduction of a bug or a security issue yourself before filing it, even when a tool found it.
 

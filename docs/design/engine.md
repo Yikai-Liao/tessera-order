@@ -1,6 +1,6 @@
 # Design
 
-This document describes the Tessera engine as it exists in the research prototype (`sort-research-rs`, commit `6c0877f`). The port to this repository keeps the algorithm unchanged; differences introduced by the port will be listed here.
+This document describes the engine in `rust/tessera-sort`. It makes the same decisions as the research prototype (`sort-research-rs`, commit `6c0877f`); the [port record](port.md) lists how the port reaches them differently.
 
 ## Vocabulary
 
@@ -20,7 +20,7 @@ The engine samples the input to classify it as ascending, descending, flat or un
 
 ### 2. Varying bits
 
-One scan computes the bitwise union and intersection of all keys. Bits that are equal in every key cannot change the order and are excluded from every later digit. A constant input returns at this point. Wide keys whose variation fits in one 64-bit half are sorted through a narrowed 64-bit view.
+One scan computes the bitwise union and intersection of all keys. Bits that are equal in every key cannot change the order and are excluded from every later digit. A constant input returns at this point. Wide keys whose variation fits in one 64-bit half are sorted by that half as a 64-bit key.
 
 ### 3. Node partitioning
 
@@ -59,7 +59,7 @@ Each counting pass reads the keys twice: once for the histogram and once to scat
 - **User key functions** (`stable_sort_by_key`). The histogram stores a two-byte bucket number per record, and scatter reads it instead of calling the key function again. Bucket ranges are disjoint, so each output slot is written exactly once whatever the key function returns. This keeps `String`, `Box<T>` and `&mut T` records safe and every record type on one path.
 - **Library-encoded keys** (`stable_sort`). The keys are the records and are encoded by Tessera, so they are deterministic. Scatter recomputes them and stores nothing.
 
-The research prototype instead skipped the stored bucket numbers for every `Copy` record type, filling scratch with valid records on the first pass of a call so that a misbehaving key function could duplicate or drop records but never expose uninitialized memory. Measured on the prototype, storing bucket numbers for `Copy` records changes performance by at most about 4.5% in either direction, with no difference for 128-byte records; the measurement is summarized in the README.
+The research prototype skipped the stored bucket numbers for `Copy` records. It filled scratch with valid records on the first pass, so a misbehaving key function could duplicate or drop records but never expose uninitialized memory. The cost of storing bucket numbers for every record type is measured in the [port record](port.md#performance).
 
 ## Panic safety
 

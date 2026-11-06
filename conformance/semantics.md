@@ -1,6 +1,6 @@
 # Ordering semantics
 
-Status: draft for 0.1. Every Tessera implementation (Rust now, C++ later) follows these rules and is tested against the shared vectors in `conformance/vectors/` once they exist.
+Status: implemented by the unreleased Rust crate; the planned C++ implementation follows the same rules. Shared test vectors in `conformance/vectors/` will be added with the benchmark runner; until then the Rust tests generate their own inputs.
 
 ## Sort contracts
 
@@ -50,3 +50,9 @@ Implementations document three quantities separately:
 3. capacity a reusable workspace retains between calls.
 
 A workspace reuses capacity only. Every call re-establishes which scratch records are live; bytes left by an earlier call are never treated as records. Sorting with a workspace produces the same result as the corresponding free function, and a workspace stays usable after a key function panics.
+
+In Rust, one call needs O(√n) block scratch for a fixed record size and key width, a tile of up to 64 KiB of records (at least one record), up to two bytes of cached bucket ID per tile record, and at most 65,535 encoded probe keys of up to 16 bytes. Each tile-local MSD level holds up to 32 KiB of cursors on the stack, with at most 22 levels for 128-bit keys. `Workspace::retained_bytes()` reports the retained heap capacity and `shrink_to_fit()` releases all of it.
+
+## Language adapters
+
+The rules above apply to Rust and C++. The [planned Python binding](../docs/proposals/python-binding.md) has its own contract: it sorts every NaN last in both directions, treats `-0.0` and `+0.0` as equal, keeps the original value bits, and calls a list's key function exactly once per element. These rules belong to the Python adapter and do not change the Rust encoding or key-extraction guarantees.

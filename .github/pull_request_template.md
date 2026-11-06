@@ -7,7 +7,7 @@
 - [ ] `cargo test --workspace`
 - [ ] `cargo clippy --workspace --all-targets` and `cargo fmt --all --check`
 - [ ] Engine changes: Miri on the affected tests
-- [ ] Performance claims: results following `docs/benchmarking.md`, including the A/A range
+- [ ] Performance claims: results following `docs/development/benchmarking.md`, including the A/A range
 - [ ] Semantics changes: `conformance/semantics.md` updated
 
 ## AI assistance

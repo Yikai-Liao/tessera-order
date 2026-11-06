@@ -1,6 +1,6 @@
 # Benchmarking
 
-This document defines how Tessera is measured. The runner described here is being built; until then, published numbers come from the research prototype and say so.
+This document defines how Tessera is measured. The runner described here is not built yet; until it is, published numbers come from the research prototype and say so.
 
 ## Purposes
 
@@ -22,7 +22,7 @@ This document defines how Tessera is measured. The runner described here is bein
 
 Cases are selected by exact `case_id`, for example `u64/random/4096/s1`, never by pattern matching.
 
-Variants include the working-tree crate, a baseline release linked under a renamed dependency, `slice::sort_by_key`, `slice::sort_unstable_by_key`, and other radix sorts from crates.io where they support the task.
+Variants include the working-tree crate, a baseline release linked under a renamed dependency (`tessera_base = { package = "tessera-sort", git = "...", tag = "rust/v0.1.0" }`), `slice::sort_by_key`, `slice::sort_unstable_by_key`, and other radix sorts from crates.io, such as `radsort` and `rdst`, where they support the task. If Cargo rejects the same package from a path and a git source, the two versions are built as separate binaries and a driver script alternates them.
 
 ## Inputs
 
@@ -70,16 +70,18 @@ Each sample follows one procedure:
 4. Stop the clock and record the batch's nanoseconds and number of sorts.
 5. Outside the timed region, check each buffer's output hash (keys and original indices) against a reference computed with a stable standard-library sort.
 
-- The batch size is chosen from a minimum sample duration and a cap on prepared memory; both are recorded.
+- The batch size is chosen from a minimum sample duration and a cap on prepared memory; both are recorded. The provisional defaults are 5 ms and 256 MiB.
 - Variants run in a random order within each block. A block runs every variant once; a run has 9 blocks by default.
 - The baseline appears twice in each block, which gives an A/A noise range.
 - The allocation mode is a separate dimension: `api` calls the free functions and includes scratch allocation; `workspace` uses a prepared workspace. Variants without a workspace only appear in `api` tables.
-- Cold-cache measurements are a separate mode in the `extended` suite.
+- Cold-cache measurements are a separate mode in the `extended` suite: before each sort, the runner walks a buffer twice the size of the last-level cache.
 
 ## Statistics
 
 - The main statistic is the median over blocks of `variant / mean(baseline A1, baseline A2)`, reported with the A/A ratio `A2 / A1`.
 - A result is reported as faster or slower only if the median lies outside the A/A range and at least 8 of 9 blocks agree on the direction. Otherwise it is reported as within noise.
+- Comparisons across builds or source copies also include a placement control, a second copy of the same source, whose deviation counts as noise like the A/A range. On the development machine, alignment alone has moved results by 10–24%.
+- Reports also give nanoseconds per element, recomputed from batch time and element count.
 
 ## Raw data
 
@@ -91,7 +93,7 @@ Each sample follows one procedure:
  "batch":64,"elements":262144,"elapsed_ns":1523840,"verified":true}
 ```
 
-`manifest.json` records variant versions and commits, runner source and binary hashes, `rustc -vV`, `RUSTFLAGS`, LTO, CPU model and pinning, kernel version, the case plan and the input hash check.
+`manifest.json` records each variant's `implementation`, `package_version`, full `git_commit`, actual `kernel` and, for uncommitted code, source hashes; the runner source and binary hashes, `rustc -vV`, `RUSTFLAGS`, LTO, CPU model and pinning, kernel version, the case plan and the input hash check.
 
 Reports are regenerated from raw data. The report script fails on missing or duplicate samples, unverified samples, manifest mismatches and input hash mismatches. Release results are attached to GitHub releases as compressed archives; the repository keeps the generated report.
 
@@ -110,3 +112,13 @@ Memory is measured in a separate run with a counting allocator: allocation count
 
 - A deliberately wrong variant that also mutates its input proves that every variant, block and buffer receives the original input, and that validation catches the error.
 - A round trip through `samples.jsonl` and the report script proves that durations, units and sort counts survive.
+
+## C++ runner
+
+The C++ runner implements the same input specification and writes the same `samples.jsonl` format. It has its own timing loop rather than Google Benchmark's summaries, and fetches its baselines (`std::sort`, `std::stable_sort`, IPS²Ra, IPS⁴o, VQSort, x86-simd-sort, Fluxsort, Dovetail) at pinned commits. Cross-language comparisons never time per-call FFI: each runner sorts and times whole batches inside its own language.
+
+## Baselines across releases
+
+Baseline releases are referenced by their language tag, for example `rust/v0.1.0` (see [`RELEASING.md`](../../RELEASING.md)). A cross-language report states whether it compares one repository commit or each language's latest release, and names the kernel each interface actually ran.
+
+The one-time port acceptance used the research repository's harness, which stays outside this repository; its results are in the [port record](../design/port.md).

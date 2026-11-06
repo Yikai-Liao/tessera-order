@@ -168,7 +168,7 @@ assets/              logo
 
 ## Contributing
 
-Bug reports, benchmark results from other machines, and integration reports are welcome. Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. Report security issues privately as described in [`SECURITY.md`](SECURITY.md).
+Bug reports, benchmark results from other machines, and integration reports are welcome, and so are AI-assisted contributions, as long as a person has reviewed the change and takes responsibility for it. Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. Commits are signed off under the [Developer Certificate of Origin](https://developercertificate.org/), and everyone in the project follows the [code of conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in [`SECURITY.md`](SECURITY.md).
 
 ## Acknowledgements
 

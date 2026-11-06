@@ -31,3 +31,20 @@ body:
       render: text
     validations:
       required: true
+  - type: dropdown
+    id: ai
+    attributes:
+      label: AI assistance
+      description: Was this report found or written with AI tools?
+      options:
+        - "No"
+        - "Yes, and I verified the reproduction myself"
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I ran the reproduction myself on the version above.
+          required: true

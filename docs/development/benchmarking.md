@@ -80,7 +80,7 @@ Each sample follows one procedure:
 
 - The main statistic is the median over blocks of `variant / mean(baseline A1, baseline A2)`, reported with the A/A ratio `A2 / A1`.
 - A result is reported as faster or slower only if the median lies outside the A/A range and at least 8 of 9 blocks agree on the direction. Otherwise it is reported as within noise.
-- Comparisons across builds or source copies also include a placement control, a second copy of the same source, whose deviation counts as noise like the A/A range. On the development machine, alignment alone has moved results by 10–24%.
+- Comparisons across builds or source copies also include a placement control, a second copy of the same source, whose deviation counts as noise like the A/A range. On the development machine, placement alone has moved results by up to 41% at n ≤ 128 and up to 1.9× on ordered inputs ([port record](../design/port.md#rebuild-and-branch-alignment-check)).
 - Reports also give nanoseconds per element, recomputed from batch time and element count.
 
 ## Raw data
@@ -103,6 +103,9 @@ Reports are regenerated from raw data. The report script fails on missing or dup
 |---|---|---|
 | `default` | `cargo build --release` | Main report: what crate users get |
 | `native` | `-C target-cpu=native`, fat LTO | Additional column |
+| `branch-aligned` | `default` plus `-C llvm-args=-x86-branches-within-32B-boundaries` (x86-64 only) | A/B comparisons on CPUs with Intel's JCC erratum (Skylake-derived cores); not a report column |
+
+On the development machine, the `branch-aligned` profile removed placement swings of up to 1.9× on ordered inputs, but not the swings at n ≤ 128, so the placement control stays required. It changes absolute times by up to −30% and +69%, so `default` remains what reports show.
 
 ## Memory
 

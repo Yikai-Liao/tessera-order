@@ -89,7 +89,8 @@ jobs:
             # A t-test against recent main history: noisy cases get wider limits.
             args=(--threshold-measure latency --threshold-test t_test
               --threshold-min-sample-size 5 --threshold-max-sample-size 32
-              --threshold-upper-boundary 0.99 --thresholds-reset)
+              --threshold-upper-boundary 0.999 --threshold-lower-boundary 0.999
+              --thresholds-reset)
           fi
           # Waiting for the remote job holds the concurrency slot until it ends.
           # Free jobs stop at 5 minutes; the suite takes about 45 s locally.

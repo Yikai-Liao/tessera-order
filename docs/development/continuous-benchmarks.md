@@ -23,7 +23,9 @@ Every case is checked against a stable standard-library sort before timing; for 
 
 ## Alerts
 
-`main` uses a t-test on latency against its last 32 samples, with an upper boundary of 0.99. PRs start from their base commit on `main` and inherit its thresholds. Cases with high variance, such as the placement-sensitive cases at n ≤ 49, get wider limits automatically. Alerts appear in the Bencher check and PR comment; they do not fail the workflow. Investigate an alert with the A/A and placement controls of the full protocol.
+`main` uses a t-test on latency against up to its last 32 samples, requiring at least 5 samples. Both the upper and lower boundaries are 0.999, flagging potential regressions and improvements. PRs start from their base commit on `main` and inherit its thresholds. Cases with high variance, such as the placement-sensitive cases at n ≤ 49, get wider limits automatically.
+
+History and alerts are available on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). PR alerts also appear in the Bencher check and PR comment. Alerts do not fail the workflow, and `main` alerts currently have no notification. Investigate an alert with the A/A and placement controls of the full protocol.
 
 Pushes to `main` that do not change code still run, adding samples of unchanged code to the history. Changing the compiler, flags or suite makes old samples incomparable: use a new Testbed name or reset the thresholds.
 

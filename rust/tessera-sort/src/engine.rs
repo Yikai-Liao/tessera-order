@@ -394,7 +394,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
         Order::Ascending => return,
         Order::Descending => {
             if strict_descending {
-                records.reverse();
+                reverse_strictly(records);
             } else {
                 reverse_stably(records, extractor);
             }
@@ -604,6 +604,12 @@ pub(crate) fn confirm_ascending<T, E: Extract<T>>(
 
 /// Sorts a descending array, stably, by reversing it and then reversing each
 /// run of equal keys back. Reversal alone would swap equal keys past each other.
+// Keep the reversal loop out of the general sort path.
+#[inline(never)]
+fn reverse_strictly<T>(records: &mut [T]) {
+    records.reverse();
+}
+
 fn reverse_stably<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
     records.reverse();
     let mut start = 0;

@@ -1,7 +1,7 @@
 name: Build benchmarks
 
 # Unprivileged: runs PR code, including forks, without secrets. Uploads one
-# static executable per language; bench-track.yml packages and submits it.
+# static executable per configuration; bench-track.yml packages and submits them.
 on:
   pull_request:
     paths:
@@ -29,6 +29,17 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: default
+            features: ""
+            artifact: bench-rust-default
+          - variant: portable-simd
+            features: tessera-sort/portable-simd
+            # The default-branch tracker also consumes this artifact on PRs.
+            artifact: bench-rust
     steps:
       - uses: actions/checkout@v7
         with:
@@ -42,7 +53,7 @@ jobs:
           RUSTFLAGS: -C target-feature=+crt-static
         run: |
           cargo bench --locked -p tessera-bench --bench smoke \
-            --features tessera-sort/portable-simd \
+            --features "${{ matrix.features }}" \
             --target x86_64-unknown-linux-gnu --no-run --message-format=json \
             | jq -r 'select(.reason == "compiler-artifact" and .target.name == "smoke")
                      | .executable // empty' > executable.txt
@@ -51,7 +62,7 @@ jobs:
           ldd out/bench | grep -q 'statically linked'
       - uses: actions/upload-artifact@v4
         with:
-          name: bench-rust
+          name: ${{ matrix.artifact }}
           path: out/bench
           retention-days: 7
           if-no-files-found: error

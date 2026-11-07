@@ -37,6 +37,9 @@ export interface TrendSummary {
   // Geometric mean of the changes against main, one per PR run.
   overall: number[];
   focus: TrendSeries[];
+  // Every shared case, so a case selected in one configuration can still be
+  // drawn beside its quiet history in another.
+  series: TrendSeries[];
 }
 
 interface MeasuredRun extends Measurement {
@@ -121,14 +124,16 @@ export function summarizeTrend(reports: BencherReport[], current: BencherReport,
   // Rows run from the largest swing down, whichever way each case moved.
   const selected = shared.filter(row => row.verdict === "regression" || swings.get(caseKey(row))! >= MIN_SWING)
     .sort((a, b) => swings.get(caseKey(b))! - swings.get(caseKey(a))! || a.name.localeCompare(b.name));
+  const series = (row: ComparedRow): TrendSeries => ({ name: row.name, label: row.label,
+    baseValue: row.baseline, firstValue: runs[0].values.get(caseKey(row))!,
+    lastValue: runs.at(-1)!.values.get(caseKey(row))!, changes: changes(row) });
   return {
     project: current.project.slug, branch: current.branch.name, testbed: current.testbed.name,
     base: summary.baseHash, sharedCases: shared.length,
     runs: runs.map(({ uuid, hash, time }) => ({ uuid, hash, time })),
     overall: runs.map(run => Math.exp(shared.reduce((sum, row) =>
       sum + Math.log(run.values.get(caseKey(row))! / row.baseline), 0) / shared.length) - 1),
-    focus: selected.map(row => ({ name: row.name, label: row.label,
-      baseValue: row.baseline, firstValue: runs[0].values.get(caseKey(row))!,
-      lastValue: runs.at(-1)!.values.get(caseKey(row))!, changes: changes(row) })),
+    focus: selected.map(series),
+    series: shared.map(series),
   };
 }

@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { marker, publishComment, resolveSource, startReport } from "./github.ts";
 import { mockGitHub } from "./fixtures/github.ts";
 import { hash } from "./fixtures/report.ts";
+import { VARIANTS } from "./variants.ts";
 
 const repo = { owner: "owner", repo: "tessera" };
 const fullName = "owner/tessera";
@@ -169,17 +170,19 @@ for (const [name, headSha, state] of [
   });
 }
 
-test("starts a check on the measured head with a link to its tracking run", async () => {
-  const mock = mockGitHub(() => ({ id: 42 }));
-  const outputs: Record<string, string> = {};
-  await startReport({
-    github: mock.github, hash,
-    context: { repo, payload: {}, serverUrl: "https://github.com", runId: 123 },
-    core: { notice: () => {}, setOutput: (name, value) => { outputs[name] = value; } },
+for (const variant of VARIANTS) {
+  test(`starts the ${variant.id} check on the measured head`, async () => {
+    const mock = mockGitHub(() => ({ id: 42 }));
+    const outputs: Record<string, string> = {};
+    await startReport({
+      github: mock.github, hash, variant,
+      context: { repo, payload: {}, serverUrl: "https://github.com", runId: 123 },
+      core: { notice: () => {}, setOutput: (name, value) => { outputs[name] = value; } },
+    });
+    assert.deepEqual(outputs, { [variant.id]: "42" });
+    assert.deepEqual(mock.requests[0].body, {
+      name: `Benchmarks (rust, ${variant.name})`, head_sha: hash, status: "in_progress",
+      details_url: "https://github.com/owner/tessera/actions/runs/123",
+    });
   });
-  assert.deepEqual(outputs, { id: "42" });
-  assert.deepEqual(mock.requests[0].body, {
-    name: "Benchmarks (rust)", head_sha: hash, status: "in_progress",
-    details_url: "https://github.com/owner/tessera/actions/runs/123",
-  });
-});
+}

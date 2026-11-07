@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { formatChange, formatPercent, isMajor, secondary, type ComparedRow, type ReportSummary } from "./report.ts";
-
-function escapeXml(text: string) {
-  const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
-  return text.replace(/[&<>"]/g, c => entities[c]);
-}
+import { chartStyles, escapeXml, textWidth } from "./svg.ts";
 
 // Each side of the axis ends at its largest change, so no width goes to
 // empty range.
@@ -22,16 +18,13 @@ function largeTickStep(minimum: number) {
   return (leading <= 1 ? 1 : leading <= 2 ? 2 : leading <= 5 ? 5 : 10) * magnitude;
 }
 
-// Approximate advances of Inter in em, enough to lay out a label column
-// without a font engine.
-function textWidth(text: string, px: number) {
-  let em = 0;
-  for (const c of text) {
-    em += /[il.,:;'·| ]/.test(c) ? 0.28 : /[{}()[\]frtj]/.test(c) ? 0.36
-      : /[mwMW%×]/.test(c) ? 0.86 : /[0-9]/.test(c) ? 0.62 : /[A-Z]/.test(c) ? 0.68 : 0.55;
-  }
-  return em * px;
-}
+// Faster cases below this change share one summary line instead of a row, so
+// the chart grows with the notable changes rather than with the suite. It is
+// a display choice: alerts still decide what is faster, the headline counts
+// every alert, and the All Cases table lists each case. Slower cases are never
+// folded. The PR history chart has its own rule (MIN_SWING in history.ts),
+// because a regression fixed within the PR leaves no trace in this comparison.
+export const FOLD_FASTER_BELOW = 0.05;
 
 // The chart of the alerted cases, as a standalone SVG for an image
 // attachment. It follows the documentation figures: neutral ink, hairline
@@ -39,11 +32,18 @@ function textWidth(text: string, px: number) {
 // The pair passes the colour-vision checks on the light and dark surfaces,
 // and the media query swaps only the neutrals, so one file serves both themes.
 export function chartSvg(s: ReportSummary) {
+  // Folding every row would leave an axis with nothing on it, so small
+  // speedups are drawn when nothing else is.
+  const fold = s.rows.some(r => r.verdict === "regression" ||
+    (r.verdict === "improvement" && -r.change >= FOLD_FASTER_BELOW));
   const groups = [
     { key: "regression", title: "SLOWER", cls: "slower" },
     { key: "improvement", title: "FASTER", cls: "faster" },
-  ].map(g => ({ ...g, rows: s.rows.filter((r): r is ComparedRow => r.verdict === g.key) }))
-    .filter(g => g.rows.length);
+  ].map(g => {
+    const alerted = s.rows.filter((r): r is ComparedRow => r.verdict === g.key);
+    const shown = fold && g.key === "improvement" ? alerted.filter(r => -r.change >= FOLD_FASTER_BELOW) : alerted;
+    return { ...g, rows: shown, folded: alerted.length - shown.length };
+  }).filter(g => g.rows.length || g.folded);
   if (!groups.length) return null;
   const all = groups.flatMap(g => g.rows);
   const slower = all.filter(r => r.verdict === "regression");
@@ -76,7 +76,7 @@ export function chartSvg(s: ReportSummary) {
   const layout = groups.map(g => {
     const titleY = y + 12;
     const first = y + 22;
-    y = first + g.rows.length * rowH + 10;
+    y = first + g.rows.length * rowH + (g.folded ? 22 : 0) + 10;
     return { ...g, titleY, first };
   });
   const plotBottom = y - 6;
@@ -88,23 +88,7 @@ export function chartSvg(s: ReportSummary) {
   out.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="t d">`);
   out.push(`<title id="t">Benchmark changes: ${s.regressions} slower, ${s.improvements} faster</title>`);
   out.push(`<desc id="d">${escapeXml(all.map(r => `${r.label}: run time ${formatChange(r.change)}`).join("; "))}</desc>`);
-  out.push(`<style>
-  .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
-  .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
-  .tag { fill: none; stroke: #c9c8c2; }
-  .slower { fill: #e8622f; } .faster { fill: #4a80e6; }
-  .stem-slower { stroke: #e8622f; } .stem-faster { stroke: #4a80e6; }
-  text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; font-feature-settings: "tnum", "cv11"; }
-  .val { font-size: 12px; } .sub { font-size: 11px; } .tiny { font-size: 10px; } .strong { font-weight: 600; }
-  .hero { font-size: 28px; font-weight: 600; letter-spacing: -0.6px; font-feature-settings: "pnum"; }
-  .stat { font-size: 18px; font-weight: 600; }
-  .caps { font-size: 10.5px; font-weight: 600; letter-spacing: 1.1px; }
-  @media (prefers-color-scheme: dark) {
-    .panel { fill: #1e1e1d; stroke: #3a3a37; } .ring { stroke: #1e1e1d; }
-    .ink { fill: #e8e7e3; } .muted { fill: #a3a29b; } .rule { stroke: #30302e; } .axis { stroke: #6f6e69; }
-    .tag { stroke: #4a4a46; }
-  }
-</style>`);
+  out.push(chartStyles);
   out.push(`<rect class="panel" x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" rx="12"/>`);
 
   // Headline: the overall ratio, then the counts.
@@ -162,6 +146,10 @@ export function chartSvg(s: ReportSummary) {
       t(`val ink${strong}`, dx + (left ? -10 : 10), cy + 4, formatChange(r.change),
         ` text-anchor="${left ? "end" : "start"}"`);
     });
+    if (g.folded) {
+      t("muted sub", pad, g.first + g.rows.length * rowH + 14,
+        `${g.folded} more faster, each by less than ${Math.round(FOLD_FASTER_BELOW * 100)}%`);
+    }
   }
   out.push("</svg>");
   return out.join("\n");

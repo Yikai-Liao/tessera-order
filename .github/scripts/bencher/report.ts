@@ -16,8 +16,10 @@ export interface Boundary {
 
 export interface BencherReport {
   uuid: string;
+  start_time?: string;
+  end_time?: string;
   project: { slug: string };
-  testbed: { uuid: string; name: string };
+  testbed: { uuid: string; name: string; spec?: { uuid: string } | null };
   branch: {
     uuid: string;
     name: string;
@@ -126,7 +128,7 @@ const DISTRIBUTIONS: Record<string, string> = {
 
 export function caseParts(id: string) {
   const parts = id.split("/");
-  if (parts.length !== 6 || !/^\d+$/.test(parts[3])) return { type: "", input: id, n: "", extra: "" };
+  if (parts.length !== 6 || !/^\d+$/.test(parts[3])) return { type: "", input: id, n: "", extra: "", seed: "", mode: "" };
   const [, type, distribution, length, seed, mode] = parts;
   const row = type.match(/^row_(\w+)$/);
   // Seed 1 and the public API are the defaults; only departures are named.
@@ -138,6 +140,8 @@ export function caseParts(id: string) {
     input: DISTRIBUTIONS[distribution] ?? distribution,
     n: Number(length).toLocaleString("en-US"),
     extra: extra.join(", "),
+    seed,
+    mode,
   };
 }
 
@@ -203,7 +207,6 @@ export function summarize(report: BencherReport) {
   if (head.start_point) {
     history.unshift({ branch: head.start_point.branch, head: head.start_point.head });
   }
-  const model = results.flatMap(r => r.measures).find(m => m.threshold)?.threshold?.model;
   // The geometric mean of current/baseline weighs a 2× win on a 700 ns case
   // and on a 10 ms case equally, which an arithmetic mean of times would not.
   const compared = rows.filter((r): r is ComparedRow => r.baseline !== null && r.value > 0);
@@ -225,7 +228,6 @@ export function summarize(report: BencherReport) {
     testbed: report.testbed,
     project: report.project?.slug,
     uuid: report.uuid,
-    model,
   };
 }
 

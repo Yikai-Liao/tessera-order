@@ -30,34 +30,40 @@ test("ignores dismissed alerts", () => {
 test("names cases in words and keeps the ID for copying", () => {
   assert.equal(report.caseLabel("rust/u64/sorted99/65536/s1/api"), "u64 · 99% sorted · 65,536");
   assert.deepEqual(report.caseParts("rust/row_u64/random/4097/s1/workspace"),
-    { type: "{u64,u32}", input: "random", n: "4,097", extra: "workspace" });
+    { type: "{u64,u32}", input: "random", n: "4,097", extra: "workspace", seed: "s1", mode: "workspace" });
   assert.equal(report.caseLabel("rust/u32/d16/48/s2/api"), "u32 · 16 values · 48, seed 2");
   assert.equal(report.caseLabel("not/a/benchmark"), "not/a/benchmark");
 });
 
-test("leads with counts and call-outs, then the tables", () => {
+test("leads with counts and both charts, then call-outs and tables", () => {
   const body = render(report.summarize(fixture()),
-    { language: "rust", runUrl: "https://run", baseRef: "main", chartRef: "./chart.svg" });
+    { language: "rust", runUrl: "https://run", baseRef: "main", chartRef: "./chart.svg", trendRef: "./trend.svg" });
   assert.equal(body.split("\n")[0], "### Benchmarks · rust · 2 slower, 1 faster, 1 new");
+  const chart = body.indexOf("](./chart.svg)");
+  const trend = body.indexOf("](./trend.svg)");
   const caution = body.indexOf("> [!CAUTION]");
   const tip = body.indexOf("> [!TIP]");
-  const chart = body.indexOf("](./chart.svg)");
-  assert.ok(caution > 0 && caution < tip && tip < chart && chart < body.indexOf("#### Slower"));
+  assert.ok(chart > 0 && chart < trend && trend < caution && caution < tip && tip < body.indexOf("#### Slower"));
+  assert.equal(body.split("\n").slice(0, 5).join("\n"),
+    "### Benchmarks · rust · 2 slower, 1 faster, 1 new\n\n![Changes against main](./chart.svg)\n\n![PR benchmark history](./trend.svg)");
   assert.match(body, /Worst: \{u32,u32\} · random · 48, 726 ns → \*\*800 ns\*\*, \*\*\+10\.2%\*\*/);
   assert.match(body, /1 case faster, 1 by 20% or more\.\*\* Best: u64 · 99% sorted · 1,000,000.*\*\*−29\.1%\*\*/);
   assert.match(body, /\*\*Overall run time −[\d.]+%\*\* against `main`, the geometric mean over 4 cases/);
-  assert.match(body, /aaaaaaa against `main` bbbbbbb on Testbed `intel-v1`/);
+  assert.match(body, /<sub>aaaaaaa → `main` bbbbbbb · `intel-v1`/);
   // Names link to history, with the benchmark ID as the link title.
-  assert.match(body, /\| \[random <sub>u64 · 49<\/sub>\]\(https:\/\/bencher\.dev\/perf\/proj\?[^ ]+ "rust\/u64\/random\/49\/s1\/api"\) \| 709 ns \| 736 ns \| \+3\.8% \|/);
+  assert.match(body, /\| \[random\]\(https:\/\/bencher\.dev\/perf\/proj\?[^ ]+ "rust\/u64\/random\/49\/s1\/api"\) \| u64 \| 49 \| api \| 709 ns \| 736 ns \| \+3\.8% \|/);
   // Both directions read as the change in run time; 20% or more is bold.
   assert.match(body, /\| \*\*−29\.1%\*\* \|/);
   assert.ok(!body.includes("/console/"), "links must not require a login");
-  assert.match(body, /\[report JSON\]\(https:\/\/api\.bencher\.dev\/v0\/projects\/proj\/reports\/r-1\)/);
-  assert.match(body, /\[history JSON of alerted cases\]\(https:\/\/api\.bencher\.dev\/v0\/projects\/proj\/perf\?branches=br-main%2Cbr-pr&/);
+  assert.match(body, /\[JSON\]\(https:\/\/api\.bencher\.dev\/v0\/projects\/proj\/reports\/r-1\)/);
+  assert.match(body, /\[History\]\(https:\/\/api\.bencher\.dev\/v0\/projects\/proj\/perf\?branches=br-main%2Cbr-pr&/);
   const folded = body.slice(body.indexOf("<details>"));
   assert.match(folded, /All 5 cases/);
-  assert.match(folded, /\| all equal <sub>u64 · 65,536<\/sub> \| 26\.0 µs \| 23\.7 µs – 28\.4 µs \|.*\| `rust\/u64\/equal\/65536\/s1\/api` \|/);
-  // The visible part lists only alerts and new cases.
+  assert.match(folded, /\| all equal \| u64 \| 65,536 \| api \| 26\.0 µs \| 23\.7 µs – 28\.4 µs \|.*\| `rust\/u64\/equal\/65536\/s1\/api` \|/);
+  // New cases use one quiet count; details and metadata follow the tables.
+  assert.match(body, /<sub>1 new case without a baseline\.<\/sub>/);
+  assert.ok(body.indexOf("<sub>aaaaaaa") > body.indexOf("</details>"));
+  assert.doesNotMatch(body, /Rerun|Confirm|Data, without login|The report holds|<sub>Baseline:/);
   assert.ok(!body.slice(0, body.indexOf("<details>")).includes("all equal"));
   assert.ok(!/[\u{1F300}-\u{1FAFF}\u2705\u26A0]/u.test(body), "no emoji");
 });
@@ -101,6 +107,30 @@ test("draws every alert when one direction has more than sixteen cases", () => {
   assert.equal(summary.regressions, 35);
   assert.equal((svg.match(/<circle /g) ?? []).length, 35);
   assert.match(svg, />u64 · 134</);
+});
+
+test("folds small speedups into one line but draws every slowdown", () => {
+  const input = fixture();
+  // all equal · 65,536 is 0.1% faster than main.
+  input.alerts.push({ metric: { uuid: "metric-rust/u64/equal/65536/s1/api" }, limit: "lower", status: "active" });
+  const summary = report.summarize(input);
+  const svg = chartSvg(summary);
+  assert.ok(svg);
+  assert.equal(summary.improvements, 2);
+  assert.match(svg, />1 more faster, each by less than 5%</);
+  assert.doesNotMatch(svg, />−0\.1%</);
+  // A 3.8% slowdown stays drawn although it is under the same 5%.
+  assert.match(svg, />\+3\.8%</);
+  assert.equal((svg.match(/<circle /g) ?? []).length, 3);
+});
+
+test("draws small speedups when folding them would leave nothing to draw", () => {
+  const input = fixture();
+  input.alerts = [{ metric: { uuid: "metric-rust/u64/equal/65536/s1/api" }, limit: "lower", status: "active" }];
+  const svg = chartSvg(report.summarize(input));
+  assert.ok(svg);
+  assert.match(svg, />−0\.1%</);
+  assert.doesNotMatch(svg, /more faster/);
 });
 
 test("keeps ticks at least sixty pixels apart for a large regression", () => {

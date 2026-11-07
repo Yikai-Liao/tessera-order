@@ -10,3 +10,4 @@ Each file records one decision that shapes the project: the context, the decisio
 | [0004](0004-continuous-benchmarks-on-bencher.md) | Run continuous benchmarks on Bencher Bare Metal | 2026-11-06 |
 | [0005](0005-no-std-with-alloc.md) | Support no-std with alloc behind a default-on std feature | 2026-11-06 |
 | [0006](0006-no-std-unwind-guard.md) | Guard record movement against unwinding without std | 2026-11-07 |
+| [0009](0009-benchmark-report-images-and-history.md) | Publish immutable benchmark images and compare PR history with main | 2026-11-07 |

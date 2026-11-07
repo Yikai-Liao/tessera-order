@@ -21,7 +21,8 @@ jobs:
       group: bencher-bare-metal
       queue: max
     permissions:
-      contents: read
+      # Only this trusted workflow publishes generated SVGs to benchmark-images.
+      contents: write
       actions: read
       checks: write
       pull-requests: write
@@ -111,7 +112,6 @@ jobs:
             --adapter rust_criterion --format json --quiet \
             "${args[@]}" --exec -- /bench --bench > "$RUNNER_TEMP/bencher-report.json"
       - name: Publish report
-        id: report
         if: always() && steps.check.outputs.id
         uses: actions/github-script@v9
         env:
@@ -130,12 +130,4 @@ jobs:
               // A skipped step means an earlier one failed.
               outcome: env.OUTCOME === "skipped" ? "failure" : env.OUTCOME,
               reportPath: `${env.RUNNER_TEMP}/bencher-report.json`,
-              chartPath: `${env.RUNNER_TEMP}/benchmark-chart.svg`,
             } });
-      - name: Upload benchmark chart
-        if: always() && steps.report.outputs.chart == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-chart-rust
-          path: ${{ runner.temp }}/benchmark-chart.svg
-          if-no-files-found: error

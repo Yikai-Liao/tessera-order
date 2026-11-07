@@ -204,6 +204,12 @@ impl<K: RadixKey> RadixKey for Reverse<K> {
     }
 }
 
+/// Widest key window that [`Extract::try_count_window`] counts and fills, in bits.
+const SMALL_WINDOW_BITS: usize = 8;
+
+/// Buckets such a window can hold.
+const SMALL_WINDOW_BUCKETS: usize = 1 << SMALL_WINDOW_BITS;
+
 /// Computes the encoded key of a record.
 ///
 /// `ByKey` calls a user key function, `Direct` encodes the record itself, and
@@ -211,6 +217,21 @@ impl<K: RadixKey> RadixKey for Reverse<K> {
 pub(crate) trait Extract<T> {
     type Value: Unsigned;
     fn key(&mut self, record: &T) -> Self::Value;
+
+    /// Finishes a slice whose keys all fall in one small window of the encoded
+    /// key, by counting the window and filling each run from one of its records.
+    ///
+    /// The window starts at bit `low` and is `width` bits wide, at most
+    /// [`SMALL_WINDOW_BITS`]; the caller guarantees that every key agrees
+    /// outside it. Filling a run with one of its records preserves order and
+    /// stability only where equal keys imply interchangeable records, which a
+    /// user key function does not guarantee. The default therefore declines and
+    /// leaves the slice unchanged for the block partition.
+    ///
+    /// Returns whether the slice is finished.
+    fn try_count_window(&mut self, _records: &mut [T], _low: usize, _width: usize) -> bool {
+        false
+    }
 
     /// Confirms ascending keys after an already encoded predecessor.
     fn confirm_ascending(&mut self, records: &[T], previous: Self::Value) -> bool
@@ -273,6 +294,41 @@ pub(crate) struct Direct;
 impl<K: RadixKey> Extract<K> for Direct {
     type Value = K::Encoded;
 
+    fn try_count_window(&mut self, records: &mut [K], low: usize, width: usize) -> bool {
+        if width == 0 || width > SMALL_WINDOW_BITS {
+            return false;
+        }
+        // An empty slice and a single record are already sorted.
+        let Some(&first) = records.first() else {
+            return true;
+        };
+        let buckets = 1usize << width;
+        let mask = Self::Value::from_usize(buckets - 1);
+        let shift = Self::Value::from_usize(low);
+        let mut counts = [0usize; SMALL_WINDOW_BUCKETS];
+        let mut representatives = [first; SMALL_WINDOW_BUCKETS];
+        for record in records.iter() {
+            let key = self.key(record);
+            let bucket = ((key >> shift) & mask).to_usize();
+            if counts[bucket] == 0 {
+                representatives[bucket] = *record;
+            }
+            counts[bucket] += 1;
+        }
+        // Every sealed encoding is a bijection on bit patterns, so equal keys
+        // mean equal records: a run of one bucket is interchangeable, and one of
+        // its records stands for all of them, NaN payloads and signed zeros
+        // included.
+        let mut start = 0;
+        for (bucket, &count) in counts[..buckets].iter().enumerate() {
+            let end = start + count;
+            records[start..end].fill(representatives[bucket]);
+            start = end;
+        }
+        debug_assert_eq!(start, records.len());
+        true
+    }
+
     #[inline]
     fn confirm_ascending(&mut self, records: &[K], previous: Self::Value) -> bool {
         K::confirm_ascending(records, previous)
@@ -308,5 +364,12 @@ impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for KeyHalf<'_, E, SHIFT> 
     #[inline]
     fn key(&mut self, record: &T) -> u64 {
         (self.0.key(record).to_u128() >> SHIFT) as u64
+    }
+
+    fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
+        // The engine narrows a key to one half only when the other half is
+        // constant, so the window moves up with the half and still covers every
+        // difference in the underlying key.
+        self.0.try_count_window(records, low + SHIFT, width)
     }
 }

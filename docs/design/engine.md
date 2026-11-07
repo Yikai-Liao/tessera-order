@@ -49,7 +49,9 @@ One scan computes the bitwise union and intersection of all keys. Bits that are 
 
 ### 3. Node partitioning
 
-A node is split by one of three partitions, all of them stable:
+A node whose remaining variation spans at most eight bits is one window away from sorted. When the records are their own keys (`Direct`), it is finished by counting that window: one `usize` count and one remembered record per bucket, then each run is filled from its record. Every sealed encoding is a bijection on bit patterns, so equal keys mean equal records and a filled run is the same permutation the block partition would produce, without block tables or record moves. A user key function keeps payloads that its key does not identify, so `ByKey` declines and takes the partition. See [decision 0012](../decisions/0012-count-narrow-direct-windows.md).
+
+Otherwise the node is split by one of three partitions, all of them stable:
 
 - **Repeated key.** The node samples 64 keys in runs of 8. If one value covers at least a quarter of the sample, an equality partition separates it from the rest, so heavily repeated keys stop costing passes.
 - **Outlier run.** If a short run at either end of the node (at most 1,024 records) disagrees with all other records on the highest varying bit, the run is split off and finished by insertion sort, and the rest of the node keeps a narrower set of varying bits.

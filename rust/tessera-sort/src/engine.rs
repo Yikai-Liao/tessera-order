@@ -729,6 +729,13 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         let span = top - low;
 
         if span <= SPLIT_BITS {
+            // A record of its own key is interchangeable with every record of
+            // the same key, so counting the window and filling each run can
+            // finish the node without moving blocks. A user key function keeps
+            // its payloads and takes the partition below instead.
+            if self.key.try_count_window(arr, low, span) {
+                return;
+            }
             // One block partition finishes the node without recursion.
             block::partition_digit(
                 arr,
@@ -1236,6 +1243,67 @@ mod tests {
         assert_eq!(records, expected);
     }
 
+    #[test]
+    fn narrow_window_fill_replaces_the_block_partition_for_direct_keys() {
+        let len = if cfg!(miri) { 129 } else { 8193 };
+        // Windows at the bottom, inside and at the top of a 64-bit key, plus one
+        // window narrower than eight bits. A 256-byte tile keeps every case a
+        // node, which is where the fill stands in for the block partition.
+        for &(low, width) in &[(0usize, 8usize), (0, 3), (9, 8), (57, 7)] {
+            let value_mask = (1u64 << width) - 1;
+            let base = 0x2b93_a3f7_1d05_0000u64 & !(value_mask << low);
+            let mut values: Vec<u64> = (0..len)
+                .map(|id| {
+                    base | (((id as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) & value_mask) << low)
+                })
+                .collect();
+            let mut expected = values.clone();
+            expected.sort();
+            sort_with_tile_bytes::<u64, _, true>(
+                &mut values,
+                &mut Direct,
+                Some(&mut Workspace::new()),
+                256,
+            );
+            assert_eq!(values, expected, "direct low={low} width={width}");
+            // A user key function keeps its payloads, so the same shape takes the
+            // block partition and must reach the same order.
+            let mut values: Vec<u64> = (0..len)
+                .map(|id| {
+                    base | (((id as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) & value_mask) << low)
+                })
+                .collect();
+            sort_with_tile_bytes::<u64, _, true>(
+                &mut values,
+                &mut ByKey(|record: &u64| *record),
+                Some(&mut Workspace::new()),
+                256,
+            );
+            assert_eq!(values, expected, "by key low={low} width={width}");
+        }
+        // A 128-bit key whose variation fits in one half is sorted by that half,
+        // so the fill is reached through `KeyHalf` and has to move the window.
+        for &(low, width) in &[(0usize, 8usize), (64, 8), (120, 8)] {
+            let value_mask = (1u128 << width) - 1;
+            let base = 0x2b93_a3f7_1d05_0000u128 & !(value_mask << low);
+            let mut values: Vec<u128> = (0..len)
+                .map(|id| {
+                    let random =
+                        (id as u128).wrapping_mul(0x9e37_79b9_7f4a_7c15_1b2c_3d4e_5f60_7181);
+                    base | ((random & value_mask) << low)
+                })
+                .collect();
+            let mut expected = values.clone();
+            expected.sort();
+            sort_with_tile_bytes::<u128, _, true>(
+                &mut values,
+                &mut Direct,
+                Some(&mut Workspace::new()),
+                256,
+            );
+            assert_eq!(values, expected, "u128 low={low} width={width}");
+        }
+    }
     #[test]
     fn sparse_digit_plans_and_outlier_routes() {
         for width in MIN_TILE_DIGIT_BITS..=MAX_TILE_DIGIT_BITS {

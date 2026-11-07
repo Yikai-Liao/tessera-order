@@ -1,0 +1,14 @@
+Historical b1d36ce export plus combined-main-5b13 prerequisite: apply-check and apply passed.
+All 20 combined-base runtime/test files equal the frozen base.
+Independent G follow-on: apply-check and apply passed without older N.
+Complete file/symlink/mode tree matches the intended historical target.
+All 23 runtime/test files equal validated private G bytes.
+All three Cargo files stay identical between historical combined base and target.
+Private crate Cargo semantics match after package/explicit library name normalization.
+Private workspace excludes bench/rust; other parsed workspace settings and all 8 retained lock records match.
+No standard benchmark-member validation is claimed.
+Entire block.rs, original compact_with bytes and reference normalization verified.
+Standalone reference normalization diff applies and reverses exactly.
+Reverse G restores the complete combined-base tree.
+Reverse prerequisite restores the complete historical b1d36ce tree.
+No staging build, test, timing, shared working-tree edit, commit or push.

@@ -1,0 +1,48 @@
+{
+  "status": "all final gates passed on frozen private source before packaging",
+  "private_identity_sha256": "6541fbba6b06bdd755fb4b3074d4a5cfcd86ec3399192bafa49bb53c0431e04a",
+  "original_frozen_manifest_sha256": "7aa41f6d87749db5bf9b3a5af7a2a57793329eeb04c9270daa3dd8c371b2c23e",
+  "original_final_gate_summary_sha256": "f3e7f057a38fb0af3d060a2826a4f6b12f6caebc44040765cf5f126e4dc0b427",
+  "independent_exact_source_review": "passed with no source blocker",
+  "toolchains": {
+    "stable": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "msrv": "rustc 1.85.1 (4eb161250 2025-03-15)",
+    "nightly": "rustc 1.101.0-nightly (c980177d8 2026-11-06)"
+  },
+  "native_release": {
+    "unit": 56,
+    "integration": 22,
+    "total": 78,
+    "three_way_native_geometries": 12600
+  },
+  "serial_fallback_root_tests": 8,
+  "all_feature_doctests": 6,
+  "strict_stable_checks": [
+    "four changed/new files rustfmt",
+    "workspace/all-targets/all-features Clippy -D warnings",
+    "workspace all-features rustdoc -D warnings"
+  ],
+  "no_std": "stable and Rust 1.85.1 checks passed",
+  "msrv_scope": {
+    "default": "Rust 1.85.1 full default tests passed",
+    "rayon": "Rust 1.85.1 --tests check passed; no claim of full Rayon runtime tests on this toolchain",
+    "portable_simd": "Requires Rust >=1.89; all-feature gates used stable Rust 1.99.1, not Rust 1.85"
+  },
+  "miri_tests": {
+    "miri-ordered": 4,
+    "miri-combined": 4,
+    "miri-owned-key-panic": 1,
+    "miri-inconsistent-exclusive": 1,
+    "miri-permutation-fault": 2
+  },
+  "miri_flags": "-Zmiri-strict-provenance",
+  "miri_scope": "Actual Rayon is covered natively. Miri runs root scatter/permutation serially, plus scoped standard-thread child tests; not a claim of Rayon/Crossbeam Miri coverage.",
+  "miri_borrow_model": "Configured default borrow model; no alternate borrow-model flag enabled.",
+  "preexisting_warnings": "Rust 1.85 key.rs unreachable-pub warning and Miri test-instrumentation dead-code warnings remain; no new suppression.",
+  "final_source_recheck": true,
+  "raw_logs_in_packet": false,
+  "staging_builds_or_timings": false,
+  "new_peak_allocation_measurement": false,
+  "validation_transfer": "All 23 runtime/test files in the standard-package reconstruction match the validated private source byte-for-byte. The validated private workspace excludes bench/rust; no standard-workspace benchmark-target test claim is made. The staged standard package was not rebuilt.",
+  "private_workspace_scope": "Only rust/tessera-sort; the 78 release tests do not include the separate bench/rust member."
+}

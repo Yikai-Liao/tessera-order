@@ -1,0 +1,36 @@
+{
+  "block_rs_path": "rust/tessera-sort/src/block.rs",
+  "entire_block_rs_byte_identical_to_historical_combined_base": true,
+  "block_rs_sha256": "d218329dcd1d4ab7f8f953e172c9ca8ba772a5b07fbb14d15ca8b8acd35f4078",
+  "compact_with_byte_range_zero_based_half_open": [
+    32839,
+    38171
+  ],
+  "compact_with_line_range_one_based_inclusive": [
+    828,
+    939
+  ],
+  "compact_with_bytes": 5332,
+  "compact_with_sha256": "3ae23b39a372d710430054af5d77c2fb85db10f697e494b1ebfcb480475239c5",
+  "reference_path": "rust/tessera-sort/src/block/parallel/ordered_reference.rs",
+  "reference_function_byte_range_zero_based_half_open": [
+    1535,
+    7734
+  ],
+  "reference_function_sha256": "cbe30a4c8093764240c39c2af4ea6138a37b1d8c29a9cf1bba179b63360bc7fc",
+  "normalization_patch": "ordered-map-preserved.REFERENCE-NORMALIZATION.diff",
+  "normalization_patch_sha256": "6a4c3287174b8191e4789095b5673c19b9b67bcd2fd64f5181f532a654168587",
+  "normalization_patch_input": "Extract reference function bytes at the recorded range and append one LF into reference-function.rs. Apply the normalization diff.",
+  "normalization_patch_output": "Exact original compact_with bytes plus one LF.",
+  "normalized_function_sha256_without_added_lf": "3ae23b39a372d710430054af5d77c2fb85db10f697e494b1ebfcb480475239c5",
+  "normalized_patch_output_sha256_with_added_lf": "68da96e338a0802d833cc642a2a63d7e745ae623ce4f9080036d8321476d9b29",
+  "normalization_forward_and_reverse_checked": true,
+  "removed_recording_sites": {
+    "Evacuate": 1,
+    "Copy": 2,
+    "VisitDue": 3
+  },
+  "other_normalization": "Restore name/visibility; remove events parameter and the pre-movement reserve comment/call. No remaining byte differs.",
+  "production_generic_instrumented": false,
+  "three_way_chain": "Untouched production generic records/callbacks/capacity/address equal traced generic reference; traced reference copy/visit events plus those outcomes equal ordered production method."
+}

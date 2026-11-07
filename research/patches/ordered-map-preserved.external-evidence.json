@@ -1,0 +1,45 @@
+{
+  "scope": "External retained evidence; these files, raw samples, benchmark harness and binaries are not bundled in the packet. Paths are relative to the coordinator execution workspace, not portable repository links.",
+  "artifact_sha256": {
+    "tessera-preserved-generic-screen/NARROW-REPORT.md": "ef686e3a28a74b9a4453dbdc3f453548910f00bb03807538b6a74c63ae808432",
+    "tessera-preserved-generic-screen/NARROW-RATIOS.tsv": "185a7e40ba60438227047412c9e2e25fafcc2834da3e44e0ac6673d3000143a2",
+    "tessera-preserved-generic-screen/PROTOCOL.md": "58a933db38c2663a12f10062b54729e18632a02b0b58cb75717d727df707ff81",
+    "tessera-preserved-generic-screen/evidence/run/manifest.json": "f80fead70701c73dbdb2264790f11976ef0ad220ebd937b9680d67cdab36f692",
+    "tessera-preserved-generic-screen/evidence/run/summary.json": "8bb30e64e853de6fa133a90e565db2fd91ff4e6485c5352c8501c3ae7e909070",
+    "tessera-preserved-generic-screen/evidence/repeat-extremes.json": "641c2aa4ef2e211ffc8f227a79c6914d892c43aa42b0a41d5b89f46c13e06e7b",
+    "tessera-preserved-generic-screen/evidence/source-inputs.json": "7a26e5e6c2681e883632480a130b772f127b3dd651b71200aad286c232c8365a",
+    "tessera-preserved-generic-screen/evidence/build.json": "e09a541a73fb79f56e843702a703acb7ef4560ba91e0a1e7743a6c6b42576c32",
+    "tessera-preserved-generic-screen/evidence/preflight/PASSED.json": "dbe4bae4945a4f216618e354c01ab88353bbd558ea6e28c539f63a9e3ebceb3f",
+    "tessera-preserved-generic-screen/evidence/old-fixture-match.json": "50eb57252ba24c0658e6d30357405bbdd19ff024e4cdce4ddb9e0db1be47b871",
+    "tessera-preserved-generic-screen/evidence/asm/MECHANISM.md": "c31b74b100e2224f3d15b32abbf6aab87d89a9e46bfce6dd061a89e9c9f536a2",
+    "tessera-ordered-map-screen/PAUSE-REPORT.md": "87610758800166c5ddbb881a5459aafb7a2d0b80633384de04cc3fdf3bea12c2",
+    "tessera-ordered-map-screen/COMPLETED-CELLS.tsv": "3aee6db94ad22aefbc9f0c7b35e818eb6f597919b26e25b38a6466c2d273f4c5",
+    "tessera-ordered-map-screen/evidence/runs/u32/manifest.json": "2e1b8b73e94c65d3b1ac89c3238426cda034e1a1400b3da9f77d02ed986c0c2a",
+    "tessera-preserved-generic-screen/evidence/run/u32-reverse-n65536-w8.jsonl": "b794191feda04636b89502608dc97264dcfd713fa20a0c68f3174e55b0bdd053",
+    "tessera-preserved-generic-screen/evidence/run/u64-random-n10000000-w8.jsonl": "9d419fc65404c838569c93aaf0c2660daec53c87ae204e21b53509b312282312",
+    "tessera-preserved-generic-screen/evidence/run/row16-random-n10000000-w8.jsonl": "34e4db0255eb829bdd4b935b5956eebeb13be002f2ec0b88c3cb0ab4a561348b"
+  },
+  "external_harness_directory": "tessera-preserved-generic-screen/harness",
+  "new_timing_binary_path": "tessera-preserved-generic-screen/evidence/timing.bin",
+  "new_timing_binary_sha256": "37cca0126753c7f928b751c263b2c01d56a7418c1294d6fc6c6614035427367b",
+  "source_protocol_file_count": 162,
+  "rows": {
+    "verified": 390,
+    "warmup": 39,
+    "measurement": 351,
+    "censored": 0,
+    "discarded": 0
+  },
+  "independent_old_binary_audit": {
+    "source": "Coordinator forwarded the independent reviewer final messages verbatim; no standalone artifact or fresh reproduction by this packager.",
+    "standalone_artifact": null,
+    "binary_sha256": "9bde84502c268270ff58badd3b0ef506263891e6d17973377abba61b9c8d93b0",
+    "reported_generic_compact_normalized_instruction_count": 602,
+    "reported_reverse_hot_loop_bytes": 77,
+    "reported_reverse_hot_loop_sha256": "fed17f807c56df8a7c94fd899d43d73c7548c989a79cf8dbacbd3e78ed4c38fa",
+    "reported_route": "Strict descending reverse path returns before compact or visit.",
+    "cause_established": false
+  },
+  "current_main_not_validated": "0bc80b49 (includes df56)",
+  "no_adoption": true
+}

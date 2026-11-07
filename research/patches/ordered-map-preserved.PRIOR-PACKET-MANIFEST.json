@@ -1,0 +1,58 @@
+{
+  "status": "verified historical research-only source packet; no performance conclusion",
+  "base_commit": "b1d36ce4e2b547ba72a0026dfb5850389e0d45e7",
+  "historical_upstream_commit": "5b13ac1f598db8875a36f0d95c37fcb9223f9f56",
+  "validated_private_identity_sha256": "6541fbba6b06bdd755fb4b3074d4a5cfcd86ec3399192bafa49bb53c0431e04a",
+  "payload_identity_sha256": "5b3ad6677bd86b14dc3b319f12352d25901fecef39c170b947e8d2add281e4a1",
+  "identity_definition": "SHA-256 of compact sorted JSON for the files object. The manifest excludes itself.",
+  "files": {
+    "ordered-map-preserved.GENERIC-PRESERVATION.json": {
+      "bytes": 1952,
+      "sha256": "e27415759cd30f06689c4f04e29684c24cda908e896f958cda1ec51122e9b85c"
+    },
+    "ordered-map-preserved.PROOF.md": {
+      "bytes": 2965,
+      "sha256": "73e47af4da1aa275ac57346f82300c9fd9aae20da247484feaa7c6130ef8fd25"
+    },
+    "ordered-map-preserved.README.md": {
+      "bytes": 2337,
+      "sha256": "5cd4338081ef9ece9e46085614ae985dc8139bc9e5f5d38d655910e302eab902"
+    },
+    "ordered-map-preserved.REFERENCE-NORMALIZATION.diff": {
+      "bytes": 3120,
+      "sha256": "6a4c3287174b8191e4789095b5673c19b9b67bcd2fd64f5181f532a654168587"
+    },
+    "ordered-map-preserved.SOURCE-LINEAGE.json": {
+      "bytes": 3679,
+      "sha256": "a86849c65a0b4563f371375ca15af822dd4482cfe28737f74a0311b59ba7b628"
+    },
+    "ordered-map-preserved.VALIDATION.json": {
+      "bytes": 2574,
+      "sha256": "e7862ab982a8846865fdd002db070d9c6fc0fa7560887c0dae458966a2c45df9"
+    },
+    "ordered-map-preserved.apply-check.txt": {
+      "bytes": 1037,
+      "sha256": "ef0d26e6bd8aef99f77e11ec6a95a85dbb1c9217a4d93c545afa7d8b7a7b54ac"
+    },
+    "ordered-map-preserved.base-hashes.txt": {
+      "bytes": 2100,
+      "sha256": "4ee33d957b2488307c0707e5bb5416224ab6b78c6ef9fb5435dbf727186d5114"
+    },
+    "ordered-map-preserved.patch": {
+      "bytes": 31243,
+      "sha256": "69bd398d06d9907562339acafaa1c37a4a595652c37df96ca75d592e314a28b6"
+    },
+    "ordered-map-preserved.source-hashes.txt": {
+      "bytes": 2458,
+      "sha256": "63599227c314c9721c0fe2d57a7308860e21818572624c5eb80a4d0461b09c80"
+    },
+    "ordered-map-preserved.standard-source-manifest.json": {
+      "bytes": 3811,
+      "sha256": "ba4724062f60d88c82035e4f016286516de71553596eecaa34c6338bae81a848"
+    },
+    "ordered-map-preserved.validated-private-manifest.json": {
+      "bytes": 3898,
+      "sha256": "6fdbbd214dcde8379574794b0147b703fa9f4ad6c720c953645c94be45053441"
+    }
+  }
+}

@@ -506,16 +506,36 @@ fn probe_order<T, E: Extract<T>>(arr: &[T], key: &mut E) -> Order {
 fn confirm_order<T, E: Extract<T>>(arr: &[T], key: &mut E) -> Order {
     let first = key.key(&arr[0]);
     let mut keys = arr[1..].iter().map(|record| key.key(record));
-    let Some(key) = keys.find(|&key| key != first) else {
+    let Some(current) = keys.find(|&key| key != first) else {
         return Order::Ascending;
     };
-    if first < key {
-        keys.try_fold(key, |a, b| (a <= b).then_some(b))
-            .map_or(Order::Unsorted, |_| Order::Ascending)
+    if first < current {
+        // The iterator has already encoded the first unequal key.
+        let tail = &arr[arr.len() - keys.len()..];
+        if key.confirm_ascending(tail, current) {
+            Order::Ascending
+        } else {
+            Order::Unsorted
+        }
     } else {
-        keys.try_fold(key, |a, b| (a >= b).then_some(b))
+        keys.try_fold(current, |a, b| (a >= b).then_some(b))
             .map_or(Order::Unsorted, |_| Order::Descending)
     }
+}
+
+/// Confirms ascending keys after an already encoded predecessor.
+#[inline]
+pub(crate) fn confirm_ascending<T, E: Extract<T>>(
+    arr: &[T],
+    key: &mut E,
+    previous: E::Value,
+) -> bool {
+    arr.iter()
+        .try_fold(previous, |before, record| {
+            let after = key.key(record);
+            (before <= after).then_some(after)
+        })
+        .is_some()
 }
 
 /// Sorts a descending array, stably, by reversing it and then reversing each
@@ -1070,12 +1090,54 @@ impl<T> Drop for RestoreTile<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::key::ByKey;
     extern crate std;
 
+    use super::*;
+    use crate::key::ByKey;
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
+    #[test]
+    fn ascending_confirmation_preserves_key_evaluation_order() {
+        for descending in [false, true] {
+            let mut records: Vec<_> = (0..129u64).map(|id| (id / 4, id)).collect();
+            if descending {
+                records.reverse();
+            }
+            let mut visited = Vec::new();
+            let order = confirm_order(
+                &records,
+                &mut ByKey(|record: &(u64, u64)| {
+                    visited.push(record.1);
+                    record.0
+                }),
+            );
+            assert!(
+                order
+                    == if descending {
+                        Order::Descending
+                    } else {
+                        Order::Ascending
+                    }
+            );
+            assert_eq!(
+                visited,
+                records.iter().map(|record| record.1).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn ascending_confirmation_detects_unsampled_inversion() {
+        let len = if cfg!(miri) { 130 } else { 8192 };
+        let mut values: Vec<_> = (0..len as u64).collect();
+        let index = (len / 2) & !1;
+        values.swap(index, index + 1);
+        // At 8192 records the strided gate checks odd pair offsets. Miri
+        // exercises the confirmation directly on a shorter vector scan.
+        assert!(confirm_order(&values, &mut Direct) == Order::Unsorted);
+        crate::stable_sort(&mut values);
+        assert_eq!(values, (0..len as u64).collect::<Vec<_>>());
+    }
     // Tiny tiles exercise block materialization and cache-hot callbacks under
     // Miri without requiring thousands of large records.
     #[test]

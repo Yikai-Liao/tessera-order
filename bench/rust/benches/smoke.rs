@@ -57,6 +57,7 @@ fn suite(c: &mut Criterion) {
     keys::<u32>(c, "sorted99", MID, false);
     keys::<u128>(c, "random", MID, false);
     keys::<f64>(c, "random", MID, false);
+    keys::<f64>(c, "sorted", MID, false);
     keys::<f64>(c, "sorted99", MID, false);
     rows::<u64>(c, "random", MID, true);
     rows::<u64>(c, "d16", MID, false);

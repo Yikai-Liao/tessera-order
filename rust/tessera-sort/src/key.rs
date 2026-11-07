@@ -33,6 +33,14 @@ mod sealed {
     // public ordering contract. Reverse keys can use these defaults without
     // acquiring a second set of primitive SIMD implementations.
     pub trait Sealed: Copy {
+        #[inline]
+        fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool
+        where
+            Self: RadixKey,
+        {
+            crate::engine::confirm_ascending(keys, &mut Direct, previous)
+        }
+
         #[inline(always)]
         fn first_inversion(keys: &[Self]) -> Option<usize>
         where
@@ -82,6 +90,12 @@ macro_rules! unsigned {
         impl sealed::Sealed for $ty {
             #[cfg(feature = "portable-simd")]
             #[inline]
+            fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool {
+                crate::portable_simd::confirm_ascending(keys, previous)
+            }
+
+            #[cfg(feature = "portable-simd")]
+            #[inline]
             fn finish_insertion(keys: &mut [Self]) {
                 crate::portable_simd::finish_insertion(keys)
             }
@@ -108,6 +122,12 @@ unsigned!(u8, u16, u32, u64, u128, usize);
 macro_rules! signed {
     ($(($s:ty, $u:ty)),* $(,)?) => {$(
         impl sealed::Sealed for $s {
+            #[cfg(feature = "portable-simd")]
+            #[inline]
+            fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool {
+                crate::portable_simd::confirm_ascending(keys, previous)
+            }
+
             #[cfg(feature = "portable-simd")]
             #[inline]
             fn finish_insertion(keys: &mut [Self]) {
@@ -139,6 +159,12 @@ signed!(
 macro_rules! float {
     ($(($f:ty, $u:ty, $default:path)),* $(,)?) => {$(
         impl sealed::Sealed for $f {
+            #[cfg(feature = "portable-simd")]
+            #[inline]
+            fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool {
+                crate::portable_simd::confirm_ascending(keys, previous)
+            }
+
             #[inline(always)]
             fn first_inversion(keys: &[Self]) -> Option<usize> {
                 $default(keys)
@@ -185,6 +211,14 @@ impl<K: RadixKey> RadixKey for Reverse<K> {
 pub(crate) trait Extract<T> {
     type Value: Unsigned;
     fn key(&mut self, record: &T) -> Self::Value;
+
+    /// Confirms ascending keys after an already encoded predecessor.
+    fn confirm_ascending(&mut self, records: &[T], previous: Self::Value) -> bool
+    where
+        Self: Sized,
+    {
+        crate::engine::confirm_ascending(records, self, previous)
+    }
 
     /// Returns the offset of the first adjacent pair whose keys descend.
     ///
@@ -238,6 +272,12 @@ pub(crate) struct Direct;
 
 impl<K: RadixKey> Extract<K> for Direct {
     type Value = K::Encoded;
+
+    #[inline]
+    fn confirm_ascending(&mut self, records: &[K], previous: Self::Value) -> bool {
+        K::confirm_ascending(records, previous)
+    }
+
     #[inline]
     fn key(&mut self, record: &K) -> Self::Value {
         record.encode()

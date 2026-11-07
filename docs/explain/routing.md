@@ -91,3 +91,7 @@ While the block partition writes its result back into the input, each child that
 | sorted with a short outlier run | rotate + insertion | the body is routed on fewer bits |
 | at most 8 varying bits, record is its own key | counted window | one counting pass and one fill |
 | everything else | top-digit block partition, then tiles | one streaming pass per node level, then cache-resident tiles |
+
+### Optional parallel count route
+
+The optional Rayon API has a separate bounded count implementation for Direct u32/u64 windows of one to eight fully varying bits. The full-input scan proves every outside bit constant before reconstructing values. Private per-worker histograms, a serial prefix and disjoint rank fills replace the serial count only when checked worker and scratch budgets admit it. Other types, ByKey payloads and declined budgets keep their existing routes. See the [parallel design](../design/parallel.md#bounded-direct-count-windows); the sequential routing and visual models above are unchanged.

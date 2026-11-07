@@ -71,11 +71,6 @@ concurrently. It need not implement `Send` or `Clone`. A key-function panic
 propagates only after all started tasks have completed or unwound and restored
 every record. When multiple tasks panic, which panic is propagated is unspecified.
 
-The parallel implementation finishes the root stable block partition before
-starting any bucket tasks. It uses at most P workspaces, bounded by the active
-Rayon pool size and input grain count, rather than an O(n) output array. Its
-heap scratch is O(√n + √(Pn) + P) for a fixed record size and key width, excluding
-Rayon's pool and thread stacks. The P term includes per-worker tile and fixed
-metadata storage. For fixed P this remains O(√n); it is not a worker-count-
-independent O(√n) claim. Each active worker has the sequential engine's bounded
-tile-local cursor stack. Parallel free functions release their scratch on return.
+The root block-partition route may spawn a batch once its buckets are retired as compaction sources and destinations. Each bucket retains its original pointer provenance. Workspace leases can exceed the worker count when user keys reenter Rayon; if W is the maximum number of leased or retained workspaces and R the root bucket count, scratch is O(√n + √(Wn) + W + R) for fixed record size and key width. W is bounded by bucket jobs rather than universally by workers. Rayon pool bookkeeping, thread stacks and recursively requested user work are separate.
+
+A distinct count route admits only Direct u32/u64 with a full-input varying window of one to eight bits. Exact unsigned values are reconstructed from the proven constant bits and bucket digit; payload extractors and unsupported types decline. Its histogram/prefix vectors request (P×R + R + 1)×sizeof(usize) bytes for P workers and R≤256 buckets, with no n-record output buffer. Checked admission includes a conservative 4096×P task/frame allowance and caps that accounted storage at 8×P×ceil(sqrt(n))×record_bytes; P≥2 and P≤n/4096 are required. The existing preparation scratch is additional; counting creates no root/child jobs or their workspaces. This is not a measurement of complete worker stacks. For fixed P the bound remains O(√n), not worker-count independent. Declining leaves the original fallback intact. All parallel free calls release algorithm scratch on return.

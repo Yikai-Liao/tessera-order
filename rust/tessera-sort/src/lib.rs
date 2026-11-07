@@ -180,13 +180,24 @@ pub mod thresholds {
 ///
 /// # Memory
 ///
-/// Uses reusable workspaces rather than a full-size output buffer. With W
+/// The block-partition route uses reusable workspaces rather than a full-size
+/// output buffer. With W
 /// workspaces and R root buckets, heap scratch is O(√n + √(Wn) + W + R) for
 /// fixed record size and key width. Ordinary non-reentrant keys lease at most
 /// one workspace per worker. Keys that enter Rayon can suspend several jobs
 /// on one worker; W is then bounded by the number of root bucket jobs rather
 /// than the pool size. Each workspace also retains bounded tile storage.
 /// Rayon owns its thread stacks and pool allocations.
+///
+/// Direct `u32`/`u64` windows of one to eight varying bits may instead use a
+/// bounded parallel count. This retains the preparation scratch but creates no
+/// root/child jobs or their workspaces. With P workers and R <= 256 buckets,
+/// its vectors request `(P * R + R + 1) * size_of::<usize>()` bytes. Admission
+/// additionally accounts a conservative 4096 * P task/frame allowance, capped
+/// together with the vectors at `8 * P * ceil(sqrt(n)) * size_of::<K>()`.
+/// It requires P >= 2 and P <= n / 4096. This is an algorithm storage budget,
+/// not measured Rayon stack usage or RSS; preparation scratch is additional.
+/// The default sequential API and unsupported parallel types are unchanged.
 ///
 /// # Examples
 ///

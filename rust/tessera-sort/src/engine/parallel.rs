@@ -56,6 +56,10 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
 #[derive(Clone)]
 struct Narrow<E, const SHIFT: usize>(E);
 impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for Narrow<E, SHIFT> {
+    fn try_parallel_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
+        self.0
+            .try_parallel_count_window(records, low + SHIFT, width)
+    }
     type Value = u64;
     #[inline]
     fn key(&mut self, record: &T) -> u64 {
@@ -189,6 +193,10 @@ fn sort_prepared<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
     sample_keys(arr, &mut keys, &mut key);
     let equal = sample_mode(&mut keys);
     let bit = KeyValue::<T, E>::from_usize(1) << KeyValue::<T, E>::from_usize(top - 1);
+    // prepare_sort scanned all keys: bits outside this window are constant.
+    if top - low <= SPLIT_BITS && key.try_parallel_count_window(arr, low, top - low) {
+        return;
+    }
     if top - low <= SPLIT_BITS
         || equal.is_some()
         || outlier_run(arr, &keys, bit, &mut key).is_some()

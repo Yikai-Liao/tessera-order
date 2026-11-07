@@ -50,6 +50,8 @@ retains stability, panic recovery and sublinear scratch for a fixed worker
 count. Acceptance requires controlled A/B measurements, small-input regression
 checks and allocation measurements; see [parallel design](docs/design/parallel.md).
 
+The experimental branch admits a checked-budget parallel count route only for Direct u32/u64 windows of at most eight varying bits. Controlled narrow-input gains do not establish generic-sort improvement or regression-free behavior; broader adoption remains a separate decision.
+
 ## Not planned
 
 - A dedicated unstable kernel before 0.1.

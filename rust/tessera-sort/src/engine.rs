@@ -1421,3 +1421,6 @@ mod tests {
 mod parallel;
 #[cfg(feature = "rayon")]
 pub(crate) use parallel::{sort as par_sort, use_serial as par_use_serial};
+
+#[cfg(all(test, feature = "rayon"))]
+pub(crate) mod count_window_witness;

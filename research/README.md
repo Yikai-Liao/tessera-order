@@ -64,7 +64,9 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
 - [Public-entry count-window source checkpoint](patches/public-count-window-source/README.md):
   Rust-only patch against public `987fbdfe`, with complete source hashes,
   safety scope and replay proof. Sealed Direct u32/u64 only; no performance
-  result or default adoption. Archived, not applied to this checkout.
+  result in that historical packet. The experimental runtime now includes this
+  candidate with public memory documentation clarified; the archived bytes
+  remain unchanged. This does not change the default sequential API.
 
 - [Public count-window 17-cell result](patches/public-count-window-results/REPORT.md):
   1,377 samples and 56,715 reference-checked sorts for the

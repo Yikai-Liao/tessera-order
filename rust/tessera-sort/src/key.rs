@@ -42,6 +42,11 @@ mod sealed {
     /// with the vector backend under `portable-simd`; `Reverse<K>` keeps the
     /// defaults, so it needs no second set of vector kernels.
     pub trait Sealed: Copy {
+        #[cfg(feature = "rayon")]
+        fn parallel_count_window(_records: &mut [Self], _low: usize, _width: usize) -> bool {
+            false
+        }
+
         #[inline]
         fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool
         where
@@ -122,9 +127,24 @@ macro_rules! vector_backend {
     };
 }
 
+#[cfg(feature = "rayon")]
+mod parallel_count;
+macro_rules! parallel_count_hook {
+    (u32) => { parallel_count_hook!(@enabled); };
+    (u64) => { parallel_count_hook!(@enabled); };
+    ($other:ident) => {};
+    (@enabled) => {
+        #[cfg(feature = "rayon")]
+        fn parallel_count_window(records: &mut [Self], low: usize, width: usize) -> bool {
+            parallel_count::sort(records, low, width)
+        }
+    };
+}
+
 macro_rules! unsigned {
-    ($($ty:ty),* $(,)?) => {$(
+    ($($ty:ident),* $(,)?) => {$(
         impl sealed::Sealed for $ty {
+            parallel_count_hook!($ty);
             vector_backend!();
         }
         impl Unsigned for $ty {
@@ -210,6 +230,17 @@ const SMALL_WINDOW_BUCKETS: usize = 1 << SMALL_WINDOW_BITS;
 /// `ByKey` calls a user key function, `Direct` encodes the record itself, and
 /// `KeyHalf` narrows another extractor to one 64-bit half of a 128-bit key.
 pub(crate) trait Extract<T> {
+    /// Tries an intrinsic parallel fill; payload-bearing extractors decline.
+    #[cfg(feature = "rayon")]
+    fn try_parallel_count_window(
+        &mut self,
+        _records: &mut [T],
+        _low: usize,
+        _width: usize,
+    ) -> bool {
+        false
+    }
+
     /// The encoded key type.
     type Value: Unsigned;
 
@@ -295,6 +326,11 @@ impl<T, K: RadixKey, F: FnMut(&T) -> K> Extract<T> for ByKey<F> {
 pub(crate) struct Direct;
 
 impl<K: RadixKey> Extract<K> for Direct {
+    #[cfg(feature = "rayon")]
+    fn try_parallel_count_window(&mut self, records: &mut [K], low: usize, width: usize) -> bool {
+        K::parallel_count_window(records, low, width)
+    }
+
     type Value = K::Encoded;
 
     fn try_count_window(&mut self, records: &mut [K], low: usize, width: usize) -> bool {

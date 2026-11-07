@@ -9,8 +9,7 @@ controlled performance measurements are evaluated.
 
 The parallel front end follows the sequential adaptive checks and detects ordered, constant and nearly ordered
 inputs before partitioning. Inputs smaller than 1 MiB, and one-thread pools, run through
-the sequential entry point. Single-digit, sampled-heavy-key and outlier routes
-also keep the existing sequential node engine.
+the sequential entry point. Eligible Direct u32/u64 single-digit windows use the bounded count route below. Other single-digit, sampled-heavy-key and outlier routes keep the existing sequential node engine.
 
 The root stable block partition materializes buckets in address order. Once a
 bucket is retired as a copy source and destination, the compaction callback
@@ -68,3 +67,13 @@ source placement control, a split sequential control, explicit Rayon thread
 counts, and full reference-output validation outside timing. Raw measurements
 and the research harness remain outside this repository. A timing result without
 its A/A and placement ranges is not an acceptance result.
+
+## Bounded Direct count windows
+
+After the existing adaptive checks, a full-input varying-bit scan proves the constant bits outside a window. Only sealed Direct u32/u64 values with one to eight varying bits can enter the parallel count route. ByKey, other primitive types and wrappers decline; sorted, reverse and equal early exits remain unchanged. Narrow forwarding preserves its bit offset but does not enable u128. If admission fails, the input is unchanged and the original serial fallback runs.
+
+For P pool workers and R = 2^width buckets, each input chunk fills a private histogram row. A serial prefix pass then assigns disjoint output-rank chunks; filling combines each digit with the proven fixed bits. Equal unsigned values are identical records, so this retains stability without reconstructing arbitrary payloads. The route introduces no unsafe code, user callbacks or n-record scratch array. Pool, Job and root scheduling are unchanged for fallback inputs.
+
+The vectors request exactly (P×R + R + 1)×sizeof(usize) bytes. Admission also accounts a conservative 4096×P task/frame allowance and requires the accounted total to fit 8×P×ceil(sqrt(n))×record_bytes, P≥2 and P≤n/4096, with checked arithmetic. Preparation scratch, including its existing workspace allocation, remains additional; counting creates no root/child jobs or their workspaces. This is a separate count-route bound, not the workspace-lease formula above or a measurement of Rayon stacks. Fixed P retains O(√n) auxiliary space; a worker-independent bound is not claimed.
+
+The [public-core screen](../../research/patches/public-count-window-results/REPORT.md) preserves the complete controls: W8 supports three of four narrow n10M cases against both public and original serial baselines; u32/d256 and equal37 remain inconclusive. This experimental branch enables only the validated domain. It does not establish generic-sort gains or absence of regressions. The [source safety record](../../research/patches/public-count-window-source/SAFETY.md) and [validation scope](../../research/patches/public-count-window-source/VALIDATION.md) distinguish native tests from scalar strict-Miri coverage without real Rayon pool execution.

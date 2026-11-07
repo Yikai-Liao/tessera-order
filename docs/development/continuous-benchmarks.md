@@ -4,18 +4,19 @@ Every push to `main` and every PR that touches Rust code runs a small Criterion 
 
 ## Pipeline
 
-1. `bench-build.yml` runs without secrets, also for forks. It builds `bench/rust/benches/smoke.rs` as a static glibc executable and uploads it as an artifact. Static glibc keeps glibc's allocator, which `api` mode measures.
+1. `bench-build.yml` runs without secrets, also for forks. It builds `bench/rust/benches/smoke.rs` with `tessera-sort/portable-simd` as a static glibc executable and uploads it as an artifact. Static glibc keeps glibc's allocator, which `api` mode measures. The optional feature uses stable Rust and selects the SIMD backend on the benchmark machine.
 2. `bench-track.yml` runs trusted default-branch code through `workflow_run`. It looks up the source PR through the GitHub API ([`github.ts`](../../.github/scripts/bencher/github.ts)) and skips closed or superseded PRs. It then wraps the executable in a `FROM scratch` image that the workflow defines itself, pushes the image and submits its digest to Bencher. The executable only ever runs on Bencher's runner, which receives no credentials.
 
 Bencher Free allows one job per organization, at most 5 minutes each. Tracking jobs share the `bencher-bare-metal` concurrency group with [`queue: max`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-queueing-multiple-pending-runs), which keeps up to 100 pending runs. Each job waits for its remote run. The remote timeout is 240 seconds. The suite takes about 130 seconds locally; keep it under 3 minutes when adding cases.
 
 ## Cases
 
-Benchmark IDs are `<language>/<case_id>/<alloc_mode>`, with `case_id` as in the [protocol](benchmarking.md#runner), for example `rust/u64/random/65536/s1/api`. Each case is there for an engine path ([routing](../explain/routing.md)) or a key type. The 35 benchmarks cover:
+Benchmark IDs are `<language>/<case_id>/<alloc_mode>`, with `case_id` as in the [protocol](benchmarking.md#runner), for example `rust/u64/random/65536/s1/api`. Each case is there for an engine path ([routing](../explain/routing.md)) or a key type. The 37 benchmarks cover:
 
 - the insertion limit (`u64` only), one past it and one past the tile capacity, for `u64` keys and `{u32, u32}` rows, and one past the tile capacity for `{u64, u32}` rows. Cases this short move with code placement, so only the boundaries are kept;
 - at 65,536 `u64` keys, random and one case per route: sorted (confirmed order), reverse (stable reversal), 99% sorted (budgeted insertion), all equal (constant keys), 16 values (one block partition), Zipf (s = 2) and `skew99` (equality partition), `sorted_tail` (outlier run), and `runs`, mixed ascending and descending runs on which the insertion probe must give up;
 - `u32`, `u128` and `f64` random keys, and `{u64, u32}` rows (random, and 16 values), at 65,536;
+- 99% sorted `u32` and `f64` keys at 65,536, reaching long integer and float inversion scans;
 - 1,000,000 records for `u64` (random, Zipf, `skew99`, `two_values`, 99% sorted), `u32`, `u128` (random, and `sparse8`, which widens the top digit) and `{u64, u32}` rows;
 - `workspace` mode beside `api` only where scratch allocation is a visible share of the time.
 
@@ -75,6 +76,12 @@ The tracking workflow runs from `main`, so a PR that changes `bench-track.yml` o
 
 Pushes to `main` that do not change code still run, adding samples of unchanged code to the history. When a case's input or batch changes, give it a new ID or reset its thresholds. When the compiler, flags or machine change, use a new Testbed. Adding or removing cases and changing sample counts retain the existing Testbed.
 
+The SIMD build uses Testbed `intel-v1-portable-simd` with hardware spec
+`intel-v1`, keeping its history separate from the earlier default-feature
+builds on Testbed `intel-v1`. After merging the build change, seed the new
+baseline with five runs on `main`. PR comparisons need a base sample in the
+new Testbed.
+
 ## Adding a language
 
 Each language adds its own build job (unprivileged, uploading `bench-<language>`) and track job (same concurrency group, publishing with its own `language`, which names its check and comment). It uses its standard harness with the matching Bencher adapter, such as Google Benchmark with `cpp_google` or pytest-benchmark with `python_pytest`. Benchmark names keep the shared `case_id` under the language prefix. Each language is a separate Bencher job with its own 5-minute limit; the queue runs them one after another.
@@ -89,6 +96,6 @@ Each language adds its own build job (unprivileged, uploading `bench-<language>`
 ## Local use
 
 ```sh
-cargo test -p tessera-bench --all-targets     # validate every case
-cargo bench -p tessera-bench --bench smoke -- 'rust/u64/random/65536/s1/api' --exact
+cargo test -p tessera-bench --all-targets --features tessera-sort/portable-simd
+cargo bench -p tessera-bench --bench smoke --features tessera-sort/portable-simd -- 'rust/u64/random/65536/s1/api' --exact
 ```

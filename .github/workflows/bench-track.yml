@@ -107,7 +107,7 @@ jobs:
           # Free jobs stop at 5 minutes; the suite takes about 130 s locally.
           bencher run --project "$BENCHER_PROJECT" --key "$BENCHER_API_KEY" \
             --branch "$BRANCH" --hash "$HASH" \
-            --testbed intel-v1 --spec intel-v1 \
+            --testbed intel-v1-portable-simd --spec intel-v1 \
             --image "$IMAGE" --job-timeout 240 \
             --adapter rust_criterion --format json --quiet \
             "${args[@]}" --exec -- /bench --bench > "$RUNNER_TEMP/bencher-report.json"

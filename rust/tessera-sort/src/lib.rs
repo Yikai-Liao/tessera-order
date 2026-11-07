@@ -52,6 +52,13 @@
 //! during block partitioning aborts rather than exposing partially moved
 //! records, even when the host enables unwinding. Panics elsewhere may unwind
 //! safely. Sorting, ordering and the memory bounds above are the same either way.
+//!
+//! `portable-simd` is off by default and requires `std` and Rust 1.89 or newer.
+//! It adds [`fearless_simd`](https://docs.rs/fearless_simd) for adjacent-key
+//! scans and bucket-count prefix sums. On x86 it selects a supported SIMD
+//! backend at run time, once per insertion pass or prefix sum. Other targets
+//! use their compile-time baseline, including Arm Neon and WebAssembly SIMD
+//! when enabled for the target. Keys without a vector kernel use scalar scans.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]
@@ -61,6 +68,9 @@ extern crate alloc;
 mod block;
 mod engine;
 mod key;
+#[cfg(feature = "portable-simd")]
+mod portable_simd;
+mod scan;
 mod unwind;
 mod workspace;
 

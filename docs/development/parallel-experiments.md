@@ -317,3 +317,130 @@ suites passed 88/89 tests; five strict-provenance Miri targets and Clippy passed
 The archive applies after the documented current-main combined research patch,
 not to the newer public scheduler. Production defaults remain unchanged by this
 experiment. Raw samples, traces and the harness remain outside Git.
+
+## Current-source bottleneck diagnosis
+
+This checkpoint separates measured critical paths from causes not yet established.
+It compares the corrected public `0e50926` entry point with the frozen research
+combined port (source identity `9586fc28...`). The public package supplies both
+its serial and parallel controls. All variants enable the same `rayon` and
+`portable-simd` features. These cloud measurements do not reinterpret the
+separate Ryzen hardware results above.
+
+### Same-machine scaling screen
+
+The input is 10 million full-width SplitMix64 seed-1 keys, either direct u64 or
+16-byte key/index records. API scratch allocation is timed; input restoration
+and full stable-reference checks are not. Each actual pool is broadcast-warmed;
+cloning occurs on its worker before timing. Process affinity is 0–7, not a claim
+of one pinned core per worker. Every block randomizes label order. All tails
+remain in the data.
+
+These are three-block descriptive medians of each block's duplicate-label mean,
+in milliseconds (divide by 10 for nanoseconds per record). They are not
+nine-block acceptance results:
+
+| Type | Workers | Strong serial | Research combined | Corrected public |
+|---|---:|---:|---:|---:|
+| u64 | 1 | 86.099 | 87.210 | 86.430 |
+| u64 | 2 | 89.643 | 55.030 | 53.365 |
+| u64 | 4 | 87.351 | 34.097 | 50.995 |
+| u64 | 8 | 84.841 | 29.609 | 49.068 |
+| Row16 | 1 | 141.657 | 151.652 | 139.426 |
+| Row16 | 2 | 136.134 | 100.169 | 85.558 |
+| Row16 | 4 | 142.292 | 60.707 | 66.746 |
+| Row16 | 8 | 133.875 | 54.323 | 81.121 |
+
+At eight workers, u64 serial/combined/public A2/A1 ranges are 0.976–0.995,
+0.899–1.066 and 0.963–1.049; the combined placement range is 0.975–0.979.
+Row16 ranges are 0.965–1.007, 0.973–1.005 and 1.054–1.135, with placement
+0.983–1.009. Other cases have larger tails: four-worker u64 combined A/A reaches
+1.511. No scaling curve alone identifies a hardware or synchronization cause.
+All 168 measured and 56 warmup sorts matched the complete reference.
+
+### Critical paths, useful CPU and waiting
+
+A separate instrumented run adds common-origin phase timestamps, per-thread CPU
+time, bucket publication/start events, and contiguous empty-queue wait spans.
+Exact controls and trace-off/on copies share one binary. All 256 sorts in eight
+cases passed full-reference and strict event-pair validation. Three traced blocks
+per case are diagnostic, not acceptance timings. Tracing is materially intrusive:
+u64 combined W8 trace/control is 1.124, versus trace-off/control 1.019.
+
+At W8, root materialization ends at 97.94–98.38% of total traced u64 combined
+duration, and 94.38–99.10% for Row16. These fractions are **not serial fractions**:
+they include parallel scatter, permutation, and child work overlapping squeeze.
+The final child tail is only 0.22–0.32 ms for u64 and 0.27–2.85 ms for Row16.
+At W2 the tail is still roughly 23–30 ms. Adding child capacity helps until that
+remaining work is hidden by the root; it does not remove root materialization.
+
+Combined Row16 W8 spends 59.1, 60.1 and 100.3 ms of summed thread CPU waiting on
+empty queues, alongside 84.4–90.7 ms in useful child-sort intervals. Waiting
+includes queue access and yielding, not useful sorting. Materialization-to-child-start
+median latency is only 1.7–2.2 microseconds; there is generally no large queue of
+ready work awaiting a consumer. The marker precedes the channel send, so it is
+not literally an enqueue timestamp. In the fixed-root traces, every bucket has
+at least 38,518 records, exceeding the 128 KiB batching threshold for both
+types; each therefore forms one batch. Waiting CPU includes subsequent queue
+polls, mutex acquisition, yields and trace boundaries. This identifies real
+empty-queue waiting, but does not yet quantify its effect on total time.
+
+Public scatter remains serial (about 21–23 ms for traced Row16 W8); compaction
+occupies 57–68 ms and ends near the overall critical-path end. In one trace two
+child workers process 245 of 256 buckets while the producer continues publishing.
+That distribution is not, by itself, evidence of poor static partitioning.
+Combined replaces a near-full-input serial evacuation pass with parallel block
+permutation, but still performs a full-input serial squeeze. Logical copy counts
+include padding and self-copies; they are not measured DRAM traffic.
+
+Hardware cycles could not be opened (`perf_event_open` returned ENOENT), `/sys`
+and `perf` are unavailable, and no cache-miss or memory-controller counters were
+obtained. Thread CPU clocks work. Cache contention, bandwidth saturation and OS
+scheduling therefore remain hypotheses, not established causes.
+
+### Fixed-root falsification control
+
+The original W4→W8 comparison changes root geometry as well as child capacity.
+For Row16, P4/B79 becomes P8/B64; partial entries double from 1,024 to 2,048.
+The sole controlled fork caps only the root's requested shard count at four.
+P then determines B, input shard boundaries, scratch and permutation tasks. Child
+worker count, batching and all sorting kernels remain unchanged.
+
+Nine randomized blocks compare original O4/O8 and fixed F4/F8, each twice per
+block. All 52 library safety tests, 96 smoke sorts and 192 main/trace sorts pass.
+Independent traces confirm identical root geometry and logical copy counts for
+O4/F4/F8. Main measurements contain no tracing.
+
+| Type | O4 ms | O8 ms | F4 ms | F8 ms | Paired F8/O8 | Paired F8/F4 |
+|---|---:|---:|---:|---:|---:|---:|
+| u64 | 35.069 | 23.768 | 36.838 | 27.672 | 1.109 | 0.753 |
+| Row16 | 57.562 | 45.320 | 60.145 | 50.346 | 1.085 | 0.811 |
+
+Fixed P4 does not establish an improvement over original W8/P8. F8/O8 is higher
+in 6/9 u64 and 8/9 Row16 blocks, but remains within A/A. Original/fixed W8 A/A
+ranges are 0.801–1.424 / 0.817–1.217 for u64 and 0.707–1.382 / 0.900–1.247
+for Row16. The identical-geometry F4/O4 placement ranges are 0.856–1.196 and
+0.835–1.654. Fixed F8/F4 improves in 9/9 blocks for both types, outside relevant
+A/A only for u64. This adds pool/consumer capacity while retaining four root
+jobs, not pure whole-algorithm scaling.
+
+At identical geometry, empty-wait CPU still rises from 7.55 to 71.98 ms for
+Row16 and from 0.092 to 15.76 ms for u64. Root geometry alone cannot explain
+that waiting. Neither the fixed-root fork nor a new algorithm is adopted.
+
+### Allocator ownership
+
+A separate pointer-tagged allocator diagnosis accounts for the public W2
+API-return extra bytes as Crossbeam global epoch `Queue<SealedBag>` nodes. Every
+observed live 2,072-byte allocation matches an exact tag at that typed allocation
+site, rather than being classified by size alone. Tags explain the whole observed
+API delta and persist through broadcast and pool drop. They are runtime-retained
+nodes, not Tessera Workspace scratch. Eventual reclamation was not tested, so
+this is not a leak claim.
+
+Raw samples, traces, harnesses, complete per-case controls and source/binary
+manifests remain outside Git. The source-manifest SHA-256 values are
+`c8602f8709fdcb4523d85e022772b53392085eea0500fca7771e5c13d83b971b`
+for the corrected profile and
+`f47ff55b90362cfd740114a9b833003a2e8cfad87be7c4747da96dbfe81f31d1`
+for the fixed-root control. No raw profile is committed.

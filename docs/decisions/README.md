@@ -13,4 +13,5 @@ Each file records one decision that shapes the project: the context, the decisio
 | [0007](0007-optional-simd-backend.md) | Add an optional fearless_simd backend for the inversion scan | 2026-11-07 |
 | [0008](0008-insertion-finishing-entry-point.md) | Give insertion finishing a unit-returning entry point | 2026-11-07 |
 | [0009](0009-benchmark-report-images-and-history.md) | Publish immutable benchmark images and compare PR history with main | 2026-11-07 |
-| [0010](0010-optional-bounded-rayon.md) | Add optional parallel completion of materialized buckets | 2026-11-07 |
+| [0010](0010-vector-ascending-confirmation.md) | Reuse the vector scan for ascending-order confirmation | 2026-11-07 |
+| [0011](0011-optional-bounded-rayon.md) | Add optional parallel completion of materialized buckets | 2026-11-07 |

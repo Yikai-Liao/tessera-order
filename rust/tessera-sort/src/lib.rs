@@ -63,8 +63,9 @@
 //!
 //! `portable-simd` is off by default and requires `std` and Rust 1.89 or newer.
 //! It adds [`fearless_simd`](https://docs.rs/fearless_simd) for adjacent-key
-//! scans and bucket-count prefix sums. On x86 it selects a supported SIMD
-//! backend at run time, once per insertion pass or prefix sum. Other targets
+//! scans, ascending-order confirmation and bucket-count prefix sums. On x86
+//! it selects a supported SIMD backend at run time, once per insertion pass,
+//! ascending confirmation or prefix sum. Other targets
 //! use their compile-time baseline, including Arm Neon and WebAssembly SIMD
 //! when enabled for the target. Keys without a vector kernel use scalar scans.
 

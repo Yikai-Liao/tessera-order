@@ -16,7 +16,7 @@ four commits. Unlike the first synchronization, this update changes Rust sorting
 it adds optional SIMD inversion scans and prefix sums and a shared insertion entry point.
 The parallel preparation path now uses that same entry point. Both `rayon` and
 `portable-simd` stay optional; the former retains Rust 1.85 compatibility, while SIMD
-requires Rust 1.89. The parallel ADR is numbered 0010 to preserve upstream ADRs 0007–0009.
+requires Rust 1.89. The parallel ADR is now numbered 0011 to preserve upstream ADRs 0007–0010.
 
 The measurements below remain tied to their earlier frozen implementations. They are
 not speedup claims against the newly merged SIMD baseline. New default and SIMD-enabled
@@ -30,6 +30,17 @@ same-binary comparisons against both default and portable-SIMD serial code from
 candidate. Its 16 targeted cases establish large random-data advantages but retain
 low-cardinality plateaus, broad controls, and an unresolved trace-disabled outlier.
 The historical matrix below is not replaced or relabeled by that study.
+
+### Subsequent ascending-confirmation integration
+
+Upstream `5b13ac1` adds SIMD-aware ascending-order confirmation after the first
+unequal encoded key. The experimental branch merges this change while keeping
+the optional Rayon entry points and existing generic extraction contracts.
+The parallel ADR moves to 0011 so upstream's ascending-confirmation ADR keeps
+0010. Historical benchmark snapshots, including the combined and halo screens,
+remain unchanged and are not relabeled as measurements of this newer main.
+The same-source combined port requires separate validation and measurement
+before any performance conclusion; integration alone is not an acceleration claim.
 
 ## Measurement method
 

@@ -17,7 +17,7 @@ Below 48 records, the work of clearing and scanning bucket tables costs more tha
 The width of a counting digit is limited by its cursor table, one `u16` per bucket. `tile_digit_bits` picks the widest table that
 
 - is no larger than the tile itself in bytes (a 14-bit table is already 32 KiB);
-- has at most 8 buckets per record, so clearing and scanning empty buckets cannot dominate;
+- has at most 8 buckets per record, or 4 for records wider than 8 bytes, so clearing and scanning empty buckets cannot dominate. A wider record fits fewer records in the same table budget, so its buckets would be mostly empty;
 - is between 6 and 14 bits wide.
 
 `plan_digits` then covers the [varying bits](keys.md#varying-bits) with windows of at most that width, highest window first. Two rules shape the plan:

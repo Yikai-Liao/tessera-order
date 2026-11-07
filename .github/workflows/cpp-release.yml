@@ -37,5 +37,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          printf 'C++ package release %s. See CHANGELOG.md and RELEASING.md at this tag.\n' "$RELEASE_TAG" > release-notes.md
-          gh release create "$RELEASE_TAG" dist/*.tar.gz --verify-tag --title "$RELEASE_TAG" --notes-file release-notes.md
+          # A draft: an agent or maintainer writes the notes per RELEASING.md, then publishes it.
+          gh release create "$RELEASE_TAG" dist/*.tar.gz --verify-tag --title "$RELEASE_TAG" --draft --notes 'Draft: write the notes per RELEASING.md.'

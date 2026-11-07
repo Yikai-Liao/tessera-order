@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { changedRows, isFaster, modeName, type CaseRow, type Configuration } from "./matrix.ts";
+import { type CaseRow, type Configuration, changedRows, isFaster, modeName } from "./matrix.ts";
 import { formatChange, formatPercent, isMajor, MAJOR, type Row } from "./report.ts";
 import { chartStyles, escapeXml, textWidth } from "./svg.ts";
 
@@ -22,7 +22,7 @@ function largeTickStep(minimum: number) {
 }
 
 export function tickStep(k: number, minPx: number) {
-  return STEPS.find(v => v * k >= minPx) ?? largeTickStep(minPx / k);
+  return STEPS.find((v) => v * k >= minPx) ?? largeTickStep(minPx / k);
 }
 
 export const PAD = 24;
@@ -57,7 +57,15 @@ export const tagWidth = (tag: string) => (tag ? textWidth(tag, 10) + 12 : 0);
 
 export function nameWidth(names: NameCell[]) {
   // Bold text runs about 5% wider than the regular advances in textWidth.
-  return Math.max(110, ...names.map(n => Math.max(textWidth(n.input, 13) * (n.strong ? 1.05 : 1) + (n.tag ? tagWidth(n.tag) + 6 : 0), textWidth(n.sub, 11))));
+  return Math.max(
+    110,
+    ...names.map((n) =>
+      Math.max(
+        textWidth(n.input, 13) * (n.strong ? 1.05 : 1) + (n.tag ? tagWidth(n.tag) + 6 : 0),
+        textWidth(n.sub, 11),
+      ),
+    ),
+  );
 }
 
 // A case's name, an optional pill for a non-default seed, and its type and
@@ -65,7 +73,8 @@ export function nameWidth(names: NameCell[]) {
 export function nameCell(row: CaseRow, strong: boolean): NameCell {
   const { parts } = row;
   return {
-    input: parts.input, strong,
+    input: parts.input,
+    strong,
     tag: parts.seed && parts.seed !== "s1" ? `seed ${parts.seed.slice(1)}` : "",
     sub: [parts.type, parts.n].filter(Boolean).join(" · "),
   };
@@ -76,7 +85,9 @@ export type Text = (cls: string, x: number, y: number, text: string, extra?: str
 export function svgWriter() {
   const out: string[] = [];
   const t: Text = (cls, x, y, text, extra = "") =>
-    out.push(`<text class="${cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}"${extra}>${escapeXml(text)}</text>`);
+    out.push(
+      `<text class="${cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}"${extra}>${escapeXml(text)}</text>`,
+    );
   return { out, t };
 }
 
@@ -84,7 +95,9 @@ export function drawName(out: string[], t: Text, name: NameCell, cy: number) {
   t(`ink${name.strong ? " strong" : ""}`, PAD, cy - 2, name.input);
   if (name.tag) {
     const tx = PAD + textWidth(name.input, 13) + 6;
-    out.push(`<rect class="tag" x="${tx.toFixed(1)}" y="${cy - 13}" width="${tagWidth(name.tag).toFixed(1)}" height="14" rx="7" stroke-width="1"/>`);
+    out.push(
+      `<rect class="tag" x="${tx.toFixed(1)}" y="${cy - 13}" width="${tagWidth(name.tag).toFixed(1)}" height="14" rx="7" stroke-width="1"/>`,
+    );
     t("muted tiny", tx + tagWidth(name.tag) / 2, cy - 3, name.tag, ' text-anchor="middle"');
   }
   t("muted sub", PAD, cy + 13, name.sub);
@@ -92,7 +105,15 @@ export function drawName(out: string[], t: Text, name: NameCell, cy: number) {
 
 // The column header: a configuration's headline number, its name and a short
 // line under it.
-export function drawHeader(t: Text, col: { left: number; right: number }, hero: string, heroCls: string, name: string, sub: string, subCls = "muted sub") {
+export function drawHeader(
+  t: Text,
+  col: { left: number; right: number },
+  hero: string,
+  heroCls: string,
+  name: string,
+  sub: string,
+  subCls = "muted sub",
+) {
   t(`hero ${heroCls}`, col.left, 50, hero);
   const lx = col.left + textWidth(hero, 28) + 12;
   t("ink strong", lx, 36, name);
@@ -121,21 +142,32 @@ export function chartSvg(configurations: Configuration[]) {
   if (!changed.length) return null;
   // Folding every faster row would leave an axis with nothing on it, so small
   // speedups are drawn when nothing else is.
-  const small = (row: CaseRow) => isFaster(row) &&
-    row.cells.every(cell => cell?.verdict !== "improvement" || -cell.change! < FOLD_FASTER_BELOW);
-  const fold = changed.some(row => !small(row));
-  const shown = fold ? changed.filter(row => !small(row)) : changed;
+  const small = (row: CaseRow) =>
+    isFaster(row) &&
+    row.cells.every((cell) => cell?.verdict !== "improvement" || -cell.change! < FOLD_FASTER_BELOW);
+  const fold = changed.some((row) => !small(row));
+  const shown = fold ? changed.filter((row) => !small(row)) : changed;
   const folded = changed.length - shown.length;
 
-  const majorRow = (row: CaseRow) => row.cells.some(cell => cell && cell.verdict !== "within" && cell.verdict !== "missing" && isMajor(cell));
-  const names = shown.map(row => nameCell(row, majorRow(row)));
+  const majorRow = (row: CaseRow) =>
+    row.cells.some(
+      (cell) => cell && cell.verdict !== "within" && cell.verdict !== "missing" && isMajor(cell),
+    );
+  const names = shown.map((row) => nameCell(row, majorRow(row)));
   // The header's two lines share the name column, so they count toward its width.
-  const title: NameCell = { input: "Run time against main", tag: "", sub: "each build, own baseline", strong: true };
+  const title: NameCell = {
+    input: "Run time against main",
+    tag: "",
+    sub: "each build, own baseline",
+    strong: true,
+  };
   const { W, cols } = matrixLayout(configurations.length, nameWidth([...names, title]));
 
   // One scale for every column, each side only as long as the data.
-  const values = shown.flatMap(row => row.cells.filter((c): c is Row => c?.change != null).map(c => c.change!));
-  const rf = Math.max(0, ...values.map(v => -v));
+  const values = shown.flatMap((row) =>
+    row.cells.filter((c): c is Row => c?.change != null).map((c) => c.change!),
+  );
+  const rf = Math.max(0, ...values.map((v) => -v));
   const rs = Math.max(0, ...values);
   const span = Math.max(rf + rs, 1e-9);
   const room = 8;
@@ -147,7 +179,11 @@ export function chartSvg(configurations: Configuration[]) {
   const heroBottom = 76;
   const plotTop = heroBottom + 14;
   let y = plotTop;
-  const groups: { title: string; titleY: number; rows: { row: CaseRow; name: NameCell; cy: number }[] }[] = [];
+  const groups: {
+    title: string;
+    titleY: number;
+    rows: { row: CaseRow; name: NameCell; cy: number }[];
+  }[] = [];
   shown.forEach((row, i) => {
     const title = modeName(row.parts.mode).toUpperCase();
     if (groups.at(-1)?.title !== title) {
@@ -163,10 +199,28 @@ export function chartSvg(configurations: Configuration[]) {
   const H = plotBottom + 52;
 
   const { out, t } = svgWriter();
-  out.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="t d">`);
-  out.push(`<title id="t">Benchmark changes against main: ${escapeXml(configurations.map(c => `${c.name} ${counts(c.summary) || "not measured"}`).join("; "))}</title>`);
-  out.push(`<desc id="d">${escapeXml(shown.map(row => `${row.label}: ` + configurations.map((c, i) =>
-    `${c.name} ${formatChange(row.cells[i]?.change ?? null)}${row.cells[i] && row.cells[i]!.verdict !== "within" ? ` ${row.cells[i]!.verdict}` : ""}`).join(", ")).join("; "))}</desc>`);
+  out.push(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="t d">`,
+  );
+  out.push(
+    `<title id="t">Benchmark changes against main: ${escapeXml(configurations.map((c) => `${c.name} ${counts(c.summary) || "not measured"}`).join("; "))}</title>`,
+  );
+  out.push(
+    `<desc id="d">${escapeXml(
+      shown
+        .map(
+          (row) =>
+            `${row.label}: ` +
+            configurations
+              .map(
+                (c, i) =>
+                  `${c.name} ${formatChange(row.cells[i]?.change ?? null)}${row.cells[i] && row.cells[i]!.verdict !== "within" ? ` ${row.cells[i]!.verdict}` : ""}`,
+              )
+              .join(", "),
+        )
+        .join("; "),
+    )}</desc>`,
+  );
   out.push(chartStyles);
   out.push(`<rect class="panel" x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" rx="12"/>`);
 
@@ -175,25 +229,43 @@ export function chartSvg(configurations: Configuration[]) {
   t("muted sub", PAD, 51, title.sub);
   configurations.forEach((c, i) => {
     const s = c.summary;
-    if (!s) return drawHeader(t, cols[i], "—", "muted", c.name, "measurement failed", "slower sub");
+    if (!s) {
+      drawHeader(t, cols[i], "—", "muted", c.name, "measurement failed", "slower sub");
+      return;
+    }
     const g = s.geomean;
-    drawHeader(t, cols[i], g == null ? "—" : formatChange(g - 1), g == null ? "muted" : g < 1 ? "faster" : g > 1 ? "slower" : "ink",
-      c.name, counts(s));
+    drawHeader(
+      t,
+      cols[i],
+      g == null ? "—" : formatChange(g - 1),
+      g == null ? "muted" : g < 1 ? "faster" : g > 1 ? "slower" : "ink",
+      c.name,
+      counts(s),
+    );
   });
-  out.push(`<line class="rule" x1="${PAD}" x2="${W - PAD}" y1="${heroBottom}" y2="${heroBottom}" stroke-width="1"/>`);
+  out.push(
+    `<line class="rule" x1="${PAD}" x2="${W - PAD}" y1="${heroBottom}" y2="${heroBottom}" stroke-width="1"/>`,
+  );
 
   // Each column: quiet grid, its zero axis and tick labels.
   const step = tickStep(k, 44);
   for (const col of cols) {
     const zero = col.left + zeroOffset;
-    for (const [side, reach] of [[-1, rf], [1, rs]]) {
+    for (const [side, reach] of [
+      [-1, rf],
+      [1, rs],
+    ]) {
       for (let v = step; v <= reach + 1e-9; v += step) {
         const gx = zero + side * v * k;
-        out.push(`<line class="rule" x1="${gx.toFixed(1)}" x2="${gx.toFixed(1)}" y1="${plotTop}" y2="${plotBottom}" stroke-width="1"/>`);
+        out.push(
+          `<line class="rule" x1="${gx.toFixed(1)}" x2="${gx.toFixed(1)}" y1="${plotTop}" y2="${plotBottom}" stroke-width="1"/>`,
+        );
         t("muted tiny", gx, plotBottom + 16, formatPercent(side * v), ' text-anchor="middle"');
       }
     }
-    out.push(`<line class="axis" x1="${zero.toFixed(1)}" x2="${zero.toFixed(1)}" y1="${plotTop}" y2="${plotBottom}" stroke-width="1"/>`);
+    out.push(
+      `<line class="axis" x1="${zero.toFixed(1)}" x2="${zero.toFixed(1)}" y1="${plotTop}" y2="${plotBottom}" stroke-width="1"/>`,
+    );
     t("muted tiny", zero, plotBottom + 16, "0", ' text-anchor="middle"');
   }
 
@@ -212,19 +284,30 @@ export function chartSvg(configurations: Configuration[]) {
         const dx = zero + cell.change * k;
         const strong = isMajor(cell) && cell.verdict !== "within" ? " strong" : "";
         if (cell.verdict === "within") {
-          out.push(`<circle class="within" cx="${dx.toFixed(1)}" cy="${cy}" r="3.5" stroke-width="1.5"/>`);
+          out.push(
+            `<circle class="within" cx="${dx.toFixed(1)}" cy="${cy}" r="3.5" stroke-width="1.5"/>`,
+          );
           t("val muted", col.right, cy + 4, formatChange(cell.change), ' text-anchor="end"');
         } else {
           const cls = cell.verdict === "regression" ? "slower" : "faster";
-          out.push(`<line class="stem-${cls}" x1="${zero.toFixed(1)}" x2="${dx.toFixed(1)}" y1="${cy}" y2="${cy}" stroke-width="2" stroke-linecap="round"/>`);
-          out.push(`<circle class="${cls} ring" cx="${dx.toFixed(1)}" cy="${cy}" r="${strong ? 5.5 : 4}" stroke-width="2"/>`);
+          out.push(
+            `<line class="stem-${cls}" x1="${zero.toFixed(1)}" x2="${dx.toFixed(1)}" y1="${cy}" y2="${cy}" stroke-width="2" stroke-linecap="round"/>`,
+          );
+          out.push(
+            `<circle class="${cls} ring" cx="${dx.toFixed(1)}" cy="${cy}" r="${strong ? 5.5 : 4}" stroke-width="2"/>`,
+          );
           t("val ink strong", col.right, cy + 4, formatChange(cell.change), ' text-anchor="end"');
         }
       });
     }
   }
   if (folded) {
-    t("muted sub", PAD, plotBottom - 10, `${folded} more faster, each by less than ${Math.round(FOLD_FASTER_BELOW * 100)}%`);
+    t(
+      "muted sub",
+      PAD,
+      plotBottom - 10,
+      `${folded} more faster, each by less than ${Math.round(FOLD_FASTER_BELOW * 100)}%`,
+    );
   }
 
   // Legend: what the marks mean, then which way is better.
@@ -239,7 +322,13 @@ export function chartSvg(configurations: Configuration[]) {
   out.push(`<circle class="ink" cx="${bx + 5.5}" cy="${ly - 4}" r="5.5"/>`);
   t("muted sub", bx + 16, ly, `${MAJOR * 100}% or more`);
   t("slower sub", W - PAD, ly, "more time →", ' text-anchor="end"');
-  t("faster sub", W - PAD - textWidth("more time →", 11) - 14, ly, "← less time", ' text-anchor="end"');
+  t(
+    "faster sub",
+    W - PAD - textWidth("more time →", 11) - 14,
+    ly,
+    "← less time",
+    ' text-anchor="end"',
+  );
   out.push("</svg>");
   return out.join("\n");
 }

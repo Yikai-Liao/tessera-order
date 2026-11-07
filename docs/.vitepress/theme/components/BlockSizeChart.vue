@@ -1,86 +1,96 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref } from "vue";
 
 // `default_block_size` in block.rs: scratch 2·R·b·s bytes plus 10·n/b bytes
 // of block tables, balanced at b* = ceil(sqrt(10n / (2Rs))), scaled by 4, then
 // floored at max(1024 / s, 32) records.
-const logN = ref(7)
-const recordBytes = ref(8)
-const radix = ref(8)
+const logN = ref(7);
+const recordBytes = ref(8);
+const radix = ref(8);
 
-const n = computed(() => Math.round(10 ** logN.value))
-const R = computed(() => 2 ** radix.value)
-const scratch = (b: number) => 2 * R.value * b * recordBytes.value
-const tables = (b: number) => (10 * n.value) / b
-const total = (b: number) => scratch(b) + tables(b)
-const balanced = computed(() => Math.ceil(Math.sqrt((10 * n.value) / (2 * R.value * recordBytes.value))))
-const floors = computed(() => Math.max(Math.floor(1024 / recordBytes.value), 32))
-const chosen = computed(() => Math.max(1, 4 * balanced.value, floors.value))
-const lsdBuffer = computed(() => n.value * recordBytes.value)
+const n = computed(() => Math.round(10 ** logN.value));
+const R = computed(() => 2 ** radix.value);
+const scratch = (b: number) => 2 * R.value * b * recordBytes.value;
+const tables = (b: number) => (10 * n.value) / b;
+const total = (b: number) => scratch(b) + tables(b);
+const balanced = computed(() =>
+  Math.ceil(Math.sqrt((10 * n.value) / (2 * R.value * recordBytes.value))),
+);
+const floors = computed(() => Math.max(Math.floor(1024 / recordBytes.value), 32));
+const chosen = computed(() => Math.max(1, 4 * balanced.value, floors.value));
+const lsdBuffer = computed(() => n.value * recordBytes.value);
 
 // Log-log axes: both cost terms are straight lines and the total is a V.
-const W = 640
-const H = 300
-const M = { left: 64, right: 16, top: 16, bottom: 40 }
-const bMin = 1
-const bMax = 1 << 14
-const yMin = computed(() => Math.min(total(balanced.value), scratch(bMin), tables(bMax)) / 4)
-const yMax = computed(() => Math.max(scratch(bMax), tables(bMin)) * 2)
-const x = (b: number) => M.left + ((Math.log2(b) - Math.log2(bMin)) / (Math.log2(bMax) - Math.log2(bMin))) * (W - M.left - M.right)
+const W = 640;
+const H = 300;
+const M = { left: 64, right: 16, top: 16, bottom: 40 };
+const bMin = 1;
+const bMax = 1 << 14;
+const yMin = computed(() => Math.min(total(balanced.value), scratch(bMin), tables(bMax)) / 4);
+const yMax = computed(() => Math.max(scratch(bMax), tables(bMin)) * 2);
+const x = (b: number) =>
+  M.left +
+  ((Math.log2(b) - Math.log2(bMin)) / (Math.log2(bMax) - Math.log2(bMin))) * (W - M.left - M.right);
 const y = (v: number) =>
-  H - M.bottom - ((Math.log2(v) - Math.log2(yMin.value)) / (Math.log2(yMax.value) - Math.log2(yMin.value))) * (H - M.top - M.bottom)
-const samples = Array.from({ length: 141 }, (_, i) => 2 ** (i / 10))
+  H -
+  M.bottom -
+  ((Math.log2(v) - Math.log2(yMin.value)) / (Math.log2(yMax.value) - Math.log2(yMin.value))) *
+    (H - M.top - M.bottom);
+const samples = Array.from({ length: 141 }, (_, i) => 2 ** (i / 10));
 const path = (f: (b: number) => number) =>
   samples
     .map((b) => [x(b), y(f(b))] as const)
     .filter(([, py]) => py >= M.top - 1 && py <= H - M.bottom + 1)
-    .map(([px, py], i) => `${i ? 'L' : 'M'}${px.toFixed(1)},${py.toFixed(1)}`)
-    .join('')
+    .map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(1)},${py.toFixed(1)}`)
+    .join("");
 
 const series = computed(() => [
-  { name: 'scratch blocks 2Rbs', color: '#2a78d6', d: path(scratch), dash: '' },
-  { name: 'block tables 10n/b', color: '#eb6834', d: path(tables), dash: '' },
-  { name: 'total', color: '#1baf7a', d: path(total), dash: '' },
-])
+  { name: "scratch blocks 2Rbs", color: "#2a78d6", d: path(scratch), dash: "" },
+  { name: "block tables 10n/b", color: "#eb6834", d: path(tables), dash: "" },
+  { name: "total", color: "#1baf7a", d: path(total), dash: "" },
+]);
 
 function bytes(v: number): string {
-  const units = ['B', 'KiB', 'MiB', 'GiB']
-  let i = 0
+  const units = ["B", "KiB", "MiB", "GiB"];
+  let i = 0;
   while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
+    v /= 1024;
+    i++;
   }
-  return `${v < 10 && !Number.isInteger(v) ? v.toFixed(1) : Math.round(v)} ${units[i]}`
+  return `${v < 10 && !Number.isInteger(v) ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
 }
 
-const xTicks = [1, 4, 16, 64, 256, 1024, 4096, 16384]
+const xTicks = [1, 4, 16, 64, 256, 1024, 4096, 16384];
 // Ticks at powers of two, so that every label is a round KiB/MiB value.
 const yTicks = computed(() => {
-  const low = Math.ceil(Math.log2(yMin.value))
-  const high = Math.floor(Math.log2(yMax.value))
-  const step = Math.max(1, Math.ceil((high - low) / 6))
-  const out: number[] = []
-  for (let e = low; e <= high; e++) if (e % step === 0) out.push(2 ** e)
-  return out
-})
+  const low = Math.ceil(Math.log2(yMin.value));
+  const high = Math.floor(Math.log2(yMax.value));
+  const step = Math.max(1, Math.ceil((high - low) / 6));
+  const out: number[] = [];
+  for (let e = low; e <= high; e++) if (e % step === 0) out.push(2 ** e);
+  return out;
+});
 const tableRows = computed(() => {
-  const rows = [Math.max(1, Math.round(balanced.value / 4)), balanced.value, balanced.value * 4]
-  if (!rows.includes(chosen.value)) rows.push(chosen.value)
-  return rows.sort((a, b) => a - b)
-})
+  const rows = [Math.max(1, Math.round(balanced.value / 4)), balanced.value, balanced.value * 4];
+  if (!rows.includes(chosen.value)) rows.push(chosen.value);
+  return rows.sort((a, b) => a - b);
+});
 
-const hover = ref<number | null>(null)
+const hover = ref<number | null>(null);
 function onMove(event: PointerEvent) {
-  const svg = event.currentTarget as SVGSVGElement
-  const box = svg.getBoundingClientRect()
-  const px = ((event.clientX - box.left) / box.width) * W
+  const svg = event.currentTarget as SVGSVGElement;
+  const box = svg.getBoundingClientRect();
+  const px = ((event.clientX - box.left) / box.width) * W;
   if (px < M.left || px > W - M.right) {
-    hover.value = null
-    return
+    hover.value = null;
+    return;
   }
-  const t = (px - M.left) / (W - M.left - M.right)
-  hover.value = Math.max(1, Math.round(2 ** (Math.log2(bMin) + t * (Math.log2(bMax) - Math.log2(bMin)))))
+  const t = (px - M.left) / (W - M.left - M.right);
+  hover.value = Math.max(
+    1,
+    Math.round(2 ** (Math.log2(bMin) + t * (Math.log2(bMax) - Math.log2(bMin)))),
+  );
 }
 </script>
 

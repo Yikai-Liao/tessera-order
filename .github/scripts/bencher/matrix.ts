@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { caseLabel, caseParts, type ReportSummary, type Row } from "./report.ts";
+import { caseLabel, type caseParts, type ReportSummary, type Row } from "./report.ts";
 
 // One build configuration's measurement. A configuration is a separately
 // compiled executable with its own Testbed and baseline, such as Portable
@@ -46,7 +46,12 @@ export function caseRows(configurations: Configuration[]): CaseRow[] {
     for (const row of configuration.summary?.rows ?? []) {
       let entry = rows.get(row.name);
       if (!entry) {
-        entry = { name: row.name, parts: row.parts, label: caseLabel(row.name), cells: configurations.map(() => undefined) };
+        entry = {
+          name: row.name,
+          parts: row.parts,
+          label: caseLabel(row.name),
+          cells: configurations.map(() => undefined),
+        };
         rows.set(row.name, entry);
       }
       entry.cells[i] = row;
@@ -55,7 +60,8 @@ export function caseRows(configurations: Configuration[]): CaseRow[] {
   return [...rows.values()];
 }
 
-const alerted = (row: CaseRow, verdict: Row["verdict"]) => row.cells.filter(cell => cell?.verdict === verdict) as Row[];
+const alerted = (row: CaseRow, verdict: Row["verdict"]) =>
+  row.cells.filter((cell) => cell?.verdict === verdict) as Row[];
 
 export function isSlower(row: CaseRow) {
   return alerted(row, "regression").length > 0;
@@ -68,20 +74,25 @@ export function isFaster(row: CaseRow) {
 // The change that decides a row's place: its largest alerted slowdown, or for
 // a faster-only row its largest alerted speedup.
 export function severity(row: CaseRow) {
-  const slower = alerted(row, "regression").map(cell => cell.change!);
+  const slower = alerted(row, "regression").map((cell) => cell.change!);
   if (slower.length) return Math.max(...slower);
-  const faster = alerted(row, "improvement").map(cell => cell.change!);
+  const faster = alerted(row, "improvement").map((cell) => cell.change!);
   return faster.length ? Math.min(...faster) : 0;
 }
 
 // Cases with an alert in any configuration, grouped by mode; within a mode,
 // slower cases first from the worst, then faster ones from the best.
 export function changedRows(configurations: Configuration[]) {
-  return caseRows(configurations).filter(row => isSlower(row) || isFaster(row)).sort((a, b) =>
-    modeOrder(a.parts.mode) - modeOrder(b.parts.mode) || a.parts.mode.localeCompare(b.parts.mode) ||
-    Number(isFaster(a)) - Number(isFaster(b)) ||
-    (isSlower(a) ? severity(b) - severity(a) : severity(a) - severity(b)) ||
-    a.name.localeCompare(b.name));
+  return caseRows(configurations)
+    .filter((row) => isSlower(row) || isFaster(row))
+    .sort(
+      (a, b) =>
+        modeOrder(a.parts.mode) - modeOrder(b.parts.mode) ||
+        a.parts.mode.localeCompare(b.parts.mode) ||
+        Number(isFaster(a)) - Number(isFaster(b)) ||
+        (isSlower(a) ? severity(b) - severity(a) : severity(a) - severity(b)) ||
+        a.name.localeCompare(b.name),
+    );
 }
 
 // Which configurations a set of alerts touched, in words: "both", "all", or
@@ -89,7 +100,7 @@ export function changedRows(configurations: Configuration[]) {
 // first clue to its cause, so the report states it instead of leaving the
 // reader to compare columns.
 export function attribution(configurations: Configuration[], hit: boolean[]) {
-  const names = configurations.filter((_, i) => hit[i]).map(c => c.name);
+  const names = configurations.filter((_, i) => hit[i]).map((c) => c.name);
   if (configurations.length === 1) return null;
   if (names.length === configurations.length) return configurations.length === 2 ? "both" : "all";
   return `${names.join(", ")} only`;
@@ -98,13 +109,22 @@ export function attribution(configurations: Configuration[], hit: boolean[]) {
 // The geometric mean of current/baseline over a configuration's compared
 // cases, optionally within one mode.
 export function geomean(summary: ReportSummary, mode?: string) {
-  const compared = summary.rows.filter(r => r.baseline !== null && r.value > 0 && (mode === undefined || r.parts.mode === mode));
+  const compared = summary.rows.filter(
+    (r) => r.baseline !== null && r.value > 0 && (mode === undefined || r.parts.mode === mode),
+  );
   if (!compared.length) return null;
-  return { change: Math.exp(compared.reduce((sum, r) => sum + Math.log(r.value / r.baseline!), 0) / compared.length) - 1,
-    cases: compared.length };
+  return {
+    change:
+      Math.exp(
+        compared.reduce((sum, r) => sum + Math.log(r.value / r.baseline!), 0) / compared.length,
+      ) - 1,
+    cases: compared.length,
+  };
 }
 
 export function modes(configurations: Configuration[]) {
-  const all = new Set(configurations.flatMap(c => c.summary?.rows.map(r => r.parts.mode) ?? []));
+  const all = new Set(
+    configurations.flatMap((c) => c.summary?.rows.map((r) => r.parts.mode) ?? []),
+  );
   return [...all].sort((a, b) => modeOrder(a) - modeOrder(b) || a.localeCompare(b));
 }

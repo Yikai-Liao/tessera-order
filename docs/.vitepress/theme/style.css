@@ -7,8 +7,19 @@
   --vp-c-brand-3: #4a80e6;
   --vp-c-brand-soft: rgba(92, 164, 248, 0.16);
   --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: linear-gradient(120deg, #2dd4bf 0%, #5ca4f8 35%, #b482f8 65%, #f98f54 100%);
-  --vp-home-hero-image-background-image: linear-gradient(135deg, #2dd4bf55 0%, #b482f855 60%, #f98f5555 100%);
+  --vp-home-hero-name-background: linear-gradient(
+    120deg,
+    #2dd4bf 0%,
+    #5ca4f8 35%,
+    #b482f8 65%,
+    #f98f54 100%
+  );
+  --vp-home-hero-image-background-image: linear-gradient(
+    135deg,
+    #2dd4bf55 0%,
+    #b482f855 60%,
+    #f98f5555 100%
+  );
   --vp-home-hero-image-filter: blur(56px);
 
   --tsr-ink: #0b0b0b;
@@ -85,9 +96,13 @@
 
 /* Animated cells: position and colour change smoothly between frames. */
 .tsr-cell rect {
-  transition: fill 0.25s ease, opacity 0.25s ease, stroke 0.15s ease;
+  transition:
+    fill 0.25s ease,
+    opacity 0.25s ease,
+    stroke 0.15s ease;
 }
 
+/* biome-ignore lint/style/noDescendingSpecificity: sets only `transition`, which `.tsr-figure svg text` does not. */
 .tsr-cell text {
   transition: opacity 0.25s ease;
 }
@@ -115,8 +130,8 @@
 .tsr-controls button,
 .tsr-controls select,
 .tsr-input select,
-.tsr-input input[type='text'],
-.tsr-input input[type='number'],
+.tsr-input input[type="text"],
+.tsr-input input[type="number"],
 .tsr-input textarea {
   padding: 3px 9px;
   border: 1px solid var(--vp-c-divider);
@@ -181,7 +196,7 @@
   gap: 6px;
 }
 
-.tsr-input input[type='range'] {
+.tsr-input input[type="range"] {
   accent-color: var(--vp-c-brand-1);
 }
 

@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+//! Key encoding and key extraction.
+//!
+//! [`RadixKey`] maps each supported key to an unsigned integer whose order is
+//! the key order. [`Extract`] computes that integer for a record, either from a
+//! user key function ([`ByKey`]) or from the record itself ([`Direct`]), and
+//! selects the scan an insertion pass uses.
+
 use core::cmp::Reverse;
 use core::ops::{BitAnd, BitOrAssign, Not, Shl, Shr};
 
@@ -29,9 +36,11 @@ pub trait RadixKey: sealed::Sealed + Copy {
 mod sealed {
     use super::{Direct, RadixKey};
 
-    // Backend selection belongs to the sealed key implementations, not the
-    // public ordering contract. Reverse keys can use these defaults without
-    // acquiring a second set of primitive SIMD implementations.
+    /// Scans and insertion passes for direct keys of one type.
+    ///
+    /// The defaults are the default-build scans. Primitive keys override them
+    /// with the vector backend under `portable-simd`; `Reverse<K>` keeps the
+    /// defaults, so it needs no second set of vector kernels.
     pub trait Sealed: Copy {
         #[inline]
         fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool
@@ -54,9 +63,10 @@ mod sealed {
         where
             Self: RadixKey,
         {
-            // Tile finishing repeatedly crosses short ordered runs. The scalar
-            // extractor avoids building a block mask for each inversion search;
-            // budgeted probes keep the blocked scan for long ordered stretches.
+            // Tile finishing crosses many short ordered runs, so a blocked scan
+            // would build a 32-pair mask for every inversion it finds. `ByKey`
+            // scans one pair at a time; budgeted probes keep the blocked scan
+            // for their long ordered stretches (decision 0030).
             crate::engine::finish_insertion(keys, &mut super::ByKey(|key: &Self| *key));
         }
 
@@ -88,25 +98,34 @@ pub trait Unsigned:
     fn to_u128(self) -> u128;
 }
 
+/// Routes the scans of a primitive key to the vector backend under
+/// `portable-simd`. Expands to nothing in the default build.
+macro_rules! vector_backend {
+    () => {
+        #[cfg(feature = "portable-simd")]
+        #[inline]
+        fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool {
+            crate::portable_simd::confirm_ascending(keys, previous)
+        }
+
+        #[cfg(feature = "portable-simd")]
+        #[inline]
+        fn finish_insertion(keys: &mut [Self]) {
+            crate::portable_simd::finish_insertion(keys)
+        }
+
+        #[cfg(feature = "portable-simd")]
+        #[inline]
+        fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
+            crate::portable_simd::insertion_sort(keys, budget)
+        }
+    };
+}
+
 macro_rules! unsigned {
     ($($ty:ty),* $(,)?) => {$(
         impl sealed::Sealed for $ty {
-            #[cfg(feature = "portable-simd")]
-            #[inline]
-            fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool {
-                crate::portable_simd::confirm_ascending(keys, previous)
-            }
-
-            #[cfg(feature = "portable-simd")]
-            #[inline]
-            fn finish_insertion(keys: &mut [Self]) {
-                crate::portable_simd::finish_insertion(keys)
-            }
-            #[cfg(feature = "portable-simd")]
-            #[inline]
-            fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
-                crate::portable_simd::insertion_sort(keys, budget)
-            }
+            vector_backend!();
         }
         impl Unsigned for $ty {
             const BITS: usize = <$ty>::BITS as usize;
@@ -125,22 +144,7 @@ unsigned!(u8, u16, u32, u64, u128, usize);
 macro_rules! signed {
     ($(($s:ty, $u:ty)),* $(,)?) => {$(
         impl sealed::Sealed for $s {
-            #[cfg(feature = "portable-simd")]
-            #[inline]
-            fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool {
-                crate::portable_simd::confirm_ascending(keys, previous)
-            }
-
-            #[cfg(feature = "portable-simd")]
-            #[inline]
-            fn finish_insertion(keys: &mut [Self]) {
-                crate::portable_simd::finish_insertion(keys)
-            }
-            #[cfg(feature = "portable-simd")]
-            #[inline]
-            fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
-                crate::portable_simd::insertion_sort(keys, budget)
-            }
+            vector_backend!();
         }
         impl RadixKey for $s {
             type Encoded = $u;
@@ -160,27 +164,13 @@ signed!(
 );
 
 macro_rules! float {
-    ($(($f:ty, $u:ty, $default:path)),* $(,)?) => {$(
+    ($(($f:ty, $u:ty, $scan:path)),* $(,)?) => {$(
         impl sealed::Sealed for $f {
-            #[cfg(feature = "portable-simd")]
-            #[inline]
-            fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool {
-                crate::portable_simd::confirm_ascending(keys, previous)
-            }
+            vector_backend!();
 
             #[inline(always)]
             fn first_inversion(keys: &[Self]) -> Option<usize> {
-                $default(keys)
-            }
-            #[cfg(feature = "portable-simd")]
-            #[inline]
-            fn finish_insertion(keys: &mut [Self]) {
-                crate::portable_simd::finish_insertion(keys)
-            }
-            #[cfg(feature = "portable-simd")]
-            #[inline]
-            fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
-                crate::portable_simd::insertion_sort(keys, budget)
+                $scan(keys)
             }
         }
         impl RadixKey for $f {
@@ -193,6 +183,8 @@ macro_rules! float {
         }
     )*};
 }
+// The default build's blocked scan compares 64-bit lanes poorly at the
+// baseline vector width, so `f64` scans one pair at a time.
 float!(
     (f32, u32, crate::scan::first_inversion),
     (f64, u64, crate::scan::scalar)
@@ -218,7 +210,10 @@ const SMALL_WINDOW_BUCKETS: usize = 1 << SMALL_WINDOW_BITS;
 /// `ByKey` calls a user key function, `Direct` encodes the record itself, and
 /// `KeyHalf` narrows another extractor to one 64-bit half of a 128-bit key.
 pub(crate) trait Extract<T> {
+    /// The encoded key type.
     type Value: Unsigned;
+
+    /// Returns the encoded key of `record`.
     fn key(&mut self, record: &T) -> Self::Value;
 
     /// Finishes a slice whose keys all fall in one small window of the encoded
@@ -236,7 +231,8 @@ pub(crate) trait Extract<T> {
         false
     }
 
-    /// Confirms ascending keys after an already encoded predecessor.
+    /// Returns whether `previous` and the keys of `records` are in ascending
+    /// order. `previous` is the already encoded key of the preceding record.
     fn confirm_ascending(&mut self, records: &[T], previous: Self::Value) -> bool
     where
         Self: Sized,
@@ -260,24 +256,26 @@ pub(crate) trait Extract<T> {
         })
     }
 
-    /// Finishes an insertion sort without a swap limit.
+    /// Sorts `records` stably by insertion, without a swap limit.
     ///
-    /// Direct extraction resolves the vector backend once for the whole pass.
-    fn finish_insertion(&mut self, arr: &mut [T])
+    /// Direct extraction selects its scan once for the whole pass.
+    fn finish_insertion(&mut self, records: &mut [T])
     where
         Self: Sized,
     {
-        crate::engine::finish_insertion(arr, self);
+        crate::engine::finish_insertion(records, self);
     }
 
-    /// Inserts within a swap budget and returns the completed pass's swap count.
+    /// Sorts `records` stably by insertion within `budget` swaps.
     ///
-    /// Direct extraction resolves the vector backend once for the whole pass.
-    fn insertion_sort(&mut self, arr: &mut [T], budget: usize) -> Option<usize>
+    /// Returns the number of swaps, or `None` once the budget runs out; the
+    /// records are then a stable permutation of their input. Direct extraction
+    /// selects its scan once for the whole pass.
+    fn insertion_sort(&mut self, records: &mut [T], budget: usize) -> Option<usize>
     where
         Self: Sized,
     {
-        crate::engine::insertion_loop(arr, budget, self)
+        crate::engine::insertion_loop(records, budget, self)
     }
 }
 
@@ -342,20 +340,21 @@ impl<K: RadixKey> Extract<K> for Direct {
         record.encode()
     }
 
-    // Outlining this chain would add a call per scan and hide caller bounds.
+    // Inlined through `K::first_inversion` so each scan is not a call and the
+    // scan sees the caller's slice bounds.
     #[inline(always)]
     fn first_inversion(&mut self, records: &[K]) -> Option<usize> {
         K::first_inversion(records)
     }
 
     #[inline]
-    fn finish_insertion(&mut self, arr: &mut [K]) {
-        K::finish_insertion(arr);
+    fn finish_insertion(&mut self, records: &mut [K]) {
+        K::finish_insertion(records);
     }
 
     #[inline]
-    fn insertion_sort(&mut self, arr: &mut [K], budget: usize) -> Option<usize> {
-        K::insertion_sort(arr, budget)
+    fn insertion_sort(&mut self, records: &mut [K], budget: usize) -> Option<usize> {
+        K::insertion_sort(records, budget)
     }
 }
 

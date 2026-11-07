@@ -1,0 +1,69 @@
+{
+  "decision": "inconclusive; no adoption",
+  "runtime_upstream_commit": "0bc80b49d5efd5bd8b62165b170015e5803226b7",
+  "source_archive_commit": "86bc8ebe511c3a3ad0b07902b48081c48074bd3f",
+  "samples": 162,
+  "fresh_timed_sorts": 324,
+  "all_full_references_passed": true,
+  "external_archive": {
+    "filename": "tessera-root-copy-span-screen-source-report.tar.gz",
+    "bytes": 566770,
+    "sha256": "52b78d3fa0dd046bce03d2d942e4d30816f20441966361577e58d64bd556e866",
+    "committed": false
+  },
+  "external_artifacts": {
+    "REPORT.md": {
+      "sha256": "0701fafee3f2d2550185e43b7af0e7fcc0b93740764ffea062e4adec400e3b63",
+      "bytes": 6324
+    },
+    "evidence/analysis.json": {
+      "sha256": "3984ccdd6920084722bb114c81def7e6596aae702047bd1b2fd53b8ca319b030",
+      "bytes": 8760
+    },
+    "evidence/vendor-source-hashes.json": {
+      "sha256": "d888f6dec9354b58fa290c666a3cce4b9414473c310ff9635a0e612496f85227",
+      "bytes": 15951
+    },
+    "evidence/base-source-manifest.json": {
+      "sha256": "948be2c3c5dfbb763cc39f0034e9f6dcc5752fd2bf4f4a1e38ee93ceae2940c8",
+      "bytes": 20158
+    },
+    "evidence/candidate-source-manifest.json": {
+      "sha256": "8d34df9042c4dbd047605591bec55b9c0dc3b4ffcbbc579ea75b68ff55d1a060",
+      "bytes": 3767
+    },
+    "evidence/timing-u64.raw": {
+      "sha256": "501a89678df972ff0e526bb46de120a02e22af8c4497ac65f7157fc24b05c4f2",
+      "bytes": 15899
+    },
+    "evidence/timing-row16.raw": {
+      "sha256": "4410c7a4a98bb1dd5dfe5f981477b4598f9eb417225acf1155fabdd9d830febd",
+      "bytes": 16108
+    },
+    "evidence/allocation-u64.jsonl": {
+      "sha256": "68cd42e2936c22dbb78c7d11db44a51fc75e8305dc2a5e42f20be85a0d1db905",
+      "bytes": 612
+    },
+    "evidence/allocation-row16.jsonl": {
+      "sha256": "c2895abae2b1da754b1680cbddc0bfe423c023ed1327b9d46a4b2efc6f0ae56b",
+      "bytes": 621
+    },
+    "evidence/compiler.txt": {
+      "sha256": "f22d5e4e9ced367e774ce5bc140d9e6b1235c1882fec80d011044851f3ae6369",
+      "bytes": 196
+    },
+    "evidence/driver-hashes.json": {
+      "sha256": "7218ea838f6e510bee14ea120cbd701f2757eef1310cf310ce1b30421c138c8d",
+      "bytes": 777
+    },
+    "evidence/binary-hashes.txt": {
+      "sha256": "365b9105037acb4fa4c8cade2d05fab3d2c597c34133c525c9885992ffdc115d",
+      "bytes": 204
+    },
+    "analyze.py": {
+      "sha256": "d8d73684304bbd01762321891d6c1093e803bbd9da5b1dd9480e560419f6f3a4",
+      "bytes": 2629
+    }
+  },
+  "scope": "Hashes and aggregate results only. Raw data, harnesses, vendor trees and binaries remain external."
+}

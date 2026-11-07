@@ -49,3 +49,8 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
 - [Parallel Direct count-window](patches/parallel-count-window/README.md): frozen e8 source and initial four-case screen. Three narrow research signals, one inconclusive case; no default adoption or full-matrix acceptance.
 
 - [e1 count-window follow-on](patches/parallel-count-window-e1/README.md): shared runtime bridge, wide-tile tests and feature-OFF Tier 1 evidence with retained inconclusive cells; no runtime adoption.
+
+- [e1 count-window Tier 2 bounded screen](patches/parallel-count-window-e1/tier2-results/REPORT.md):
+  504 samples and 20,385 sorts at W8/n1M. Three of four narrow-window cells
+  clear controls; u32/d16 and all four wide fallback cells remain inconclusive.
+  No default adoption, runtime changes, or later shifted/ordered results.

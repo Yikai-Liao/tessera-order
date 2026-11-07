@@ -1,0 +1,28 @@
+{
+  "upstream_core": "e1d25297685cecb205d18114e898a39878e3fd83",
+  "baseline_source_identity_sha256": "ab73401745af53e114015e4ba6cc6a87ef91a5cfe3a1daa73036049189050e2a",
+  "candidate_source_identity_sha256": "8f300a35a875c8949d80fc306ed2ec24ddc9fbe6747663d4768369610b641b35",
+  "report_sha256": "4e42c57bb28e9e6682542f0c747fa8b0df9b48c2d1e127edf8312189653b8c0a",
+  "driver_manifest_sha256": "c85581a171035cfda8a1f87fcddec21cf2d28d31213b8e5a6e5653311da9778f",
+  "evidence_manifest_sha256": "16db932de4b42130ff487050e9fb94e5fab05bba50114f5d16cc406b1195aa20",
+  "timing_binary_sha256": "11101a16100555de2f907c7f1543392a1b8dc9d1735443e5015d5761fc6eb634",
+  "allocation_binary_sha256": "60bb03688f074928a3a06dfdb00629d43925815c87bc4ab27b236b6717f1f75a",
+  "tier1_report_unchanged_sha256": "c57cda6e4dc59ea6d3871d6601f26e6489cec76ac9417427ff1b031b559a2260",
+  "samples": 504,
+  "individual_timed_sorts": 20385,
+  "cases": 8,
+  "blocks": 9,
+  "labels": 7,
+  "workers": 8,
+  "length": 1000000,
+  "features": [
+    "default",
+    "std",
+    "rayon",
+    "portable-simd"
+  ],
+  "research_feature": false,
+  "last_exclusive_release_utc": "2026-11-07T15:09:55Z",
+  "decision": "3/4 narrow favorable; 1/4 narrow inconclusive; 4/4 wide inconclusive; no supported regression",
+  "raw_and_harness_in_public_packet": false
+}

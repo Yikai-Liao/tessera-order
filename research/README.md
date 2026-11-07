@@ -65,3 +65,10 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   Rust-only patch against public `987fbdfe`, with complete source hashes,
   safety scope and replay proof. Sealed Direct u32/u64 only; no performance
   result or default adoption. Archived, not applied to this checkout.
+
+- [Public count-window 17-cell result](patches/public-count-window-results/REPORT.md):
+  1,377 samples and 56,715 reference-checked sorts for the
+  [archived source candidate](patches/public-count-window-source/README.md).
+  W8 clears controls in three of four narrow inputs against both the public
+  baseline and original serial API. u32/d256 and equal37 remain inconclusive;
+  no general regression-free claim or runtime adoption.

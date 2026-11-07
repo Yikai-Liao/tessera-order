@@ -74,3 +74,9 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   W8 clears controls in three of four narrow inputs against both the public
   baseline and original serial API. u32/d256 and equal37 remain inconclusive;
   no general regression-free claim or runtime adoption.
+
+- [Public count-window fallback gate](patches/public-count-window-fallback-results/REPORT.md):
+  810 samples and 12,580 reference-checked sorts across ten declined-route
+  cases. All C/A cells remain inconclusive; u128/d256 is slower than original
+  serial, not established as count-hook regression. Zero retained heap in all
+  30 observations. The frozen report precedes the separate runtime integration.

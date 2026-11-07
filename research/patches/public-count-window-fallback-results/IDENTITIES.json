@@ -1,0 +1,36 @@
+{
+  "status": "complete",
+  "new_cases": 10,
+  "samples": 810,
+  "individual_timed_sorts": 12580,
+  "comparisons": {
+    "C/A": {
+      "supported_favorable": 0,
+      "supported_slower": 0
+    },
+    "C/S": {
+      "supported_favorable": 5,
+      "supported_slower": 1
+    }
+  },
+  "all_oracles_passed": true,
+  "all30_heap_retained_zero": true,
+  "candidate_count_entered": false,
+  "last_exclusive_release_utc": "2026-11-07T16:58:28Z",
+  "public_baseline_commit": "987fbdfe757cc81330db04ee11ed6e454b2e5142",
+  "baseline_source_identity": "19659df2fd57dfcde3b82892bb01b84a6a5770cadd5094bb9815a6cfd70d9f17",
+  "candidate_source_identity": "b4c51ddca807a94260e6399800f17f06b4463fde6a4162f07a9f6df094d84f45",
+  "source_freezes": {
+    "scalar": "3674017abc4dadead3a65e3e154fd62720efc84e4f150153b5176bbd4230e667",
+    "declined": "ebcb8f277a15212be92981abf579ce2644e45c3d7d1e925509c46de1eea0f1a4"
+  },
+  "report_sha256": "3ae73ff3c78c94b055eada97a993063cc2368f5290aca4a3535c9f4b106b5cc4",
+  "raw_harness_binaries_in_packet": false,
+  "binary_sha256": {
+    "public-fallback-scalar": "cf89e6339b42767e46359282ec1f7d7f7b33aabb8bff16e68512baa0d62cb0c3",
+    "public-fallback-scalar-memory": "7a58279c00c32d480429be95f82e85e98bf47ff9f130c225b7e0ea93f7dc1653",
+    "public-fallback-declined": "83a2b8a14619f9624e0d4e3722d5cb9b885fe98d5eb135cd502c7dac77bed139",
+    "public-fallback-declined-memory": "45e17db0f1c6781745097890620f71fd9da42156439451aca8b9d71406a0bf3e"
+  },
+  "evidence_artifact_manifest_sha256": "3e2d502fbf8afc7dfa4f4a4f811df660eae53bcf25b1855ede97cccae1b3bd59"
+}

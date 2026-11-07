@@ -95,3 +95,10 @@ Evidence identifiers for this checkpoint:
 - Timing samples SHA-256: `c6d457d9b82ac9cdcf341589c0f496183c5a2e3821115c7f0acd124adf0918ed`.
 - Per-case summary SHA-256: `43a3e62f6506c7c4446ad085f5dababc12a900715635d60e39d75cd91b445db7`.
 - All source/binary/sample manifests remain with the external experiment bundle. No outliers were removed. The main-merge verification is a separate five-case run, not a reuse of old speed ratios.
+
+## Rejected source-prefetch mechanism
+
+A separate [fixed four-block source-prefetch control](compact-prefetch-control.md)
+left the best combined layout and copy count unchanged but did not establish an
+end-to-end improvement in its bounded screen. The optional research patch is
+retained for reproducibility; no new default or parameter sweep follows.

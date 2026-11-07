@@ -1,0 +1,55 @@
+--- a/rust/tessera-sort/Cargo.toml
++++ b/rust/tessera-sort/Cargo.toml
+@@ -21,6 +21,8 @@
+ std = []
+ # Optional parallel API; sequential builds keep their dependency-free no_std path.
+ rayon = ["std", "dep:rayon"]
++# Research-only source-block lookahead; no new record workspace.
++prefetch-compact = ["rayon"]
+ 
+ [dependencies]
+ rayon = { version = "1.10", optional = true }
+--- a/rust/tessera-sort/src/block/parallel/compact.rs
++++ b/rust/tessera-sort/src/block/parallel/compact.rs
+@@ -191,7 +191,31 @@
+                 }
+                 job.temp.as_ptr().cast()
+             };
+-            for pair in piece.blocks.windows(2) {
++            for (index, pair) in piece.blocks.windows(2).enumerate() {
++                #[cfg(all(feature = "prefetch-compact", target_arch = "x86_64", not(miri)))]
++                {
++                    // Four future copies provide memory-level parallelism for
++                    // the irregular source stream. Prefetch only allocated
++                    // source-block cache lines, never fabricated adjacent slots.
++                    if let Some(&physical) = piece.blocks.get(index + 5) {
++                        let source = addresses.at(physical).cast::<u8>();
++                        let bytes = block_size * core::mem::size_of::<T>();
++                        for offset in (0..bytes).step_by(64) {
++                            // SAFETY: physical is a validated full B-cell block.
++                            // Offset is strictly within its allocated byte range.
++                            // This hint does not form a reference or read T,
++                            // including the uninitialized padding in partials.
++                            unsafe {
++                                core::arch::x86_64::_mm_prefetch(
++                                    source.add(offset).cast(),
++                                    core::arch::x86_64::_MM_HINT_T0,
++                                );
++                            }
++                        }
++                    }
++                }
++                #[cfg(not(all(feature = "prefetch-compact", target_arch = "x86_64", not(miri))))]
++                let _ = index;
+                 // SAFETY: distinct cycle nodes identify disjoint full blocks;
+                 // no other worker reads or writes either node except boundary
+                 // sources, which were copied before this phase.
+@@ -231,7 +255,7 @@
+     // preallocated state, then restore the input before resuming the panic.
+     let result = unwind::catch(|| {
+         if parallel {
+-            jobs.par_iter_mut().for_each(&run);
++            jobs.par_iter_mut().for_each(run);
+         } else {
+             jobs.iter_mut().for_each(&run);
+         }

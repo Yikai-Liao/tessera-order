@@ -102,3 +102,25 @@ A separate [fixed four-block source-prefetch control](compact-prefetch-control.m
 left the best combined layout and copy count unchanged but did not establish an
 end-to-end improvement in its bounded screen. The optional research patch is
 retained for reproducibility; no new default or parameter sweep follows.
+
+## Histogram-aligned root checkpoint
+
+The standalone `research/aligned-root` crate preserves a different native-root
+structure: a pure-key histogram assigns final bucket/shard rank intervals, shared
+boundary blocks receive disjoint fragments, and full body blocks reuse consumed
+input storage. Packed block restoration produces real contiguous children and
+requires no interior-hole squeeze. This is a sealed Copy-only research API, not
+the generic public Rayon implementation, and has no panic-permutation guarantee.
+
+The checkpoint includes the serial restoration control, cached-write-cursor
+variant, parallel block restoration, and direct-u64 child routing. Debug/release,
+Rust1.85, Clippy and focused default-model concurrent Miri checks pass. Source
+notices and the exact frozen Tessera child dependency are preserved.
+
+No performance win is established. Earlier u64 v1/v2 controls used by-key APIs
+on both sides; the later Direct-u64 comparison is recorded separately rather
+than relabeling those results. Exact additional heap is8,069,820 bytes for u64
+and11,258,012 for Row16 at eight workers, about6.1 times the serial comparison.
+Histogram cost, root write-cursor cost, and lost root/child overlap remain in
+the end-to-end accounting. See the crate README and validation record for the
+individual controls, noisy/adverse measurements, and unsupported contracts.

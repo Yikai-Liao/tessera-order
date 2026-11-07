@@ -1,0 +1,13 @@
+[package]
+name = "tessera-aligned-root-prototype"
+version = "0.0.0"
+publish = false
+edition = "2024"
+rust-version = "1.85"
+license = "BSD-2-Clause"
+description = "Research-only native aligned root partition for sealed Copy records"
+[workspace]
+exclude = ["vendor/tessera-leaf"]
+[dependencies]
+rayon = "1.10"
+tessera = { package = "tessera-consumer-wait", path = "vendor/tessera-leaf", features = ["rayon"] }

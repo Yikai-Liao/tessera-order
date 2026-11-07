@@ -188,21 +188,18 @@ pub(crate) trait Extract<T> {
 
     /// Returns the offset of the first adjacent pair whose keys descend.
     ///
-    /// The default keeps the previous key, so it calls the key function once
-    /// per record instead of once per compared pair.
+    /// Retaining the previous key avoids evaluating it again for the next
+    /// pair, so the key function is called once per scanned record.
     #[inline]
     fn first_inversion(&mut self, records: &[T]) -> Option<usize> {
-        let mut records = records.iter();
-        let first = records.next()?;
+        let first = records.first()?;
         let mut previous = self.key(first);
-        for (index, record) in records.enumerate() {
-            let current = self.key(record);
-            if previous > current {
-                return Some(index);
-            }
+        records.windows(2).position(|pair| {
+            let current = self.key(&pair[1]);
+            let inverted = previous > current;
             previous = current;
-        }
-        None
+            inverted
+        })
     }
 
     /// Finishes an insertion sort without a swap limit.

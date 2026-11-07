@@ -1,0 +1,20 @@
+{
+  "status": "research-only source/validation packet; performance conclusion pending",
+  "files": {
+    "research/patches/ordered-map.README.md": "589d57095580cca91fbbebb0cc08da9baa963cb0f4984c392ee2f7a4fb18b366",
+    "research/patches/ordered-map.SOURCE-LINEAGE.json": "b02d3c7f740bcf132ccc220b68f28dbd1096f760b3aec342072e995bc18821fd",
+    "research/patches/ordered-map.SPACE-AND-PROOF.md": "f20f489deb0f33a2bced27acec52482e58013c82e123ad3edeee63f95109dba3",
+    "research/patches/ordered-map.VALIDATION.md": "a0a65aa1b28b868b4a5aeaf7bb2e5f2a148cc2cc474561ee26c8225c6f2db4c4",
+    "research/patches/ordered-map.apply-check.txt": "c08baaad1103d768e07fa5fdef46298c5cd06e36bacc5e3f490cf39a61cf1dbf",
+    "research/patches/ordered-map.base-hashes.txt": "4ee33d957b2488307c0707e5bb5416224ab6b78c6ef9fb5435dbf727186d5114",
+    "research/patches/ordered-map.external-evidence.json": "e3db93f59c3019fb0541ca9c17eafc31ef9ed7b072c259f40819ea8ef004b711",
+    "research/patches/ordered-map.patch": "cf039ba22f98c875cbbb5e8558c16031a6e9bc4576cd205f14ca73fdf5c9c336",
+    "research/patches/ordered-map.source-hashes.txt": "a7f3f0f19efab1a604264ddaab388a8bdd845938e2b185acbfbeab9d97de599a",
+    "research/patches/ordered-map.validated-private-hashes.txt": "a7f3f0f19efab1a604264ddaab388a8bdd845938e2b185acbfbeab9d97de599a"
+  },
+  "source_manifest_sha256": "5cc8565181593afd3ce8291dfe7d9ceb9bf94e1b1de38588a53247a915966471",
+  "candidate_identity_sha256": "331452a13f64dd430ddf79c60ed7056856ab979649a644712c303debfb01620a",
+  "raw_logs_included": false,
+  "harnesses_included": false,
+  "production_adoption": false
+}

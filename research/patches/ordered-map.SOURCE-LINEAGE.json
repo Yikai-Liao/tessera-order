@@ -1,0 +1,34 @@
+{
+  "base_commit": "b1d36ce4e2b547ba72a0026dfb5850389e0d45e7",
+  "prerequisite_patch": "combined-main-5b13.patch",
+  "prerequisite_sha256": "0c75b051977dab392c66dbfee70a7f32885484ca143bc15611e819bb5bf15ba3",
+  "follow_on_patch": "ordered-map.patch",
+  "follow_on_sha256": "cf039ba22f98c875cbbb5e8558c16031a6e9bc4576cd205f14ca73fdf5c9c336",
+  "validated_private_identity_sha256": "331452a13f64dd430ddf79c60ed7056856ab979649a644712c303debfb01620a",
+  "validated_private_manifest_sha256": "5cc8565181593afd3ce8291dfe7d9ceb9bf94e1b1de38588a53247a915966471",
+  "validated_base_identity_sha256": "9586fc287e595da719ec8c958f3e428254459599b3ba2306ffe1e234058d76b8",
+  "changed_files": [
+    "rust/tessera-sort/src/block.rs",
+    "rust/tessera-sort/src/block/parallel.rs",
+    "rust/tessera-sort/src/block/parallel/ordered_tests.rs"
+  ],
+  "runtime_test_files_verified_byte_identical": 21,
+  "standard_package": "tessera-sort",
+  "no_cargo_change": true,
+  "independent_not_stacked": true,
+  "not_public_0e_drop_in": true,
+  "base_tree_manifest_sha256": "0ebc514b76b6bd948148718e1c8f556722622ffbfcd7d69788c5abb22bbce808",
+  "target_tree_manifest_sha256": "126ed78941f6c72a2b0d880bdf3cd6b1cd2d37f3ab8d83d995073e32f99c7c7a",
+  "tree_manifest_identity_definition": "SHA256 of canonical compact sorted JSON with file mode/content SHA or symlink target",
+  "checks": [
+    "historical prerequisite apply-check/apply",
+    "normalized crate Cargo semantics match",
+    "follow-on apply-check/apply independent export",
+    "entire file/symlink tree matches target",
+    "all21 runtime/test files match validated private source",
+    "reverse-check/reverse application restores entire combined base tree",
+    "reverse prerequisite restores entire historical b1d36ce tree"
+  ],
+  "staging_builds_or_timings": false,
+  "publication_status": "research-only; not adopted; performance conclusions pending separate benchmark"
+}

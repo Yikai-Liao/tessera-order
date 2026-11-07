@@ -1,0 +1,21 @@
+{
+  "note": "External evidence is not included in this source-only packet. These hashes identify the exact local artifacts held by the coordinator. No performance data is included or summarized.",
+  "artifacts": {
+    "source-manifest-final.json": "5cc8565181593afd3ce8291dfe7d9ceb9bf94e1b1de38588a53247a915966471",
+    "gate-summary-final.json": "ea703ae8c790ef03bfd477562207bf8c9de2caaf6cb16b9c55a482a4526615b8",
+    "report.md": "dddbeb970b85d8029ef513fee99547ebdb76d9215a08a6f99618667f4f662e75",
+    "implementation-note.md": "047ad7c195af0ad5d3100b49380a27e436a4b2a192ec0f98e96312889bbff62c",
+    "review-result.txt": "91225e634c24e5f982a9a9a2d80d692cb4edc8584c6c02f91e23c51dd66dd78e",
+    "full-all-features.log": "e64e61f2e175318808641eb68a92a921bb466fc20ce937b315354ad7e13a73e9",
+    "clippy-all-features.log": "8acd41839384938564681da211755ebd0ed51dea9ea2ed4eb7cb42dca395782a",
+    "rustdoc-all-features.log": "d9cd1065fbe102a674318a112020854904f792cf9e93b1cef7ad11d5310fe08e",
+    "docs-all-features.log": "7c04d453d1af07e4b86f30b78c0e88485fa7761d901634216ad9609d28e1b5dc",
+    "miri-ordered.log": "79be5e36766878f34daf04ca9c6b0b1806d98cc216e0adfd7ffa8d000a1b96bc",
+    "miri-combined.log": "9b2093a63cee982abd34288f3a8ee355a35c677c21d68bef6af13f505a5408fc",
+    "miri-owned-key-panic.log": "e48688c14dfb07da0c3cdf8a81b875a1484256c18d22eb7b2d95f7f5040c2177",
+    "miri-inconsistent-exclusive.log": "b2bced6fbbb20c5f0b864683d6246fe7c0e73878196d482a964297ff18fdf1be",
+    "miri-permutation-fault.log": "badff7e30af817b1397ba9230d46f1a7d9a13283877b145c925c9ad0d626eb4e",
+    "final-compatibility.log": "88dcd62a48b50e6d03518ac1c8639a74b45da0b0bbb2ca1b0baaf69969187cfa",
+    "clippy-first-doc-failure.log": "f3fdeba03a067d27f0c0e5de3f6f734dad9ed79d42d8c0c4101d096bcff0903d"
+  }
+}

@@ -1,0 +1,9 @@
+Historical b1d36ce export + combined-main-5b13.patch: apply-check and apply passed.
+Ordered-map follow-on: apply-check and independent apply passed.
+Entire resulting file/symlink/mode tree matches target.
+All21 runtime/test source files match validated private candidate bytes.
+All3 Cargo files unchanged between historical combined base, target, and verify.
+Private crate Cargo differs only in private package/explicit library name.
+Reverse ordered-map restores entire combined base tree.
+Reverse prerequisite restores entire b1d36ce export tree.
+No shared working-tree edits, staging build, timing, commit, or push.

@@ -13,6 +13,10 @@ ownership proof, validation record, and limitations before using it.
   stronger native-root pipeline rebased onto upstream `5b13ac1`, with explicit
   SIMD-off/on controls and an inconclusive four-case pilot. This patch targets
   the documented experimental commit and is not applied to production.
+- [Ordered post-permutation map control](patches/ordered-map.README.md):
+  a validated single-variable research patch removing redundant directory work
+  while preserving every copy, publication and allocation. It remains disabled;
+  performance acceptance is separate from its correctness and space proof.
 - [Causal root and scheduling controls](patches/causal-controls.README.md):
   independent fixed-root, sleep50 and deferred-consumer experiments. Their
   source/guard patches and precise negative results distinguish waiting CPU,

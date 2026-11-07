@@ -44,7 +44,8 @@
 <text class="caps muted" x="696.0" y="102.0" text-anchor="end">SPEED</text>
 <text class="caps muted" x="24.0" y="102.0">STABLE SORTS</text>
 <text class="ink strong" x="24.0" y="135.0">Tessera, Portable SIMD</text>
-<circle class="within edge-tessera" cx="591.2" cy="131" r="5.5" stroke-width="2"/>
+<circle class="ring" cx="591.2" cy="131" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="591.2" cy="131" r="5.5" fill="none" stroke-width="2"/>
 <text class="val ink strong" x="696.0" y="135.0" text-anchor="end">3.3×</text>
 <text class="ink strong" x="24.0" y="173.0">Tessera</text>
 <circle class="tessera ring" cx="558.9" cy="169" r="6.5" stroke-width="2"/>

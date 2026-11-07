@@ -51,8 +51,9 @@
 <circle class="comparison ring" cx="486.1" cy="124" r="4" stroke-width="2"/>
 <circle class="comparison ring" cx="517.9" cy="131" r="4" stroke-width="2"/>
 <circle class="radix ring" cx="481.2" cy="131" r="4" stroke-width="2"/>
-<circle class="within edge-tessera" cx="538.2" cy="131" r="5.5" stroke-width="2"/>
 <circle class="tessera ring" cx="506.4" cy="131" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="538.2" cy="131" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="538.2" cy="131" r="5.5" fill="none" stroke-width="2"/>
 <text class="val ink" x="642.7" y="135.0" text-anchor="end">2.6×</text>
 <text class="val ink strong" x="696.0" y="135.0" text-anchor="end">2nd</text>
 <text class="ink" x="24.0" y="167.0">u64</text>
@@ -62,8 +63,9 @@
 <circle class="comparison ring" cx="486.1" cy="162" r="4" stroke-width="2"/>
 <circle class="comparison ring" cx="517.9" cy="169" r="4" stroke-width="2"/>
 <circle class="radix ring" cx="481.2" cy="169" r="4" stroke-width="2"/>
-<circle class="within edge-tessera" cx="538.2" cy="169" r="5.5" stroke-width="2"/>
 <circle class="tessera ring" cx="506.4" cy="169" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="538.2" cy="169" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="538.2" cy="169" r="5.5" fill="none" stroke-width="2"/>
 <text class="val ink" x="642.7" y="173.0" text-anchor="end">2.6×</text>
 <text class="val ink strong" x="696.0" y="173.0" text-anchor="end">2nd</text>
 <text class="ink" x="24.0" y="205.0">f64</text>
@@ -72,8 +74,9 @@
 <circle class="comparison ring" cx="468.5" cy="207" r="4" stroke-width="2"/>
 <circle class="comparison ring" cx="486.1" cy="200" r="4" stroke-width="2"/>
 <circle class="radix ring" cx="481.2" cy="207" r="4" stroke-width="2"/>
-<circle class="within edge-tessera" cx="538.2" cy="207" r="5.5" stroke-width="2"/>
 <circle class="tessera ring" cx="506.4" cy="207" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="538.2" cy="207" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="538.2" cy="207" r="5.5" fill="none" stroke-width="2"/>
 <text class="val ink" x="642.7" y="211.0" text-anchor="end">2.6×</text>
 <text class="val ink strong" x="696.0" y="211.0" text-anchor="end">1st</text>
 <text class="caps muted" x="24.0" y="248.0">RECORDS · AGAINST STABLE SORTS</text>
@@ -82,8 +85,9 @@
 <circle class="comparison ring" cx="368.7" cy="277" r="4" stroke-width="2"/>
 <circle class="comparison ring" cx="468.5" cy="277" r="4" stroke-width="2"/>
 <circle class="radix ring" cx="481.2" cy="277" r="4" stroke-width="2"/>
-<circle class="within edge-tessera" cx="538.2" cy="277" r="5.5" stroke-width="2"/>
 <circle class="tessera ring" cx="506.4" cy="277" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="538.2" cy="277" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="538.2" cy="277" r="5.5" fill="none" stroke-width="2"/>
 <text class="val ink" x="642.7" y="281.0" text-anchor="end">2.6×</text>
 <text class="val ink strong" x="696.0" y="281.0" text-anchor="end">1st</text>
 <text class="ink" x="24.0" y="313.0">{u64, u32}</text>
@@ -91,8 +95,9 @@
 <circle class="comparison ring" cx="368.7" cy="315" r="4" stroke-width="2"/>
 <circle class="comparison ring" cx="468.5" cy="315" r="4" stroke-width="2"/>
 <circle class="radix ring" cx="481.2" cy="315" r="4" stroke-width="2"/>
-<circle class="within edge-tessera" cx="538.2" cy="315" r="5.5" stroke-width="2"/>
 <circle class="tessera ring" cx="506.4" cy="315" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="538.2" cy="315" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="538.2" cy="315" r="5.5" fill="none" stroke-width="2"/>
 <text class="val ink" x="642.7" y="319.0" text-anchor="end">2.6×</text>
 <text class="val ink strong" x="696.0" y="319.0" text-anchor="end">1st</text>
 <text class="ink" x="24.0" y="351.0">128-byte record</text>
@@ -100,16 +105,18 @@
 <circle class="comparison ring" cx="368.7" cy="353" r="4" stroke-width="2"/>
 <circle class="comparison ring" cx="468.5" cy="353" r="4" stroke-width="2"/>
 <circle class="radix ring" cx="481.2" cy="353" r="4" stroke-width="2"/>
-<circle class="within edge-tessera" cx="538.2" cy="353" r="5.5" stroke-width="2"/>
 <circle class="tessera ring" cx="506.4" cy="353" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="538.2" cy="353" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="538.2" cy="353" r="5.5" fill="none" stroke-width="2"/>
 <text class="val ink" x="642.7" y="357.0" text-anchor="end">2.6×</text>
 <text class="val ink strong" x="696.0" y="357.0" text-anchor="end">1st</text>
 <text class="ink" x="24.0" y="389.0">owned record</text>
 <text class="muted sub" x="24.0" y="404.0">{u64, String}</text>
 <circle class="comparison ring" cx="368.7" cy="391" r="4" stroke-width="2"/>
 <circle class="comparison ring" cx="468.5" cy="391" r="4" stroke-width="2"/>
-<circle class="within edge-tessera" cx="538.2" cy="391" r="5.5" stroke-width="2"/>
 <circle class="tessera ring" cx="506.4" cy="391" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="538.2" cy="391" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="538.2" cy="391" r="5.5" fill="none" stroke-width="2"/>
 <text class="val ink" x="642.7" y="395.0" text-anchor="end">2.6×</text>
 <text class="val ink strong" x="696.0" y="395.0" text-anchor="end">1st</text>
 <circle class="tessera" cx="28" cy="462" r="4"/>

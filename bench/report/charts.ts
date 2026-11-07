@@ -152,8 +152,8 @@ function markdownTable(headers: string[], rows: string[][]) {
 type Tone = "tessera" | "radix" | "comparison";
 const toneOf = (variant: string): Tone =>
   variant === "tessera" ? "tessera" : RADIX.has(variant) ? "radix" : "comparison";
-// Drawing order: Tessera last, on top of the field, its filled default
-// build above the hollow SIMD ring.
+// Drawing order: Tessera last, on top of the field. Hollow rings are see-through
+// and drawn above filled dots, so a ring overlapping a dot stays a whole circle.
 const DEPTH: Record<Tone, number> = { comparison: 0, radix: 1, tessera: 2 };
 
 interface Mark {
@@ -211,6 +211,8 @@ const extraStyles = `<style>
   .edge-tessera { stroke: #4a80e6; } .edge-radix { stroke: #e8622f; } .edge-comparison { stroke: #8d8c86; }
 </style>`;
 
+const hollowRadius = (m: Mark) => (m.tone === "tessera" ? 5.5 : 4);
+
 function drawMark(out: string[], x: number, rowY: number, m: Mark, edge: 0 | -1 | 1) {
   const cy = rowY + (m.dy ?? 0);
   const cls = m.tone;
@@ -223,8 +225,12 @@ function drawMark(out: string[], x: number, rowY: number, m: Mark, edge: 0 | -1 
     return;
   }
   if (m.hollow) {
+    const r = hollowRadius(m);
+    const width = m.tone === "tessera" ? 2 : 1.5;
+    const circle = `cx="${x.toFixed(1)}" cy="${cy}" r="${r}" fill="none"`;
     out.push(
-      `<circle class="within edge-${m.tone}" cx="${x.toFixed(1)}" cy="${cy}" r="${m.tone === "tessera" ? 5.5 : 4}" stroke-width="${m.tone === "tessera" ? 2 : 1.5}"/>`,
+      `<circle class="ring" ${circle} stroke-width="${width + 2}"/>`,
+      `<circle class="edge-${m.tone}" ${circle} stroke-width="${width}"/>`,
     );
     return;
   }
@@ -358,12 +364,18 @@ function renderChart(spec: Chart) {
     for (const { row, cy } of g.placed) {
       drawRowName(out, t, row.name, cy);
       if (row.span) {
+        // The line stops at a ring's edge rather than showing through it.
+        const inset = (value: number) => {
+          const ring = row.marks.find((m) => m.hollow && m.value === value);
+          return ring ? hollowRadius(ring) : 0;
+        };
+        const [lo, hi] = row.span;
         out.push(
-          `<line class="edge-${row.marks[0].tone}" x1="${x(row.span[0]).toFixed(1)}" x2="${x(row.span[1]).toFixed(1)}" y1="${cy}" y2="${cy}" stroke-width="2" stroke-linecap="round"/>`,
+          `<line class="edge-${row.marks[0].tone}" x1="${(x(lo) + inset(lo)).toFixed(1)}" x2="${(x(hi) - inset(hi)).toFixed(1)}" y1="${cy}" y2="${cy}" stroke-width="2" stroke-linecap="round"/>`,
         );
       }
       if (row.swarm) dodge(row.marks, x);
-      const depth = (m: Mark) => DEPTH[m.tone] + (m.hollow ? 0 : 0.5);
+      const depth = (m: Mark) => DEPTH[m.tone] + (m.hollow ? 0.5 : 0);
       for (const m of [...row.marks].sort((a, b) => depth(a) - depth(b)))
         drawMark(out, x(m.value), cy, m, edgeOf(m.value));
       // Tessera's cells are ink, its last cell bold; other sorts' are muted.

@@ -4,6 +4,8 @@ These pages explain the algorithm from first principles: what a radix sort does,
 
 For the engine's exact decisions and constants, see the [engine design](../design/engine.md). These pages explain the reasons behind those decisions.
 
+These pages describe the sequential engine. The optional Rayon API reuses its ordering and ownership contracts; see the [parallel design](../design/parallel.md) and [experimental results](../development/parallel-experiments.md) for the separate parallel work.
+
 ## The problem in one paragraph
 
 A radix sort reads digits of the key instead of comparing keys, so it runs in time linear in n for a fixed key width. The stable textbook version, LSD radix sort, moves every record into a second buffer as large as the input on every pass. The in-place textbook version, American flag sort (an MSD radix sort), needs no buffer, but its swaps break stability. Tessera stays stable and linear and uses O(√n) extra memory: for 10 million 8-byte records, about 1.2 MiB instead of a 76 MiB buffer.

@@ -178,6 +178,7 @@ function developmentSidebar() {
       text: 'Design',
       items: [
         { text: 'Engine design', link: '/design/engine' },
+        { text: 'Optional parallel sorting', link: '/design/parallel' },
         { text: 'Port from the prototype', link: '/design/port' },
       ],
     },
@@ -187,6 +188,7 @@ function developmentSidebar() {
         { text: 'Contributing', link: '/CONTRIBUTING' },
         { text: 'Benchmark protocol', link: '/development/benchmarking' },
         { text: 'Continuous benchmarks', link: '/development/continuous-benchmarks' },
+        { text: 'Parallel experiments', link: '/development/parallel-experiments' },
         { text: 'Documentation site', link: '/development/docs-site' },
         { text: 'Releasing', link: '/RELEASING' },
       ],

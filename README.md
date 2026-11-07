@@ -16,6 +16,10 @@
   <img src="https://img.shields.io/badge/status-pre--release-lightgrey.svg" alt="Status: pre-release">
 </p>
 
+<p align="center">
+  <a href="https://yikai-liao.github.io/tessera-sort/">Documentation</a>
+</p>
+
 > [!IMPORTANT]
 > Tessera is in pre-release. The Rust engine has been ported to Stable Rust and checked against the research prototype. Nothing is on crates.io yet; see the [roadmap](ROADMAP.md).
 
@@ -101,10 +105,10 @@ A Python binding is planned as well; see the [roadmap](ROADMAP.md).
 | Topic | Document |
 |---|---|
 | Ordering, key functions, floats, panics and memory bounds | [`conformance/semantics.md`](conformance/semantics.md) |
-| How the algorithm works, with interactive figures | [`docs/explain/`](docs/explain/index.md) |
+| How the algorithm works, with interactive figures | [Algorithm explanation](https://yikai-liao.github.io/tessera-sort/explain/) |
 | How the engine works | [`docs/design/engine.md`](docs/design/engine.md) |
 | Why every record type caches bucket IDs | [Decision 0002](docs/decisions/0002-cache-bucket-ids-for-every-record.md) |
-| All documentation | [`docs/README.md`](docs/README.md) |
+| All documentation | [Documentation site](https://yikai-liao.github.io/tessera-sort/) · [Source index](docs/README.md) |
 
 ## Contributing
 

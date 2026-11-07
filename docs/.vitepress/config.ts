@@ -202,6 +202,7 @@ function developmentSidebar() {
         { text: "Benchmark protocol", link: "/development/benchmarking" },
         { text: "Continuous benchmarks", link: "/development/continuous-benchmarks" },
         { text: "Parallel experiments", link: "/development/parallel-experiments" },
+        { text: "Continuous integration", link: "/development/ci" },
         { text: "Documentation site", link: "/development/docs-site" },
         { text: "Releasing", link: "/RELEASING" },
       ],

@@ -16,7 +16,8 @@ ownership proof, validation record, and limitations before using it.
 - [Ordered post-permutation map control](patches/ordered-map.README.md):
   a validated single-variable research patch removing redundant directory work
   while preserving every copy, publication and allocation. It remains disabled;
-  performance acceptance is separate from its correctness and space proof.
+  [screening paused after a non-target serial-path regression](patches/ordered-map.SCREEN.md),
+  with all completed samples retained and the exact cause still unproved.
 - [Causal root and scheduling controls](patches/causal-controls.README.md):
   independent fixed-root, sleep50 and deferred-consumer experiments. Their
   source/guard patches and precise negative results distinguish waiting CPU,

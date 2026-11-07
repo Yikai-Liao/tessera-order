@@ -32,14 +32,29 @@ The free plan's limits shape the design:
 | One job at a time per organization, 5 minutes each (240 s timeout in use) | The suite is split into **shards**, each a fixed list of cases that finishes in under 240 s. A workflow submits them one after another through the existing `bencher-bare-metal` concurrency group. |
 | Consecutive jobs may run on different machines of the same spec | Every ratio is computed **within one job**: a shard contains every variant of its cases, interleaved in blocks, with Tessera twice as an A/A control. Ratios from different shards are comparable; raw nanoseconds across shards are reported but not compared. |
 | The tracking job holds the concurrency slot while it waits | Comparison runs are started manually or by a release tag, never by PRs, so they do not block PR benchmarks for long. A shard that fails or times out is resubmitted alone. |
-| Results come back through `bencher run`'s adapter | The runner prints [Bencher Metric Format](https://bencher.dev/docs/reference/bencher-metric-format/) JSON with the `json` adapter: one benchmark per case and variant, with a `ratio` measure (median over blocks, A/A range as the bounds) and a `latency` measure. |
+| 65,535 Metrics per day | A full run stores one Metric per case, variant and Measure, about 3,000 per Measure for the whole suite, so summaries fit easily. Per-block values do not go into Metrics: nine blocks per Metric would put two builds near the daily limit. They stay in the job output (below). |
+| Shared runners have no network access | The image holds the runner and every competitor, built on the GitHub host. |
 
-Each shard is its own Bencher report on a dedicated branch, such as `compare/<commit>`, and a Testbed per build (`intel-v1-compare`, `intel-v1-compare-portable-simd`), so comparison runs never mix with continuous history or thresholds.
+### Bencher's model
 
-Two facts must be checked before this plan is final (step 1 below):
+The comparison uses Bencher's concepts for what they mean, so its history accumulates like any other Bencher data:
 
-1. Whether the full stdout of a remote job, or a file it writes, can be retrieved. If it can, the runner also prints its per-block samples, and reports are regenerated from them as [Benchmarking](../development/benchmarking.md#raw-data) requires. If it cannot, the per-block values are carried as BMF measures and the report is rebuilt from Bencher's stored results.
-2. The noise level on this hardware: the A/A range within a job and the spread of the same shard across jobs. If the A/A range is wider than the differences the report needs to resolve, block count or sample duration goes up, at the cost of more shards.
+| Concept | Use |
+|---|---|
+| Branch | One fixed branch, `compare`. Every shard of a run passes `--branch compare --hash <commit>`; reports with the same branch and hash belong to the same version, so the shards of one run form one version, and successive runs of `main` or of release candidates form that branch's history |
+| Testbed | One Testbed, `intel-v1-compare`, with spec `intel-v1`. A Testbed is the measurement environment, not a build, so the Portable SIMD build is a segment of the benchmark ID instead. The continuous suite keeps a Testbed per build ([decision 0011](../decisions/0011-benchmark-feature-configurations.md)) because thresholds are scoped by Testbed; the comparison sets no thresholds |
+| Benchmark | `compare/<case_id>/<variant>/<build>`, for example `compare/u64/random/1000000/s1/radsort/default` |
+| Measures | `ratio`: the median over blocks of the variant's time over the mean of Tessera's A/A pair, with the smallest and largest per-block ratio as `lower_value` and `upper_value`, so the bounds describe that ratio and nothing else. `latency`: the median nanoseconds per element. The A/A control is its own benchmark, variant `tessera-aa`, whose `ratio` is A2 / A1, so the noise range is stored as a value, not disguised as another metric's bounds |
+| Iterations | One `bencher run` iteration per shard. The nine blocks run inside one process, because pairing a variant with Tessera within the same block is the point of the design. Running each block as a separate `--iter` would store one output per block, but it multiplies Metrics by nine and restarts the process between blocks |
+| GitHub integration | None. Comparison runs are not tied to a PR, so `--github-actions` checks and comments do not apply; the workflow writes a job summary with links to the Bencher reports |
+
+Bencher keeps each finished job's stdout, stderr, exit code and output files. The runner therefore prints its per-block samples to stderr as JSON lines, beside the BMF on stdout, and the report is regenerated from those samples as [Benchmarking](../development/benchmarking.md#raw-data) requires. Bencher's [Project Jobs API](https://bencher.dev/docs/api/projects/jobs/) returns a finished job's output to callers with `view` permission, which the trusted workflow's API key has, but the same page lists viewing a job as a Bencher Plus feature.
+
+Step 1 below settles the open points on this hardware:
+
+1. **Retrieving the output.** Whether the free plan, with the project's API key, returns a job's output through `bencher job view`. If it does not, the per-block samples go into one BMF benchmark per shard (`compare/shard-<k>/blocks`) whose Measures carry the block ratios, within the Metrics limit.
+2. **Noise.** The A/A range within a job, the spread of one shard across three jobs, and `bencher noise --format json` run in the same image, which measures compute and cache jitter. The A/A pair measures this workload; `bencher noise` explains a wide A/A range when there is one. If the A/A range is wider than the differences the report needs to resolve, block count or sample duration goes up, at the cost of more shards.
+3. **Host conditions.** Bencher documents that its runner, by default, disables ASLR, SMT, turbo boost and the NMI watchdog and sets the performance governor. Step 1 confirms which of these hold on the shared `intel-v1` runners, and the report states them beside the spec, because turbo boost and SMT change absolute times.
 
 ## Implementations
 
@@ -252,19 +267,19 @@ How does the extra memory grow? Peak extra bytes against length, both on log sca
 
 ### Producing the figures
 
-The report module renders every figure as SVG from Bencher's stored results, alongside the report tables. Before real data exists, its tests render them from a synthetic fixture, as `fixtures/chart.svg` does for the continuous report, so the layout is settled and reviewed first: long variant names, overlapping dots and a Tessera dot that is not on the front must all render legibly. The documentation site can later show the same data with hover detail, but the README images are static SVGs, so nothing in them depends on hovering.
+The report module renders every figure as SVG from the stored job outputs and Metrics, alongside the report tables. Before real data exists, its tests render them from a synthetic fixture, as `fixtures/chart.svg` does for the continuous report, so the layout is settled and reviewed first: long variant names, close values in one column and a Tessera row that is not first must all render legibly. The documentation site can later show the same data with hover detail, but the README images are static SVGs, so nothing in them depends on hovering.
 
 ## Steps
 
 | Step | Delivers | Done when |
 |---|---|---|
-| 1. Feasibility on Bencher | A throwaway shard: Tessera A/A and `std-stable` on 10 cases, printed as BMF | Retrieval of raw output is settled; the A/A range within a job and the spread of one shard across three jobs are known; shard time per case is measured |
+| 1. Feasibility on Bencher | A throwaway shard: Tessera A/A and `std-stable` on 10 cases, printed as BMF on branch `compare`, plus `bencher noise` | The three points under [Bencher's model](#bencher-s-model) are settled; shard time per case is measured |
 | 2. Shared generator | `case.rs` in the library; `smoke.rs` uses it | Smoke inputs hash identically before and after; Bencher shows no new IDs |
 | 3. Runner | `variant`, `check`, `run`, `shard`, `compare` with Tessera and the std sorts | Self-test: a deliberately wrong variant that also mutates its input is caught, and every variant receives the original input; `validate` passes in CI |
 | 4. Rust competitors | The crate adapters behind `compare` | `list` shows the capability table; `validate` passes or marks unsupported types |
 | 5. Native competitors | `fetch.py`, `build.rs`, the shims behind `compare-native` | Every license is recorded with its commit; the static executable builds on the GitHub build host; `validate` passes; the report names each SIMD sort's dispatched level |
 | 6. Memory | `memory` executable | Peak bytes for every variant and case up to 1,000,000 |
-| 7. Workflow and report | A `bench-compare.yml` that submits every shard, and the report module with its figures | The figures render from a synthetic fixture and are reviewed before any real run; one full run on `main` produces the report and figures from Bencher's stored results alone |
+| 7. Workflow and report | A `bench-compare.yml` that submits every shard, and the report module with its figures | The figures render from a synthetic fixture and are reviewed before any real run; one full run on `main` produces the report and figures from the stored job outputs and Metrics alone |
 | 8. Release report | The first run on the release candidate | The README links the report and its numbers name the variant versions and the A/A ranges |
 
 ## Changes to existing documents
@@ -274,5 +289,4 @@ When step 3 lands, [Benchmarking](../development/benchmarking.md) is rewritten t
 ## Open questions
 
 - **A u64 key with 32 varying bits.** Many real `u64` keys are IDs or timestamps whose high bits are constant. A `low32` distribution would show varying-bit skipping on such data; it is not in the generator yet.
-- **Bencher limits beyond the job length.** Whether the free plan limits total jobs or minutes per month, which would bound how often the full comparison can run.
 - **IPS²Ra's pinned source.** IPS²Ra's repository and license must be confirmed before it is pinned; it joins only if its sequential entry point builds without the parallel runtime.

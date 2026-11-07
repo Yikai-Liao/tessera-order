@@ -344,6 +344,64 @@ fn plan_digits(varying: u128, width: usize, digits: &mut [Digit]) -> usize {
     len
 }
 
+/// At most [`SPLIT_BITS`] varying bits compressed into one digit.
+///
+/// A node whose bits vary in a few widely spaced places has a wide span but few
+/// values: eight varying bits make at most 256 keys, wherever they sit. Packing
+/// moves each run of varying bits down over the constant gaps below it, in
+/// place, so one partition of at most 256 buckets finishes the node. Bits keep
+/// their order, and the constant bits outside the mask are equal in every key of
+/// the node, so bucket order is key order.
+struct PackedBits {
+    /// Shift and mask of each run, from the lowest packed bit upwards.
+    segments: [(usize, usize); SPLIT_BITS],
+    len: usize,
+    /// Width of the packed digit; at most `SPLIT_BITS`.
+    width: usize,
+}
+
+impl PackedBits {
+    /// Packs the set bits of `varying`, which must hold at most `SPLIT_BITS` of them.
+    fn new(varying: u128) -> Self {
+        debug_assert!(varying != 0 && varying.count_ones() as usize <= SPLIT_BITS);
+        let mut packed = Self {
+            segments: [(0, 0); SPLIT_BITS],
+            len: 0,
+            width: 0,
+        };
+        let mut remaining = varying;
+        while remaining != 0 {
+            let low = remaining.trailing_zeros() as usize;
+            let width = (remaining >> low).trailing_ones() as usize;
+            let run = ((1u128 << width) - 1) << low;
+            // Everything packed so far lies below this run, so its bits move
+            // down by their own width and the constant gaps below them.
+            packed.segments[packed.len] =
+                (low - packed.width, ((1usize << width) - 1) << packed.width);
+            packed.len += 1;
+            packed.width += width;
+            remaining &= !run;
+        }
+        packed
+    }
+
+    /// Buckets the packed digit can hold.
+    fn buckets(&self) -> usize {
+        1usize << self.width
+    }
+
+    /// Bucket of an encoded key.
+    #[inline]
+    fn bucket<V: Unsigned>(&self, value: V) -> usize {
+        let mut bucket = 0;
+        for &(shift, mask) in &self.segments[..self.len] {
+            // The key keeps its own width: a 64-bit key needs no 128-bit shift.
+            bucket |= (value >> V::from_usize(shift)).to_usize() & mask;
+        }
+        bucket
+    }
+}
+
 struct Sorter<'a, T, E, const CACHED: bool> {
     workspace: &'a mut Workspace<T>,
     key: &'a mut E,
@@ -755,8 +813,35 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
                 return;
             }
         }
+        // Few varying bits are few values, whatever their span: packing them
+        // into one digit finishes the node with a single partition. The routes
+        // above keep their priority, because a repeated key or an end run costs
+        // less than partitioning the node at all.
+        if varying.count_ones() as usize <= SPLIT_BITS {
+            self.partition_packed(arr, varying);
+            return;
+        }
         let digit = choose_split_digit(arr, top, self.tile_bytes, self.key);
         self.partition_digit(arr, digit, varying);
+    }
+
+    /// Partitions by the varying bits themselves, with their constant gaps dropped.
+    fn partition_packed(&mut self, arr: &mut [T], varying: u128) {
+        let packed = PackedBits::new(varying);
+        let ends = block::partition_by(
+            arr,
+            packed.buckets(),
+            self.key,
+            self.workspace.block_buffers(),
+            |key: &mut E, record: &T| packed.bucket(key.key(record)),
+        );
+        // Every varying bit is a bucket bit, so the partition sorts the node and
+        // no child needs routing of its own.
+        self.workspace
+            .block
+            .as_mut()
+            .expect("partition buffers restored")
+            .recycle_ends(ends);
     }
 
     /// Partitions by digit, then sorts each unfinished child.
@@ -1236,6 +1321,100 @@ mod tests {
         assert_eq!(records, expected);
     }
 
+    #[test]
+    fn packed_bits_order_their_buckets_like_their_keys() {
+        let mut state = 5u64;
+        let mut masks = alloc::vec![
+            0x0101_0101_0101_0101u128,
+            0x8000_0000_0000_0001u128,
+            0x00f0_0000_0f00_0000u128,
+            (1u128 << 127) | 0x0101_0000,
+            0b1010_1010u128,
+        ];
+        for _ in 0..4 {
+            // Eight bit positions drawn from the whole key.
+            let mut mask = 0u128;
+            while mask.count_ones() < 8 {
+                state = state.wrapping_mul(0x9e37_79b9_7f4a_7c15).rotate_left(17);
+                mask |= 1u128 << ((state >> 32) % 128);
+            }
+            masks.push(mask);
+        }
+        for &varying in &masks {
+            let packed = PackedBits::new(varying);
+            assert_eq!(packed.width, varying.count_ones() as usize);
+            assert!(packed.width <= SPLIT_BITS);
+            // Every value of the varying bits over one constant base.
+            let base = 0x5555_5555_5555_5555_5555_5555_5555_5555u128 & !varying;
+            let keys: Vec<u128> = (0..1u128 << varying.count_ones())
+                .map(|combo| {
+                    let mut key = base;
+                    let mut remaining = combo;
+                    for bit in 0..128 {
+                        if varying >> bit & 1 == 1 {
+                            key |= (remaining & 1) << bit;
+                            remaining >>= 1;
+                        }
+                    }
+                    key
+                })
+                .collect();
+            let buckets: Vec<usize> = keys.iter().map(|&key| packed.bucket(key)).collect();
+            // A bucket is the key without its constant bits, so the two orders
+            // agree wherever the keys differ.
+            for (left, &a) in keys.iter().enumerate() {
+                for (right, &b) in keys.iter().enumerate() {
+                    assert_eq!(
+                        a.cmp(&b),
+                        buckets[left].cmp(&buckets[right]),
+                        "varying={varying:#x} a={a:#x} b={b:#x}"
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn sparse_varying_bits_pack_into_one_partition() {
+        let len = if cfg!(miri) { 129 } else { 8193 };
+        // Eight varying bits spread over the key: at the bottom, at the top and
+        // with constant gaps between them, which the packing has to close.
+        for &mask in &[
+            0x0101_0101_0101_0101u64,
+            0x8000_0000_0000_0001u64,
+            0x00f0_0000_0f00_0000u64,
+        ] {
+            let base = 0x2b93_a3f7_1d05_0000u64 & !mask;
+            // Every value of the mask, in an order that is not key order.
+            let values: Vec<u64> = (0..len as u64)
+                .map(|id| base | (id.wrapping_mul(0x9e37_79b9_7f4a_7c15) & mask))
+                .collect();
+            let mut sorted = values.clone();
+            sorted.sort();
+            let mut direct = values.clone();
+            sort_with_tile_bytes::<u64, _, true>(
+                &mut direct,
+                &mut Direct,
+                Some(&mut Workspace::new()),
+                256,
+            );
+            assert_eq!(direct, sorted, "mask={mask:#x}");
+            // Equal keys of a user key function keep their input order.
+            let mut rows: Vec<(u64, u32)> = values
+                .iter()
+                .enumerate()
+                .map(|(id, key)| (*key, id as u32))
+                .collect();
+            let mut expected = rows.clone();
+            expected.sort_by_key(|row| row.0);
+            sort_with_tile_bytes::<_, _, true>(
+                &mut rows,
+                &mut ByKey(|row: &(u64, u32)| row.0),
+                Some(&mut Workspace::new()),
+                256,
+            );
+            assert_eq!(rows, expected, "by key mask={mask:#x}");
+        }
+    }
     #[test]
     fn sparse_digit_plans_and_outlier_routes() {
         for width in MIN_TILE_DIGIT_BITS..=MAX_TILE_DIGIT_BITS {

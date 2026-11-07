@@ -49,10 +49,11 @@ One scan computes the bitwise union and intersection of all keys. Bits that are 
 
 ### 3. Node partitioning
 
-A node is split by one of three partitions, all of them stable:
+A node is split by one of four partitions, all of them stable:
 
 - **Repeated key.** The node samples 64 keys in runs of 8. If one value covers at least a quarter of the sample, an equality partition separates it from the rest, so heavily repeated keys stop costing passes.
 - **Outlier run.** If a short run at either end of the node (at most 1,024 records) disagrees with all other records on the highest varying bit, the run is split off and finished by insertion sort, and the rest of the node keeps a narrower set of varying bits.
+- **Packed bits.** A node whose varying bits number at most 8 has at most 256 keys, however wide their span. `PackedBits` moves each run of varying bits down over the constant gaps below it, so one partition on the packed digit finishes the node with no more than 256 buckets, and no recursion. Equal packed digits mean equal keys: the bits outside the mask are equal in every key of the node, and the packed bits keep their relative significance.
 - **Top digit.** Otherwise the node is split on its top digit. The initial width is 8 bits and may grow to 12; a sample of 128 keys checks that the digit actually divides the range.
 
 The digit partition uses the block LSD scheme of Clausecker and Schintke. Buckets are filled block by block, consumed input blocks are reused as output blocks, and permutation metadata records their logical order. Stability holds without a full-size output buffer, and the extra space is O(√n) for a fixed digit width and record size. The block size in records is

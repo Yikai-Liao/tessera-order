@@ -140,6 +140,55 @@ fn record_shapes_thresholds_and_key_halves() {
 }
 
 #[test]
+fn sparse_varying_bits_pack_into_one_partition() {
+    // Eight varying bits make at most 256 keys however far apart they sit, so
+    // the node is partitioned once on the packed bits instead of once per digit.
+    let lengths: &[usize] = if cfg!(miri) { &[257] } else { &[8193, 65_537] };
+    let mut state = 777;
+    // Runs of varying bits at both ends of the key and across the middle, with
+    // constant gaps that the packing has to close.
+    let mut masks = vec![0x0101_0101_0101_0101u128, 0x8000_0000_0000_0001u128];
+    for _ in 0..2 {
+        let mut mask = 0u128;
+        while mask.count_ones() < 8 {
+            mask |= 1u128 << (next(&mut state) % 128) as u32;
+        }
+        masks.push(mask);
+    }
+    for &len in lengths {
+        for &mask in &masks {
+            let base = u128::from(next(&mut state)) << 64 | u128::from(next(&mut state));
+            let base = base & !mask;
+            // Every value of the mask, drawn without order.
+            let draw = |id: usize| {
+                let mut combo = 0u128;
+                let mut bits = (id as u128).wrapping_mul(0x9e37_79b9_7f4a_7c15_1b2c_3d4e_5f60_7181);
+                for bit in 0..128 {
+                    if mask >> bit & 1 == 1 {
+                        combo |= (bits & 1) << bit;
+                        bits >>= 1;
+                    }
+                }
+                base | combo
+            };
+            let mut rows: Vec<(u128, u32)> = (0..len).map(|id| (draw(id), id as u32)).collect();
+            let mut expected = rows.clone();
+            expected.sort_by_key(|row| row.0);
+            stable_sort_by_key(&mut rows, |row| row.0);
+            assert_eq!(rows, expected, "len={len} mask={mask:#x}");
+
+            // Bit patterns, including every NaN and signed zero the mask reaches.
+            let mut values: Vec<f64> = (0..len).map(|id| f64::from_bits(draw(id) as u64)).collect();
+            let mut expected = values.clone();
+            expected.sort_by(f64::total_cmp);
+            stable_sort(&mut values);
+            let sorted: Vec<u64> = values.iter().map(|x| x.to_bits()).collect();
+            let wanted: Vec<u64> = expected.iter().map(|x| x.to_bits()).collect();
+            assert_eq!(sorted, wanted, "f64 len={len} mask={mask:#x}");
+        }
+    }
+}
+#[test]
 fn wide_aligned_and_zero_sized_records() {
     #[repr(align(128))]
     struct Wide {

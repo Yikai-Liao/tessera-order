@@ -60,6 +60,16 @@ Tessera looks at the top varying bit. If at most an eighth of the sample disagre
 
 If the minority also appears anywhere outside the run, the check gives up at the first such record and the node takes the top-digit split.
 
+### Few varying bits
+
+The span of the varying bits says how far apart they are, not how many there are. A key that varies in bits 0, 8, 16, …, 56 spans 57 bits, yet it can hold only 256 values. A [block partition](block-partition.md) on a window that wide would spread those records over buckets that are mostly empty, and the digits between the varying bits would carry no information at all.
+
+Tessera counts the varying bits. With at most eight of them, it **packs** them: each run of varying bits moves down over the constant gaps below it, and one stable partition on the packed digit finishes the node. Bits keep their order, so bucket order stays key order, and the bits outside the mask are equal in every key of the node, so nothing else can separate two records.
+
+The packed digit is at most eight bits wide — 256 buckets, the same as the initial split width. A node with more varying bits takes the top-digit split below, which the sample widens up to 12 bits.
+
+The routes above keep their priority. A repeated key or a short end run costs less than partitioning the node at all, and those two checks run first.
+
 ### Top digit
 
 Otherwise the node is split on the digit under its highest varying bit, with the [stable block partition](block-partition.md). `choose_split_digit` picks the width:
@@ -79,4 +89,5 @@ While the block partition writes its result back into the input, each child that
 | nearly sorted | budgeted insertion | linear in n plus inversions |
 | one dominant key | equality partition | one partition, the equal band is done |
 | sorted with a short outlier run | rotate + insertion | the body is routed on fewer bits |
+| at most 8 varying bits, widely spaced | one packed-digit partition | one partition, 256 buckets at most |
 | everything else | top-digit block partition, then tiles | one streaming pass per node level, then cache-resident tiles |

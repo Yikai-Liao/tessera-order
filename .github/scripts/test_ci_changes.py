@@ -26,6 +26,15 @@ class LanguageSelection(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(select([path]), {"rust": True, "cpp": True, "python": True})
 
+    def test_docs_site_tooling_selects_no_language(self):
+        for path in ["docs/.vitepress/config.ts", "docs/.vitepress/theme/sim/digits.ts",
+                     "docs/public/logo.svg", "package.json", "package-lock.json",
+                     ".github/workflows/docs.yml"]:
+            with self.subTest(path=path):
+                self.assertEqual(select([path]), {"rust": False, "cpp": False, "python": False})
+        # Pages remain shared documentation.
+        self.assertEqual(select(["docs/explain/keys.md"]), {"rust": True, "cpp": True, "python": True})
+
     def test_changes_accumulate_across_languages(self):
         self.assertEqual(select(["rust/a.rs", "cpp/b.hpp"]),
                          {"rust": True, "cpp": True, "python": True})

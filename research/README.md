@@ -141,3 +141,8 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   exact source/test patches preserve root transport and the public scanner.
   Initial scan keys fell from 10M to 262,400, but 703 verified full sorts
   established no accepted net gain. Archive only; no runtime adoption.
+
+- [Stable-rank/path restore phase constraints](path-restore-phase-diagnostic/summary.md):
+  two separate 40-call diagnostics place most instrumented restoration in
+  move/join rather than planning. Perturbation remains; neither a speed
+  acceptance nor hardware attribution, and no runtime change.

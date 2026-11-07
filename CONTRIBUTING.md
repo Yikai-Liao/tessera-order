@@ -25,10 +25,7 @@ rustup +nightly component add miri
 cargo +nightly miri test -p tessera-sort
 ```
 
-CI runs the default and `--no-default-features` configurations in parallel.
-Within each configuration, [cargo-nextest](https://nexte.st/docs/integrations/miri/)
-runs each test in its own Miri process so tests can use multiple CPU cores.
-Doctests run separately with `cargo miri test --doc`. To use the same runner locally:
+CI runs the default and `--no-default-features` configurations in parallel. Within each configuration, [cargo-nextest](https://nexte.st/docs/integrations/miri/) runs each test in its own Miri process so tests can use multiple CPU cores. Doctests run separately with `cargo miri test --doc`. To use the same runner locally:
 
 ```sh
 cargo install --locked cargo-nextest --version 0.9.151

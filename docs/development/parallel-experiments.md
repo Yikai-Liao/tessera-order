@@ -264,5 +264,3 @@ serial equality and outlier routes before any partition happens, so
 about 15% on 10M records with 256 distinct values. Removing the serial root above
 would not change that: the whole sort is one materialization pass with no
 independent work behind it.
-
-

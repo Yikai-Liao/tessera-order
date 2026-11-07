@@ -143,25 +143,38 @@ test("refuses failed or non-advancing history rather than presenting a partial t
   await assert.rejects(loadHistory(current, async () => new Response(JSON.stringify(page))), /did not advance/);
 });
 
-test("draws main as each row's axis, colours by side of main and labels only the end runs", () => {
+test("draws main as each row's axis and colours by side of main", () => {
   // Alternating around main's 110 crosses it on every segment.
   const reports = Array.from({ length: 100 }, (_, i) => measured(i, [i % 2 ? 120 : 100], i.toString(16).padStart(40, "0")));
   const current = reports.at(-1)!;
   baselines(current, [110]);
   const trend = summarizeTrend(reports, current, "rust")!;
-  const svg = trendSvg(trend);
+  assert.equal(trend.series.length, 1);
+  const svg = trendSvg([{ name: "Default", trend }])!;
   assert.match(svg, /class="stem-faster"/);
   assert.match(svg, /class="stem-slower"/);
   assert.match(svg, /<line class="axis main"/);
-  assert.match(svg, />main bbbbbbb</);
-  assert.match(svg, />100 ns</);
-  assert.match(svg, />120 ns</);
-  assert.doesNotMatch(svg, />#\d+</);
+  assert.match(svg, />main bbbbbbb · runs 0000000 → 0000000</);
+  assert.match(svg, />Default</);
+  assert.match(svg, />100 runs</);
   assert.doesNotMatch(svg, /SLOWER|FASTER|MOVED/);
-  const labels = svg.match(/<text[^>]*>[^<]*<\/text>/g)!;
-  assert.equal(labels.filter(label => />[a-f0-9]{7}</.test(label)).length, 2);
-  // Overall and the case: two visible end dots each, and a hover target per other run.
-  assert.equal((svg.match(/<circle /g) ?? []).length, 200);
-  assert.equal((svg.match(/<circle class="hit"/g) ?? []).length, 196);
+  // Overall and the case: a first and a latest dot each.
+  assert.equal((svg.match(/<circle /g) ?? []).length, 4);
   assert.doesNotMatch(svg, /NaN|Infinity/);
+});
+
+test("gives a case selected in one build a row in every build", () => {
+  const quiet = Array.from({ length: 3 }, (_, i) => measured(i, [100, 100]));
+  const moving = Array.from({ length: 3 }, (_, i) => measured(i, [100, i === 2 ? 130 : 100]));
+  baselines(quiet.at(-1)!, [100, 100]);
+  baselines(moving.at(-1)!, [100, 100]);
+  const a = summarizeTrend(quiet, quiet.at(-1)!, "rust")!;
+  const b = summarizeTrend(moving, moving.at(-1)!, "rust")!;
+  assert.equal(a.focus.length, 0);
+  assert.equal(b.focus.length, 1);
+  const svg = trendSvg([{ name: "Default", trend: a }, { name: "Portable SIMD", trend: b }])!;
+  // Overall plus the moving case, in both columns: two dots per cell.
+  assert.equal((svg.match(/<circle /g) ?? []).length, 2 * 2 * 2);
+  assert.match(svg, />\+30\.0%</);
+  assert.match(svg, />\+0\.0%</);
 });

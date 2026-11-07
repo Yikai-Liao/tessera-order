@@ -1,4 +1,4 @@
-# 0011: Optional parallel completion of materialized buckets
+# 0012: Optional parallel completion of materialized buckets
 
 Date: 2026-11-07. Status: experimental implementation; performance acceptance pending.
 

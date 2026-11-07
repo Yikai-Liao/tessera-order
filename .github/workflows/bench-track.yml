@@ -39,7 +39,7 @@ jobs:
           script: |
             const { resolveSource } = require('./.github/scripts/bencher/github.ts');
             await resolveSource({ github, context, core });
-      - name: Start the report check
+      - name: Start the report checks
         id: check
         if: steps.source.outputs.eligible == 'true'
         uses: actions/github-script@v9
@@ -48,12 +48,23 @@ jobs:
         with:
           script: |
             const { startReport } = require('./.github/scripts/bencher/github.ts');
-            await startReport({ github, context, core, hash: process.env.HASH });
+            const { VARIANTS } = require('./.github/scripts/bencher/variants.ts');
+            for (const variant of VARIANTS) {
+              await startReport({ github, context, core, hash: process.env.HASH, variant });
+            }
+            core.setOutput('variants', JSON.stringify(VARIANTS));
+      - uses: actions/download-artifact@v4
+        if: steps.source.outputs.eligible == 'true'
+        with:
+          name: bench-rust-default
+          path: artifact/default
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
       - uses: actions/download-artifact@v4
         if: steps.source.outputs.eligible == 'true'
         with:
           name: bench-rust
-          path: artifact
+          path: artifact/portable-simd
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
       - name: Package and push image
@@ -66,8 +77,8 @@ jobs:
         run: |
           # The image definition is trusted; only the executable comes from the build.
           image="registry.bencher.dev/$BENCHER_PROJECT:$TAG"
-          chmod +x artifact/bench
-          printf 'FROM scratch\nCOPY bench /bench\n' \
+          chmod +x artifact/default/bench artifact/portable-simd/bench
+          printf 'FROM scratch\nCOPY default/bench /bench-default\nCOPY portable-simd/bench /bench-portable-simd\n' \
             | docker build --platform linux/amd64 -t "$image" -f - artifact
           printf '%s' "$BENCHER_API_KEY" | docker login registry.bencher.dev \
             --username "$BENCHER_PROJECT" --password-stdin
@@ -91,6 +102,7 @@ jobs:
           BASE_HASH: ${{ steps.source.outputs.base_hash }}
           PR_NUMBER: ${{ steps.source.outputs.number }}
           IMAGE: ${{ steps.image.outputs.reference }}
+          VARIANTS_JSON: ${{ steps.check.outputs.variants }}
         run: |
           if [ -n "$PR_NUMBER" ]; then
             # Compare against the target branch at the PR's base commit.
@@ -103,31 +115,45 @@ jobs:
               --threshold-upper-boundary 0.999 --threshold-lower-boundary 0.999
               --thresholds-reset)
           fi
-          # Waiting for the remote job holds the concurrency slot until it ends.
-          # Free jobs stop at 5 minutes; the suite takes about 130 s locally.
-          bencher run --project "$BENCHER_PROJECT" --key "$BENCHER_API_KEY" \
-            --branch "$BRANCH" --hash "$HASH" \
-            --testbed intel-v1-portable-simd --spec intel-v1 \
-            --image "$IMAGE" --job-timeout 240 \
-            --adapter rust_criterion --format json --quiet \
-            "${args[@]}" --exec -- /bench --bench > "$RUNNER_TEMP/bencher-report.json"
+          # Each configuration gets its own remote job and timeout. A failed
+          # measurement must not prevent measuring the other configuration.
+          while IFS=$'\t' read -r variant testbed; do
+            if bencher run --project "$BENCHER_PROJECT" --key "$BENCHER_API_KEY" \
+              --branch "$BRANCH" --hash "$HASH" \
+              --testbed "$testbed" --spec intel-v1 \
+              --image "$IMAGE" --job-timeout 240 \
+              --adapter rust_criterion --format json --quiet \
+              "${args[@]}" --exec -- "/bench-$variant" --bench > "$RUNNER_TEMP/bencher-$variant.json"; then
+              echo "$variant=success" >> "$GITHUB_OUTPUT"
+            else
+              echo "$variant=failure" >> "$GITHUB_OUTPUT"
+            fi
+          done < <(jq -r '.[] | [.id, .testbed] | @tsv' <<< "$VARIANTS_JSON")
       - name: Publish report
-        if: always() && steps.check.outputs.id
+        if: always() && (steps.check.outputs.default || steps.check.outputs['portable-simd'])
         uses: actions/github-script@v9
         env:
           HASH: ${{ steps.source.outputs.hash }}
           PR_NUMBER: ${{ steps.source.outputs.number }}
           BASE: ${{ steps.source.outputs.base }}
-          CHECK_ID: ${{ steps.check.outputs.id }}
-          OUTCOME: ${{ steps.measure.outcome }}
+          CHECK_DEFAULT: ${{ steps.check.outputs.default }}
+          CHECK_SIMD: ${{ steps.check.outputs['portable-simd'] }}
+          OUTCOME_DEFAULT: ${{ steps.measure.outputs.default }}
+          OUTCOME_SIMD: ${{ steps.measure.outputs['portable-simd'] }}
+          CANCELLED: ${{ job.status == 'cancelled' }}
         with:
           script: |
             const { publishReport } = require('./.github/scripts/bencher/index.ts');
+            const { VARIANTS } = require('./.github/scripts/bencher/variants.ts');
             const env = process.env;
             await publishReport({ github, context, core, inputs: {
               language: "rust", hash: env.HASH, number: env.PR_NUMBER,
-              baseRef: env.BASE || "main", checkId: env.CHECK_ID,
-              // A skipped step means an earlier one failed.
-              outcome: env.OUTCOME === "skipped" ? "failure" : env.OUTCOME,
-              reportPath: `${env.RUNNER_TEMP}/bencher-report.json`,
+              baseRef: env.BASE || "main",
+              variants: VARIANTS.map(variant => ({
+                variant,
+                checkId: variant.id === 'default' ? env.CHECK_DEFAULT : env.CHECK_SIMD,
+                outcome: (variant.id === 'default' ? env.OUTCOME_DEFAULT : env.OUTCOME_SIMD)
+                  || (env.CANCELLED === 'true' ? 'cancelled' : 'failure'),
+                reportPath: `${env.RUNNER_TEMP}/bencher-${variant.id}.json`,
+              })),
             } });

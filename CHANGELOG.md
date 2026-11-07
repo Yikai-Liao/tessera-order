@@ -22,3 +22,7 @@ All notable changes to this project are documented in this file. The format foll
 - Give insertion finishing a unit-returning entry point shared by both backends, and skip portable SIMD dispatch when the existing scan gate guarantees scalar execution.
 - Finish nodes whose remaining variation spans at most eight bits by counting the window when the record is its own key, instead of building block tables and compacting records ([decision 0012](docs/decisions/0012-count-narrow-direct-windows.md)).
 - Derive the block-partition block size from the scratch-versus-tables trade-off instead of a tuned multiple of it, and keep the per-block copy and bookkeeping amortised with a floor in bytes and one in records. The removed factor sat at 2.1 times the minimum auxiliary memory of the scheme; the asymptotic bound is unchanged.
+
+### Fixed
+
+- Use scalar key extraction for insertion finishing in the default build, keeping blocked budgeted probes and the optional SIMD backend ([decision 0013](docs/decisions/0013-scalar-default-insertion-finishing.md)).

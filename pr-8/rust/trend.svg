@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 330" width="720" height="330" role="img" aria-labelledby="t d">
+<title id="t">PR benchmark history: −2.5% run time over 6 runs</title>
+<desc id="d">Change against main 8bab76a on intel-v1, runs 4ed270e to e240a06; Geometric mean of 29 cases measured on main and in every run, −3.2%, −3.1%, −5.4%, −5.6%, −5.7%, −5.7%; u64 · random · 48: main 500 ns, latest 484 ns, +57.8%, +57.0%, −1.8%, −3.4%, −3.4%, −3.2%; u64 · all equal · 65,536: main 26.1 µs, latest 25.2 µs, −4.5%, −4.3%, −9.1%, −4.8%, −2.5%, −3.2%; u64 · random · 49, workspace: main 676 ns, latest 690 ns, +4.9%, +4.9%, +6.8%, +3.1%, +1.8%, +2.0%</desc>
+<style>
+  .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
+  .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
+  .tag { fill: none; stroke: #c9c8c2; }
+  .slower { fill: #e8622f; } .faster { fill: #4a80e6; }
+  .stem-slower { stroke: #e8622f; } .stem-faster { stroke: #4a80e6; }
+  text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; font-feature-settings: "tnum", "cv11"; }
+  .val { font-size: 12px; } .sub { font-size: 11px; } .tiny { font-size: 10px; } .strong { font-weight: 600; }
+  .hero { font-size: 28px; font-weight: 600; letter-spacing: -0.6px; font-feature-settings: "pnum"; }
+  .stat { font-size: 18px; font-weight: 600; }
+  .caps { font-size: 10.5px; font-weight: 600; letter-spacing: 1.1px; }
+  @media (prefers-color-scheme: dark) {
+    .panel { fill: #1e1e1d; stroke: #3a3a37; } .ring { stroke: #1e1e1d; }
+    .ink { fill: #e8e7e3; } .muted { fill: #a3a29b; } .rule { stroke: #30302e; } .axis { stroke: #6f6e69; }
+    .tag { stroke: #4a4a46; }
+  }
+</style>
+<style>
+  .hit { fill: transparent; } .main { stroke-dasharray: 3 3; } .on-main { fill: #8d8c86; }
+  @media (prefers-color-scheme: dark) { .on-main { fill: #6f6e69; } }
+</style>
+<rect class="panel" x="0.5" y="0.5" width="719" height="329" rx="12"/>
+<text class="hero faster" x="24.0" y="50.0">−2.5%</text>
+<text class="ink" x="120.0" y="36.0">run time during this PR</text>
+<text class="muted sub" x="120.0" y="51.0">first to latest run, geometric mean</text>
+<text class="muted sub" x="696.0" y="50.0" text-anchor="end">runs</text>
+<text class="stat ink" x="668.9" y="50.0" text-anchor="end">6</text>
+<line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
+<line class="rule" x1="230.0" x2="230.0" y1="86" y2="286" stroke-width="1"/>
+<text class="muted tiny" x="230.0" y="302.0" text-anchor="middle">4ed270e</text>
+<line class="rule" x1="587.0" x2="587.0" y1="86" y2="286" stroke-width="1"/>
+<text class="muted tiny" x="587.0" y="302.0" text-anchor="middle">e240a06</text>
+<line class="rule" x1="24" x2="696" y1="138" y2="138" stroke-width="1"/>
+<g><title>Geometric mean of 29 cases measured on main and in every run</title>
+<text class="ink strong" x="24.0" y="107.0">Overall</text>
+<text class="muted sub" x="24.0" y="122.0">geometric mean, 29 cases</text>
+<line class="axis main" x1="230" x2="587.0" y1="100.0" y2="100.0" stroke-width="1"/>
+<line class="stem-faster" x1="230.0" y1="113.5" x2="301.4" y2="113.1" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-faster" x1="301.4" y1="113.1" x2="372.8" y2="122.6" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-faster" x1="372.8" y1="122.6" x2="444.2" y2="123.5" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-faster" x1="444.2" y1="123.5" x2="515.6" y2="124.0" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-faster" x1="515.6" y1="124.0" x2="587.0" y2="123.7" stroke-width="2" stroke-linecap="round"/>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b3c1-a1a2-7764-86dc-f237485a8d93"><title>4ed270e · 2026-11-07T02:06:14Z · −3.2% against main</title>
+<circle class="faster ring" cx="230.0" cy="113.5" r="2.5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b3c3-1d05-7528-878f-8e212df3958f"><title>367c1ad · 2026-11-07T02:07:51Z · −3.1% against main</title>
+<circle class="hit" cx="301.4" cy="113.1" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b439-af07-76ba-8c86-02123b1e8aac"><title>a3acde4 · 2026-11-07T04:17:22Z · −5.4% against main</title>
+<circle class="hit" cx="372.8" cy="122.6" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b466-d83a-7488-a75d-909238f8929a"><title>ae0fea0 · 2026-11-07T05:06:41Z · −5.6% against main</title>
+<circle class="hit" cx="444.2" cy="123.5" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b494-1aa0-7214-977d-0b542dab43d1"><title>b961ab1 · 2026-11-07T05:56:07Z · −5.7% against main</title>
+<circle class="hit" cx="515.6" cy="124.0" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b4d8-9271-759d-ad28-349b9bddbef4"><title>e240a06 · 2026-11-07T07:10:54Z · −5.7% against main</title>
+<circle class="faster ring" cx="587.0" cy="123.7" r="5.5" stroke-width="2"/></a>
+<text class="ink strong" x="220.0" y="117.5" text-anchor="end">−3.2%</text>
+<text class="ink strong" x="599.0" y="127.7">−5.7%</text>
+</g>
+<g><title>u64 · random · 48: main 500 ns, latest 484 ns</title>
+<text class="ink" x="24.0" y="165.0">random</text>
+<text class="muted sub" x="24.0" y="180.0">u64 · 48</text>
+<line class="axis main" x1="230" x2="587.0" y1="180.7" y2="180.7" stroke-width="1"/>
+<line class="stem-slower" x1="230.0" y1="158.0" x2="301.4" y2="158.3" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-slower" x1="301.4" y1="158.3" x2="370.6" y2="180.7" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-faster" x1="370.6" y1="180.7" x2="372.8" y2="181.4" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-faster" x1="372.8" y1="181.4" x2="444.2" y2="182.0" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-faster" x1="444.2" y1="182.0" x2="515.6" y2="182.0" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-faster" x1="515.6" y1="182.0" x2="587.0" y2="181.9" stroke-width="2" stroke-linecap="round"/>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b3c1-a1a2-7764-86dc-f237485a8d93"><title>4ed270e · 2026-11-07T02:06:14Z · +57.8% against main</title>
+<circle class="slower ring" cx="230.0" cy="158.0" r="2.5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b3c3-1d05-7528-878f-8e212df3958f"><title>367c1ad · 2026-11-07T02:07:51Z · +57.0% against main</title>
+<circle class="hit" cx="301.4" cy="158.3" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b439-af07-76ba-8c86-02123b1e8aac"><title>a3acde4 · 2026-11-07T04:17:22Z · −1.8% against main</title>
+<circle class="hit" cx="372.8" cy="181.4" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b466-d83a-7488-a75d-909238f8929a"><title>ae0fea0 · 2026-11-07T05:06:41Z · −3.4% against main</title>
+<circle class="hit" cx="444.2" cy="182.0" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b494-1aa0-7214-977d-0b542dab43d1"><title>b961ab1 · 2026-11-07T05:56:07Z · −3.4% against main</title>
+<circle class="hit" cx="515.6" cy="182.0" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b4d8-9271-759d-ad28-349b9bddbef4"><title>e240a06 · 2026-11-07T07:10:54Z · −3.2% against main</title>
+<circle class="faster ring" cx="587.0" cy="181.9" r="4" stroke-width="2"/></a>
+<text class="muted sub" x="220.0" y="162.0" text-anchor="end">789 ns</text>
+<text class="muted sub" x="599.0" y="185.9">484 ns</text>
+<text class="val ink" x="696.0" y="171.0" text-anchor="end">−3.2%</text>
+</g>
+<g><title>u64 · all equal · 65,536: main 26.1 µs, latest 25.2 µs</title>
+<text class="ink" x="24.0" y="211.0">all equal</text>
+<text class="muted sub" x="24.0" y="226.0">u64 · 65,536</text>
+<line class="axis main" x1="230" x2="587.0" y1="204.0" y2="204.0" stroke-width="1"/>
+<line class="stem-faster" x1="230.0" y1="215.9" x2="301.4" y2="215.4" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-faster" x1="301.4" y1="215.4" x2="372.8" y2="228.0" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-faster" x1="372.8" y1="228.0" x2="444.2" y2="216.8" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-faster" x1="444.2" y1="216.8" x2="515.6" y2="210.7" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-faster" x1="515.6" y1="210.7" x2="587.0" y2="212.4" stroke-width="2" stroke-linecap="round"/>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b3c1-a1a2-7764-86dc-f237485a8d93"><title>4ed270e · 2026-11-07T02:06:14Z · −4.5% against main</title>
+<circle class="faster ring" cx="230.0" cy="215.9" r="2.5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b3c3-1d05-7528-878f-8e212df3958f"><title>367c1ad · 2026-11-07T02:07:51Z · −4.3% against main</title>
+<circle class="hit" cx="301.4" cy="215.4" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b439-af07-76ba-8c86-02123b1e8aac"><title>a3acde4 · 2026-11-07T04:17:22Z · −9.1% against main</title>
+<circle class="hit" cx="372.8" cy="228.0" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b466-d83a-7488-a75d-909238f8929a"><title>ae0fea0 · 2026-11-07T05:06:41Z · −4.8% against main</title>
+<circle class="hit" cx="444.2" cy="216.8" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b494-1aa0-7214-977d-0b542dab43d1"><title>b961ab1 · 2026-11-07T05:56:07Z · −2.5% against main</title>
+<circle class="hit" cx="515.6" cy="210.7" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b4d8-9271-759d-ad28-349b9bddbef4"><title>e240a06 · 2026-11-07T07:10:54Z · −3.2% against main</title>
+<circle class="faster ring" cx="587.0" cy="212.4" r="4" stroke-width="2"/></a>
+<text class="muted sub" x="220.0" y="219.9" text-anchor="end">24.9 µs</text>
+<text class="muted sub" x="599.0" y="216.4">25.2 µs</text>
+<text class="val ink" x="696.0" y="217.0" text-anchor="end">−3.2%</text>
+</g>
+<g><title>u64 · random · 49, workspace: main 676 ns, latest 690 ns</title>
+<text class="ink" x="24.0" y="257.0">random</text>
+<rect class="tag" x="74.5" y="246" width="62.7" height="14" rx="7" stroke-width="1"/>
+<text class="muted tiny" x="105.8" y="256.0" text-anchor="middle">workspace</text>
+<text class="muted sub" x="24.0" y="272.0">u64 · 49</text>
+<line class="axis main" x1="230" x2="587.0" y1="274.0" y2="274.0" stroke-width="1"/>
+<line class="stem-slower" x1="230.0" y1="256.7" x2="301.4" y2="256.5" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-slower" x1="301.4" y1="256.5" x2="372.8" y2="250.0" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-slower" x1="372.8" y1="250.0" x2="444.2" y2="263.2" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-slower" x1="444.2" y1="263.2" x2="515.6" y2="267.5" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-slower" x1="515.6" y1="267.5" x2="587.0" y2="267.1" stroke-width="2" stroke-linecap="round"/>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b3c1-a1a2-7764-86dc-f237485a8d93"><title>4ed270e · 2026-11-07T02:06:14Z · +4.9% against main</title>
+<circle class="slower ring" cx="230.0" cy="256.7" r="2.5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b3c3-1d05-7528-878f-8e212df3958f"><title>367c1ad · 2026-11-07T02:07:51Z · +4.9% against main</title>
+<circle class="hit" cx="301.4" cy="256.5" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b439-af07-76ba-8c86-02123b1e8aac"><title>a3acde4 · 2026-11-07T04:17:22Z · +6.8% against main</title>
+<circle class="hit" cx="372.8" cy="250.0" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b466-d83a-7488-a75d-909238f8929a"><title>ae0fea0 · 2026-11-07T05:06:41Z · +3.1% against main</title>
+<circle class="hit" cx="444.2" cy="263.2" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b494-1aa0-7214-977d-0b542dab43d1"><title>b961ab1 · 2026-11-07T05:56:07Z · +1.8% against main</title>
+<circle class="hit" cx="515.6" cy="267.5" r="5" stroke-width="1.5"/></a>
+<a href="https://bencher.dev/perf/yikai-liao-s-project/reports/01a1b4d8-9271-759d-ad28-349b9bddbef4"><title>e240a06 · 2026-11-07T07:10:54Z · +2.0% against main</title>
+<circle class="slower ring" cx="587.0" cy="267.1" r="4" stroke-width="2"/></a>
+<text class="muted sub" x="220.0" y="260.7" text-anchor="end">709 ns</text>
+<text class="muted sub" x="599.0" y="271.1">690 ns</text>
+<text class="val ink" x="696.0" y="263.0" text-anchor="end">+2.0%</text>
+</g>
+<line class="axis main" x1="24" x2="38" y1="315" y2="315" stroke-width="1"/>
+<text class="muted sub" x="44.0" y="319.0">main 8bab76a</text>
+<text class="faster sub" x="134.4" y="319.0">↓ less time</text>
+<text class="slower sub" x="204.4" y="319.0">↑ more time</text>
+<text class="muted tiny" x="696.0" y="319.0" text-anchor="end">each row on its own scale</text>
+</svg>

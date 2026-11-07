@@ -94,7 +94,7 @@ jobs:
           if [ -n "$PR_NUMBER" ]; then
             # Compare against the target branch at the PR's base commit.
             args=(--start-point "$BASE" --start-point-hash "$BASE_HASH"
-              --start-point-clone-thresholds --start-point-reset --ci-number "$PR_NUMBER")
+              --start-point-clone-thresholds --start-point-reset)
           else
             # A t-test against recent main history: noisy cases get wider limits.
             args=(--threshold-measure latency --threshold-test t_test

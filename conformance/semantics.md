@@ -57,7 +57,7 @@ In Rust, the heap memory comes from `alloc`, so a `no_std` build needs a global 
 
 The optional `rayon` feature enables `std` and exposes `par_stable_sort` and `par_stable_sort_by_key`. Small inputs and one-thread pools use the serial engine; large inputs partition the root serially and sort complete root buckets in the caller's pool. Both entry points preserve ordering, stability, records and panic recovery ([proposal](../docs/proposals/rayon-parallel-sort.md)).
 
-Parallel calls use O(√n) auxiliary scratch for fixed record size and key width: the root fan-out is bounded by 256 buckets, so per-bucket workspaces remain bounded independently of pool width. They do not allocate an n-record buffer. Records require `Send` but do not require `Sync`. The by-key entry point requires `Fn + Sync` rather than `FnMut`; key evaluations may run concurrently and in any order. The serial APIs and `Workspace` retain their existing bounds.
+Parallel calls use O(√n) auxiliary scratch for fixed record size and key width: the root digit is bounded by 12 bits (4096 buckets), so per-bucket workspaces remain bounded independently of pool width. They do not allocate an n-record buffer. Records require `Send` but do not require `Sync`. The by-key entry point requires `Fn + Sync` rather than `FnMut`; key evaluations may run concurrently and in any order. The serial APIs and `Workspace` retain their existing bounds.
 
 ## Language adapters
 

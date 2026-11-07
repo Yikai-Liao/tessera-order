@@ -146,6 +146,26 @@ fn mix(value: u64) -> u64 {
 }
 
 #[test]
+fn sparse_root_keeps_stability() {
+    const LEN: usize = 70_000;
+
+    let keys: Vec<_> = (0..64).map(mix).collect();
+    let mut rows: Vec<_> = (0..LEN as u32)
+        .map(|id| (keys[(mix(u64::from(id)) % keys.len() as u64) as usize], id))
+        .collect();
+    let mut expected = rows.clone();
+    expected.sort_by_key(|row| row.0);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+
+    pool.install(|| par_stable_sort_by_key(&mut rows, |row| row.0));
+
+    assert_eq!(rows, expected);
+}
+
+#[test]
 fn changing_keys_keep_records() {
     let mut records: Vec<_> = (0..16_384u32).map(Box::new).collect();
     let calls = AtomicUsize::new(0);

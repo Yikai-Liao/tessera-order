@@ -19,9 +19,11 @@ use crate::{RadixKey, engine};
 ///
 /// # Memory
 ///
-/// Scratch remains O(√n) for fixed record size and key width. The root's
-/// partition scratch stays live during compaction; at most 256 child jobs can
-/// retain workspaces, bounded by the root digit's eight-bit fan-out.
+/// Scratch remains O(√n) for fixed record size and key width. The root digit is
+/// at most 12 bits, so at most 4096 child jobs can retain workspaces. If job
+/// `i` holds `mᵢ` records, their disjoint inputs give
+/// `Σ√mᵢ ≤ √(4096n)`; the root partition scratch and fixed-size tile buffers
+/// preserve the same bound.
 ///
 /// # Examples
 ///
@@ -43,10 +45,10 @@ pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
 ///
 /// # Key function
 ///
-/// `key` must implement `Fn + Sync` so tasks can borrow it concurrently once
-/// scheduling is implemented. It does not need `Send` or `Clone`. It may be
-/// called several times per record, in any order, and should return the same
-/// key for a record throughout the call. Inconsistent keys leave the result's
+/// `key` must implement `Fn + Sync` so Rayon jobs can borrow it concurrently.
+/// It does not need `Send` or `Clone`. It may be called several times per
+/// record, in any order, and should return the same key for a record throughout
+/// the call. Inconsistent keys leave the result's
 /// order unspecified, with every record still present exactly once.
 ///
 /// # Panics
@@ -58,9 +60,9 @@ pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
 ///
 /// # Memory
 ///
-/// Scratch remains O(√n) for fixed record size and key width. Root partition
-/// scratch stays live while child jobs run; the eight-bit root digit bounds
-/// the pool to at most 256 job workspaces.
+/// Scratch remains O(√n) for fixed record size and key width. The root digit is
+/// at most 12 bits, bounding the pool to 4096 job workspaces; fixed fan-out
+/// keeps their combined scratch O(√n).
 ///
 /// # Examples
 ///

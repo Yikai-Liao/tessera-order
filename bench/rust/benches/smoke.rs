@@ -7,20 +7,24 @@
 //! Runners in other languages use the same case IDs under their own prefix.
 
 use criterion::{BatchSize, Criterion};
-use std::cmp::Ordering;
 use std::hint::black_box;
 use std::time::Duration;
+use tessera_bench::case::{Key, Row, generate};
+use tessera_sort::Workspace;
 use tessera_sort::thresholds::{INSERTION_MAX, TILE_BYTES};
-use tessera_sort::{RadixKey, Workspace};
 
 /// Elements prepared per Criterion batch, so the cache footprint of a batch
 /// is the same for every length and does not depend on measured timings.
 const BATCH_ELEMENTS: usize = 1 << 18;
 
+/// Length spanning several tiles in the continuous suite.
 const MID: usize = 65_536;
+/// Length used for measured engine decisions.
 const LARGE: usize = 1_000_000;
+/// Length exercising the out-of-cache block partition.
 const HUGE: usize = 10_000_000;
 
+/// Registers the continuous suite's fixed case IDs and allocation modes.
 fn suite(c: &mut Criterion) {
     // Insertion limit, one past it, and one past the tile capacity for 8- and
     // 16-byte records. Cases this short move with code placement, so only the
@@ -83,188 +87,7 @@ fn suite(c: &mut Criterion) {
     keys::<u64>(c, "zipf2", HUGE, false);
 }
 
-/// A key type with a name for case IDs and an exact equality for validation.
-trait Key: RadixKey + Copy {
-    const NAME: &'static str;
-    /// Draws from the type's whole bit range.
-    fn draw(rng: &mut SplitMix64) -> Self;
-    /// Draws a key above every `small` value that differs from them in the
-    /// highest varying bit.
-    fn draw_high(rng: &mut SplitMix64) -> Self;
-    /// Converts a value below `2^32` exactly.
-    fn small(value: u64) -> Self;
-    /// The `k`-th of ten values spread over the whole key, `k` in `0..10`.
-    fn tenth(k: u64) -> Self;
-    fn order(&self, other: &Self) -> Ordering;
-    fn same(&self, other: &Self) -> bool;
-}
-
-macro_rules! int_key {
-    ($t:ty, $draw:expr) => {
-        impl Key for $t {
-            const NAME: &'static str = stringify!($t);
-            fn draw(rng: &mut SplitMix64) -> Self {
-                $draw(rng)
-            }
-            fn draw_high(rng: &mut SplitMix64) -> Self {
-                Self::draw(rng) | 1 << (<$t>::BITS - 1)
-            }
-            fn small(value: u64) -> Self {
-                value as $t
-            }
-            fn tenth(k: u64) -> Self {
-                <$t>::MAX / 10 * k as $t
-            }
-            fn order(&self, other: &Self) -> Ordering {
-                self.cmp(other)
-            }
-            fn same(&self, other: &Self) -> bool {
-                self == other
-            }
-        }
-    };
-}
-
-int_key!(u32, |rng: &mut SplitMix64| rng.next() as u32);
-int_key!(u64, |rng: &mut SplitMix64| rng.next());
-int_key!(u128, |rng: &mut SplitMix64| {
-    (u128::from(rng.next()) << 64) | u128::from(rng.next())
-});
-
-impl Key for f64 {
-    const NAME: &'static str = "f64";
-    // Arbitrary bit patterns include NaNs, infinities and subnormals.
-    fn draw(rng: &mut SplitMix64) -> Self {
-        f64::from_bits(rng.next())
-    }
-    // Positive NaNs and +inf have the exponent's top bit set; every `small`
-    // value is below 2^32 and has it clear.
-    fn draw_high(rng: &mut SplitMix64) -> Self {
-        f64::from_bits(0x7ff0_0000_0000_0000 | rng.next() >> 12)
-    }
-    fn small(value: u64) -> Self {
-        value as f64
-    }
-    // k · 2^1020 is exact and stays finite for k < 16.
-    fn tenth(k: u64) -> Self {
-        k as f64 * f64::from_bits(0x7fb0_0000_0000_0000)
-    }
-    fn order(&self, other: &Self) -> Ordering {
-        self.total_cmp(other)
-    }
-    fn same(&self, other: &Self) -> bool {
-        self.to_bits() == other.to_bits()
-    }
-}
-
-/// A row: a key and the record's original index, so validation also checks
-/// that records are permuted and that equal keys keep their order.
-#[derive(Clone, Copy)]
-struct Row<K> {
-    key: K,
-    row: u32,
-}
-
-struct SplitMix64(u64);
-
-impl SplitMix64 {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        z ^ (z >> 31)
-    }
-}
-
-/// Generates seed-1 inputs with integer arithmetic only.
-fn generate<K: Key>(distribution: &str, len: usize) -> Vec<K> {
-    let mut rng = SplitMix64(1);
-    let n = len as u64;
-    match distribution {
-        "random" => (0..len).map(|_| K::draw(&mut rng)).collect(),
-        "d16" => (0..len).map(|_| K::small(rng.next() % 16)).collect(),
-        "zipf2" => {
-            // Zipf with s = 2 over ranks 0..len: rank k has weight
-            // floor(2^62 / (k + 1)^2). Rank 0 holds about 61% of the keys.
-            let mut total = 0;
-            let cdf: Vec<u64> = (1..=n)
-                .map(|k| {
-                    total += (1 << 62) / (k * k);
-                    total
-                })
-                .collect();
-            (0..len)
-                .map(|_| {
-                    let r = ((u128::from(rng.next()) * u128::from(total)) >> 64) as u64;
-                    K::small(cdf.partition_point(|&c| c <= r) as u64)
-                })
-                .collect()
-        }
-        "skew99" => {
-            // Ten values spread over the whole key; the smallest takes 99% of
-            // the records and the other nine share the rest. The spread keeps
-            // the minority apart in the top digit.
-            (0..len)
-                .map(|_| {
-                    if rng.next() % 100 < 99 {
-                        K::tenth(0)
-                    } else {
-                        K::tenth(1 + rng.next() % 9)
-                    }
-                })
-                .collect()
-        }
-        "two_values" => (0..len)
-            .map(|_| K::tenth(if rng.next() >> 63 == 0 { 0 } else { 9 }))
-            .collect(),
-        "sparse8" => {
-            // Each record picks one of eight full-width keys at random, so
-            // the sample of runs is not periodic.
-            let values: Vec<K> = (0..8).map(|_| K::draw(&mut rng)).collect();
-            (0..len)
-                .map(|_| values[(rng.next() % 8) as usize])
-                .collect()
-        }
-        "sorted_tail" => {
-            // Ascending, then the last len / 128 records drawn above them.
-            let tail = len / 128;
-            let mut values: Vec<K> = (0..(n - tail as u64)).map(K::small).collect();
-            values.extend((0..tail).map(|_| K::draw_high(&mut rng)));
-            values
-        }
-        "runs" => {
-            // Consecutive runs of 16 to 2,063 random keys, each sorted
-            // ascending or descending with equal odds.
-            let mut values: Vec<K> = (0..len).map(|_| K::draw(&mut rng)).collect();
-            let mut start = 0;
-            while start < len {
-                let end = len.min(start + 16 + (rng.next() % 2048) as usize);
-                let run = &mut values[start..end];
-                run.sort_by(K::order);
-                if rng.next() >> 63 == 1 {
-                    run.reverse();
-                }
-                start = end;
-            }
-            values
-        }
-        "sorted" => (0..n).map(K::small).collect(),
-        "reverse" => (0..n).rev().map(K::small).collect(),
-        "sorted99" => {
-            // Ascending, with len / 100 evenly spaced adjacent swaps.
-            let mut values: Vec<u64> = (0..n).collect();
-            let step = (len / (len / 100).max(1)).max(2);
-            for i in (0..len.saturating_sub(1)).step_by(step) {
-                values.swap(i, i + 1);
-            }
-            values.into_iter().map(K::small).collect()
-        }
-        "equal" => vec![K::small(1); len],
-        _ => unreachable!("unknown distribution {distribution}"),
-    }
-}
-
+/// Measures a scalar-key case with the public API and optional workspace.
 fn keys<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bool) {
     let input = generate::<K>(distribution, len);
     let mut expected = input.clone();
@@ -287,6 +110,7 @@ fn keys<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bo
     }
 }
 
+/// Measures a keyed-row case while checking stable payload order.
 fn rows<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bool) {
     let input: Vec<Row<K>> = generate::<K>(distribution, len)
         .into_iter()
@@ -315,6 +139,7 @@ struct Wide {
 }
 
 impl Wide {
+    /// Creates a wide record carrying its original index.
     fn new(key: u64, index: usize) -> Self {
         let mut payload = [0u8; 120];
         payload[..8].copy_from_slice(&(index as u64).to_le_bytes());
@@ -387,6 +212,7 @@ fn measure<T: Copy>(
     group.finish();
 }
 
+/// Runs the Criterion suite with command-line case selection.
 fn main() {
     let mut criterion = Criterion::default().without_plots().configure_from_args();
     suite(&mut criterion);

@@ -12,7 +12,10 @@
     "docs:typecheck": "vue-tsc --noEmit -p docs/.vitepress",
     "docs:test": "node --test \"docs/.vitepress/theme/sim/*.test.ts\"",
     "scripts:typecheck": "tsc --noEmit -p .github/scripts",
-    "scripts:test": "node --test \".github/scripts/bencher/*.test.ts\""
+    "scripts:test": "node --test \".github/scripts/bencher/*.test.ts\"",
+    "bench:report": "node bench/report/index.ts",
+    "bench:test": "node --test \"bench/report/*.test.ts\"",
+    "bench:typecheck": "tsc --noEmit -p bench/report"
   },
   "devDependencies": {
     "@actions/github": "^9.1.1",

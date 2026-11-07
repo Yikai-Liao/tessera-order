@@ -37,21 +37,39 @@ History and alerts are available on the [public Bencher dashboard](https://bench
 - **Job summary** of the tracking run, for `main` and PRs.
 - **PR comment** for each measured head. A rerun of the same head updates its comment. A new head gets a new comment at the end of the timeline, and earlier reports (including comments from `bencher run --github-actions`) are minimized as outdated. That way the newest result is the visible one, and the PR shows one expanded report however often it is pushed. If the PR moves on while a run is queued, the stale result goes to the job summary only.
 
-The scripts run directly on Node.js 24. `report.ts` defines the Bencher result model and computes the summary, `chart.ts` generates the SVG, `markdown.ts` renders the report text, and `github.ts` resolves commits and publishes checks and comments. Run `npm ci`, `npm run scripts:typecheck` and `npm run scripts:test` to check them.
+The scripts run directly on Node.js 24. `report.ts` owns the result model and current comparison; `history.ts` loads and normalizes PR history. `chart.ts` and `trend-chart.ts` share the SVG styles and text metrics in `svg.ts`. `markdown.ts` formats the report; `images.ts` publishes generated SVGs; `github.ts` resolves commits and manages checks and comments. Run `npm ci`, `npm run scripts:typecheck` and `npm run scripts:test` to check them.
 
 A comment is written to be read top-down:
 
 1. The title counts slower, faster and new cases. It is also the check title.
-2. A red caution box names the worst slowdown and asks for a rerun or a controlled measurement before merging. A green tip box names the best speedup and counts the changes of 20% or more.
-3. An overall line gives the change in run time as the geometric mean of current/baseline over all compared cases, so a halving counts the same on a short and a long case. The measured commit, the base commit and the Testbed follow.
-4. Tables of the slower and the faster cases give the case, baseline, current time and change. Changes of 20% or more are bold. Each input links to its public history chart; the link title holds the benchmark ID.
-5. New cases without a baseline, two data links, and a collapsed table of all cases with their limits and IDs come last.
+2. A caution box names the worst slowdown. A tip names the best speedup and counts changes of 20% or more.
+3. Two embedded charts follow: the comparison of the current run with main, and on a PR, how the PR's own runs moved against main.
+4. An overall line gives the change against main as the geometric mean of current/baseline over all compared cases.
+5. Slower and faster tables separate input, key type, record count and allocation mode into columns. Changes of 20% or more are bold. Each input links to its public history chart; its link title holds the benchmark ID.
+6. A small line counts new cases without a baseline; their details remain in the collapsed All Cases table.
+7. A compact footer holds the measured and base commits, Testbed and links to the workflow run, the Bencher report, its JSON and the alerted cases' history.
 
-Every change is the signed change in run time, such as −37.4%: minus means less time. Cases are named in words, `u64 · 99% sorted · 65,536`, rather than by benchmark ID. Seed 1 and the `api` mode are left out; other seeds and modes are named. The 20% tier only changes how a change is shown; the threshold model alone decides what is alerted. The baseline is the threshold model's mean of `main` samples up to the base commit, not a single run of the base commit.
+Every change is the signed change in run time, such as −37.4%: minus means less time. The 20% tier only changes emphasis; the threshold model alone decides alerts. The baseline is the threshold model's mean of `main` samples up to the base commit, not a single run of the base commit.
 
-For runs with alerts, the workflow uploads an SVG chart as the `benchmark-chart-rust` artifact. The chart shows the overall change and each alerted case on a shared scale.
+The comparison chart draws every slower case. Faster cases that changed by less than 5% (`FOLD_FASTER_BELOW` in `chart.ts`) share one line, such as "2 more faster, each by less than 5%", so the chart grows with notable changes rather than with the suite; the headline counts and the All Cases table still include them. If folding would leave the chart empty, the small speedups are drawn instead.
 
-The data links point at Bencher's public API and need no login: the report JSON holds every case with its baseline and limits, and the history JSON holds each sample of the alerted cases on `main` and the PR branch.
+### Report images
+
+Comments need image URLs, and Actions artifacts are ZIP downloads, so the tracking job publishes each SVG itself. It has `contents: write` and commits the generated SVGs to the separate `benchmark-images` branch, under `pr-<number>/<language>/` or `main/<language>/`. The comment embeds them from `raw.githubusercontent.com` at that image commit, which GitHub serves as `image/svg+xml` and embeds without a redirect. Pinning the commit keeps the images of earlier comments unchanged. The workflow's shared concurrency group serializes image writers, and branch updates never force-push. Raw report data stays in Bencher. See [decision 0009](../decisions/0009-benchmark-report-images-and-history.md).
+
+### PR history
+
+History comes from Bencher's report-list API, filtered by PR branch and Testbed, across every reset branch head. Only completed reports with the current hardware spec are compared, up to the current report's measurement time. Report UUIDs distinguish same-commit reruns.
+
+Every run is compared with main's baseline from the latest report: the same reference as the comparison chart, fixed for the whole history. An earlier run on an older base therefore shows how far that code was from the main the PR would merge into, and rebases or force pushes need no special handling. Cases without a main baseline are left to the table. Every point uses the same set of cases, those with a baseline and a positive value in every run, so a case added to or removed from the suite changes the whole chart, never one point.
+
+- The headline is the change from the first to the latest PR run, as a geometric mean over that set.
+- The Overall row shows the geometric mean against main at its first and latest run; its right end matches the comparison chart's headline when both cover the same cases.
+- A case is drawn when its swing within the PR, the ratio of its largest to its smallest PR value minus one, reaches 5% (`MIN_SWING` in `history.ts`), or when it still has an upper alert. A regression fixed later in the PR therefore stays visible here though the comparison no longer shows it. The swing is a ratio of PR values, so a case far from main does not magnify its rerun noise. There is no row cap; rows run from the largest swing down.
+- Each row has its own vertical scale, spanning at least 5% and including main, so a small swing does not fill the row. Main is the row's dashed axis. The line is blue while the run takes less time than main and orange while it takes more, so it changes colour only where it crosses main. The ends carry measured times, or percentages for Overall.
+- Only the first and latest runs have visible dots and commit labels. Every other run is a vertex of the line with a hover target linking to its Bencher report.
+
+History loading and image publication are supplemental: failures are logged and linked in the footer without changing the current measurement's verdict. Neither this descriptive history nor the continuous comparison replaces the A/A and placement controls of the full benchmark protocol.
 
 The tracking workflow runs from `main`, so a PR that changes `bench-track.yml` or this script is still reported by the version on `main`. Check the Testbed in the comment when a PR changes the build.
 

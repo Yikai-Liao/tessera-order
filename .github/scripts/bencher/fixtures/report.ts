@@ -23,8 +23,10 @@ function result(name: string, value: number, boundary: Boundary | null) {
 export function fixture(): BencherReport {
   return {
     uuid: "r-1",
+    start_time: "2026-11-07T02:00:00Z",
+    end_time: "2026-11-07T02:01:00Z",
     project: { slug: "proj" },
-    testbed: { uuid: "t-1", name: "intel-v1" },
+    testbed: { uuid: "t-1", name: "intel-v1", spec: { uuid: "spec-1" } },
     branch: {
       uuid: "br-pr", name: "pr-8",
       head: {

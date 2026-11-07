@@ -42,14 +42,27 @@ The runner's output directory is the source of truth. The report reads nothing e
 
 ```text
 DIR/
-  manifest.json      commit, rustc -vV, flags and features, variant versions and source commits, suite version
-  host.json          CPU model, cores, kernel, frequency governor, turbo and SMT state, other load
-  blocks.jsonl       one line per sample: case, variant, build, block, slot, batch, elapsed time, verified
+  manifest.json      build provenance (below) and the suite version
+  host.json          the host fingerprint: machine, CPU model and topology, kernel, governor, turbo, SMT, CPU affinity
+  blocks.jsonl       one line per sample: case, variant, build, block, slot, batch, elapsed time, verified;
+                     and one observation line at the start and end of each group
   bmf.json           summaries in Bencher Metric Format, for optional upload
   memory.jsonl       peak extra bytes per case and variant
 ```
 
-The runner writes all of it: build information comes from `build.rs` and `sources.toml`, host conditions from `/proc` and `/sys`. It never changes the host. The [Benchmarking](../development/benchmarking.md#build-profiles) page will list the recommended setup (performance governor, turbo boost and SMT off where the machine allows, an otherwise idle system, the run pinned to one core); the report prints the recorded conditions in its header and marks any that differ from the recommendation. A run interrupted part-way resumes with `--group`, and the report fails if `host.json` differs between the parts.
+The runner writes all of it: build information comes from `build.rs` and `sources.toml`, host conditions from `/proc` and `/sys`. It never changes the host.
+
+`manifest.json` records everything that shapes the compiled code, so any number can be traced to how it was built:
+
+| Part | Fields |
+|---|---|
+| Rust | commit and whether the tree was clean, `rustc -vV`, target, `RUSTFLAGS`, profile, Cargo features per executable |
+| Native | C and C++ compiler and version, target, `CFLAGS`, `CXXFLAGS`, linker and relevant link flags |
+| Per variant | crate version or source repository and commit, source SHA-256, and options specific to it, such as the libraries IPS⁴o is linked without |
+
+`build.rs` compiles the native sources with fixed flags and the same baseline target as the Rust code, never `-march=native`; the IPS⁴o and IPS²Ra CMake files would otherwise optimize for the build machine. VQSort and x86-simd-sort still choose their instruction set at run time, which the report names.
+
+The host has two kinds of state. The **fingerprint** in `host.json` describes the environment and does not change while it stays the same environment. **Observations** change from minute to minute: load average, temperature where it can be read, observed CPU frequency, memory pressure. Each group records an observation at its start and end in `blocks.jsonl`. The [Benchmarking](../development/benchmarking.md#build-profiles) page will list the recommended setup (performance governor, turbo boost and SMT off where the machine allows, an otherwise idle system, the run pinned to one core); the report prints the recorded conditions in its header and marks any that differ from the recommendation. A run interrupted part-way resumes with `--group`. Parts can be merged only if their fingerprints are equal, and the report fails otherwise. Observations never block a merge: the report warns where a group's load, temperature or frequency stands out from the run's other groups.
 
 ### Measurement
 
@@ -82,8 +95,8 @@ The Rust crates alone would leave out the fastest single-threaded sorts known, w
 |---|---|---|---|---|---|
 | `clausecker` | Robert Clausecker's [`radsort`](https://github.com/clausecker/radsort), `radixsort_permuted.c`: the O(√n) stable LSD sort Tessera's block partition comes from | yes | O(√n) | Q2, Q4 | keys, rows |
 | `fluxsort` | [scandum/fluxsort](https://github.com/scandum/fluxsort), stable quicksort and merge hybrid | yes | n | Q1, Q2 | keys, rows, records |
-| `ips2ra` | IPS²Ra, in-place parallel super scalar radix sort, sequential entry point | no | O(1) in n | Q3 | keys, rows |
-| `ips4o` | [IPS⁴o](https://github.com/ips4o/ips4o), in-place samplesort, sequential entry point | no | O(1) in n | Q3 | keys, rows, records |
+| `ips2ra` | [IPS²Ra](https://github.com/ips4o/ips2ra), in-place super scalar radix sort: `ips2ra::sort`, compiled without its parallel libraries | no | O(1) in n | Q3 | keys, rows |
+| `ips4o` | [IPS⁴o](https://github.com/ips4o/ips4o), in-place samplesort: `ips4o::sort`, compiled without its parallel libraries | no | O(1) in n | Q3 | keys, rows, records |
 | `vqsort` | VQSort from [Highway](https://github.com/google/highway), SIMD quicksort with runtime dispatch | no | O(1) | Q3 | `u32`, `u64`, `f64` keys; `{u64, u64}` pairs |
 | `x86simdsort` | [x86-simd-sort](https://github.com/numpy/x86-simd-sort), AVX2 and AVX-512 quicksort, runtime dispatch | no | O(1) | Q3 | keys; key-value pairs |
 | `crumsort` | [scandum/crumsort](https://github.com/scandum/crumsort), branchless unstable quicksort | no | O(1) | Q3 | keys, rows, records |
@@ -99,7 +112,7 @@ Rules:
 - **Default configuration.** No variant enables crate features that change its algorithm.
 - **Pinned versions.** Crates are pinned with `=x.y.z` in `bench/rust/Cargo.toml`, C and C++ sources by commit and SHA-256; both are upgraded deliberately, and the version or commit appears in the report.
 - **Sources stay out.** Third-party C and C++ sources are fetched into an ignored directory, never committed or copied into the shims ([decision 0001](../decisions/0001-single-bsd-2-clause-license.md)). Each license is checked when its commit is pinned, because the executable links the code and the results archive names it.
-- **No parallel sorting.** Tessera is single-threaded, so the comparison is too. Every variant runs on one thread: crates without their thread features (`rdst` without `multi-threaded`, `voracious` without `voracious_multithread`), IPS²Ra and IPS⁴o through their sequential entry points, built without their parallel runtime, and nothing that needs a thread pool. Sorts that are only parallel, such as Dovetail sort, are left out. The runner checks this: it counts the process's threads after every variant's first sort and fails the run if any variant started one.
+- **No parallel sorting.** Tessera is single-threaded, so the comparison is too. Every variant runs on one thread: crates without their thread features (`rdst` without `multi-threaded`, `voracious` without `voracious_multithread`), IPS²Ra and IPS⁴o through `ips2ra::sort` and `ips4o::sort`, compiled by `build.rs` without TBB, OpenMP or the threads library, which is what their CMake options `IPS2RA_DISABLE_PARALLEL` and `IPS4O_DISABLE_PARALLEL` do, and nothing that needs a thread pool. Sorts that are only parallel, such as Dovetail sort, are left out. The runner checks this: it counts the process's threads after every variant's first sort and fails the run if any variant started one.
 - **Not included.** `sort_by_cached_key` (it answers a key-cost question, not a sort question); string and comparator sorts (Tessera does not support them).
 
 ## Inputs
@@ -317,4 +330,3 @@ Bencher's self-hosted runners and a self-hosted Bencher server could serve the s
 ## Open questions
 
 - **A u64 key with 32 varying bits.** Many real `u64` keys are IDs or timestamps whose high bits are constant. A `low32` distribution would show varying-bit skipping on such data; it is not in the generator yet.
-- **IPS²Ra's pinned source.** IPS²Ra's repository and license must be confirmed before it is pinned; it joins only if its sequential entry point builds without the parallel runtime.

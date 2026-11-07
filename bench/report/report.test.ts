@@ -141,7 +141,7 @@ test("invalid samples fail validation", () => {
 test("figures preserve plotted values", () => {
   const dataset = createFixture(),
     charts = renderFigures(dataset, summarize(dataset));
-  assert.equal(charts.length, 6);
+  assert.equal(charts.length, 5);
   for (const chart of charts) {
     assert.match(chart.svg, /width="\d+"/);
     assert.match(chart.svg, /<title id="t">/);
@@ -150,11 +150,13 @@ test("figures preserve plotted values", () => {
   }
   assert.deepEqual(
     charts.map((c) => c.name),
-    ["ranking", "inputs", "radix", "short", "types", "memory"],
+    ["ranking", "inputs", "short", "types", "memory"],
   );
   assert.ok(charts[0].table.indexOf("vqsort") < charts[0].table.indexOf("Tessera"));
   assert.match(charts[0].svg, /long-stable-variant-name/);
-  assert.match(charts[2].table, /Tessera slower/);
+  // vqsort is always faster in the fixture, and radsort also wins on reverse.
+  assert.match(charts[1].table, /\| reverse \| [^|]+ \| 3rd of 7 \|/);
+  assert.match(charts[1].title, /fastest on 0 of 10 input patterns/);
 });
 
 test("raw results round trip", async () => {

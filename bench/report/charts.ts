@@ -28,15 +28,16 @@ export interface Figure {
 
 // Every figure answers one question on one horizontal axis, so it reads
 // without a caption: the title asks, a headline number at the top right
-// answers, each row is one named thing with one mark, and the axis and the
-// values are words ("3.5× faster", "4× slower") rather than ratios. Blue and
-// orange keep their meaning from the pull-request benchmark chart: blue is
-// less time for Tessera, orange is more, and a hollow grey dot is within the
-// A/A noise.
+// answers, and each row is one named thing. Words appear once — in the title,
+// a column head or an axis end — and the cells hold only numbers, so the eye
+// lands on the data rather than on repeated labels. Blue is Tessera, as in the
+// pull-request benchmark chart; grey is every other sort.
 
 const PAD = 24;
 const W = 720;
+// Rows with a second line under the name need the taller height.
 const ROW_H = 38;
+const ROW_H_SINGLE = 34;
 const HEADER_RULE = 76;
 const PLOT_TOP = HEADER_RULE + 14;
 // Losses on short skewed inputs reach 50× against SIMD sorts. Beyond 32× a
@@ -51,16 +52,24 @@ const NAMES: Record<string, string> = {
 const RADIX = new Set(["radsort", "voracious", "rdst", "ips2ra", "clausecker"]);
 const SIMD = new Set(["vqsort", "x86simdsort"]);
 const displayName = (variant: string) => NAMES[variant] ?? variant;
-// glidesort-sqrt receives Tessera's measured peak as its buffer, so its
-// memory matches Tessera's by construction.
 const family = (variant: string) =>
   variant === "glidesort-sqrt"
-    ? "glidesort with Tessera's memory"
+    ? "comparison sort with Tessera's memory"
     : variant === "tessera" || RADIX.has(variant)
       ? "radix sort"
       : SIMD.has(variant)
         ? "SIMD sort"
         : "comparison sort";
+
+// The one sort whose name needs a second line in a figure: glidesort-sqrt
+// receives Tessera's measured peak as its buffer, so its memory matches
+// Tessera's by construction.
+const sortName = (variant: string): NameCell => ({
+  input: displayName(variant),
+  sub: variant === "glidesort-sqrt" ? "given Tessera's memory" : "",
+  tag: "",
+  strong: variant === "tessera",
+});
 
 const SHAPE_GROUPS: { title: string; shapes: [string, string][] }[] = [
   { title: "Uniform", shapes: [["random", "random"]] },
@@ -119,8 +128,6 @@ const LARGEST = 10000000;
 // small difference does not print as "1×".
 const times = (v: number) =>
   `${v >= 100 ? v.toFixed(0) : v < 1.095 ? v.toFixed(2) : Number(v.toPrecision(2))}×`;
-// A ratio is the other sort's time over Tessera's; above 1 Tessera is faster.
-const formatSpeed = (r: number) => (r >= 1 ? `${times(r)} faster` : `${times(1 / r)} slower`);
 const formatLength = (n: number) => n.toLocaleString("en-US");
 const formatNs = (v: number) => `${Number(v.toPrecision(3))} ns`;
 function formatBytes(n: number) {
@@ -140,27 +147,22 @@ function markdownTable(headers: string[], rows: string[][]) {
   return `| ${headers.join(" | ")} |\n| ${headers.map(() => "---").join(" | ")} |\n${rows.map((r) => `| ${r.join(" | ")} |`).join("\n")}\n`;
 }
 
-// Tone of one comparison from Tessera's side: an opponent that is slower
-// beyond the A/A range is a Tessera win.
-type Tone = "faster" | "slower" | "within" | "tessera" | "other";
-const toneOf = (s: Summary): Tone =>
-  s.verdict === "slower" ? "faster" : s.verdict === "faster" ? "slower" : "within";
-const verdictText = (tone: Tone) =>
-  tone === "faster" ? "Tessera faster" : tone === "slower" ? "Tessera slower" : "within noise";
+type Tone = "tessera" | "other";
 
 interface Mark {
   value: number;
   tone: Tone;
+  dy?: number;
   stem?: boolean;
   hollow?: boolean;
 }
 interface Row {
   name: NameCell;
+  swarm?: boolean;
   marks: Mark[];
   span?: [number, number];
-  text: string;
+  cells: string[];
   strong?: boolean;
-  note?: string;
 }
 interface Scale {
   low: number;
@@ -172,7 +174,7 @@ interface Scale {
 interface Chart {
   title: string;
   guide: string;
-  hero: { value: string; cls: string; label: string; sub: string };
+  columns: string[];
   groups: { title: string; rows: Row[] }[];
   scale: Scale;
   marker?: { value: number; label: string };
@@ -180,17 +182,18 @@ interface Chart {
   axis: [string, string];
 }
 
-// A symmetric speed axis in doublings around "same", wide enough for the
-// data and labelled in words on both sides.
+// A symmetric speed axis in doublings around slice::sort, wide enough for
+// the data. Left of the centre the labels are fractions, so a tick and a
+// value cell read the same way.
 function speedScale(ratios: number[]): Scale {
   const reach = Math.max(2, ...ratios.map((r) => Math.min(RATIO_LIMIT, Math.max(r, 1 / r)) * 1.08));
   const span = 2 ** Math.ceil(Math.log2(reach));
   const steps = Math.log2(span);
   // Every doubling is labelled while there is room; wider axes label every other one.
   const every = steps <= 3 ? 1 : 2;
-  const ticks = [{ value: 1, label: "same" }];
+  const ticks = [{ value: 1, label: "slice::sort" }];
   for (let k = every; k <= steps; k += every) {
-    ticks.push({ value: 2 ** k, label: `${2 ** k}×` }, { value: 2 ** -k, label: `${2 ** k}×` });
+    ticks.push({ value: 2 ** k, label: `${2 ** k}×` }, { value: 2 ** -k, label: `1/${2 ** k}×` });
   }
   return { low: 1 / span, high: span, ticks, origin: 1, clamp: true };
 }
@@ -199,37 +202,79 @@ const extraStyles = `<style>
   .mark { fill: #8d8c86; } .stroke-mark { stroke: #8d8c86; }
 </style>`;
 
-function drawMark(out: string[], x: number, cy: number, m: Mark, edge: 0 | -1 | 1) {
-  const cls = m.tone === "tessera" ? "faster" : m.tone === "other" ? "mark" : m.tone;
+function drawMark(out: string[], x: number, rowY: number, m: Mark, edge: 0 | -1 | 1) {
+  const cy = rowY + (m.dy ?? 0);
+  const cls = m.tone === "tessera" ? "faster" : "mark";
   if (edge) {
     const tip = x + edge * 6,
       back = x - edge * 3;
     out.push(
-      `<path class="${cls === "within" ? "within" : `${cls} ring`}" d="M${tip.toFixed(1)} ${cy}L${back.toFixed(1)} ${cy - 6}L${back.toFixed(1)} ${cy + 6}Z" stroke-width="1.5" stroke-linejoin="round"/>`,
+      `<path class="${cls} ring" d="M${tip.toFixed(1)} ${cy}L${back.toFixed(1)} ${cy - 6}L${back.toFixed(1)} ${cy + 6}Z" stroke-width="1.5" stroke-linejoin="round"/>`,
     );
     return;
   }
-  if (m.tone === "within" || m.hollow) {
-    const stroke = m.hollow && m.tone === "tessera" ? ' style="stroke:#4a80e6"' : "";
+  if (m.hollow) {
+    const stroke = m.tone === "tessera" ? ' style="stroke:#4a80e6"' : "";
     out.push(
       `<circle class="within" cx="${x.toFixed(1)}" cy="${cy}" r="4" stroke-width="1.5"${stroke}/>`,
     );
     return;
   }
-  const r = m.tone === "tessera" ? 6 : m.tone === "other" ? 4 : 5;
+  const r = m.tone === "tessera" ? 6.5 : 4;
   out.push(
     `<circle class="${cls} ring" cx="${x.toFixed(1)}" cy="${cy}" r="${r}" stroke-width="2"/>`,
   );
 }
 
+// Grey dots that would touch another dot move to a lane just above or below
+// the row, so every sort stays visible; Tessera keeps the centre line.
+function dodge(marks: Mark[], x: (v: number) => number) {
+  const radius = (m: Mark) => (m.tone === "tessera" ? 6.5 : 4);
+  const placed = marks.filter((m) => m.tone === "tessera").map((m) => ({ m, px: x(m.value) }));
+  const clearance = (m: Mark, px: number, dy: number) =>
+    Math.min(
+      ...placed.map((p) => Math.hypot(p.px - px, (p.m.dy ?? 0) - dy) - radius(p.m) - radius(m)),
+    );
+  for (const m of [...marks]
+    .filter((m) => m.tone !== "tessera")
+    .sort((a, b) => a.value - b.value)) {
+    const px = x(m.value);
+    const lanes = [0, -7, 7];
+    m.dy =
+      lanes.find((dy) => clearance(m, px, dy) >= 1) ??
+      lanes.reduce((best, dy) => (clearance(m, px, dy) > clearance(m, px, best) ? dy : best));
+    placed.push({ m, px });
+  }
+}
+
+// Header: the finding as the title, what is plotted under it, then a rule.
+function drawTitle(out: string[], t: Text, width: number, spec: Chart) {
+  t("ink stat", PAD, 40, spec.title);
+  t("muted sub", PAD, 60, spec.guide);
+  out.push(
+    `<line class="rule" x1="${PAD}" x2="${width - PAD}" y1="${HEADER_RULE}" y2="${HEADER_RULE}" stroke-width="1"/>`,
+  );
+}
+
+// A sort or input name, on one line when it has no second line.
+function drawRowName(out: string[], t: Text, name: NameCell, cy: number) {
+  if (name.sub) drawName(out, t, name, cy);
+  else t(`ink${name.strong ? " strong" : ""}`, PAD, cy + 4, name.input);
+}
+
 function renderChart(spec: Chart) {
   const rows = spec.groups.flatMap((g) => g.rows);
   const nameW = nameWidth(rows.map((r) => r.name));
-  const valueW = Math.max(
-    ...rows.map((r) => Math.max(textWidth(r.text, 12) * 1.05, r.note ? textWidth(r.note, 10) : 0)),
+  const rowH = rows.some((r) => r.name.sub) ? ROW_H : ROW_H_SINGLE;
+  // Value columns, right-aligned from the edge; caps headings run wide.
+  const columnW = spec.columns.map((head, j) =>
+    Math.max(textWidth(head, 11) * 1.3, ...rows.map((r) => textWidth(r.cells[j], 12) * 1.05)),
+  );
+  const columnR = columnW.map((_, j) =>
+    columnW.slice(j + 1).reduce((right, w) => right - w - 20, W - PAD),
   );
   const plotL = PAD + Math.ceil(nameW) + 28;
-  const plotR = W - PAD - Math.ceil(valueW) - 24;
+  const plotR = columnR[0] - columnW[0] - 24;
   const room = 10;
   const { low, high } = spec.scale;
   const x = (v: number) =>
@@ -246,8 +291,8 @@ function renderChart(spec: Chart) {
     const titleY = y + 12;
     y += 22;
     const placed = g.rows.map((row) => {
-      const cy = y + ROW_H / 2;
-      y += ROW_H;
+      const cy = y + rowH / 2;
+      y += rowH;
       return { row, cy };
     });
     return { title: g.title, titleY, placed };
@@ -264,23 +309,13 @@ function renderChart(spec: Chart) {
   out.push(`<title id="t">${escapeXml(spec.title)}</title>`);
   out.push(
     `<desc id="d">${escapeXml(
-      `${spec.hero.value} ${spec.hero.label}, ${spec.hero.sub}. ${rows.map((r) => `${r.name.input}: ${r.text}${r.note ? ` (${r.note})` : ""}`).join("; ")}`,
+      `${spec.guide}. ${spec.columns.join(", ")}: ${rows.map((r) => `${r.name.input} ${r.cells.join(", ")}`).join("; ")}`,
     )}</desc>`,
   );
   out.push(chartStyles, extraStyles);
   out.push(`<rect class="panel" x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" rx="12"/>`);
 
-  // Header: the question on the left, its answer on the right.
-  t("ink strong", PAD, 36, spec.title);
-  t("muted sub", PAD, 54, spec.guide);
-  const labelW = Math.max(textWidth(spec.hero.label, 13) * 1.05, textWidth(spec.hero.sub, 11));
-  const lx = W - PAD - labelW;
-  t(`hero ${spec.hero.cls}`, lx - 12, 50, spec.hero.value, ' text-anchor="end"');
-  t("ink strong", lx, 36, spec.hero.label);
-  t("muted sub", lx, 51, spec.hero.sub);
-  out.push(
-    `<line class="rule" x1="${PAD}" x2="${W - PAD}" y1="${HEADER_RULE}" y2="${HEADER_RULE}" stroke-width="1"/>`,
-  );
+  drawTitle(out, t, W, spec);
 
   for (const tick of spec.scale.ticks) {
     const gx = x(tick.value).toFixed(1);
@@ -303,16 +338,17 @@ function renderChart(spec: Chart) {
     );
     t("muted tiny", x(spec.marker.value), PLOT_TOP - 4, spec.marker.label, ' text-anchor="middle"');
   }
-  // The axis says in words which side is which.
+  // The axis ends say in words which side is which.
   const [left, right] = spec.axis;
-  const tinted = spec.scale.origin !== undefined;
-  t(tinted ? "slower sub" : "muted sub", plotL, axisY + 16, left);
-  t(tinted ? "faster sub" : "muted sub", plotR, axisY + 16, right, ' text-anchor="end"');
+  t("muted sub", plotL, axisY + 16, left);
+  t("muted sub", plotR, axisY + 16, right, ' text-anchor="end"');
 
+  for (const [j, head] of spec.columns.entries())
+    t("caps muted", columnR[j], layout[0].titleY, head.toUpperCase(), ' text-anchor="end"');
   for (const g of layout) {
     t("caps muted", PAD, g.titleY, g.title.toUpperCase());
     for (const { row, cy } of g.placed) {
-      drawName(out, t, row.name, cy);
+      drawRowName(out, t, row.name, cy);
       if (row.span) {
         const tessera = row.marks.some((m) => m.tone === "tessera");
         out.push(
@@ -320,17 +356,22 @@ function renderChart(spec: Chart) {
         );
       }
       for (const m of row.marks) {
-        if (!m.stem || spec.scale.origin === undefined || m.tone === "within") continue;
+        if (!m.stem || spec.scale.origin === undefined) continue;
         out.push(
-          `<line class="stem-${m.tone === "slower" ? "slower" : "faster"}" x1="${x(spec.scale.origin).toFixed(1)}" x2="${x(m.value).toFixed(1)}" y1="${cy}" y2="${cy}" stroke-width="2" stroke-linecap="round"/>`,
+          `<line class="stem-faster" x1="${x(spec.scale.origin).toFixed(1)}" x2="${x(m.value).toFixed(1)}" y1="${cy}" y2="${cy}" stroke-width="2" stroke-linecap="round"/>`,
         );
       }
+      if (row.swarm) dodge(row.marks, x);
       for (const m of row.marks) drawMark(out, x(m.value), cy, m, edgeOf(m.value));
-      const cls = row.strong ? "val ink strong" : "val muted";
-      if (row.note) {
-        t(cls, W - PAD, cy - 1, row.text, ' text-anchor="end"');
-        t("muted tiny", W - PAD, cy + 12, row.note, ' text-anchor="end"');
-      } else t(cls, W - PAD, cy + 4, row.text, ' text-anchor="end"');
+      // Tessera's cells are ink, its last cell bold; other sorts' are muted.
+      for (const [j, cell] of row.cells.entries()) {
+        const cls = !row.strong
+          ? "val muted"
+          : j === row.cells.length - 1
+            ? "val ink strong"
+            : "val ink";
+        t(cls, columnR[j], cy + 4, cell, ' text-anchor="end"');
+      }
     }
   }
 
@@ -339,7 +380,7 @@ function renderChart(spec: Chart) {
   return `<!-- SPDX-License-Identifier: BSD-2-Clause -->\n${out.join("\n")}\n`;
 }
 
-type Swatch = "faster" | "slower" | "within" | "mark" | "dash";
+type Swatch = "faster" | "within" | "mark" | "dash";
 function legendRow(out: string[], t: Text, y: number, items: [Swatch[], string][]) {
   let lx = PAD;
   for (const [swatches, label] of items) {
@@ -358,248 +399,251 @@ function legendRow(out: string[], t: Text, y: number, items: [Swatch[], string][
     lx += 4 + textWidth(label, 11) + 18;
   }
 }
-const verdictLegend = (out: string[], t: Text, y: number) =>
-  legendRow(out, t, y, [
-    [["faster"], "Tessera faster"],
-    [["slower"], "Tessera slower"],
-    [["within"], "difference within run-to-run noise"],
-  ]);
-
-function opponents(summaries: Map<string, Summary>, id: string, eligible: (s: Summary) => boolean) {
-  return [...summaries.values()].filter(
-    (s) =>
-      s.build === "default" && s.caseId === id && !s.variant.startsWith("tessera") && eligible(s),
-  );
-}
-const fastest = (list: Summary[]) =>
-  list.length ? list.reduce((a, b) => (b.ratio < a.ratio ? b : a)) : null;
-
-// Speed of a variant relative to slice::sort in the same blocks, as a
-// geometric mean over the ten input shapes.
-function speedAgainstStd(
+// Speed of one variant relative to slice::sort in the same blocks: the
+// slice::sort time over the variant's, per block, then the median.
+function speedOnCase(
   summaries: Map<string, Summary>,
+  id: string,
   variant: string,
-  build: string,
-  n: number,
+  build = "default",
 ) {
-  const values = shapes.map((shape) => {
-    const id = caseId({ ty: "u64", distribution: shape, len: n });
-    const std = summaries.get(measurementId(build, id, "std-stable")),
-      s = summaries.get(measurementId(build, id, variant));
-    if (!std || !s) return null;
-    return variant === "tessera" ? std.ratio : median(std.ratios.map((r, i) => r / s.ratios[i]));
-  });
+  const std = summaries.get(measurementId(build, id, "std-stable")),
+    s = summaries.get(measurementId(build, id, variant));
+  if (!std || !s) return null;
+  return variant === "tessera" ? std.ratio : median(std.ratios.map((r, i) => r / s.ratios[i]));
+}
+
+// The geometric mean of those speeds over cases, or null if one is missing.
+function speedOver(
+  summaries: Map<string, Summary>,
+  ids: string[],
+  variant: string,
+  build = "default",
+) {
+  const values = ids.map((id) => speedOnCase(summaries, id, variant, build));
   return values.every((v): v is number => v !== null) ? geomean(values) : null;
 }
+const u64Cases = (n: number) =>
+  shapes.map((shape) => caseId({ ty: "u64", distribution: shape, len: n }));
+
+const SPEED_AXIS: [string, string] = ["← slower", "faster →"];
+const SPEED_LEGEND = (out: string[], t: Text, y: number) =>
+  legendRow(out, t, y, [
+    [["faster"], "Tessera"],
+    [["mark"], "other sorts"],
+  ]);
 
 function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figure | null {
   const entries = dataset.manifests.get("default")!.variants.map((v) => ({
-    name: displayName(v.name),
-    sub: family(v.name),
+    cell: sortName(v.name),
+    kind: family(v.name),
     stable: v.stable,
-    tessera: v.name === "tessera",
-    speeds: lengths.map((n) => speedAgainstStd(summaries, v.name, "default", n)),
+    speeds: lengths.map((n) => speedOver(summaries, u64Cases(n), v.name)),
   }));
   if (dataset.manifests.has("portable-simd"))
     entries.push({
-      name: "Tessera, Portable SIMD",
-      sub: "radix sort · SIMD build",
+      cell: { input: "Tessera, Portable SIMD", sub: "", tag: "", strong: true },
+      kind: "radix sort, SIMD build",
       stable: true,
-      tessera: true,
-      speeds: lengths.map((n) => speedAgainstStd(summaries, "tessera", "portable-simd", n)),
+      speeds: lengths.map((n) => speedOver(summaries, u64Cases(n), "tessera", "portable-simd")),
     });
   const at = lengths.indexOf(LARGE);
   const complete = entries
     .filter((e) => e.speeds.every((v) => v !== null))
     .map((e) => ({ ...e, speeds: e.speeds as number[] }))
     .sort((a, b) => b.speeds[at] - a.speeds[at]);
-  const anchor = complete.find((e) => e.name === "Tessera");
+  const anchor = complete.find((e) => e.cell.input === "Tessera");
   if (!anchor) return null;
-  const others = complete.filter((e) => !e.tessera);
+  const others = complete.filter((e) => !e.cell.strong);
   const rank = 1 + others.filter((e) => e.speeds[at] > anchor.speeds[at]).length;
   const row = (e: (typeof complete)[number]): Row => ({
-    name: { input: e.name, sub: e.sub, tag: "", strong: e.tessera },
-    marks: [{ value: e.speeds[at], tone: e.tessera ? "tessera" : "other", stem: e.tessera }],
-    text: e.name === "slice::sort" ? "baseline" : formatSpeed(e.speeds[at]),
-    strong: e.tessera,
+    name: e.cell,
+    marks: [
+      { value: e.speeds[at], tone: e.cell.strong ? "tessera" : "other", stem: e.cell.strong },
+    ],
+    cells: [times(e.speeds[at])],
+    strong: e.cell.strong,
   });
-  const title = `Sorting ${formatLength(LARGE)} u64 keys`;
+  const field = `${others.length + 1} sorts on ${formatLength(LARGE)} u64 keys`;
+  const title =
+    rank === 1
+      ? `Tessera is the fastest of ${field}`
+      : `Tessera ranks ${ordinal(rank)} of ${field}`;
   return {
     name: "ranking",
     title,
     svg: renderChart({
       title,
-      guide: "Speed of each sort against slice::sort, averaged over 10 input patterns",
-      hero: {
-        value: times(anchor.speeds[at]),
-        cls: anchor.speeds[at] >= 1 ? "faster" : "slower",
-        label: "faster than slice::sort",
-        sub:
-          rank === 1
-            ? `fastest of ${others.length + 1} sorts`
-            : `${ordinal(rank)} of ${others.length + 1} sorts`,
-      },
+      guide: "Speed relative to slice::sort, geometric mean over 10 input patterns",
+      columns: ["Speed"],
       groups: [
         { title: "Stable sorts", rows: complete.filter((e) => e.stable).map(row) },
         { title: "Unstable sorts", rows: complete.filter((e) => !e.stable).map(row) },
       ].filter((g) => g.rows.length),
       scale: speedScale(complete.map((e) => e.speeds[at])),
-      axis: ["← slower than slice::sort", "faster than slice::sort →"],
-      legend: (out, t, y) =>
-        legendRow(out, t, y, [
-          [["faster"], "Tessera"],
-          [["mark"], "other sorts"],
-        ]),
+      axis: SPEED_AXIS,
+      legend: SPEED_LEGEND,
     }),
     table: markdownTable(
-      ["Sort", "Kind", "Stability", ...lengths.map((n) => `${formatLength(n)} keys`)],
+      [
+        "Sort",
+        "Kind",
+        "Stability",
+        ...lengths.map((n) => `${formatLength(n)} keys, speed vs slice::sort`),
+      ],
       complete.map((e) => [
-        e.name,
-        e.sub,
+        e.cell.input,
+        e.kind,
         e.stable ? "stable" : "unstable",
-        ...e.speeds.map((v) => `${times(v)} slice::sort`),
+        ...e.speeds.map(times),
       ]),
     ),
   };
 }
 
-// Each input pattern of u64 keys against the fastest eligible sort for that
-// case, naming it. Keys make stability unobservable, so every sort competes.
-function renderInputs(
+interface Standing {
+  speeds: { variant: string; speed: number }[];
+  tessera: number;
+  rank: number;
+}
+// Where Tessera stands among every eligible sort on one row, all measured
+// against slice::sort, which therefore sits at the origin and is not drawn.
+function standing(
   summaries: Map<string, Summary>,
-  options: {
-    name: string;
-    n: number;
-    title: string;
-    guide: string;
-    rivals: string;
-    eligible: (s: Summary) => boolean;
-  },
-): Figure | null {
-  const id = (shape: string) => caseId({ ty: "u64", distribution: shape, len: options.n });
-  const tessera = (shape: string) => summaries.get(measurementId("default", id(shape), "tessera"));
-  const best = (shape: string) => fastest(opponents(summaries, id(shape), options.eligible));
-  if (!shapes.every((shape) => tessera(shape) && best(shape))) return null;
-  const plotted: string[][] = [];
-  const found: Summary[] = [];
-  const groups = SHAPE_GROUPS.map((g) => ({
-    title: g.title,
-    rows: g.shapes.map(([shape, label]): Row => {
-      const s = best(shape)!;
-      const tone = toneOf(s);
-      found.push(s);
-      plotted.push([
-        label,
-        displayName(s.variant),
-        formatSpeed(s.ratio),
-        verdictText(tone),
-        formatNs(tessera(shape)!.ns),
-      ]);
-      return {
-        name: { input: label, sub: `Tessera ${formatNs(tessera(shape)!.ns)} per key`, tag: "" },
-        marks: [{ value: s.ratio, tone, stem: true }],
-        text: tone === "within" ? "even" : formatSpeed(s.ratio),
-        strong: tone !== "within",
-        note: `vs ${displayName(s.variant)}`,
-      };
-    }),
-  }));
-  const wins = found.filter((s) => toneOf(s) === "faster").length,
-    losses = found.filter((s) => toneOf(s) === "slower").length;
+  variants: { name: string; stable: boolean }[],
+  ids: string[],
+  stableOnly: boolean,
+): Standing | null {
+  const speedOf = (variant: string) => speedOver(summaries, ids, variant);
+  const tessera = speedOf("tessera");
+  if (tessera === null) return null;
+  const speeds = variants
+    .filter((v) => v.name !== "tessera" && (!stableOnly || v.stable))
+    .map((v) => ({ variant: v.name, speed: speedOf(v.name) }))
+    .filter((v): v is { variant: string; speed: number } => v.speed !== null);
+  return { speeds, tessera, rank: 1 + speeds.filter((v) => v.speed > tessera).length };
+}
+
+function fieldRow(name: NameCell, s: Standing): Row {
   return {
-    name: options.name,
-    title: options.title,
-    svg: renderChart({
-      title: options.title,
-      guide: options.guide,
-      hero: {
-        value: `${wins} of ${found.length}`,
-        cls: wins >= losses ? "faster" : "slower",
-        label: `inputs faster than ${options.rivals}`,
-        sub: `slower on ${losses} · even on ${found.length - wins - losses}`,
-      },
-      groups,
-      scale: speedScale(found.map((s) => s.ratio)),
-      axis: ["← Tessera slower", "Tessera faster →"],
-      legend: verdictLegend,
-    }),
-    table: markdownTable(
-      ["Input", "Fastest rival", "Tessera", "Verdict", "Tessera time per key"],
-      plotted,
-    ),
+    name,
+    swarm: true,
+    marks: [
+      ...s.speeds
+        .filter((v) => v.variant !== "std-stable")
+        .map((v): Mark => ({ value: v.speed, tone: "other" })),
+      { value: s.tessera, tone: "tessera" },
+    ],
+    cells: [times(s.tessera), ordinal(s.rank)],
+    strong: true,
   };
 }
 
-// Each element type against the one sort that comes closest over all ten
-// inputs, so the comparison is with a sort a user could choose instead.
-function renderTypes(summaries: Map<string, Summary>): Figure | null {
-  const plotted: string[][] = [];
-  const means: number[] = [];
-  const tones: Tone[] = [];
+// The finding of a field figure, stated as its title.
+function fieldTitle(standings: Standing[], unit: string) {
+  const total = standings.length,
+    first = standings.filter((s) => s.rank === 1).length,
+    top3 = standings.filter((s) => s.rank <= 3).length;
+  if (first === total) return `Tessera is fastest on all ${total} ${unit}`;
+  const top = top3 > first ? `, top 3 on ${top3}` : "";
+  return `Tessera is fastest on ${first} of ${total} ${unit}${top}`;
+}
+
+function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
+  return markdownTable(
+    [
+      "Row",
+      ...(nsPerKey ? ["Tessera time per key"] : []),
+      "Tessera rank",
+      "Tessera speed vs slice::sort",
+      "Other sorts, fastest first",
+    ],
+    rows.map(([label, s], i) => [
+      label,
+      ...(nsPerKey ? [formatNs(nsPerKey[i])] : []),
+      `${ordinal(s.rank)} of ${s.speeds.length + 1}`,
+      times(s.tessera),
+      [...s.speeds]
+        .sort((a, b) => b.speed - a.speed)
+        .map((v) => `${displayName(v.variant)} ${times(v.speed)}`)
+        .join(", "),
+    ]),
+  );
+}
+
+// Each input pattern of u64 keys: every sort competes, since keys make
+// stability unobservable.
+function renderInputs(
+  dataset: Dataset,
+  summaries: Map<string, Summary>,
+  name: string,
+  n: number,
+): Figure | null {
+  const variants = dataset.manifests.get("default")!.variants;
+  const plotted: [string, Standing][] = [];
+  const nsPerKey: number[] = [];
+  const groups = SHAPE_GROUPS.map((g) => ({
+    title: g.title,
+    rows: g.shapes.flatMap(([shape, label]) => {
+      const id = caseId({ ty: "u64", distribution: shape, len: n });
+      const s = standing(summaries, variants, [id], false);
+      const ns = summaries.get(measurementId("default", id, "tessera"))?.ns;
+      if (!s || ns === undefined) return [];
+      plotted.push([label, s]);
+      nsPerKey.push(ns);
+      return [fieldRow({ input: label, sub: "", tag: "" }, s)];
+    }),
+  })).filter((g) => g.rows.length);
+  if (plotted.length !== shapes.length) return null;
+  const standings = plotted.map(([, s]) => s);
+  const title = fieldTitle(standings, "input patterns");
+  return {
+    name,
+    title,
+    svg: renderChart({
+      title,
+      guide: `${formatLength(n)} u64 keys; each dot is one sort, placed by its speed relative to slice::sort`,
+      columns: ["Speed", "Rank"],
+      groups,
+      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
+      axis: SPEED_AXIS,
+      legend: SPEED_LEGEND,
+    }),
+    table: fieldTable(plotted, nsPerKey),
+  };
+}
+
+// Each element type as a geometric mean over the ten inputs. Records admit
+// only stable sorts, because stability is observable there.
+function renderTypes(dataset: Dataset, summaries: Map<string, Summary>): Figure | null {
+  const variants = dataset.manifests.get("default")!.variants;
+  const plotted: [string, Standing][] = [];
   const groups = TYPE_GROUPS.map((g) => ({
     title: g.title,
-    rows: g.types
-      .map(([ty, label, sub]): Row | null => {
-        const ids = shapes.map((shape) => caseId({ ty, distribution: shape, len: LARGE }));
-        const candidates = new Set(
-          ids.flatMap((id) =>
-            opponents(summaries, id, (s) => g.keys || s.stable).map((s) => s.variant),
-          ),
-        );
-        const series = [...candidates]
-          .map((variant) => ids.map((id) => summaries.get(measurementId("default", id, variant))))
-          .filter((list): list is Summary[] => list.every((s) => s !== undefined))
-          .map((list) => ({ list, mean: geomean(list.map((s) => s.ratio)) }));
-        if (!series.length) return null;
-        const { list, mean } = series.reduce((a, b) => (b.mean < a.mean ? b : a));
-        // A mean inside the widest A/A range of its ten cases is a tie.
-        const tone: Tone =
-          mean > Math.max(...list.map((s) => s.aaHigh))
-            ? "faster"
-            : mean < Math.min(...list.map((s) => s.aaLow))
-              ? "slower"
-              : "within";
-        tones.push(tone);
-        means.push(mean);
-        const wins = list.filter((s) => toneOf(s) === "faster").length;
-        plotted.push([
-          label,
-          displayName(list[0].variant),
-          formatSpeed(mean),
-          `${wins} of ${list.length}`,
-        ]);
-        return {
-          name: { input: label, sub, tag: "" },
-          marks: [{ value: mean, tone, stem: true }],
-          text: tone === "within" ? "even" : formatSpeed(mean),
-          strong: tone !== "within",
-          note: `vs ${displayName(list[0].variant)}`,
-        };
-      })
-      .filter((r): r is Row => r !== null),
+    rows: g.types.flatMap(([ty, label, sub]) => {
+      const ids = shapes.map((shape) => caseId({ ty, distribution: shape, len: LARGE }));
+      const s = standing(summaries, variants, ids, !g.keys);
+      if (!s) return [];
+      plotted.push([label, s]);
+      return [fieldRow({ input: label, sub, tag: "" }, s)];
+    }),
   })).filter((g) => g.rows.length);
-  if (!groups.length) return null;
-  const ahead = tones.filter((t) => t === "faster").length,
-    behind = tones.filter((t) => t === "slower").length;
-  const title = `Every element type, ${formatLength(LARGE)} elements`;
+  if (!plotted.length) return null;
+  const standings = plotted.map(([, s]) => s);
+  const title = fieldTitle(standings, "element types");
   return {
     name: "types",
     title,
     svg: renderChart({
       title,
-      guide: "Tessera against the strongest rival for each type, over 10 inputs",
-      hero: {
-        value: `${ahead} of ${means.length}`,
-        cls: ahead >= behind ? "faster" : "slower",
-        label: "types where Tessera leads",
-        sub: `behind on ${behind} · even on ${means.length - ahead - behind}`,
-      },
+      guide: `${formatLength(LARGE)} elements; speed relative to slice::sort, geometric mean over 10 input patterns`,
+      columns: ["Speed", "Rank"],
       groups,
-      scale: speedScale(means),
-      axis: ["← Tessera slower", "Tessera faster →"],
-      legend: verdictLegend,
+      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
+      axis: SPEED_AXIS,
+      legend: SPEED_LEGEND,
     }),
-    table: markdownTable(["Type", "Strongest rival", "Tessera", "Inputs Tessera wins"], plotted),
+    table: fieldTable(plotted),
   };
 }
 
@@ -634,39 +678,30 @@ function renderMemory(dataset: Dataset): Figure | null {
     const { random, worst } = e.peak;
     plotted.push([displayName(e.name), formatBytes(random), formatBytes(worst)]);
     const tone: Tone = tessera ? "tessera" : "other";
-    if (!worst)
-      return {
-        name: { input: displayName(e.name), sub: family(e.name), tag: "" },
-        marks: [],
-        text: "none",
-      };
+    // The random-input value is the ring; only the worst case is a number.
+    const cells = [worst ? formatBytes(worst) : "0"];
+    if (!worst) return { name: sortName(e.name), marks: [], cells };
     const spread = random !== worst;
     return {
-      name: { input: displayName(e.name), sub: family(e.name), tag: "", strong: tessera },
+      name: sortName(e.name),
       marks: [
         ...(spread ? [{ value: Math.max(low, random), tone, hollow: true }] : []),
         { value: worst, tone },
       ],
       span: spread ? [Math.max(low, random), worst] : undefined,
-      text: formatBytes(worst),
+      cells,
       strong: tessera,
-      note: spread ? `random ${formatBytes(random)}` : undefined,
     };
   };
-  const title = `Extra memory for ${formatLength(n)} u64 keys`;
   const input = n * 8;
+  const title = `Tessera sorts ${formatLength(n)} u64 keys in at most ${formatBytes(anchor.peak.worst)} of extra memory`;
   return {
     name: "memory",
     title,
     svg: renderChart({
       title,
-      guide: `Heap allocated during one sort, beyond the ${formatBytes(input)} input`,
-      hero: {
-        value: formatBytes(anchor.peak.worst),
-        cls: "ink",
-        label: "Tessera at most",
-        sub: `${formatBytes(anchor.peak.random)} on random input`,
-      },
+      guide: `Peak heap allocation during one sort, beyond the ${formatBytes(input)} input`,
+      columns: ["Worst"],
       groups: [
         { title: "Stable sorts", rows: entries.filter((e) => e.stable).map(row) },
         { title: "Unstable sorts", rows: entries.filter((e) => !e.stable).map(row) },
@@ -691,35 +726,11 @@ function renderMemory(dataset: Dataset): Figure | null {
 }
 
 export function renderFigures(dataset: Dataset, summaries: Map<string, Summary>): Figure[] {
-  const large = formatLength(LARGE),
-    short = formatLength(SHORT);
   return [
     renderRanking(dataset, summaries),
-    renderInputs(summaries, {
-      name: "inputs",
-      n: LARGE,
-      title: `Each input pattern, ${large} u64 keys`,
-      guide: "Tessera against the fastest other sort on that input",
-      rivals: "every other sort",
-      eligible: () => true,
-    }),
-    renderInputs(summaries, {
-      name: "radix",
-      n: LARGE,
-      title: `Against other radix sorts, ${large} u64 keys`,
-      guide: "Tessera against the fastest other radix sort on that input",
-      rivals: "every radix sort",
-      eligible: (s) => RADIX.has(s.variant),
-    }),
-    renderInputs(summaries, {
-      name: "short",
-      n: SHORT,
-      title: `Short arrays, ${short} u64 keys`,
-      guide: "Tessera against the fastest other sort on that input",
-      rivals: "every other sort",
-      eligible: () => true,
-    }),
-    renderTypes(summaries),
+    renderInputs(dataset, summaries, "inputs", LARGE),
+    renderInputs(dataset, summaries, "short", SHORT),
+    renderTypes(dataset, summaries),
     renderMemory(dataset),
   ].filter((f): f is Figure => f !== null);
 }

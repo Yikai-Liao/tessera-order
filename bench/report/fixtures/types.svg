@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 484" width="720" height="484" role="img" aria-labelledby="t d">
-<title id="t">Every element type, 1,000,000 elements</title>
-<desc id="d">5 of 7 types where Tessera leads, behind on 2 · even on 0. u32: 1.08× slower (vs vqsort); u64: 1.08× slower (vs vqsort); f64: 1.2× faster (vs slice::sort_unstable); {u32, u32}: 1.2× faster (vs radsort); {u64, u32}: 1.2× faster (vs radsort); 128-byte record: 1.2× faster (vs radsort); owned record: 1.3× faster (vs long-stable-variant-name)</desc>
+<title id="t">Tessera is fastest on 5 of 7 element types, top 3 on 7</title>
+<desc id="d">1,000,000 elements; speed relative to slice::sort, geometric mean over 10 input patterns. Speed, Rank: u32 2.6×, 2nd; u64 2.6×, 2nd; f64 2.6×, 1st; {u32, u32} 2.6×, 1st; {u64, u32} 2.6×, 1st; 128-byte record 2.6×, 1st; owned record 2.6×, 1st</desc>
 <style>
   .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
   .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
@@ -25,68 +25,87 @@
   .mark { fill: #8d8c86; } .stroke-mark { stroke: #8d8c86; }
 </style>
 <rect class="panel" x="0.5" y="0.5" width="719" height="483" rx="12"/>
-<text class="ink strong" x="24.0" y="36.0">Every element type, 1,000,000 elements</text>
-<text class="muted sub" x="24.0" y="54.0">Tessera against the strongest rival for each type, over 10 inputs</text>
-<text class="hero faster" x="512.8" y="50.0" text-anchor="end">5 of 7</text>
-<text class="ink strong" x="524.8" y="36.0">types where Tessera leads</text>
-<text class="muted sub" x="524.8" y="51.0">behind on 2 · even on 0</text>
+<text class="ink stat" x="24.0" y="40.0">Tessera is fastest on 5 of 7 element types, top 3 on 7</text>
+<text class="muted sub" x="24.0" y="60.0">1,000,000 elements; speed relative to slice::sort, geometric mean over 10 input patterns</text>
 <line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
-<line class="axis" x1="349.0" x2="349.0" y1="90" y2="414" stroke-width="1"/>
-<text class="ink tiny" x="349.0" y="432.0" text-anchor="middle">same</text>
-<line class="rule" x1="526.0" x2="526.0" y1="90" y2="414" stroke-width="1"/>
-<text class="muted tiny" x="526.0" y="432.0" text-anchor="middle">2×</text>
+<line class="axis" x1="369.7" x2="369.7" y1="90" y2="414" stroke-width="1"/>
+<text class="ink tiny" x="369.7" y="432.0" text-anchor="middle">slice::sort</text>
+<line class="rule" x1="468.6" x2="468.6" y1="90" y2="414" stroke-width="1"/>
+<text class="muted tiny" x="468.6" y="432.0" text-anchor="middle">2×</text>
+<line class="rule" x1="270.9" x2="270.9" y1="90" y2="414" stroke-width="1"/>
+<text class="muted tiny" x="270.9" y="432.0" text-anchor="middle">1/2×</text>
+<line class="rule" x1="567.5" x2="567.5" y1="90" y2="414" stroke-width="1"/>
+<text class="muted tiny" x="567.5" y="432.0" text-anchor="middle">4×</text>
 <line class="rule" x1="172.0" x2="172.0" y1="90" y2="414" stroke-width="1"/>
-<text class="muted tiny" x="172.0" y="432.0" text-anchor="middle">2×</text>
-<text class="slower sub" x="162.0" y="448.0">← Tessera slower</text>
-<text class="faster sub" x="536.0" y="448.0" text-anchor="end">Tessera faster →</text>
+<text class="muted tiny" x="172.0" y="432.0" text-anchor="middle">1/4×</text>
+<text class="muted sub" x="162.0" y="448.0">← slower</text>
+<text class="muted sub" x="577.5" y="448.0" text-anchor="end">faster →</text>
+<text class="caps muted" x="642.7" y="102.0" text-anchor="end">SPEED</text>
+<text class="caps muted" x="696.0" y="102.0" text-anchor="end">RANK</text>
 <text class="caps muted" x="24.0" y="102.0">KEYS · AGAINST ANY SORT</text>
 <text class="ink" x="24.0" y="129.0">u32</text>
 <text class="muted sub" x="24.0" y="144.0">4-byte key</text>
-<line class="stem-slower" x1="349.0" x2="328.3" y1="131" y2="131" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="328.3" cy="131" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="130.0" text-anchor="end">1.08× slower</text>
-<text class="muted tiny" x="696.0" y="143.0" text-anchor="end">vs vqsort</text>
+<circle class="mark ring" cx="481.2" cy="131" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="368.7" cy="131" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="131" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="486.1" cy="124" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="517.9" cy="131" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="506.4" cy="131" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="135.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="135.0" text-anchor="end">2nd</text>
 <text class="ink" x="24.0" y="167.0">u64</text>
 <text class="muted sub" x="24.0" y="182.0">8-byte key</text>
-<line class="stem-slower" x1="349.0" x2="328.3" y1="169" y2="169" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="328.3" cy="169" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="168.0" text-anchor="end">1.08× slower</text>
-<text class="muted tiny" x="696.0" y="181.0" text-anchor="end">vs vqsort</text>
+<circle class="mark ring" cx="481.2" cy="169" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="368.7" cy="169" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="169" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="486.1" cy="162" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="517.9" cy="169" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="506.4" cy="169" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="173.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="173.0" text-anchor="end">2nd</text>
 <text class="ink" x="24.0" y="205.0">f64</text>
 <text class="muted sub" x="24.0" y="220.0">total order</text>
-<line class="stem-faster" x1="349.0" x2="385.3" y1="207" y2="207" stroke-width="2" stroke-linecap="round"/>
-<circle class="faster ring" cx="385.3" cy="207" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="206.0" text-anchor="end">1.2× faster</text>
-<text class="muted tiny" x="696.0" y="219.0" text-anchor="end">vs slice::sort_unstable</text>
+<circle class="mark ring" cx="481.2" cy="207" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="368.7" cy="207" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="207" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="486.1" cy="200" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="506.4" cy="207" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="211.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="211.0" text-anchor="end">1st</text>
 <text class="caps muted" x="24.0" y="248.0">RECORDS · AGAINST STABLE SORTS</text>
 <text class="ink" x="24.0" y="275.0">{u32, u32}</text>
 <text class="muted sub" x="24.0" y="290.0">8-byte row</text>
-<line class="stem-faster" x1="349.0" x2="394.2" y1="277" y2="277" stroke-width="2" stroke-linecap="round"/>
-<circle class="faster ring" cx="394.2" cy="277" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="276.0" text-anchor="end">1.2× faster</text>
-<text class="muted tiny" x="696.0" y="289.0" text-anchor="end">vs radsort</text>
+<circle class="mark ring" cx="481.2" cy="277" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="368.7" cy="277" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="277" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="506.4" cy="277" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="281.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="281.0" text-anchor="end">1st</text>
 <text class="ink" x="24.0" y="313.0">{u64, u32}</text>
 <text class="muted sub" x="24.0" y="328.0">16-byte row</text>
-<line class="stem-faster" x1="349.0" x2="394.2" y1="315" y2="315" stroke-width="2" stroke-linecap="round"/>
-<circle class="faster ring" cx="394.2" cy="315" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="314.0" text-anchor="end">1.2× faster</text>
-<text class="muted tiny" x="696.0" y="327.0" text-anchor="end">vs radsort</text>
+<circle class="mark ring" cx="481.2" cy="315" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="368.7" cy="315" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="315" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="506.4" cy="315" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="319.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="319.0" text-anchor="end">1st</text>
 <text class="ink" x="24.0" y="351.0">128-byte record</text>
 <text class="muted sub" x="24.0" y="366.0">u64 key</text>
-<line class="stem-faster" x1="349.0" x2="394.2" y1="353" y2="353" stroke-width="2" stroke-linecap="round"/>
-<circle class="faster ring" cx="394.2" cy="353" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="352.0" text-anchor="end">1.2× faster</text>
-<text class="muted tiny" x="696.0" y="365.0" text-anchor="end">vs radsort</text>
+<circle class="mark ring" cx="481.2" cy="353" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="368.7" cy="353" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="353" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="506.4" cy="353" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="357.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="357.0" text-anchor="end">1st</text>
 <text class="ink" x="24.0" y="389.0">owned record</text>
 <text class="muted sub" x="24.0" y="404.0">{u64, String}</text>
-<line class="stem-faster" x1="349.0" x2="416.8" y1="391" y2="391" stroke-width="2" stroke-linecap="round"/>
-<circle class="faster ring" cx="416.8" cy="391" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="390.0" text-anchor="end">1.3× faster</text>
-<text class="muted tiny" x="696.0" y="403.0" text-anchor="end">vs long-stable-variant-name</text>
+<circle class="mark ring" cx="368.7" cy="391" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="391" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="506.4" cy="391" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="395.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="395.0" text-anchor="end">1st</text>
 <circle class="faster" cx="28" cy="462" r="4"/>
-<text class="muted sub" x="38.0" y="466.0">Tessera faster</text>
-<circle class="slower" cx="134.8" cy="462" r="4"/>
-<text class="muted sub" x="144.8" y="466.0">Tessera slower</text>
-<circle class="within" cx="246.22000000000003" cy="462" r="3.5" stroke-width="1.5"/>
-<text class="muted sub" x="256.2" y="466.0">difference within run-to-run noise</text>
+<text class="muted sub" x="38.0" y="466.0">Tessera</text>
+<circle class="mark" cx="101.69" cy="462" r="4"/>
+<text class="muted sub" x="111.7" y="466.0">other sorts</text>
 </svg>

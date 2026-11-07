@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 662" width="720" height="662" role="img" aria-labelledby="t d">
-<title id="t">Each input pattern, 1,000,000 u64 keys</title>
-<desc id="d">0 of 10 inputs faster than every other sort, slower on 10 · even on 0. random: 1.08× slower (vs vqsort); 256 values: 1.08× slower (vs vqsort); 16 values: 1.08× slower (vs vqsort); Zipf 1.1: 1.08× slower (vs vqsort); Zipf 2: 1.08× slower (vs vqsort); 99% one key: 1.08× slower (vs vqsort); sorted: 1.08× slower (vs vqsort); reverse: 1.4× slower (vs radsort); 99% sorted: 1.08× slower (vs vqsort); sorted runs: 1.08× slower (vs vqsort)</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 622" width="720" height="622" role="img" aria-labelledby="t d">
+<title id="t">Tessera is fastest on 0 of 10 input patterns, top 3 on 10</title>
+<desc id="d">1,000,000 u64 keys; each dot is one sort, placed by its speed relative to slice::sort. Speed, Rank: random 2.6×, 2nd; 256 values 2.6×, 2nd; 16 values 2.6×, 2nd; Zipf 1.1 2.6×, 2nd; Zipf 2 2.6×, 2nd; 99% one key 2.6×, 2nd; sorted 2.6×, 2nd; reverse 2.6×, 3rd; 99% sorted 2.6×, 2nd; sorted runs 2.6×, 2nd</desc>
 <style>
   .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
   .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
@@ -24,89 +24,124 @@
 <style>
   .mark { fill: #8d8c86; } .stroke-mark { stroke: #8d8c86; }
 </style>
-<rect class="panel" x="0.5" y="0.5" width="719" height="661" rx="12"/>
-<text class="ink strong" x="24.0" y="36.0">Each input pattern, 1,000,000 u64 keys</text>
-<text class="muted sub" x="24.0" y="54.0">Tessera against the fastest other sort on that input</text>
-<text class="hero slower" x="469.3" y="50.0" text-anchor="end">0 of 10</text>
-<text class="ink strong" x="481.3" y="36.0">inputs faster than every other sort</text>
-<text class="muted sub" x="481.3" y="51.0">slower on 10 · even on 0</text>
+<rect class="panel" x="0.5" y="0.5" width="719" height="621" rx="12"/>
+<text class="ink stat" x="24.0" y="40.0">Tessera is fastest on 0 of 10 input patterns, top 3 on 10</text>
+<text class="muted sub" x="24.0" y="60.0">1,000,000 u64 keys; each dot is one sort, placed by its speed relative to slice::sort</text>
 <line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
-<line class="axis" x1="383.0" x2="383.0" y1="90" y2="592" stroke-width="1"/>
-<text class="ink tiny" x="383.0" y="610.0" text-anchor="middle">same</text>
-<line class="rule" x1="580.0" x2="580.0" y1="90" y2="592" stroke-width="1"/>
-<text class="muted tiny" x="580.0" y="610.0" text-anchor="middle">2×</text>
-<line class="rule" x1="186.0" x2="186.0" y1="90" y2="592" stroke-width="1"/>
-<text class="muted tiny" x="186.0" y="610.0" text-anchor="middle">2×</text>
-<text class="slower sub" x="176.0" y="626.0">← Tessera slower</text>
-<text class="faster sub" x="590.0" y="626.0" text-anchor="end">Tessera faster →</text>
+<line class="axis" x1="369.7" x2="369.7" y1="90" y2="552" stroke-width="1"/>
+<text class="ink tiny" x="369.7" y="570.0" text-anchor="middle">slice::sort</text>
+<line class="rule" x1="435.7" x2="435.7" y1="90" y2="552" stroke-width="1"/>
+<text class="muted tiny" x="435.7" y="570.0" text-anchor="middle">2×</text>
+<line class="rule" x1="303.8" x2="303.8" y1="90" y2="552" stroke-width="1"/>
+<text class="muted tiny" x="303.8" y="570.0" text-anchor="middle">1/2×</text>
+<line class="rule" x1="501.6" x2="501.6" y1="90" y2="552" stroke-width="1"/>
+<text class="muted tiny" x="501.6" y="570.0" text-anchor="middle">4×</text>
+<line class="rule" x1="237.9" x2="237.9" y1="90" y2="552" stroke-width="1"/>
+<text class="muted tiny" x="237.9" y="570.0" text-anchor="middle">1/4×</text>
+<line class="rule" x1="567.5" x2="567.5" y1="90" y2="552" stroke-width="1"/>
+<text class="muted tiny" x="567.5" y="570.0" text-anchor="middle">8×</text>
+<line class="rule" x1="172.0" x2="172.0" y1="90" y2="552" stroke-width="1"/>
+<text class="muted tiny" x="172.0" y="570.0" text-anchor="middle">1/8×</text>
+<text class="muted sub" x="162.0" y="586.0">← slower</text>
+<text class="muted sub" x="577.5" y="586.0" text-anchor="end">faster →</text>
+<text class="caps muted" x="642.7" y="102.0" text-anchor="end">SPEED</text>
+<text class="caps muted" x="696.0" y="102.0" text-anchor="end">RANK</text>
 <text class="caps muted" x="24.0" y="102.0">UNIFORM</text>
-<text class="ink" x="24.0" y="129.0">random</text>
-<text class="muted sub" x="24.0" y="144.0">Tessera 4.16 ns per key</text>
-<line class="stem-slower" x1="383.0" x2="360.0" y1="131" y2="131" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="360.0" cy="131" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="130.0" text-anchor="end">1.08× slower</text>
-<text class="muted tiny" x="696.0" y="143.0" text-anchor="end">vs vqsort</text>
-<text class="caps muted" x="24.0" y="172.0">FEW DISTINCT KEYS</text>
+<text class="ink" x="24.0" y="133.0">random</text>
+<circle class="mark ring" cx="435.7" cy="122" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="369.0" cy="129" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="435.6" cy="129" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="447.3" cy="129" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="122" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="460.9" cy="129" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="133.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="133.0" text-anchor="end">2nd</text>
+<text class="caps muted" x="24.0" y="168.0">FEW DISTINCT KEYS</text>
 <text class="ink" x="24.0" y="199.0">256 values</text>
-<text class="muted sub" x="24.0" y="214.0">Tessera 4.16 ns per key</text>
-<line class="stem-slower" x1="383.0" x2="360.0" y1="201" y2="201" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="360.0" cy="201" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="200.0" text-anchor="end">1.08× slower</text>
-<text class="muted tiny" x="696.0" y="213.0" text-anchor="end">vs vqsort</text>
-<text class="ink" x="24.0" y="237.0">16 values</text>
-<text class="muted sub" x="24.0" y="252.0">Tessera 4.16 ns per key</text>
-<line class="stem-slower" x1="383.0" x2="360.0" y1="239" y2="239" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="360.0" cy="239" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="238.0" text-anchor="end">1.08× slower</text>
-<text class="muted tiny" x="696.0" y="251.0" text-anchor="end">vs vqsort</text>
-<text class="caps muted" x="24.0" y="280.0">SKEWED</text>
-<text class="ink" x="24.0" y="307.0">Zipf 1.1</text>
-<text class="muted sub" x="24.0" y="322.0">Tessera 4.16 ns per key</text>
-<line class="stem-slower" x1="383.0" x2="360.0" y1="309" y2="309" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="360.0" cy="309" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="308.0" text-anchor="end">1.08× slower</text>
-<text class="muted tiny" x="696.0" y="321.0" text-anchor="end">vs vqsort</text>
-<text class="ink" x="24.0" y="345.0">Zipf 2</text>
-<text class="muted sub" x="24.0" y="360.0">Tessera 4.16 ns per key</text>
-<line class="stem-slower" x1="383.0" x2="360.0" y1="347" y2="347" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="360.0" cy="347" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="346.0" text-anchor="end">1.08× slower</text>
-<text class="muted tiny" x="696.0" y="359.0" text-anchor="end">vs vqsort</text>
-<text class="ink" x="24.0" y="383.0">99% one key</text>
-<text class="muted sub" x="24.0" y="398.0">Tessera 4.16 ns per key</text>
-<line class="stem-slower" x1="383.0" x2="360.0" y1="385" y2="385" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="360.0" cy="385" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="384.0" text-anchor="end">1.08× slower</text>
-<text class="muted tiny" x="696.0" y="397.0" text-anchor="end">vs vqsort</text>
-<text class="caps muted" x="24.0" y="426.0">PRESORTED</text>
-<text class="ink" x="24.0" y="453.0">sorted</text>
-<text class="muted sub" x="24.0" y="468.0">Tessera 4.16 ns per key</text>
-<line class="stem-slower" x1="383.0" x2="360.0" y1="455" y2="455" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="360.0" cy="455" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="454.0" text-anchor="end">1.08× slower</text>
-<text class="muted tiny" x="696.0" y="467.0" text-anchor="end">vs vqsort</text>
-<text class="ink" x="24.0" y="491.0">reverse</text>
-<text class="muted sub" x="24.0" y="506.0">Tessera 4.16 ns per key</text>
-<line class="stem-slower" x1="383.0" x2="282.3" y1="493" y2="493" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="282.3" cy="493" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="492.0" text-anchor="end">1.4× slower</text>
-<text class="muted tiny" x="696.0" y="505.0" text-anchor="end">vs radsort</text>
-<text class="ink" x="24.0" y="529.0">99% sorted</text>
-<text class="muted sub" x="24.0" y="544.0">Tessera 4.16 ns per key</text>
-<line class="stem-slower" x1="383.0" x2="360.0" y1="531" y2="531" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="360.0" cy="531" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="530.0" text-anchor="end">1.08× slower</text>
-<text class="muted tiny" x="696.0" y="543.0" text-anchor="end">vs vqsort</text>
-<text class="ink" x="24.0" y="567.0">sorted runs</text>
-<text class="muted sub" x="24.0" y="582.0">Tessera 4.16 ns per key</text>
-<line class="stem-slower" x1="383.0" x2="360.0" y1="569" y2="569" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="360.0" cy="569" r="5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="568.0" text-anchor="end">1.08× slower</text>
-<text class="muted tiny" x="696.0" y="581.0" text-anchor="end">vs vqsort</text>
-<circle class="faster" cx="28" cy="640" r="4"/>
-<text class="muted sub" x="38.0" y="644.0">Tessera faster</text>
-<circle class="slower" cx="134.8" cy="640" r="4"/>
-<text class="muted sub" x="144.8" y="644.0">Tessera slower</text>
-<circle class="within" cx="246.22000000000003" cy="640" r="3.5" stroke-width="1.5"/>
-<text class="muted sub" x="256.2" y="644.0">difference within run-to-run noise</text>
+<circle class="mark ring" cx="435.7" cy="188" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="369.0" cy="195" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="435.6" cy="195" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="447.3" cy="195" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="188" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="460.9" cy="195" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="199.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="199.0" text-anchor="end">2nd</text>
+<text class="ink" x="24.0" y="233.0">16 values</text>
+<circle class="mark ring" cx="435.7" cy="222" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="369.0" cy="229" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="435.6" cy="229" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="447.3" cy="229" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="222" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="460.9" cy="229" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="233.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="233.0" text-anchor="end">2nd</text>
+<text class="caps muted" x="24.0" y="268.0">SKEWED</text>
+<text class="ink" x="24.0" y="299.0">Zipf 1.1</text>
+<circle class="mark ring" cx="435.7" cy="288" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="369.0" cy="295" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="435.6" cy="295" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="447.3" cy="295" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="288" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="460.9" cy="295" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="299.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="299.0" text-anchor="end">2nd</text>
+<text class="ink" x="24.0" y="333.0">Zipf 2</text>
+<circle class="mark ring" cx="435.7" cy="322" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="369.0" cy="329" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="435.6" cy="329" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="447.3" cy="329" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="322" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="460.9" cy="329" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="333.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="333.0" text-anchor="end">2nd</text>
+<text class="ink" x="24.0" y="367.0">99% one key</text>
+<circle class="mark ring" cx="435.7" cy="356" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="369.0" cy="363" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="435.6" cy="363" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="447.3" cy="363" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="356" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="460.9" cy="363" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="367.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="367.0" text-anchor="end">2nd</text>
+<text class="caps muted" x="24.0" y="402.0">PRESORTED</text>
+<text class="ink" x="24.0" y="433.0">sorted</text>
+<circle class="mark ring" cx="435.7" cy="422" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="369.0" cy="429" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="435.6" cy="429" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="447.3" cy="429" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="422" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="460.9" cy="429" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="433.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="433.0" text-anchor="end">2nd</text>
+<text class="ink" x="24.0" y="467.0">reverse</text>
+<circle class="mark ring" cx="494.5" cy="463" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="369.0" cy="463" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="435.6" cy="463" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="447.3" cy="463" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="456" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="460.9" cy="463" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="467.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="467.0" text-anchor="end">3rd</text>
+<text class="ink" x="24.0" y="501.0">99% sorted</text>
+<circle class="mark ring" cx="435.7" cy="490" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="369.0" cy="497" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="435.6" cy="497" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="447.3" cy="497" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="490" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="460.9" cy="497" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="501.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="501.0" text-anchor="end">2nd</text>
+<text class="ink" x="24.0" y="535.0">sorted runs</text>
+<circle class="mark ring" cx="460.5" cy="524" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="369.0" cy="531" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="435.6" cy="531" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="447.3" cy="531" r="4" stroke-width="2"/>
+<circle class="mark ring" cx="468.5" cy="524" r="4" stroke-width="2"/>
+<circle class="faster ring" cx="460.9" cy="531" r="6.5" stroke-width="2"/>
+<text class="val ink" x="642.7" y="535.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="535.0" text-anchor="end">2nd</text>
+<circle class="faster" cx="28" cy="600" r="4"/>
+<text class="muted sub" x="38.0" y="604.0">Tessera</text>
+<circle class="mark" cx="101.69" cy="600" r="4"/>
+<text class="muted sub" x="111.7" y="604.0">other sorts</text>
 </svg>

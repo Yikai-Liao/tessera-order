@@ -21,7 +21,7 @@ class LanguageSelection(unittest.TestCase):
 
     def test_shared_changes_validate_both(self):
         for path in ["conformance/semantics.md", "conformance/vectors/a.json",
-                     "docs/design.md", "bench/report/report.py", "LICENSE",
+                     "bench/report/report.py", "LICENSE",
                      ".github/workflows/release.yml"]:
             with self.subTest(path=path):
                 self.assertEqual(select([path]), {"rust": True, "cpp": True, "python": True})
@@ -32,8 +32,15 @@ class LanguageSelection(unittest.TestCase):
                      ".github/workflows/docs.yml"]:
             with self.subTest(path=path):
                 self.assertEqual(select([path]), {"rust": False, "cpp": False, "python": False})
-        # Pages remain shared documentation.
-        self.assertEqual(select(["docs/explain/keys.md"]), {"rust": True, "cpp": True, "python": True})
+
+    def test_prose_selects_no_language(self):
+        for path in ["README.md", "CHANGELOG.md", "ROADMAP.md", "docs/explain/keys.md",
+                     "docs/decisions/0001-single-bsd-2-clause-license.md", "bench/README.md",
+                     "assets/logo.svg"]:
+            with self.subTest(path=path):
+                self.assertEqual(select([path]), {"rust": False, "cpp": False, "python": False})
+        # Markdown inside a language directory belongs to that language.
+        self.assertEqual(select(["rust/tessera-sort/README.md"]), {"rust": True, "cpp": False, "python": True})
 
     def test_changes_accumulate_across_languages(self):
         self.assertEqual(select(["rust/a.rs", "cpp/b.hpp"]),

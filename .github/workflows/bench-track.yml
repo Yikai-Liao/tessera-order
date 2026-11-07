@@ -21,7 +21,8 @@ jobs:
       group: bencher-bare-metal
       queue: max
     permissions:
-      contents: read
+      # Only this trusted workflow publishes generated SVGs to benchmark-images.
+      contents: write
       actions: read
       checks: write
       pull-requests: write
@@ -36,8 +37,18 @@ jobs:
         uses: actions/github-script@v9
         with:
           script: |
-            const resolve = require('./.github/scripts/bencher_context.cjs');
-            await resolve({ github, context, core });
+            const { resolveSource } = require('./.github/scripts/bencher/github.ts');
+            await resolveSource({ github, context, core });
+      - name: Start the report check
+        id: check
+        if: steps.source.outputs.eligible == 'true'
+        uses: actions/github-script@v9
+        env:
+          HASH: ${{ steps.source.outputs.hash }}
+        with:
+          script: |
+            const { startReport } = require('./.github/scripts/bencher/github.ts');
+            await startReport({ github, context, core, hash: process.env.HASH });
       - uses: actions/download-artifact@v4
         if: steps.source.outputs.eligible == 'true'
         with:
@@ -69,11 +80,11 @@ jobs:
         with:
           version: 0.6.16
       - name: Measure on Bencher Bare Metal
+        id: measure
         if: steps.source.outputs.eligible == 'true'
         env:
           BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
           BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
-          GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ steps.source.outputs.branch }}
           HASH: ${{ steps.source.outputs.hash }}
           BASE: ${{ steps.source.outputs.base }}
@@ -84,7 +95,7 @@ jobs:
           if [ -n "$PR_NUMBER" ]; then
             # Compare against the target branch at the PR's base commit.
             args=(--start-point "$BASE" --start-point-hash "$BASE_HASH"
-              --start-point-clone-thresholds --start-point-reset --ci-number "$PR_NUMBER")
+              --start-point-clone-thresholds --start-point-reset)
           else
             # A t-test against recent main history: noisy cases get wider limits.
             args=(--threshold-measure latency --threshold-test t_test
@@ -93,11 +104,30 @@ jobs:
               --thresholds-reset)
           fi
           # Waiting for the remote job holds the concurrency slot until it ends.
-          # Free jobs stop at 5 minutes; the suite takes about 45 s locally.
+          # Free jobs stop at 5 minutes; the suite takes about 130 s locally.
           bencher run --project "$BENCHER_PROJECT" --key "$BENCHER_API_KEY" \
             --branch "$BRANCH" --hash "$HASH" \
             --testbed intel-v1-portable-simd --spec intel-v1 \
             --image "$IMAGE" --job-timeout 240 \
-            --adapter rust_criterion \
-            --github-actions "$GH_TOKEN" --ci-id rust \
-            "${args[@]}" --exec -- /bench --bench
+            --adapter rust_criterion --format json --quiet \
+            "${args[@]}" --exec -- /bench --bench > "$RUNNER_TEMP/bencher-report.json"
+      - name: Publish report
+        if: always() && steps.check.outputs.id
+        uses: actions/github-script@v9
+        env:
+          HASH: ${{ steps.source.outputs.hash }}
+          PR_NUMBER: ${{ steps.source.outputs.number }}
+          BASE: ${{ steps.source.outputs.base }}
+          CHECK_ID: ${{ steps.check.outputs.id }}
+          OUTCOME: ${{ steps.measure.outcome }}
+        with:
+          script: |
+            const { publishReport } = require('./.github/scripts/bencher/index.ts');
+            const env = process.env;
+            await publishReport({ github, context, core, inputs: {
+              language: "rust", hash: env.HASH, number: env.PR_NUMBER,
+              baseRef: env.BASE || "main", checkId: env.CHECK_ID,
+              // A skipped step means an earlier one failed.
+              outcome: env.OUTCOME === "skipped" ? "failure" : env.OUTCOME,
+              reportPath: `${env.RUNNER_TEMP}/bencher-report.json`,
+            } });

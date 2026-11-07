@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-labelledby="title">
+  <title id="title">Tessera</title>
+  <!-- A mosaic rosette read as a radix sort: the inner ring holds 4 buckets of the top digit,
+       each outer ring splits every bucket in two, and colours run in key order clockwise from 12 o'clock. -->
+  <rect x="57.5" y="57.5" width="13" height="13" rx="3" fill="#2DD4BF" transform="rotate(45 64 64)"/>
+  <path d="M66.40 39.92 A24.2 24.2 0 0 1 88.08 61.60 L75.56 61.62 A11.8 11.8 0 0 0 66.38 52.44Z" fill="#32C8DC" stroke="#32C8DC" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M88.08 66.40 A24.2 24.2 0 0 1 66.40 88.08 L66.38 75.56 A11.8 11.8 0 0 0 75.56 66.38Z" fill="#5CA4F8" stroke="#5CA4F8" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M61.60 88.08 A24.2 24.2 0 0 1 39.92 66.40 L52.44 66.38 A11.8 11.8 0 0 0 61.62 75.56Z" fill="#B482F8" stroke="#B482F8" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M39.92 61.60 A24.2 24.2 0 0 1 61.60 39.92 L61.62 52.44 A11.8 11.8 0 0 0 52.44 61.62Z" fill="#F2869A" stroke="#F2869A" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M66.40 21.87 A42.2 42.2 0 0 1 92.10 32.51 L82.60 42.01 A28.8 28.8 0 0 0 66.40 35.30Z" fill="#30CECD" stroke="#30CECD" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M95.49 35.90 A42.2 42.2 0 0 1 106.13 61.60 L92.70 61.60 A28.8 28.8 0 0 0 85.99 45.40Z" fill="#35C3EA" stroke="#35C3EA" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M106.13 66.40 A42.2 42.2 0 0 1 95.49 92.10 L85.99 82.60 A28.8 28.8 0 0 0 92.70 66.40Z" fill="#4AB1F8" stroke="#4AB1F8" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M92.10 95.49 A42.2 42.2 0 0 1 66.40 106.13 L66.40 92.70 A28.8 28.8 0 0 0 82.60 85.99Z" fill="#6F98F8" stroke="#6F98F8" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M61.60 106.13 A42.2 42.2 0 0 1 35.90 95.49 L45.40 85.99 A28.8 28.8 0 0 0 61.60 92.70Z" fill="#9B87F8" stroke="#9B87F8" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M32.51 92.10 A42.2 42.2 0 0 1 21.87 66.40 L35.30 66.40 A28.8 28.8 0 0 0 42.01 82.60Z" fill="#CE7EF9" stroke="#CE7EF9" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M21.87 61.60 A42.2 42.2 0 0 1 32.51 35.90 L42.01 45.40 A28.8 28.8 0 0 0 35.30 61.60Z" fill="#ED7FCA" stroke="#ED7FCA" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M35.90 32.51 A42.2 42.2 0 0 1 61.60 21.87 L61.60 35.30 A28.8 28.8 0 0 0 45.40 42.01Z" fill="#F68C6B" stroke="#F68C6B" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M66.40 3.85 A60.2 60.2 0 0 1 84.80 7.51 L79.67 19.90 A46.8 46.8 0 0 0 66.40 17.26Z" fill="#2ED1C6" stroke="#2ED1C6" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M89.24 9.34 A60.2 60.2 0 0 1 104.84 19.77 L95.35 29.25 A46.8 46.8 0 0 0 84.10 21.74Z" fill="#31CBD4" stroke="#31CBD4" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M108.23 23.16 A60.2 60.2 0 0 1 118.66 38.76 L106.26 43.90 A46.8 46.8 0 0 0 98.75 32.65Z" fill="#34C6E3" stroke="#34C6E3" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M120.49 43.20 A60.2 60.2 0 0 1 124.15 61.60 L110.74 61.60 A46.8 46.8 0 0 0 108.10 48.33Z" fill="#37C0F1" stroke="#37C0F1" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M124.15 66.40 A60.2 60.2 0 0 1 120.49 84.80 L108.10 79.67 A46.8 46.8 0 0 0 110.74 66.40Z" fill="#41B7F8" stroke="#41B7F8" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M118.66 89.24 A60.2 60.2 0 0 1 108.23 104.84 L98.75 95.35 A46.8 46.8 0 0 0 106.26 84.10Z" fill="#53ABF8" stroke="#53ABF8" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M104.84 108.23 A60.2 60.2 0 0 1 89.24 118.66 L84.10 106.26 A46.8 46.8 0 0 0 95.35 98.75Z" fill="#669EF8" stroke="#669EF8" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M84.80 120.49 A60.2 60.2 0 0 1 66.40 124.15 L66.40 110.74 A46.8 46.8 0 0 0 79.67 108.10Z" fill="#7892F8" stroke="#7892F8" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M61.60 124.15 A60.2 60.2 0 0 1 43.20 120.49 L48.33 108.10 A46.8 46.8 0 0 0 61.60 110.74Z" fill="#8E8AF8" stroke="#8E8AF8" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M38.76 118.66 A60.2 60.2 0 0 1 23.16 108.23 L32.65 98.75 A46.8 46.8 0 0 0 43.90 106.26Z" fill="#A885F8" stroke="#A885F8" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M19.77 104.84 A60.2 60.2 0 0 1 9.34 89.24 L21.74 84.10 A46.8 46.8 0 0 0 29.25 95.35Z" fill="#C180F9" stroke="#C180F9" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M7.51 84.80 A60.2 60.2 0 0 1 3.85 66.40 L17.26 66.40 A46.8 46.8 0 0 0 19.90 79.67Z" fill="#DB7BF9" stroke="#DB7BF9" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M3.85 61.60 A60.2 60.2 0 0 1 7.51 43.20 L19.90 48.33 A46.8 46.8 0 0 0 17.26 61.60Z" fill="#EA7CE1" stroke="#EA7CE1" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M9.34 38.76 A60.2 60.2 0 0 1 19.77 23.16 L29.25 32.65 A46.8 46.8 0 0 0 21.74 43.90Z" fill="#EF82B2" stroke="#EF82B2" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M23.16 19.77 A60.2 60.2 0 0 1 38.76 9.34 L43.90 21.74 A46.8 46.8 0 0 0 32.65 29.25Z" fill="#F48983" stroke="#F48983" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M43.20 7.51 A60.2 60.2 0 0 1 61.60 3.85 L61.60 17.26 A46.8 46.8 0 0 0 48.33 19.90Z" fill="#F98F54" stroke="#F98F54" stroke-width="1.6" stroke-linejoin="round"/>
+</svg>

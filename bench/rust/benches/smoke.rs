@@ -21,18 +21,36 @@ const MID: usize = 65_536;
 const LARGE: usize = 1_000_000;
 
 fn suite(c: &mut Criterion) {
-    // Insertion limit, one past it, and one past the tile capacity.
-    for len in [INSERTION_MAX, INSERTION_MAX + 1, TILE_BYTES / 8 + 1] {
-        let workspace = len > INSERTION_MAX;
-        keys::<u64>(c, "random", len, workspace);
+    // Insertion limit, one past it, and one past the tile capacity for 8- and
+    // 16-byte records. Cases this short move with code placement, so only the
+    // boundaries themselves are kept.
+    keys::<u64>(c, "random", INSERTION_MAX, false);
+    for len in [INSERTION_MAX + 1, TILE_BYTES / 8 + 1] {
+        keys::<u64>(c, "random", len, true);
         rows::<u32>(c, "random", len, false);
     }
-    rows::<u64>(c, "random", INSERTION_MAX + 1, false);
     rows::<u64>(c, "random", TILE_BYTES / 16 + 1, true);
 
-    // Eight tiles: one block-partition level and every root shortcut.
+    // Eight tiles: one block-partition level and every root and node route.
     keys::<u64>(c, "random", MID, true);
-    for distribution in ["d16", "zipf2", "sorted", "reverse", "sorted99", "equal"] {
+    for distribution in [
+        // Root shortcuts: confirmed order, stable reversal, budgeted
+        // insertion, constant keys.
+        "sorted",
+        "reverse",
+        "sorted99",
+        "equal",
+        // At most 8 varying bits: one block partition.
+        "d16",
+        // A repeated key: the equality partition.
+        "zipf2",
+        "skew99",
+        // A short end run separated by the top bit: the outlier run.
+        "sorted_tail",
+        // Mixed ascending and descending runs, as from merged sources: the
+        // insertion probe must give up early.
+        "runs",
+    ] {
         keys::<u64>(c, distribution, MID, false);
     }
     keys::<u32>(c, "random", MID, false);
@@ -44,11 +62,13 @@ fn suite(c: &mut Criterion) {
     rows::<u64>(c, "d16", MID, false);
 
     // The size at which most engine decisions were measured.
-    for distribution in ["random", "zipf2", "sorted99"] {
+    for distribution in ["random", "zipf2", "skew99", "two_values", "sorted99"] {
         keys::<u64>(c, distribution, LARGE, false);
     }
     keys::<u32>(c, "random", LARGE, false);
     keys::<u128>(c, "random", LARGE, false);
+    // Eight keys in 256 top-digit buckets: digit widening.
+    keys::<u128>(c, "sparse8", LARGE, false);
     rows::<u64>(c, "random", LARGE, false);
 }
 
@@ -57,8 +77,13 @@ trait Key: RadixKey + Copy {
     const NAME: &'static str;
     /// Draws from the type's whole bit range.
     fn draw(rng: &mut SplitMix64) -> Self;
+    /// Draws a key above every `small` value that differs from them in the
+    /// highest varying bit.
+    fn draw_high(rng: &mut SplitMix64) -> Self;
     /// Converts a value below `2^32` exactly.
     fn small(value: u64) -> Self;
+    /// The `k`-th of ten values spread over the whole key, `k` in `0..10`.
+    fn tenth(k: u64) -> Self;
     fn order(&self, other: &Self) -> Ordering;
     fn same(&self, other: &Self) -> bool;
 }
@@ -70,8 +95,14 @@ macro_rules! int_key {
             fn draw(rng: &mut SplitMix64) -> Self {
                 $draw(rng)
             }
+            fn draw_high(rng: &mut SplitMix64) -> Self {
+                Self::draw(rng) | 1 << (<$t>::BITS - 1)
+            }
             fn small(value: u64) -> Self {
                 value as $t
+            }
+            fn tenth(k: u64) -> Self {
+                <$t>::MAX / 10 * k as $t
             }
             fn order(&self, other: &Self) -> Ordering {
                 self.cmp(other)
@@ -95,8 +126,17 @@ impl Key for f64 {
     fn draw(rng: &mut SplitMix64) -> Self {
         f64::from_bits(rng.next())
     }
+    // Positive NaNs and +inf have the exponent's top bit set; every `small`
+    // value is below 2^32 and has it clear.
+    fn draw_high(rng: &mut SplitMix64) -> Self {
+        f64::from_bits(0x7ff0_0000_0000_0000 | rng.next() >> 12)
+    }
     fn small(value: u64) -> Self {
         value as f64
+    }
+    // k · 2^1020 is exact and stays finite for k < 16.
+    fn tenth(k: u64) -> Self {
+        k as f64 * f64::from_bits(0x7fb0_0000_0000_0000)
     }
     fn order(&self, other: &Self) -> Ordering {
         self.total_cmp(other)
@@ -149,6 +189,54 @@ fn generate<K: Key>(distribution: &str, len: usize) -> Vec<K> {
                     K::small(cdf.partition_point(|&c| c <= r) as u64)
                 })
                 .collect()
+        }
+        "skew99" => {
+            // Ten values spread over the whole key; the smallest takes 99% of
+            // the records and the other nine share the rest. The spread keeps
+            // the minority apart in the top digit.
+            (0..len)
+                .map(|_| {
+                    if rng.next() % 100 < 99 {
+                        K::tenth(0)
+                    } else {
+                        K::tenth(1 + rng.next() % 9)
+                    }
+                })
+                .collect()
+        }
+        "two_values" => (0..len)
+            .map(|_| K::tenth(if rng.next() >> 63 == 0 { 0 } else { 9 }))
+            .collect(),
+        "sparse8" => {
+            // Each record picks one of eight full-width keys at random, so
+            // the sample of runs is not periodic.
+            let values: Vec<K> = (0..8).map(|_| K::draw(&mut rng)).collect();
+            (0..len)
+                .map(|_| values[(rng.next() % 8) as usize])
+                .collect()
+        }
+        "sorted_tail" => {
+            // Ascending, then the last len / 128 records drawn above them.
+            let tail = len / 128;
+            let mut values: Vec<K> = (0..(n - tail as u64)).map(K::small).collect();
+            values.extend((0..tail).map(|_| K::draw_high(&mut rng)));
+            values
+        }
+        "runs" => {
+            // Consecutive runs of 16 to 2,063 random keys, each sorted
+            // ascending or descending with equal odds.
+            let mut values: Vec<K> = (0..len).map(|_| K::draw(&mut rng)).collect();
+            let mut start = 0;
+            while start < len {
+                let end = len.min(start + 16 + (rng.next() % 2048) as usize);
+                let run = &mut values[start..end];
+                run.sort_by(K::order);
+                if rng.next() >> 63 == 1 {
+                    run.reverse();
+                }
+                start = end;
+            }
+            values
         }
         "sorted" => (0..n).map(K::small).collect(),
         "reverse" => (0..n).rev().map(K::small).collect(),
@@ -224,7 +312,19 @@ fn measure<T: Copy>(
     assert!(ok, "{id}/{mode}: output differs from the reference");
 
     let batch = (BATCH_ELEMENTS / input.len()).max(1) as u64;
-    c.bench_function(&format!("{id}/{mode}"), |b| {
+    let mut group = c.benchmark_group(id);
+    // A sort of 10^6 keys takes milliseconds, so a 1.5 s window gives it only
+    // a few hundred sorts; it gets more time and samples to narrow its limits.
+    let (warm_up, window, samples) = if input.len() >= LARGE {
+        (1000, 4000, 40)
+    } else {
+        (500, 1500, 30)
+    };
+    group
+        .warm_up_time(Duration::from_millis(warm_up))
+        .measurement_time(Duration::from_millis(window))
+        .sample_size(samples);
+    group.bench_function(mode, |b| {
         // Restoring the input and dropping buffers are not timed.
         b.iter_batched_ref(
             || input.to_vec(),
@@ -232,15 +332,11 @@ fn measure<T: Copy>(
             BatchSize::NumIterations(batch),
         );
     });
+    group.finish();
 }
 
 fn main() {
-    let mut criterion = Criterion::default()
-        .sample_size(20)
-        .warm_up_time(Duration::from_millis(250))
-        .measurement_time(Duration::from_millis(750))
-        .without_plots()
-        .configure_from_args();
+    let mut criterion = Criterion::default().without_plots().configure_from_args();
     suite(&mut criterion);
     criterion.final_summary();
 }

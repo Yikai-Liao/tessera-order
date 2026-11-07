@@ -1,0 +1,12 @@
+{
+  "forward_apply_check": "PASS",
+  "forward_all_rust_hashes": "PASS",
+  "reverse_apply_check": "PASS",
+  "reverse_all_rust_hashes": "PASS",
+  "second_forward_all_rust_hashes": "PASS",
+  "public_cargo_manifests_and_lock_byte_unchanged": true,
+  "baseline_rust_files": 15,
+  "candidate_rust_files": 18,
+  "patch_sha256": "1eed1e15517b1ca79102c465cc382f4efddd516749d8d50922068006c5557c40",
+  "method": "Fresh temporary source-only tree from immutable Git objects; git apply; full Rust file set and SHA256 equality after each step; no build or test execution."
+}

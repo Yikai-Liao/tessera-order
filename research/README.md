@@ -60,3 +60,8 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   controls. The u32/equal37 slower primary tendency remains unresolved; this
   does not establish regression-free behavior. Historical e1 source, not the
   subsequently merged main refactor; no count-window adoption.
+
+- [Public-entry count-window source checkpoint](patches/public-count-window-source/README.md):
+  Rust-only patch against public `987fbdfe`, with complete source hashes,
+  safety scope and replay proof. Sealed Direct u32/u64 only; no performance
+  result or default adoption. Archived, not applied to this checkout.

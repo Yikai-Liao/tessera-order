@@ -1,0 +1,62 @@
+{
+  "public_base_commit": "987fbdfe757cc81330db04ee11ed6e454b2e5142",
+  "public_base_tree": "1a45e496ce7cd0a965b4851f08e002f5f3ed3796",
+  "tested_private_baseline_identity": "19659df2fd57dfcde3b82892bb01b84a6a5770cadd5094bb9815a6cfd70d9f17",
+  "tested_private_candidate_identity": "b4c51ddca807a94260e6399800f17f06b4463fde6a4162f07a9f6df094d84f45",
+  "identity_scope": "Private identities include normalized Cargo workspace/package/lock files. Public replay keeps public Cargo files unchanged; Rust bytes match the tested candidate exactly.",
+  "baseline_rust_sha256": {
+    "rust/tessera-sort/src/block.rs": "fff6282eb72e7f2d5fbf14ae63707122ed17e3c2864361c6a9b4c1a7ea40fd7f",
+    "rust/tessera-sort/src/engine.rs": "35587192cc7aa1a2011ad3a5b4fdb6bee09649257262a16bc9a4a3dd36b9f452",
+    "rust/tessera-sort/src/engine/parallel.rs": "968a2f01207966bb3d54615971ae348270c999d86b3ec74e396074d8e11fbc3b",
+    "rust/tessera-sort/src/engine/parallel/bucket_borrow_tests.rs": "2629929d99ab07a6b4805a0b9c08ae8128c94e3cb7c352b1c2021328855b4f27",
+    "rust/tessera-sort/src/engine/parallel/sparse_root_tests.rs": "023322a6a7763d5bb3d688ad290e8fd88d8feb9188221032d9727cab18b7a5c8",
+    "rust/tessera-sort/src/key.rs": "65e4278db81068c2b3b663144d249d63b8883d2f1f2f952b806fe801120f3c00",
+    "rust/tessera-sort/src/lib.rs": "b3cae14ac8f9720f9224591bceeb6d78ad3a44cd2349467e0d1d4b1c986ffb5e",
+    "rust/tessera-sort/src/portable_simd.rs": "1e7b392ee3b646cff7e88fab262fe9ba3f4799d0765252450f51cb4a52b47139",
+    "rust/tessera-sort/src/scan.rs": "7033f9770bdaba09e91c2996b27677a476c795ccf3fad555e7a087eb5c8311dc",
+    "rust/tessera-sort/src/unwind.rs": "82477e2787826509e957dbdccd8cb7641b6ac9c56521c7385f76aef41e5cc614",
+    "rust/tessera-sort/src/workspace.rs": "d040c5c58dc95f883796df526c1d8379db875f9dc80b4160e9424573a7ffb572",
+    "rust/tessera-sort/tests/conformance.rs": "ba6591297605712a80ee4c72bf4e321f636dbd7f65e81e0d6018ed1bcdcb6cde",
+    "rust/tessera-sort/tests/parallel.rs": "fda3236cb6fbf7c47e374823937ea4bdd6823f0a63ee8d66b462f519311fd54b",
+    "rust/tessera-sort/tests/recovery.rs": "a726fe37f2d28c363b7efda2d02a3f223b443525c0ab29a5e28823d9a66bf7f0",
+    "rust/tessera-sort/tests/workspace_memory.rs": "5590c0fd3d83cb4515a169c6cdd9c1e7db5f3bac9a11004b39b04cb4d88770fb"
+  },
+  "candidate_rust_sha256": {
+    "rust/tessera-sort/src/block.rs": "fff6282eb72e7f2d5fbf14ae63707122ed17e3c2864361c6a9b4c1a7ea40fd7f",
+    "rust/tessera-sort/src/engine.rs": "03ff9cc0b923c0aa0aad73bed71b5a3432860828c67f2968420f607564c95325",
+    "rust/tessera-sort/src/engine/count_window_witness.rs": "e95192891b6a3b6b2720fe5978f2a3306ad09e9b19a8f3c779cd259fa5bc173d",
+    "rust/tessera-sort/src/engine/parallel.rs": "fde0588985b4f6e2d01d6f8fb7d9aa9e3d34859b5c929c9cdb0d1ed60fd4c33a",
+    "rust/tessera-sort/src/engine/parallel/bucket_borrow_tests.rs": "2629929d99ab07a6b4805a0b9c08ae8128c94e3cb7c352b1c2021328855b4f27",
+    "rust/tessera-sort/src/engine/parallel/sparse_root_tests.rs": "023322a6a7763d5bb3d688ad290e8fd88d8feb9188221032d9727cab18b7a5c8",
+    "rust/tessera-sort/src/key.rs": "17949629bea58b6f8f8c9f5b23e3a28b6a5c1ee65669ab8b51cb39e5cb150cf7",
+    "rust/tessera-sort/src/key/parallel_count.rs": "660b3475cdb3574527c3993120a70e8c81aa4d18455ba5bd0379bc1ce172f7ab",
+    "rust/tessera-sort/src/key/parallel_count/tests.rs": "a35b1ec19451276582de0312c7ee121c0580525fe0b10f71a38e430b6faac77f",
+    "rust/tessera-sort/src/lib.rs": "b3cae14ac8f9720f9224591bceeb6d78ad3a44cd2349467e0d1d4b1c986ffb5e",
+    "rust/tessera-sort/src/portable_simd.rs": "1e7b392ee3b646cff7e88fab262fe9ba3f4799d0765252450f51cb4a52b47139",
+    "rust/tessera-sort/src/scan.rs": "7033f9770bdaba09e91c2996b27677a476c795ccf3fad555e7a087eb5c8311dc",
+    "rust/tessera-sort/src/unwind.rs": "82477e2787826509e957dbdccd8cb7641b6ac9c56521c7385f76aef41e5cc614",
+    "rust/tessera-sort/src/workspace.rs": "d040c5c58dc95f883796df526c1d8379db875f9dc80b4160e9424573a7ffb572",
+    "rust/tessera-sort/tests/conformance.rs": "ba6591297605712a80ee4c72bf4e321f636dbd7f65e81e0d6018ed1bcdcb6cde",
+    "rust/tessera-sort/tests/parallel.rs": "fda3236cb6fbf7c47e374823937ea4bdd6823f0a63ee8d66b462f519311fd54b",
+    "rust/tessera-sort/tests/recovery.rs": "a726fe37f2d28c363b7efda2d02a3f223b443525c0ab29a5e28823d9a66bf7f0",
+    "rust/tessera-sort/tests/workspace_memory.rs": "5590c0fd3d83cb4515a169c6cdd9c1e7db5f3bac9a11004b39b04cb4d88770fb"
+  },
+  "changed_existing_rust": [
+    "rust/tessera-sort/src/engine.rs",
+    "rust/tessera-sort/src/engine/parallel.rs",
+    "rust/tessera-sort/src/key.rs"
+  ],
+  "added_rust": [
+    "rust/tessera-sort/src/engine/count_window_witness.rs",
+    "rust/tessera-sort/src/key/parallel_count.rs",
+    "rust/tessera-sort/src/key/parallel_count/tests.rs"
+  ],
+  "original_test_files_unchanged": [
+    "rust/tessera-sort/src/engine/parallel/bucket_borrow_tests.rs",
+    "rust/tessera-sort/src/engine/parallel/sparse_root_tests.rs",
+    "rust/tessera-sort/tests/conformance.rs",
+    "rust/tessera-sort/tests/parallel.rs",
+    "rust/tessera-sort/tests/recovery.rs",
+    "rust/tessera-sort/tests/workspace_memory.rs"
+  ]
+}

@@ -13,6 +13,9 @@
 //! stack. The depth is at most `ceil(key bits / MIN_TILE_DIGIT_BITS)`, 22
 //! levels for `u128`.
 
+#[cfg(feature = "rayon")]
+pub(crate) mod parallel;
+
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 

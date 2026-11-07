@@ -360,6 +360,7 @@ name = "tessera-bench"
 version = "0.0.0"
 dependencies = [
  "criterion",
+ "rayon",
  "tessera-sort",
 ]
 

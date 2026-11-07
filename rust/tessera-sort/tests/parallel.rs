@@ -6,9 +6,10 @@
 
 use core::cell::Cell;
 use core::cmp::Reverse;
+use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tessera_sort::{par_stable_sort, par_stable_sort_by_key};
 
 #[test]
@@ -71,6 +72,77 @@ fn caller_pools_are_supported() {
         });
         assert_eq!(rows, expected);
     }
+}
+
+#[test]
+fn large_sort_uses_workers_and_recovers_task_panics() {
+    const LEN: usize = 1_000_000;
+
+    let mut rows: Vec<_> = (0..LEN as u32).map(|id| (mix(u64::from(id)), id)).collect();
+    let original = rows.clone();
+    let mut expected = original.clone();
+    expected.sort_by_key(|row| row.0);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+
+    let calls = AtomicUsize::new(0);
+    let workers = Mutex::new(HashSet::new());
+    pool.install(|| {
+        par_stable_sort_by_key(&mut rows, |row| {
+            if calls.fetch_add(1, Ordering::Relaxed) % 4096 == 0 {
+                workers
+                    .lock()
+                    .unwrap()
+                    .insert(rayon::current_thread_index().unwrap());
+            }
+            row.0
+        });
+    });
+    assert_eq!(rows, expected);
+    assert!(
+        workers.lock().unwrap().len() > 1,
+        "sorting work stayed on one Rayon worker"
+    );
+
+    rows.clone_from_slice(&original);
+    let calls = AtomicUsize::new(0);
+    let origin = Mutex::new(None);
+    let panicked = AtomicBool::new(false);
+    let panic = catch_unwind(AssertUnwindSafe(|| {
+        pool.install(|| {
+            par_stable_sort_by_key(&mut rows, |row| {
+                let call = calls.fetch_add(1, Ordering::Relaxed);
+                let current = std::thread::current().id();
+                if call == 0 {
+                    *origin.lock().unwrap() = Some(current.clone());
+                } else if call > LEN
+                    && origin
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .is_some_and(|origin| *origin != current)
+                    && !panicked.swap(true, Ordering::Relaxed)
+                {
+                    panic!("key panic in a child task");
+                }
+                row.0
+            });
+        });
+    }));
+    assert!(panic.is_err());
+    assert!(panicked.load(Ordering::Relaxed));
+    let mut ids: Vec<_> = rows.into_iter().map(|row| row.1).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, (0..LEN as u32).collect::<Vec<_>>());
+}
+
+fn mix(value: u64) -> u64 {
+    let mut value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
 }
 
 #[test]

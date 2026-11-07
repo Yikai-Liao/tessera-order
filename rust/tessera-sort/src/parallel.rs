@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Rayon entry points and, once implemented, task scheduling.
+//! Rayon entry points for stable sorting.
 //!
-//! The serial engine remains the fallback and owns key encoding, routing and
-//! record recovery. Keep scheduling here rather than adding threading bounds
-//! to the serial API. These entry points currently delegate the whole sort.
+//! The parallel engine uses the existing serial probes and node/tile sorting.
+//! It partitions the root serially, then sorts each complete bucket in Rayon's
+//! current pool while root compaction continues. Small inputs and one-thread
+//! pools use the serial engine.
 
 use crate::key::{ByKey, Direct};
 use crate::{RadixKey, engine};
@@ -13,13 +14,14 @@ use crate::{RadixKey, engine};
 ///
 /// Available with the `rayon` feature. Ordering and stability are the same as
 /// [`crate::stable_sort`], including floats and [`Reverse`](core::cmp::Reverse).
-/// This initial implementation uses the serial engine for every input; it does
-/// not schedule parallel tasks yet.
+/// Small inputs and one-thread pools use the serial engine; larger inputs split
+/// completed root buckets across Rayon's current pool.
 ///
 /// # Memory
 ///
-/// Currently allocates and frees the same scratch as [`crate::stable_sort`].
-/// The parallel scratch budget will be specified with task scheduling.
+/// Scratch remains O(√n) for fixed record size and key width. The root's
+/// partition scratch stays live during compaction; at most 256 child jobs can
+/// retain workspaces, bounded by the root digit's eight-bit fan-out.
 ///
 /// # Examples
 ///
@@ -29,16 +31,15 @@ use crate::{RadixKey, engine};
 /// assert_eq!(keys, [3, 7, 7, 19, 42]);
 /// ```
 pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
-    engine::sort::<K, _, false>(values, &mut Direct, None);
+    engine::parallel::sort::<K, _, false>(values, &mut Direct);
 }
 
 /// Sorts records stably by a key through the Rayon entry point.
 ///
 /// Available with the `rayon` feature. Ordering, stability and record
 /// preservation are the same as [`crate::stable_sort_by_key`]. Records need
-/// `Send`, but do not need `Sync`, `Copy`, `Clone`, `Default` or `Ord`.
-/// This initial implementation uses the serial engine for every input; it does
-/// not schedule parallel tasks yet.
+/// `Send`, but do not need `Sync`, `Copy`, `Clone`, `Default` or `Ord`. Small
+/// inputs and one-thread pools use the serial engine.
 ///
 /// # Key function
 ///
@@ -57,8 +58,9 @@ pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
 ///
 /// # Memory
 ///
-/// Currently allocates and frees the same scratch as [`crate::stable_sort_by_key`].
-/// The parallel scratch budget will be specified with task scheduling.
+/// Scratch remains O(√n) for fixed record size and key width. Root partition
+/// scratch stays live while child jobs run; the eight-bit root digit bounds
+/// the pool to at most 256 job workspaces.
 ///
 /// # Examples
 ///
@@ -75,5 +77,5 @@ where
     K: RadixKey,
     F: Fn(&T) -> K + Sync,
 {
-    engine::sort::<T, _, true>(values, &mut ByKey(&key), None);
+    engine::parallel::sort::<T, _, true>(values, &mut ByKey(&key));
 }

@@ -2,9 +2,9 @@
 
 # Proposal: Rayon parallel sorting
 
-Status: API scaffold implemented; parallel execution pending. Date: 2026-11-07.
+Status: optional API and serial-root/parallel-bucket execution implemented; acceptance measurements pending. Date: 2026-11-07.
 
-Add parallel stable radix sorting as an optional capability of the existing Rust crate. This branch establishes entry points, dependency wiring and contracts. Both entry points currently delegate the entire sort to the serial engine. No parallel speedup or parallel memory bound has been measured or claimed.
+Add parallel stable radix sorting as an optional capability of the existing Rust crate. The first execution stage reuses the engine's probes, digit planner, block partition and tile/node sorting. It partitions the root serially, then sorts complete child buckets in bounded Rayon jobs. It is a baseline for further root-partition work, not a speedup claim or final parallel design.
 
 ## Public API
 
@@ -42,7 +42,8 @@ Do not add parallel methods to `Workspace<T>` yet. It currently owns scratch for
 | File | Responsibility |
 |---|---|
 | `src/lib.rs` | Crate documentation, feature gates and root exports |
-| `src/parallel.rs` | Rayon entry points, future task scheduling, concurrency budget and serial fallback |
+| `src/parallel.rs` | Rayon entry points and serial fallback |
+| `src/engine/parallel.rs` | Root split, complete-bucket jobs and per-job workspace reuse |
 | `src/engine.rs` | Shared order probes, routing, digit planning, node partition orchestration and tile sorting |
 | `src/key.rs` | Shared sealed encodings and `Direct` / `ByKey` extractors |
 | `src/block.rs` | Block partition, scratch ownership and panic restoration |
@@ -53,9 +54,7 @@ Name the module `parallel` for its responsibility; name the feature `rayon` for 
 
 The scaffold directly calls `engine::sort` with `Direct` or `ByKey(&key)`. This preserves the existing distinction between sealed direct keys and cached user classifications. It introduces no second extractor trait, duplicate sort engine, new unsafe code or serial-engine refactor.
 
-When scheduling is introduced, extract a complete node-preparation and partition stage inside `engine.rs`, used by both serial and parallel orchestration. Keep order probes, variation masks, digit widths and adaptive shortcuts authoritative there; expose only the stage results the scheduler needs. Reuse the existing tile finish through the serial engine. Measure any changes to the serial routing path before accepting that extraction.
-
-Partition a node completely before splitting its buckets into disjoint slices for Rayon tasks. The current block visitor borrows one mutable extractor and may run while other records still live in partition scratch. It is not a task-spawning interface. Add a narrow partition operation that returns completed bucket boundaries when needed, through the existing partition implementation, rather than exporting its raw pointers or retaining callback slices. Keep the current serial visitor for its cache-local tile finish.
+The parallel entry point shares the existing order probes and key encodings, but keeps the serial entry point unchanged. It uses the existing digit planner and `Sorter` for root selection and child sorting. The block engine hands each complete bucket to a scoped Rayon job during compaction, overlapping child sorting with the remaining root compaction. Each job retains the pointer and length of every bucket as a distinct region; adjacent addresses are not combined into a wider borrow. This narrow handoff uses raw pointers because the visitor's temporary borrow cannot outlive its callback. Its safety argument depends on compaction retiring each handed-off region as both destination and copy source.
 
 Keep parallel block movement in `block.rs` while it shares the partition's ownership and recovery invariants. Split a complete mechanism into `block/parallel.rs` only if the implementation establishes a separately understandable boundary; do not create empty module trees or a second `parallel_engine.rs` in advance.
 
@@ -63,11 +62,11 @@ Keep parallel block movement in `block.rs` while it shares the partition's owner
 
 The current fallback has the serial engine's documented memory bounds. That does not establish the future parallel bound. For `q` concurrent disjoint nodes of lengths `n_i`, block scratch proportional to `sum(sqrt(n_i))` is at most `sqrt(q * n)`; tile buffers, cursor tables, probe keys, bucket metadata and Rayon runtime storage must be accounted for separately.
 
-Budget live scratch owners per call, including tasks suspended during work stealing. A thread count alone does not bound those owners. Divide a finite task allowance among child jobs, and release a parent's partition scratch before child jobs allocate theirs. Specify and test the resulting peak bound before enabling concurrent buckets. Avoid a mutex around one shared workspace and avoid allocating a workspace for every queued bucket. A reusable parallel workspace remains deferred until these lifetimes and reuse costs are understood.
+The root digit is chosen by the existing planner and has at most eight bits, so there are at most 256 nonempty buckets and jobs. A job reuses one workspace across its buckets; the pool lock is held only to take or return a workspace. The root's O(√n) block scratch remains live during child work because it is needed for compaction. If `mᵢ` is the largest bucket handled by job `i`, the `mᵢ` are disjoint across jobs and `Σ√mᵢ ≤ √(256n)`. Thus the root reserve plus child reserves, bounded job metadata and fixed per-workspace tile storage remain O(√n) for fixed record size and key width. Reentrant key functions may suspend jobs, so workspace count is bounded by the fixed root fan-out, not by worker count. Rayon runtime storage and thread stacks are separate. A reusable parallel workspace remains deferred until these lifetimes and reuse costs are understood.
 
 ## Implementation sequence
 
 1. **Scaffold (this change).** Optional dependency, two entry points, documented serial fallback and contract tests. Validate default, `no_std`, Rayon, Rayon without default features, and Rayon with Portable SIMD; check the Rayon MSRV. No scheduling thresholds or engine heuristics change.
-2. **Concurrent buckets.** Extract the shared complete node stage, then sort completed disjoint buckets in Rayon's current pool. Keep small jobs serial. Add a per-call scratch budget, task-level panic tests, inconsistent keys, owned records and exclusive borrows. Verify that multiple workers execute sorting work. Measure task granularity and the serial baseline with A/A controls; do not choose a cutoff from an unmeasured constant.
-3. **Parallel partition.** Address the serial root partition with a separate ownership and recovery design. Reuse encoding and digit planning; account for histogram, block movement and synchronization memory. Concurrent child sorting alone does not establish whole-sort scalability.
+2. **Overlapped root bucket completion (implementation stage).** Large inputs reuse the shared probes, digit planner and node/tile engine; complete buckets are grouped into 256 KiB jobs and sorted while the serial root compaction continues. Root fan-out stays within the existing eight-bit radix limit, and the serial path is unchanged. Contract tests cover task panics, provenance, and multiple workers. Cutoffs remain candidates pending controlled measurements.
+3. **Parallel root partition.** Address the serial root classification/scatter and compaction from their stable-rank and in-place movement invariants. Reuse encoding and digit planning; account for synchronization, block movement, rollback and scratch lifetimes. The first overlap baseline still has a serial scatter critical path, so it is not an acceptance target by itself.
 4. **Acceptance.** Follow the [benchmark protocol](../development/benchmarking.md), comparing the complete public call against the serial engine and Rayon's stable sort at controlled pool widths. Cover random, ordered, repeated and skewed keys, wide keys, owned records and expensive extraction; report A/A ranges and peak memory. Extend sanitizer and Miri coverage to the new mechanisms. Promote the implemented contracts to a guide and engine design, and record settled choices under the implementation pull request's number.

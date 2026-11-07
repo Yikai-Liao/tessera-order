@@ -280,6 +280,7 @@ pub(crate) trait Extract<T> {
 }
 
 /// Extracts keys with a user key function, which may panic or be inconsistent.
+#[derive(Clone)]
 pub(crate) struct ByKey<F>(pub F);
 impl<T, K: RadixKey, F: FnMut(&T) -> K> Extract<T> for ByKey<F> {
     type Value = K::Encoded;
@@ -290,6 +291,7 @@ impl<T, K: RadixKey, F: FnMut(&T) -> K> Extract<T> for ByKey<F> {
 }
 
 /// Uses the record itself as the key; deterministic and panic-free.
+#[derive(Clone, Copy)]
 pub(crate) struct Direct;
 
 impl<K: RadixKey> Extract<K> for Direct {

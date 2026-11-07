@@ -208,7 +208,7 @@ impl<T> Destinations<T> {
 }
 
 /// A staged bucket run during compaction: where staged buckets go, and what
-/// finishes them. Unlike Staging, the visitor no longer needs the key.
+/// finishes them. Unlike `Staging`, the visitor no longer needs the key.
 struct StagedRun<'a, T> {
     visit: StagedVisit<'a, T>,
     ptr: *mut T,
@@ -332,13 +332,13 @@ fn partition_pass<T, E: Extract<T>>(
     partition_pass_inner(arr, buckets, key, buffers, classify, want_ends, visit, None)
 }
 
-/// Like partition_pass, but a bucket that fits the staging buffer is copied
+/// Like `partition_pass`, but a bucket that fits the staging buffer is copied
 /// there and handed to the visitor together with its destination.
 ///
 /// # Safety
 ///
 /// The staging pointer must satisfy the requirement of
-/// partition_digit_staged.
+/// `partition_digit_staged`.
 unsafe fn partition_staged<T, E: Extract<T>>(
     arr: &mut [T],
     buckets: usize,
@@ -957,7 +957,7 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
         self.materialize(ends, visit, None)
     }
 
-    /// Materializes like compact_with, except that a bucket that fits the
+    /// Materializes like `compact_with`, except that a bucket that fits the
     /// staged run is finished there and scatters straight into its final
     /// position instead of being copied into the input slice first.
     fn compact_staged(&mut self, ends: &[usize], run: StagedRun<'_, T>) -> Option<PanicPayload> {

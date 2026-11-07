@@ -22,7 +22,8 @@
   }
 </style>
 <style>
-  .mark { fill: #8d8c86; } .stroke-mark { stroke: #8d8c86; }
+  .tessera { fill: #4a80e6; } .radix { fill: #e8622f; } .comparison { fill: #8d8c86; }
+  .edge-tessera { stroke: #4a80e6; } .edge-radix { stroke: #e8622f; } .edge-comparison { stroke: #8d8c86; }
 </style>
 <rect class="panel" x="0.5" y="0.5" width="719" height="521" rx="12"/>
 <text class="ink stat" x="24.0" y="40.0">Tessera ranks 2nd of 7 sorts on 1,000,000 u64 keys</text>
@@ -43,35 +44,38 @@
 <text class="caps muted" x="696.0" y="102.0" text-anchor="end">SPEED</text>
 <text class="caps muted" x="24.0" y="102.0">STABLE SORTS</text>
 <text class="ink strong" x="24.0" y="135.0">Tessera, Portable SIMD</text>
-<line class="stem-faster" x1="420.4" x2="591.2" y1="131" y2="131" stroke-width="2" stroke-linecap="round"/>
-<circle class="faster ring" cx="591.2" cy="131" r="6.5" stroke-width="2"/>
+<circle class="within edge-tessera" cx="591.2" cy="131" r="5.5" stroke-width="2"/>
 <text class="val ink strong" x="696.0" y="135.0" text-anchor="end">3.3×</text>
 <text class="ink strong" x="24.0" y="173.0">Tessera</text>
 <line class="stem-faster" x1="420.4" x2="558.9" y1="169" y2="169" stroke-width="2" stroke-linecap="round"/>
-<circle class="faster ring" cx="558.9" cy="169" r="6.5" stroke-width="2"/>
+<circle class="tessera ring" cx="558.9" cy="169" r="6.5" stroke-width="2"/>
 <text class="val ink strong" x="696.0" y="173.0" text-anchor="end">2.6×</text>
 <text class="ink" x="24.0" y="211.0">radsort</text>
-<circle class="mark ring" cx="533.3" cy="207" r="4" stroke-width="2"/>
+<circle class="radix ring" cx="533.3" cy="207" r="4" stroke-width="2"/>
 <text class="val muted" x="696.0" y="211.0" text-anchor="end">2.2×</text>
 <text class="ink" x="24.0" y="249.0">long-stable-variant-name</text>
-<circle class="mark ring" cx="520.5" cy="245" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="520.5" cy="245" r="4" stroke-width="2"/>
 <text class="val muted" x="696.0" y="249.0" text-anchor="end">2×</text>
 <text class="ink" x="24.0" y="287.0">slice::sort</text>
-<circle class="mark ring" cx="420.4" cy="283" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="420.4" cy="283" r="4" stroke-width="2"/>
 <text class="val muted" x="696.0" y="287.0" text-anchor="end">1.00×</text>
 <text class="ink" x="24.0" y="319.0">glidesort-sqrt</text>
 <text class="muted sub" x="24.0" y="334.0">given Tessera's memory</text>
-<circle class="mark ring" cx="419.3" cy="321" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="419.3" cy="321" r="4" stroke-width="2"/>
 <text class="val muted" x="696.0" y="325.0" text-anchor="end">0.99×</text>
 <text class="caps muted" x="24.0" y="362.0">UNSTABLE SORTS</text>
 <text class="ink" x="24.0" y="395.0">vqsort</text>
-<circle class="mark ring" cx="570.6" cy="391" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="570.6" cy="391" r="4" stroke-width="2"/>
 <text class="val muted" x="696.0" y="395.0" text-anchor="end">2.8×</text>
 <text class="ink" x="24.0" y="433.0">slice::sort_unstable</text>
-<circle class="mark ring" cx="538.3" cy="429" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="538.3" cy="429" r="4" stroke-width="2"/>
 <text class="val muted" x="696.0" y="433.0" text-anchor="end">2.3×</text>
-<circle class="faster" cx="28" cy="500" r="4"/>
+<circle class="tessera" cx="28" cy="500" r="4"/>
 <text class="muted sub" x="38.0" y="504.0">Tessera</text>
-<circle class="mark" cx="101.69" cy="500" r="4"/>
-<text class="muted sub" x="111.7" y="504.0">other sorts</text>
+<circle class="within edge-tessera" cx="101.69" cy="500" r="3.5" stroke-width="1.5"/>
+<text class="muted sub" x="111.7" y="504.0">Tessera, Portable SIMD</text>
+<circle class="radix" cx="259.2" cy="500" r="4"/>
+<text class="muted sub" x="269.2" y="504.0">other radix sorts</text>
+<circle class="comparison" cx="374.69" cy="500" r="4"/>
+<text class="muted sub" x="384.7" y="504.0">comparison sorts</text>
 </svg>

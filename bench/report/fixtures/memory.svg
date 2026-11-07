@@ -22,7 +22,8 @@
   }
 </style>
 <style>
-  .mark { fill: #8d8c86; } .stroke-mark { stroke: #8d8c86; }
+  .tessera { fill: #4a80e6; } .radix { fill: #e8622f; } .comparison { fill: #8d8c86; }
+  .edge-tessera { stroke: #4a80e6; } .edge-radix { stroke: #e8622f; } .edge-comparison { stroke: #8d8c86; }
 </style>
 <rect class="panel" x="0.5" y="0.5" width="719" height="483" rx="12"/>
 <text class="ink stat" x="24.0" y="40.0">Tessera sorts 10,000,000 u64 keys in at most 405 kB of extra memory</text>
@@ -45,30 +46,34 @@
 <text class="caps muted" x="696.0" y="102.0" text-anchor="end">WORST</text>
 <text class="caps muted" x="24.0" y="102.0">STABLE SORTS</text>
 <text class="ink strong" x="24.0" y="135.0">Tessera</text>
-<circle class="faster ring" cx="280.7" cy="131" r="6.5" stroke-width="2"/>
+<circle class="tessera ring" cx="280.7" cy="131" r="6.5" stroke-width="2"/>
 <text class="val ink strong" x="696.0" y="135.0" text-anchor="end">405 kB</text>
 <text class="ink" x="24.0" y="167.0">glidesort-sqrt</text>
 <text class="muted sub" x="24.0" y="182.0">given Tessera's memory</text>
-<circle class="mark ring" cx="280.7" cy="169" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="280.7" cy="169" r="4" stroke-width="2"/>
 <text class="val muted" x="696.0" y="173.0" text-anchor="end">405 kB</text>
 <text class="ink" x="24.0" y="211.0">slice::sort</text>
-<circle class="mark ring" cx="510.0" cy="207" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="510.0" cy="207" r="4" stroke-width="2"/>
 <text class="val muted" x="696.0" y="211.0" text-anchor="end">80 MB</text>
 <text class="ink" x="24.0" y="249.0">radsort</text>
-<circle class="mark ring" cx="510.0" cy="245" r="4" stroke-width="2"/>
+<circle class="radix ring" cx="510.0" cy="245" r="4" stroke-width="2"/>
 <text class="val muted" x="696.0" y="249.0" text-anchor="end">80 MB</text>
 <text class="ink" x="24.0" y="287.0">long-stable-variant-name</text>
-<circle class="mark ring" cx="510.0" cy="283" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="510.0" cy="283" r="4" stroke-width="2"/>
 <text class="val muted" x="696.0" y="287.0" text-anchor="end">80 MB</text>
 <text class="caps muted" x="24.0" y="324.0">UNSTABLE SORTS</text>
 <text class="ink" x="24.0" y="357.0">slice::sort_unstable</text>
 <text class="val muted" x="696.0" y="357.0" text-anchor="end">0</text>
 <text class="ink" x="24.0" y="395.0">vqsort</text>
 <text class="val muted" x="696.0" y="395.0" text-anchor="end">0</text>
-<circle class="mark" cx="28" cy="462" r="4"/>
-<text class="muted sub" x="38.0" y="466.0">worst of 10 inputs</text>
-<circle class="within" cx="153.61" cy="462" r="3.5" stroke-width="1.5"/>
-<text class="muted sub" x="163.6" y="466.0">random input</text>
-<line class="axis" x1="251.5" x2="251.5" y1="455" y2="469" stroke-width="1" stroke-dasharray="3 3"/>
-<text class="muted sub" x="261.5" y="466.0">input size, 80 MB</text>
+<circle class="tessera" cx="28" cy="462" r="4"/>
+<text class="muted sub" x="38.0" y="466.0">Tessera</text>
+<circle class="radix" cx="101.69" cy="462" r="4"/>
+<text class="muted sub" x="111.7" y="466.0">other radix sorts</text>
+<circle class="comparison" cx="217.18" cy="462" r="4"/>
+<text class="muted sub" x="227.2" y="466.0">comparison sorts</text>
+<circle class="within" cx="337.18" cy="462" r="3.5" stroke-width="1.5"/>
+<text class="muted sub" x="347.2" y="466.0">random input</text>
+<line class="axis" x1="435.07" x2="435.07" y1="455" y2="469" stroke-width="1" stroke-dasharray="3 3"/>
+<text class="muted sub" x="445.1" y="466.0">input size</text>
 </svg>

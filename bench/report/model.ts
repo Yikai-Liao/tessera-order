@@ -38,7 +38,7 @@ export interface Manifest {
   target: string;
   profile: string;
   dispatch?: Record<string, string>;
-  [key: string]: unknown;
+  [measurementId: string]: unknown;
 }
 export interface Sample {
   kind: "sample";
@@ -78,7 +78,7 @@ export interface Dataset {
   memory: Memory[];
   partial: boolean;
 }
-export function caseId(c: Case) {
+export function caseId(c: Pick<Case, "ty" | "distribution" | "len">) {
   return `${c.ty}/${c.distribution}/${c.len}/s1`;
 }
 export function median(values: number[]) {
@@ -92,7 +92,7 @@ export function geomean(values: number[]) {
     throw new Error("geometric mean requires positive values");
   return Math.exp(values.reduce((a, b) => a + Math.log(b), 0) / values.length);
 }
-export function key(build: string, id: string, variant: string) {
+export function measurementId(build: string, id: string, variant: string) {
   return `${build}:${id}:${variant}`;
 }
 export interface Summary {
@@ -109,14 +109,14 @@ export interface Summary {
   ns: number;
   verdict: "faster" | "slower" | "within noise";
 }
-export function summarize(data: Dataset): Map<string, Summary> {
-  const groups = Map.groupBy(data.samples, (s) => key(s.build, s.case_id, s.variant));
+export function summarize(dataset: Dataset): Map<string, Summary> {
+  const groups = Map.groupBy(dataset.samples, (s) => measurementId(s.build, s.case_id, s.variant));
   const result = new Map<string, Summary>();
   for (const unsorted of groups.values()) {
     const samples = [...unsorted].sort((a, b) => a.block - b.block);
     const { build, case_id: id, variant } = samples[0];
-    const a = groups.get(key(build, id, "tessera"))!;
-    const b = groups.get(key(build, id, "tessera-aa"))!;
+    const a = groups.get(measurementId(build, id, "tessera"))!;
+    const b = groups.get(measurementId(build, id, "tessera-aa"))!;
     const time = (s: Sample) => s.elapsed_ns / s.batch;
     const times = (values: Sample[]) => new Map(values.map((s) => [s.block, time(s)]));
     const first = times(a),
@@ -138,13 +138,13 @@ export function summarize(data: Dataset): Map<string, Summary> {
           : ratio > aaHigh && ratios.filter((r) => r > 1).length >= 8
             ? "slower"
             : "within noise";
-    result.set(key(build, id, variant), {
+    result.set(measurementId(build, id, variant), {
       caseId: id,
       build,
       variant,
       stable:
         variant.startsWith("tessera") ||
-        data.manifests.get(build)!.variants.find((v) => v.name === variant)!.stable,
+        dataset.manifests.get(build)!.variants.find((v) => v.name === variant)!.stable,
       ratios,
       ratio,
       low: Math.min(...ratios),

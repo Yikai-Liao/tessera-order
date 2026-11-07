@@ -18,13 +18,13 @@ template <class T> static auto key(const T &value) {
     return value.key;
 }
 #define SHIMS(TYPE, NAME)                                                      \
-  extern "C" void bench_ips2ra_##NAME(void *data, size_t n) noexcept {         \
-    auto *values = static_cast<TYPE *>(data);                                  \
-    ips2ra::sort(values, values + n, [](const TYPE &x) { return key(x); });    \
+  extern "C" void bench_ips2ra_##NAME(void *records, size_t len) noexcept {         \
+    auto *values = static_cast<TYPE *>(records);                                  \
+    ips2ra::sort(values, values + len, [](const TYPE &x) { return key(x); });    \
   }                                                                            \
-  extern "C" void bench_ips4o_##NAME(void *data, size_t n) noexcept {          \
-    auto *values = static_cast<TYPE *>(data);                                  \
-    ips4o::sort(values, values + n,                                            \
+  extern "C" void bench_ips4o_##NAME(void *records, size_t len) noexcept {          \
+    auto *values = static_cast<TYPE *>(records);                                  \
+    ips4o::sort(values, values + len,                                            \
                 [](const TYPE &a, const TYPE &b) { return key(a) < key(b); }); \
   }
 SHIMS(uint32_t, u32)

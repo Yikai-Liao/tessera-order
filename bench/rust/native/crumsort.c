@@ -3,11 +3,11 @@
 #include "layout.h"
 #include <crumsort.h>
 
-void bench_crumsort_u32(void *data, size_t n) {
-  crumsort_uint32(data, n, NULL);
+void bench_crumsort_u32(void *records, size_t len) {
+  crumsort_uint32(records, len, NULL);
 }
-void bench_crumsort_u64(void *data, size_t n) {
-  crumsort_uint64(data, n, NULL);
+void bench_crumsort_u64(void *records, size_t len) {
+  crumsort_uint64(records, len, NULL);
 }
 static uint64_t float_key(double value) {
   uint64_t bits;
@@ -26,7 +26,7 @@ static uint64_t float_key(double value) {
 #undef cmp
 #undef FUNC
 #undef VAR
-void bench_crumsort_f64(void *data, size_t n) { crumsort_f64(data, n, NULL); }
+void bench_crumsort_f64(void *records, size_t len) { crumsort_f64(records, len, NULL); }
 
 #define VAR BenchRow32
 #define FUNC(NAME) NAME##_row32
@@ -39,8 +39,8 @@ void bench_crumsort_f64(void *data, size_t n) { crumsort_f64(data, n, NULL); }
 #undef cmp
 #undef FUNC
 #undef VAR
-void bench_crumsort_row32(void *data, size_t n) {
-  crumsort_row32(data, n, NULL);
+void bench_crumsort_row32(void *records, size_t len) {
+  crumsort_row32(records, len, NULL);
 }
 
 #define VAR BenchRow64
@@ -54,8 +54,8 @@ void bench_crumsort_row32(void *data, size_t n) {
 #undef cmp
 #undef FUNC
 #undef VAR
-void bench_crumsort_row64(void *data, size_t n) {
-  crumsort_row64(data, n, NULL);
+void bench_crumsort_row64(void *records, size_t len) {
+  crumsort_row64(records, len, NULL);
 }
 
 #define VAR BenchRecord
@@ -69,6 +69,6 @@ void bench_crumsort_row64(void *data, size_t n) {
 #undef cmp
 #undef FUNC
 #undef VAR
-void bench_crumsort_record(void *data, size_t n) {
-  crumsort_record(data, n, NULL);
+void bench_crumsort_record(void *records, size_t len) {
+  crumsort_record(records, len, NULL);
 }

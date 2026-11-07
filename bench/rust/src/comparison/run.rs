@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+//! Batch timing and paired block scheduling.
+
 use super::{suite::Case, variant::Kernel};
 use serde::Serialize;
 use std::time::Instant;
 
+/// Number of paired blocks in one case measurement.
 pub(super) const BLOCKS: usize = 9;
+/// One verified batch timing and its position within a case.
 #[derive(Serialize)]
 pub(super) struct Sample {
     pub kind: &'static str,
@@ -18,7 +22,8 @@ pub(super) struct Sample {
     pub elapsed_ns: u64,
     pub verified: bool,
 }
-pub(super) fn sample(k: &mut dyn Kernel, batch: usize) -> Result<u64, String> {
+/// Restores a batch, times only the sort calls, and verifies every output.
+pub(super) fn measure_batch(k: &mut dyn Kernel, batch: usize) -> Result<u64, String> {
     k.restore(batch);
     let start = Instant::now();
     k.run_batch();
@@ -27,11 +32,18 @@ pub(super) fn sample(k: &mut dyn Kernel, batch: usize) -> Result<u64, String> {
     super::host::check_threads()?;
     Ok(elapsed.max(1))
 }
-pub(super) fn calibrate(k: &mut dyn Kernel, min_ns: u64, cap: usize) -> Result<usize, String> {
-    let elapsed = sample(k, 1)?;
-    Ok(((min_ns.div_ceil(elapsed)) as usize).clamp(1, (cap / k.bytes()).max(1)))
+/// Chooses a batch from a warm-up timing and the prepared-memory limit.
+pub(super) fn calibrate(
+    k: &mut dyn Kernel,
+    min_sample_ns: u64,
+    prepared_cap_bytes: usize,
+) -> Result<usize, String> {
+    let elapsed = measure_batch(k, 1)?;
+    Ok(((min_sample_ns.div_ceil(elapsed)) as usize)
+        .clamp(1, (prepared_cap_bytes / k.buffer_bytes()).max(1)))
 }
-pub(super) fn order(n: usize, block: usize, c: &Case) -> Vec<usize> {
+/// Shuffles adapter slots reproducibly from the case identity and block.
+pub(super) fn shuffle_variants(n: usize, block: usize, c: &Case) -> Vec<usize> {
     let mut seed = c.id().bytes().fold(block as u64 + 1, |a, b| {
         a.wrapping_mul(31).wrapping_add(u64::from(b))
     });
@@ -47,28 +59,32 @@ pub(super) fn order(n: usize, block: usize, c: &Case) -> Vec<usize> {
     order
 }
 
+/// Publishes nine shuffled blocks with a separate Tessera A/A sample.
 pub(super) fn measure_case(
     case: &Case,
-    scratch: usize,
-    min_ns: u64,
-    cap: usize,
+    scratch_bytes: usize,
+    min_sample_ns: u64,
+    prepared_cap_bytes: usize,
     build: &str,
     mut publish: impl FnMut(Sample) -> super::Result<()>,
 ) -> super::Result<()> {
-    let input = super::variant::Input::new(case);
-    let variants = super::variant::variants();
+    let input = super::variant::CaseInput::new(case);
+    let variants = super::variant::list_variants();
     let active: Vec<_> = variants
         .iter()
-        .filter(|v| v.prepare(&input, scratch).is_some())
+        .filter(|v| v.prepare(&input, scratch_bytes).is_some())
         .copied()
         .chain(std::iter::once(variants[0]))
         .collect();
     for block in 0..BLOCKS {
-        for (slot, index) in order(active.len(), block, case).into_iter().enumerate() {
+        for (slot, index) in shuffle_variants(active.len(), block, case)
+            .into_iter()
+            .enumerate()
+        {
             let variant = active[index];
-            let mut kernel = variant.prepare(&input, scratch).unwrap();
-            let batch = calibrate(&mut *kernel, min_ns, cap)?;
-            let elapsed_ns = sample(&mut *kernel, batch)
+            let mut kernel = variant.prepare(&input, scratch_bytes).unwrap();
+            let batch = calibrate(&mut *kernel, min_sample_ns, prepared_cap_bytes)?;
+            let elapsed_ns = measure_batch(&mut *kernel, batch)
                 .map_err(|e| format!("{} {}: {e}", case.id(), variant.name))?;
             publish(Sample {
                 kind: "sample",

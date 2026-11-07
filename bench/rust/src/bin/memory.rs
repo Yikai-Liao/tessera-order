@@ -3,9 +3,15 @@
 //! Measures sorting allocations in a process separate from timing.
 
 use std::alloc::{GlobalAlloc, Layout, System};
+/// Measures allocation sizes while delegating storage to the system allocator.
 struct Counting;
 // SAFETY: All allocation operations delegate to System with the original layout.
 unsafe impl GlobalAlloc for Counting {
+    /// Allocates storage and records the live allocation size.
+    ///
+    /// # Safety
+    ///
+    /// `layout` satisfies [`GlobalAlloc::alloc`]'s requirements.
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: The caller supplies a valid allocation layout.
         let p = unsafe { System.alloc(layout) };
@@ -15,6 +21,32 @@ unsafe impl GlobalAlloc for Counting {
         }
         p
     }
+    /// Resizes storage through the system allocator and records the size change.
+    ///
+    /// # Safety
+    ///
+    /// `allocation`, `layout` and `new_size_bytes` satisfy [`GlobalAlloc::realloc`].
+    unsafe fn realloc(
+        &self,
+        allocation: *mut u8,
+        layout: Layout,
+        new_size_bytes: usize,
+    ) -> *mut u8 {
+        // SAFETY: The caller supplies a live allocation and a valid resized layout.
+        let resized = unsafe { System.realloc(allocation, layout, new_size_bytes) };
+        #[cfg(not(feature = "compare-native"))]
+        if !resized.is_null() {
+            tessera_bench::allocation::bench_allocation_change(
+                new_size_bytes as isize - layout.size() as isize,
+            );
+        }
+        resized
+    }
+    /// Releases storage and removes its live allocation size.
+    ///
+    /// # Safety
+    ///
+    /// `p` and `layout` identify a live allocation returned by this allocator.
     unsafe fn dealloc(&self, p: *mut u8, layout: Layout) {
         #[cfg(not(feature = "compare-native"))]
         tessera_bench::allocation::bench_allocation_change(-(layout.size() as isize));
@@ -24,6 +56,7 @@ unsafe impl GlobalAlloc for Counting {
 }
 #[global_allocator]
 static ALLOCATOR: Counting = Counting;
+/// Runs the memory command-line executable.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tessera_bench::main(true)
 }
@@ -32,13 +65,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 mod tests {
     use tessera_bench::allocation::{begin, end};
     #[test]
-    fn rust_and_native_allocations_are_counted_once() {
+    fn allocations_count_once() {
         begin();
         let values = Vec::<u8>::with_capacity(12345);
         std::hint::black_box(&values);
         let rust_peak = end();
         assert!((12345..12400).contains(&rust_peak), "Rust peak {rust_peak}");
         drop(values);
+        begin();
+        let mut buffer = Vec::<u8>::with_capacity(12345);
+        buffer.reserve_exact(20000);
+        std::hint::black_box(&buffer);
+        let resized_peak_bytes = end();
+        assert!(
+            (20000..20200).contains(&resized_peak_bytes),
+            "resized peak {resized_peak_bytes}"
+        );
+        drop(buffer);
         #[cfg(feature = "compare-native")]
         {
             unsafe extern "C" {

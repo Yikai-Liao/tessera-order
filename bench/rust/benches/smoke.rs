@@ -17,10 +17,14 @@ use tessera_sort::thresholds::{INSERTION_MAX, TILE_BYTES};
 /// is the same for every length and does not depend on measured timings.
 const BATCH_ELEMENTS: usize = 1 << 18;
 
+/// Length spanning several tiles in the continuous suite.
 const MID: usize = 65_536;
+/// Length used for measured engine decisions.
 const LARGE: usize = 1_000_000;
+/// Length exercising the out-of-cache block partition.
 const HUGE: usize = 10_000_000;
 
+/// Registers the continuous suite's fixed case IDs and allocation modes.
 fn suite(c: &mut Criterion) {
     // Insertion limit, one past it, and one past the tile capacity for 8- and
     // 16-byte records. Cases this short move with code placement, so only the
@@ -83,6 +87,7 @@ fn suite(c: &mut Criterion) {
     keys::<u64>(c, "zipf2", HUGE, false);
 }
 
+/// Measures a scalar-key case with the public API and optional workspace.
 fn keys<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bool) {
     let input = generate::<K>(distribution, len);
     let mut expected = input.clone();
@@ -105,6 +110,7 @@ fn keys<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bo
     }
 }
 
+/// Measures a keyed-row case while checking stable payload order.
 fn rows<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bool) {
     let input: Vec<Row<K>> = generate::<K>(distribution, len)
         .into_iter()
@@ -133,6 +139,7 @@ struct Wide {
 }
 
 impl Wide {
+    /// Creates a wide record carrying its original index.
     fn new(key: u64, index: usize) -> Self {
         let mut payload = [0u8; 120];
         payload[..8].copy_from_slice(&(index as u64).to_le_bytes());
@@ -205,6 +212,7 @@ fn measure<T: Copy>(
     group.finish();
 }
 
+/// Runs the Criterion suite with command-line case selection.
 fn main() {
     let mut criterion = Criterion::default().without_plots().configure_from_args();
     suite(&mut criterion);

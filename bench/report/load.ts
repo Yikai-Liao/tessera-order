@@ -6,17 +6,17 @@ import { isDeepStrictEqual } from "node:util";
 import {
   caseId,
   type Dataset,
-  key,
   type Manifest,
   type Memory,
+  measurementId,
   type Observation,
   type Sample,
 } from "./model.ts";
 
-async function json(path: string): Promise<unknown> {
+async function readJson(path: string): Promise<unknown> {
   return JSON.parse(await readFile(path, "utf8"));
 }
-async function lines(path: string): Promise<unknown[]> {
+async function readJsonLines(path: string): Promise<unknown[]> {
   const text = await readFile(path, "utf8");
   if (text && !text.endsWith("\n")) throw new Error(`${path}: incomplete final line`);
   return text.trim()
@@ -32,19 +32,19 @@ async function lines(path: string): Promise<unknown[]> {
         })
     : [];
 }
-function object(value: unknown): asserts value is Record<string, unknown> {
+function assertObject(value: unknown): asserts value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("expected a JSON object");
 }
-function integer(value: unknown, min = 0): asserts value is number {
+function assertInteger(value: unknown, min = 0): asserts value is number {
   if (!Number.isSafeInteger(value) || Number(value) < min)
     throw new Error(`invalid integer: ${value}`);
 }
-function text(value: unknown): asserts value is string {
+function assertString(value: unknown): asserts value is string {
   if (typeof value !== "string" || !value.length) throw new Error("expected a nonempty string");
 }
-function manifest(value: unknown): Manifest {
-  object(value);
+function parseManifest(value: unknown): Manifest {
+  assertObject(value);
   if (
     value.schema !== 1 ||
     value.suite_version !== 1 ||
@@ -62,22 +62,22 @@ function manifest(value: unknown): Manifest {
     "target",
     "profile",
   ])
-    text(value[name]);
+    assertString(value[name]);
   if (!Array.isArray(value.cases) || !Array.isArray(value.variants))
     throw new Error("missing case or variant plan");
   const names = new Set<string>();
   for (const v of value.variants) {
-    object(v);
-    text(v.name);
+    assertObject(v);
+    assertString(v.name);
     if (typeof v.stable !== "boolean" || names.has(v.name)) throw new Error("invalid variant plan");
     names.add(v.name);
   }
   const ids = new Set<string>();
   for (const c of value.cases) {
-    object(c);
-    text(c.ty);
-    text(c.distribution);
-    integer(c.len, 1);
+    assertObject(c);
+    assertString(c.ty);
+    assertString(c.distribution);
+    assertInteger(c.len, 1);
     if (
       !Array.isArray(c.variants) ||
       c.variants.length < 2 ||
@@ -93,22 +93,22 @@ function manifest(value: unknown): Manifest {
   }
   return value as unknown as Manifest;
 }
-export function validate(data: Dataset): void {
-  if (!data.manifests.has("default")) throw new Error("default build is missing");
+export function validateRun(dataset: Dataset): void {
+  if (!dataset.manifests.has("default")) throw new Error("default build is missing");
   const samples = new Map<string, Sample[]>(),
     identities = new Set<string>(),
     slots = new Set<string>();
-  for (const s of data.samples) {
-    object(s);
-    text(s.case_id);
-    text(s.variant);
-    text(s.build);
-    text(s.group);
-    integer(s.block);
-    integer(s.slot);
-    integer(s.batch, 1);
-    integer(s.elapsed_ns, 1);
-    const m = data.manifests.get(s.build),
+  for (const s of dataset.samples) {
+    assertObject(s);
+    assertString(s.case_id);
+    assertString(s.variant);
+    assertString(s.build);
+    assertString(s.group);
+    assertInteger(s.block);
+    assertInteger(s.slot);
+    assertInteger(s.batch, 1);
+    assertInteger(s.elapsed_ns, 1);
+    const m = dataset.manifests.get(s.build),
       c = m?.cases.find((c) => caseId(c) === s.case_id);
     if (
       !c ||
@@ -119,69 +119,77 @@ export function validate(data: Dataset): void {
       s.group !== `${c.ty}/${c.distribution}`
     )
       throw new Error(`invalid or unverified sample ${s.case_id}/${s.variant}`);
-    const id = `${key(s.build, s.case_id, s.variant)}:${s.block}`,
+    const id = `${measurementId(s.build, s.case_id, s.variant)}:${s.block}`,
       slot = `${s.build}:${s.case_id}:${s.block}:${s.slot}`;
     if (identities.has(id) || slots.has(slot)) throw new Error(`duplicate sample or slot ${id}`);
     identities.add(id);
     slots.add(slot);
-    const k = key(s.build, s.case_id, s.variant);
+    const k = measurementId(s.build, s.case_id, s.variant);
     if (!samples.has(k)) samples.set(k, []);
     samples.get(k)!.push(s);
   }
   const observations = new Map<string, Observation>();
-  for (const o of data.observations) {
-    object(o);
-    text(o.group);
-    text(o.build);
-    integer(o.unix_seconds);
-    if (!["start", "end"].includes(o.phase) || !data.manifests.has(o.build))
+  for (const o of dataset.observations) {
+    assertObject(o);
+    assertString(o.group);
+    assertString(o.build);
+    assertInteger(o.unix_seconds);
+    if (!["start", "end"].includes(o.phase) || !dataset.manifests.has(o.build))
       throw new Error("invalid host observation");
     const id = `${o.build}:${o.group}:${o.phase}`;
     if (observations.has(id)) throw new Error(`duplicate observation ${id}`);
     observations.set(id, o);
   }
-  for (const [build, m] of data.manifests) {
+  for (const [build, m] of dataset.manifests) {
     for (const c of m.cases) {
-      const has = [...c.variants, "tessera-aa"].map((v) => samples.get(key(build, caseId(c), v)));
-      if (data.partial && has.every((s) => !s)) continue;
+      const has = [...c.variants, "tessera-aa"].map((v) =>
+        samples.get(measurementId(build, caseId(c), v)),
+      );
+      const group = `${build}:${c.ty}/${c.distribution}`;
+      if (
+        dataset.partial &&
+        has.every((s) => !s) &&
+        !observations.has(`${group}:start`) &&
+        !observations.has(`${group}:end`)
+      )
+        continue;
       if (has.some((s) => s?.length !== 9))
         throw new Error(`missing blocks: ${build}/${caseId(c)}`);
-      const group = `${build}:${c.ty}/${c.distribution}`;
       const start = observations.get(`${group}:start`),
         end = observations.get(`${group}:end`);
       if (!start || !end || end.unix_seconds < start.unix_seconds)
         throw new Error(`incomplete group ${group}`);
     }
   }
-  if (!data.samples.length) throw new Error("no measurements");
+  if (!dataset.samples.length) throw new Error("no measurements");
   const memories = new Set<string>();
-  for (const r of data.memory) {
-    object(r);
-    integer(r.peak_extra_bytes);
-    text(r.case_id);
-    text(r.variant);
-    text(r.build);
-    const id = key(r.build, r.case_id, r.variant);
-    const c = data.manifests.get(r.build)?.cases.find((c) => caseId(c) === r.case_id);
+  for (const r of dataset.memory) {
+    assertObject(r);
+    assertInteger(r.peak_extra_bytes);
+    assertString(r.case_id);
+    assertString(r.variant);
+    assertString(r.build);
+    const id = measurementId(r.build, r.case_id, r.variant);
+    const c = dataset.manifests.get(r.build)?.cases.find((c) => caseId(c) === r.case_id);
     if (r.verified !== true || !c?.variants.includes(r.variant) || memories.has(id))
       throw new Error(`invalid or duplicate memory sample ${id}`);
     memories.add(id);
   }
-  for (const [build, m] of data.manifests) {
+  for (const [build, m] of dataset.manifests) {
     for (const c of m.cases) {
-      if (data.partial && !samples.has(key(build, caseId(c), "tessera"))) continue;
+      if (dataset.partial && !samples.has(measurementId(build, caseId(c), "tessera"))) continue;
       for (const v of c.variants) {
         if (
           (c.len <= 1000000 || c.ty === "u64" || v === "tessera") &&
-          !memories.has(key(build, caseId(c), v))
+          !memories.has(measurementId(build, caseId(c), v))
         )
           throw new Error(`missing memory sample ${build}/${caseId(c)}/${v}`);
       }
     }
   }
 }
-export async function load(directories: string[], partial = false): Promise<Dataset> {
-  const data: Dataset = {
+export async function loadRun(directories: string[], partial = false): Promise<Dataset> {
+  const dataset: Dataset = {
     host: {},
     manifests: new Map(),
     samples: [],
@@ -191,28 +199,28 @@ export async function load(directories: string[], partial = false): Promise<Data
   };
   let first = true;
   for (const directory of directories) {
-    const host = await json(join(directory, "host.json"));
-    object(host);
-    if (!first && !isDeepStrictEqual(host, data.host))
+    const host = await readJson(join(directory, "host.json"));
+    assertObject(host);
+    if (!first && !isDeepStrictEqual(host, dataset.host))
       throw new Error("host fingerprints differ; cannot merge runs");
-    data.host = host;
+    dataset.host = host;
     first = false;
     for (const build of ["default", "portable-simd"]) {
-      let value;
+      let value: unknown;
       try {
-        value = await json(
+        value = await readJson(
           join(directory, build === "default" ? "manifest.json" : `manifest-${build}.json`),
         );
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
         throw e;
       }
-      const m = manifest(value);
+      const m = parseManifest(value);
       if (m.build !== build) throw new Error("manifest build disagrees with file name");
-      if (data.manifests.has(build) && !isDeepStrictEqual(m, data.manifests.get(build)))
+      if (dataset.manifests.has(build) && !isDeepStrictEqual(m, dataset.manifests.get(build)))
         throw new Error(`build provenance differs: ${build}`);
-      const memory = await json(join(directory, `memory-manifest-${build}.json`));
-      object(memory);
+      const memory = await readJson(join(directory, `memory-manifest-${build}.json`));
+      assertObject(memory);
       for (const field of [
         "schema",
         "source_sha256",
@@ -227,18 +235,18 @@ export async function load(directories: string[], partial = false): Promise<Data
         if (!isDeepStrictEqual(memory[field], m[field]))
           throw new Error(`memory provenance differs: ${build}/${field}`);
       }
-      data.manifests.set(build, m);
+      dataset.manifests.set(build, m);
     }
-    for (const row of await lines(join(directory, "blocks.jsonl"))) {
-      object(row);
-      if (row.kind === "sample") data.samples.push(row as unknown as Sample);
-      else if (row.kind === "observation") data.observations.push(row as unknown as Observation);
+    for (const row of await readJsonLines(join(directory, "blocks.jsonl"))) {
+      assertObject(row);
+      if (row.kind === "sample") dataset.samples.push(row as unknown as Sample);
+      else if (row.kind === "observation") dataset.observations.push(row as unknown as Observation);
       else throw new Error("unknown block record");
     }
-    data.memory.push(...((await lines(join(directory, "memory.jsonl"))) as Memory[]));
+    dataset.memory.push(...((await readJsonLines(join(directory, "memory.jsonl"))) as Memory[]));
   }
-  const baseline = data.manifests.get("default"),
-    simd = data.manifests.get("portable-simd");
+  const baseline = dataset.manifests.get("default"),
+    simd = dataset.manifests.get("portable-simd");
   if (baseline && simd) {
     for (const field of [
       "commit",
@@ -253,6 +261,6 @@ export async function load(directories: string[], partial = false): Promise<Data
         throw new Error(`builds do not share a source and compiler configuration: ${field}`);
     }
   }
-  validate(data);
-  return data;
+  validateRun(dataset);
+  return dataset;
 }

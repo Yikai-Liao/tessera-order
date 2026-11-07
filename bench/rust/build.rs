@@ -6,7 +6,8 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{env, fs, path::Path, process::Command};
 
-fn output(cmd: &str, args: &[&str]) -> String {
+/// Runs a provenance query and reads its standard output.
+fn read_command_output(cmd: &str, args: &[&str]) -> String {
     let result = Command::new(cmd)
         .args(args)
         .output()
@@ -18,7 +19,9 @@ fn output(cmd: &str, args: &[&str]) -> String {
     );
     String::from_utf8_lossy(&result.stdout).trim().to_owned()
 }
+/// Hashes source paths and contents in a deterministic order.
 fn hash_tree(path: &Path, digest: &mut Sha256) {
+    println!("cargo:rerun-if-changed={}", path.display());
     if path.is_dir() {
         let mut entries: Vec<_> = fs::read_dir(path)
             .unwrap()
@@ -32,24 +35,13 @@ fn hash_tree(path: &Path, digest: &mut Sha256) {
             hash_tree(&entry, digest);
         }
     } else {
-        println!("cargo:rerun-if-changed={}", path.display());
         digest.update(path.to_string_lossy().as_bytes());
         digest.update([0]);
         digest.update(fs::read(path).unwrap());
     }
 }
+/// Writes build provenance and compiles optional native adapters.
 fn main() {
-    for path in [
-        "../../rust/tessera-sort/src",
-        "src",
-        "native",
-        "build.rs",
-        "Cargo.toml",
-        "../../Cargo.toml",
-        "../../Cargo.lock",
-    ] {
-        println!("cargo:rerun-if-changed={path}");
-    }
     for key in [
         "RUSTFLAGS",
         "CARGO_ENCODED_RUSTFLAGS",
@@ -62,9 +54,9 @@ fn main() {
     ] {
         println!("cargo:rerun-if-env-changed={key}");
     }
-    let reference = output("git", &["rev-parse", "--symbolic-full-name", "HEAD"]);
+    let reference = read_command_output("git", &["rev-parse", "--symbolic-full-name", "HEAD"]);
     for name in ["HEAD", "index", "packed-refs", reference.as_str()] {
-        let path = output("git", &["rev-parse", "--git-path", name]);
+        let path = read_command_output("git", &["rev-parse", "--git-path", name]);
         println!("cargo:rerun-if-changed={path}");
     }
     let out = env::var("OUT_DIR").unwrap();
@@ -85,7 +77,15 @@ fn main() {
         .map(|(k, _)| k)
         .collect();
     features.sort();
-    let mut value = json!({"schema":1,"commit":output("git", &["rev-parse","HEAD"]),"dirty":!output("git", &["status","--porcelain"]).is_empty(),"rustc":output(&env::var("RUSTC").unwrap_or_else(|_|"rustc".into()), &["-vV"]),"source_sha256":format!("{:x}",digest.finalize()),"cargo_lock":fs::read_to_string("../../Cargo.lock").unwrap(),"features":features});
+    let mut value = json!({
+        "schema": 1,
+        "commit": read_command_output("git", &["rev-parse", "HEAD"]),
+        "dirty": !read_command_output("git", &["status", "--porcelain"]).is_empty(),
+        "rustc": read_command_output(&env::var("RUSTC").unwrap_or_else(|_| "rustc".into()), &["-vV"]),
+        "source_sha256": format!("{:x}", digest.finalize()),
+        "cargo_lock": fs::read_to_string("../../Cargo.lock").unwrap(),
+        "features": features,
+    });
     for key in [
         "TARGET",
         "PROFILE",
@@ -106,7 +106,7 @@ fn main() {
         .unwrap();
         for (key, variable, fallback) in [("cc", "CC", "cc"), ("cxx", "CXX", "c++")] {
             let compiler = env::var(variable).unwrap_or_else(|_| fallback.into());
-            value[key] = json!(output(&compiler, &["--version"]));
+            value[key] = json!(read_command_output(&compiler, &["--version"]));
         }
     }
     fs::write(
@@ -115,6 +115,7 @@ fn main() {
     )
     .unwrap();
 }
+/// Builds pinned native adapters and registers their linker inputs.
 fn native(out: &Path) {
     assert_eq!(
         env::var("TARGET").unwrap(),

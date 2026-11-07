@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-use super::variant::Element;
+//! Output ordering, permutation and stability verification.
 
-pub(super) fn check<T: Element>(
+use super::variant::BenchmarkRecord;
+
+/// Checks ordering, record preservation and stable tie order against the reference.
+pub(super) fn check<T: BenchmarkRecord>(
     values: &[T],
     input: &[T],
     reference: &[T],
@@ -38,7 +41,7 @@ mod tests {
     use super::*;
     use crate::case::Row;
     #[test]
-    fn unstable_records_still_preserve_payloads_and_stable_records_preserve_ties() {
+    fn records_preserve_payloads() {
         let input = vec![
             Row { key: 1u64, row: 0 },
             Row { key: 1, row: 1 },

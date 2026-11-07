@@ -11,7 +11,7 @@ import {
 } from "./model.ts";
 
 /** Builds a synthetic release run with Tessera between faster and slower competitors. */
-export function fixture(simd = false): Dataset {
+export function createFixture(simd = false): Dataset {
   const variants = [
     { name: "tessera", stable: true },
     { name: "std-stable", stable: true },
@@ -54,7 +54,7 @@ export function fixture(simd = false): Dataset {
     target: "x86_64-unknown-linux-gnu",
     profile: "release",
   };
-  const data: Dataset = {
+  const dataset: Dataset = {
     host: {
       cpu: "Synthetic fixture",
       governor: "performance",
@@ -98,13 +98,13 @@ export function fixture(simd = false): Dataset {
           elapsed_ns: Math.round(c.len * 3 * 4 * factor * (1 + block / 100)),
           verified: true,
         };
-        data.samples.push(sample);
+        dataset.samples.push(sample);
       }
     }
     for (const variant of c.variants) {
       if (c.len > 1000000 && c.ty !== "u64" && variant !== "tessera") continue;
       const size = c.ty === "record128" ? 128 : c.ty === "u32" ? 4 : 8;
-      data.memory.push({
+      dataset.memory.push({
         case_id: caseId(c),
         variant,
         build: "default",
@@ -120,7 +120,7 @@ export function fixture(simd = false): Dataset {
   }
   for (const group of groups)
     for (const phase of ["start", "end"] as const) {
-      data.observations.push({
+      dataset.observations.push({
         kind: "observation",
         group,
         build: "default",
@@ -134,14 +134,14 @@ export function fixture(simd = false): Dataset {
     }
   if (simd) {
     const selected = ["tessera", "std-stable"];
-    data.manifests.set("portable-simd", {
+    dataset.manifests.set("portable-simd", {
       ...m,
       build: "portable-simd",
       variants: variants.filter((v) => selected.includes(v.name)),
       cases: cases.map((c) => ({ ...c, variants: selected })),
     });
-    data.samples.push(
-      ...data.samples
+    dataset.samples.push(
+      ...dataset.samples
         .filter((s) => [...selected, "tessera-aa"].includes(s.variant))
         .map((s) => ({
           ...s,
@@ -150,12 +150,14 @@ export function fixture(simd = false): Dataset {
           elapsed_ns: Math.round(s.elapsed_ns * (s.variant === "std-stable" ? 1 : 0.8)),
         })),
     );
-    data.memory.push(
-      ...data.memory
+    dataset.memory.push(
+      ...dataset.memory
         .filter((r) => selected.includes(r.variant))
         .map((r) => ({ ...r, build: "portable-simd" })),
     );
-    data.observations.push(...data.observations.map((o) => ({ ...o, build: "portable-simd" })));
+    dataset.observations.push(
+      ...dataset.observations.map((o) => ({ ...o, build: "portable-simd" })),
+    );
   }
-  return data;
+  return dataset;
 }

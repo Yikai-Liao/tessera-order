@@ -24,6 +24,7 @@ pub trait Key: RadixKey + Copy {
     fn same(&self, other: &Self) -> bool;
 }
 
+/// Implements exact-width integer key generation and comparison.
 macro_rules! int_key {
     ($t:ty, $draw:expr) => {
         impl Key for $t {
@@ -225,7 +226,7 @@ pub fn generate<K: Key>(distribution: &str, len: usize) -> Vec<K> {
     }
 }
 
-// Fixed-point tenth root, rounded down in units of 1/256.
+/// Returns the fixed-point tenth root, rounded down in units of 1/256.
 fn tenth_root(k: u64) -> u64 {
     let target = u128::from(k) << 80;
     let mut lo = 256u64;
@@ -244,13 +245,14 @@ fn tenth_root(k: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Hashes the canonical little-endian input representation.
     fn hash(bytes: impl Iterator<Item = u8>) -> u64 {
         bytes.fold(0xcbf29ce484222325u64, |a, b| {
             (a ^ u64::from(b)).wrapping_mul(0x100000001b3)
         })
     }
     #[test]
-    fn smoke_inputs_keep_their_published_identity() {
+    fn smoke_input_identity() {
         let pins = [
             (
                 "random",

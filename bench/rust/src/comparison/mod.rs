@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+//! Command orchestration and persistent comparison results.
+
 mod check;
 mod host;
 #[cfg(feature = "compare-native")]
@@ -18,22 +20,26 @@ use std::{
 };
 use suite::Case;
 
+/// Fallible comparison commands and result persistence.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
+/// Feature configuration named in every measurement.
 const BUILD: &str = if cfg!(feature = "portable-simd") {
     "portable-simd"
 } else {
     "default"
 };
 
+/// Command selection, output location and sampling limits.
 struct Options {
     command: String,
     suite: String,
     group: Option<String>,
-    out: PathBuf,
-    min_ns: u64,
-    cap: usize,
+    output_dir: PathBuf,
+    min_sample_ns: u64,
+    prepared_cap_bytes: usize,
 }
 impl Options {
+    /// Parses the executable arguments into one comparison command.
     fn parse(memory: bool) -> Result<Self> {
         let mut args = std::env::args().skip(1);
         let command = if memory {
@@ -41,35 +47,35 @@ impl Options {
         } else {
             args.next().unwrap_or_else(|| "help".into())
         };
-        let mut o = Self {
+        let mut options = Self {
             command,
             suite: "smoke".into(),
             group: None,
-            out: "bench/results/local".into(),
-            min_ns: 5_000_000,
-            cap: 256 << 20,
+            output_dir: "bench/results/local".into(),
+            min_sample_ns: 5_000_000,
+            prepared_cap_bytes: 256 << 20,
         };
         while let Some(key) = args.next() {
             if key == "--help" || key == "-h" {
-                o.command = "help".into();
-                return Ok(o);
+                options.command = "help".into();
+                return Ok(options);
             }
             let value = args
                 .next()
                 .ok_or_else(|| format!("missing value for {key}"))?;
             match key.as_str() {
-                "--suite" => o.suite = value,
-                "--group" => o.group = Some(value),
-                "--out" => o.out = value.into(),
+                "--suite" => options.suite = value,
+                "--group" => options.group = Some(value),
+                "--out" => options.output_dir = value.into(),
                 "--sample-ms" => {
-                    o.min_ns = value
+                    options.min_sample_ns = value
                         .parse::<u64>()?
                         .checked_mul(1_000_000)
                         .filter(|&n| n > 0)
                         .ok_or("sample duration must be positive")?
                 }
                 "--memory-mib" => {
-                    o.cap = value
+                    options.prepared_cap_bytes = value
                         .parse::<usize>()?
                         .checked_mul(1 << 20)
                         .filter(|&n| n > 0)
@@ -78,31 +84,30 @@ impl Options {
                 _ => return Err(format!("unknown option {key}").into()),
             }
         }
-        Ok(o)
+        Ok(options)
     }
 }
-fn json_file(path: &Path, value: &Value) -> Result<()> {
-    fs::write(path, serde_json::to_vec_pretty(value)?)?;
-    Ok(())
-}
-fn same_or_write(path: &Path, value: &Value) -> Result<()> {
+/// Writes new provenance or checks an existing run for compatibility.
+fn verify_or_write_json(path: &Path, value: &Value) -> Result<()> {
     if path.exists() {
         let old: Value = serde_json::from_slice(&fs::read(path)?)?;
         if old != *value {
             return Err(format!("{} differs from this run", path.display()).into());
         }
     } else {
-        json_file(path, value)?;
+        fs::write(path, serde_json::to_vec_pretty(value)?)?;
     }
     Ok(())
 }
-fn line(file: &mut File, value: &impl serde::Serialize) -> Result<()> {
+/// Appends and flushes one complete JSONL record.
+fn append_record(file: &mut File, value: &impl serde::Serialize) -> Result<()> {
     serde_json::to_writer(&mut *file, value)?;
     file.write_all(b"\n")?;
     file.flush()?;
     Ok(())
 }
-fn manifest(o: &Options, cases: &[Case]) -> Value {
+/// Combines build provenance with the suite and adapter capabilities.
+fn create_manifest(options: &Options, cases: &[Case]) -> Value {
     let mut provenance: Value =
         serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/provenance.json")))
             .expect("build provenance is valid JSON");
@@ -113,56 +118,62 @@ fn manifest(o: &Options, cases: &[Case]) -> Value {
             fs::read(std::env::current_exe().expect("executable path")).expect("read executable")
         )
     ));
-    provenance["suite"] = json!(o.suite);
+    provenance["suite"] = json!(options.suite);
     provenance["suite_version"] = json!(1);
     provenance["cases"] = json!(
         cases
             .iter()
-            .map(|c| {
+            .map(|case| {
                 let probe = Case {
                     len: 32,
                     distribution: "random".into(),
-                    ..c.clone()
+                    ..case.clone()
                 };
-                let input = variant::Input::new(&probe);
-                let supported: Vec<_> = variant::variants()
+                let input = variant::CaseInput::new(&probe);
+                let supported: Vec<_> = variant::list_variants()
                     .iter()
                     .filter(|v| v.prepare(&input, 0).is_some())
                     .map(|v| v.name)
                     .collect();
-                json!({"ty":c.ty,"distribution":c.distribution,"len":c.len,"variants":supported})
+                json!({"ty":case.ty,"distribution":case.distribution,"len":case.len,"variants":supported})
             })
             .collect::<Vec<_>>()
     );
     provenance["build"] = json!(BUILD);
-    provenance["min_sample_ns"] = json!(o.min_ns);
-    provenance["prepared_cap_bytes"] = json!(o.cap);
+    provenance["min_sample_ns"] = json!(options.min_sample_ns);
+    provenance["prepared_cap_bytes"] = json!(options.prepared_cap_bytes);
     provenance["blocks"] = json!(run::BLOCKS);
     provenance["variants"] = json!(
-        variant::variants()
+        variant::list_variants()
             .iter()
             .map(|v| json!({"name":v.name,"stable":v.stable}))
             .collect::<Vec<_>>()
     );
     #[cfg(feature = "compare-native")]
     {
-        provenance["dispatch"] = native::dispatch();
+        provenance["dispatch"] = native::read_dispatch_targets();
     }
     provenance
 }
-fn setup(o: &Options) -> Result<()> {
-    fs::create_dir_all(&o.out)?;
-    same_or_write(&o.out.join("host.json"), &host::fingerprint())?;
-    let all = suite::cases(&o.suite, None)?;
-    let mut provenance = manifest(o, &all);
-    if o.command == "memory" {
+/// Checks the host and executable provenance before writing results.
+fn prepare_output(options: &Options) -> Result<()> {
+    fs::create_dir_all(&options.output_dir)?;
+    verify_or_write_json(
+        &options.output_dir.join("host.json"),
+        &host::read_fingerprint(),
+    )?;
+    let all = suite::plan_cases(&options.suite, None)?;
+    let mut provenance = create_manifest(options, &all);
+    if options.command == "memory" {
         provenance.as_object_mut().unwrap().remove("min_sample_ns");
         provenance
             .as_object_mut()
             .unwrap()
             .remove("prepared_cap_bytes");
-        same_or_write(
-            &o.out.join(format!("memory-manifest-{BUILD}.json")),
+        verify_or_write_json(
+            &options
+                .output_dir
+                .join(format!("memory-manifest-{BUILD}.json")),
             &provenance,
         )?;
     } else {
@@ -171,11 +182,12 @@ fn setup(o: &Options) -> Result<()> {
         } else {
             format!("manifest-{BUILD}.json")
         };
-        same_or_write(&o.out.join(file), &provenance)?;
+        verify_or_write_json(&options.output_dir.join(file), &provenance)?;
     }
     Ok(())
 }
-fn memory_rows(path: &Path) -> Result<Vec<Value>> {
+/// Reads completed allocation measurements from a results directory.
+fn read_memory_samples(path: &Path) -> Result<Vec<Value>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -184,21 +196,28 @@ fn memory_rows(path: &Path) -> Result<Vec<Value>> {
         .map(|l| Ok(serde_json::from_str(&l?)?))
         .collect()
 }
-fn block_rows(path: &Path) -> Result<Vec<Value>> {
+/// Reads complete journal lines, leaving an interrupted final write out.
+fn read_block_records(path: &Path) -> Result<Vec<Value>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let data = fs::read(path)?;
-    let complete = data.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
-    data[..complete]
+    let journal_bytes = fs::read(path)?;
+    let complete = journal_bytes
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |i| i + 1);
+    journal_bytes[..complete]
         .split(|&b| b == b'\n')
         .filter(|l| !l.is_empty())
         .map(|l| Ok(serde_json::from_slice(l)?))
         .collect()
 }
 
-fn verify_memory_build(o: &Options) -> Result<()> {
-    let path = o.out.join(format!("memory-manifest-{BUILD}.json"));
+/// Checks that scratch sizes were measured by the same source and configuration.
+fn verify_memory_build(options: &Options) -> Result<()> {
+    let path = options
+        .output_dir
+        .join(format!("memory-manifest-{BUILD}.json"));
     let memory: Value = serde_json::from_slice(&fs::read(path)?)?;
     let timing: Value =
         serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/provenance.json")))?;
@@ -222,43 +241,51 @@ fn verify_memory_build(o: &Options) -> Result<()> {
     Ok(())
 }
 
-fn scratch(c: &Case, rows: &[Value]) -> Option<usize> {
+/// Finds Tessera's measured peak allocation size for a case.
+fn find_scratch_bytes(case: &Case, rows: &[Value]) -> Option<usize> {
     rows.iter()
-        .find(|r| r["case_id"] == c.id() && r["variant"] == "tessera" && r["build"] == BUILD)
+        .find(|r| r["case_id"] == case.id() && r["variant"] == "tessera" && r["build"] == BUILD)
         .and_then(|r| r["peak_extra_bytes"].as_u64())
         .map(|n| n as usize)
 }
-fn validate(cases: &[Case]) -> Result<()> {
-    for c in cases {
-        let input = variant::Input::new(c);
-        for v in variant::variants() {
+/// Checks every supported adapter against each case's shared reference.
+fn validate_cases(cases: &[Case]) -> Result<()> {
+    for case in cases {
+        let input = variant::CaseInput::new(case);
+        for v in variant::list_variants() {
             if let Some(mut k) = v.prepare(&input, 32_768) {
-                run::sample(&mut *k, 1).map_err(|e| format!("{} {}: {e}", c.id(), v.name))?;
+                run::measure_batch(&mut *k, 1)
+                    .map_err(|e| format!("{} {}: {e}", case.id(), v.name))?;
             }
         }
     }
     println!("Validated {} cases ({BUILD})", cases.len());
     Ok(())
 }
-fn measure(o: &Options, cases: &[Case]) -> Result<()> {
-    setup(o)?;
-    let mem_path = o.out.join("memory.jsonl");
-    let mem = memory_rows(&mem_path)?;
-    if cases.iter().any(|c| scratch(c, &mem).is_none()) {
+/// Resumes completed groups and records the missing paired measurements.
+fn measure_cases(options: &Options, cases: &[Case]) -> Result<()> {
+    prepare_output(options)?;
+    let mem_path = options.output_dir.join("memory.jsonl");
+    let mem = read_memory_samples(&mem_path)?;
+    if cases
+        .iter()
+        .any(|case| find_scratch_bytes(case, &mem).is_none())
+    {
         let exe = std::env::current_exe()?.with_file_name("memory");
         let mut cmd = std::process::Command::new(exe);
-        cmd.args(["--suite", &o.suite, "--out"]).arg(&o.out);
-        if let Some(g) = &o.group {
+        cmd.args(["--suite", &options.suite, "--out"])
+            .arg(&options.output_dir);
+        if let Some(g) = &options.group {
             cmd.args(["--group", g]);
         }
         if !cmd.status()?.success() {
             return Err("memory measurement failed".into());
         }
     }
-    verify_memory_build(o)?;
-    let mem = memory_rows(&mem_path)?;
-    let path = o.out.join("blocks.jsonl");
-    let existing = block_rows(&path)?;
+    verify_memory_build(options)?;
+    let mem = read_memory_samples(&mem_path)?;
+    let path = options.output_dir.join("blocks.jsonl");
+    let existing = read_block_records(&path)?;
     let completed: BTreeSet<_> = existing
         .iter()
         .filter(|r| r["kind"] == "observation" && r["phase"] == "end" && r["build"] == BUILD)
@@ -275,7 +302,7 @@ fn measure(o: &Options, cases: &[Case]) -> Result<()> {
     {
         let mut f = File::create(&temporary)?;
         for r in retained {
-            line(&mut f, &r)?;
+            append_record(&mut f, &r)?;
         }
     }
     fs::rename(temporary, &path)?;
@@ -286,19 +313,24 @@ fn measure(o: &Options, cases: &[Case]) -> Result<()> {
             continue;
         }
         eprintln!("Measuring {group} ({BUILD})");
-        let mut start = host::observation(&group, "start");
+        let mut start = host::observe_group(&group, "start");
         start["build"] = json!(BUILD);
-        line(&mut f, &start)?;
-        for c in cases.iter().filter(|c| c.group() == group) {
-            let bytes = scratch(c, &mem)
-                .ok_or_else(|| format!("missing Tessera memory measurement: {}", c.id()))?;
-            run::measure_case(c, bytes, o.min_ns, o.cap, BUILD, |sample| {
-                line(&mut f, &sample)
-            })?;
+        append_record(&mut f, &start)?;
+        for case in cases.iter().filter(|case| case.group() == group) {
+            let bytes = find_scratch_bytes(case, &mem)
+                .ok_or_else(|| format!("missing Tessera memory measurement: {}", case.id()))?;
+            run::measure_case(
+                case,
+                bytes,
+                options.min_sample_ns,
+                options.prepared_cap_bytes,
+                BUILD,
+                |sample| append_record(&mut f, &sample),
+            )?;
         }
-        let mut end = host::observation(&group, "end");
+        let mut end = host::observe_group(&group, "end");
         end["build"] = json!(BUILD);
-        line(&mut f, &end)?;
+        append_record(&mut f, &end)?;
     }
     Ok(())
 }
@@ -311,22 +343,27 @@ fn measure(o: &Options, cases: &[Case]) -> Result<()> {
 pub fn main(memory: bool) -> Result<()> {
     #[cfg(feature = "compare-native")]
     native::check_layouts();
-    let o = Options::parse(memory)?;
-    if o.command == "help" || o.command == "--help" || o.command == "-h" {
+    let options = Options::parse(memory)?;
+    if options.command == "help" || options.command == "--help" || options.command == "-h" {
+        let command = if memory {
+            "memory"
+        } else {
+            "compare <list|validate|run>"
+        };
         println!(
-            "compare <list|validate|run> [--suite smoke|release] [--group TYPE/SHAPE] [--out DIR] [--sample-ms N] [--memory-mib N]"
+            "{command} [--suite smoke|release] [--group TYPE/SHAPE] [--out DIR] [--sample-ms N] [--memory-mib N]"
         );
         return Ok(());
     }
-    let cases = suite::cases(&o.suite, o.group.as_deref())?;
-    match o.command.as_str() {
+    let cases = suite::plan_cases(&options.suite, options.group.as_deref())?;
+    match options.command.as_str() {
         "list" => {
-            for v in variant::variants() {
+            for v in variant::list_variants() {
                 let supported: Vec<_> = suite::TYPES
                     .into_iter()
                     .filter(|ty| {
                         v.prepare(
-                            &variant::Input::new(&Case {
+                            &variant::CaseInput::new(&Case {
                                 ty: (*ty).into(),
                                 distribution: "random".into(),
                                 len: 32,
@@ -345,37 +382,38 @@ pub fn main(memory: bool) -> Result<()> {
             }
             Ok(())
         }
-        "validate" => validate(&cases),
-        "run" => measure(&o, &cases),
-        "memory" => memory_measure(&o, &cases),
-        _ => Err(format!("unknown command {}", o.command).into()),
+        "validate" => validate_cases(&cases),
+        "run" => measure_cases(&options, &cases),
+        "memory" => measure_memory(&options, &cases),
+        _ => Err(format!("unknown command {}", options.command).into()),
     }
 }
-fn memory_measure(o: &Options, cases: &[Case]) -> Result<()> {
-    setup(o)?;
-    let path = o.out.join("memory.jsonl");
-    let mut rows = memory_rows(&path)?;
-    for c in cases {
-        let input = variant::Input::new(c);
-        for v in variant::variants() {
-            if c.len > 1_000_000 && c.ty != "u64" && v.name != "tessera" {
+/// Measures one isolated sort allocation peak per supported case and adapter.
+fn measure_memory(options: &Options, cases: &[Case]) -> Result<()> {
+    prepare_output(options)?;
+    let path = options.output_dir.join("memory.jsonl");
+    let mut rows = read_memory_samples(&path)?;
+    for case in cases {
+        let input = variant::CaseInput::new(case);
+        for v in variant::list_variants() {
+            if case.len > 1_000_000 && case.ty != "u64" && v.name != "tessera" {
                 continue;
             }
             if rows
                 .iter()
-                .any(|r| r["case_id"] == c.id() && r["variant"] == v.name && r["build"] == BUILD)
+                .any(|r| r["case_id"] == case.id() && r["variant"] == v.name && r["build"] == BUILD)
             {
                 continue;
             }
-            if let Some(mut k) = v.prepare(&input, scratch(c, &rows).unwrap_or(0)) {
+            if let Some(mut k) = v.prepare(&input, find_scratch_bytes(case, &rows).unwrap_or(0)) {
                 k.restore(1);
                 super::allocation::begin();
                 k.run_batch();
                 let peak = super::allocation::end();
                 k.check()
-                    .map_err(|e| format!("{} {}: {e}", c.id(), v.name))?;
+                    .map_err(|e| format!("{} {}: {e}", case.id(), v.name))?;
                 host::check_threads()?;
-                rows.push(json!({"case_id":c.id(),"variant":v.name,"build":BUILD,"peak_extra_bytes":peak,"verified":true}));
+                rows.push(json!({"case_id":case.id(),"variant":v.name,"build":BUILD,"peak_extra_bytes":peak,"verified":true}));
             }
         }
     }
@@ -383,7 +421,7 @@ fn memory_measure(o: &Options, cases: &[Case]) -> Result<()> {
     {
         let mut f = File::create(&temporary)?;
         for r in rows {
-            line(&mut f, &r)?;
+            append_record(&mut f, &r)?;
         }
     }
     fs::rename(temporary, path)?;
@@ -393,13 +431,13 @@ fn memory_measure(o: &Options, cases: &[Case]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn journal_recovers_a_truncated_tail_but_rejects_a_corrupt_complete_line() {
+    fn journal_recovers_truncated_tail() {
         let path =
             std::env::temp_dir().join(format!("tessera-journal-{}.jsonl", std::process::id()));
         std::fs::write(&path, b"{\"kind\":\"observation\"}\n{\"partial\":").unwrap();
-        assert_eq!(super::block_rows(&path).unwrap().len(), 1);
+        assert_eq!(super::read_block_records(&path).unwrap().len(), 1);
         std::fs::write(&path, b"{broken}\n").unwrap();
-        assert!(super::block_rows(&path).is_err());
+        assert!(super::read_block_records(&path).is_err());
         std::fs::remove_file(path).unwrap();
     }
 }

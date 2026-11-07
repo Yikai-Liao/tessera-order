@@ -7,11 +7,11 @@
 #include <x86simdsort.h>
 
 #define SHIMS(TYPE, NAME)                                                      \
-  extern "C" void bench_vqsort_##NAME(void *data, size_t n) noexcept {         \
-    hwy::VQSort(static_cast<TYPE *>(data), n, hwy::SortAscending());           \
+  extern "C" void bench_vqsort_##NAME(void *records, size_t len) noexcept {         \
+    hwy::VQSort(static_cast<TYPE *>(records), len, hwy::SortAscending());           \
   }                                                                            \
-  extern "C" void bench_x86simdsort_##NAME(void *data, size_t n) noexcept {    \
-    x86simdsort::qsort(static_cast<TYPE *>(data), n);                          \
+  extern "C" void bench_x86simdsort_##NAME(void *records, size_t len) noexcept {    \
+    x86simdsort::qsort(static_cast<TYPE *>(records), len);                          \
   }
 SHIMS(uint32_t, u32)
 SHIMS(uint64_t, u64)

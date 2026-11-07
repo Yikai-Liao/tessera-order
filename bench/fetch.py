@@ -41,12 +41,12 @@ def main() -> None:
         repository = source["repository"].removeprefix("https://github.com/")
         url = f"https://codeload.github.com/{repository}/tar.gz/{source['commit']}"
         with urllib.request.urlopen(url, timeout=120) as response:
-            data = response.read()
-        if hashlib.sha256(data).hexdigest() != source["sha256"]:
+            archive_bytes = response.read()
+        if hashlib.sha256(archive_bytes).hexdigest() != source["sha256"]:
             raise ValueError(f"{name}: source archive SHA-256 mismatch")
         with tempfile.TemporaryDirectory(dir=vendor) as temporary:
             unpacked = Path(temporary)
-            with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+            with tarfile.open(fileobj=io.BytesIO(archive_bytes)) as archive:
                 archive.extractall(unpacked, filter="data")
             (tree,) = unpacked.iterdir()
             for license_path in source["license_files"]:

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
-//! The default adjacent-pair scan.
+
+//! Scalar and blocked adjacent-pair scans.
 //!
-//! Direct extraction uses this without the `portable-simd` feature. It has no
-//! dependency and lets the compiler auto-vectorize at the ambient target
-//! width. The optional backend dispatches the insertion pass as a whole.
+//! Direct extraction uses the blocked scan for budgeted insertion probes in the
+//! default build; the compiler auto-vectorizes it at the target's baseline
+//! width. The scalar scan serves `f64`, which that width compares poorly, and
+//! the keys the `portable-simd` backend has no vector kernel for.
 
 use crate::RadixKey;
 
@@ -54,10 +56,8 @@ pub(crate) fn first_inversion<K: RadixKey>(keys: &[K]) -> Option<usize> {
     None
 }
 
-/// Scans one pair at a time.
-///
-/// Used for encodings whose per-element cost outweighs the wider comparison,
-/// because the baseline vector width cannot compare 64-bit lanes.
+/// Returns the offset of the first adjacent pair whose encoded keys descend,
+/// scanning one pair at a time.
 #[inline(always)]
 pub(crate) fn scalar<K: RadixKey>(keys: &[K]) -> Option<usize> {
     let mut keys = keys.iter();

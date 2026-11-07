@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
+
 //! Routing: order probe, variation scan, node partitions and tile leaves.
 //!
 //! A *node* is a slice larger than the tile budget (64 KiB of records by
@@ -48,16 +49,20 @@ const MAX_TILE_RECORDS: usize = crate::thresholds::MAX_TILE_RECORDS;
 const DIGIT_SAMPLE_LEN: usize = 128;
 
 /// Counts distinct digits in an evenly spaced sample.
-fn sample_distinct_digits<T, E: Extract<T>>(arr: &[T], digit: Digit, key: &mut E) -> usize {
+fn sample_distinct_digits<T, E: Extract<T>>(
+    records: &[T],
+    digit: Digit,
+    extractor: &mut E,
+) -> usize {
     let mask = digit.mask::<E::Value>();
     let shift = E::Value::from_usize(digit.shift);
 
     let mut seen = [0u64; MAX_DIGIT_BUCKETS / 64];
-    let sample_len = DIGIT_SAMPLE_LEN.min(arr.len());
-    let step = (arr.len() / sample_len).max(1);
+    let sample_len = DIGIT_SAMPLE_LEN.min(records.len());
+    let step = (records.len() / sample_len).max(1);
     let mut distinct = 0;
-    for index in (0..arr.len()).step_by(step).take(sample_len) {
-        let bucket = ((key.key(&arr[index]) & mask) >> shift).to_usize();
+    for index in (0..records.len()).step_by(step).take(sample_len) {
+        let bucket = ((extractor.key(&records[index]) & mask) >> shift).to_usize();
         let word = bucket / 64;
         let bit = 1u64 << (bucket % 64);
         if seen[word] & bit == 0 {
@@ -79,18 +84,18 @@ const MODE_SAMPLE_RUN_LEN: usize = 8;
 
 /// Fills `keys` with runs of `MODE_SAMPLE_RUN_LEN` consecutive keys spread over
 /// the node, which avoids stride aliasing with periodic keys.
-fn sample_keys<T, E: Extract<T>>(arr: &[T], keys: &mut [KeyValue<T, E>], key: &mut E) {
+fn sample_keys<T, E: Extract<T>>(records: &[T], keys: &mut [KeyValue<T, E>], extractor: &mut E) {
     let runs = keys.len() / MODE_SAMPLE_RUN_LEN;
-    let step = (arr.len() / runs).max(1);
+    let step = (records.len() / runs).max(1);
     let mut len = 0;
     for run in 0..runs {
         let start = run * step;
         for offset in 0..MODE_SAMPLE_RUN_LEN {
             let index = start + offset;
-            if index >= arr.len() {
+            if index >= records.len() {
                 break;
             }
-            keys[len] = key.key(&arr[index]);
+            keys[len] = extractor.key(&records[index]);
             len += 1;
         }
     }
@@ -149,21 +154,21 @@ struct OutlierRun {
 /// Finds a short end run separated by the top bit and scans the body
 /// for variation. A scattered minority stops the scan at its first occurrence.
 fn outlier_run<T, E: Extract<T>>(
-    arr: &[T],
+    records: &[T],
     keys: &[KeyValue<T, E>],
     bit: KeyValue<T, E>,
-    key: &mut E,
+    extractor: &mut E,
 ) -> Option<OutlierRun> {
     let minority_set = sample_minority_bit(keys, bit)?;
     let zero = KeyValue::<T, E>::from_usize(0);
     let is_minority = |key: KeyValue<T, E>| ((key & bit) != zero) == minority_set;
-    let cap = OUTLIER_RUN_MAX.min(arr.len() / 2);
+    let cap = OUTLIER_RUN_MAX.min(records.len() / 2);
     let mut head = 0;
-    while head < cap && is_minority(key.key(&arr[head])) {
+    while head < cap && is_minority(extractor.key(&records[head])) {
         head += 1;
     }
     let mut tail = 0;
-    while tail < cap && is_minority(key.key(&arr[arr.len() - 1 - tail])) {
+    while tail < cap && is_minority(extractor.key(&records[records.len() - 1 - tail])) {
         tail += 1;
     }
     // The minority must occupy exactly one end.
@@ -179,14 +184,14 @@ fn outlier_run<T, E: Extract<T>>(
         return None;
     }
     let (start, end) = if head_run {
-        (len, arr.len())
+        (len, records.len())
     } else {
-        (0, arr.len() - len)
+        (0, records.len() - len)
     };
-    let mut union = key.key(&arr[start]);
+    let mut union = extractor.key(&records[start]);
     let mut intersection = union;
-    for record in &arr[start + 1..end] {
-        let key = key.key(record);
+    for record in &records[start + 1..end] {
+        let key = extractor.key(record);
         if is_minority(key) {
             return None;
         }
@@ -208,15 +213,15 @@ fn outlier_run<T, E: Extract<T>>(
 /// loop in that context avoids out-of-line calls for each vector operation.
 #[inline(always)]
 pub(crate) fn insertion_loop<T, E: Extract<T>>(
-    arr: &mut [T],
+    records: &mut [T],
     budget: usize,
-    key: &mut E,
+    extractor: &mut E,
 ) -> Option<usize> {
     let mut swaps = 0;
     let mut start = 0;
-    while let Some(offset) = key.first_inversion(&arr[start..]) {
+    while let Some(offset) = extractor.first_inversion(&records[start..]) {
         let index = start + offset + 1;
-        let (prefix, tail) = arr.split_at_mut(index);
+        let (prefix, tail) = records.split_at_mut(index);
         let (mut current, prefix) = prefix.split_last_mut().unwrap();
         // The scan already compared this pair, so swap without re-reading keys.
         core::mem::swap(current, &mut tail[0]);
@@ -225,7 +230,7 @@ pub(crate) fn insertion_loop<T, E: Extract<T>>(
             return None;
         }
         for before in prefix.iter_mut().rev() {
-            if key.key(before) <= key.key(current) {
+            if extractor.key(before) <= extractor.key(current) {
                 break;
             }
             core::mem::swap(before, current);
@@ -245,8 +250,8 @@ pub(crate) fn insertion_loop<T, E: Extract<T>>(
 /// The unit return keeps the unused swap total inside the inlined operation,
 /// so it can be discarded before returning across a target-feature boundary.
 #[inline(always)]
-pub(crate) fn finish_insertion<T, E: Extract<T>>(arr: &mut [T], key: &mut E) {
-    let _ = insertion_loop(arr, usize::MAX, key);
+pub(crate) fn finish_insertion<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
+    let _ = insertion_loop(records, usize::MAX, extractor);
 }
 
 /// Number of bits needed to represent `value`; 0 for 0.
@@ -269,23 +274,24 @@ impl Digit {
     }
 }
 
-/// Capacity for packed digit windows over a 128-bit key. A bound of 22 is
-/// sufficient, but shrinking this array awaits an isolated performance check.
+/// Capacity of a digit plan. A plan over a 128-bit key needs at most 22 windows
+/// of at least `MIN_TILE_DIGIT_BITS` bits; the array keeps 48 entries until a
+/// smaller one is measured.
 const MAX_DIGITS: usize = 48;
 
 /// Scans until all candidate bits have appeared in both states, or the input ends.
 /// The parent partition digit is constant within a child and excluded by the caller.
-fn scan_varying_bits<T, E: Extract<T>>(arr: &[T], candidate: u128, key: &mut E) -> u128 {
+fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor: &mut E) -> u128 {
     if candidate == 0 {
         return 0;
     }
-    let first = key.key(&arr[0]);
+    let first = extractor.key(&records[0]);
     let (mut union, mut intersection) = (first, first);
     let mut index = 1;
-    while index < arr.len() {
-        let end = (index + 64).min(arr.len());
-        for record in &arr[index..end] {
-            let key = key.key(record);
+    while index < records.len() {
+        let end = (index + 64).min(records.len());
+        for record in &records[index..end] {
+            let key = extractor.key(record);
             union |= key;
             intersection = intersection & key;
         }
@@ -319,8 +325,8 @@ fn top_window(remaining: u128, width: usize) -> (Digit, u128) {
 /// the run is instead tiled evenly over the passes that `width` would need, so
 /// 32 bits in three passes become 11 + 11 + 10 rather than 14 + 14 + 4. Both
 /// plans move each record three times and cover the same bits, but the even one
-/// clears, counts and walks a quarter of the bucket slots. Gaps keep the wide
-/// windows, which jump over them.
+/// clears, counts and walks 5,120 bucket slots instead of 32,784. Gaps keep the
+/// wide windows, which jump over them.
 fn plan_digits(varying: u128, width: usize, digits: &mut [Digit]) -> usize {
     let top = bit_len(varying);
     // Passes left to tile the contiguous run over; `None` keeps fixed windows.
@@ -344,85 +350,71 @@ fn plan_digits(varying: u128, width: usize, digits: &mut [Digit]) -> usize {
     len
 }
 
+/// Routes nodes and finishes tiles with one extractor and one scratch workspace.
+///
+/// `CACHED` stores each record's bucket ID during a tile pass's histogram so
+/// the scatter never calls the key function again; it is `true` for user key
+/// functions and `false` for library-encoded keys (decision 0002).
 struct Sorter<'a, T, E, const CACHED: bool> {
     workspace: &'a mut Workspace<T>,
-    key: &'a mut E,
+    extractor: &'a mut E,
     tile_bytes: usize,
 }
 
+/// Sorts `records` stably by the keys `key` extracts.
+///
+/// Uses `workspace` for scratch, or allocates scratch for this call once the
+/// order probe and varying-bit scan have not finished the sort.
 pub(crate) fn sort<T, E: Extract<T>, const CACHED: bool>(
-    arr: &mut [T],
-    key: &mut E,
+    records: &mut [T],
+    extractor: &mut E,
     workspace: Option<&mut Workspace<T>>,
 ) {
-    sort_with_tile_bytes::<T, E, CACHED>(arr, key, workspace, TILE_BYTES);
+    sort_with_tile_bytes::<T, E, CACHED>(records, extractor, workspace, TILE_BYTES);
 }
 
+/// [`sort`] with a tile budget of `tile_bytes`, so tests can reach node routes
+/// with small inputs.
 fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
-    arr: &mut [T],
-    key: &mut E,
+    records: &mut [T],
+    extractor: &mut E,
     mut workspace: Option<&mut Workspace<T>>,
     tile_bytes: usize,
 ) {
     let record_bytes = core::mem::size_of::<T>();
-    if arr.len() < 2 || record_bytes == 0 {
+    if records.len() < 2 || record_bytes == 0 {
         return;
     }
     let tile_bytes = tile_bytes
         .max(record_bytes)
         .min(MAX_TILE_RECORDS.saturating_mul(record_bytes));
-    let sampled = probe_order(arr, key);
+    let sampled = probe_order(records, extractor);
     match sampled {
         Order::Ascending => return,
         Order::Descending => {
-            reverse_stably(arr, key);
+            reverse_stably(records, extractor);
             return;
         }
-        Order::Flat | Order::Unsorted => {}
-    }
-    if sampled == Order::Unsorted {
-        let probe = (tile_bytes / record_bytes).max(2).min(arr.len());
-        let swaps = if probe == arr.len() {
-            key.insertion_sort(arr, probe)
-        } else {
-            // The buffer holds keys, never records. Its `u128` elements give
-            // alignment for every encoded key width.
-            let bytes = probe * core::mem::size_of::<E::Value>();
-            let mut local_probe = Vec::new();
-            let storage = match workspace.as_deref_mut() {
-                Some(workspace) => &mut workspace.probe,
-                None => &mut local_probe,
-            };
-            storage.resize_with(bytes.div_ceil(16), MaybeUninit::uninit);
-            let ptr = storage.as_mut_ptr().cast::<E::Value>();
-            for (i, record) in arr[..probe].iter().enumerate() {
-                // SAFETY: the allocation has space and alignment for probe keys.
-                unsafe {
-                    ptr.add(i).write(key.key(record));
-                }
+        Order::Unsorted => {
+            let probe_len = (tile_bytes / record_bytes).max(2).min(records.len());
+            let probe = workspace
+                .as_deref_mut()
+                .map(|workspace| &mut workspace.probe);
+            if insertion_probe(records, extractor, probe_len, probe) {
+                return;
             }
-            // SAFETY: every key slot was initialized above; this borrow ends
-            // before the workspace is used by the sorting engine.
-            let keys = unsafe { core::slice::from_raw_parts_mut(ptr, probe) };
-            match Direct.insertion_sort(keys, probe) {
-                Some(0) => None,
-                Some(swaps) => key.insertion_sort(arr, swaps * arr.len() / probe),
-                None => None,
-            }
-        };
-        if swaps.is_some() {
-            return;
         }
+        Order::Flat => {}
     }
-    let varying = block::varying_key_bits(arr, key);
+    let varying = block::varying_key_bits(records, extractor);
     if varying == 0 {
         return;
     }
     if sampled == Order::Flat {
-        match confirm_order(arr, key) {
+        match confirm_order(records, extractor) {
             Order::Ascending => return,
             Order::Descending => {
-                reverse_stably(arr, key);
+                reverse_stably(records, extractor);
                 return;
             }
             _ => {}
@@ -442,28 +434,71 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
         if varying >> 64 == 0 {
             Sorter::<T, _, CACHED> {
                 workspace,
-                key: &mut KeyHalf::<_, 0>(key),
+                extractor: &mut KeyHalf::<_, 0>(extractor),
                 tile_bytes,
             }
-            .sort_node(arr, varying);
+            .sort_node(records, varying);
             return;
         }
         if varying & ((1u128 << 64) - 1) == 0 {
             Sorter::<T, _, CACHED> {
                 workspace,
-                key: &mut KeyHalf::<_, 64>(key),
+                extractor: &mut KeyHalf::<_, 64>(extractor),
                 tile_bytes,
             }
-            .sort_node(arr, varying >> 64);
+            .sort_node(records, varying >> 64);
             return;
         }
     }
     Sorter::<T, E, CACHED> {
         workspace,
-        key,
+        extractor,
         tile_bytes,
     }
-    .sort_node(arr, varying);
+    .sort_node(records, varying);
+}
+
+/// Tries to finish `records` with a budgeted insertion pass and returns whether it
+/// did.
+///
+/// An input of at most `probe_len` records gets a budget of `probe_len` swaps.
+/// A longer input first insertion-sorts the keys of its first `probe_len`
+/// records in `storage`, or in a local buffer without a workspace, and scales
+/// that window's swap count to the whole input as the budget for the records.
+/// A window that needs no swaps says nothing about the rest, so the records are
+/// not touched. A pass that runs out of budget leaves `records` a stable
+/// permutation of its input.
+fn insertion_probe<T, E: Extract<T>>(
+    records: &mut [T],
+    extractor: &mut E,
+    probe_len: usize,
+    storage: Option<&mut Vec<MaybeUninit<u128>>>,
+) -> bool {
+    if probe_len == records.len() {
+        return extractor.insertion_sort(records, probe_len).is_some();
+    }
+    // The buffer holds keys, never records. Its `u128` elements give alignment
+    // for every encoded key width.
+    let bytes = probe_len * core::mem::size_of::<E::Value>();
+    let mut local = Vec::new();
+    let storage = storage.unwrap_or(&mut local);
+    storage.resize_with(bytes.div_ceil(16), MaybeUninit::uninit);
+    let ptr = storage.as_mut_ptr().cast::<E::Value>();
+    for (i, record) in records[..probe_len].iter().enumerate() {
+        // SAFETY: the allocation has space and alignment for `probe_len` keys.
+        unsafe {
+            ptr.add(i).write(extractor.key(record));
+        }
+    }
+    // SAFETY: every key slot was initialized above, and `storage` is not used
+    // again while `keys` is alive.
+    let keys = unsafe { core::slice::from_raw_parts_mut(ptr, probe_len) };
+    match Direct.insertion_sort(keys, probe_len) {
+        Some(0) | None => false,
+        Some(swaps) => extractor
+            .insertion_sort(records, swaps * records.len() / probe_len)
+            .is_some(),
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -481,15 +516,15 @@ const ORDER_SAMPLES: usize = 4096;
 /// Rejects unordered input with strided adjacent pairs, then confirms order
 /// with a full scan. Equal-only samples defer confirmation to the caller.
 #[inline(never)]
-fn probe_order<T, E: Extract<T>>(arr: &[T], key: &mut E) -> Order {
-    let stride = (arr.len() / ORDER_SAMPLES).max(1);
+fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
+    let stride = (records.len() / ORDER_SAMPLES).max(1);
     let mut ascending = true;
     let mut descending = true;
-    for index in (stride..arr.len()).step_by(stride) {
+    for index in (stride..records.len()).step_by(stride) {
         // SAFETY: the range starts at `stride >= 1`, so `index - 1` is in bounds.
-        let before = key.key(unsafe { arr.get_unchecked(index - 1) });
-        // SAFETY: the range ends before `arr.len()`.
-        let after = key.key(unsafe { arr.get_unchecked(index) });
+        let before = extractor.key(unsafe { records.get_unchecked(index - 1) });
+        // SAFETY: the range ends before `records.len()`.
+        let after = extractor.key(unsafe { records.get_unchecked(index) });
         ascending &= before <= after;
         descending &= before >= after;
         if !ascending && !descending {
@@ -499,20 +534,20 @@ fn probe_order<T, E: Extract<T>>(arr: &[T], key: &mut E) -> Order {
     if ascending && descending {
         return Order::Flat;
     }
-    confirm_order(arr, key)
+    confirm_order(records, extractor)
 }
 
 /// Determines direction from the first unequal key, then confirms that order.
-fn confirm_order<T, E: Extract<T>>(arr: &[T], key: &mut E) -> Order {
-    let first = key.key(&arr[0]);
-    let mut keys = arr[1..].iter().map(|record| key.key(record));
+fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
+    let first = extractor.key(&records[0]);
+    let mut keys = records[1..].iter().map(|record| extractor.key(record));
     let Some(current) = keys.find(|&key| key != first) else {
         return Order::Ascending;
     };
     if first < current {
         // The iterator has already encoded the first unequal key.
-        let tail = &arr[arr.len() - keys.len()..];
-        if key.confirm_ascending(tail, current) {
+        let tail = &records[records.len() - keys.len()..];
+        if extractor.confirm_ascending(tail, current) {
             Order::Ascending
         } else {
             Order::Unsorted
@@ -526,13 +561,14 @@ fn confirm_order<T, E: Extract<T>>(arr: &[T], key: &mut E) -> Order {
 /// Confirms ascending keys after an already encoded predecessor.
 #[inline]
 pub(crate) fn confirm_ascending<T, E: Extract<T>>(
-    arr: &[T],
-    key: &mut E,
+    records: &[T],
+    extractor: &mut E,
     previous: E::Value,
 ) -> bool {
-    arr.iter()
+    records
+        .iter()
         .try_fold(previous, |before, record| {
-            let after = key.key(record);
+            let after = extractor.key(record);
             (before <= after).then_some(after)
         })
         .is_some()
@@ -540,23 +576,18 @@ pub(crate) fn confirm_ascending<T, E: Extract<T>>(
 
 /// Sorts a descending array, stably, by reversing it and then reversing each
 /// run of equal keys back. Reversal alone would swap equal keys past each other.
-fn reverse_stably<T, E: Extract<T>>(arr: &mut [T], extractor: &mut E) {
-    arr.reverse();
+fn reverse_stably<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
+    records.reverse();
     let mut start = 0;
-    while start < arr.len() {
-        let key = extractor.key(&arr[start]);
+    while start < records.len() {
+        let key = extractor.key(&records[start]);
         let mut end = start + 1;
-        while end < arr.len() && extractor.key(&arr[end]) == key {
+        while end < records.len() && extractor.key(&records[end]) == key {
             end += 1;
         }
-        arr[start..end].reverse();
+        records[start..end].reverse();
         start = end;
     }
-}
-
-/// Stable insertion sort on converted keys.
-fn insertion_sort<T, E: Extract<T>>(arr: &mut [T], key: &mut E) {
-    key.finish_insertion(arr);
 }
 
 /// One stable counting pass: histogram, prefix sum, then scatter from `source`
@@ -586,7 +617,7 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
     digit: Digit,
     cursor: *mut u16,
     cache_tail: *mut u16,
-    key: &mut E,
+    extractor: &mut E,
 ) -> u16 {
     // SAFETY: the caller supplies initialized source records, disjoint writable
     // output and cursor/cache storage as specified by this function's contract.
@@ -606,7 +637,7 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
         let mut largest = 0u16;
         for index in 0..len {
             // SAFETY: the caller guarantees `len` initialized records.
-            let key = key.key(&*source.add(index));
+            let key = extractor.key(&*source.add(index));
             let bucket = ((key & mask) >> shift).to_usize();
             if CACHED {
                 // SAFETY: the scratch tail has len aligned u16 slots.
@@ -639,7 +670,7 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
             let bucket = if !CACHED {
                 // Only sealed library encoders use the uncached path; their
                 // classification is deterministic and cannot panic.
-                ((key.key(&*record) & mask) >> shift).to_usize()
+                ((extractor.key(&*record) & mask) >> shift).to_usize()
             } else {
                 // SAFETY: histogram initialized every cached classification before
                 // any record was copied. Scatter runs no user code on this path.
@@ -662,8 +693,8 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
 
 /// Chooses the widest cursor table that fits beside the tile, capped by
 /// record count to avoid clearing mostly empty buckets on wide records.
-fn tile_digit_bits(records: usize, record_bytes: usize) -> usize {
-    let tile_bytes = records.saturating_mul(record_bytes);
+fn tile_digit_bits(len: usize, record_bytes: usize) -> usize {
+    let tile_bytes = len.saturating_mul(record_bytes);
     // The widest table that still fits: `2 * 2^width` bytes of cursors.
     let widest = (tile_bytes / 2).max(1).ilog2() as usize;
     // Limit empty-bucket work to at most eight times the record count, or four
@@ -673,7 +704,7 @@ fn tile_digit_bits(records: usize, record_bytes: usize) -> usize {
     // disagrees by 23.6% on that case, so the direction is the result, not the
     // size). 128-byte records are unchanged: the byte cap already decides.
     let slack = if record_bytes > 8 { 2 } else { 3 };
-    let by_records = records.max(1).ilog2() as usize + slack;
+    let by_records = len.max(1).ilog2() as usize + slack;
     widest
         .min(by_records)
         .clamp(MIN_TILE_DIGIT_BITS, MAX_TILE_DIGIT_BITS)
@@ -681,15 +712,15 @@ fn tile_digit_bits(records: usize, record_bytes: usize) -> usize {
 
 /// Chooses an initial width targeting half-tile children, then widens if needed.
 fn choose_split_digit<T, E: Extract<T>>(
-    arr: &[T],
+    records: &[T],
     top: usize,
     tile_bytes: usize,
-    key: &mut E,
+    extractor: &mut E,
 ) -> Digit {
     let record_bytes = core::mem::size_of::<T>();
     let tile_records = (tile_bytes / record_bytes).max(64);
     let target = (tile_records / 2).max(1);
-    let children = (arr.len() / target).max(2);
+    let children = (records.len() / target).max(2);
     let bits = (children - 1).ilog2() + 1;
     // Wider fan-out increased page/TLB pressure in the 10M measurements.
     let mut width = (bits as usize).clamp(3, SPLIT_BITS).min(top).max(1);
@@ -703,12 +734,12 @@ fn choose_split_digit<T, E: Extract<T>>(
                 width,
             };
 
-            if sample_distinct_digits(arr, probe, key) * 4 >= 1usize << width {
+            if sample_distinct_digits(records, probe, extractor) * 4 >= 1usize << width {
                 break;
             }
         }
-        // Clamp to the highest varying bit: a 9-bit node previously widened
-        // to 10 bits and underflowed the digit shift.
+        // Clamp to the highest varying bit, or `top - width` underflows: a
+        // 9-bit node would widen to 10 bits.
         width = (width + 2).min(top);
     }
     Digit {
@@ -718,15 +749,15 @@ fn choose_split_digit<T, E: Extract<T>>(
 }
 
 impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
-    fn sort_node(&mut self, arr: &mut [T], varying: u128) {
-        let records = arr.len();
-        if records < 2 || varying == 0 {
+    fn sort_node(&mut self, records: &mut [T], varying: u128) {
+        let len = records.len();
+        if len < 2 || varying == 0 {
             return;
         }
         let record_bytes = core::mem::size_of::<T>();
-        let node_bytes = records.saturating_mul(record_bytes);
+        let node_bytes = len.saturating_mul(record_bytes);
         if node_bytes <= self.tile_bytes {
-            self.sort_tile(arr, varying);
+            self.sort_tile(records, varying);
             return;
         }
         // One digit finishes a narrow span; wider spans benefit from tiled children.
@@ -739,15 +770,15 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             // the same key, so counting the window and filling each run can
             // finish the node without moving blocks. A user key function keeps
             // its payloads and takes the partition below instead.
-            if self.key.try_count_window(arr, low, span) {
+            if self.extractor.try_count_window(records, low, span) {
                 return;
             }
             // One block partition finishes the node without recursion.
             block::partition_digit(
-                arr,
+                records,
                 SPLIT_BITS,
                 low,
-                self.key,
+                self.extractor,
                 self.workspace.block_buffers(),
             );
             return;
@@ -755,47 +786,47 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         // Amortize the key sample over at least four tiles.
         if node_bytes >= 4 * self.tile_bytes {
             let mut keys = [KeyValue::<T, E>::from_usize(0); MODE_SAMPLE_LEN];
-            sample_keys(arr, &mut keys, self.key);
+            sample_keys(records, &mut keys, self.extractor);
             // An equality partition finishes the repeated key immediately.
             if let Some(equal) = sample_mode(&mut keys) {
-                self.partition_equal(arr, equal, varying);
+                self.partition_equal(records, equal, varying);
                 return;
             }
             // Lift a short end run rather than move the whole node to separate it.
             let bit = KeyValue::<T, E>::from_usize(1) << KeyValue::<T, E>::from_usize(top - 1);
-            if let Some(outlier) = outlier_run(arr, &keys, bit, self.key) {
-                self.sort_outlier_run(arr, outlier);
+            if let Some(outlier) = outlier_run(records, &keys, bit, self.extractor) {
+                self.sort_outlier_run(records, outlier);
                 return;
             }
         }
-        let digit = choose_split_digit(arr, top, self.tile_bytes, self.key);
-        self.partition_digit(arr, digit, varying);
+        let digit = choose_split_digit(records, top, self.tile_bytes, self.extractor);
+        self.partition_digit(records, digit, varying);
     }
 
     /// Partitions by digit, then sorts each unfinished child.
-    fn partition_digit(&mut self, arr: &mut [T], digit: Digit, varying: u128) {
+    fn partition_digit(&mut self, records: &mut [T], digit: Digit, varying: u128) {
         let record_bytes = core::mem::size_of::<T>();
         // Bucket boundaries come from the block engine. The split digit is
         // constant inside each child, so its bits are excluded from the next scan.
         let candidate = varying & !digit.mask::<E::Value>().to_u128();
         let tile_bytes = self.tile_bytes;
         let mut block_buffers = self.workspace.block.take().unwrap_or_default();
-        let mut visit = |child: &mut [T], key: &mut E| {
+        let mut visit = |child: &mut [T], extractor: &mut E| {
             if child.len().saturating_mul(record_bytes) <= tile_bytes {
-                let varying = scan_varying_bits(child, candidate, key);
+                let varying = scan_varying_bits(child, candidate, extractor);
                 Sorter::<T, E, CACHED> {
                     workspace: self.workspace,
-                    key,
+                    extractor,
                     tile_bytes,
                 }
                 .sort_tile(child, varying);
             }
         };
         let ends = block::partition_digit_with_ends(
-            arr,
+            records,
             digit.width,
             digit.shift,
-            self.key,
+            self.extractor,
             &mut block_buffers,
             &mut visit,
         );
@@ -803,9 +834,9 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         let mut start = 0;
         for &end in &ends {
             if end > start {
-                let child = &mut arr[start..end];
+                let child = &mut records[start..end];
                 if child.len().saturating_mul(record_bytes) > tile_bytes {
-                    let varying = scan_varying_bits(child, candidate, self.key);
+                    let varying = scan_varying_bits(child, candidate, self.extractor);
                     self.sort_node(child, varying);
                 }
             }
@@ -819,18 +850,24 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
     }
 
     /// Partitions below, equal to, and above a sampled key. The equal band is done.
-    fn partition_equal(&mut self, arr: &mut [T], equal: KeyValue<T, E>, parent_varying: u128) {
-        let classify = move |key: &mut E, record: &T| {
-            let key = key.key(record);
+    fn partition_equal(&mut self, records: &mut [T], equal: KeyValue<T, E>, parent_varying: u128) {
+        let classify = move |extractor: &mut E, record: &T| {
+            let key = extractor.key(record);
             usize::from(key >= equal) + usize::from(key > equal)
         };
         // Three outcomes need four buckets because `partition_by` takes powers
         // of two; the fourth is unused, so the greater band runs to the end.
-        let ends = block::partition_by(arr, 4, self.key, self.workspace.block_buffers(), classify);
-        for range in [0..ends[0], ends[1]..arr.len()] {
-            let child = &mut arr[range];
+        let ends = block::partition_by(
+            records,
+            4,
+            self.extractor,
+            self.workspace.block_buffers(),
+            classify,
+        );
+        for range in [0..ends[0], ends[1]..records.len()] {
+            let child = &mut records[range];
             if child.len() > 1 {
-                let varying = scan_varying_bits(child, parent_varying, self.key);
+                let varying = scan_varying_bits(child, parent_varying, self.extractor);
                 self.sort_node(child, varying);
             }
         }
@@ -844,36 +881,41 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
     /// Moves a run of disagreeing records to the end its bit belongs to, then
     /// finishes both parts: the body by the ordinary recursion, the run by
     /// insertion.
-    fn sort_outlier_run(&mut self, arr: &mut [T], outlier: OutlierRun) {
-        let len = arr.len();
+    fn sort_outlier_run(&mut self, records: &mut [T], outlier: OutlierRun) {
+        let len = records.len();
         let run = outlier.len;
         // The run belongs before the body when its bit is clear and after it when
         // set: every record outside the run has the opposite bit.
         let before = !outlier.set;
         if outlier.head && !before {
-            arr.rotate_left(run);
+            records.rotate_left(run);
         } else if !outlier.head && before {
-            arr.rotate_right(run);
+            records.rotate_right(run);
         }
         let body = if before {
-            &mut arr[run..]
+            &mut records[run..]
         } else {
-            &mut arr[..len - run]
+            &mut records[..len - run]
         };
         self.sort_node(body, outlier.body_varying);
         let lifted = if before {
-            &mut arr[..run]
+            &mut records[..run]
         } else {
-            &mut arr[len - run..]
+            &mut records[len - run..]
         };
-        insertion_sort(lifted, self.key);
+        self.extractor.finish_insertion(lifted);
     }
 
-    fn reserve_scratch(&mut self, len: usize, cache: bool, buckets: usize) -> (*mut T, *mut u16) {
-        // Cached digits first use the unused suffix of the existing cursor
-        // table. Larger caches share the record allocation, without another
-        // allocation or zero initialization.
-        let tail = cache && len + buckets > MAX_DIGIT_BUCKETS;
+    /// Reserves `len` scratch records and, when bucket IDs are cached and do not
+    /// fit after `buckets` cursors, `len` aligned `u16` slots after them.
+    ///
+    /// Returns the scratch records and the ID slots, or a null ID pointer when
+    /// the IDs fit in the cursor table.
+    fn reserve_scratch(&mut self, len: usize, buckets: usize) -> (*mut T, *mut u16) {
+        // Cached IDs first use the unused suffix of the cursor table. Larger
+        // caches share the record allocation, without another allocation or
+        // zero initialization.
+        let tail = CACHED && len + buckets > MAX_DIGIT_BUCKETS;
         if tail {
             let bytes = core::mem::size_of::<T>();
             let extra = (len * core::mem::size_of::<u16>() + 1).div_ceil(bytes);
@@ -911,13 +953,12 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
     }
 
     /// Partitions a tile through scratch, then finishes each bucket.
-    fn partition_tile(&mut self, arr: &mut [T], digit: Digit, varying: u128) {
-        let len = arr.len();
-        let cache = CACHED;
-        let (scratch, cache_tail) = self.reserve_scratch(len, cache, 1 << digit.width);
+    fn partition_tile(&mut self, records: &mut [T], digit: Digit, varying: u128) {
+        let len = records.len();
+        let (scratch, cache_tail) = self.reserve_scratch(len, 1 << digit.width);
         let mut counts = MaybeUninit::<[u16; MAX_DIGIT_BUCKETS]>::uninit();
         let counts_ptr = counts.as_mut_ptr().cast::<u16>();
-        let tile = arr.as_mut_ptr();
+        let tile = records.as_mut_ptr();
         let mut guard = RestoreTile {
             tile,
             len,
@@ -927,18 +968,20 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         // SAFETY: both buffers have len slots and the cursor/cache regions
         // satisfy pass requirements; uncached mode uses only sealed encoders.
         let largest = unsafe {
-            if cache {
-                guard.pass::<E, true>(&mut destination, digit, counts_ptr, cache_tail, self.key)
-            } else {
-                guard.pass::<E, false>(&mut destination, digit, counts_ptr, cache_tail, self.key)
-            }
+            guard.pass::<E, CACHED>(
+                &mut destination,
+                digit,
+                counts_ptr,
+                cache_tail,
+                self.extractor,
+            )
         };
 
         drop(guard);
         // With insertion-sized buckets, whole-tile insertion has the same inversion
         // count as separate bucket sorts and skips the boundary walk.
         if largest as usize <= INSERTION_MAX {
-            insertion_sort(arr, self.key);
+            self.extractor.finish_insertion(records);
             return;
         }
         // Read boundaries from the completed cursors; recomputing them from keys
@@ -952,24 +995,24 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             debug_assert!(start <= end && end <= len);
             // Insertion-sized children need no variation scan.
             if end - start > INSERTION_MAX {
-                let child = &arr[start..end];
-                let varying = scan_varying_bits(child, candidate, self.key);
-                self.sort_tile(&mut arr[start..end], varying);
+                let child = &records[start..end];
+                let varying = scan_varying_bits(child, candidate, self.extractor);
+                self.sort_tile(&mut records[start..end], varying);
             } else if end > start + 1 {
-                insertion_sort(&mut arr[start..end], self.key);
+                self.extractor.finish_insertion(&mut records[start..end]);
             }
             start = end;
         }
     }
 
     /// Finishes a tile by insertion, an MSD partition, or LSD counting passes.
-    fn sort_tile(&mut self, arr: &mut [T], varying: u128) {
-        let len = arr.len();
+    fn sort_tile(&mut self, records: &mut [T], varying: u128) {
+        let len = records.len();
         if len < 2 || varying == 0 {
             return;
         }
         if len <= INSERTION_MAX {
-            insertion_sort(arr, self.key);
+            self.extractor.finish_insertion(records);
             return;
         }
         // Widest counting table this tile can afford; LSD spreads it over passes.
@@ -990,7 +1033,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             // optimizer the divisor below is non-zero, and removing it measured
             // as a slower `sort_tile` (an extra zero check and different register
             // allocation).
-            let distinct = sample_distinct_digits(arr, digit, self.key).max(1);
+            let distinct = sample_distinct_digits(records, digit, self.extractor).max(1);
             let fanout = if distinct >= DIGIT_SAMPLE_LEN.min(len) {
                 1usize << digit.width
             } else {
@@ -1008,12 +1051,11 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             // As above, `max(1)` is kept for the optimizer, not for the value.
             let level_cost = depth.max(1) + MSD_FINISH_PASSES;
             if level_cost < passes {
-                self.partition_tile(arr, digit, varying);
+                self.partition_tile(records, digit, varying);
                 return;
             }
         }
-        let cache = CACHED;
-        let buckets = if cache {
+        let buckets = if CACHED {
             1 << digits[..passes]
                 .iter()
                 .map(|digit| digit.width)
@@ -1022,11 +1064,11 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         } else {
             0
         };
-        let (scratch_ptr, cache_tail) = self.reserve_scratch(len, cache, buckets);
+        let (scratch_ptr, cache_tail) = self.reserve_scratch(len, buckets);
         debug_assert!(len <= MAX_TILE_RECORDS);
         let mut counts = MaybeUninit::<[u16; MAX_DIGIT_BUCKETS]>::uninit();
         let counts_ptr = counts.as_mut_ptr().cast::<u16>();
-        let tile = arr.as_mut_ptr();
+        let tile = records.as_mut_ptr();
         let mut guard = RestoreTile {
             tile,
             len,
@@ -1037,7 +1079,13 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             // SAFETY: scratch and tile are disjoint len-slot buffers. Cached
             // IDs fit in the cursor suffix or the reserved scratch tail.
             unsafe {
-                guard.pass::<E, CACHED>(&mut destination, digit, counts_ptr, cache_tail, self.key)
+                guard.pass::<E, CACHED>(
+                    &mut destination,
+                    digit,
+                    counts_ptr,
+                    cache_tail,
+                    self.extractor,
+                )
             };
         }
     }
@@ -1069,7 +1117,7 @@ impl<T> RestoreTile<T> {
         digit: Digit,
         cursor: *mut u16,
         cache_tail: *mut u16,
-        key: &mut E,
+        extractor: &mut E,
     ) -> u16 {
         // SAFETY: the caller supplies initialized source records, disjoint writable
         // output and cursor/cache storage as specified by this function's contract.
@@ -1081,7 +1129,7 @@ impl<T> RestoreTile<T> {
                 digit,
                 cursor,
                 cache_tail,
-                key,
+                extractor,
             );
             core::mem::swap(&mut self.source, destination);
             largest
@@ -1110,7 +1158,7 @@ mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     #[test]
-    fn ascending_confirmation_preserves_key_evaluation_order() {
+    fn confirm_order_calls_key_in_order() {
         for descending in [false, true] {
             let mut records: Vec<_> = (0..129u64).map(|id| (id / 4, id)).collect();
             if descending {
@@ -1140,7 +1188,7 @@ mod tests {
     }
 
     #[test]
-    fn ascending_confirmation_detects_unsampled_inversion() {
+    fn confirm_order_finds_unsampled_inversion() {
         let len = if cfg!(miri) { 130 } else { 8192 };
         let mut values: Vec<_> = (0..len as u64).collect();
         let index = (len / 2) & !1;
@@ -1151,10 +1199,11 @@ mod tests {
         crate::stable_sort(&mut values);
         assert_eq!(values, (0..len as u64).collect::<Vec<_>>());
     }
+
     // Tiny tiles exercise block materialization and cache-hot callbacks under
     // Miri without requiring thousands of large records.
     #[test]
-    fn block_and_tile_unwind_preserve_exclusive_borrows() {
+    fn key_panic_keeps_borrowed_records() {
         let len = if cfg!(miri) { 65 } else { 513 };
         let mut total = 0;
         let key = |id: usize| (id as u64).wrapping_mul(0x9e3779b97f4a7c15);
@@ -1220,7 +1269,7 @@ mod tests {
     }
 
     #[test]
-    fn odd_record_cache_tail_alignment() {
+    fn cache_tail_after_odd_records() {
         #[derive(Clone, Debug, PartialEq, Eq)]
         struct Odd([u8; 3]);
         let mut records: Vec<_> = (0..65u16)
@@ -1235,7 +1284,7 @@ mod tests {
         let mut key = ByKey(|x: &Odd| u16::from_le_bytes([x.0[0], x.0[1]]));
         Sorter::<_, _, true> {
             workspace: &mut workspace,
-            key: &mut key,
+            extractor: &mut key,
             tile_bytes: TILE_BYTES,
         }
         .partition_tile(
@@ -1250,7 +1299,7 @@ mod tests {
     }
 
     #[test]
-    fn narrow_window_fill_replaces_the_block_partition_for_direct_keys() {
+    fn narrow_window_counting() {
         let len = if cfg!(miri) { 129 } else { 8193 };
         // Windows at the bottom, inside and at the top of a 64-bit key, plus one
         // window narrower than eight bits. A 256-byte tile keeps every case a
@@ -1310,8 +1359,9 @@ mod tests {
             assert_eq!(values, expected, "u128 low={low} width={width}");
         }
     }
+
     #[test]
-    fn sparse_digit_plans_and_outlier_routes() {
+    fn digit_plan_covers_varying_bits() {
         for width in MIN_TILE_DIGIT_BITS..=MAX_TILE_DIGIT_BITS {
             for varying in [
                 1,
@@ -1331,6 +1381,10 @@ mod tests {
                 assert_eq!(mask & varying, varying);
             }
         }
+    }
+
+    #[test]
+    fn outlier_run_at_either_end() {
         let len = if cfg!(miri) { 129 } else { 8193 };
         for high in [false, true] {
             let mut values: Vec<_> = (0..len)

@@ -67,7 +67,7 @@ fn measure(f: impl FnOnce()) -> (usize, isize) {
 }
 
 #[test]
-fn warm_workspace_reuses_all_buffers_and_reports_retained_heap() {
+fn warm_workspace_reuses_buffers() {
     let mut input: Vec<_> = (0..20000u64)
         .map(|id| (id.wrapping_mul(0x9e3779b97f4a7c15), id))
         .collect();

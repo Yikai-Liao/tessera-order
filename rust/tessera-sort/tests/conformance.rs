@@ -39,7 +39,7 @@ fn integer_encodings() {
 }
 
 #[test]
-fn float_total_order_and_reverse() {
+fn float_total_order() {
     macro_rules! check {
         ($f:ty, $u:ty, $special:expr) => {{
             let mut state = 91;
@@ -94,7 +94,7 @@ fn float_total_order_and_reverse() {
 }
 
 #[test]
-fn record_shapes_thresholds_and_key_halves() {
+fn record_shapes_and_thresholds() {
     let mut state = 71;
     let lengths: &[usize] = if cfg!(miri) {
         &[0, 1, 2, 47, 48, 49, 81]
@@ -140,7 +140,7 @@ fn record_shapes_thresholds_and_key_halves() {
 }
 
 #[test]
-fn narrow_direct_ranges_fill_by_counting() {
+fn narrow_direct_ranges() {
     // Above one tile, a node whose keys differ only inside one eight-bit window
     // is finished by counting rather than by the block partition. Float keys
     // check what the fill has to preserve: equal encoded keys are equal bit
@@ -175,7 +175,7 @@ fn narrow_direct_ranges_fill_by_counting() {
     }
 }
 #[test]
-fn wide_aligned_and_zero_sized_records() {
+fn unusual_record_layouts() {
     #[repr(align(128))]
     struct Wide {
         key: u64,
@@ -206,7 +206,7 @@ fn wide_aligned_and_zero_sized_records() {
 }
 
 #[test]
-fn workspace_can_move_between_threads() {
+fn workspace_is_send_and_sync() {
     fn send_sync<T: Send + Sync>() {}
     send_sync::<Workspace<String>>();
     let mut workspace = Workspace::new();

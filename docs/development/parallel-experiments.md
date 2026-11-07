@@ -180,3 +180,36 @@ and complete two-pilot report are archived under `research/patches/halo-squeeze.
 They apply after the historical combined patch, not directly to current main.
 Full raw evidence and the harness stay outside Git. The screen's main/SIMD
 controls remain frozen at `72c2984`, not the subsequently merged `5b13ac1`.
+
+
+## Combined pipeline on current main
+
+`research/patches/combined-main-5b13.patch` preserves the stronger native-root,
+parallel block-permutation and standard-thread-yield pipeline on upstream
+`5b13ac1` serial/SIMD kernels. It applies to experimental commit `b1d36ce`, not
+to the original historical base. Cargo identities and features are unchanged.
+The patch is archived; the repository's public Rayon implementation remains
+child-only until a separate promotion decision.
+
+The isolated port passes debug all-target tests with SIMD off (47 unit and 22
+integration tests) and on (52 and 22), six doctests per feature set, Rust 1.85
+default/Rayon/no_std tests, lint, rustdoc and focused Miri. Final inherited lint
+cleanup reruns both library suites and affected Miri kernels. These are not
+claims of full optimized integration tests or Miri execution of Rayon scheduling.
+Independent archive application and all twenty runtime/test hashes match.
+
+An optimized nine-label, four-case pilot compares old combined, same-core new
+SIMD-off/on, and exact-main serial controls. All 108 measured and 36 warmup
+outputs verify, as do 144 separate smoke/corruption/fresh-input checks. The
+new-SIMD/old-combined paired medians are 0.910/1.027 for 16-byte records at
+four/eight workers and 0.890/0.813 for u64. No improvement is established:
+the first three control envelopes span 17.6–22.4%, and u64 eight-worker C2
+contains a retained 1,129.698 ms sample versus the same-block C1 at 35.838 ms.
+Its cause is unverified; neither that sample nor its 31.522-fold A/A ratio is
+removed. Three blocks do not meet the nine-block acceptance rule.
+
+The source lineage and full report are stored beside the patch. The pilot
+measures random 10M inputs only, process affinity 0–7, API allocation included.
+No new heap or full-distribution claim is made. Follow-on layout experiments
+must compare literal and indirect versions on the same core, and give the
+strong serial baseline the same leaf improvement.

@@ -9,6 +9,10 @@ ownership proof, validation record, and limitations before using it.
 - `patches/combined-rayon.patch`: native root scatter, parallel block movement,
   pipelined child sorting and the consumer-wait fix, against the documented v3
   base. It is archived for review, not applied to the default crate.
+- [Current-main combined port](patches/combined-main-5b13.README.md): the
+  stronger native-root pipeline rebased onto upstream `5b13ac1`, with explicit
+  SIMD-off/on controls and an inconclusive four-case pilot. This patch targets
+  the documented experimental commit and is not applied to production.
 - [Bounded halo squeeze](patches/halo-squeeze.README.md): generic parallel
   materialization with bounded threatened-source snapshots. Neither screen
   establishes a win; the corrected four-worker case regresses and unexplained

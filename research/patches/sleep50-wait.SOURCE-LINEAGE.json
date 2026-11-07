@@ -1,0 +1,25 @@
+{
+  "base_commit": "b1d36ce4e2b547ba72a0026dfb5850389e0d45e7",
+  "prerequisite_patch": "combined-main-5b13.patch",
+  "prerequisite_sha256": "0c75b051977dab392c66dbfee70a7f32885484ca143bc15611e819bb5bf15ba3",
+  "follow_on_sha256": "b2cdb7e4401b8714d8206a44d118fb3b3d6009d911b9cb38007e0caf3e5e0bf9",
+  "source_private": "tessera-sleep50-diagnostic/sources/sleep50",
+  "changed_files": [
+    "rust/tessera-sort/src/engine/parallel.rs"
+  ],
+  "runtime_test_files_verified_byte_identical": 20,
+  "standard_package": "tessera-sort",
+  "independent_not_stacked": true,
+  "not_public_0e_drop_in": true,
+  "base_tree_manifest_sha256": "7ff3c20a033037a1e2040c0aa9c389a8b3d5bf23a00d21cf20194c2a0a64bda4",
+  "target_tree_manifest_sha256": "5ff8e17c6e4fbfecde787b41ef8543ed2e95f2563a45d83a757f692eeda4c3f5",
+  "checks": [
+    "historical prerequisite apply-check/apply",
+    "normalized crate Cargo semantics match",
+    "follow-on apply-check/apply independent export",
+    "entire file/symlink tree matches target",
+    "all runtime/test bytes match validated private source",
+    "reverse-check/reverse application restores entire base tree"
+  ],
+  "builds_or_timings_in_archive": false
+}

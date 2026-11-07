@@ -1,0 +1,12 @@
+diff --git a/rust/tessera-sort/src/engine/parallel.rs b/rust/tessera-sort/src/engine/parallel.rs
+--- a/rust/tessera-sort/src/engine/parallel.rs
++++ b/rust/tessera-sort/src/engine/parallel.rs
+@@ -225,7 +225,7 @@
+             }
+             Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+             Err(std::sync::mpsc::TryRecvError::Empty) => {
+-                std::thread::yield_now();
++                std::thread::sleep(std::time::Duration::from_micros(50));
+             }
+         }
+     }

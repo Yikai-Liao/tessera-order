@@ -1,0 +1,437 @@
+{
+  "tessera-fixed-root-diagnostic/report.md": {
+    "sha256": "394cc1a7c9137f229c3149855fb71f04d717c4f6f410ddd6606a489dfc2ff685",
+    "bytes": 6298,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/PROTOCOL.md": {
+    "sha256": "0dde3dede7c542e85e41d1ad385642f7acf6d6815167965d2a04e6a130e442e1",
+    "bytes": 1362,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/build-check.log": {
+    "sha256": "d5f3c4acc8aced3651c7fd1da2aa36ef98e94c73a48c26544b776859a932cda1",
+    "bytes": 17300,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/frozen-manifest.json": {
+    "sha256": "f47ff55b90362cfd740114a9b833003a2e8cfad87be7c4747da96dbfe81f31d1",
+    "bytes": 63913,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/main-row16-summary.txt": {
+    "sha256": "28546be12a3a6cbf15ea0f48500b1dc78bb4802cf2926d10fe713ec642c1efdd",
+    "bytes": 1398,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/main-row16-warmup.jsonl": {
+    "sha256": "fa6879ba89d6f8797605289a5c2bfd48c562b814081f8987c735bf90bc5a2ba6",
+    "bytes": 736,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/main-row16.jsonl": {
+    "sha256": "5aedeafcc738a2c4039bddfb828410eea44793e94286986961da5c10c223b932",
+    "bytes": 6701,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/main-u64-summary.txt": {
+    "sha256": "24d412a8bad36eb27638cd188877f533893995deebcd69bc8973741ac046d1be",
+    "bytes": 1395,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/main-u64-warmup.jsonl": {
+    "sha256": "4f595879f389a58dfdf7d5cb113a13a0856a715c2f58c769cae0c12cf10086f2",
+    "bytes": 736,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/main-u64.jsonl": {
+    "sha256": "7b85ebe2d9aebce5c1c713a81dfbdaf75b6e550f0261c6d7f55f96422c633c93",
+    "bytes": 6698,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/production-diff.patch": {
+    "sha256": "ceff011a9128ff9179dea036ee03b0133b4b5963faf581c410845efbc0a91020",
+    "bytes": 540,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/run.log": {
+    "sha256": "3566bb1d8259848cd53a226d1ad20a143ba62216d22938a21fe42e7b68b84cc6",
+    "bytes": 271,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/trace-row16-summary.txt": {
+    "sha256": "f995f6be45f0b77193da29e56ce771a204974660cd8a0fdab4cf219ae49ea3e5",
+    "bytes": 6908,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/trace-row16-warmup.jsonl": {
+    "sha256": "2513ab6b52513dde49d0857e68aa3ccd12d599d4b0a971dfd5acad1af177ebc7",
+    "bytes": 861047,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/trace-row16.jsonl": {
+    "sha256": "db18030d3fd73a7eac7ee20dde43858099e45b1e9e8e941fb7bbf45a09ce5acc",
+    "bytes": 3055492,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/trace-u64-summary.txt": {
+    "sha256": "e92e9549e61147a918ce4b63c76d4433bcf000e6241448c0a052fb1f57d81355",
+    "bytes": 6883,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/trace-u64-warmup.jsonl": {
+    "sha256": "a3c5ba6df9b032e54ac8c3c55706195e6a144d1bc691f95951b49b5cf627c4bc",
+    "bytes": 773820,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/trace-u64.jsonl": {
+    "sha256": "2917f257410d7e755a56e758b5cc04a53e220110776a71476550c216dbf8add1",
+    "bytes": 2728929,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/validation-row16-trace0.jsonl": {
+    "sha256": "9cbc28fb5899401529979038bfde7496dc68bcec929b06acb79876bc6b13a27f",
+    "bytes": 1427,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/validation-row16-trace1.jsonl": {
+    "sha256": "22f4ba80991a5ffc9535fd8c00d61c87528e280a946fc8f1f8ebbc67aac65dff",
+    "bytes": 597054,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/validation-summary.txt": {
+    "sha256": "d2818cca1cb6aa1d73ab4d0776d055789cfee6e0fd5b4ab1f70647d228377c79",
+    "bytes": 6315,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/validation-u64-trace0.jsonl": {
+    "sha256": "4f4094a334a5af486b2ebf51ecdd0a05e90bb49bf99c99c5054eb366d0c8598e",
+    "bytes": 1419,
+    "included_in_packet": false
+  },
+  "tessera-fixed-root-diagnostic/evidence/validation-u64-trace1.jsonl": {
+    "sha256": "b30b39d1ca9953cf6eb2959e8588f4c4ca7dbb494bd3b431d85de07aac582572",
+    "bytes": 327675,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/report.md": {
+    "sha256": "e83972a3f0931a91182cf8d843b2bedebfcb4f3b9885a0abab40bc10881bce47",
+    "bytes": 5949,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/PROTOCOL.md": {
+    "sha256": "3327026d1ac6fa650aa4b469cd1f8f763d3ea2c860c7035bbd0af04e7114cbf0",
+    "bytes": 1907,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/build-check.log": {
+    "sha256": "c65b02bf6a6e8df754d21f4ec6ed18851685e475247bab273642f7f05cf60f2e",
+    "bytes": 17354,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/frozen-manifest.json": {
+    "sha256": "99050f713f24521b9afd57d58086710f3c834df42798970bee06c8a0b25a9359",
+    "bytes": 80283,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/main-row16-summary.txt": {
+    "sha256": "951a8d136c875fe77dff127ed4a90a38943246ae964a3bb154395d7cb262e45c",
+    "bytes": 1102,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/main-row16-warmup.jsonl": {
+    "sha256": "eafc4f995026817c7d1603e1d0d16b4145f14bc2b47464d8405b75c049adcee5",
+    "bytes": 546,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/main-row16.jsonl": {
+    "sha256": "cdb8ab3aa39e4ec10a63028cb21b833cd5af8e88a5ce6b4e308aa25edf3a4f31",
+    "bytes": 5010,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/main-u64-summary.txt": {
+    "sha256": "7668ca0d9112b1292f6d9195e14e4af19f867bbbf032f272a4c05cd9f0e4f6a5",
+    "bytes": 1099,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/main-u64-warmup.jsonl": {
+    "sha256": "4e645c63191348ac04f8b0295ae5857f9885953ef27c8982e25612242595432d",
+    "bytes": 546,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/main-u64.jsonl": {
+    "sha256": "1bbf28114023f2419c59db7b95c98fa4aa62e06574e7a6382b01c617c479482e",
+    "bytes": 5008,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/production-diff.patch": {
+    "sha256": "66a5e796e690b77f4d780fe31d4d9e3fe746b8a7d4a4c163f6a0164c77a9d51a",
+    "bytes": 567,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/run.log": {
+    "sha256": "1d0ec5f27ecba671c5d81a72b9053f5116ff4260bac4a4a773edadf595e0a0fd",
+    "bytes": 265,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/trace-row16-summary.txt": {
+    "sha256": "5283bbffc0cd41de7befdf75b694115cde046fa1f181b4e573ad155a240af70b",
+    "bytes": 4324,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/trace-row16-warmup.jsonl": {
+    "sha256": "b9efcfe9e7bd1d3c7831ceb1b137097a76fa7aad1b30853ed9832c3cbeffdd02",
+    "bytes": 440048,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/trace-row16.jsonl": {
+    "sha256": "18d0b9cd9cbb06f062b0b509f09e991f0bd4cf1249a033076a31eae1f715c023",
+    "bytes": 1489942,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/trace-u64-summary.txt": {
+    "sha256": "ffc9d0ce18381d96f786a7f76f4857c0d11f3d9d84dd3ba6ec91b1afa8fd1b70",
+    "bytes": 4301,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/trace-u64-warmup.jsonl": {
+    "sha256": "41dde61268ccaced360a9426705db0f8689910afd66a3333dfee1cb5af46db6d",
+    "bytes": 361159,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/trace-u64.jsonl": {
+    "sha256": "e862b55d5cba70efbcfbb8591beff75093ad8286ab56591b4e2e9d56bff37dd4",
+    "bytes": 1466349,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/validation-row16-trace0.jsonl": {
+    "sha256": "bb0e632d8aac675ebd46164c22a1230350eecee7b81cacce190d64f0e1a44b73",
+    "bytes": 1099,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/validation-row16-trace1.jsonl": {
+    "sha256": "187e8fad5c675dfd6674c0361ca307153f78dc716aaafb408cdcb7e65563ea03",
+    "bytes": 317125,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/validation-summary.txt": {
+    "sha256": "7c02ef0464052028935d1cf9a3a693dc559272445ea2fcf546fbd965b6490752",
+    "bytes": 4387,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/validation-u64-trace0.jsonl": {
+    "sha256": "299689b9e537b4f9b0ea3fafae55c94d6b8bdd814390df61d77b5bd79eee943a",
+    "bytes": 1097,
+    "included_in_packet": false
+  },
+  "tessera-sleep50-diagnostic/evidence/validation-u64-trace1.jsonl": {
+    "sha256": "105edf52cab9af06b6a57d028f0bea59aa795ef0ee1194e2097f0206bceff662",
+    "bytes": 168598,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/report.md": {
+    "sha256": "0141c3625076b77e5b89172eb30a2ea4e3ef7c1d7d0aac013c47d7338e42e574",
+    "bytes": 7735,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/PROTOCOL.md": {
+    "sha256": "c0308be21fd14fd3904b88634b5b8b7cd57eb971bd7d5224139a770f660dcde9",
+    "bytes": 2417,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/DEFERRED-TEST-PLAN.md": {
+    "sha256": "f04b02fc9dddae41a6e306ccc2b1ed2aef72a21a543d1a77966b64238c3e1ff0",
+    "bytes": 3004,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/backfill-miri.log": {
+    "sha256": "3ce603077c01457b257a8a88be69f6ee5463e96ab1114ab3be7e7ba6a184231c",
+    "bytes": 10277,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/deferred-check-v2.log": {
+    "sha256": "451624fcd6446614231bbd52300af82c6361e7c589ec30c171b63921c8f73d97",
+    "bytes": 29065,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/deferred-check.log": {
+    "sha256": "83e4a78f591b23e5c9c420e5c9805e4cdb66fb60d4578d9d42558dfcce6dbaff",
+    "bytes": 16704,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/final-gates.log": {
+    "sha256": "3babfb5a787e06dfe95d8b1b9c3adb12b68125f5215bb601d0136532979e3ee2",
+    "bytes": 35231,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/final-source-diff.patch": {
+    "sha256": "25a7d8aee75d2145d4c063489df22195aaa78f786a658d8205f8c6204a7e026c",
+    "bytes": 5095,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/frozen-manifest.json": {
+    "sha256": "c97a1f9187161e6c68a4f57d43a13c50ac03fb998e2a3aa3039f6e4f97f9f3bd",
+    "bytes": 80857,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/main-row16-summary.txt": {
+    "sha256": "833a9f9458a253391838124061499c4b3d8eb00ea9a3d19e2e0b52fa90f937e8",
+    "bytes": 1105,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/main-row16-warmup.jsonl": {
+    "sha256": "c192e2723eb1a4d2245746484891cdee0a8d2d3e798cc9af2ad3ad45bf52ab73",
+    "bytes": 546,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/main-row16.jsonl": {
+    "sha256": "487ddecbffd4528298183b47a18b09482a9cf5b1129d557d48962f420fcec19c",
+    "bytes": 5010,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/main-u64-summary.txt": {
+    "sha256": "0f516885709d3cd13c396a1cc9eed5f5926329224ef6a3091037bba10285afad",
+    "bytes": 1100,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/main-u64-warmup.jsonl": {
+    "sha256": "8d8787b6ace49e3f7965011beecf5ba009a6f82026024991777e59d699c40bfa",
+    "bytes": 546,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/main-u64.jsonl": {
+    "sha256": "b48381f49a3f3a46a32cc7e6dddc85af57c54885a0ed1c8975af8b0dc206b4d9",
+    "bytes": 5008,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/original-guards.log": {
+    "sha256": "0825d4cf94608427188a409c5869d5a43d28bbf8d17cf4e167d30f18603d6722",
+    "bytes": 8858,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/review-result.txt": {
+    "sha256": "559344f87d505782b7dce29e83df6f690bf7673421d5115c920ac48540594d17",
+    "bytes": 482,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/run.log": {
+    "sha256": "ea287db7731587e8991d8a584e7a91268485fa3e0f46fc63f56a9ffc9d5fc2ea",
+    "bytes": 283,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/scheduling-draft.patch": {
+    "sha256": "d97f1109e7176069b779b4a9c77bf0b1c39bfc33be76430e1424a1b784265ddd",
+    "bytes": 2523,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/trace-row16-summary.txt": {
+    "sha256": "e67f83b6297e77cfbbffd7e81152f3e968097d5fd1db4b16a7f7f64ae25900b1",
+    "bytes": 4637,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/trace-row16-warmup.jsonl": {
+    "sha256": "55e94df8fe44b30921aaccf6640e8efc8dc248e4f209eca38f7fee7eab2c9f6c",
+    "bytes": 391877,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/trace-row16.jsonl": {
+    "sha256": "66ebb9c628b4fd2548ebbb0bb45e9e36ac1dc25a6ba75de7166cdbde7241c84c",
+    "bytes": 1394835,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/trace-u64-summary.txt": {
+    "sha256": "d7892345554e106f03cd352ed21f486f48800e0717a4e80722608a04a92d0cab",
+    "bytes": 4611,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/trace-u64-warmup.jsonl": {
+    "sha256": "bab102dcb8135eda4754f390a424f9558dd59192751f776efd6c6b60bc24f930",
+    "bytes": 389745,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/trace-u64.jsonl": {
+    "sha256": "5e7c9ae8acf1d4a30f99745f9c37ee7cc85893ee7dab68c31b5f975134d5a637",
+    "bytes": 1311875,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-final-row16-trace0-summary.txt": {
+    "sha256": "0dd7dfcd140844b70f9972fe4e026d32e2da7e81b5740a1f1f07151d03dddb30",
+    "bytes": 647,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-final-row16-trace0.jsonl": {
+    "sha256": "43541c558c0c013a6a856045873c1267c15cb89de9884d10e595f9ca5f90a8e4",
+    "bytes": 1104,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-final-row16-trace1-summary.txt": {
+    "sha256": "31305f72cb013b981398a4e91427b5383f0022568dc6f0bfa760cf843d40fd8b",
+    "bytes": 1672,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-final-row16-trace1.jsonl": {
+    "sha256": "48516b7053082f0e42b1e79debaf3e20c17e1376771af2c121b5149c0ea9d407",
+    "bytes": 312620,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-final-u64-trace0-summary.txt": {
+    "sha256": "774adc4e013dd06f0056e60359197954b77c4b79ae7b9c07716617569be208f0",
+    "bytes": 642,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-final-u64-trace0.jsonl": {
+    "sha256": "65ac95ec8139788d2fb824440b8f318dacd40399a900f13cbe982dd7f95e3e39",
+    "bytes": 1096,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-final-u64-trace1-summary.txt": {
+    "sha256": "ff1664d835b87220291d389c2cb7766392015aba91efa6fc1b26fb6eb0840f21",
+    "bytes": 1666,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-final-u64-trace1.jsonl": {
+    "sha256": "6e024b02ba21a2f1f1e568f313b3b4c2853c320bab8427bc99ce5d6c4707824e",
+    "bytes": 167276,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-row16-trace0-summary.txt": {
+    "sha256": "af0fae2df62f72a1933042b03ec5c4e36e56c129c4b59e4a95563186e70e1765",
+    "bytes": 644,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-row16-trace0.jsonl": {
+    "sha256": "f460476956f21aca35e7ff4c040812c63c87964c391ba890026d8683cc09657a",
+    "bytes": 1102,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-row16-trace1-summary.txt": {
+    "sha256": "879b8abef39359cd721ea8e64a72c894e959f9d789e8ca73e8cd79ef95381d04",
+    "bytes": 1663,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-row16-trace1.jsonl": {
+    "sha256": "b774241afc9910179627ff4e72861b90caff25f931c65f5c7b960f1c2298b2c7",
+    "bytes": 311340,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-u64-trace0-summary.txt": {
+    "sha256": "4cc58406a3e7823b3c06d4906ed8f27d7fc30c9bbf7b817bcfe789816007c800",
+    "bytes": 635,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-u64-trace0.jsonl": {
+    "sha256": "8f16c0bbc1c8bf54fa31d3b820274732580968792b63dc4fe68672f78ed57575",
+    "bytes": 1096,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-u64-trace1-summary.txt": {
+    "sha256": "caed5b7436db49c566dfaade3ec07ba40b855fdc55fba85ee4c7e07e4b048bc6",
+    "bytes": 1673,
+    "included_in_packet": false
+  },
+  "tessera-deferred-overlap-diagnostic/evidence/validation-u64-trace1.jsonl": {
+    "sha256": "b6ea265027eeeb6716943bf93cd8743b59a08ba7b461049a470e206c0f9c6f2b",
+    "bytes": 166347,
+    "included_in_packet": false
+  }
+}

@@ -13,6 +13,10 @@ ownership proof, validation record, and limitations before using it.
   stronger native-root pipeline rebased onto upstream `5b13ac1`, with explicit
   SIMD-off/on controls and an inconclusive four-case pilot. This patch targets
   the documented experimental commit and is not applied to production.
+- [Causal root and scheduling controls](patches/causal-controls.README.md):
+  independent fixed-root, sleep50 and deferred-consumer experiments. Their
+  source/guard patches and precise negative results distinguish waiting CPU,
+  hidden child work and unverified hardware causes. None is adopted.
 - [Bounded indirect LSD leaves](patches/bounded-indirect-lsd.README.md): a
   validated tile-only key/index snapshot and record-cycle experiment. It halved
   measured logical leaf copies but regressed serial throughput and explicit

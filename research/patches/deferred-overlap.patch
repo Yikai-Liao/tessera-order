@@ -1,0 +1,886 @@
+diff --git a/rust/tessera-sort/src/engine/parallel.rs b/rust/tessera-sort/src/engine/parallel.rs
+--- a/rust/tessera-sort/src/engine/parallel.rs
++++ b/rust/tessera-sort/src/engine/parallel.rs
+@@ -114,8 +114,8 @@
+         digit
+     };
+     let candidate = varying & !digit.mask::<E::Value>().to_u128();
+-    // Prototype: child work starts as soon as compact has retired its source
+-    // blocks. Jobs only own materialized, pairwise disjoint bucket intervals.
++    // Diagnostic: retain materialized, pairwise disjoint bucket intervals,
++    // then launch child work only after root return and sender disconnection.
+     let worker_count = rayon::current_num_threads().min((bytes / MIN_TASK_BYTES).max(1));
+     if worker_count < 2 {
+         Sorter::<T, E, CACHED> {
+@@ -132,6 +132,11 @@
+         .ok()
+         .and_then(|v| v.parse::<usize>().ok())
+         .unwrap_or(128 * 1024);
++    #[cfg(test)]
++    let batch_bytes = hooks
++        .as_ref()
++        .and_then(|h| h.deferred_batch_bytes)
++        .unwrap_or(batch_bytes);
+     rayon::scope(|scope| {
+         // The sender lives inside the scope body. A producer panic therefore
+         // disconnects the channel before scope waits for consumers to finish.
+@@ -141,7 +146,8 @@
+         let _sender_witness = crate::test_witness::SenderGuard::new(hooks.clone());
+         let (sender, receiver) = std::sync::mpsc::channel();
+         let receiver = std::sync::Arc::new(std::sync::Mutex::new(receiver));
+-        let mut launched = false;
++        let mut keys_prepared = false;
++        let mut prepared_keys = Vec::new();
+         block::partition_digit_parallel_with_visit(
+             arr,
+             digit.width,
+@@ -161,35 +167,22 @@
+                     #[cfg(test)]
+                     crate::test_witness::published(&hooks);
+                     batch_records = 0;
+-                    if !launched {
+-                        // Finish potentially reentrant generic Clone code
+-                        // before publishing any consumer that waits for us.
++                    if !keys_prepared {
++                        // Preserve the original first-batch timing of potentially
++                        // reentrant generic Clone code, but retain keys until close.
+                         let keys: Vec<_> = (1..worker_count).map(|_| child_key.clone()).collect();
+-                        launched = true;
++                        keys_prepared = true;
+                         #[cfg(test)]
+-                        crate::test_witness::publication_started();
+-                        for mut child_key in keys {
+-                            let receiver = receiver.clone();
+-                            #[cfg(test)]
+-                            let consumer_hooks = hooks.clone();
+-                            scope.spawn(move |_| {
+-                                #[cfg(test)]
+-                                let _consumer_witness =
+-                                    crate::test_witness::PhaseGuard::consumer(consumer_hooks);
+-                                consume_queue::<T, E, CACHED>(
+-                                    &receiver,
+-                                    candidate,
+-                                    &mut child_key,
+-                                    tile_bytes,
+-                                );
+-                            });
+-                        }
++                        crate::test_witness::deferred_keys_ready(&hooks, keys.len());
++                        prepared_keys = keys;
+                     }
+                 }
+                 #[cfg(test)]
+                 crate::test_witness::callback_finished(&hooks);
+             },
+         );
++        #[cfg(test)]
++        crate::test_witness::deferred_root_returned(&hooks);
+         if batch_records != 0 {
+             sender.send(core::mem::take(&mut batch)).unwrap();
+         }
+@@ -198,7 +191,22 @@
+         // across a user key call, including reentrant Rayon operations.
+         drop(sender);
+         #[cfg(test)]
++        crate::test_witness::deferred_sender_closed(&hooks);
++        #[cfg(test)]
+         crate::test_witness::publication_closed();
++        for mut child_key in prepared_keys {
++            let receiver = receiver.clone();
++            #[cfg(test)]
++            let consumer_hooks = hooks.clone();
++            scope.spawn(move |_| {
++                #[cfg(test)]
++                let _consumer_witness = crate::test_witness::PhaseGuard::consumer(consumer_hooks);
++                consume_queue::<T, E, CACHED>(&receiver, candidate, &mut child_key, tile_bytes);
++            });
++        }
++        #[cfg(test)]
++        let _producer_drain_witness =
++            crate::test_witness::PhaseGuard::producer_drain(hooks.clone());
+         consume_queue::<T, E, CACHED>(&receiver, candidate, &mut key, tile_bytes);
+     });
+ }
+@@ -512,7 +520,7 @@
+ }
+ 
+ #[cfg(all(test, not(miri)))]
+-mod safety_gap_tests;
++mod deferred_safety_tests;
+ 
+ #[cfg(all(test, not(miri)))]
+-mod progress_tests;
++mod deferred_progress_tests;
+diff --git a/rust/tessera-sort/src/engine/parallel/deferred_progress_tests.rs b/rust/tessera-sort/src/engine/parallel/deferred_progress_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/parallel/deferred_progress_tests.rs
+@@ -0,0 +1,280 @@
++// SPDX-License-Identifier: BSD-2-Clause
++//! Bounded tests for cooperating nested Rayon work, not arbitrary user blocking.
++use crate::test_witness::{self, Hooks, Phase};
++use std::cell::Cell;
++use std::panic::{AssertUnwindSafe, catch_unwind};
++use std::sync::{
++    Arc,
++    atomic::{AtomicUsize, Ordering::SeqCst},
++};
++use std::time::{Duration, Instant};
++
++pub(crate) fn bounded(name: &str, run: impl FnOnce()) {
++    if std::env::var("TESSERA_PROGRESS_CHILD").as_deref() == Ok(name) {
++        run();
++        return;
++    }
++    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
++        .args(["--exact", name, "--nocapture", "--test-threads=1"])
++        .env("TESSERA_PROGRESS_CHILD", name)
++        .spawn()
++        .unwrap();
++    let deadline = Instant::now() + Duration::from_secs(35);
++    loop {
++        if let Some(status) = child.try_wait().unwrap() {
++            assert!(status.success(), "bounded child failed: {status}");
++            return;
++        }
++        if Instant::now() > deadline {
++            child.kill().unwrap();
++            let _ = child.wait();
++            panic!("nested public sort exceeded 35-second subprocess deadline: {name}");
++        }
++        std::thread::sleep(Duration::from_millis(10));
++    }
++}
++fn key(id: usize) -> u64 {
++    (id as u64).wrapping_mul(0x9e3779b97f4a7c15)
++}
++struct Nested {
++    hooks: Arc<Hooks>,
++    workers: AtomicUsize,
++    claimed: AtomicUsize,
++    active: AtomicUsize,
++    peak: AtomicUsize,
++    completed: AtomicUsize,
++}
++impl Nested {
++    fn new(target: usize) -> Self {
++        Self {
++            hooks: Arc::new(Hooks::progress(target)),
++            workers: AtomicUsize::new(0),
++            claimed: AtomicUsize::new(0),
++            active: AtomicUsize::new(0),
++            peak: AtomicUsize::new(0),
++            completed: AtomicUsize::new(0),
++        }
++    }
++    fn invoke(&self, fail: bool) {
++        test_witness::assert_user_allowed();
++        if test_witness::phase() != Phase::Consumer {
++            return;
++        }
++        let worker = rayon::current_thread_index().unwrap();
++        if self.workers.fetch_or(1 << worker, SeqCst) & (1 << worker) != 0 {
++            return;
++        }
++        if self.claimed.fetch_add(1, SeqCst) >= self.hooks.progress_target {
++            return;
++        }
++        let active = self.active.fetch_add(1, SeqCst) + 1;
++        self.peak.fetch_max(active, SeqCst);
++        self.hooks.progress_arrive();
++        // Witness state describes one invocation. Each nested public sort gets
++        // fresh hooks inside its actual closure, including stolen join work.
++        // These calls still use the same fixed Rayon pool.
++        let mut direct: Vec<_> = (0..131_073).map(key).collect();
++        test_witness::with_hooks(Arc::new(Hooks::default()), || {
++            crate::par_stable_sort(&mut direct);
++        });
++        assert!(direct.windows(2).all(|w| w[0] <= w[1]));
++        let (left, right) = rayon::join(
++            || {
++                let mut rows: Vec<_> = (0..65_537).map(|id| (key(id), id)).collect();
++                test_witness::with_hooks(Arc::new(Hooks::default()), || {
++                    crate::par_stable_sort_by_key(&mut rows, |r| {
++                        test_witness::assert_user_allowed();
++                        r.0
++                    });
++                });
++                assert!(rows.windows(2).all(|w| w[0].0 <= w[1].0));
++                rows.len()
++            },
++            || {
++                let (a, b) = rayon::join(|| 17, || 25);
++                a + b
++            },
++        );
++        assert_eq!(left, 65_537);
++        assert_eq!(right, 42);
++        self.completed.fetch_add(1, SeqCst);
++        self.active.fetch_sub(1, SeqCst);
++        if fail {
++            rayon::join(|| panic!("nested join key panic"), || ());
++        }
++    }
++    fn verify(&self) {
++        self.hooks.assert_deferred_ready();
++        assert_eq!(self.hooks.producer_drains.load(SeqCst), 1);
++        assert!(
++            self.hooks.consumer_keys_ready.load(SeqCst) < self.hooks.root_returned.load(SeqCst)
++        );
++        assert!(self.workers.load(SeqCst).count_ones() as usize >= self.hooks.progress_target);
++        assert_eq!(self.completed.load(SeqCst), self.hooks.progress_target);
++        assert_eq!(self.active.load(SeqCst), 0);
++        assert!(self.peak.load(SeqCst) >= self.hooks.progress_target);
++        assert_eq!(
++            self.hooks.consumers_started.load(SeqCst),
++            self.hooks.consumers_done.load(SeqCst)
++        );
++        assert!(self.hooks.sender_closed.load(SeqCst) > 0);
++    }
++}
++struct Owned {
++    key: u64,
++    id: usize,
++    text: String,
++    visits: Cell<usize>,
++    drops: Arc<Vec<AtomicUsize>>,
++}
++impl Drop for Owned {
++    fn drop(&mut self) {
++        assert_eq!(self.text, self.id.to_string());
++        assert_eq!(self.drops[self.id].fetch_add(1, SeqCst), 0);
++    }
++}
++fn owned(threads: usize, fail: bool) {
++    let n = 131_073;
++    let drops = Arc::new((0..n).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++    let mut rows: Vec<_> = (0..n)
++        .map(|id| Owned {
++            key: key(id),
++            id,
++            text: id.to_string(),
++            visits: Cell::new(0),
++            drops: drops.clone(),
++        })
++        .collect();
++    let nested = Nested::new(threads.min(2));
++    let pool = rayon::ThreadPoolBuilder::new()
++        .num_threads(threads)
++        .build()
++        .unwrap();
++    let outcome = catch_unwind(AssertUnwindSafe(|| {
++        pool.install(|| {
++            test_witness::with_hooks(nested.hooks.clone(), || {
++                crate::par_stable_sort_by_key(&mut rows, |r| {
++                    nested.invoke(fail);
++                    r.visits.set(r.visits.get() + 1);
++                    r.key
++                });
++            })
++        })
++    }));
++    assert_eq!(outcome.is_err(), fail);
++    nested.verify();
++    let mut ids: Vec<_> = rows
++        .iter()
++        .map(|r| {
++            assert_eq!(r.text, r.id.to_string());
++            r.id
++        })
++        .collect();
++    ids.sort_unstable();
++    assert_eq!(ids, (0..n).collect::<Vec<_>>());
++    if !fail {
++        assert!(
++            rows.windows(2)
++                .all(|w| (w[0].key, w[0].id) <= (w[1].key, w[1].id))
++        );
++    }
++    assert!(drops.iter().all(|x| x.load(SeqCst) == 0));
++    drop(rows);
++    assert!(drops.iter().all(|x| x.load(SeqCst) == 1));
++}
++fn exclusive(threads: usize) {
++    let n = 131_073;
++    let mut backing: Vec<_> = (0..n).collect();
++    let mut rows: Vec<_> = backing
++        .iter_mut()
++        .enumerate()
++        .map(|(id, r)| (key(id), id, r))
++        .collect();
++    let nested = Nested::new(threads.min(2));
++    rayon::ThreadPoolBuilder::new()
++        .num_threads(threads)
++        .build()
++        .unwrap()
++        .install(|| {
++            test_witness::with_hooks(nested.hooks.clone(), || {
++                crate::par_stable_sort_by_key(&mut rows, |r| {
++                    nested.invoke(false);
++                    r.0
++                });
++            })
++        });
++    nested.verify();
++    assert!(
++        rows.windows(2)
++            .all(|w| (w[0].0, w[0].1) <= (w[1].0, w[1].1))
++    );
++    for (_, id, r) in rows {
++        assert_eq!(*r, id);
++        *r += 1;
++    }
++    assert_eq!(backing, (1..=n).collect::<Vec<_>>());
++}
++#[test]
++fn nested_public_sorts_and_joins_owned_cell() {
++    bounded(
++        "engine::parallel::deferred_progress_tests::nested_public_sorts_and_joins_owned_cell",
++        || owned(4, false),
++    );
++}
++#[test]
++fn nested_public_sorts_and_joins_exclusive() {
++    bounded(
++        "engine::parallel::deferred_progress_tests::nested_public_sorts_and_joins_exclusive",
++        || exclusive(4),
++    );
++}
++#[test]
++fn nested_join_panics_restore_owned_cell() {
++    bounded(
++        "engine::parallel::deferred_progress_tests::nested_join_panics_restore_owned_cell",
++        || owned(4, true),
++    );
++}
++
++#[test]
++fn nested_public_sorts_and_joins_owned_cell_p2() {
++    bounded(
++        "engine::parallel::deferred_progress_tests::nested_public_sorts_and_joins_owned_cell_p2",
++        || owned(2, false),
++    );
++}
++#[test]
++fn nested_public_sorts_and_joins_owned_cell_p3() {
++    bounded(
++        "engine::parallel::deferred_progress_tests::nested_public_sorts_and_joins_owned_cell_p3",
++        || owned(3, false),
++    );
++}
++#[test]
++fn nested_public_sorts_and_joins_exclusive_p2() {
++    bounded(
++        "engine::parallel::deferred_progress_tests::nested_public_sorts_and_joins_exclusive_p2",
++        || exclusive(2),
++    );
++}
++#[test]
++fn nested_public_sorts_and_joins_exclusive_p3() {
++    bounded(
++        "engine::parallel::deferred_progress_tests::nested_public_sorts_and_joins_exclusive_p3",
++        || exclusive(3),
++    );
++}
++#[test]
++fn nested_join_panics_restore_owned_cell_p2() {
++    bounded(
++        "engine::parallel::deferred_progress_tests::nested_join_panics_restore_owned_cell_p2",
++        || owned(2, true),
++    );
++}
++#[test]
++fn nested_join_panics_restore_owned_cell_p3() {
++    bounded(
++        "engine::parallel::deferred_progress_tests::nested_join_panics_restore_owned_cell_p3",
++        || owned(3, true),
++    );
++}
+diff --git a/rust/tessera-sort/src/engine/parallel/deferred_safety_tests.rs b/rust/tessera-sort/src/engine/parallel/deferred_safety_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/parallel/deferred_safety_tests.rs
+@@ -0,0 +1,288 @@
++// SPDX-License-Identifier: BSD-2-Clause
++//! Deterministic native tests of actual producer/consumer and narrow routes.
++use crate::test_witness::{self, Hooks};
++use std::cell::Cell;
++use std::panic::{AssertUnwindSafe, catch_unwind};
++use std::sync::{
++    Arc,
++    atomic::{AtomicUsize, Ordering::SeqCst},
++};
++struct OwnedCell {
++    key: u64,
++    id: usize,
++    text: String,
++    visits: Cell<usize>,
++    drops: Arc<Vec<AtomicUsize>>,
++}
++impl Drop for OwnedCell {
++    fn drop(&mut self) {
++        assert_eq!(self.text, self.id.to_string());
++        assert_eq!(
++            self.drops[self.id].fetch_add(1, SeqCst),
++            0,
++            "duplicate record drop"
++        );
++    }
++}
++fn value(id: usize, narrow: bool) -> u64 {
++    if narrow {
++        ((id * 37 + 11) % 16) as u64
++    } else {
++        (id as u64).wrapping_mul(0x9e3779b97f4a7c15)
++    }
++}
++fn joined(h: &Hooks, no_launch: bool) {
++    h.assert_deferred_ready();
++    assert_eq!(
++        h.consumers_started.load(SeqCst),
++        h.consumers_done.load(SeqCst)
++    );
++    assert_eq!(h.producer_drains.load(SeqCst), 1);
++    if no_launch {
++        assert_eq!(h.publication.load(SeqCst), 0);
++        assert_eq!(h.consumer_keys_ready.load(SeqCst), 0);
++        assert_eq!(h.consumers_started.load(SeqCst), 0);
++    } else {
++        assert!(h.publication.load(SeqCst) > 0);
++        assert!(h.consumer_keys_ready.load(SeqCst) > h.publication.load(SeqCst));
++        assert!(h.root_returned.load(SeqCst) > h.consumer_keys_ready.load(SeqCst));
++        assert_eq!(h.prepared_key_count.load(SeqCst), 3);
++        assert_eq!(h.consumers_started.load(SeqCst), 3);
++    }
++    assert!(h.consumer_first_key.load(SeqCst) > h.actual_sender_closed.load(SeqCst));
++}
++fn check_late(h: &Hooks) {
++    assert!(h.publication.load(SeqCst) > 0);
++    assert!(h.callback_panic.load(SeqCst) > h.consumer_keys_ready.load(SeqCst));
++    assert_eq!(h.root_returned.load(SeqCst), 0);
++    assert_eq!(h.actual_sender_closed.load(SeqCst), 0);
++    assert_eq!(h.consumer_calls.load(SeqCst), 0);
++    assert_eq!(h.consumer_first_move.load(SeqCst), 0);
++    assert_eq!(h.consumers_started.load(SeqCst), 0);
++    assert_eq!(h.producer_drains.load(SeqCst), 0);
++    assert!(h.sender_closed.load(SeqCst) > h.callback_panic.load(SeqCst));
++}
++#[cfg(not(miri))]
++fn owned_case(narrow: bool, late: bool, key_panic: bool, no_launch: bool) {
++    let len = 65_537;
++    let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++    let mut rows: Vec<_> = (0..len)
++        .map(|id| OwnedCell {
++            key: value(id, narrow),
++            id,
++            text: id.to_string(),
++            visits: Cell::new(0),
++            drops: drops.clone(),
++        })
++        .collect();
++    let mut hook = Hooks::new(late);
++    if no_launch {
++        hook.deferred_batch_bytes = Some(usize::MAX);
++    }
++    let h = Arc::new(hook);
++    let result = catch_unwind(AssertUnwindSafe(|| {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(4)
++            .build()
++            .unwrap()
++            .install(|| {
++                test_witness::with_hooks(h.clone(), || {
++                    crate::par_stable_sort_by_key(&mut rows, |r| {
++                        h.key(key_panic && !narrow, key_panic && narrow);
++                        r.visits.set(r.visits.get() + 1);
++                        r.key
++                    })
++                });
++            });
++    }));
++    assert_eq!(result.is_err(), late || key_panic);
++    let mut ids: Vec<_> = rows
++        .iter()
++        .map(|r| {
++            assert_eq!(r.text, r.id.to_string());
++            r.id
++        })
++        .collect();
++    ids.sort_unstable();
++    assert_eq!(ids, (0..len).collect::<Vec<_>>());
++    assert!(drops.iter().all(|n| n.load(SeqCst) == 0));
++    if narrow {
++        assert!(h.single_route.load(SeqCst));
++        assert!(h.root_calls.load(SeqCst) > 0);
++        assert_eq!(h.consumer_calls.load(SeqCst), 0);
++        assert_eq!(h.consumers_started.load(SeqCst), 0);
++        assert_eq!(h.root_key_panic.load(SeqCst), key_panic);
++    } else if late {
++        check_late(&h);
++    } else {
++        joined(&h, no_launch);
++        if key_panic {
++            assert!(h.consumer_first_move.load(SeqCst) > 0);
++            assert!(h.consumer_key_panic.load(SeqCst) > h.consumer_first_move.load(SeqCst));
++            assert!(!h.root_key_panic.load(SeqCst));
++        }
++    }
++    if !late && !key_panic {
++        let actual: Vec<_> = rows.iter().map(|r| (r.key, r.id)).collect();
++        let mut expected: Vec<_> = (0..len).map(|id| (value(id, narrow), id)).collect();
++        expected.sort_by_key(|r| r.0);
++        assert_eq!(actual, expected);
++    }
++    drop(rows);
++    assert!(drops.iter().all(|n| n.load(SeqCst) == 1));
++}
++#[cfg(not(miri))]
++fn exclusive_case(narrow: bool, late: bool, key_panic: bool, no_launch: bool) {
++    let len = 65_537;
++    let mut backing: Vec<_> = (0..len).collect();
++    let mut rows: Vec<_> = backing
++        .iter_mut()
++        .enumerate()
++        .map(|(id, r)| (value(id, narrow), id, r))
++        .collect();
++    let mut hook = Hooks::new(late);
++    if no_launch {
++        hook.deferred_batch_bytes = Some(usize::MAX);
++    }
++    let h = Arc::new(hook);
++    let result = catch_unwind(AssertUnwindSafe(|| {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(4)
++            .build()
++            .unwrap()
++            .install(|| {
++                test_witness::with_hooks(h.clone(), || {
++                    crate::par_stable_sort_by_key(&mut rows, |r| {
++                        h.key(key_panic && !narrow, key_panic && narrow);
++                        r.0
++                    })
++                });
++            });
++    }));
++    assert_eq!(result.is_err(), late || key_panic);
++    if narrow {
++        assert!(h.single_route.load(SeqCst));
++        assert_eq!(h.consumers_started.load(SeqCst), 0);
++        assert_eq!(h.root_key_panic.load(SeqCst), key_panic);
++    } else if late {
++        check_late(&h);
++    } else {
++        joined(&h, no_launch);
++        if key_panic {
++            assert!(h.consumer_key_panic.load(SeqCst) > h.consumer_first_move.load(SeqCst));
++            assert!(h.consumer_first_move.load(SeqCst) > 0);
++        }
++    }
++    let actual: Vec<_> = rows.iter().map(|r| (r.0, r.1)).collect();
++    if !late && !key_panic {
++        let mut expected: Vec<_> = (0..len).map(|id| (value(id, narrow), id)).collect();
++        expected.sort_by_key(|r| r.0);
++        assert_eq!(actual, expected);
++    }
++    let mut ids = Vec::new();
++    for (_, id, r) in rows {
++        assert_eq!(*r, id);
++        *r += 1;
++        ids.push(id);
++    }
++    ids.sort_unstable();
++    assert_eq!(ids, (0..len).collect::<Vec<_>>());
++    assert_eq!(backing, (1..=len).collect::<Vec<_>>());
++}
++
++#[test]
++fn deferred_owned_success() {
++    owned_case(false, false, false, false);
++}
++#[test]
++fn deferred_exclusive_success() {
++    exclusive_case(false, false, false, false);
++}
++#[test]
++fn deferred_owned_producer_callback_panic_without_children() {
++    owned_case(false, true, false, false);
++}
++#[test]
++fn deferred_exclusive_producer_callback_panic_without_children() {
++    exclusive_case(false, true, false, false);
++}
++#[test]
++fn deferred_owned_consumer_moved_key_panic_after_close() {
++    owned_case(false, false, true, false);
++}
++#[test]
++fn deferred_exclusive_consumer_moved_key_panic_after_close() {
++    exclusive_case(false, false, true, false);
++}
++#[test]
++fn deferred_owned_no_launch_threshold() {
++    owned_case(false, false, false, true);
++}
++#[test]
++fn deferred_exclusive_no_launch_threshold() {
++    exclusive_case(false, false, false, true);
++}
++
++#[test]
++fn deferred_first_batch_clone_panic_precedes_root_return_and_children() {
++    struct FirstBatchClone(Arc<Hooks>);
++    impl Clone for FirstBatchClone {
++        fn clone(&self) -> Self {
++            if self.0.publication.load(SeqCst) > 0 {
++                assert_eq!(self.0.root_returned.load(SeqCst), 0);
++                assert_eq!(self.0.actual_sender_closed.load(SeqCst), 0);
++                assert_eq!(self.0.consumer_keys_ready.load(SeqCst), 0);
++                assert_eq!(self.0.consumers_started.load(SeqCst), 0);
++                panic!("first deferred child-key clone at original first batch");
++            }
++            Self(self.0.clone())
++        }
++    }
++    impl super::Extract<OwnedCell> for FirstBatchClone {
++        type Value = u64;
++        fn key(&mut self, row: &OwnedCell) -> u64 {
++            row.key
++        }
++    }
++    let len = 65_537;
++    let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++    let mut rows: Vec<_> = (0..len)
++        .map(|id| OwnedCell {
++            key: value(id, false),
++            id,
++            text: id.to_string(),
++            visits: Cell::new(0),
++            drops: drops.clone(),
++        })
++        .collect();
++    let h = Arc::new(Hooks::default());
++    let result = catch_unwind(AssertUnwindSafe(|| {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(4)
++            .build()
++            .unwrap()
++            .install(|| {
++                test_witness::with_hooks(h.clone(), || {
++                    super::sort::<_, _, true>(&mut rows, FirstBatchClone(h.clone()));
++                });
++            });
++    }));
++    assert!(result.is_err());
++    assert!(h.publication.load(SeqCst) > 0);
++    assert_eq!(h.root_returned.load(SeqCst), 0);
++    assert_eq!(h.consumer_keys_ready.load(SeqCst), 0);
++    assert_eq!(h.consumer_calls.load(SeqCst), 0);
++    assert_eq!(h.consumers_started.load(SeqCst), 0);
++    let mut ids: Vec<_> = rows
++        .iter()
++        .map(|r| {
++            assert_eq!(r.text, r.id.to_string());
++            r.id
++        })
++        .collect();
++    ids.sort_unstable();
++    assert_eq!(ids, (0..len).collect::<Vec<_>>());
++    assert!(drops.iter().all(|n| n.load(SeqCst) == 0));
++    drop(rows);
++    assert!(drops.iter().all(|n| n.load(SeqCst) == 1));
++}
+diff --git a/rust/tessera-sort/src/engine/parallel/safety_gap_tests.rs b/rust/tessera-sort/src/engine/parallel/safety_gap_tests.rs
+--- a/rust/tessera-sort/src/engine/parallel/safety_gap_tests.rs
++++ b/rust/tessera-sort/src/engine/parallel/safety_gap_tests.rs
+@@ -73,7 +73,7 @@
+             drops: drops.clone(),
+         })
+         .collect();
+-    let h = Arc::new(Hooks::new(late, key_panic && !narrow));
++    let h = Arc::new(Hooks::new(late));
+     let result = catch_unwind(AssertUnwindSafe(|| {
+         rayon::ThreadPoolBuilder::new()
+             .num_threads(4)
+@@ -134,7 +134,7 @@
+         .enumerate()
+         .map(|(id, r)| (value(id, narrow), id, r))
+         .collect();
+-    let h = Arc::new(Hooks::new(late, key_panic && !narrow));
++    let h = Arc::new(Hooks::new(late));
+     let result = catch_unwind(AssertUnwindSafe(|| {
+         rayon::ThreadPoolBuilder::new()
+             .num_threads(4)
+diff --git a/rust/tessera-sort/src/test_witness.rs b/rust/tessera-sort/src/test_witness.rs
+--- a/rust/tessera-sort/src/test_witness.rs
++++ b/rust/tessera-sort/src/test_witness.rs
+@@ -17,8 +17,13 @@
+ }
+ #[derive(Default)]
+ pub(crate) struct Hooks {
++    pub deferred_batch_bytes: Option<usize>,
++    pub root_returned: AtomicUsize,
++    pub actual_sender_closed: AtomicUsize,
++    pub consumer_keys_ready: AtomicUsize,
++    pub prepared_key_count: AtomicUsize,
++    pub producer_drains: AtomicUsize,
+     pub late_callback_panic: bool,
+-    pub wait_for_child_panic: bool,
+     pub progress_target: usize,
+     pub progress_started: AtomicUsize,
+     pub publication_count: AtomicUsize,
+@@ -41,10 +46,9 @@
+     ready: Condvar,
+ }
+ impl Hooks {
+-    pub(crate) fn new(late_callback_panic: bool, wait_for_child_panic: bool) -> Self {
++    pub(crate) fn new(late_callback_panic: bool) -> Self {
+         Self {
+             late_callback_panic,
+-            wait_for_child_panic,
+             ..Self::default()
+         }
+     }
+@@ -59,6 +63,7 @@
+     pub(crate) fn key(&self, fail_consumer: bool, fail_root: bool) {
+         match phase() {
+             Phase::Consumer => {
++                self.assert_deferred_ready();
+                 self.consumer_calls.fetch_add(1, SeqCst);
+                 self.once(&self.consumer_first_key);
+                 if has_moved()
+@@ -119,7 +124,17 @@
+         Self::enter(Phase::Root, current(), false)
+     }
+     pub(crate) fn consumer(hooks: Option<Arc<Hooks>>) -> Self {
++        if let Some(h) = &hooks {
++            h.assert_deferred_ready();
++        }
+         Self::enter(Phase::Consumer, hooks, true)
++    }
++    pub(crate) fn producer_drain(hooks: Option<Arc<Hooks>>) -> Self {
++        if let Some(h) = &hooks {
++            h.assert_deferred_ready();
++            h.producer_drains.fetch_add(1, SeqCst);
++        }
++        Self::enter(Phase::Consumer, hooks, false)
+     }
+     fn enter(phase: Phase, hooks: Option<Arc<Hooks>>, consumer: bool) -> Self {
+         if consumer {
+@@ -155,6 +170,7 @@
+     MOVED.set(true);
+     if phase() == Phase::Consumer {
+         if let Some(h) = current() {
++            h.assert_deferred_ready();
+             if h.consumer_first_move.load(SeqCst) == 0 {
+                 let _lock = h
+                     .signal
+@@ -172,58 +188,54 @@
+         h.publication_count.fetch_add(1, SeqCst);
+     }
+ }
++/// Deferred callbacks cannot wait for consumers that have not been spawned.
+ pub(crate) fn callback_finished(h: &Option<Arc<Hooks>>) {
+     let Some(h) = h else { return };
+-    if h.progress_target > 0 && h.publication_count.load(SeqCst) >= h.progress_target {
+-        let lock = h
+-            .signal
+-            .lock()
+-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+-        let (_lock, timeout) = h
+-            .ready
+-            .wait_timeout_while(lock, Duration::from_secs(20), |_| {
+-                h.progress_started.load(SeqCst) < h.progress_target
+-            })
+-            .unwrap();
+-        assert!(
+-            !timeout.timed_out(),
+-            "distinct consumers did not reach progress rendezvous"
+-        );
+-    }
+-    if (!h.late_callback_panic && !h.wait_for_child_panic) || h.publication.load(SeqCst) == 0 {
++    assert_eq!(h.consumers_started.load(SeqCst), 0);
++    assert_eq!(h.producer_drains.load(SeqCst), 0);
++    assert_eq!(h.consumer_calls.load(SeqCst), 0);
++    if !h.late_callback_panic || h.publication.load(SeqCst) == 0 {
+         return;
+     }
+     if h.callbacks_after_publication.fetch_add(1, SeqCst) == 0 {
+         return;
+     }
+-    // The second callback after publication is an intentional test rendezvous.
+-    // Root scatter/permutation have joined. Consumers have independent work,
+-    // no producer or receiver lock is held, and this is an OS wait, not a Rayon
+-    // yield that could recursively enter a receiver waiting for this sender.
+-    let lock = h
+-        .signal
+-        .lock()
+-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+-    let (_lock, timeout) = h
+-        .ready
+-        .wait_timeout_while(lock, Duration::from_secs(20), |_| {
+-            if h.wait_for_child_panic {
+-                h.consumer_key_panic.load(SeqCst) == 0
+-            } else {
+-                h.consumer_first_move.load(SeqCst) == 0
+-            }
+-        })
+-        .unwrap();
+-    assert!(
+-        !timeout.timed_out(),
+-        "consumer failed to reach move witness within bounded test rendezvous"
+-    );
+-    assert!(h.consumer_first_key.load(SeqCst) > 0);
+-    if h.late_callback_panic {
+-        h.callback_panic.store(h.tick(), SeqCst);
+-        panic!("delayed producer callback panic after published child moved records");
+-    }
+-}
++    h.callback_panic.store(h.tick(), SeqCst);
++    panic!("deferred producer callback panic before any child is launched");
++}
++
++pub(crate) fn deferred_keys_ready(h: &Option<Arc<Hooks>>, count: usize) {
++    if let Some(h) = h {
++        assert!(h.publication.load(SeqCst) > 0);
++        assert_eq!(h.root_returned.load(SeqCst), 0);
++        assert_eq!(h.consumers_started.load(SeqCst), 0);
++        h.prepared_key_count.store(count, SeqCst);
++        h.consumer_keys_ready.store(h.tick(), SeqCst);
++    }
++}
++pub(crate) fn deferred_root_returned(h: &Option<Arc<Hooks>>) {
++    if let Some(h) = h {
++        assert_eq!(h.consumer_first_key.load(SeqCst), 0);
++        h.root_returned.store(h.tick(), SeqCst);
++    }
++}
++pub(crate) fn deferred_sender_closed(h: &Option<Arc<Hooks>>) {
++    if let Some(h) = h {
++        assert!(h.root_returned.load(SeqCst) > 0);
++        h.actual_sender_closed.store(h.tick(), SeqCst);
++    }
++}
++impl Hooks {
++    pub(crate) fn assert_deferred_ready(&self) {
++        let root = self.root_returned.load(SeqCst);
++        let closed = self.actual_sender_closed.load(SeqCst);
++        assert!(
++            root > 0 && closed > root,
++            "child ran before root return and actual sender close"
++        );
++    }
++}
++
+ pub(crate) fn single_route(h: &Option<Arc<Hooks>>) {
+     if let Some(h) = h {
+         h.single_route.store(true, SeqCst);
+@@ -263,9 +275,6 @@
+     fn drop(&mut self) {
+         PUBLISHING.set(self.0);
+     }
+-}
+-pub(crate) fn publication_started() {
+-    PUBLISHING.set(true);
+ }
+ pub(crate) fn publication_closed() {
+     PUBLISHING.set(false);

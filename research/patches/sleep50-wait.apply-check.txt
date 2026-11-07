@@ -1,0 +1,7 @@
+historical prerequisite apply-check/apply
+normalized crate Cargo semantics match
+follow-on apply-check/apply independent export
+entire file/symlink tree matches target
+all runtime/test bytes match validated private source
+reverse-check/reverse application restores entire base tree
+No cargo, compilation, test, timing, commit, push or shared-tree write performed during archival staging.

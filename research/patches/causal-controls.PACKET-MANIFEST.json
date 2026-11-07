@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "status": "source-only independent checkpoints; not adopted",
+  "files": {
+    "research/patches/causal-controls.README.md": "ee9bb2cad3018d66bb703fd9ba6a24fe0a7474a6f64f6890d52c77654f166f9f",
+    "research/patches/causal-controls.SPACE-AND-PROGRESS.md": "ac68233da6b861e5c79a6606c76cfa3df10ddff8e17c86b271680f3f9f3fd8ea",
+    "research/patches/causal-controls.SUMMARY.md": "1fcdf4b973678a0c966b29953c31bda36a0ac479c1bfa58930ac1da049281489",
+    "research/patches/causal-controls.VALIDATION.md": "f267fbe7ee17bce6b99146e98b33151549e0fc334eb4dfc8f6b70696f6b5f7d2",
+    "research/patches/causal-controls.external-evidence.json": "dbee59a89e24c0df4b94527c79952a8b76424d857c7ae669e436085c86c9aa86",
+    "research/patches/deferred-overlap.README.md": "312ac47bb7b0256d6ebefe3344f3d104169f76aa989aac6c127d8ddcaa9fb6a6",
+    "research/patches/deferred-overlap.SOURCE-LINEAGE.json": "f5ecb94d3d515b5355cceb8f55c3dcf023b66dae2d1d34e526700ed41bf70f27",
+    "research/patches/deferred-overlap.apply-check.txt": "f328d9a36debaaf2cb907b370930e914ab859fe6876a6e497eae73d95191fd47",
+    "research/patches/deferred-overlap.base-hashes.txt": "7a0b1dab04d6f096fba45265e81ee8dc93c26369eef608b916ad78ac853bae04",
+    "research/patches/deferred-overlap.patch": "087767e6a4f3628ae06c9366d80c7ef445a9dcc0dc66569fdc619e6de3aaa479",
+    "research/patches/deferred-overlap.source-hashes.txt": "7d89a958211dbbcd44af8a074a14486c662292a835ca49905d71236e897892a6",
+    "research/patches/deferred-overlap.validated-private-hashes.txt": "63a6ece563896cd8fd219b82f07a7cde75e75d2cca5e84b772d55c23c17d7088",
+    "research/patches/fixed-root-p4.README.md": "7e6aed1d55b6f5ae21ef7383130fd26288e69c10a1251b041e11d218381aa993",
+    "research/patches/fixed-root-p4.SOURCE-LINEAGE.json": "3ecef1c52aeca3e22d054c9281c46da17b78defcff2509d59c52ba484c9b17b1",
+    "research/patches/fixed-root-p4.apply-check.txt": "f328d9a36debaaf2cb907b370930e914ab859fe6876a6e497eae73d95191fd47",
+    "research/patches/fixed-root-p4.base-hashes.txt": "7a0b1dab04d6f096fba45265e81ee8dc93c26369eef608b916ad78ac853bae04",
+    "research/patches/fixed-root-p4.patch": "1ef6f148bef4cf1c2c3e8f480268a53ddef54c9136a3127fa52356efb722980e",
+    "research/patches/fixed-root-p4.source-hashes.txt": "6af3cc71c179dacd13988afa08a0ac59005c28ebf1db34318e0db4f678e0ff35",
+    "research/patches/fixed-root-p4.validated-private-hashes.txt": "bbffca61ef7660fb3b0236afaf68bb8a874b637fa22b3de2fd6a264225aada99",
+    "research/patches/sleep50-wait.README.md": "5ac5ccf6e882689035f1febc605a91c5054c21ceb8477407edc7484d62641de4",
+    "research/patches/sleep50-wait.SOURCE-LINEAGE.json": "ba5ad7580a0eef108b983cb75b4ce1a973f27ef19a9cba17df6581120abc5de9",
+    "research/patches/sleep50-wait.apply-check.txt": "f328d9a36debaaf2cb907b370930e914ab859fe6876a6e497eae73d95191fd47",
+    "research/patches/sleep50-wait.base-hashes.txt": "7a0b1dab04d6f096fba45265e81ee8dc93c26369eef608b916ad78ac853bae04",
+    "research/patches/sleep50-wait.patch": "b2cdb7e4401b8714d8206a44d118fb3b3d6009d911b9cb38007e0caf3e5e0bf9",
+    "research/patches/sleep50-wait.source-hashes.txt": "f6a2c177f5d6c7e152718ad3af4c5a5da029aa235264a51b3bc7ddc69e21b124",
+    "research/patches/sleep50-wait.validated-private-hashes.txt": "c937d0c229039dcdae8a308da8ca3ab97c7612f8193e98e4256583c5ea791865"
+  }
+}

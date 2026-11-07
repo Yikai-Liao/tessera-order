@@ -1,0 +1,12 @@
+diff --git a/rust/tessera-sort/src/engine/parallel.rs b/rust/tessera-sort/src/engine/parallel.rs
+--- a/rust/tessera-sort/src/engine/parallel.rs
++++ b/rust/tessera-sort/src/engine/parallel.rs
+@@ -148,7 +148,7 @@
+             digit.shift,
+             key.clone(),
+             workspace.block_buffers(),
+-            worker_count,
++            worker_count.min(4),
+             &mut |child| {
+                 let child_key = &key;
+                 batch_records += child.len();

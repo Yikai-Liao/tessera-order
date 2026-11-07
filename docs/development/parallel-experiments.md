@@ -444,3 +444,89 @@ manifests remain outside Git. The source-manifest SHA-256 values are
 for the corrected profile and
 `f47ff55b90362cfd740114a9b833003a2e8cfad87be7c4747da96dbfe81f31d1`
 for the fixed-root control. No raw profile is committed.
+
+### Empty-wait strategy control
+
+A second single-change control replaces only the empty-queue OS yield with a
+requested 50-microsecond sleep, after releasing the receiver mutex. Root
+geometry, logical copies, child kernels, batching and workspace policy are
+unchanged. No duration sweep was performed. Actual OS delay is not assumed to
+equal the requested duration. This changes the entire waiting strategy:
+polling frequency, receiver-lock competition and work pickup delay, not just
+one instruction's cost.
+
+Nine randomized blocks at W8 compare exact original O, sleep S and an independent
+same-source placement P, each twice. For Row16, paired S/O is 0.948 (9/9 lower)
+but S/P is 0.976 (7/9 lower); for u64 the ratios are 0.975 (6/9) and 1.012
+(4/9). Row16 O/S/P A/A ranges are 0.900–1.328 / 0.781–1.023 / 0.783–1.204;
+u64 ranges are 0.981–1.657 / 0.860–1.212 / 0.898–1.369. Thus neither case
+establishes an end-to-end speed gain. The median duplicate-label mean times
+are Row16 O 47.903 ms, S 47.058 ms, P 48.203 ms and u64 O 26.877 ms,
+S 27.364 ms, P 26.539 ms. Paired ratios need not equal ratios of these medians.
+
+Separate three-block traces show 83–89% lower empty-wait CPU for Row16 and
+84–92% lower for u64, with identical geometry and logical copy counts. Typical
+materialized-to-start delay rises from about 2 microseconds to 20–30 microseconds.
+The serial squeeze still takes descriptive medians of 26.1 ms for Row16 and
+15.8 ms for u64. Long-delay third Row16 traces in both policies remain in the
+report. Reducing waiting CPU does not establish the removal of the wall-time
+limit; it also does not prove waiting has zero wall cost.
+
+All 136 main/trace sorts and 64 smoke sorts passed full reference validation;
+52 library guards cover nested public calls and producer/consumer recovery.
+A subsequent focused strict-provenance default Stacked Borrows Miri check passed
+two existing deferred exclusive-borrow/compaction ownership fixtures on each of
+the fixed-root and sleep sources. This checks ownership kernels, not actual
+Rayon scheduling. The sleep-source manifest SHA-256 is
+`99050f713f24521b9afd57d58086710f3c834df42798970bee06c8a0b25a9359`.
+The wait policy is not adopted.
+
+### Deferred parallel-child control
+
+A third control retains the original first-batch key clones and the same queue,
+128 KiB batches, bucket pointers and parallel children. It delays only spawning
+those consumers until root compaction returns, the tail batch is sent, and the
+sender is actually closed. The producer then drains the queue too. This removes
+root/child overlap, not child parallelism: every diagnostic trace observes all
+eight workers sorting all 256 buckets, zero empty waits, and unchanged geometry
+and logical copies. Subthreshold inputs retain the original no-spawn behavior.
+
+The intervention also moves spawn overhead, receiver competition, queue backlog
+and cache-hot timing. It does not isolate DRAM contention. Three independent
+traces expose an 8.76–9.74 ms u64 child tail and a 12.34–15.66 ms Row16 tail,
+versus approximately 0.22–1.23 ms in the original pipeline. Squeeze intervals
+do not consistently improve enough to pay this tail. Scatter and permutation,
+which precede original first spawn, also vary substantially. Those negative
+controls prevent attributing all root-time changes to the removed overlap.
+
+In the separate nine-block no-trace screen, paired deferred/original medians are
+1.120 for Row16 (7/9 higher) and 1.124 for u64 (8/9 higher). Paired deferred/
+placement medians are 1.017 and 1.128. Original/deferred/placement A/A ranges are
+0.926–1.567 / 0.868–1.106 / 0.754–1.362 for Row16 and
+0.853–1.173 / 0.651–1.175 / 0.596–1.173 for u64. Placement/original per-block
+ranges are 0.881–1.196 and 0.882–1.215. Neither an improvement nor a slowdown
+passes the complete acceptance rule. Duplicate-label mean medians are Row16
+O 46.623 ms, D 47.913 ms, P 46.959 ms and u64 O 25.237 ms, D 30.069 ms,
+P 26.455 ms. All 136 main/trace sorts passed full-reference and strict temporal
+checks; no tail was discarded.
+
+The unchanged original passes 52 native library tests. The deferred fork passes
+49 applicable tests in the default test profile, four focused strict-provenance
+Miri ownership fixtures, and warnings-denied library/driver Clippy. Native tests
+separately check pre-child callback panic, post-root moved-child key panic,
+owned/exclusive records, first-batch Clone failure, no-launch behavior and
+bounded P2/P3/P4 nested calls. They do not claim to cover impossible simultaneous
+producer/consumer overlap faults in the deferred schedule. The initial nine
+nested fixture failures and their per-invocation state-lifecycle repair are
+retained in the validation record. Release harness verification is separate from
+these default-profile recovery tests; actual Rayon scheduling is not a Miri
+claim.
+
+All three independent controls are archived in
+`research/patches/causal-controls.README.md`, with exact historical apply chains,
+source identities, progress/space arguments and validation limits. They apply
+independently after the current-main combined research patch, not on top of each
+other or directly to the newer public scheduler. No policy or sorting change
+from these controls is enabled in production. The evidence supports keeping the
+original overlap and targeting remaining root work; it does not identify a
+single hardware cause for every failed experiment.

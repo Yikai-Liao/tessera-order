@@ -7,7 +7,7 @@ Each milestone lists what it delivers and how we know it is done. Decisions that
 - **Repository setup.** License, ordering semantics, design and benchmark protocol, CI, contribution policy.
 - **Stable Rust port.** `stable_sort`, `stable_sort_by_key` and `Workspace<T>` on Rust 1.85, with rewritten tests, Miri and AddressSanitizer.
 - **`no_std` with `alloc`.** `default-features = false` builds on `core` and `alloc`. An unwind guard aborts on key-function panics during block partitioning, regardless of the host panic strategy; memory bounds and successful results are unchanged ([decision 0005a](docs/decisions/0005a-no-std-with-alloc.md), [decision 0005b](docs/decisions/0005b-no-std-unwind-guard.md)).
-- **Multi-platform CI.** Stable and MSRV on Linux (x86-64, AArch64), macOS (AArch64) and Windows (x86-64), plus Miri and AddressSanitizer; `main` requires it to pass.
+- **Multi-platform CI.** Stable and MSRV on Linux (x86-64, AArch64), macOS (AArch64) and Windows (x86-64), plus Miri and AddressSanitizer; `main` requires it to pass. A pull request validates one test cell per operating system and the MSRV on Linux, within a fixed budget of concurrent jobs ([how CI runs](docs/development/ci.md)).
 - **Optional SIMD backend.** The `portable-simd` feature vectorizes the insertion and ascending-order scans and the counting-pass prefix sums ([decision 0008a](docs/decisions/0008a-optional-simd-backend.md)).
 - **Continuous benchmarks.** Default and `portable-simd` builds on Bencher Bare Metal, with reports on every pull request ([setup](docs/development/continuous-benchmarks.md)).
 - **Fuzzing and documentation site.** A `cargo-fuzz` target, and a VitePress site with the algorithm explanation.

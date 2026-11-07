@@ -8,46 +8,65 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
 
 jobs:
+  # The check name defaults to the job id plus the matrix values. A skipped job
+  # never expands its matrix, so an explicit `name:` would surface as the raw
+  # template; the default name shows only `test-other-platforms`.
   test:
-    name: test (${{ matrix.os }}, ${{ matrix.toolchain }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
-        # Keep the second entry in sync with `rust-version` in Cargo.toml.
-        toolchain: [stable, "1.85"]
-    env:
-      # Lints are enforced on stable by the lint job. Older compilers report
-      # false positives, such as `unreachable_pub` on 1.85, so MSRV only has
-      # to build and pass the tests.
-      RUSTFLAGS: ${{ matrix.toolchain == 'stable' && '-D warnings' || '' }}
+        include:
+          - os: ubuntu-latest
+            toolchain: stable
+          # Keep every 1.85 cell in sync with `rust-version` in Cargo.toml.
+          - os: ubuntu-latest
+            toolchain: "1.85"
+          - os: macos-latest
+            toolchain: stable
+          - os: windows-latest
+            toolchain: stable
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
+      - uses: ./.github/actions/rust-test
         with:
           toolchain: ${{ matrix.toolchain }}
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --all-targets
-      # Benchmark dependencies would otherwise enable the crate's std feature.
-      - run: cargo test -p tessera-sort --all-targets --no-default-features
-      - run: cargo test --workspace --doc
-      # fearless_simd requires Rust 1.89; keep the default-feature MSRV at 1.85.
-      - run: cargo test --workspace --all-targets --features tessera-sort/portable-simd
-        if: matrix.toolchain == 'stable'
-      - run: cargo test --workspace --doc --features tessera-sort/portable-simd
-        if: matrix.toolchain == 'stable'
+
+  # A pull request validates one cell per operating system and the MSRV on
+  # Linux. The remaining cells run on main, which no pull request waits for.
+  test-other-platforms:
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04-arm
+            toolchain: stable
+          - os: ubuntu-24.04-arm
+            toolchain: "1.85"
+          - os: macos-latest
+            toolchain: "1.85"
+          - os: windows-latest
+            toolchain: "1.85"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/rust-test
+        with:
+          toolchain: ${{ matrix.toolchain }}
 
   lint:
     runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: thumbv7em-none-eabi
       - uses: Swatinem/rust-cache@v2
       - name: Install native benchmark headers
         run: |
@@ -57,12 +76,18 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets
       - run: cargo clippy --workspace --all-targets --all-features
+      # Behavioral tests run in the host matrix above, including MSRV. This
+      # target has no `std` to link accidentally, and clippy checks the no-std
+      # code path.
+      - run: cargo build -p tessera-sort --no-default-features --target thumbv7em-none-eabi
+      - run: cargo clippy -p tessera-sort --no-default-features --all-targets
       - run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
       - run: cargo doc --workspace --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
+      - run: cargo package -p tessera-sort
       - name: Test the portable-simd MSRV
         run: |
           rustup toolchain install 1.89 --profile minimal
@@ -101,34 +126,31 @@ jobs:
       - run: npm ci
       - run: npm run bench:report -- bench/results/ci --partial
 
-  # This target has no `std` to link accidentally. Behavioral tests run in the
-  # host matrix above, including MSRV; clippy also checks the no-std code path.
-  no_std:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: thumbv7em-none-eabi
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build -p tessera-sort --no-default-features --target thumbv7em-none-eabi
-      - run: cargo clippy -p tessera-sort --no-default-features --all-targets
-
   miri:
     name: miri (${{ matrix.features }})
     runs-on: ubuntu-latest
     env:
       MIRI_SYSROOT: ${{ github.workspace }}/.miri-sysroot
+      RUSTFLAGS: -D warnings
     strategy:
       fail-fast: false
       matrix:
         include:
           - features: std
             args: ""
+            filter: ""
           - features: no-std
             args: --no-default-features
+            filter: ""
+          # The std lane interprets every engine path already. This lane only
+          # has to interpret what the feature adds: its own unsafe vector code
+          # and one integration case that runs the engine with it enabled. The
+          # doctest step below stays unfiltered and interprets the engine through
+          # the feature too. `test(=name)` matches the name inside the binary;
+          # the binary id is not part of it.
           - features: portable-simd
             args: --features portable-simd
+            filter: "-E 'test(portable_simd::tests) | test(=unusual_record_layouts)'"
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
@@ -138,7 +160,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # The sysroot depends on the compiler, not on the crate's feature set.
       # An exact key prevents reusing it across nightly compiler versions.
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         id: miri-cache
         with:
           path: ${{ env.MIRI_SYSROOT }}
@@ -152,7 +174,7 @@ jobs:
       - run: cargo miri setup
         if: steps.miri-cache.outputs.cache-hit != 'true'
       # Each test gets its own interpreter so the runner's cores can be used.
-      - run: cargo miri nextest run -p tessera-sort ${{ matrix.args }}
+      - run: cargo miri nextest run -p tessera-sort ${{ matrix.args }} ${{ matrix.filter }}
       # Nextest does not run doctests.
       - run: cargo miri test -p tessera-sort --doc ${{ matrix.args }}
 
@@ -168,10 +190,3 @@ jobs:
       - run: cargo test --release --target x86_64-unknown-linux-gnu --workspace --all-targets --features tessera-sort/portable-simd
         env:
           RUSTFLAGS: -Zsanitizer=address
-
-  package:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo package -p tessera-sort

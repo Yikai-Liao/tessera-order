@@ -23,7 +23,7 @@ npm run docs:test && npm run docs:typecheck && npm run docs:build   # site chang
 python3 -m unittest discover -s .github/scripts -p "test_*.py"     # CI routing changes
 ```
 
-Run these locally. Miri, the MSRV, other platforms and benchmarks run in CI on a non-draft pull request; push commits and read the results there.
+Run these locally. Miri, the MSRV and benchmarks run in CI on every pull request, together with one test cell per operating system; `main` also runs the remaining platforms and their MSRV ([details](docs/development/ci.md)). Push commits and read the results there.
 
 ## Code
 

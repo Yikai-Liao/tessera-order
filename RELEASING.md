@@ -45,10 +45,10 @@ Benchmark manifests record the implementation (for example `tessera-rust`), pack
 | `rust/`, `bench/rust/`, root Cargo and rustfmt files | Rust, and Python because it embeds the Rust core |
 | `cpp/`, `bench/cpp/`, root CMake files | C++ |
 | `python/`, `bench/python/` | Python |
-| Markdown outside `conformance/` and the language directories, `assets/`, the documentation site's tooling, `.github/scripts/` | No language; `docs.yml` builds the site when its pages change, and the `changes` job tests the scripts |
+| Markdown outside `conformance/` and the language directories, `assets/`, the documentation site's tooling, `.github/scripts/` | No language; `docs.yml` builds the site when its pages change, and the `lint` job tests the scripts |
 | Anything else (`conformance/`, vectors, license, workflows) | Every implemented language |
 
-Paths are compared from the merge base, so commits that reached `main` after a branch was cut do not select languages for it. A manual run, a new branch, or a base commit that is no longer reachable selects everything. In `rust-ci.yml`, tests, lints, packaging, Miri and ASan are separate jobs.
+Paths are compared from the merge base, so commits that reached `main` after a branch was cut do not select languages for it. A manual run, a new branch, or a base commit that is no longer reachable selects everything. In `rust-ci.yml`, tests, lints, Miri and ASan are separate jobs; packaging and the no-std target run inside the lint job.
 
 `release.yml` routes each tag to its language's release workflow, which runs that language's CI, checks the tag against the package metadata and publishes. Each tag has its own concurrency group, so languages can release in parallel.
 

@@ -1,0 +1,4260 @@
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -3,132 +3,29 @@
+ version = 4
+ 
+ [[package]]
+-name = "aho-corasick"
+-version = "1.1.5"
++name = "crossbeam-deque"
++version = "0.8.8"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "c982642fa9e8606056828ee9a8505737230110bb1099153c79efe865c59d12ba"
++checksum = "622f3fc73690be383c7214310406f28a90e6edeadc3cea882f9d71e495b9711a"
+ dependencies = [
+- "memchr",
++ "crossbeam-epoch",
++ "crossbeam-utils",
+ ]
+ 
+ [[package]]
+-name = "anes"
+-version = "0.1.6"
++name = "crossbeam-epoch"
++version = "0.9.21"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
+-
+-[[package]]
+-name = "anstyle"
+-version = "1.0.14"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
+-
+-[[package]]
+-name = "autocfg"
+-version = "1.5.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
+-
+-[[package]]
+-name = "cast"
+-version = "0.3.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
+-
+-[[package]]
+-name = "cfg-if"
+-version = "1.0.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
+-
+-[[package]]
+-name = "ciborium"
+-version = "0.2.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "42e69ffd6f0917f5c029256a24d0161db17cea3997d185db0d35926308770f0e"
++checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
+ dependencies = [
+- "ciborium-io",
+- "ciborium-ll",
+- "serde",
++ "crossbeam-utils",
+ ]
+ 
+ [[package]]
+-name = "ciborium-io"
+-version = "0.2.2"
++name = "crossbeam-utils"
++version = "0.8.23"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "05afea1e0a06c9be33d539b876f1ce3692f4afea2cb41f740e7743225ed1c757"
+-
+-[[package]]
+-name = "ciborium-ll"
+-version = "0.2.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "57663b653d948a338bfb3eeba9bb2fd5fcfaecb9e199e87e1eda4d9e8b240fd9"
+-dependencies = [
+- "ciborium-io",
+- "half",
+-]
+-
+-[[package]]
+-name = "clap"
+-version = "4.6.7"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "aa8876b300ab35ba921adea3dfd70157a46249b33f95c9084ae5709785478946"
+-dependencies = [
+- "clap_builder",
+-]
+-
+-[[package]]
+-name = "clap_builder"
+-version = "4.6.7"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ec0797fb7aeb1406c84efac526901f7ec3ead2124f946b494e72879d4b54704d"
+-dependencies = [
+- "anstyle",
+- "clap_lex",
+-]
+-
+-[[package]]
+-name = "clap_lex"
+-version = "1.1.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
+-
+-[[package]]
+-name = "criterion"
+-version = "0.7.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e1c047a62b0cc3e145fa84415a3191f628e980b194c2755aa12300a4e6cbd928"
+-dependencies = [
+- "anes",
+- "cast",
+- "ciborium",
+- "clap",
+- "criterion-plot",
+- "itertools",
+- "num-traits",
+- "oorandom",
+- "regex",
+- "serde",
+- "serde_json",
+- "tinytemplate",
+- "walkdir",
+-]
+-
+-[[package]]
+-name = "criterion-plot"
+-version = "0.6.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "9b1bcc0dc7dfae599d84ad0b1a55f80cde8af3725da8313b528da95ef783e338"
+-dependencies = [
+- "cast",
+- "itertools",
+-]
+-
+-[[package]]
+-name = "crunchy"
+-version = "0.2.4"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
++checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
+ 
+ [[package]]
+ name = "either"
+@@ -143,260 +40,29 @@
+ checksum = "629c9d6b6f30b5604089e0980f4d924a013aacb1654a6cdf5d3d852224f68651"
+ 
+ [[package]]
+-name = "half"
+-version = "2.7.1"
++name = "rayon"
++version = "1.12.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
++checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
+ dependencies = [
+- "cfg-if",
+- "crunchy",
+- "zerocopy",
++ "either",
++ "rayon-core",
+ ]
+ 
+ [[package]]
+-name = "itertools"
+-version = "0.13.0"
++name = "rayon-core"
++version = "1.13.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
++checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
+ dependencies = [
+- "either",
++ "crossbeam-deque",
++ "crossbeam-utils",
+ ]
+ 
+ [[package]]
+-name = "itoa"
+-version = "1.0.18"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+-
+-[[package]]
+-name = "memchr"
+-version = "2.8.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+-
+-[[package]]
+-name = "num-traits"
+-version = "0.2.19"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
+-dependencies = [
+- "autocfg",
+-]
+-
+-[[package]]
+-name = "oorandom"
+-version = "11.1.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
+-
+-[[package]]
+-name = "proc-macro2"
+-version = "1.0.107"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
+-dependencies = [
+- "unicode-ident",
+-]
+-
+-[[package]]
+-name = "quote"
+-version = "1.0.47"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
+-dependencies = [
+- "proc-macro2",
+-]
+-
+-[[package]]
+-name = "regex"
+-version = "1.13.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d"
+-dependencies = [
+- "aho-corasick",
+- "memchr",
+- "regex-automata",
+- "regex-syntax",
+-]
+-
+-[[package]]
+-name = "regex-automata"
+-version = "0.4.18"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ad8553b9b26413251cbf30e620595c7a41b3887f03da04579c0e6b0d6a06b4b2"
+-dependencies = [
+- "aho-corasick",
+- "memchr",
+- "regex-syntax",
+-]
+-
+-[[package]]
+-name = "regex-syntax"
+-version = "0.8.11"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+-
+-[[package]]
+-name = "same-file"
+-version = "1.0.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
+-dependencies = [
+- "winapi-util",
+-]
+-
+-[[package]]
+-name = "serde"
+-version = "1.0.229"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
+-dependencies = [
+- "serde_core",
+- "serde_derive",
+-]
+-
+-[[package]]
+-name = "serde_core"
+-version = "1.0.229"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48"
+-dependencies = [
+- "serde_derive",
+-]
+-
+-[[package]]
+-name = "serde_derive"
+-version = "1.0.229"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
+-dependencies = [
+- "proc-macro2",
+- "quote",
+- "syn 3.0.9",
+-]
+-
+-[[package]]
+-name = "serde_json"
+-version = "1.0.154"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
+-dependencies = [
+- "itoa",
+- "memchr",
+- "serde",
+- "serde_core",
+- "zmij",
+-]
+-
+-[[package]]
+-name = "syn"
+-version = "2.0.119"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297"
+-dependencies = [
+- "proc-macro2",
+- "quote",
+- "unicode-ident",
+-]
+-
+-[[package]]
+-name = "syn"
+-version = "3.0.9"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b"
+-dependencies = [
+- "proc-macro2",
+- "quote",
+- "unicode-ident",
+-]
+-
+-[[package]]
+-name = "tessera-bench"
+-version = "0.0.0"
+-dependencies = [
+- "criterion",
+- "tessera-sort",
+-]
+-
+-[[package]]
+-name = "tessera-sort"
++name = "tessera-combined-current-main"
+ version = "0.0.0"
+ dependencies = [
+  "fearless_simd",
++ "rayon",
+ ]
+-
+-[[package]]
+-name = "tinytemplate"
+-version = "1.2.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "be4d6b5f19ff7664e8c98d03e2139cb510db9b0a60b55f8e8709b689d939b6bc"
+-dependencies = [
+- "serde",
+- "serde_json",
+-]
+-
+-[[package]]
+-name = "unicode-ident"
+-version = "1.0.27"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+-
+-[[package]]
+-name = "walkdir"
+-version = "2.5.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b"
+-dependencies = [
+- "same-file",
+- "winapi-util",
+-]
+-
+-[[package]]
+-name = "winapi-util"
+-version = "0.1.11"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
+-dependencies = [
+- "windows-sys",
+-]
+-
+-[[package]]
+-name = "windows-link"
+-version = "0.2.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+-
+-[[package]]
+-name = "windows-sys"
+-version = "0.61.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
+-dependencies = [
+- "windows-link",
+-]
+-
+-[[package]]
+-name = "zerocopy"
+-version = "0.8.63"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e5fe1f8f1b06191a00962174c61aa5005e0bb391a6d80d07e24d115c01a92ed8"
+-dependencies = [
+- "zerocopy-derive",
+-]
+-
+-[[package]]
+-name = "zerocopy-derive"
+-version = "0.8.63"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "863ad3ac83293fb4d740aedbfdc9240dd8d1a50c1099acd76ce80ce7c7230c7f"
+-dependencies = [
+- "proc-macro2",
+- "quote",
+- "syn 2.0.119",
+-]
+-
+-[[package]]
+-name = "zmij"
+-version = "1.0.23"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,5 +1,5 @@
+ [workspace]
+-members = ["rust/tessera-sort", "bench/rust"]
++members = ["rust/tessera-sort"]
+ resolver = "3"
+ 
+ [workspace.package]
+--- a/rust/tessera-sort/Cargo.toml
++++ b/rust/tessera-sort/Cargo.toml
+@@ -1,5 +1,5 @@
+ [package]
+-name = "tessera-sort"
++name = "tessera-combined-current-main"
+ # Unreleased. Publication waits for the benchmark runner and release report.
+ version = "0.0.0"
+ publish = false
+@@ -19,15 +19,22 @@
+ # resume the panic. Without this feature the crate is `no_std`: it uses `core` and
+ # `alloc`, needs a global allocator, and aborts on a panic during block partitioning.
+ std = []
++# Optional parallel API; sequential builds keep their dependency-free no_std path.
++rayon = ["std", "dep:rayon"]
++
+ # Vector scans and prefix sums through `fearless_simd`. Requires std and Rust
+ # 1.89. Dispatches at run time on x86; other targets use their baseline ISA.
+ portable-simd = ["std", "dep:fearless_simd"]
+ 
+ [dependencies]
+ fearless_simd = { version = "1.2", optional = true }
++rayon = { version = "1.10", optional = true }
+ 
+ [package.metadata.docs.rs]
+ all-features = true
+ 
+ [lints]
+ workspace = true
++
++[lib]
++name = "tessera_sort"
+--- a/rust/tessera-sort/src/block.rs
++++ b/rust/tessera-sort/src/block.rs
+@@ -46,6 +46,11 @@
+ /// Widest digit, in bits, that one pass accepts. Callers that choose their own
+ /// digit width (the Tessera engine) bound it by this constant.
+ pub(crate) const MAX_RADIX_BITS: usize = 12;
++
++#[cfg(feature = "rayon")]
++mod parallel;
++#[cfg(feature = "rayon")]
++pub(crate) use parallel::partition_digit_parallel_with_visit;
+ 
+ type PanicPayload = unwind::Payload;
+ 
+@@ -347,6 +352,10 @@
+     scratch_blocks: usize,
+     block_count: usize,
+     scratch: Vec<MaybeUninit<T>>,
++    // Parallel root partitions retain each shard's allocation, rather than
++    // copying live scratch records into a second arena during adoption.
++    #[cfg(feature = "rayon")]
++    scratch_segments: Vec<Vec<MaybeUninit<T>>>,
+     input_borrow: PhantomData<&'a mut [T]>,
+ }
+ 
+@@ -389,6 +398,8 @@
+             scratch_blocks,
+             block_count,
+             scratch,
++            #[cfg(feature = "rayon")]
++            scratch_segments: Vec::new(),
+             input_borrow: PhantomData,
+         }
+     }
+@@ -399,6 +410,14 @@
+         // allocations, which stay alive and are never resized during sorting.
+         unsafe {
+             if physical < self.scratch_blocks {
++                #[cfg(feature = "rayon")]
++                if !self.scratch_segments.is_empty() {
++                    let segment_blocks = self.scratch_blocks / self.scratch_segments.len();
++                    return self.scratch_segments[physical / segment_blocks]
++                        .as_mut_ptr()
++                        .cast::<T>()
++                        .add((physical % segment_blocks) * self.block_size);
++                }
+                 self.scratch
+                     .as_mut_ptr()
+                     .cast::<T>()
+@@ -799,6 +818,8 @@
+                 write(offset);
+             }
+             position.input += 1;
++            #[cfg(all(test, feature = "rayon"))]
++            crate::test_witness::moved();
+             begin = 0;
+         }
+     }
+--- /dev/null
++++ b/rust/tessera-sort/src/block/parallel.rs
+@@ -0,0 +1,632 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Experimental root scatter into independently owned contiguous block shards.
++
++use super::*;
++use rayon::prelude::*;
++
++mod compact;
++
++struct Shard<'a, 'w, T, E> {
++    sorter: Sorter<'a, 'w, T>,
++    key: E,
++    panic: Option<PanicPayload>,
++    first_block: usize,
++}
++
++#[derive(Clone, Copy)]
++struct Config {
++    shards: usize,
++    block_size: Option<usize>,
++    parallel: bool,
++}
++
++// SAFETY: each shard exclusively borrows a disjoint input slice and Buffers.
++// Its pointers address only those allocations. No shared references to its
++// records cross threads, and all records are restored by Sorter on unwind.
++unsafe impl<T: Send, E: Send> Send for Shard<'_, '_, T, E> {}
++
++impl<T, E: Extract<T>> Shard<'_, '_, T, E> {
++    fn scatter(mut self, width: usize, shift: usize) -> Self {
++        #[cfg(test)]
++        let _phase = crate::test_witness::PhaseGuard::root();
++        let shift = E::Value::from_usize(shift);
++        let mask = E::Value::from_usize((1usize << width) - 1) << shift;
++        let key = &mut self.key;
++        let (panic, _) = self.sorter.step_with_ends(
++            |record| ((key.key(record) & mask) >> shift).to_usize(),
++            false,
++        );
++        self.panic = panic;
++        self
++    }
++}
++
++pub(crate) fn partition_digit_parallel_with_visit<T: Send, E: Extract<T> + Clone + Send>(
++    arr: &mut [T],
++    radix: usize,
++    shift: usize,
++    key: E,
++    buffers: &mut Buffers<T>,
++    requested_shards: usize,
++    visit: Visit<'_, T>,
++) -> Vec<usize> {
++    partition_impl_with_visit(
++        arr,
++        radix,
++        shift,
++        key,
++        buffers,
++        Config {
++            shards: requested_shards,
++            block_size: None,
++            parallel: true,
++        },
++        Some(visit),
++    )
++}
++
++#[cfg(test)]
++fn partition_impl<T: Send, E: Extract<T> + Clone + Send>(
++    arr: &mut [T],
++    radix: usize,
++    shift: usize,
++    key: E,
++    buffers: &mut Buffers<T>,
++    config: Config,
++) -> Vec<usize> {
++    partition_impl_with_visit(arr, radix, shift, key, buffers, config, None)
++}
++
++fn partition_impl_with_visit<T: Send, E: Extract<T> + Clone + Send>(
++    arr: &mut [T],
++    radix: usize,
++    shift: usize,
++    key: E,
++    buffers: &mut Buffers<T>,
++    config: Config,
++    mut visit: Option<Visit<'_, T>>,
++) -> Vec<usize> {
++    assert!((1..=MAX_RADIX_BITS).contains(&radix));
++    assert!(shift < E::Value::BITS);
++    assert!(core::mem::size_of::<T>() != 0);
++    assert!(arr.len() >= 2);
++    let bucket_count = 1usize << radix;
++    let shards = config.shards.max(1).min(arr.len());
++    // This isolated prototype temporarily holds local and global directories
++    // together during adoption, hence 20 rather than 10 bytes per input block.
++    let record_bytes = core::mem::size_of::<T>();
++    let balanced = ((20.0 * arr.len() as f64)
++        / (2.0 * shards as f64 * bucket_count as f64 * record_bytes as f64))
++        .sqrt()
++        .ceil() as usize;
++    let block_size = config.block_size.unwrap_or_else(|| {
++        balanced
++            .max(BLOCK_BYTES_FLOOR / record_bytes)
++            .max(BLOCK_RECORDS_FLOOR)
++            .max(1)
++    });
++    let full_blocks = arr.len() / block_size;
++    let shards = shards.min(full_blocks.max(1));
++    #[cfg(test)]
++    if let Some(hooks) = crate::test_witness::current() {
++        hooks
++            .root_geometry
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .push((arr.len(), bucket_count, block_size, shards));
++    }
++    if shards == 1 && config.block_size.is_none() {
++        let mut key = key;
++        return partition_digit_with_ends(arr, radix, shift, &mut key, buffers, &mut |child, _| {
++            if let Some(callback) = visit.as_deref_mut() {
++                callback(child);
++            }
++        });
++    }
++    let width = radix.min(E::Value::BITS - shift);
++    let input_len = arr.len();
++    let input = arr.as_mut_ptr();
++    let mut local_buffers: Vec<_> = (0..shards).map(|_| Buffers::new()).collect();
++    let mut tasks = Vec::with_capacity(shards);
++    let mut first_block = 0;
++    for (index, local) in local_buffers.iter_mut().enumerate() {
++        let blocks = full_blocks / shards + usize::from(index < full_blocks % shards);
++        let len = if index + 1 == shards {
++            input_len - first_block * block_size
++        } else {
++            blocks * block_size
++        };
++        // SAFETY: cumulative full-block quotas cover disjoint consecutive
++        // ranges, with only the final shard including the input tail. Each
++        // range is initialized here and stays exclusively owned by its guard.
++        // Derive all shard borrows from this same raw ancestor: reborrowing
++        // `arr` via split_at_mut would invalidate the raw pointer retained for
++        // global compaction after these shard guards have been retired.
++        let part =
++            unsafe { core::slice::from_raw_parts_mut(input.add(first_block * block_size), len) };
++        tasks.push(Shard {
++            sorter: Sorter::new(part, bucket_count, block_size, local),
++            key: key.clone(),
++            panic: None,
++            first_block,
++        });
++        first_block += blocks;
++    }
++    let mut tasks: Vec<_> = if config.parallel {
++        tasks
++            .into_par_iter()
++            .map(|shard| shard.scatter(width, shift))
++            .collect()
++    } else {
++        // The same ownership/adoption path can run under Miri without Rayon.
++        tasks
++            .into_iter()
++            .map(|shard| shard.scatter(width, shift))
++            .collect()
++    };
++    if let Some(payload) = tasks.iter_mut().find_map(|task| task.panic.take()) {
++        // All jobs have joined. Every guard still owns only its original
++        // shard, so unwinding restores all slices without invoking keys again.
++        unwind::resume(payload);
++    }
++
++    let head = shards.checked_mul(bucket_count).expect("head overflow");
++    let scratch_blocks = head.checked_mul(2).expect("scratch overflow");
++    let block_count = full_blocks
++        .checked_add(scratch_blocks)
++        .expect("block overflow");
++    assert!(block_count <= u32::MAX as usize);
++    let allocated: usize = tasks
++        .iter()
++        .map(|task| task.sorter.active_blocks_end - bucket_count)
++        .sum();
++    let active_end = head + allocated;
++    assert!(active_end <= block_count);
++
++    // Until the final non-panicking transfer below, every local guard owns its
++    // shard and can recover it if allocation or directory construction fails.
++    let mut order = alloc::vec![0u32; block_count];
++    let next_order = alloc::vec![0u32; block_count];
++    let bucket_ids = alloc::vec![0u16; block_count];
++    let mut partials = Vec::with_capacity(head);
++    let mut ends = Vec::with_capacity(bucket_count);
++    let mut output = head;
++    let mut records = 0;
++    let translate = |shard_index: usize, task: &Shard<'_, '_, T, E>, physical: u32| {
++        let physical = physical as usize;
++        if physical < 2 * bucket_count {
++            shard_index * 2 * bucket_count + physical
++        } else {
++            scratch_blocks + task.first_block + physical - 2 * bucket_count
++        }
++    };
++    for bucket in 0..bucket_count {
++        // Bucket-major, then ORIGINAL shard order. Completion order is never
++        // used, so equal keys retain their original cross-shard order.
++        for (index, task) in tasks.iter().enumerate() {
++            let start = if bucket == 0 {
++                bucket_count
++            } else {
++                task.sorter.buffers.counts[bucket - 1]
++            };
++            let end = task.sorter.buffers.counts[bucket];
++            let partial = task.sorter.partial_blocks[bucket];
++            assert_eq!(partial.order_index, end - 1);
++            for logical in start..end {
++                order[output] = translate(index, task, task.sorter.block_order[logical]) as u32;
++                output += 1;
++            }
++            partials.push(PartialBlock {
++                order_index: output - 1,
++                len: partial.len,
++            });
++            records += (end - start - 1) * block_size + partial.len;
++        }
++        ends.push(records);
++    }
++    assert_eq!(records, input_len);
++    assert_eq!(output, active_end);
++    let mut free = 0;
++    for (index, task) in tasks.iter().enumerate() {
++        for logical in
++            (0..bucket_count).chain(task.sorter.active_blocks_end..task.sorter.block_order.len())
++        {
++            if free == head {
++                free = active_end;
++            }
++            order[free] = translate(index, task, task.sorter.block_order[logical]) as u32;
++            free += 1;
++        }
++    }
++    if free == head {
++        free = active_end;
++    }
++    assert_eq!(free, block_count);
++    let mut global = Sorter {
++        buffers,
++        blocks: BlockStorage {
++            input,
++            input_len,
++            block_size,
++            scratch_blocks,
++            block_count,
++            scratch: Vec::new(),
++            scratch_segments: Vec::with_capacity(shards),
++            input_borrow: PhantomData,
++        },
++        // For compaction this field means the free prefix length, not the
++        // number of semantic radix buckets. No scatter runs on this guard.
++        bucket_count: head,
++        block_order: order,
++        next_block_order: next_order,
++        bucket_ids,
++        partial_blocks: partials,
++        active_blocks_end: active_end,
++        input_materialized: true,
++    };
++
++    // Ownership transfer has no allocations, bounds checks, or user calls:
++    // scratch_segments has capacity for exactly tasks.len() allocations.
++    // Each moved Vec owns only MaybeUninit cells, so stale copies never drop T.
++    // The global directory already names each live prefix exactly once.
++    for task in &mut tasks {
++        global
++            .blocks
++            .scratch_segments
++            .push(core::mem::take(&mut task.sorter.blocks.scratch));
++        task.sorter.input_materialized = true;
++    }
++    global.input_materialized = false;
++    drop(tasks);
++    drop(local_buffers);
++    #[cfg(debug_assertions)]
++    global.validate();
++    if cfg!(miri) || std::env::var_os("TESSERA_COMPACT_SERIAL").is_none() {
++        compact::permute_blocks(&mut global, shards, config.parallel);
++    }
++    let panic = global.compact_with(&ends, visit);
++    if let Some(payload) = panic {
++        unwind::resume(payload);
++    }
++    ends
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::key::ByKey;
++    use std::panic::{AssertUnwindSafe, catch_unwind};
++    use std::sync::{
++        Arc,
++        atomic::{AtomicUsize, Ordering},
++    };
++
++    #[test]
++    fn combined_deferred_owned_after_permutation() {
++        let mut rows: Vec<_> = (0..293u64)
++            .map(|i| ((i * 73) % 64, alloc::format!("row {i}")))
++            .collect();
++        let mut expected = rows.clone();
++        expected.sort_by_key(|row| row.0);
++        let mut pending: Option<(*mut (u64, alloc::string::String), usize)> = None;
++        let mut buffers = Buffers::new();
++        partition_impl_with_visit(
++            &mut rows,
++            2,
++            4,
++            ByKey(|row: &(u64, alloc::string::String)| row.0),
++            &mut buffers,
++            config(3, 7),
++            Some(&mut |child| {
++                if let Some((pointer, len)) = pending.take() {
++                    // SAFETY: this is an earlier materialized disjoint bucket.
++                    unsafe { core::slice::from_raw_parts_mut(pointer, len) }
++                        .sort_by_key(|row| row.0);
++                }
++                pending = Some((child.as_mut_ptr(), child.len()));
++            }),
++        );
++        if let Some((pointer, len)) = pending {
++            // SAFETY: the final bucket remains uniquely owned until consumed.
++            unsafe { core::slice::from_raw_parts_mut(pointer, len) }.sort_by_key(|row| row.0);
++        }
++        assert_eq!(rows, expected);
++    }
++
++    #[test]
++    fn combined_callback_panic_finishes_materialization() {
++        let mut rows: Vec<_> = (0..293u64)
++            .map(|i| ((i * 73) % 64, alloc::format!("row {i}")))
++            .collect();
++        let mut expected = rows.clone();
++        expected.sort();
++        let mut buffers = Buffers::new();
++        let result = catch_unwind(AssertUnwindSafe(|| {
++            partition_impl_with_visit(
++                &mut rows,
++                2,
++                4,
++                ByKey(|row: &(u64, alloc::string::String)| row.0),
++                &mut buffers,
++                config(3, 7),
++                Some(&mut |_| panic!("callback panic")),
++            );
++        }));
++        assert!(result.is_err());
++        rows.sort();
++        assert_eq!(rows, expected);
++    }
++
++    fn config(shards: usize, block_size: usize) -> Config {
++        Config {
++            shards,
++            block_size: Some(block_size),
++            parallel: !cfg!(miri),
++        }
++    }
++
++    #[test]
++    fn native_scatter_stable_partial_boundaries() {
++        let lengths: Vec<_> = if cfg!(miri) {
++            vec![2, 7, 19, 33]
++        } else {
++            (2..90).collect()
++        };
++        let sizes: Vec<_> = if cfg!(miri) {
++            vec![1, 5]
++        } else {
++            vec![1, 2, 3, 5, 8, 32]
++        };
++        for len in lengths {
++            for &block_size in &sizes {
++                for shards in [1, 2, 4] {
++                    for radix in [1, 3] {
++                        let mut rows: Vec<_> = (0..len)
++                            .map(|id| (((id * 37 + 11) % 256) as u64, id))
++                            .collect();
++                        let mut expected = rows.clone();
++                        let mask = (1u64 << radix) - 1;
++                        expected.sort_by_key(|row| row.0 & mask);
++                        let ends = partition_impl(
++                            &mut rows,
++                            radix,
++                            0,
++                            ByKey(|row: &(u64, usize)| row.0),
++                            &mut Buffers::new(),
++                            config(shards, block_size),
++                        );
++                        assert_eq!(
++                            rows, expected,
++                            "n={len}, b={block_size}, P={shards}, radix={radix}"
++                        );
++                        for (bucket, end) in ends.into_iter().enumerate() {
++                            assert_eq!(
++                                end,
++                                rows.iter()
++                                    .filter(|row| row.0 & mask <= bucket as u64)
++                                    .count()
++                            );
++                        }
++                    }
++                }
++            }
++        }
++    }
++
++    struct Owned {
++        key: u64,
++        id: usize,
++        text: String,
++        drops: Arc<Vec<AtomicUsize>>,
++    }
++
++    impl Drop for Owned {
++        fn drop(&mut self) {
++            assert_eq!(self.text, self.id.to_string());
++            self.drops[self.id].fetch_add(1, Ordering::SeqCst);
++        }
++    }
++
++    #[test]
++    fn native_scatter_owned_panic_restores_each_shard() {
++        let len = if cfg!(miri) { 19 } else { 97 };
++        for fail in (0..len).chain([usize::MAX]) {
++            let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++            let mut rows: Vec<_> = (0..len)
++                .map(|id| Owned {
++                    key: ((id * 37 + 11) % 16) as u64,
++                    id,
++                    text: id.to_string(),
++                    drops: drops.clone(),
++                })
++                .collect();
++            let result = catch_unwind(AssertUnwindSafe(|| {
++                partition_impl(
++                    &mut rows,
++                    3,
++                    0,
++                    ByKey(|row: &Owned| {
++                        assert_ne!(row.id, fail, "injected key panic");
++                        row.key
++                    }),
++                    &mut Buffers::new(),
++                    config(4, 5),
++                );
++            }));
++            assert_eq!(result.is_err(), fail != usize::MAX);
++            let mut ids: Vec<_> = rows.iter().map(|row| row.id).collect();
++            ids.sort_unstable();
++            assert_eq!(ids, (0..len).collect::<Vec<_>>());
++            assert!(drops.iter().all(|count| count.load(Ordering::SeqCst) == 0));
++            drop(rows);
++            assert!(drops.iter().all(|count| count.load(Ordering::SeqCst) == 1));
++        }
++    }
++
++    #[test]
++    fn native_scatter_exclusive_borrows_and_inconsistent_keys() {
++        let len = if cfg!(miri) { 23 } else { 113 };
++        for inconsistent in [false, true] {
++            let mut backing: Vec<_> = (0..len).collect();
++            let mut records: Vec<_> = backing.iter_mut().enumerate().collect();
++            let calls = AtomicUsize::new(0);
++            partition_impl(
++                &mut records,
++                3,
++                0,
++                ByKey(|row: &(usize, &mut usize)| {
++                    let call = calls.fetch_add(1, Ordering::Relaxed);
++                    (if inconsistent {
++                        call ^ row.0
++                    } else {
++                        row.0 * 37
++                    }) as u64
++                }),
++                &mut Buffers::new(),
++                config(4, 5),
++            );
++            let mut ids = Vec::new();
++            for (id, record) in records {
++                assert_eq!(id, *record);
++                *record += 1;
++                ids.push(id);
++            }
++            ids.sort_unstable();
++            assert_eq!(ids, (0..len).collect::<Vec<_>>());
++            assert_eq!(backing, (1..=len).collect::<Vec<_>>());
++        }
++    }
++
++    #[test]
++    #[cfg(not(miri))]
++    fn native_scatter_root_uses_multiple_workers() {
++        let pool = rayon::ThreadPoolBuilder::new()
++            .num_threads(4)
++            .build()
++            .unwrap();
++        let mut rows: Vec<_> = (0..131_072)
++            .map(|id| ((id as u64).wrapping_mul(0x9e3779b97f4a7c15), id))
++            .collect();
++        let mut expected = rows.clone();
++        expected.sort_by_key(|row| row.0 & 255);
++        let workers = AtomicUsize::new(0);
++        pool.install(|| {
++            partition_impl(
++                &mut rows,
++                8,
++                0,
++                ByKey(|row: &(u64, usize)| {
++                    workers.fetch_or(
++                        1usize << rayon::current_thread_index().unwrap(),
++                        Ordering::Relaxed,
++                    );
++                    row.0
++                }),
++                &mut Buffers::new(),
++                Config {
++                    shards: 4,
++                    block_size: None,
++                    parallel: true,
++                },
++            );
++        });
++        assert!(workers.load(Ordering::Relaxed).count_ones() >= 2);
++        assert_eq!(rows, expected);
++    }
++    #[test]
++    fn combined_deferred_exclusive_after_permutation() {
++        let len = if cfg!(miri) { 53 } else { 293 };
++        let mut backing: Vec<_> = (0..len).collect();
++        let mut rows: Vec<_> = backing
++            .iter_mut()
++            .enumerate()
++            .map(|(id, r)| (((id * 73) % 64) as u64, id, r))
++            .collect();
++        let mut expected: Vec<_> = rows.iter().map(|r| (r.0, r.1)).collect();
++        expected.sort_by_key(|r| r.0);
++        let mut pending: Option<(*mut (u64, usize, &mut usize), usize)> = None;
++        let mut callbacks = 0;
++        partition_impl_with_visit(
++            &mut rows,
++            2,
++            4,
++            ByKey(|r: &(u64, usize, &mut usize)| r.0),
++            &mut Buffers::new(),
++            config(3, 7),
++            Some(&mut |child| {
++                callbacks += 1;
++                if let Some((pointer, len)) = pending.take() {
++                    // SAFETY: this is a previous, retired, disjoint bucket;
++                    // the current callback cannot overwrite or borrow it.
++                    let previous = unsafe { core::slice::from_raw_parts_mut(pointer, len) };
++                    previous.sort_by_key(|r| r.0);
++                }
++                pending = Some((child.as_mut_ptr(), child.len()));
++            }),
++        );
++        if let Some((pointer, len)) = pending {
++            // SAFETY: this final retired interval remains exclusively owned.
++            unsafe { core::slice::from_raw_parts_mut(pointer, len) }.sort_by_key(|r| r.0);
++        }
++        assert!(callbacks >= 2);
++        assert_eq!(
++            rows.iter().map(|r| (r.0, r.1)).collect::<Vec<_>>(),
++            expected
++        );
++        for (_, id, r) in rows {
++            assert_eq!(*r, id);
++            *r += 1;
++        }
++        assert_eq!(backing, (1..=len).collect::<Vec<_>>());
++    }
++
++    #[test]
++    fn combined_delayed_callback_panic_exclusive_after_prior_consumption() {
++        let len = if cfg!(miri) { 53 } else { 293 };
++        let mut backing: Vec<_> = (0..len).collect();
++        let mut rows: Vec<_> = backing
++            .iter_mut()
++            .enumerate()
++            .map(|(id, r)| (((id * 73) % 64) as u64, id, r))
++            .collect();
++        let mut pending: Option<(*mut (u64, usize, &mut usize), usize)> = None;
++        let mut callbacks = 0;
++        let mut consumed = 0;
++        let result = catch_unwind(AssertUnwindSafe(|| {
++            partition_impl_with_visit(
++                &mut rows,
++                2,
++                4,
++                ByKey(|r: &(u64, usize, &mut usize)| r.0),
++                &mut Buffers::new(),
++                config(3, 7),
++                Some(&mut |child| {
++                    callbacks += 1;
++                    if let Some((pointer, len)) = pending.take() {
++                        // SAFETY: the earlier retired bucket is disjoint and
++                        // cannot be accessed by the remaining producer work.
++                        let previous = unsafe { core::slice::from_raw_parts_mut(pointer, len) };
++                        previous.sort_by_key(|r| r.0);
++                        consumed += len;
++                        panic!("second callback after previous exclusive bucket consumed");
++                    }
++                    pending = Some((child.as_mut_ptr(), child.len()));
++                }),
++            );
++        }));
++        assert!(result.is_err());
++        assert_eq!(callbacks, 2);
++        assert!(consumed > 0);
++        assert!(pending.is_none());
++        let mut ids = Vec::new();
++        for (_, id, r) in rows {
++            assert_eq!(*r, id);
++            *r += 1;
++            ids.push(id);
++        }
++        ids.sort_unstable();
++        assert_eq!(ids, (0..len).collect::<Vec<_>>());
++        assert_eq!(backing, (1..=len).collect::<Vec<_>>());
++    }
++}
+--- /dev/null
++++ b/rust/tessera-sort/src/block/parallel/compact.rs
+@@ -0,0 +1,356 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Experimental parallel block permutation followed by the existing squeeze.
++//!
++//! Long permutation cycles are split into segments. Their boundary blocks are
++//! snapshotted before writes, so segments are independent even within one cycle.
++//! Short cycles share a worker-local temporary. No initialized references to T
++//! are formed: partial blocks contain uninitialized padding.
++
++use super::*;
++
++struct Addresses<T>(Vec<*mut T>);
++
++// SAFETY: the immutable table only stores addresses. The movement plan assigns
++// each physical destination to exactly one job; sources in other jobs are
++// snapshotted before execution. T is transferred, never concurrently borrowed.
++unsafe impl<T: Send> Sync for Addresses<T> {}
++
++impl<T> Addresses<T> {
++    fn at(&self, physical: u32) -> *mut T {
++        // SAFETY: all IDs were validated while building cycles, before movement.
++        unsafe { *self.0.get_unchecked(physical as usize) }
++    }
++}
++
++struct Piece {
++    blocks: Vec<u32>,
++    // None means a complete short cycle using the worker-local temporary.
++    final_snapshot: Option<usize>,
++}
++
++struct Worker<T> {
++    pieces: Vec<Piece>,
++    temp: Vec<MaybeUninit<T>>,
++    load: usize,
++    completed: usize,
++}
++
++struct Snapshots<T>(Vec<MaybeUninit<T>>);
++
++// SAFETY: during execution snapshots are read exclusively as raw bytes, once
++// for each non-overlapping destination. No shared references to T are formed.
++unsafe impl<T: Send> Sync for Snapshots<T> {}
++
++impl<T> Snapshots<T> {
++    fn at(&self, offset: usize) -> *const T {
++        // SAFETY: construction reserves a complete block at each stored offset.
++        unsafe { self.0.as_ptr().add(offset).cast() }
++    }
++}
++
++fn cells<T>(len: usize) -> Vec<MaybeUninit<T>> {
++    let mut result = Vec::with_capacity(len);
++    result.resize_with(len, MaybeUninit::uninit);
++    result
++}
++
++pub(super) fn permute_blocks<T: Send>(
++    sorter: &mut Sorter<'_, '_, T>,
++    workers: usize,
++    parallel: bool,
++) {
++    permute_with_fault(sorter, workers, parallel, None);
++}
++
++fn permute_with_fault<T: Send>(
++    sorter: &mut Sorter<'_, '_, T>,
++    workers: usize,
++    parallel: bool,
++    fail_after: Option<usize>,
++) {
++    let report = !cfg!(miri) && std::env::var_os("TESSERA_COMPACT_STATS").is_some();
++    let count = sorter.block_order.len();
++    let head = sorter.bucket_count;
++    let block_size = sorter.blocks.block_size;
++    let workers = workers.max(1).min(count);
++    // Each split cycle has at least cap blocks. There are at most count/cap
++    // such cycles and at most 2*count/cap segment boundaries, hence <= 8Q
++    // temporary boundary blocks, plus Q worker blocks. Metadata is O(count).
++    let cap = count.div_ceil(workers.saturating_mul(4)).max(2);
++    let mut visited = alloc::vec![false; count];
++    let mut jobs: Vec<_> = (0..workers)
++        .map(|_| Worker {
++            pieces: Vec::new(),
++            temp: cells(block_size),
++            load: 0,
++            completed: 0,
++        })
++        .collect();
++    let mut boundaries = Vec::new();
++    let mut cycle_count = 0;
++    let mut largest_cycle = 0;
++    let mut put = |piece: Piece| {
++        let worker = jobs.iter_mut().min_by_key(|worker| worker.load).unwrap();
++        worker.load += piece.blocks.len();
++        worker.pieces.push(piece);
++    };
++    for start in 0..count {
++        if visited[start] {
++            continue;
++        }
++        let mut cycle = Vec::new();
++        let mut physical = start;
++        while !visited[physical] {
++            visited[physical] = true;
++            cycle.push(physical as u32);
++            // Target physical ID for logical i is (i + head) mod count.
++            let logical = if physical >= head {
++                physical - head
++            } else {
++                count - (head - physical)
++            };
++            physical = sorter.block_order[logical] as usize;
++        }
++        assert_eq!(physical, start);
++        cycle_count += 1;
++        largest_cycle = largest_cycle.max(cycle.len());
++        if cycle.len() <= 1 {
++            continue;
++        }
++        if cycle.len() <= cap {
++            put(Piece {
++                blocks: cycle,
++                final_snapshot: None,
++            });
++        } else {
++            let base = boundaries.len();
++            let pieces = cycle.len().div_ceil(cap);
++            for chunk in cycle.chunks(cap) {
++                boundaries.push(chunk[0]);
++            }
++            for (index, chunk) in cycle.chunks(cap).enumerate() {
++                put(Piece {
++                    blocks: chunk.to_vec(),
++                    final_snapshot: Some((base + (index + 1) % pieces) * block_size),
++                });
++            }
++        }
++    }
++    if report {
++        eprintln!(
++            "compact cycles: blocks={count} cycles={cycle_count} largest={largest_cycle} cap={cap} boundaries={} worker_loads={:?}",
++            boundaries.len(),
++            jobs.iter().map(|job| job.load).collect::<Vec<_>>()
++        );
++    }
++    let mut snapshots = Snapshots(cells(boundaries.len().checked_mul(block_size).unwrap()));
++    // Calling block_ptr repeatedly must not create fresh overlapping T borrows.
++    // It returns pointers from the original input ancestor or Vec allocations.
++    let addresses = Addresses((0..count).map(|id| sorter.blocks.block_ptr(id)).collect());
++    if parallel {
++        let _ = rayon::current_num_threads();
++    }
++    for (index, physical) in boundaries.into_iter().enumerate() {
++        // SAFETY: full physical blocks and disjoint snapshot blocks are valid
++        // allocations of B cells. Raw copies preserve uninitialized padding.
++        unsafe {
++            ptr::copy_nonoverlapping(
++                addresses.at(physical),
++                snapshots.0.as_mut_ptr().add(index * block_size).cast(),
++                block_size,
++            );
++        }
++    }
++    let used_workers = std::sync::atomic::AtomicUsize::new(0);
++    let completed_pieces = std::sync::atomic::AtomicUsize::new(0);
++    let run = |job: &mut Worker<T>| {
++        if report {
++            if let Some(index) = rayon::current_thread_index() {
++                if index < usize::BITS as usize {
++                    used_workers.fetch_or(1usize << index, std::sync::atomic::Ordering::Relaxed);
++                }
++            }
++        }
++        while job.completed < job.pieces.len() {
++            // SAFETY: completed is checked above and every planned piece is nonempty.
++            let piece = unsafe { job.pieces.get_unchecked(job.completed) };
++            // SAFETY: every piece comes from a nonempty cycle chunk.
++            let first = unsafe { *piece.blocks.get_unchecked(0) };
++            let final_source = if let Some(offset) = piece.final_snapshot {
++                snapshots.at(offset)
++            } else {
++                // SAFETY: the short cycle is wholly owned by this worker and
++                // its temporary is disjoint from every physical block.
++                unsafe {
++                    ptr::copy_nonoverlapping(
++                        addresses.at(first),
++                        job.temp.as_mut_ptr().cast(),
++                        block_size,
++                    );
++                }
++                job.temp.as_ptr().cast()
++            };
++            for pair in piece.blocks.windows(2) {
++                // SAFETY: distinct cycle nodes identify disjoint full blocks;
++                // no other worker reads or writes either node except boundary
++                // sources, which were copied before this phase.
++                unsafe {
++                    ptr::copy_nonoverlapping(
++                        addresses.at(*pair.get_unchecked(1)),
++                        addresses.at(*pair.get_unchecked(0)),
++                        block_size,
++                    );
++                }
++            }
++            // SAFETY: the final source is either this worker's temporary or a
++            // pre-staged boundary. It is disjoint from the final destination.
++            unsafe {
++                ptr::copy_nonoverlapping(
++                    final_source,
++                    addresses.at(*piece.blocks.get_unchecked(piece.blocks.len() - 1)),
++                    block_size,
++                );
++            }
++            job.completed += 1;
++            // Injection is strictly between pieces, after ownership reaches a
++            // recoverable boundary. The monotonically increasing count makes
++            // it one-shot, including during serial completion after unwind.
++            if let Some(fail_after) = fail_after {
++                let completed = completed_pieces.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++                assert_ne!(
++                    completed, fail_after,
++                    "injected scheduling panic between pieces"
++                );
++            }
++        }
++    };
++    // The movement kernel has no allocation, user callbacks, or panicking
++    // operations. A scheduler panic can only leave whole pieces pending. Rayon
++    // joins existing jobs before returning; finish pending work serially using
++    // preallocated state, then restore the input before resuming the panic.
++    let result = unwind::catch(|| {
++        if parallel {
++            jobs.par_iter_mut().for_each(run);
++        } else {
++            jobs.iter_mut().for_each(&run);
++        }
++    });
++    if result.is_err() {
++        jobs.iter_mut().for_each(run);
++    }
++    for (logical, physical) in sorter.block_order.iter_mut().enumerate() {
++        *physical = if logical >= count - head {
++            logical - (count - head)
++        } else {
++            logical + head
++        } as u32;
++    }
++    if report {
++        eprintln!(
++            "compact executing workers: {}",
++            used_workers
++                .load(std::sync::atomic::Ordering::Relaxed)
++                .count_ones()
++        );
++    }
++    if let Err(payload) = result {
++        sorter.compact();
++        unwind::resume(payload);
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::sync::{
++        Arc,
++        atomic::{AtomicUsize, Ordering},
++    };
++
++    struct Owned {
++        key: usize,
++        id: usize,
++        text: String,
++        drops: Arc<Vec<AtomicUsize>>,
++    }
++    impl Drop for Owned {
++        fn drop(&mut self) {
++            assert_eq!(self.text, self.id.to_string());
++            self.drops[self.id].fetch_add(1, Ordering::Relaxed);
++        }
++    }
++
++    #[test]
++    fn compact_short_split_and_one_block_tail_cycles() {
++        // F=9, H=2 gives 13 physical blocks and cap=2 for Q=4.
++        // A seven-node cycle splits 2+2+2+1; the next two nodes
++        // form a short cycle. The final live block has padding.
++        let mut rows: Vec<_> = (0..29).collect();
++        let mut expected = Vec::new();
++        for block in [1, 2, 3, 4, 5, 6, 0, 8, 7] {
++            expected.extend(block * 3..block * 3 + 3);
++        }
++        expected.extend(27..29);
++        {
++            let mut buffers = Buffers::new();
++            let mut sorter = Sorter::new(&mut rows, 2, 3, &mut buffers);
++            sorter.block_order[2..9].rotate_left(1);
++            sorter.block_order.swap(9, 10);
++            permute_blocks(&mut sorter, 4, !cfg!(miri));
++            sorter.compact();
++        }
++        assert_eq!(rows, expected);
++    }
++
++    #[test]
++    fn compact_between_piece_panic_owned_and_exclusive() {
++        let n = if cfg!(miri) { 23 } else { 113 };
++        for fail in [None, Some(0), Some(1)] {
++            let drops = Arc::new((0..n).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++            let mut rows: Vec<_> = (0..n)
++                .map(|id| Owned {
++                    key: id * 37 % 4,
++                    id,
++                    text: id.to_string(),
++                    drops: drops.clone(),
++                })
++                .collect();
++            let result = unwind::catch(|| {
++                let mut buffers = Buffers::new();
++                let mut sorter = Sorter::new(&mut rows, 4, 3, &mut buffers);
++                assert!(sorter.step_with_ends(|row| row.key, false).0.is_none());
++                permute_with_fault(&mut sorter, 4, !cfg!(miri), fail);
++                sorter.compact();
++            });
++            assert_eq!(result.is_err(), fail.is_some());
++            let mut expected: Vec<_> = (0..n).collect();
++            expected.sort_by_key(|id| id * 37 % 4);
++            assert_eq!(rows.iter().map(|r| r.id).collect::<Vec<_>>(), expected);
++            assert!(drops.iter().all(|d| d.load(Ordering::Relaxed) == 0));
++            drop(rows);
++            assert!(drops.iter().all(|d| d.load(Ordering::Relaxed) == 1));
++
++            let mut backing: Vec<_> = (0..n).collect();
++            let mut refs: Vec<_> = backing.iter_mut().collect();
++            let result = unwind::catch(|| {
++                let mut buffers = Buffers::new();
++                let mut sorter = Sorter::new(&mut refs, 4, 3, &mut buffers);
++                assert!(
++                    sorter
++                        .step_with_ends(|row| **row * 37 % 4, false)
++                        .0
++                        .is_none()
++                );
++                permute_with_fault(&mut sorter, 4, !cfg!(miri), fail);
++                sorter.compact();
++            });
++            assert_eq!(result.is_err(), fail.is_some());
++            assert_eq!(refs.iter().map(|r| **r).collect::<Vec<_>>(), expected);
++            for record in refs {
++                *record += 1;
++            }
++            assert_eq!(backing, (1..=n).collect::<Vec<_>>());
++        }
++    }
++}
+--- a/rust/tessera-sort/src/engine.rs
++++ b/rust/tessera-sort/src/engine.rs
+@@ -1078,6 +1078,8 @@
+                 key,
+             );
+             core::mem::swap(&mut self.source, destination);
++            #[cfg(all(test, feature = "rayon"))]
++            crate::test_witness::moved();
+             largest
+         }
+     }
+@@ -1356,3 +1358,11 @@
+         }
+     }
+ }
++
++#[cfg(feature = "rayon")]
++mod parallel;
++#[cfg(feature = "rayon")]
++pub(crate) use parallel::{sort as par_sort, use_serial as par_use_serial};
++
++#[cfg(test)]
++mod current_main_tests;
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/current_main_tests.rs
+@@ -0,0 +1,147 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Attribute the shared narrow-window route to Direct, never `ByKey` payloads.
++
++use super::*;
++use crate::RadixKey;
++use crate::key::ByKey;
++use alloc::sync::Arc;
++use core::cmp::Reverse;
++use core::sync::atomic::{AtomicUsize, Ordering::Relaxed};
++
++#[derive(Clone)]
++pub(super) struct Counted<E> {
++    inner: E,
++    attempts: Arc<AtomicUsize>,
++    pub(super) fills: Arc<AtomicUsize>,
++}
++
++impl<T, E: Extract<T>> Extract<T> for Counted<E> {
++    type Value = E::Value;
++
++    fn key(&mut self, record: &T) -> Self::Value {
++        self.inner.key(record)
++    }
++
++    fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
++        self.attempts.fetch_add(1, Relaxed);
++        let filled = self.inner.try_count_window(records, low, width);
++        self.fills.fetch_add(usize::from(filled), Relaxed);
++        filled
++    }
++}
++
++pub(super) fn counted<E>(inner: E) -> Counted<E> {
++    Counted {
++        inner,
++        attempts: Arc::new(AtomicUsize::new(0)),
++        fills: Arc::new(AtomicUsize::new(0)),
++    }
++}
++
++fn check_window<K: RadixKey>(input: Vec<K>, low: usize, width: usize) {
++    let mask = ((1u128 << width) - 1) << low;
++    let fixed = input[0].encode().to_u128() & !mask;
++    assert!(
++        input
++            .iter()
++            .all(|value| value.encode().to_u128() & !mask == fixed)
++    );
++    let mut expected: Vec<_> = input.iter().map(|value| value.encode()).collect();
++    expected.sort();
++    let mut actual = input.clone();
++    assert!(Direct.try_count_window(&mut actual, low, width));
++    assert!(actual.iter().map(|value| value.encode()).eq(expected));
++
++    // A fresh engine call must actually use the hook, not just return the
++    // correct output by taking a tile or an ordered-input early return.
++    let mut actual = input.clone();
++    let mut trace = counted(Direct);
++    sort_with_tile_bytes::<_, _, false>(&mut actual, &mut trace, None, 64);
++    assert_eq!(trace.fills.load(Relaxed), 1);
++    assert!(actual.windows(2).all(|w| w[0].encode() <= w[1].encode()));
++
++    let mut rows: Vec<_> = input
++        .into_iter()
++        .enumerate()
++        .map(|(id, key)| (key, id))
++        .collect();
++    let mut wanted = rows.clone();
++    wanted.sort_by_key(|row| row.0.encode());
++    let mut trace = counted(ByKey(|row: &(K, usize)| row.0));
++    sort_with_tile_bytes::<_, _, true>(&mut rows, &mut trace, None, 64);
++    assert!(trace.attempts.load(Relaxed) > 0);
++    assert_eq!(trace.fills.load(Relaxed), 0);
++    assert!(
++        rows.iter()
++            .map(|row| (row.0.encode(), row.1))
++            .eq(wanted.iter().map(|row| (row.0.encode(), row.1)))
++    );
++}
++
++#[test]
++fn narrow_count_all_integer_widths_and_reverse() {
++    let len = if cfg!(miri) { 129 } else { 1025 };
++    macro_rules! check {
++        ($($ty:ty),*) => {$(
++            let bits = core::mem::size_of::<$ty>() * 8;
++            for (low, width) in [(0, 3), (bits / 2, 4), (bits - 8, 8)] {
++                let mask = ((1u128 << width) - 1) << low;
++                let base = 0x9a31_65f0_c07b_12e4_a97c_d4e5_83f6_b2d1u128 & !mask;
++                let input: Vec<$ty> = (0..len)
++                    .map(|id| (base | (((id as u128).wrapping_mul(181) << low) & mask)) as $ty)
++                    .collect();
++                check_window(input.clone(), low, width);
++                check_window(input.into_iter().map(Reverse).collect(), low, width);
++            }
++        )*};
++    }
++    check!(
++        u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
++    );
++}
++
++#[test]
++fn narrow_count_float_bits_preserve_nan_payloads_and_signs() {
++    let len = if cfg!(miri) { 129 } else { 1025 };
++    // Keep the sign fixed: flipping it would complement every encoded bit and
++    // violate the small-window precondition. These groups cover each sign,
++    // NaN payloads, infinities, zeros/subnormals and exponent-only variation.
++    for sign in [0u32, 1 << 31] {
++        for (base, low) in [(0x7fc0_0000, 0), (0x7f80_0000, 0), (0, 0), (0, 23)] {
++            let input: Vec<_> = (0..len)
++                .map(|id| {
++                    f32::from_bits(sign | base | (((id as u32).wrapping_mul(181) & 255) << low))
++                })
++                .collect();
++            check_window(input.clone(), low, 8);
++            check_window(input.into_iter().map(Reverse).collect(), low, 8);
++        }
++    }
++    for sign in [0u64, 1 << 63] {
++        for (base, low) in [
++            (0x7ff8_0000_0000_0000, 0),
++            (0x7ff0_0000_0000_0000, 0),
++            (0, 0),
++            (0, 52),
++        ] {
++            let input: Vec<_> = (0..len)
++                .map(|id| {
++                    f64::from_bits(sign | base | (((id as u64).wrapping_mul(181) & 255) << low))
++                })
++                .collect();
++            check_window(input.clone(), low, 8);
++            check_window(input.into_iter().map(Reverse).collect(), low, 8);
++        }
++    }
++}
++
++#[test]
++fn narrow_count_declines_invalid_width_without_touching_records() {
++    for width in [0, 9, 64] {
++        let mut values = [3u64, 1, 2];
++        assert!(!Direct.try_count_window(&mut values, 0, width));
++        assert_eq!(values, [3, 1, 2]);
++    }
++    assert!(Direct.try_count_window(&mut [] as &mut [u128], 64, 8));
++}
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/parallel.rs
+@@ -0,0 +1,533 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Parallel completion of fully materialized, disjoint radix buckets.
++
++use super::*;
++
++// A task needs several tiles to amortize scheduling and independent scratch.
++const MIN_TASK_BYTES: usize = 256 * 1024;
++// At 512 KiB, the first measured schedule did not consistently beat the
++// sequential call; keep at least sixteen tiles before paying for task setup.
++const MIN_PARALLEL_BYTES: usize = 1024 * 1024;
++
++/// Selects the serial entry point before adapting a user key to a shared borrow.
++#[inline]
++pub(crate) fn use_serial<T>(len: usize) -> bool {
++    len < 2
++        || core::mem::size_of::<T>() == 0
++        || len.saturating_mul(core::mem::size_of::<T>()) < MIN_PARALLEL_BYTES
++        || rayon::current_num_threads() == 1
++}
++
++pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
++    arr: &mut [T],
++    mut key: E,
++) {
++    let record_bytes = core::mem::size_of::<T>();
++    let bytes = arr.len().saturating_mul(record_bytes);
++    if arr.len() < 2
++        || record_bytes == 0
++        || bytes < MIN_PARALLEL_BYTES
++        || rayon::current_num_threads() == 1
++    {
++        super::sort::<T, E, CACHED>(arr, &mut key, None);
++        return;
++    }
++    let tile_bytes = TILE_BYTES
++        .max(record_bytes)
++        .min(MAX_TILE_RECORDS.saturating_mul(record_bytes));
++    let Some(varying) = prepare_sort(arr, &mut key, tile_bytes) else {
++        return;
++    };
++    // Keep 128-bit keys on the existing 64-bit kernels when only one half varies.
++    if E::Value::BITS > 64 {
++        if varying >> 64 == 0 {
++            sort_prepared::<T, _, CACHED>(arr, Narrow::<E, 0>(key), varying, tile_bytes);
++            return;
++        }
++        if varying & ((1u128 << 64) - 1) == 0 {
++            sort_prepared::<T, _, CACHED>(arr, Narrow::<E, 64>(key), varying >> 64, tile_bytes);
++            return;
++        }
++    }
++    sort_prepared::<T, E, CACHED>(arr, key, varying, tile_bytes);
++}
++
++#[derive(Clone)]
++struct Narrow<E, const SHIFT: usize>(E);
++impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for Narrow<E, SHIFT> {
++    type Value = u64;
++    #[inline]
++    fn key(&mut self, record: &T) -> u64 {
++        (self.0.key(record).to_u128() >> SHIFT) as u64
++    }
++
++    fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
++        // Narrowing is selected only when the other half is constant, so this
++        // translated window still covers every varying encoded-key bit.
++        self.0.try_count_window(records, low + SHIFT, width)
++    }
++}
++
++fn sort_prepared<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
++    arr: &mut [T],
++    mut key: E,
++    varying: u128,
++    tile_bytes: usize,
++) {
++    let bytes = arr.len().saturating_mul(core::mem::size_of::<T>());
++    #[cfg(test)]
++    let hooks = crate::test_witness::current();
++    let mut workspace = Workspace::new();
++    let low = varying.trailing_zeros() as usize;
++    let top = bit_len(varying);
++    // A single digit has no unfinished children. Preserve the adaptive serial
++    // equality and outlier routes until there is useful independent work.
++    let mut keys = [KeyValue::<T, E>::from_usize(0); MODE_SAMPLE_LEN];
++    sample_keys(arr, &mut keys, &mut key);
++    let equal = sample_mode(&mut keys);
++    let bit = KeyValue::<T, E>::from_usize(1) << KeyValue::<T, E>::from_usize(top - 1);
++    if top - low <= SPLIT_BITS {
++        // The full adaptive scan established `varying`, so this window covers
++        // every key difference. Direct keys can use the shared counting fill;
++        // payload-bearing ByKey records decline and keep the native partition.
++        if key.try_count_window(arr, low, top - low) {
++            return;
++        }
++        #[cfg(test)]
++        crate::test_witness::single_route(&hooks);
++        block::partition_digit_parallel_with_visit(
++            arr,
++            top - low,
++            low,
++            key,
++            workspace.block_buffers(),
++            rayon::current_num_threads().min((bytes / MIN_TASK_BYTES).max(1)),
++            &mut |_| {},
++        );
++        return;
++    }
++    if equal.is_some() || outlier_run(arr, &keys, bit, &mut key).is_some() {
++        Sorter::<T, E, CACHED> {
++            workspace: &mut workspace,
++            key: &mut key,
++            tile_bytes,
++        }
++        .sort_node(arr, varying);
++        return;
++    }
++    let digit = choose_split_digit(arr, top, tile_bytes, &mut key);
++    let digit = if let Some(cap) = std::env::var("TESSERA_PIPELINE_ROOT_BITS")
++        .ok()
++        .and_then(|value| value.parse::<usize>().ok())
++    {
++        top_window(varying, cap.clamp(1, digit.width)).0
++    } else {
++        digit
++    };
++    let candidate = varying & !digit.mask::<E::Value>().to_u128();
++    // Prototype: child work starts as soon as compact has retired its source
++    // blocks. Jobs only own materialized, pairwise disjoint bucket intervals.
++    let worker_count = rayon::current_num_threads().min((bytes / MIN_TASK_BYTES).max(1));
++    if worker_count < 2 {
++        Sorter::<T, E, CACHED> {
++            workspace: &mut workspace,
++            key: &mut key,
++            tile_bytes,
++        }
++        .sort_node(arr, varying);
++        return;
++    }
++    let mut batch = Vec::new();
++    let mut batch_records = 0usize;
++    let batch_bytes = std::env::var("TESSERA_PIPELINE_BATCH_BYTES")
++        .ok()
++        .and_then(|v| v.parse::<usize>().ok())
++        .unwrap_or(128 * 1024);
++    rayon::scope(|scope| {
++        // The sender lives inside the scope body. A producer panic therefore
++        // disconnects the channel before scope waits for consumers to finish.
++        #[cfg(test)]
++        let _publishing_witness = crate::test_witness::PublishingGuard::new();
++        #[cfg(test)]
++        let _sender_witness = crate::test_witness::SenderGuard::new(hooks.clone());
++        let (sender, receiver) = std::sync::mpsc::channel();
++        let receiver = std::sync::Arc::new(std::sync::Mutex::new(receiver));
++        let mut launched = false;
++        block::partition_digit_parallel_with_visit(
++            arr,
++            digit.width,
++            digit.shift,
++            key.clone(),
++            workspace.block_buffers(),
++            worker_count,
++            &mut |child| {
++                let child_key = &key;
++                batch_records += child.len();
++                batch.push(Materialized {
++                    pointer: child.as_mut_ptr(),
++                    len: child.len(),
++                });
++                if batch_records.saturating_mul(core::mem::size_of::<T>()) >= batch_bytes {
++                    sender.send(core::mem::take(&mut batch)).unwrap();
++                    #[cfg(test)]
++                    crate::test_witness::published(&hooks);
++                    batch_records = 0;
++                    if !launched {
++                        // Finish potentially reentrant generic Clone code
++                        // before publishing any consumer that waits for us.
++                        let keys: Vec<_> = (1..worker_count).map(|_| child_key.clone()).collect();
++                        launched = true;
++                        #[cfg(test)]
++                        crate::test_witness::publication_started();
++                        for mut child_key in keys {
++                            let receiver = receiver.clone();
++                            #[cfg(test)]
++                            let consumer_hooks = hooks.clone();
++                            scope.spawn(move |_| {
++                                #[cfg(test)]
++                                let _consumer_witness =
++                                    crate::test_witness::PhaseGuard::consumer(consumer_hooks);
++                                consume_queue::<T, E, CACHED>(
++                                    &receiver,
++                                    candidate,
++                                    &mut child_key,
++                                    tile_bytes,
++                                );
++                            });
++                        }
++                    }
++                }
++                #[cfg(test)]
++                crate::test_witness::callback_finished(&hooks);
++            },
++        );
++        if batch_records != 0 {
++            sender.send(core::mem::take(&mut batch)).unwrap();
++        }
++        // Disconnect before this producer joins the consumers. No job blocks
++        // on the availability of a particular worker or holds a queue lock
++        // across a user key call, including reentrant Rayon operations.
++        drop(sender);
++        #[cfg(test)]
++        crate::test_witness::publication_closed();
++        consume_queue::<T, E, CACHED>(&receiver, candidate, &mut key, tile_bytes);
++    });
++}
++
++fn consume_queue<T, E: Extract<T>, const CACHED: bool>(
++    receiver: &std::sync::Mutex<std::sync::mpsc::Receiver<Vec<Materialized<T>>>>,
++    candidate: u128,
++    key: &mut E,
++    tile_bytes: usize,
++) {
++    let mut workspace = Workspace::new();
++    loop {
++        #[cfg(test)]
++        let queue_witness = crate::test_witness::QueueGuard::new();
++        let next = receiver
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .try_recv();
++        #[cfg(test)]
++        drop(queue_witness);
++        match next {
++            Ok(buckets) => {
++                consume_buckets::<T, E, CACHED>(buckets, candidate, key, &mut workspace, tile_bytes)
++            }
++            Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
++            Err(std::sync::mpsc::TryRecvError::Empty) => {
++                std::thread::yield_now();
++            }
++        }
++    }
++}
++
++fn consume_buckets<T, E: Extract<T>, const CACHED: bool>(
++    buckets: Vec<Materialized<T>>,
++    candidate: u128,
++    key: &mut E,
++    workspace: &mut Workspace<T>,
++    tile_bytes: usize,
++) {
++    for source in buckets {
++        // SAFETY: compact retired these records before publishing the task;
++        // tasks cover disjoint buckets and scope joins before the input borrow
++        // ends. No task aliases root scratch or another job's workspace.
++        let child = unsafe { source.slice() };
++        #[cfg(test)]
++        crate::test_witness::new_bucket();
++        if child.len() > 1 {
++            let varying = scan_varying_bits(child, candidate, key);
++            Sorter::<T, E, CACHED> {
++                workspace,
++                key,
++                tile_bytes,
++            }
++            .sort_node(child, varying);
++        }
++    }
++}
++
++struct Materialized<T> {
++    pointer: *mut T,
++    len: usize,
++}
++
++// SAFETY: ownership of a materialized disjoint interval is transferred once
++// into its scoped job. T only needs Send; no shared T references are created.
++unsafe impl<T: Send> Send for Materialized<T> {}
++
++impl<T> Materialized<T> {
++    /// # Safety
++    /// The interval must be fully initialized, uniquely owned by this task,
++    /// and remain allocated for the lifetime selected by the scoped caller.
++    unsafe fn slice<'a>(self) -> &'a mut [T] {
++        // SAFETY: the scoped caller guarantees this interval's unique ownership.
++        unsafe { core::slice::from_raw_parts_mut(self.pointer, self.len) }
++    }
++}
++
++/// Keeps the serial adaptive checks without changing the sequential entry point.
++fn prepare_sort<T, E: Extract<T>>(arr: &mut [T], key: &mut E, tile_bytes: usize) -> Option<u128> {
++    let record_bytes = core::mem::size_of::<T>();
++    let sampled = probe_order(arr, key);
++    match sampled {
++        Order::Ascending => return None,
++        Order::Descending => {
++            reverse_stably(arr, key);
++            return None;
++        }
++        Order::Flat | Order::Unsorted => {}
++    }
++    if sampled == Order::Unsorted {
++        let probe = (tile_bytes / record_bytes).max(2).min(arr.len());
++        let swaps = if probe == arr.len() {
++            key.insertion_sort(arr, probe)
++        } else {
++            // No retained workspace is exposed by the parallel API, so these
++            // Copy keys can use a typed temporary without raw scratch casts.
++            let mut keys: Vec<_> = arr[..probe].iter().map(|record| key.key(record)).collect();
++            match Direct.insertion_sort(&mut keys, probe) {
++                Some(0) => None,
++                Some(swaps) => key.insertion_sort(arr, swaps * arr.len() / probe),
++                None => None,
++            }
++        };
++        if swaps.is_some() {
++            return None;
++        }
++    }
++    let varying = block::varying_key_bits(arr, key);
++    if varying == 0 {
++        return None;
++    }
++    if sampled == Order::Flat {
++        match confirm_order(arr, key) {
++            Order::Ascending => return None,
++            Order::Descending => {
++                reverse_stably(arr, key);
++                return None;
++            }
++            _ => {}
++        }
++    }
++    Some(varying)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn delayed_pipeline_consumption_preserves_owned_borrows() {
++        let mut values: Vec<_> = (0..293u64)
++            .map(|i| ((i * 73) % 64, alloc::format!("value {i}")))
++            .collect();
++        let mut expected = values.clone();
++        expected.sort_by_key(|row| row.0);
++        let mut pending = Vec::new();
++        let mut root = Workspace::new();
++        let mut worker = Workspace::new();
++        let mut key = crate::key::ByKey(|row: &(u64, alloc::string::String)| row.0);
++        block::partition_digit_with_ends(
++            &mut values,
++            2,
++            4,
++            &mut key,
++            root.block_buffers(),
++            &mut |child, key| {
++                consume_buckets::<_, _, true>(
++                    core::mem::take(&mut pending),
++                    15,
++                    key,
++                    &mut worker,
++                    TILE_BYTES,
++                );
++                pending.push(Materialized {
++                    pointer: child.as_mut_ptr(),
++                    len: child.len(),
++                });
++            },
++        );
++        consume_buckets::<_, _, true>(pending, 15, &mut key, &mut worker, TILE_BYTES);
++        assert_eq!(values, expected);
++    }
++    #[test]
++    fn delayed_pipeline_consumption_preserves_exclusive_records() {
++        let mut payloads: Vec<_> = (0..293u64).collect();
++        let mut values: Vec<_> = payloads
++            .iter_mut()
++            .map(|payload| (((*payload * 73) % 64), payload))
++            .collect();
++        let mut expected: Vec<_> = values.iter().map(|row| (row.0, *row.1)).collect();
++        expected.sort_by_key(|row| row.0);
++        let mut pending = Vec::new();
++        let mut root = Workspace::new();
++        let mut worker = Workspace::new();
++        let mut key = crate::key::ByKey(|row: &(u64, &mut u64)| row.0);
++        block::partition_digit_with_ends(
++            &mut values,
++            2,
++            4,
++            &mut key,
++            root.block_buffers(),
++            &mut |child, key| {
++                consume_buckets::<_, _, true>(
++                    core::mem::take(&mut pending),
++                    15,
++                    key,
++                    &mut worker,
++                    TILE_BYTES,
++                );
++                pending.push(Materialized {
++                    pointer: child.as_mut_ptr(),
++                    len: child.len(),
++                });
++            },
++        );
++        consume_buckets::<_, _, true>(pending, 15, &mut key, &mut worker, TILE_BYTES);
++        let actual: Vec<_> = values.iter().map(|row| (row.0, *row.1)).collect();
++        assert_eq!(actual, expected);
++    }
++
++    #[test]
++    #[cfg(not(miri))]
++    fn reentrant_rayon_keys_do_not_hold_worker_locks() {
++        let mut values: Vec<_> = (0..131_073u64)
++            .map(|i| i.wrapping_mul(0x9e3779b97f4a7c15))
++            .collect();
++        let mut expected = values.clone();
++        expected.sort();
++        let calls = std::sync::atomic::AtomicUsize::new(0);
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(4)
++            .build()
++            .unwrap()
++            .install(|| {
++                crate::par_stable_sort_by_key(&mut values, |key| {
++                    let call = calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++                    if call % 1024 == 0 {
++                        rayon::join(|| (), || ());
++                    }
++                    *key
++                });
++            });
++        assert_eq!(values, expected);
++    }
++
++    #[test]
++    #[cfg(not(miri))]
++    fn producer_clone_panic_preserves_records() {
++        struct PanickingClone(std::sync::Arc<std::sync::atomic::AtomicUsize>);
++        impl Clone for PanickingClone {
++            fn clone(&self) -> Self {
++                if self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 1 {
++                    panic!("producer clone panic");
++                }
++                Self(self.0.clone())
++            }
++        }
++        impl Extract<u64> for PanickingClone {
++            type Value = u64;
++            fn key(&mut self, record: &u64) -> u64 {
++                *record
++            }
++        }
++        let mut values: Vec<_> = (0..131_073u64)
++            .map(|i| i.wrapping_mul(0x9e3779b97f4a7c15))
++            .collect();
++        let mut expected = values.clone();
++        expected.sort();
++        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++            rayon::ThreadPoolBuilder::new()
++                .num_threads(4)
++                .build()
++                .unwrap()
++                .install(|| {
++                    sort::<_, _, false>(
++                        &mut values,
++                        PanickingClone(std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0))),
++                    );
++                });
++        }));
++        assert!(result.is_err());
++        values.sort();
++        assert_eq!(values, expected);
++    }
++    #[test]
++    #[cfg(not(miri))]
++    fn producer_unwind_disconnects_started_consumers() {
++        let mut values: Vec<_> = (0..1021u64)
++            .map(|i| i.wrapping_mul(0x9e3779b97f4a7c15))
++            .collect();
++        let mut expected = values.clone();
++        expected.sort();
++        let started = std::sync::atomic::AtomicBool::new(false);
++        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++            rayon::ThreadPoolBuilder::new()
++                .num_threads(2)
++                .build()
++                .unwrap()
++                .install(|| {
++                    rayon::scope(|scope| {
++                        let (sender, receiver) = std::sync::mpsc::channel();
++                        let receiver = std::sync::Arc::new(std::sync::Mutex::new(receiver));
++                        sender
++                            .send(alloc::vec![Materialized {
++                                pointer: values.as_mut_ptr(),
++                                len: values.len(),
++                            }])
++                            .unwrap();
++                        let started_ref = &started;
++                        scope.spawn(move |_| {
++                            started_ref.store(true, std::sync::atomic::Ordering::Release);
++                            consume_queue::<_, _, false>(
++                                &receiver,
++                                u128::MAX,
++                                &mut crate::key::Direct,
++                                TILE_BYTES,
++                            );
++                        });
++                        while !started.load(std::sync::atomic::Ordering::Acquire) {
++                            std::thread::yield_now();
++                        }
++                        panic!("producer after worker start");
++                    });
++                });
++        }));
++        assert!(result.is_err());
++        assert!(started.load(std::sync::atomic::Ordering::Acquire));
++        values.sort();
++        assert_eq!(values, expected);
++    }
++}
++
++#[cfg(all(test, not(miri)))]
++mod safety_gap_tests;
++
++#[cfg(all(test, not(miri)))]
++mod progress_tests;
++
++#[cfg(test)]
++mod current_main_tests;
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/parallel/current_main_tests.rs
+@@ -0,0 +1,177 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Verify the owned parallel half-key adapter forwards the shared count hook.
++
++use super::*;
++#[cfg(not(miri))]
++use crate::engine::current_main_tests::counted;
++use crate::key::ByKey;
++#[cfg(not(miri))]
++use core::sync::atomic::Ordering::Relaxed;
++
++#[test]
++fn owned_narrow_forwards_direct_count_and_by_key_declines() {
++    for shift in [0usize, 64] {
++        let base = 0x19b2_34c5_d6e7_f809_a1b2_c3d4_e5f6_0000u128 & !(255u128 << shift);
++        let input: Vec<_> = (0..129)
++            .map(|id| base | (((id as u128 * 181) & 255) << shift))
++            .collect();
++        let mut expected = input.clone();
++        expected.sort();
++        let mut actual = input.clone();
++        if shift == 0 {
++            assert!(Narrow::<_, 0>(Direct).try_count_window(&mut actual, 0, 8));
++        } else {
++            assert!(Narrow::<_, 64>(Direct).try_count_window(&mut actual, 0, 8));
++        }
++        assert_eq!(actual, expected);
++        let mut actual = input.clone();
++        let key = ByKey(|record: &u128| *record);
++        let filled = if shift == 0 {
++            Narrow::<_, 0>(key).try_count_window(&mut actual, 0, 8)
++        } else {
++            Narrow::<_, 64>(key).try_count_window(&mut actual, 0, 8)
++        };
++        assert!(!filled);
++        assert_eq!(actual, input);
++    }
++}
++
++#[cfg(not(miri))]
++#[test]
++fn parallel_single_digit_root_counts_direct_and_partitions_by_key() {
++    for threads in [2, 3, 4] {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(threads)
++            .build()
++            .unwrap()
++            .install(|| {
++                for low in [0usize, 57, 64, 120] {
++                    let width = if low == 57 { 7 } else { 8 };
++                    let mask = ((1u128 << width) - 1) << low;
++                    let base = 0x19b2_34c5_d6e7_f809_a1b2_c3d4_e5f6_0000u128 & !mask;
++                    let input: Vec<_> = (0..65_537)
++                        .map(|id| base | (((id as u128 * 181) << low) & mask))
++                        .collect();
++                    let mut expected = input.clone();
++                    expected.sort();
++                    let trace = counted(Direct);
++                    let fills = trace.fills.clone();
++                    let mut actual = input.clone();
++                    sort::<_, _, false>(&mut actual, trace);
++                    assert_eq!(actual, expected);
++                    assert_eq!(fills.load(Relaxed), 1, "threads={threads} low={low}");
++
++                    let mut rows: Vec<_> = input
++                        .into_iter()
++                        .enumerate()
++                        .map(|(id, key)| (key, id))
++                        .collect();
++                    let mut wanted = rows.clone();
++                    wanted.sort_by_key(|row| row.0);
++                    let trace = counted(ByKey(|row: &(u128, usize)| row.0));
++                    let fills = trace.fills.clone();
++                    sort::<_, _, true>(&mut rows, trace);
++                    assert_eq!(fills.load(Relaxed), 0);
++                    assert_eq!(rows, wanted);
++                }
++            });
++    }
++}
++
++#[cfg(not(miri))]
++#[test]
++fn parallel_narrow_half_children_keep_direct_count_hook() {
++    rayon::ThreadPoolBuilder::new()
++        .num_threads(4)
++        .build()
++        .unwrap()
++        .install(|| {
++            for shift in [0usize, 64] {
++                // Two varying bytes separated by a gap force a root partition with
++                // narrow-window children large enough to exceed a tile. The default
++                // eight-bit root leaves about 8192 records per child, above 4096.
++                let base =
++                    0x0123_4567_89ab_cdef_1122_3344_5566_7788u128 & !(0xff00_00ffu128 << shift);
++                let input: Vec<_> = (0..2_097_153)
++                    .map(|id| {
++                        let mixed = (id as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
++                        base | (((u128::from(mixed) & 255)
++                            | ((u128::from(mixed >> 32) & 255) << 24))
++                            << shift)
++                    })
++                    .collect();
++                let mut expected = input.clone();
++                expected.sort();
++                let trace = counted(Direct);
++                let fills = trace.fills.clone();
++                let mut actual = input;
++                sort::<_, _, false>(&mut actual, trace);
++                assert_eq!(actual, expected);
++                assert!(
++                    fills.load(Relaxed) > 1,
++                    "child counting was not reached at half {shift}"
++                );
++            }
++        });
++}
++
++#[cfg(not(miri))]
++#[test]
++#[ignore = "untimed 10M root geometry diagnostic, run explicitly"]
++fn root_geometry_at_10m_matches_frozen_native_policy() {
++    use crate::test_witness::{self, Hooks};
++    use std::sync::Arc;
++    const LEN: usize = 10_000_000;
++    let mut state = 1u64;
++    let input: Vec<_> = (0..LEN)
++        .map(|_| {
++            state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
++            let mut value = state;
++            value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
++            value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
++            value ^ (value >> 31)
++        })
++        .collect();
++    let pool = rayon::ThreadPoolBuilder::new()
++        .num_threads(8)
++        .build()
++        .unwrap();
++    for record_bytes in [8usize, 16] {
++        let hooks = Arc::new(Hooks::default());
++        pool.install(|| {
++            test_witness::with_hooks(hooks.clone(), || {
++                if record_bytes == 8 {
++                    let mut actual = input.clone();
++                    let mut expected = input.clone();
++                    expected.sort();
++                    crate::par_stable_sort(&mut actual);
++                    assert_eq!(actual, expected);
++                } else {
++                    let mut actual: Vec<_> = input
++                        .iter()
++                        .copied()
++                        .enumerate()
++                        .map(|(id, key)| (key, id))
++                        .collect();
++                    let mut expected = actual.clone();
++                    expected.sort_by_key(|row| row.0);
++                    crate::par_stable_sort_by_key(&mut actual, |row| row.0);
++                    assert_eq!(actual, expected);
++                }
++            })
++        });
++        let geometry = hooks.root_geometry.lock().unwrap();
++        assert_eq!(geometry.len(), 1);
++        let (len, radix, block_size, shards) = geometry[0];
++        assert_eq!((len, radix, shards), (LEN, 256, 8));
++        let previous = ((20.0 * LEN as f64) / (2.0 * 8.0 * 256.0 * record_bytes as f64))
++            .sqrt()
++            .ceil() as usize;
++        let previous = previous.max(1024 / record_bytes).max(32).max(1);
++        assert_eq!(block_size, previous);
++        println!(
++            "root_geometry n={len} record_bytes={record_bytes} workers=8 radix={radix} block_size={block_size} shards={shards} frozen_formula={previous}"
++        );
++    }
++}
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/parallel/progress_tests.rs
+@@ -0,0 +1,272 @@
++// SPDX-License-Identifier: BSD-2-Clause
++//! Bounded tests for cooperating nested Rayon work, not arbitrary user blocking.
++use crate::test_witness::{self, Hooks, Phase};
++use std::cell::Cell;
++use std::panic::{AssertUnwindSafe, catch_unwind};
++use std::sync::{
++    Arc,
++    atomic::{AtomicUsize, Ordering::SeqCst},
++};
++use std::time::{Duration, Instant};
++
++pub(crate) fn bounded(name: &str, run: impl FnOnce()) {
++    if std::env::var("TESSERA_PROGRESS_CHILD").as_deref() == Ok(name) {
++        run();
++        return;
++    }
++    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
++        .args(["--exact", name, "--nocapture", "--test-threads=1"])
++        .env("TESSERA_PROGRESS_CHILD", name)
++        .spawn()
++        .unwrap();
++    let deadline = Instant::now() + Duration::from_secs(35);
++    loop {
++        if let Some(status) = child.try_wait().unwrap() {
++            assert!(status.success(), "bounded child failed: {status}");
++            return;
++        }
++        if Instant::now() > deadline {
++            child.kill().unwrap();
++            let _ = child.wait();
++            panic!("nested public sort exceeded 35-second subprocess deadline: {name}");
++        }
++        std::thread::sleep(Duration::from_millis(10));
++    }
++}
++fn key(id: usize) -> u64 {
++    (id as u64).wrapping_mul(0x9e3779b97f4a7c15)
++}
++struct Nested {
++    hooks: Arc<Hooks>,
++    workers: AtomicUsize,
++    claimed: AtomicUsize,
++    active: AtomicUsize,
++    peak: AtomicUsize,
++    completed: AtomicUsize,
++}
++impl Nested {
++    fn new(target: usize) -> Self {
++        Self {
++            hooks: Arc::new(Hooks::progress(target)),
++            workers: AtomicUsize::new(0),
++            claimed: AtomicUsize::new(0),
++            active: AtomicUsize::new(0),
++            peak: AtomicUsize::new(0),
++            completed: AtomicUsize::new(0),
++        }
++    }
++    fn invoke(&self, fail: bool) {
++        test_witness::assert_user_allowed();
++        if test_witness::phase() != Phase::Consumer {
++            return;
++        }
++        let worker = rayon::current_thread_index().unwrap();
++        if self.workers.fetch_or(1 << worker, SeqCst) & (1 << worker) != 0 {
++            return;
++        }
++        if self.claimed.fetch_add(1, SeqCst) >= self.hooks.progress_target {
++            return;
++        }
++        let active = self.active.fetch_add(1, SeqCst) + 1;
++        self.peak.fetch_max(active, SeqCst);
++        self.hooks.progress_arrive();
++        // Isolate the nested invocation's instrumentation from the outer test's
++        // rendezvous. These public calls still use the same fixed Rayon pool.
++        test_witness::with_hooks(Arc::new(Hooks::default()), || {
++            let mut direct: Vec<_> = (0..131_073).map(key).collect();
++            crate::par_stable_sort(&mut direct);
++            assert!(direct.windows(2).all(|w| w[0] <= w[1]));
++            let (left, right) = rayon::join(
++                || {
++                    let mut rows: Vec<_> = (0..65_537).map(|id| (key(id), id)).collect();
++                    crate::par_stable_sort_by_key(&mut rows, |r| {
++                        test_witness::assert_user_allowed();
++                        r.0
++                    });
++                    assert!(rows.windows(2).all(|w| w[0].0 <= w[1].0));
++                    rows.len()
++                },
++                || {
++                    let (a, b) = rayon::join(|| 17, || 25);
++                    a + b
++                },
++            );
++            assert_eq!(left, 65_537);
++            assert_eq!(right, 42);
++        });
++        self.completed.fetch_add(1, SeqCst);
++        self.active.fetch_sub(1, SeqCst);
++        if fail {
++            rayon::join(|| panic!("nested join key panic"), || ());
++        }
++    }
++    fn verify(&self) {
++        assert!(self.workers.load(SeqCst).count_ones() as usize >= self.hooks.progress_target);
++        assert_eq!(self.completed.load(SeqCst), self.hooks.progress_target);
++        assert_eq!(self.active.load(SeqCst), 0);
++        assert!(self.peak.load(SeqCst) >= self.hooks.progress_target);
++        assert_eq!(
++            self.hooks.consumers_started.load(SeqCst),
++            self.hooks.consumers_done.load(SeqCst)
++        );
++        assert!(self.hooks.sender_closed.load(SeqCst) > 0);
++    }
++}
++struct Owned {
++    key: u64,
++    id: usize,
++    text: String,
++    visits: Cell<usize>,
++    drops: Arc<Vec<AtomicUsize>>,
++}
++impl Drop for Owned {
++    fn drop(&mut self) {
++        assert_eq!(self.text, self.id.to_string());
++        assert_eq!(self.drops[self.id].fetch_add(1, SeqCst), 0);
++    }
++}
++fn owned(threads: usize, fail: bool) {
++    let n = 131_073;
++    let drops = Arc::new((0..n).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++    let mut rows: Vec<_> = (0..n)
++        .map(|id| Owned {
++            key: key(id),
++            id,
++            text: id.to_string(),
++            visits: Cell::new(0),
++            drops: drops.clone(),
++        })
++        .collect();
++    let nested = Nested::new((threads - 1).min(2));
++    let pool = rayon::ThreadPoolBuilder::new()
++        .num_threads(threads)
++        .build()
++        .unwrap();
++    let outcome = catch_unwind(AssertUnwindSafe(|| {
++        pool.install(|| {
++            test_witness::with_hooks(nested.hooks.clone(), || {
++                crate::par_stable_sort_by_key(&mut rows, |r| {
++                    nested.invoke(fail);
++                    r.visits.set(r.visits.get() + 1);
++                    r.key
++                });
++            })
++        })
++    }));
++    assert_eq!(outcome.is_err(), fail);
++    nested.verify();
++    let mut ids: Vec<_> = rows
++        .iter()
++        .map(|r| {
++            assert_eq!(r.text, r.id.to_string());
++            r.id
++        })
++        .collect();
++    ids.sort_unstable();
++    assert_eq!(ids, (0..n).collect::<Vec<_>>());
++    if !fail {
++        assert!(
++            rows.windows(2)
++                .all(|w| (w[0].key, w[0].id) <= (w[1].key, w[1].id))
++        );
++    }
++    assert!(drops.iter().all(|x| x.load(SeqCst) == 0));
++    drop(rows);
++    assert!(drops.iter().all(|x| x.load(SeqCst) == 1));
++}
++fn exclusive(threads: usize) {
++    let n = 131_073;
++    let mut backing: Vec<_> = (0..n).collect();
++    let mut rows: Vec<_> = backing
++        .iter_mut()
++        .enumerate()
++        .map(|(id, r)| (key(id), id, r))
++        .collect();
++    let nested = Nested::new((threads - 1).min(2));
++    rayon::ThreadPoolBuilder::new()
++        .num_threads(threads)
++        .build()
++        .unwrap()
++        .install(|| {
++            test_witness::with_hooks(nested.hooks.clone(), || {
++                crate::par_stable_sort_by_key(&mut rows, |r| {
++                    nested.invoke(false);
++                    r.0
++                });
++            })
++        });
++    nested.verify();
++    assert!(
++        rows.windows(2)
++            .all(|w| (w[0].0, w[0].1) <= (w[1].0, w[1].1))
++    );
++    for (_, id, r) in rows {
++        assert_eq!(*r, id);
++        *r += 1;
++    }
++    assert_eq!(backing, (1..=n).collect::<Vec<_>>());
++}
++#[test]
++fn nested_public_sorts_and_joins_owned_cell() {
++    bounded(
++        "engine::parallel::progress_tests::nested_public_sorts_and_joins_owned_cell",
++        || owned(4, false),
++    );
++}
++#[test]
++fn nested_public_sorts_and_joins_exclusive() {
++    bounded(
++        "engine::parallel::progress_tests::nested_public_sorts_and_joins_exclusive",
++        || exclusive(4),
++    );
++}
++#[test]
++fn nested_join_panics_restore_owned_cell() {
++    bounded(
++        "engine::parallel::progress_tests::nested_join_panics_restore_owned_cell",
++        || owned(4, true),
++    );
++}
++
++#[test]
++fn nested_public_sorts_and_joins_owned_cell_p2() {
++    bounded(
++        "engine::parallel::progress_tests::nested_public_sorts_and_joins_owned_cell_p2",
++        || owned(2, false),
++    );
++}
++#[test]
++fn nested_public_sorts_and_joins_owned_cell_p3() {
++    bounded(
++        "engine::parallel::progress_tests::nested_public_sorts_and_joins_owned_cell_p3",
++        || owned(3, false),
++    );
++}
++#[test]
++fn nested_public_sorts_and_joins_exclusive_p2() {
++    bounded(
++        "engine::parallel::progress_tests::nested_public_sorts_and_joins_exclusive_p2",
++        || exclusive(2),
++    );
++}
++#[test]
++fn nested_public_sorts_and_joins_exclusive_p3() {
++    bounded(
++        "engine::parallel::progress_tests::nested_public_sorts_and_joins_exclusive_p3",
++        || exclusive(3),
++    );
++}
++#[test]
++fn nested_join_panics_restore_owned_cell_p2() {
++    bounded(
++        "engine::parallel::progress_tests::nested_join_panics_restore_owned_cell_p2",
++        || owned(2, true),
++    );
++}
++#[test]
++fn nested_join_panics_restore_owned_cell_p3() {
++    bounded(
++        "engine::parallel::progress_tests::nested_join_panics_restore_owned_cell_p3",
++        || owned(3, true),
++    );
++}
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/parallel/safety_gap_tests.rs
+@@ -0,0 +1,246 @@
++// SPDX-License-Identifier: BSD-2-Clause
++//! Deterministic native tests of actual producer/consumer and narrow routes.
++use crate::test_witness::{self, Hooks};
++use std::cell::Cell;
++use std::panic::{AssertUnwindSafe, catch_unwind};
++use std::sync::{
++    Arc,
++    atomic::{AtomicUsize, Ordering::SeqCst},
++};
++struct OwnedCell {
++    key: u64,
++    id: usize,
++    text: String,
++    visits: Cell<usize>,
++    drops: Arc<Vec<AtomicUsize>>,
++}
++impl Drop for OwnedCell {
++    fn drop(&mut self) {
++        assert_eq!(self.text, self.id.to_string());
++        assert_eq!(
++            self.drops[self.id].fetch_add(1, SeqCst),
++            0,
++            "duplicate record drop"
++        );
++    }
++}
++fn value(id: usize, narrow: bool) -> u64 {
++    if narrow {
++        ((id * 37 + 11) % 16) as u64
++    } else {
++        (id as u64).wrapping_mul(0x9e3779b97f4a7c15)
++    }
++}
++fn joined(h: &Hooks) {
++    assert!(
++        h.publication.load(SeqCst) > 0,
++        "actual batch publication not witnessed"
++    );
++    assert!(
++        h.consumers_started.load(SeqCst) > 0,
++        "spawned consumers not witnessed"
++    );
++    assert_eq!(
++        h.consumers_started.load(SeqCst),
++        h.consumers_done.load(SeqCst),
++        "scope returned with active consumer"
++    );
++    assert!(
++        h.sender_closed.load(SeqCst) > 0,
++        "sender destruction not witnessed"
++    );
++}
++fn check_late(h: &Hooks) {
++    joined(h);
++    let published = h.publication.load(SeqCst);
++    let first_key = h.consumer_first_key.load(SeqCst);
++    let moved = h.consumer_first_move.load(SeqCst);
++    let panic = h.callback_panic.load(SeqCst);
++    assert!(published > 0 && published < first_key && first_key < moved && moved < panic);
++    assert!(panic < h.sender_closed.load(SeqCst));
++    assert!(h.callbacks_after_publication.load(SeqCst) >= 2);
++}
++#[cfg(not(miri))]
++fn owned_case(narrow: bool, late: bool, key_panic: bool) {
++    let len = 65_537;
++    let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++    let mut rows: Vec<_> = (0..len)
++        .map(|id| OwnedCell {
++            key: value(id, narrow),
++            id,
++            text: id.to_string(),
++            visits: Cell::new(0),
++            drops: drops.clone(),
++        })
++        .collect();
++    let h = Arc::new(Hooks::new(late, key_panic && !narrow));
++    let result = catch_unwind(AssertUnwindSafe(|| {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(4)
++            .build()
++            .unwrap()
++            .install(|| {
++                test_witness::with_hooks(h.clone(), || {
++                    crate::par_stable_sort_by_key(&mut rows, |r| {
++                        h.key(key_panic && !narrow, key_panic && narrow);
++                        r.visits.set(r.visits.get() + 1);
++                        r.key
++                    })
++                });
++            });
++    }));
++    assert_eq!(result.is_err(), late || key_panic);
++    let mut ids: Vec<_> = rows
++        .iter()
++        .map(|r| {
++            assert_eq!(r.text, r.id.to_string());
++            r.id
++        })
++        .collect();
++    ids.sort_unstable();
++    assert_eq!(ids, (0..len).collect::<Vec<_>>());
++    assert!(drops.iter().all(|n| n.load(SeqCst) == 0));
++    if narrow {
++        assert!(h.single_route.load(SeqCst));
++        assert!(h.root_calls.load(SeqCst) > 0);
++        assert_eq!(h.consumer_calls.load(SeqCst), 0);
++        assert_eq!(h.consumers_started.load(SeqCst), 0);
++        assert_eq!(h.root_key_panic.load(SeqCst), key_panic);
++    } else if late {
++        check_late(&h);
++    } else {
++        joined(&h);
++        if key_panic {
++            assert!(h.consumer_first_move.load(SeqCst) > 0);
++            assert!(h.consumer_key_panic.load(SeqCst) > h.consumer_first_move.load(SeqCst));
++            assert!(!h.root_key_panic.load(SeqCst));
++        }
++    }
++    if !late && !key_panic {
++        let actual: Vec<_> = rows.iter().map(|r| (r.key, r.id)).collect();
++        let mut expected: Vec<_> = (0..len).map(|id| (value(id, narrow), id)).collect();
++        expected.sort_by_key(|r| r.0);
++        assert_eq!(actual, expected);
++    }
++    drop(rows);
++    assert!(drops.iter().all(|n| n.load(SeqCst) == 1));
++}
++#[cfg(not(miri))]
++fn exclusive_case(narrow: bool, late: bool, key_panic: bool) {
++    let len = 65_537;
++    let mut backing: Vec<_> = (0..len).collect();
++    let mut rows: Vec<_> = backing
++        .iter_mut()
++        .enumerate()
++        .map(|(id, r)| (value(id, narrow), id, r))
++        .collect();
++    let h = Arc::new(Hooks::new(late, key_panic && !narrow));
++    let result = catch_unwind(AssertUnwindSafe(|| {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(4)
++            .build()
++            .unwrap()
++            .install(|| {
++                test_witness::with_hooks(h.clone(), || {
++                    crate::par_stable_sort_by_key(&mut rows, |r| {
++                        h.key(key_panic && !narrow, key_panic && narrow);
++                        r.0
++                    })
++                });
++            });
++    }));
++    assert_eq!(result.is_err(), late || key_panic);
++    if narrow {
++        assert!(h.single_route.load(SeqCst));
++        assert_eq!(h.consumers_started.load(SeqCst), 0);
++        assert_eq!(h.root_key_panic.load(SeqCst), key_panic);
++    } else if late {
++        check_late(&h);
++    } else {
++        joined(&h);
++        if key_panic {
++            assert!(h.consumer_key_panic.load(SeqCst) > h.consumer_first_move.load(SeqCst));
++            assert!(h.consumer_first_move.load(SeqCst) > 0);
++        }
++    }
++    let actual: Vec<_> = rows.iter().map(|r| (r.0, r.1)).collect();
++    if !late && !key_panic {
++        let mut expected: Vec<_> = (0..len).map(|id| (value(id, narrow), id)).collect();
++        expected.sort_by_key(|r| r.0);
++        assert_eq!(actual, expected);
++    }
++    let mut ids = Vec::new();
++    for (_, id, r) in rows {
++        assert_eq!(*r, id);
++        *r += 1;
++        ids.push(id);
++    }
++    ids.sort_unstable();
++    assert_eq!(ids, (0..len).collect::<Vec<_>>());
++    assert_eq!(backing, (1..=len).collect::<Vec<_>>());
++}
++#[test]
++#[cfg(not(miri))]
++fn delayed_callback_panic_owned_cell_published_consumer_moved() {
++    owned_case(false, true, false);
++}
++#[test]
++#[cfg(not(miri))]
++fn child_key_panic_owned_cell_after_consumer_move() {
++    owned_case(false, false, true);
++}
++#[test]
++#[cfg(not(miri))]
++fn combined_owned_cell_success() {
++    owned_case(false, false, false);
++}
++#[test]
++#[cfg(not(miri))]
++fn delayed_callback_panic_exclusive_published_consumer_moved() {
++    exclusive_case(false, true, false);
++}
++#[test]
++#[cfg(not(miri))]
++fn child_key_panic_exclusive_after_consumer_move() {
++    exclusive_case(false, false, true);
++}
++#[test]
++#[cfg(not(miri))]
++fn combined_exclusive_success() {
++    exclusive_case(false, false, false);
++}
++#[test]
++#[cfg(not(miri))]
++fn single_digit_owned_cell_success() {
++    owned_case(true, false, false);
++}
++#[test]
++#[cfg(not(miri))]
++fn single_digit_owned_cell_root_panic_after_moves() {
++    owned_case(true, false, true);
++}
++#[test]
++#[cfg(not(miri))]
++fn single_digit_exclusive_success() {
++    exclusive_case(true, false, false);
++}
++#[test]
++#[cfg(not(miri))]
++fn single_digit_exclusive_root_panic_after_moves() {
++    exclusive_case(true, false, true);
++}
++
++#[test]
++fn simultaneous_producer_consumer_panic_owned_cell() {
++    super::progress_tests::bounded(
++        "engine::parallel::safety_gap_tests::simultaneous_producer_consumer_panic_owned_cell",
++        || owned_case(false, true, true),
++    );
++}
++#[test]
++fn simultaneous_producer_consumer_panic_exclusive() {
++    super::progress_tests::bounded(
++        "engine::parallel::safety_gap_tests::simultaneous_producer_consumer_panic_exclusive",
++        || exclusive_case(false, true, true),
++    );
++}
+--- a/rust/tessera-sort/src/key.rs
++++ b/rust/tessera-sort/src/key.rs
+@@ -279,6 +279,7 @@
+ }
+ 
+ /// Extracts keys with a user key function, which may panic or be inconsistent.
++#[derive(Clone, Copy)]
+ pub(crate) struct ByKey<F>(pub F);
+ impl<T, K: RadixKey, F: FnMut(&T) -> K> Extract<T> for ByKey<F> {
+     type Value = K::Encoded;
+@@ -289,6 +290,7 @@
+ }
+ 
+ /// Uses the record itself as the key; deterministic and panic-free.
++#[derive(Clone, Copy)]
+ pub(crate) struct Direct;
+ 
+ impl<K: RadixKey> Extract<K> for Direct {
+--- a/rust/tessera-sort/src/lib.rs
++++ b/rust/tessera-sort/src/lib.rs
+@@ -42,6 +42,10 @@
+ //! [`stable_sort_by_key`]. Each tile-local MSD level also keeps a cursor table
+ //! of up to 32 KiB on the stack, with at most 22 levels for 128-bit keys.
+ //!
++//! These bounds describe the sequential API. With `rayon`, parallel calls use
++//! bounded per-worker scratch; see the parallel functions for the worker-count
++//! dependent memory bound.
++//!
+ //! The free functions allocate this scratch during each call. A [`Workspace`]
+ //! keeps it between calls.
+ //!
+@@ -52,6 +56,10 @@
+ //! during block partitioning aborts rather than exposing partially moved
+ //! records, even when the host enables unwinding. Panics elsewhere may unwind
+ //! safely. Sorting, ordering and the memory bounds above are the same either way.
++//!
++//! The optional `rayon` feature enables `par_stable_sort` and
++//! `par_stable_sort_by_key` and implies `std`. It does not change the
++//! sequential API or the default feature selection.
+ //!
+ //! `portable-simd` is off by default and requires `std` and Rust 1.89 or newer.
+ //! It adds [`fearless_simd`](https://docs.rs/fearless_simd) for adjacent-key
+@@ -146,3 +154,77 @@
+     pub const MAX_TILE_RECORDS: usize = u16::MAX as usize;
+     pub const MAX_CURSOR_BYTES: usize = 32 * 1024;
+ }
++
++/// Sorts keys in ascending order in the current Rayon pool, stably.
++///
++/// Requires the `rayon` feature, which enables `std`. Ordering is identical to
++/// [`stable_sort`]. Small inputs and adaptive fast paths run sequentially.
++///
++/// # Memory
++///
++/// Uses bounded per-worker scratch rather than a full-size output buffer.
++/// With P workspaces, heap scratch is O(√n + √(Pn) + P) for a fixed record
++/// size and key width. P is bounded by the current pool size and input grain
++/// count. For fixed P this is O(√n), but memory grows with parallelism. Each
++/// worker may also keep a tile and cursor tables as described in the crate-level
++/// memory documentation. Rayon owns its thread stacks and pool allocations.
++///
++/// # Examples
++///
++/// ```
++/// let mut keys = [42, -7, 42, 0];
++/// tessera_sort::par_stable_sort(&mut keys);
++/// assert_eq!(keys, [-7, 0, 42, 42]);
++/// ```
++#[cfg(feature = "rayon")]
++pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
++    engine::par_sort::<K, _, false>(values, key::Direct);
++}
++
++/// Sorts records by a key in the current Rayon pool, keeping equal keys stable.
++///
++/// Requires the `rayon` feature. Records only need `Send`, not `Sync`, `Copy`
++/// or `Clone`. The key function may run concurrently and therefore implements
++/// `Fn + Sync`; the sequential [`stable_sort_by_key`] also accepts `FnMut`.
++///
++/// # Key function
++///
++/// `key` may be called several times per record, in any order, including from
++/// different threads. It should return the same key for a record throughout
++/// the call. Inconsistent keys produce unspecified ordering, but every record
++/// remains present exactly once.
++///
++/// # Panics
++///
++/// If `key` panics, started tasks finish unwinding before the panic propagates.
++/// Every record is restored to `values`, in an unspecified order. If several
++/// tasks panic, one of those panics propagates.
++///
++/// # Memory
++///
++/// Uses the bounded worker scratch described by [`par_stable_sort`].
++///
++/// # Examples
++///
++/// ```
++/// let mut rows = vec![(2u32, "first"), (1, "middle"), (2, "last")];
++/// tessera_sort::par_stable_sort_by_key(&mut rows, |row| row.0);
++/// assert_eq!(rows, [(1, "middle"), (2, "first"), (2, "last")]);
++/// ```
++#[cfg(feature = "rayon")]
++pub fn par_stable_sort_by_key<T: Send, K: RadixKey, F: Fn(&T) -> K + Sync>(
++    values: &mut [T],
++    key: F,
++) {
++    if engine::par_use_serial::<T>(values.len()) {
++        stable_sort_by_key(values, key);
++        return;
++    }
++    engine::par_sort::<T, _, true>(values, key::ByKey(&key));
++}
++
++#[cfg(all(test, feature = "rayon"))]
++mod test_witness;
++
++#[cfg(test)]
++mod main_kernel_tests;
+--- /dev/null
++++ b/rust/tessera-sort/src/main_kernel_tests.rs
+@@ -0,0 +1,233 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Checks the extractor boundary shared by serial and parallel preparation.
++
++use alloc::vec::Vec;
++use core::cell::Cell;
++use core::cmp::Reverse;
++
++use crate::RadixKey;
++use crate::key::{ByKey, Direct, Extract};
++
++fn check_scans<K: RadixKey>(mut values: Vec<K>) {
++    values.sort_by_key(|value| value.encode());
++    assert_eq!(Direct.first_inversion(&values), None);
++    assert_eq!(ByKey(|value: &K| *value).first_inversion(&values), None);
++    let encoded: Vec<_> = values.iter().map(|value| value.encode()).collect();
++    if let Some(first) = encoded.first().copied() {
++        assert!(Direct.confirm_ascending(&values, first));
++        assert!(ByKey(|value: &K| *value).confirm_ascending(&values, first));
++        if let Some(larger) = encoded.iter().copied().find(|value| *value > first) {
++            assert!(!Direct.confirm_ascending(&values, larger));
++            assert!(!ByKey(|value: &K| *value).confirm_ascending(&values, larger));
++        }
++    }
++    for index in 0..values.len().saturating_sub(1) {
++        if encoded[index] == encoded[index + 1] {
++            continue;
++        }
++        for budget in [0, 1] {
++            let mut actual = values.clone();
++            actual.swap(index, index + 1);
++            assert_eq!(Direct.first_inversion(&actual), Some(index));
++            assert_eq!(
++                ByKey(|value: &K| *value).first_inversion(&actual),
++                Some(index)
++            );
++            assert!(!Direct.confirm_ascending(&actual, actual[0].encode()));
++            assert!(!ByKey(|value: &K| *value).confirm_ascending(&actual, actual[0].encode()));
++            // This invokes the selected insertion backend, rather than only
++            // the default scan reached through Direct::first_inversion.
++            assert_eq!(
++                Direct.insertion_sort(&mut actual, budget),
++                (budget == 1).then_some(1)
++            );
++            assert!(
++                actual
++                    .iter()
++                    .map(|value| value.encode())
++                    .eq(encoded.iter().copied())
++            );
++        }
++    }
++}
++
++#[test]
++fn direct_and_by_key_scan_boundaries() {
++    let lengths: &[usize] = if cfg!(miri) {
++        &[0, 1, 63, 64, 65]
++    } else {
++        &[0, 1, 2, 31, 63, 64, 65, 97, 129]
++    };
++    for &len in lengths {
++        macro_rules! check_integer {
++            ($($ty:ty),*) => {$(
++                let values: Vec<$ty> = (0..len)
++                    .map(|index| {
++                        let low = (index as u128).wrapping_mul(0x9e37_79b9_7f4a_7c15);
++                        (low.rotate_left(64) ^ low.wrapping_mul(37)) as $ty
++                    })
++                    .collect();
++                check_scans(values.clone());
++                check_scans(values.into_iter().map(Reverse).collect());
++            )*};
++        }
++        check_integer!(
++            u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
++        );
++
++        let float32 = [
++            0xffc0_0001,
++            0xff80_0001,
++            0xff80_0000,
++            0x8000_0001,
++            0x8000_0000,
++            0,
++            1,
++            0x7f80_0000,
++            0x7f80_0001,
++            0x7fc0_0001,
++        ];
++        let float64 = [
++            0xfff8_0000_0000_0001,
++            0xfff0_0000_0000_0001,
++            0xfff0_0000_0000_0000,
++            0x8000_0000_0000_0001,
++            0x8000_0000_0000_0000,
++            0,
++            1,
++            0x7ff0_0000_0000_0000,
++            0x7ff0_0000_0000_0001,
++            0x7ff8_0000_0000_0001,
++        ];
++        let values: Vec<_> = (0..len)
++            .map(|index| f32::from_bits(float32[index % float32.len()]))
++            .collect();
++        check_scans(values.clone());
++        check_scans(values.into_iter().map(Reverse).collect());
++        let values: Vec<_> = (0..len)
++            .map(|index| f64::from_bits(float64[index % float64.len()]))
++            .collect();
++        check_scans(values.clone());
++        check_scans(values.into_iter().map(Reverse).collect());
++    }
++}
++
++fn assert_stable_permutation(values: &[(u64, usize, Cell<bool>)], len: usize) {
++    let mut ids: Vec<_> = values.iter().map(|value| value.1).collect();
++    ids.sort_unstable();
++    assert_eq!(ids, (0..len).collect::<Vec<_>>());
++    for key in 0..=len as u64 / 3 {
++        let mut previous = None;
++        for value in values.iter().filter(|value| value.0 == key) {
++            assert!(previous.is_none_or(|id| id < value.1));
++            previous = Some(value.1);
++        }
++    }
++}
++
++#[test]
++fn partial_insertion_preserves_equal_key_order_and_cell_edits() {
++    for len in [63, 64, 65] {
++        for budget in [0, 1, 7, 63] {
++            let mut values: Vec<_> = (0..len)
++                .map(|id| (((len - id) / 3) as u64, id, Cell::new(false)))
++                .collect();
++            let mut key = ByKey(|value: &(u64, usize, Cell<bool>)| {
++                value.2.set(true);
++                value.0
++            });
++            assert_eq!(key.insertion_sort(&mut values, budget), None);
++            assert_stable_permutation(&values, len);
++            assert!(values.iter().any(|value| value.2.get()));
++            key.finish_insertion(&mut values);
++            assert_stable_permutation(&values, len);
++            assert!(values.windows(2).all(|pair| pair[0].0 <= pair[1].0));
++        }
++    }
++}
++
++#[test]
++fn partial_insertion_preserves_exclusive_records() {
++    for len in [63, 64, 65] {
++        let mut storage: Vec<_> = (0..len).collect();
++        let mut values: Vec<_> = storage
++            .iter_mut()
++            .enumerate()
++            .map(|(id, value)| (((len - id) / 3) as u64, id, value))
++            .collect();
++        let mut key = ByKey(|value: &(u64, usize, &mut usize)| value.0);
++        assert_eq!(key.insertion_sort(&mut values, 7), None);
++        let mut ids: Vec<_> = values.iter().map(|value| value.1).collect();
++        ids.sort_unstable();
++        assert_eq!(ids, (0..len).collect::<Vec<_>>());
++        for value in &mut values {
++            assert_eq!(*value.2, value.1);
++            *value.2 += len;
++        }
++        key.finish_insertion(&mut values);
++        assert!(values.windows(2).all(|pair| {
++            pair[0].0 < pair[1].0 || (pair[0].0 == pair[1].0 && pair[0].1 < pair[1].1)
++        }));
++        drop(values);
++        assert_eq!(storage, (len..2 * len).collect::<Vec<_>>());
++    }
++}
++
++#[cfg(feature = "std")]
++#[test]
++fn insertion_panic_after_movement_preserves_payload_and_owned_records() {
++    use alloc::string::String;
++    use std::panic::{AssertUnwindSafe, catch_unwind};
++    use std::sync::Arc;
++    use std::sync::atomic::{AtomicUsize, Ordering};
++
++    struct Owned {
++        id: usize,
++        key: u64,
++        text: String,
++        edited: Cell<bool>,
++        drops: Arc<Vec<AtomicUsize>>,
++    }
++    impl Drop for Owned {
++        fn drop(&mut self) {
++            self.drops[self.id].fetch_add(1, Ordering::Relaxed);
++        }
++    }
++
++    let len = 65;
++    let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++    let mut values: Vec<_> = (0..len)
++        .map(|id| Owned {
++            id,
++            key: ((len - id) / 3) as u64,
++            text: std::format!("record {id}"),
++            edited: Cell::new(false),
++            drops: Arc::clone(&drops),
++        })
++        .collect();
++    let base = values.as_ptr();
++    let moved = Cell::new(false);
++    let result = catch_unwind(AssertUnwindSafe(|| {
++        ByKey(|value: &Owned| {
++            value.edited.set(true);
++            if !core::ptr::eq(core::ptr::from_ref(value), base.wrapping_add(value.id)) {
++                moved.set(true);
++                std::panic::panic_any(0x51a7_u32);
++            }
++            value.key
++        })
++        .finish_insertion(&mut values);
++    }));
++    assert!(moved.get(), "panic must occur after a record changed slots");
++    assert_eq!(*result.unwrap_err().downcast::<u32>().unwrap(), 0x51a7);
++    assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 0));
++    assert!(values.iter().any(|value| value.edited.get()));
++    values.sort_by_key(|value| value.id);
++    for (id, value) in values.iter().enumerate() {
++        assert_eq!(value.id, id);
++        assert_eq!(value.text, std::format!("record {id}"));
++    }
++    drop(values);
++    assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 1));
++}
+--- /dev/null
++++ b/rust/tessera-sort/src/test_witness.rs
+@@ -0,0 +1,317 @@
++// SPDX-License-Identifier: BSD-2-Clause
++//! Test-only phase witnesses. The frozen algorithms are unchanged.
++use std::cell::{Cell, RefCell};
++use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
++use std::sync::{Arc, Condvar, Mutex};
++use std::time::Duration;
++#[derive(Clone, Copy, PartialEq, Eq, Debug)]
++pub(crate) enum Phase {
++    None,
++    Root,
++    Consumer,
++}
++thread_local! {
++    static PHASE: Cell<Phase> = const { Cell::new(Phase::None) };
++    static MOVED: Cell<bool> = const { Cell::new(false) };
++    static HOOKS: RefCell<Option<Arc<Hooks>>> = const { RefCell::new(None) };
++}
++#[derive(Default)]
++pub(crate) struct Hooks {
++    pub late_callback_panic: bool,
++    pub wait_for_child_panic: bool,
++    pub progress_target: usize,
++    pub progress_started: AtomicUsize,
++    pub publication_count: AtomicUsize,
++    pub sequence: AtomicUsize,
++    pub publication: AtomicUsize,
++    pub callbacks_after_publication: AtomicUsize,
++    pub callback_panic: AtomicUsize,
++    pub consumer_first_key: AtomicUsize,
++    pub consumer_first_move: AtomicUsize,
++    pub consumer_key_panic: AtomicUsize,
++    pub sender_closed: AtomicUsize,
++    pub consumer_finished: AtomicUsize,
++    pub consumers_started: AtomicUsize,
++    pub consumers_done: AtomicUsize,
++    pub single_route: AtomicBool,
++    pub root_geometry: Mutex<Vec<(usize, usize, usize, usize)>>,
++    pub root_key_panic: AtomicBool,
++    pub root_calls: AtomicUsize,
++    pub consumer_calls: AtomicUsize,
++    signal: Mutex<()>,
++    ready: Condvar,
++}
++impl Hooks {
++    pub(crate) fn new(late_callback_panic: bool, wait_for_child_panic: bool) -> Self {
++        Self {
++            late_callback_panic,
++            wait_for_child_panic,
++            ..Self::default()
++        }
++    }
++    fn tick(&self) -> usize {
++        self.sequence.fetch_add(1, SeqCst) + 1
++    }
++    fn once(&self, target: &AtomicUsize) {
++        if target.load(SeqCst) == 0 {
++            let _ = target.compare_exchange(0, self.tick(), SeqCst, SeqCst);
++        }
++    }
++    pub(crate) fn key(&self, fail_consumer: bool, fail_root: bool) {
++        match phase() {
++            Phase::Consumer => {
++                self.consumer_calls.fetch_add(1, SeqCst);
++                self.once(&self.consumer_first_key);
++                if has_moved()
++                    && fail_consumer
++                    && self
++                        .consumer_key_panic
++                        .compare_exchange(0, self.tick(), SeqCst, SeqCst)
++                        .is_ok()
++                {
++                    {
++                        let _lock = self
++                            .signal
++                            .lock()
++                            .unwrap_or_else(std::sync::PoisonError::into_inner);
++                        self.ready.notify_all();
++                    }
++                    panic!("phase-gated consumer key panic after live record moves");
++                }
++            }
++            Phase::Root => {
++                self.root_calls.fetch_add(1, SeqCst);
++                if has_moved() && fail_root && !self.root_key_panic.swap(true, SeqCst) {
++                    panic!("phase-gated root key panic after completed scatter block");
++                }
++            }
++            Phase::None => {}
++        }
++    }
++}
++pub(crate) fn current() -> Option<Arc<Hooks>> {
++    HOOKS.with(|h| h.borrow().clone())
++}
++pub(crate) fn phase() -> Phase {
++    PHASE.get()
++}
++pub(crate) fn has_moved() -> bool {
++    MOVED.get()
++}
++pub(crate) fn with_hooks<R>(hooks: Arc<Hooks>, run: impl FnOnce() -> R) -> R {
++    let previous = HOOKS.with(|h| h.replace(Some(hooks)));
++    struct Reset(Option<Arc<Hooks>>);
++    impl Drop for Reset {
++        fn drop(&mut self) {
++            HOOKS.with(|h| h.replace(self.0.take()));
++        }
++    }
++    let _reset = Reset(previous);
++    run()
++}
++pub(crate) struct PhaseGuard {
++    phase: Phase,
++    moved: bool,
++    hooks: Option<Arc<Hooks>>,
++    consumer: bool,
++}
++impl PhaseGuard {
++    pub(crate) fn root() -> Self {
++        Self::enter(Phase::Root, current(), false)
++    }
++    pub(crate) fn consumer(hooks: Option<Arc<Hooks>>) -> Self {
++        Self::enter(Phase::Consumer, hooks, true)
++    }
++    fn enter(phase: Phase, hooks: Option<Arc<Hooks>>, consumer: bool) -> Self {
++        if consumer {
++            if let Some(h) = &hooks {
++                h.consumers_started.fetch_add(1, SeqCst);
++            }
++        }
++        let old_phase = PHASE.replace(phase);
++        let old_moved = MOVED.replace(false);
++        let old_hooks = HOOKS.with(|h| h.replace(hooks));
++        Self {
++            phase: old_phase,
++            moved: old_moved,
++            hooks: old_hooks,
++            consumer,
++        }
++    }
++}
++impl Drop for PhaseGuard {
++    fn drop(&mut self) {
++        if self.consumer {
++            if let Some(h) = current() {
++                h.consumers_done.fetch_add(1, SeqCst);
++                h.consumer_finished.store(h.tick(), SeqCst);
++            }
++        }
++        PHASE.set(self.phase);
++        MOVED.set(self.moved);
++        HOOKS.with(|h| h.replace(self.hooks.take()));
++    }
++}
++pub(crate) fn moved() {
++    MOVED.set(true);
++    if phase() == Phase::Consumer {
++        if let Some(h) = current() {
++            if h.consumer_first_move.load(SeqCst) == 0 {
++                let _lock = h
++                    .signal
++                    .lock()
++                    .unwrap_or_else(std::sync::PoisonError::into_inner);
++                h.once(&h.consumer_first_move);
++                h.ready.notify_all();
++            }
++        }
++    }
++}
++pub(crate) fn published(h: &Option<Arc<Hooks>>) {
++    if let Some(h) = h {
++        h.once(&h.publication);
++        h.publication_count.fetch_add(1, SeqCst);
++    }
++}
++pub(crate) fn callback_finished(h: &Option<Arc<Hooks>>) {
++    let Some(h) = h else { return };
++    if h.progress_target > 0 && h.publication_count.load(SeqCst) >= h.progress_target {
++        let lock = h
++            .signal
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner);
++        let (_lock, timeout) = h
++            .ready
++            .wait_timeout_while(lock, Duration::from_secs(20), |_| {
++                h.progress_started.load(SeqCst) < h.progress_target
++            })
++            .unwrap();
++        assert!(
++            !timeout.timed_out(),
++            "distinct consumers did not reach progress rendezvous"
++        );
++    }
++    if (!h.late_callback_panic && !h.wait_for_child_panic) || h.publication.load(SeqCst) == 0 {
++        return;
++    }
++    if h.callbacks_after_publication.fetch_add(1, SeqCst) == 0 {
++        return;
++    }
++    // The second callback after publication is an intentional test rendezvous.
++    // Root scatter/permutation have joined. Consumers have independent work,
++    // no producer or receiver lock is held, and this is an OS wait, not a Rayon
++    // yield that could recursively enter a receiver waiting for this sender.
++    let lock = h
++        .signal
++        .lock()
++        .unwrap_or_else(std::sync::PoisonError::into_inner);
++    let (_lock, timeout) = h
++        .ready
++        .wait_timeout_while(lock, Duration::from_secs(20), |_| {
++            if h.wait_for_child_panic {
++                h.consumer_key_panic.load(SeqCst) == 0
++            } else {
++                h.consumer_first_move.load(SeqCst) == 0
++            }
++        })
++        .unwrap();
++    assert!(
++        !timeout.timed_out(),
++        "consumer failed to reach move witness within bounded test rendezvous"
++    );
++    assert!(h.consumer_first_key.load(SeqCst) > 0);
++    if h.late_callback_panic {
++        h.callback_panic.store(h.tick(), SeqCst);
++        panic!("delayed producer callback panic after published child moved records");
++    }
++}
++pub(crate) fn single_route(h: &Option<Arc<Hooks>>) {
++    if let Some(h) = h {
++        h.single_route.store(true, SeqCst);
++    }
++}
++pub(crate) struct SenderGuard(Option<Arc<Hooks>>);
++impl SenderGuard {
++    pub(crate) fn new(h: Option<Arc<Hooks>>) -> Self {
++        Self(h)
++    }
++}
++impl Drop for SenderGuard {
++    fn drop(&mut self) {
++        if let Some(h) = &self.0 {
++            h.sender_closed.store(h.tick(), SeqCst);
++        }
++    }
++}
++
++pub(crate) fn new_bucket() {
++    if phase() == Phase::Consumer {
++        MOVED.set(false);
++    }
++}
++
++thread_local! {
++    static PUBLISHING: Cell<bool> = const { Cell::new(false) };
++    static QUEUE_LOCKED: Cell<bool> = const { Cell::new(false) };
++}
++pub(crate) struct PublishingGuard(bool);
++impl PublishingGuard {
++    pub(crate) fn new() -> Self {
++        Self(PUBLISHING.replace(false))
++    }
++}
++impl Drop for PublishingGuard {
++    fn drop(&mut self) {
++        PUBLISHING.set(self.0);
++    }
++}
++pub(crate) fn publication_started() {
++    PUBLISHING.set(true);
++}
++pub(crate) fn publication_closed() {
++    PUBLISHING.set(false);
++}
++pub(crate) struct QueueGuard(bool);
++impl QueueGuard {
++    pub(crate) fn new() -> Self {
++        Self(QUEUE_LOCKED.replace(true))
++    }
++}
++impl Drop for QueueGuard {
++    fn drop(&mut self) {
++        QUEUE_LOCKED.set(self.0);
++    }
++}
++pub(crate) fn assert_user_allowed() {
++    assert!(
++        !PUBLISHING.get(),
++        "producer invoked user key while published consumers can wait"
++    );
++    assert!(!QUEUE_LOCKED.get(), "user key invoked under receiver lock");
++}
++impl Hooks {
++    pub(crate) fn progress(target: usize) -> Self {
++        Self {
++            progress_target: target,
++            ..Self::default()
++        }
++    }
++    pub(crate) fn progress_arrive(&self) {
++        let lock = self
++            .signal
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner);
++        self.progress_started.fetch_add(1, SeqCst);
++        self.ready.notify_all();
++        let (_lock, timeout) = self
++            .ready
++            .wait_timeout_while(lock, Duration::from_secs(20), |_| {
++                self.progress_started.load(SeqCst) < self.progress_target
++            })
++            .unwrap();
++        assert!(
++            !timeout.timed_out(),
++            "nested consumers did not meet at progress rendezvous"
++        );
++    }
++}
+--- /dev/null
++++ b/rust/tessera-sort/tests/main_kernel_port.rs
+@@ -0,0 +1,65 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Full-width direct keys and owned parallel narrowing across both feature sets.
++
++#![cfg(all(feature = "rayon", not(miri)))]
++
++use std::cmp::Reverse;
++use tessera_sort::{par_stable_sort, par_stable_sort_by_key};
++
++fn random(id: usize) -> u64 {
++    let mut value = (id as u64).wrapping_add(0x9e37_79b9_7f4a_7c15);
++    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
++    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
++    value ^ (value >> 31)
++}
++
++#[test]
++fn full_u128_and_each_half_use_direct_and_by_key_routes() {
++    for threads in [1, 2, 4] {
++        let pool = rayon::ThreadPoolBuilder::new()
++            .num_threads(threads)
++            .build()
++            .unwrap();
++        pool.install(|| {
++            let len = 65_537;
++            for shape in 0..3 {
++                let input: Vec<u128> = (0..len)
++                    .map(|id| {
++                        let low = u128::from(random(id / 3));
++                        let high = u128::from(random(id / 3 + len));
++                        match shape {
++                            0 => (high << 64) | low,
++                            1 => (u128::from(u64::MAX) << 64) | low,
++                            _ => (high << 64) | u128::from(u64::MAX),
++                        }
++                    })
++                    .collect();
++                let mut expected = input.clone();
++                expected.sort();
++                let mut actual = input.clone();
++                par_stable_sort(&mut actual);
++                assert_eq!(actual, expected, "threads={threads} shape={shape}");
++
++                let mut reversed: Vec<_> = input.iter().copied().map(Reverse).collect();
++                par_stable_sort(&mut reversed);
++                assert!(
++                    reversed
++                        .iter()
++                        .map(|value| value.0)
++                        .eq(expected.iter().rev().copied())
++                );
++
++                let mut records: Vec<_> = input
++                    .into_iter()
++                    .enumerate()
++                    .map(|(id, key)| (key, id))
++                    .collect();
++                let mut expected = records.clone();
++                expected.sort_by_key(|value| value.0);
++                par_stable_sort_by_key(&mut records, |value| value.0);
++                assert_eq!(records, expected, "threads={threads} shape={shape}");
++            }
++        });
++    }
++}
+--- /dev/null
++++ b/rust/tessera-sort/tests/parallel.rs
+@@ -0,0 +1,587 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Parallel ordering and ownership contracts in explicitly sized Rayon pools.
++//! Rayon execution is excluded under Miri; the sequential recovery suite tests
++//! the underlying record movement there, not the parallel scheduler.
++
++#![cfg(all(feature = "rayon", not(miri)))]
++
++use std::cell::Cell;
++use std::cmp::Reverse;
++use std::panic::{AssertUnwindSafe, catch_unwind};
++use std::sync::Arc;
++use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
++use tessera_sort::{par_stable_sort, par_stable_sort_by_key};
++
++fn pool(threads: usize) -> rayon::ThreadPool {
++    rayon::ThreadPoolBuilder::new()
++        .num_threads(threads)
++        .build()
++        .unwrap()
++}
++
++fn random(id: usize) -> u64 {
++    let mut x = (id as u64).wrapping_add(0x9e3779b97f4a7c15);
++    x = (x ^ (x >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
++    x = (x ^ (x >> 27)).wrapping_mul(0x94d049bb133111eb);
++    x ^ (x >> 31)
++}
++
++#[test]
++fn integer_keys_in_each_pool() {
++    for threads in [1, 2, 4] {
++        pool(threads).install(|| {
++            macro_rules! check {
++                ($($ty:ty),*) => {$(
++                    // Cross the 1 MiB parallel gate for every multi-byte key.
++                    // Single-byte keys intentionally use the one-digit route.
++                    let bytes = std::mem::size_of::<$ty>();
++                    let len = if bytes == 1 { 65537 } else { (1024 * 1024 / bytes + 1).max(65537) };
++                    let mut values: Vec<$ty> = (0..len).map(|id| random(id) as $ty).collect();
++                    values.extend([<$ty>::MIN, 0, <$ty>::MAX]);
++                    let mut expected = values.clone();
++                    expected.sort();
++                    par_stable_sort(&mut values);
++                    assert_eq!(values, expected);
++                    let mut values: Vec<_> = values.into_iter().map(Reverse).collect();
++                    par_stable_sort(&mut values);
++                    expected.reverse();
++                    assert_eq!(values.into_iter().map(|x| x.0).collect::<Vec<_>>(), expected);
++                )*};
++            }
++            check!(
++                u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
++            );
++        });
++    }
++}
++
++#[test]
++fn stable_records_at_routing_and_grain_boundaries() {
++    let grain = 256 * 1024 / std::mem::size_of::<(u128, usize)>();
++    let mut lengths = vec![0, 1, 2, 47, 48, 49, 4095, 4096, 4097, 16383, 16384, 16385];
++    for tasks in [1, 2, 4] {
++        lengths.extend([tasks * grain - 1, tasks * grain, tasks * grain + 1]);
++    }
++    lengths.sort_unstable();
++    lengths.dedup();
++    for threads in [1, 2, 4] {
++        pool(threads).install(|| {
++            for &len in &lengths {
++                for shape in 0..9 {
++                    let mut values: Vec<_> = (0..len)
++                        .map(|id| {
++                            let r = random(id);
++                            let key = match shape {
++                                0 => u128::from(r),
++                                1 => u128::from(r) << 64,
++                                2 => (u128::from(r) << 64) | u128::from(random(id + len)),
++                                3 => u128::from(r % 16),
++                                4 => (id / 3) as u128,
++                                5 => ((len - id) / 3) as u128,
++                                6 => 9,
++                                7 => {
++                                    if r % 100 < 98 {
++                                        0
++                                    } else {
++                                        u128::from(r)
++                                    }
++                                }
++                                _ => u128::from(r % 8192) * 0x01010101010101010101010101,
++                            };
++                            (key, id)
++                        })
++                        .collect();
++                    let mut expected = values.clone();
++                    expected.sort_by_key(|x| x.0);
++                    par_stable_sort_by_key(&mut values, |x| x.0);
++                    assert_eq!(
++                        values, expected,
++                        "threads={threads} len={len} shape={shape}"
++                    );
++                }
++            }
++        });
++    }
++}
++
++#[test]
++fn float_bit_patterns_and_reverse_are_stable() {
++    for threads in [1, 2, 4] {
++        pool(threads).install(|| {
++            macro_rules! check {
++                ($f:ty, $u:ty, $special:expr) => {{
++                    let special: &[$u] = &$special;
++                    let mut rows: Vec<_> = (0..65537)
++                        .map(|id| {
++                            let bits = if id % 2 == 0 {
++                                special[id % special.len()]
++                            } else {
++                                random(id) as $u
++                            };
++                            (<$f>::from_bits(bits), id)
++                        })
++                        .collect();
++                    let mut expected = rows.clone();
++                    expected.sort_by(|a, b| a.0.total_cmp(&b.0));
++                    par_stable_sort_by_key(&mut rows, |x| x.0);
++                    let bits = |rows: &[($f, usize)]| {
++                        rows.iter()
++                            .map(|x| (x.0.to_bits(), x.1))
++                            .collect::<Vec<_>>()
++                    };
++                    assert_eq!(bits(&rows), bits(&expected));
++                    expected.sort_by(|a, b| b.0.total_cmp(&a.0));
++                    par_stable_sort_by_key(&mut rows, |x| Reverse(x.0));
++                    assert_eq!(bits(&rows), bits(&expected));
++                    // Use fresh unordered bits rather than the already sorted
++                    // rows, and exceed the gate for the direct key layout too.
++                    let len = 1024 * 1024 / std::mem::size_of::<$f>() + 1;
++                    let mut direct: Vec<_> = (0..len)
++                        .map(|id| <$f>::from_bits(random(id) as $u))
++                        .collect();
++                    direct.extend(special.iter().copied().map(<$f>::from_bits));
++                    let mut expected = direct.clone();
++                    expected.sort_by(<$f>::total_cmp);
++                    par_stable_sort(&mut direct);
++                    assert_eq!(
++                        direct.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
++                        expected.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
++                    );
++                }};
++            }
++            check!(
++                f32,
++                u32,
++                [
++                    0, 1, 0x80000000, 0x80000001, 0x7f800000, 0xff800000, 0x7fc00001, 0x7f800001,
++                    0xffc00001
++                ]
++            );
++            check!(
++                f64,
++                u64,
++                [
++                    0,
++                    1,
++                    0x8000000000000000,
++                    0x8000000000000001,
++                    0x7ff0000000000000,
++                    0xfff0000000000000,
++                    0x7ff8000000000001,
++                    0x7ff0000000000001,
++                    0xfff8000000000001
++                ]
++            );
++        });
++    }
++}
++
++// Cell deliberately makes this Send but not Sync. Its edits must survive both
++// successful sorting and unwinding, without requiring shared access to records.
++struct Owned {
++    id: usize,
++    text: String,
++    edited: Cell<bool>,
++    drops: Arc<Vec<AtomicUsize>>,
++}
++
++impl Drop for Owned {
++    fn drop(&mut self) {
++        self.drops[self.id].fetch_add(1, Ordering::Relaxed);
++    }
++}
++
++fn owned(len: usize) -> (Vec<Owned>, Arc<Vec<AtomicUsize>>) {
++    let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++    let values = (0..len)
++        .map(|id| Owned {
++            id,
++            text: format!("record {id}"),
++            edited: Cell::new(false),
++            drops: Arc::clone(&drops),
++        })
++        .collect();
++    (values, drops)
++}
++
++fn verify_owned(mut values: Vec<Owned>, drops: &Arc<Vec<AtomicUsize>>) {
++    assert!(drops.iter().all(|x| x.load(Ordering::Relaxed) == 0));
++    values.sort_by_key(|x| x.id);
++    for (id, value) in values.iter().enumerate() {
++        assert_eq!(value.id, id);
++        assert_eq!(value.text, format!("record {id}"));
++    }
++    // A subsequent parallel operation must also be safe after recovery.
++    par_stable_sort_by_key(&mut values, |x| Reverse(x.id));
++    assert!(values.windows(2).all(|x| x[0].id > x[1].id));
++    drop(values);
++    assert!(drops.iter().all(|x| x.load(Ordering::Relaxed) == 1));
++}
++
++#[test]
++fn send_only_owned_records_preserve_stability_and_edits() {
++    for threads in [1, 2, 4] {
++        pool(threads).install(|| {
++            let (mut values, drops) = owned(32769);
++            let mut expected: Vec<_> = values.iter().map(|x| x.id).collect();
++            expected.sort_by_key(|&id| random(id) % 8192);
++            par_stable_sort_by_key(&mut values, |x| {
++                x.edited.set(true);
++                random(x.id) % 8192
++            });
++            assert_eq!(values.iter().map(|x| x.id).collect::<Vec<_>>(), expected);
++            assert!(values.iter().all(|x| x.edited.get()));
++            verify_owned(values, &drops);
++        });
++    }
++}
++
++#[test]
++fn panic_payload_and_owned_records_survive_parent_and_worker_panics() {
++    for threads in [1, 2, 4] {
++        pool(threads).install(|| {
++            for at in [1, 48, 8192] {
++                let (mut values, drops) = owned(32769);
++                let calls = AtomicUsize::new(0);
++                let result = catch_unwind(AssertUnwindSafe(|| {
++                    par_stable_sort_by_key(&mut values, |x| {
++                        x.edited.set(true);
++                        if calls.fetch_add(1, Ordering::Relaxed) + 1 == at {
++                            std::panic::panic_any(0x71u32);
++                        }
++                        random(x.id)
++                    });
++                }));
++                assert_eq!(*result.unwrap_err().downcast::<u32>().unwrap(), 0x71);
++                assert!(values.iter().any(|x| x.edited.get()));
++                verify_owned(values, &drops);
++            }
++            if threads > 1 {
++                let origin = std::thread::current().id();
++                let worker_panicked = AtomicBool::new(false);
++                let (mut values, drops) = owned(131073);
++                let result = catch_unwind(AssertUnwindSafe(|| {
++                    par_stable_sort_by_key(&mut values, |x| {
++                        x.edited.set(true);
++                        // Only child completion runs outside the installing
++                        // worker, after the parent partition is materialized.
++                        if std::thread::current().id() != origin {
++                            worker_panicked.store(true, Ordering::Relaxed);
++                            std::panic::panic_any(0x72u32);
++                        }
++                        random(x.id)
++                    });
++                }));
++                assert!(
++                    worker_panicked.load(Ordering::Relaxed),
++                    "no worker child was exercised"
++                );
++                assert_eq!(*result.unwrap_err().downcast::<u32>().unwrap(), 0x72);
++                verify_owned(values, &drops);
++            }
++        });
++    }
++}
++
++#[test]
++fn inconsistent_keys_preserve_owned_records() {
++    for threads in [1, 2, 4] {
++        pool(threads).install(|| {
++            for at in [1, 8192, 100000] {
++                let (mut values, drops) = owned(32769);
++                let calls = AtomicUsize::new(0);
++                let _ = catch_unwind(AssertUnwindSafe(|| {
++                    par_stable_sort_by_key(&mut values, |x| {
++                        let call = calls.fetch_add(1, Ordering::Relaxed);
++                        if call < at {
++                            random(x.id)
++                        } else {
++                            random(call)
++                        }
++                    });
++                }));
++                verify_owned(values, &drops);
++            }
++        });
++    }
++}
++
++#[test]
++fn exclusive_borrows_survive_sort_changing_keys_and_panics() {
++    struct Borrowed<'a> {
++        id: usize,
++        value: &'a mut usize,
++    }
++    for threads in [1, 2, 4] {
++        pool(threads).install(|| {
++            for mode in 0..3 {
++                let len = 65537;
++                let mut backing: Vec<_> = (0..len).collect();
++                let mut values: Vec<_> = backing
++                    .iter_mut()
++                    .enumerate()
++                    .map(|(id, value)| Borrowed { id, value })
++                    .collect();
++                let calls = AtomicUsize::new(0);
++                let result = catch_unwind(AssertUnwindSafe(|| {
++                    par_stable_sort_by_key(&mut values, |x| {
++                        let call = calls.fetch_add(1, Ordering::Relaxed);
++                        assert!(!(mode == 2 && call == 8192), "borrowed key panic");
++                        if mode == 1 && call >= 8192 {
++                            random(call)
++                        } else {
++                            random(x.id) % 8192
++                        }
++                    });
++                }));
++                if mode == 0 {
++                    assert!(result.is_ok());
++                    let mut expected: Vec<_> = (0..len).collect();
++                    expected.sort_by_key(|&id| random(id) % 8192);
++                    assert_eq!(values.iter().map(|x| x.id).collect::<Vec<_>>(), expected);
++                } else if mode == 2 {
++                    assert!(result.is_err());
++                }
++                let mut ids: Vec<_> = values.iter().map(|x| x.id).collect();
++                ids.sort_unstable();
++                assert_eq!(ids, (0..len).collect::<Vec<_>>());
++                for x in &mut values {
++                    assert_eq!(*x.value, x.id);
++                    *x.value += len;
++                }
++                drop(values);
++                assert_eq!(backing, (len..2 * len).collect::<Vec<_>>());
++            }
++        });
++    }
++}
++
++#[test]
++fn zero_sized_and_overaligned_records() {
++    #[repr(align(128))]
++    struct Wide {
++        key: u64,
++        id: usize,
++        payload: [u8; 257],
++    }
++    for threads in [1, 2, 4] {
++        pool(threads).install(|| {
++            let mut zero_sized = [(); 65537];
++            par_stable_sort_by_key(&mut zero_sized, |_| 0u8);
++            let mut values: Vec<_> = (0..4097)
++                .map(|id| Wide {
++                    key: random(id) % 1024,
++                    id,
++                    payload: [id as u8; 257],
++                })
++                .collect();
++            let mut expected: Vec<_> = values.iter().map(|x| (x.key, x.id)).collect();
++            expected.sort_by_key(|x| x.0);
++            par_stable_sort_by_key(&mut values, |x| x.key);
++            assert_eq!(
++                values.iter().map(|x| (x.key, x.id)).collect::<Vec<_>>(),
++                expected
++            );
++            assert!(values.iter().all(|x| x.payload == [x.id as u8; 257]));
++        });
++    }
++}
++
++#[test]
++fn key_closure_needs_sync_but_not_send_or_clone() {
++    pool(4).install(|| {
++        let salt = std::sync::Mutex::new(0x1234u64);
++        let guard = salt.lock().unwrap();
++        let mut values: Vec<_> = (0..65537).map(|id| (random(id), id)).collect();
++        let mut expected = values.clone();
++        expected.sort_by_key(|x| x.0 ^ *guard);
++        // Moving a MutexGuard into the closure makes the closure neither Send
++        // nor Clone, while it remains Sync and can be shared by worker tasks.
++        par_stable_sort_by_key(&mut values, move |x| x.0 ^ *guard);
++        assert_eq!(values, expected);
++    });
++}
++
++struct MovedWorkerPanic<'a> {
++    pool: &'a rayon::ThreadPool,
++    origin: std::thread::ThreadId,
++    start: usize,
++    end: usize,
++    moved_worker_started: AtomicBool,
++    moved_calls: AtomicUsize,
++    at: usize,
++}
++
++impl<'a> MovedWorkerPanic<'a> {
++    fn new<T>(values: &[T], at: usize, pool: &'a rayon::ThreadPool) -> Self {
++        let start = values.as_ptr() as usize;
++        Self {
++            pool,
++            origin: std::thread::current().id(),
++            start,
++            end: start + std::mem::size_of_val(values),
++            moved_worker_started: AtomicBool::new(false),
++            moved_calls: AtomicUsize::new(0),
++            at,
++        }
++    }
++
++    fn check<T>(&self, value: &T) {
++        let address = std::ptr::from_ref(value) as usize;
++        let moved = !(self.start..self.end).contains(&address);
++        if std::thread::current().id() == self.origin {
++            // A parallel root can invoke worker keys before any child moves
++            // records. Yield only after this origin itself enters moved
++            // storage, and wait for another worker to do the same. This
++            // cannot block serial preparation or root scatter.
++            if moved
++                && !self.moved_worker_started.load(Ordering::Relaxed)
++                && self.pool.current_thread_has_pending_tasks() == Some(true)
++            {
++                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
++                while !self.moved_worker_started.load(Ordering::Relaxed) {
++                    assert!(
++                        std::time::Instant::now() < deadline,
++                        "worker did not enter moved storage"
++                    );
++                    std::thread::yield_now();
++                }
++            }
++            return;
++        }
++        if moved {
++            self.moved_worker_started.store(true, Ordering::Relaxed);
++            let call = self.moved_calls.fetch_add(1, Ordering::Relaxed) + 1;
++            if call == self.at {
++                std::panic::panic_any(0x73u32);
++            }
++        }
++    }
++
++    fn verify(&self, result: std::thread::Result<()>) {
++        assert!(self.moved_calls.load(Ordering::Relaxed) >= self.at);
++        assert_eq!(*result.unwrap_err().downcast::<u32>().unwrap(), 0x73);
++    }
++}
++
++fn movement_key(id: usize, block_children: bool) -> u64 {
++    if block_children {
++        // Four balanced high-prefix buckets remain large even after the root
++        // widens its digit. Each child exceeds the 64 KiB tile budget for both
++        // Owned and Borrowed, forcing a worker block partition.
++        random(id) & 0xc000_0000_ffff_ffff
++    } else {
++        // Uniform root buckets fit a tile; their remaining bits require more
++        // than one counting pass, so later extraction reads moved scratch.
++        random(id) & 0x00ff_ffff
++    }
++}
++
++#[test]
++fn delayed_worker_movement_panics_preserve_owned_records() {
++    for threads in [2, 4] {
++        let pool = pool(threads);
++        pool.install(|| {
++            for block_children in [false, true] {
++                for at in [1, 7, 17] {
++                    let (mut values, drops) = owned(131072);
++                    let probe = MovedWorkerPanic::new(&values, at, &pool);
++                    let result = catch_unwind(AssertUnwindSafe(|| {
++                        par_stable_sort_by_key(&mut values, |x| {
++                            x.edited.set(true);
++                            probe.check(x);
++                            movement_key(x.id, block_children)
++                        });
++                    }));
++                    probe.verify(result);
++                    assert!(values.iter().any(|x| x.edited.get()));
++                    verify_owned(values, &drops);
++                }
++            }
++        });
++    }
++}
++
++#[test]
++fn delayed_worker_movement_panics_preserve_exclusive_borrows() {
++    struct Borrowed<'a> {
++        id: usize,
++        value: &'a mut usize,
++    }
++    for threads in [2, 4] {
++        let pool = pool(threads);
++        pool.install(|| {
++            for block_children in [false, true] {
++                for at in [1, 7, 17] {
++                    let len = 131072;
++                    let mut backing: Vec<_> = (0..len).collect();
++                    let mut values: Vec<_> = backing
++                        .iter_mut()
++                        .enumerate()
++                        .map(|(id, value)| Borrowed { id, value })
++                        .collect();
++                    let probe = MovedWorkerPanic::new(&values, at, &pool);
++                    let result = catch_unwind(AssertUnwindSafe(|| {
++                        par_stable_sort_by_key(&mut values, |x| {
++                            probe.check(x);
++                            movement_key(x.id, block_children)
++                        });
++                    }));
++                    probe.verify(result);
++                    values.sort_by_key(|x| x.id);
++                    for (id, x) in values.iter_mut().enumerate() {
++                        assert_eq!(x.id, id);
++                        assert_eq!(*x.value, id);
++                        *x.value += len;
++                    }
++                    // Reuse every exclusive reference in a second parallel
++                    // sort before releasing it and checking the backing data.
++                    par_stable_sort_by_key(&mut values, |x| Reverse(x.id));
++                    assert!(values.windows(2).all(|x| x[0].id > x[1].id));
++                    drop(values);
++                    assert_eq!(backing, (len..2 * len).collect::<Vec<_>>());
++                }
++            }
++        });
++    }
++}
++
++#[test]
++fn successful_large_sorts_use_multiple_workers() {
++    for threads in [2, 4] {
++        let pool = pool(threads);
++        pool.install(|| {
++            macro_rules! check {
++                ($ty:ty, $make:expr, $compare:expr) => {{
++                    let len = 1024 * 1024 / std::mem::size_of::<$ty>() + 1;
++                    let mut values: Vec<$ty> = (0..len).map($make).collect();
++                    let mut expected = values.clone();
++                    expected.sort_by($compare);
++                    let probe = MovedWorkerPanic::new(&values, usize::MAX, &pool);
++                    let visited = AtomicUsize::new(0);
++                    par_stable_sort_by_key(&mut values, |x| {
++                        probe.check(x);
++                        visited.fetch_or(
++                            1 << rayon::current_thread_index().unwrap(),
++                            Ordering::Relaxed,
++                        );
++                        *x
++                    });
++                    assert!(visited.load(Ordering::Relaxed).count_ones() >= 2);
++                    assert!(
++                        values
++                            .iter()
++                            .zip(&expected)
++                            .all(|(a, b)| ($compare)(a, b).is_eq())
++                    );
++                }};
++            }
++            check!(u16, |id| random(id) as u16, u16::cmp);
++            check!(u32, |id| random(id) as u32, u32::cmp);
++            check!(u64, random, u64::cmp);
++            check!(f32, |id| f32::from_bits(random(id) as u32), f32::total_cmp);
++            check!(f64, |id| f64::from_bits(random(id)), f64::total_cmp);
++        });
++    }
++}

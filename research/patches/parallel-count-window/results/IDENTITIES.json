@@ -1,0 +1,43 @@
+{
+  "baseline": {
+    "identity_sha256": "955fa26515aa9feeac20b41d2885dd62dd4349d4d7040bfe9b3025e7306e6bfc",
+    "identity_algorithm": "SHA256 of UTF-8 json.dumps(files,sort_keys=True,separators=(comma,colon))",
+    "parent_identity_sha256": "305068d9d6f4b1d0621c18426eee4945c8b45514f4b89037a276ed60fef37d70",
+    "upstream_runtime_commit": "e8e590616f0d3cfb5e8a30b84e4b3e43042036a4",
+    "status": "Safety validation passed. Source immutable and ready for separately authorized narrow count benchmark. No timings performed by this worker."
+  },
+  "candidate": {
+    "identity_sha256": "add21ec01b2982c32dbc430e98444a866743cd0de03801f7d9968213e1b82d71",
+    "identity_algorithm": "SHA256 of UTF-8 json.dumps(files,sort_keys=True,separators=(comma,colon))",
+    "parent_identity_sha256": "9a093c7aa0d82393f9abae1f333aa763197b492c31216164f82079dcbd15189c",
+    "upstream_runtime_commit": "e8e590616f0d3cfb5e8a30b84e4b3e43042036a4",
+    "status": "Safety validation passed. Source immutable and ready for separately authorized narrow count benchmark. No timings performed by this worker."
+  },
+  "binary_sha256": {
+    "target/release/tessera-parallel-count-window-screen": "3ec436f9c419cfab70f9e10b65c80a32cf0bf2bd6c5a5a3b8ef610ad013e583f",
+    "target/release/full-memory": "a09bf1cbcf1df5400847224af06cb0b3ad451149a80ca7276c56ecc3bd85ac99"
+  },
+  "driver_file_sha256": {
+    "Cargo.lock": "4b576d99379dfd2fd1c80b853ffeda229f716c8395ea8ab5b442fa40ea7245c1",
+    "Cargo.toml": "104757e3c344d79909bb4ce0be6ea68f9a63b8b54ad4adb2cbccb813685b0be5",
+    "PLAN.md": "b86075bc5ebf5d7488e77bae7846c8dabf0f507d98ec7b3f854a8e20b6f844ba",
+    "analyze.py": "c511b771f2226b37ddc5c67cc0e0a9b96cd59ffe7a364c6320938b1d19086483",
+    "build.sh": "b173fad649ba851e3e6454e1f821f9ce5acad1255815037a8a1e1363cdd77285",
+    "common.sh": "e946f2ae8e1f435900974a1dc9bac91544bb2a18d888637a79f9ab5d69ed0175",
+    "freeze_driver.py": "57af728ab120db6bf113ee356ef1c6867d7c6cb2c3c307e84653d6e5c82a114c",
+    "measure.sh": "57f6fed200b469d38bea2a9951935817dd05bffbb56d0f5cc44a80d6f64ed579",
+    "prepare.py": "d28902226c1598d22022c1d33003bc36812eddcbfd75ca1ad0497d6afdb784ba",
+    "prepare_diagnostics.py": "68f939cc3e7f1b3b4b3a440cfad59569984660a9ac63afe30f32aadcd1ebe2df",
+    "src/bin/full-memory.rs": "8cb51cce01b89b81c968d9a5e58f211f5c0554c6ad904e01d0472f98450ec019",
+    "src/main.rs": "4be5d88e44cae14cc2ef70280507d14e35d432eb712e0095d09f3ee6127a68b3",
+    "src/records.rs": "527e49515cc63ed6ed150a2b4641eb06ce1b8f31ebf9f826f824446970abde32",
+    "validate.sh": "1c2dc497f1fd621ea480822fe88ab3db4d55a854c606e91b5e2e3d0548ea61f6",
+    "verify_frozen.py": "980fa06fb78f2614c18049c821e8d45881eccbbd9de50a1fda8465ab32d3d863",
+    "verify_smoke.py": "d98768f909d16694c8d54043af3fd7a8e7c1ea6cf445c94fd0b1ff6d2e7ebfed"
+  },
+  "screen_status": "Three favorable cases, u32/d256 inconclusive under retained controls. No production acceptance.",
+  "measure_window_utc": {
+    "acquired": "2026-11-07T14:00:10Z",
+    "released": "2026-11-07T14:01:25Z"
+  }
+}

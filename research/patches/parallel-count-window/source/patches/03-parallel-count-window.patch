@@ -1,0 +1,741 @@
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -60,7 +60,7 @@
+ ]
+ 
+ [[package]]
+-name = "tessera-combined-current-main"
++name = "tessera-sort"
+ version = "0.0.0"
+ dependencies = [
+  "fearless_simd",
+--- a/rust/tessera-sort/Cargo.toml
++++ b/rust/tessera-sort/Cargo.toml
+@@ -1,5 +1,5 @@
+ [package]
+-name = "tessera-combined-current-main"
++name = "tessera-sort"
+ # Unreleased. Publication waits for the benchmark runner and release report.
+ version = "0.0.0"
+ publish = false
+@@ -21,6 +21,8 @@
+ std = []
+ # Optional parallel API; sequential builds keep their dependency-free no_std path.
+ rayon = ["std", "dep:rayon"]
++# Private attribution control; does not change normal scheduling.
++count-window-research = ["rayon"]
+ 
+ # Vector scans and prefix sums through `fearless_simd`. Requires std and Rust
+ # 1.89. Dispatches at run time on x86; other targets use their baseline ISA.
+--- /dev/null
++++ b/rust/tessera-sort/src/count_window_research.rs
+@@ -0,0 +1,108 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Opt-in research control; normal calls retain parallel scheduling.
++
++use std::cell::Cell;
++thread_local! {
++    static SERIAL: Cell<bool> = const { Cell::new(false) };
++}
++
++pub(crate) fn serial() -> bool {
++    SERIAL.get()
++}
++
++/// Runs the same count-window algorithm with serial chunk scheduling.
++///
++/// Call this inside the desired Rayon pool's `install` closure, surrounding a
++/// normal `par_stable_sort` call. The pool size, table size, input/output chunk
++/// geometry, probes, budget and fallbacks remain identical. Only count and fill
++/// iterator execution changes. This thread-local scope does not propagate to
++/// explicitly spawned jobs; it restores the previous setting even on panic.
++/// Pool size one still takes the unchanged public serial fallback.
++///
++/// This opt-in private control is for attribution, not a replacement public
++/// sorting policy. Compare its result against both the parallel schedule and
++/// unchanged strong serial sorter; do not label all algorithm changes as
++/// threading gains.
++pub fn with_serial_schedule<R>(run: impl FnOnce() -> R) -> R {
++    struct Reset(bool);
++    impl Drop for Reset {
++        fn drop(&mut self) {
++            SERIAL.set(self.0);
++        }
++    }
++    let _reset = Reset(SERIAL.replace(true));
++    run()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn research_scope_restores_after_nesting_and_panic() {
++        assert!(!serial());
++        with_serial_schedule(|| {
++            assert!(serial());
++            with_serial_schedule(|| assert!(serial()));
++            assert!(serial());
++        });
++        assert!(!serial());
++        assert!(
++            std::panic::catch_unwind(|| with_serial_schedule(|| panic!("scope test"))).is_err()
++        );
++        assert!(!serial());
++    }
++
++    #[cfg(not(miri))]
++    #[test]
++    fn serial_control_retains_parallel_geometry_and_values() {
++        use crate::test_witness::{Hooks, with_hooks};
++        use std::sync::Arc;
++        for workers in [2, 3, 8] {
++            rayon::ThreadPoolBuilder::new()
++                .num_threads(workers)
++                .build()
++                .unwrap()
++                .install(|| {
++                    let mut parallel: Vec<_> = (0..262_149)
++                        .map(|i| (i as u64).wrapping_mul(181) & 255)
++                        .collect();
++                    let mut serial = parallel.clone();
++                    let mut expected = parallel.clone();
++                    expected.sort();
++                    let parallel_hooks = Arc::new(Hooks::default());
++                    let serial_hooks = Arc::new(Hooks::default());
++                    with_hooks(parallel_hooks.clone(), || {
++                        crate::par_stable_sort(&mut parallel)
++                    });
++                    with_hooks(serial_hooks.clone(), || {
++                        with_serial_schedule(|| crate::par_stable_sort(&mut serial))
++                    });
++                    assert_eq!(serial, expected);
++                    assert_eq!(parallel, expected);
++                    let geometry = |hooks: &Hooks| {
++                        let mut rows: Vec<_> = hooks
++                            .count_work
++                            .lock()
++                            .unwrap()
++                            .iter()
++                            .map(|&(phase, _, len)| (phase, len))
++                            .collect();
++                        rows.sort();
++                        rows
++                    };
++                    assert_eq!(geometry(&serial_hooks), geometry(&parallel_hooks));
++                    assert_eq!(geometry(&serial_hooks).len(), 2 * workers);
++                    assert!(
++                        serial_hooks
++                            .count_work
++                            .lock()
++                            .unwrap()
++                            .iter()
++                            .all(|w| w.1 == rayon::current_thread_index().unwrap())
++                    );
++                });
++        }
++    }
++}
+--- a/rust/tessera-sort/src/engine/parallel.rs
++++ b/rust/tessera-sort/src/engine/parallel.rs
+@@ -60,6 +60,11 @@
+     #[inline]
+     fn key(&mut self, record: &T) -> u64 {
+         (self.0.key(record).to_u128() >> SHIFT) as u64
++    }
++
++    fn try_parallel_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
++        self.0
++            .try_parallel_count_window(records, low + SHIFT, width)
+     }
+ 
+     fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
+@@ -91,7 +96,9 @@
+         // The full adaptive scan established `varying`, so this window covers
+         // every key difference. Direct keys can use the shared counting fill;
+         // payload-bearing ByKey records decline and keep the native partition.
+-        if key.try_count_window(arr, low, top - low) {
++        if key.try_parallel_count_window(arr, low, top - low)
++            || key.try_count_window(arr, low, top - low)
++        {
+             return;
+         }
+         #[cfg(test)]
+--- a/rust/tessera-sort/src/engine/parallel/current_main_tests.rs
++++ b/rust/tessera-sort/src/engine/parallel/current_main_tests.rs
+@@ -175,3 +175,25 @@
+         );
+     }
+ }
++
++#[test]
++fn parallel_count_hook_translates_narrow_window() {
++    #[derive(Clone)]
++    struct Probe(std::rc::Rc<std::cell::Cell<(usize, usize)>>);
++    impl Extract<u128> for Probe {
++        type Value = u128;
++        fn key(&mut self, record: &u128) -> u128 {
++            *record
++        }
++        fn try_parallel_count_window(&mut self, _: &mut [u128], low: usize, width: usize) -> bool {
++            self.0.set((low, width));
++            true
++        }
++    }
++    let seen = std::rc::Rc::new(std::cell::Cell::new((0, 0)));
++    assert!(Narrow::<_, 64>(Probe(seen.clone())).try_parallel_count_window(&mut [0], 56, 8));
++    assert_eq!(seen.get(), (120, 8));
++    // Real u128 Direct and payload extractors must still decline the route.
++    assert!(!Narrow::<_, 64>(Direct).try_parallel_count_window(&mut [u128::MAX], 56, 8));
++    assert!(!Narrow::<_, 0>(ByKey(|r: &u64| *r)).try_parallel_count_window(&mut [0], 0, 8));
++}
+--- a/rust/tessera-sort/src/key.rs
++++ b/rust/tessera-sort/src/key.rs
+@@ -33,6 +33,11 @@
+     // public ordering contract. Reverse keys can use these defaults without
+     // acquiring a second set of primitive SIMD implementations.
+     pub trait Sealed: Copy {
++        #[cfg(feature = "rayon")]
++        fn parallel_count_window(_records: &mut [Self], _low: usize, _width: usize) -> bool {
++            false
++        }
++
+         #[inline]
+         fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool
+         where
+@@ -88,9 +93,26 @@
+     fn to_u128(self) -> u128;
+ }
+ 
++// Only these two intrinsic types may reconstruct records from window digits.
++// Keeping the choice in sealed implementations avoids casts or bounds on ByKey.
++#[cfg(feature = "rayon")]
++mod parallel_count;
++macro_rules! parallel_count_hook {
++    (u32) => { parallel_count_hook!(@enabled); };
++    (u64) => { parallel_count_hook!(@enabled); };
++    (@enabled) => {
++        #[cfg(feature = "rayon")]
++        fn parallel_count_window(records: &mut [Self], low: usize, width: usize) -> bool {
++            parallel_count::sort(records, low, width)
++        }
++    };
++    ($other:ident) => {};
++}
++
+ macro_rules! unsigned {
+-    ($($ty:ty),* $(,)?) => {$(
++    ($($ty:ident),* $(,)?) => {$(
+         impl sealed::Sealed for $ty {
++            parallel_count_hook!($ty);
+             #[cfg(feature = "portable-simd")]
+             #[inline]
+             fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool {
+@@ -220,6 +242,17 @@
+ pub(crate) trait Extract<T> {
+     type Value: Unsigned;
+     fn key(&mut self, record: &T) -> Self::Value;
++
++    /// Tries the intrinsic parallel fill; payload-bearing extractors decline.
++    #[cfg(feature = "rayon")]
++    fn try_parallel_count_window(
++        &mut self,
++        _records: &mut [T],
++        _low: usize,
++        _width: usize,
++    ) -> bool {
++        false
++    }
+ 
+     /// Finishes a slice whose keys all fall in one small window of the encoded
+     /// key, by counting the window and filling each run from one of its records.
+@@ -298,6 +331,11 @@
+ 
+ impl<K: RadixKey> Extract<K> for Direct {
+     type Value = K::Encoded;
++
++    #[cfg(feature = "rayon")]
++    fn try_parallel_count_window(&mut self, records: &mut [K], low: usize, width: usize) -> bool {
++        K::parallel_count_window(records, low, width)
++    }
+ 
+     fn try_count_window(&mut self, records: &mut [K], low: usize, width: usize) -> bool {
+         if width == 0 || width > SMALL_WINDOW_BITS {
+--- /dev/null
++++ b/rust/tessera-sort/src/key/parallel_count.rs
+@@ -0,0 +1,179 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Intrinsic unsigned counting with independently owned output-rank intervals.
++
++use super::Unsigned;
++use alloc::vec;
++use core::mem::size_of;
++use rayon::prelude::*;
++
++// Account for both parallel iterator trees, their closures and scalar frames.
++// There are at most P leaves and P-1 internal nodes per tree, and the passes do
++// not overlap. No per-task arrays, records, or user callbacks live on the stack.
++// Existing Rayon worker stacks and pool bookkeeping are not auxiliary storage
++// allocated by this algorithm. This conservative allowance is 4 KiB per leaf.
++const TASK_BYTES: usize = 4096;
++const RECORD_FACTOR: usize = 8;
++const MIN_CHUNK: usize = 4096;
++
++#[derive(Debug)]
++struct Plan {
++    buckets: usize,
++    chunk: usize,
++    workers: usize,
++    cells: usize,
++}
++
++fn plan(n: usize, workers: usize, width: usize, record_bytes: usize) -> Option<Plan> {
++    if workers < 2 || width == 0 || width > 8 || record_bytes == 0 || workers > n / MIN_CHUNK {
++        return None;
++    }
++    let buckets = 1usize.checked_shl(width as u32)?;
++    let cells = workers.checked_mul(buckets)?;
++    let table_bytes = cells.checked_mul(size_of::<usize>())?;
++    let prefix_bytes = buckets.checked_add(1)?.checked_mul(size_of::<usize>())?;
++    let scratch = table_bytes
++        .checked_add(prefix_bytes)?
++        .checked_add(workers.checked_mul(TASK_BYTES)?)?;
++    let root = n.isqrt();
++    let ceiling_root = root.checked_add(usize::from(root * root != n))?;
++    let budget = RECORD_FACTOR
++        .checked_mul(workers)?
++        .checked_mul(ceiling_root)?
++        .checked_mul(record_bytes)?;
++    if scratch > budget {
++        return None;
++    }
++    Some(Plan {
++        buckets,
++        chunk: n.div_ceil(workers),
++        workers,
++        cells,
++    })
++}
++
++fn count<K: Unsigned>(records: &[K], counts: &mut [usize], low: usize) {
++    let mask = K::from_usize(counts.len() - 1);
++    let shift = K::from_usize(low);
++    for &record in records {
++        counts[((record >> shift) & mask).to_usize()] += 1;
++    }
++}
++
++fn prefix(counts: &[usize], buckets: usize, ends: &mut [usize]) {
++    for row in counts.chunks_exact(buckets) {
++        for (end, &count) in ends[1..].iter_mut().zip(row) {
++            *end += count;
++        }
++    }
++    for bucket in 0..buckets {
++        ends[bucket + 1] += ends[bucket];
++    }
++}
++
++fn fill<K: Unsigned>(records: &mut [K], start: usize, ends: &[usize], base: K, low: usize) {
++    let mut rank = start;
++    let mut bucket = ends[1..].partition_point(|&end| end <= rank);
++    let mut remaining = records;
++    while !remaining.is_empty() {
++        let amount = (ends[bucket + 1] - rank).min(remaining.len());
++        let (run, rest) = remaining.split_at_mut(amount);
++        let mut value = base;
++        value |= K::from_usize(bucket) << K::from_usize(low);
++        run.fill(value);
++        rank += amount;
++        remaining = rest;
++        bucket += 1;
++    }
++}
++
++// Only sealed u32/u64 implementations call this function. Every other bit is
++// known constant from prepare_sort, so replacing a run preserves exact values.
++pub(super) fn sort<K: Unsigned + Send + Sync>(records: &mut [K], low: usize, width: usize) -> bool {
++    if low.checked_add(width).is_none_or(|top| top > K::BITS) {
++        return false;
++    }
++    let Some(plan) = plan(
++        records.len(),
++        rayon::current_num_threads(),
++        width,
++        size_of::<K>(),
++    ) else {
++        return false;
++    };
++    let mut counts = vec![0usize; plan.cells];
++    let mut ends = vec![0usize; plan.buckets + 1];
++    // vec![0; len] requests exactly len elements; neither vector grows. The
++    // table contains P rows even when ceil(n/P) yields fewer nonempty chunks.
++    debug_assert_eq!(counts.capacity(), plan.cells);
++    debug_assert_eq!(ends.capacity(), plan.buckets + 1);
++    debug_assert!(records.len().div_ceil(plan.chunk) <= plan.workers);
++    #[cfg(test)]
++    let hooks = crate::test_witness::current();
++    #[cfg(test)]
++    if let Some(hooks) = &hooks {
++        *hooks.count_layout.lock().unwrap() =
++            Some((counts.as_ptr().addr() % 64, plan.workers, plan.buckets));
++    }
++    #[cfg(feature = "count-window-research")]
++    let serial = crate::count_window_research::serial();
++    #[cfg(not(feature = "count-window-research"))]
++    let serial = false;
++    let count_chunk = |(row, chunk): (&mut [usize], &mut [K])| {
++        count(chunk, row, low);
++        #[cfg(test)]
++        record_work(&hooks, false, chunk.len());
++    };
++    if serial {
++        counts
++            .chunks_mut(plan.buckets)
++            .zip(records.chunks_mut(plan.chunk))
++            .for_each(count_chunk);
++    } else {
++        counts
++            .par_chunks_mut(plan.buckets)
++            .zip(records.par_chunks_mut(plan.chunk))
++            .for_each(count_chunk);
++    }
++    prefix(&counts, plan.buckets, &mut ends);
++    debug_assert_eq!(ends[plan.buckets], records.len());
++    let mask = K::from_usize(plan.buckets - 1) << K::from_usize(low);
++    let base = records[0] & !mask;
++    let fill_chunk = |(index, chunk): (usize, &mut [K])| {
++        fill(chunk, index * plan.chunk, &ends, base, low);
++        #[cfg(test)]
++        record_work(&hooks, true, chunk.len());
++    };
++    if serial {
++        records
++            .chunks_mut(plan.chunk)
++            .enumerate()
++            .for_each(fill_chunk);
++    } else {
++        records
++            .par_chunks_mut(plan.chunk)
++            .enumerate()
++            .for_each(fill_chunk);
++    }
++    #[cfg(test)]
++    if let Some(hooks) = crate::test_witness::current() {
++        hooks
++            .parallel_count
++            .store(true, std::sync::atomic::Ordering::SeqCst);
++    }
++    true
++}
++
++#[cfg(test)]
++fn record_work(hooks: &Option<std::sync::Arc<crate::test_witness::Hooks>>, fill: bool, len: usize) {
++    if let Some(hooks) = hooks {
++        hooks
++            .count_work
++            .lock()
++            .unwrap()
++            .push((fill, rayon::current_thread_index().unwrap(), len));
++    }
++}
++
++#[cfg(test)]
++mod tests;
+--- /dev/null
++++ b/rust/tessera-sort/src/key/parallel_count/tests.rs
+@@ -0,0 +1,265 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++use super::*;
++use crate::key::{ByKey, Direct, Extract};
++
++fn data(n: usize, low: usize, width: usize, base: u64, skew: bool) -> Vec<u64> {
++    let mask = ((1u64 << width) - 1) << low;
++    (0..n)
++        .map(|i| {
++            let mixed = (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
++            let digit = if skew && i % 101 != 0 { 0 } else { mixed >> 32 };
++            (base & !mask) | ((digit << low) & mask)
++        })
++        .collect()
++}
++
++#[test]
++fn scalar_count_prefix_rank_fill() {
++    // Run the exact scalar kernels under Miri without executing Rayon.
++    for width in 1..=8 {
++        for low in [0, 17, 64 - width] {
++            let input = data(517, low, width, u64::MAX, true);
++            let mut expected = input.clone();
++            expected.sort();
++            let buckets = 1 << width;
++            let mut counts = vec![0; 3 * buckets];
++            for (row, chunk) in counts.chunks_mut(buckets).zip(input.chunks(173)) {
++                count(chunk, row, low);
++            }
++            let mut ends = vec![0; buckets + 1];
++            prefix(&counts, buckets, &mut ends);
++            assert_eq!(ends[buckets], input.len());
++            for chunk_size in [1, 19, 173, 257, 517] {
++                let mut actual = input.clone();
++                let base = input[0] & !(((1 << width) - 1) << low);
++                for (index, chunk) in actual.chunks_mut(chunk_size).enumerate() {
++                    fill(chunk, index * chunk_size, &ends, base, low);
++                }
++                assert_eq!(actual, expected);
++            }
++        }
++    }
++}
++
++#[test]
++fn checked_budget_rejects_overflow_and_small_inputs() {
++    for width in [0, 9, usize::MAX] {
++        assert!(plan(1 << 20, 8, width, 4).is_none());
++    }
++    assert!(plan(usize::MAX, usize::MAX, 8, 4).is_none());
++    assert!(plan(usize::MAX, usize::MAX / MIN_CHUNK, 8, 8).is_none());
++    assert!(plan(usize::MAX, 2, 8, usize::MAX).is_none());
++    assert!(plan(0, 2, 8, 4).is_none());
++    assert!(plan(1 << 20, 1, 8, 4).is_none());
++    assert!(plan(32768, 8, 8, 4).is_none()); // Scratch, not chunk limit.
++    assert!(plan(65536, 17, 8, 4).is_none()); // Excess workers.
++    for workers in [2usize, 3, 4, 8, 64, 1024] {
++        let n = (workers * MIN_CHUNK).max(65536);
++        assert!(plan(n, workers, 8, 4).is_some());
++    }
++}
++
++#[cfg(not(miri))]
++#[test]
++fn intrinsic_window_matrix_and_fallback() {
++    for workers in [1, 2, 4, 8] {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(workers)
++            .build()
++            .unwrap()
++            .install(|| {
++                for width in 1..=8 {
++                    for low in [0, 11, 64 - width] {
++                        for base in [0, u64::MAX] {
++                            let input = data(65539, low, width, base, width % 2 == 0);
++                            let mut expected = input.clone();
++                            expected.sort();
++                            let mut actual = input.clone();
++                            let used = Direct.try_parallel_count_window(&mut actual, low, width);
++                            assert_eq!(used, workers > 1);
++                            if used {
++                                assert_eq!(actual, expected);
++                            } else {
++                                assert_eq!(actual, input);
++                            }
++                            if low + width <= 32 {
++                                let mut actual: Vec<_> = input.iter().map(|&v| v as u32).collect();
++                                let mut expected = actual.clone();
++                                expected.sort();
++                                let used =
++                                    Direct.try_parallel_count_window(&mut actual, low, width);
++                                assert_eq!(used, workers > 1);
++                                if used {
++                                    assert_eq!(actual, expected);
++                                }
++                            }
++                        }
++                    }
++                }
++                for n in [0, 1, 8191, 8192, 32767, 32768, 32769, 65535, 65536, 65537] {
++                    let mut actual: Vec<_> = data(n, 24, 8, u64::MAX, false)
++                        .into_iter()
++                        .map(|v| v as u32)
++                        .collect();
++                    let mut expected = actual.clone();
++                    expected.sort();
++                    let used = Direct.try_parallel_count_window(&mut actual, 24, 8);
++                    assert_eq!(used, plan(n, workers, 8, 4).is_some());
++                    if !used {
++                        assert!(Direct.try_count_window(&mut actual, 24, 8));
++                    }
++                    assert_eq!(actual, expected);
++                }
++            });
++    }
++}
++
++#[cfg(not(miri))]
++#[test]
++fn public_route_witness_and_fastpaths() {
++    use crate::test_witness::{Hooks, with_hooks};
++    use std::sync::{Arc, atomic::Ordering::SeqCst};
++    for workers in [1, 2, 4, 8] {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(workers)
++            .build()
++            .unwrap()
++            .install(|| {
++                for n in [262143, 262144, 262145] {
++                    for width in [1, 4, 8] {
++                        for low in [0, 32 - width] {
++                            let mut actual: Vec<_> = data(n, low, width, u64::MAX, false)
++                                .into_iter()
++                                .map(|v| v as u32)
++                                .collect();
++                            let mut expected = actual.clone();
++                            expected.sort();
++                            let hooks = Arc::new(Hooks::default());
++                            with_hooks(hooks.clone(), || crate::par_stable_sort(&mut actual));
++                            assert_eq!(actual, expected);
++                            assert_eq!(
++                                hooks.parallel_count.load(SeqCst),
++                                workers > 1 && n >= 262144
++                            );
++                        }
++                    }
++                }
++                for n in [131071, 131072, 131073] {
++                    let mut actual = data(n, 56, 8, u64::MAX, true);
++                    let mut expected = actual.clone();
++                    expected.sort();
++                    let hooks = Arc::new(Hooks::default());
++                    with_hooks(hooks.clone(), || crate::par_stable_sort(&mut actual));
++                    assert_eq!(actual, expected);
++                    assert_eq!(
++                        hooks.parallel_count.load(SeqCst),
++                        workers > 1 && n >= 131072
++                    );
++                }
++                for kind in 0..4 {
++                    let mut actual = match kind {
++                        0 => vec![u64::MAX; 131073],
++                        1 => (0..131073).map(|i| i as u64).collect(),
++                        2 => (0..131073).rev().map(|i| i as u64).collect(),
++                        _ => data(131073, 0, 8, 0, false)
++                            .into_iter()
++                            .enumerate()
++                            .map(|(i, v)| v ^ (i as u64).wrapping_mul(0x9e3779b97f4a7c15))
++                            .collect(),
++                    };
++                    let mut expected = actual.clone();
++                    expected.sort();
++                    let hooks = Arc::new(Hooks::default());
++                    with_hooks(hooks.clone(), || crate::par_stable_sort(&mut actual));
++                    assert_eq!(actual, expected);
++                    assert!(!hooks.parallel_count.load(SeqCst));
++                }
++                let mut rows: Vec<_> = data(65539, 0, 8, 0, false)
++                    .into_iter()
++                    .enumerate()
++                    .map(|(i, k)| (k, i))
++                    .collect();
++                let mut expected = rows.clone();
++                expected.sort_by_key(|r| r.0);
++                let hooks = Arc::new(Hooks::default());
++                with_hooks(hooks.clone(), || {
++                    crate::par_stable_sort_by_key(&mut rows, |r| r.0)
++                });
++                assert_eq!(rows, expected);
++                assert!(!hooks.parallel_count.load(SeqCst));
++            });
++    }
++}
++
++#[test]
++fn unsupported_types_and_payload_extractors_decline() {
++    let mut direct = Direct;
++    assert!(!direct.try_parallel_count_window(&mut [1u8, 0], 0, 1));
++    assert!(!direct.try_parallel_count_window(&mut [1u16, 0], 0, 1));
++    assert!(!direct.try_parallel_count_window(&mut [1u128, 0], 0, 1));
++    assert!(!direct.try_parallel_count_window(&mut [1i64, 0], 0, 1));
++    assert!(!direct.try_parallel_count_window(&mut [1usize, 0], 0, 1));
++    assert!(!direct.try_parallel_count_window(&mut [1f64, 0.], 0, 1));
++    assert!(!direct.try_parallel_count_window(&mut [core::cmp::Reverse(1u64)], 0, 1));
++    assert!(!ByKey(|r: &(u64, usize)| r.0).try_parallel_count_window(&mut [(1, 0), (0, 1)], 0, 1));
++    // Invalid shifts decline before querying Rayon or allocating.
++    assert!(!direct.try_parallel_count_window(&mut [1u64, 0], usize::MAX, 1));
++    assert!(!direct.try_parallel_count_window(&mut [1u32, 0], 31, 2));
++}
++
++#[cfg(not(miri))]
++#[test]
++fn nested_public_calls_and_rank_balance_witness() {
++    use crate::test_witness::{Hooks, with_hooks};
++    use std::sync::{Arc, atomic::Ordering::SeqCst};
++    for workers in [2, 3] {
++        rayon::ThreadPoolBuilder::new().num_threads(workers).build().unwrap().install(|| {
++            let run = || {
++                let mut actual = data(1_048_579, 56, 8, u64::MAX, true);
++                let mut expected = actual.clone(); expected.sort();
++                let hooks = Arc::new(Hooks::default());
++                with_hooks(hooks.clone(), || crate::par_stable_sort(&mut actual));
++                assert_eq!(actual, expected);
++                assert!(hooks.parallel_count.load(SeqCst));
++                let work = hooks.count_work.lock().unwrap();
++                for phase in [false, true] {
++                    let sizes: Vec<_> = work.iter().filter(|w| w.0 == phase).map(|w| w.2).collect();
++                    assert_eq!(sizes.len(), workers);
++                    assert_eq!(sizes.iter().sum::<usize>(), actual.len());
++                    assert!(sizes.iter().max().unwrap() - sizes.iter().min().unwrap() < workers);
++                }
++                eprintln!("nested P={workers} actual count/fill worker and rank-size witness: {work:?}");
++            };
++            rayon::join(run, run);
++        });
++    }
++}
++
++#[cfg(not(miri))]
++#[test]
++fn actual_histogram_allocation_layout_diagnostic() {
++    use crate::test_witness::{Hooks, with_hooks};
++    use std::sync::Arc;
++    for workers in [2, 3, 8] {
++        rayon::ThreadPoolBuilder::new().num_threads(workers).build().unwrap().install(|| {
++            for width in [1, 4, 8] {
++                let n: usize = 262149;
++                let chunk = n.div_ceil(workers);
++                // Neighboring rows concentrate on their boundary buckets. This
++                // diagnoses layout only; it does not measure false sharing.
++                let mut values: Vec<u32> = (0..n).map(|i| if (i / chunk) % 2 == 0 { (1 << width) - 1 } else { 0 }).collect();
++                let mut expected = values.clone(); expected.sort();
++                let hooks = Arc::new(Hooks::default());
++                assert!(with_hooks(hooks.clone(), || Direct.try_parallel_count_window(&mut values, 0, width)));
++                assert_eq!(values, expected);
++                let (base_mod, p, r) = hooks.count_layout.lock().unwrap().unwrap();
++                assert_eq!(p, workers);
++                assert_eq!(r, 1 << width);
++                let row_bytes = r * size_of::<usize>();
++                let rows: Vec<_> = (0..p).map(|row| (row, (base_mod + row * row_bytes) % 64, row * row_bytes..(row + 1) * row_bytes)).collect();
++                eprintln!("actual histogram layout: P={p} R={r} base_mod64={base_mod} rows=(index,start_mod64,used_byte_range) {rows:?}");
++            }
++        });
++    }
++}
+--- a/rust/tessera-sort/src/lib.rs
++++ b/rust/tessera-sort/src/lib.rs
+@@ -77,6 +77,11 @@
+ mod block;
+ mod engine;
+ mod key;
++
++/// Private experimental scheduling control for count-window comparisons.
++#[cfg(feature = "count-window-research")]
++#[doc(hidden)]
++pub mod count_window_research;
+ #[cfg(feature = "portable-simd")]
+ mod portable_simd;
+ mod scan;
+--- a/rust/tessera-sort/src/test_witness.rs
++++ b/rust/tessera-sort/src/test_witness.rs
+@@ -34,6 +34,9 @@
+     pub consumers_started: AtomicUsize,
+     pub consumers_done: AtomicUsize,
+     pub single_route: AtomicBool,
++    pub parallel_count: AtomicBool,
++    pub count_work: Mutex<Vec<(bool, usize, usize)>>,
++    pub count_layout: Mutex<Option<(usize, usize, usize)>>,
+     pub root_geometry: Mutex<Vec<(usize, usize, usize, usize)>>,
+     pub root_key_panic: AtomicBool,
+     pub root_calls: AtomicUsize,

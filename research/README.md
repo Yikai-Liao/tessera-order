@@ -45,3 +45,5 @@ The [experiment report](../docs/development/parallel-experiments.md) includes
 negative results, control noise, and the practical space costs. Raw benchmarks,
 profiles, and harnesses remain outside this repository. Each crate has a separate
 `[workspace]` and must be tested explicitly with its own manifest path.
+
+- [Parallel Direct count-window](patches/parallel-count-window/README.md): frozen e8 source and initial four-case screen. Three narrow research signals, one inconclusive case; no default adoption or full-matrix acceptance.

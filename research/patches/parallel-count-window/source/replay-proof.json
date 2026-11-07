@@ -1,0 +1,56 @@
+{
+  "public_base_commit": "0bc80b49d5efd5bd8b62165b170015e5803226b7",
+  "upstream_runtime_commit": "e8e590616f0d3cfb5e8a30b84e4b3e43042036a4",
+  "frozen_candidate_identity": "add21ec01b2982c32dbc430e98444a866743cd0de03801f7d9968213e1b82d71",
+  "normalization": "Only package name tessera-count-e8-candidate -> tessera-sort in Cargo.lock and rust/tessera-sort/Cargo.toml; all Rust files byte-identical.",
+  "patch_order": [
+    "patches/01-combined-current-main.patch",
+    "patches/02-e8-default-insertion.patch",
+    "patches/03-parallel-count-window.patch"
+  ],
+  "patch_sha256": {
+    "patches/01-combined-current-main.patch": "0d375cfb6f962fb6032c2a962833d9d003d15951403e220b69a84e0b1e0f6b7d",
+    "patches/02-e8-default-insertion.patch": "9bc9dc9ea7325930cc38e023e45bd7a89d470a0e1ce66fe47ab261b6d6f6878e",
+    "patches/03-parallel-count-window.patch": "6212274c151d02d27a0230f8cf63e3019ff2cabd8585ad19b47a79562093dd94"
+  },
+  "checks": {
+    "forward_apply_check_and_apply": true,
+    "normalized_candidate_all_file_equality": true,
+    "reverse_all_patches_exact_base_source_equality": true,
+    "second_forward_replay_equality": true,
+    "builds_tests_timings_performed_during_packaging": false,
+    "new_count_patch_added_unsafe_tokens": 0,
+    "metadata_and_patch_headers_relative": true
+  },
+  "normalized_files": {
+    "Cargo.lock": "0df8bc3ab74b5f0ddd11b3265270df97176d14a21971a4836e42ec6bed7bcf5b",
+    "Cargo.toml": "a212021425176b0c9f703d6b0b710b87e19dce0576fdc757fe276c2729c766d3",
+    "rust/tessera-sort/Cargo.toml": "62f6a9d0a47599173716201f5ad4c398096c3fad90df17534afa280057112629",
+    "rust/tessera-sort/src/block.rs": "2e9e07ece3adebdd09ec93c691d5697ef9e36135e2a639c4cd24b689535801cd",
+    "rust/tessera-sort/src/block/parallel.rs": "1d3ab2baeb63396d9ff7cef9e1a84bd083f599440982a256cda67d147b7fcd46",
+    "rust/tessera-sort/src/block/parallel/compact.rs": "0830aeb19a2b6430bf8c21d5aef3214d567dc913bc8ccebeae50a96f548db455",
+    "rust/tessera-sort/src/count_window_research.rs": "7fc3bdc9e2624ff22dc98fb7d7ba8e6085fc3b18bbb9531c8b4fd317c18992ce",
+    "rust/tessera-sort/src/engine.rs": "5df5c15acf2913c3deb0cb9af7958333b789a56be62b51749c9e427c90efb6b7",
+    "rust/tessera-sort/src/engine/current_main_tests.rs": "d4a0acd674c5d000abac0380ff0eb6dc6a3b07dc5151b06aad5179a30228626b",
+    "rust/tessera-sort/src/engine/parallel.rs": "9252dc5ceef0211733471c26ae85756f0ffe3be3376f848ae7a32a0e5ebc7f38",
+    "rust/tessera-sort/src/engine/parallel/current_main_tests.rs": "2e4ed9986e5244a9a429aaf69db85ab3ec9362cc31f95d3082f18a780b3bb582",
+    "rust/tessera-sort/src/engine/parallel/progress_tests.rs": "e359d1126433573ef7abc0baea766460fc259f6e75afb293756899542e4ce199",
+    "rust/tessera-sort/src/engine/parallel/safety_gap_tests.rs": "a5f2f82e95a4f1767a6abba36503f58110ab57fc9715d73cf8803d1a5f147d4e",
+    "rust/tessera-sort/src/key.rs": "fe7d1fd29897da1b710e63460de554640e7d3a1d8279b697342804522ea1562c",
+    "rust/tessera-sort/src/key/parallel_count.rs": "9dda96266248a08849cf018295f33ccc035586315886473385060d411ddd6213",
+    "rust/tessera-sort/src/key/parallel_count/tests.rs": "c835d7651dec3a33fad4955f1249660585b22196f22b7e0355e4b71e03bc2063",
+    "rust/tessera-sort/src/lib.rs": "42196a532234012d2fe6094503a4412d5653b88eaff4f99457926de5333721a6",
+    "rust/tessera-sort/src/main_kernel_tests.rs": "eae4b4d7fdda4196dcd34c8f3f379f3708a1a3753fe171fe54c005b4026739b0",
+    "rust/tessera-sort/src/portable_simd.rs": "50cd42bddc699cd9e52ef7996ccb3cee7a087efe3100d2390d6f16d044eab3de",
+    "rust/tessera-sort/src/scan.rs": "cc0e490181d96164076b4543554507c98db77b5b5c7b88c124a2a572c9338916",
+    "rust/tessera-sort/src/test_witness.rs": "fd4c280b104f300f88866bf9a69e20a47a27ab7d13c5458be3fb030b677deecb",
+    "rust/tessera-sort/src/unwind.rs": "82477e2787826509e957dbdccd8cb7641b6ac9c56521c7385f76aef41e5cc614",
+    "rust/tessera-sort/src/workspace.rs": "f92fddbcee2d649e78aefd76864c383c7720aa0628497f2689ed7055f021af45",
+    "rust/tessera-sort/tests/conformance.rs": "7f3c94f087a1351e30cc1929cb5fc220afe9e398c58630cf7cd69ea81daa9336",
+    "rust/tessera-sort/tests/main_kernel_port.rs": "a5ea198b30289693298f81ba81ce1845fd2a9cba35cdc691cd85723e246a29a5",
+    "rust/tessera-sort/tests/parallel.rs": "3971d077817dd41c2721f1b9a4726e23f2dca51d8f3bb956affd07c60e8d47b9",
+    "rust/tessera-sort/tests/recovery.rs": "1bff48350a8f58364e870586ed9b1042b54d09a91749d705bf592b078afd3ccb",
+    "rust/tessera-sort/tests/workspace_memory.rs": "28228c3aec5e49fb0ed2f01ddb460955dcc9f9bcebe1bf9b5090b67e0bb87e7a",
+    "rustfmt.toml": "01bd7a809585d7696ba6421db41d46fa3cfb3afbbfc28f16463dc2f1649b2f7a"
+  }
+}

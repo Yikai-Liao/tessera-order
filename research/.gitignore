@@ -1,0 +1,2 @@
+# Standalone research crates keep build products outside commits.
+**/target/

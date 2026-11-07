@@ -1,0 +1,31 @@
+{
+  "validation_origin": "tessera-rank-owned-prototype/evidence/multi-panic-validated-source/VALIDATION.md",
+  "files": {
+    "src/lib.rs": {
+      "origin": "tessera-rank-owned-prototype/src/lib.rs",
+      "validated_sha256": "0aa2a8f8566facee65301fab0e80b1c15acf0e8cc5fdc18b3005507ea3d8a6e9",
+      "staged_sha256": "0aa2a8f8566facee65301fab0e80b1c15acf0e8cc5fdc18b3005507ea3d8a6e9"
+    },
+    "src/aligned.rs": {
+      "origin": "tessera-rank-owned-prototype/src/aligned.rs",
+      "validated_sha256": "677de24dc558c408d7c3e4dd76f27f58d37d2ad9726c835225e0d639b9e780ed",
+      "staged_sha256": "677de24dc558c408d7c3e4dd76f27f58d37d2ad9726c835225e0d639b9e780ed"
+    },
+    "src/parallel_restore.rs": {
+      "origin": "tessera-rank-owned-prototype/src/parallel_restore.rs",
+      "validated_sha256": "b48d9d6d38b4be63f37b2ee9a930ef74e56427d386dd6a8dbfe495a8ff56651e",
+      "staged_sha256": "b48d9d6d38b4be63f37b2ee9a930ef74e56427d386dd6a8dbfe495a8ff56651e"
+    },
+    "Cargo.toml": {
+      "origin": "tessera-rank-owned-prototype/Cargo.toml",
+      "validated_sha256": "e28180eb0e2780fb365cf3576b5e529991e152b080a61b21c554b22d9e2b3bf2",
+      "staged_sha256": "df5e46de2ed5259fdd6335cb2a18e24d4454f96abb06aa5af5bdbca53490113c",
+      "packaging_change": "Only local dependency path changed to ../../rust/tessera-sort; standalone [workspace] retained."
+    },
+    "Cargo.lock": {
+      "origin": "tessera-rank-owned-prototype/Cargo.lock",
+      "validated_sha256": "7e08c24f1f8b0a32c6d659a8c396afb7ddca54497a3c967dc3fb3546926660d9",
+      "staged_sha256": "7e08c24f1f8b0a32c6d659a8c396afb7ddca54497a3c967dc3fb3546926660d9"
+    }
+  }
+}

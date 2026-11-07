@@ -1,0 +1,23 @@
+[package]
+name = "rank-owned-prototype"
+version = "0.0.0"
+edition = "2021"
+license = "BSD-2-Clause"
+publish = false
+
+[dependencies]
+rayon = "1.10"
+tessera-sort = { path = "../../rust/tessera-sort" }
+
+[workspace]
+
+[features]
+default = ["padded", "cursor-cache", "inline-step", "pull-restore", "parallel-restore", "loser-tree"]
+comparison-counting = []
+allocation-counting = []
+padded = []
+cursor-cache = []
+inline-step = []
+pull-restore = []
+parallel-restore = ["pull-restore"]
+loser-tree = []

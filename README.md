@@ -14,10 +14,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSD--2--Clause-blue.svg" alt="License: BSD-2-Clause"></a>
   <img src="https://img.shields.io/badge/MSRV-1.85-orange.svg" alt="MSRV 1.85">
   <img src="https://img.shields.io/badge/status-pre--release-lightgrey.svg" alt="Status: pre-release">
-</p>
-
-<p align="center">
-  <a href="https://yikai-liao.github.io/tessera-sort/">Documentation</a>
+  <a href="https://yikai-liao.github.io/tessera-sort/"><img src="https://img.shields.io/badge/docs-online-8b5cf6.svg" alt="Documentation"></a>
 </p>
 
 > [!IMPORTANT]

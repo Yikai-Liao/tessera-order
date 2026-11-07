@@ -40,7 +40,17 @@ From here on, the engine works on slices of the input and sorts each one in plac
 - a **tile** is a slice of at most 64 KiB of records. It is finished in a scratch buffer of the same size, which stays in the L2 cache ([tiles](tiles.md));
 - a **node** is anything larger. It is split by a stable partition into children, and each child is routed again.
 
-A node first looks at its varying bits. If they span at most 8 bits, one [block partition](block-partition.md) on that window finishes the node: every record is then in its final position. Otherwise the node has three ways to split. The first two are checked only on nodes of at least four tiles, so their 64-key sample is paid for.
+A node first looks at its varying bits. If they span at most 8 bits, the node is one window away from sorted, and one of the routes below finishes it: every record is then in its final position.
+
+### Counted window
+
+A record sorted by its own key is interchangeable with every record of the same key: equal encoded keys are equal bit patterns. For those inputs — `stable_sort`, not `stable_sort_by_key` — the engine counts the records of each value in the window, remembers one record per value, and fills each run with it. The runs come out in key order, and no block table or record move is needed.
+
+Records sorted by a key function keep their payloads: two records with key 7 may hold different data and in a fixed order between them. Counting would drop that, so `stable_sort_by_key` takes the [block partition](block-partition.md) below instead.
+
+### Block partition of the window
+
+The remaining inputs get one [block partition](block-partition.md) on the window, which also finishes the node. Wider nodes have three ways to split. The first two are checked only on nodes of at least four tiles, so their 64-key sample is paid for.
 
 ### Repeated key
 
@@ -79,4 +89,5 @@ While the block partition writes its result back into the input, each child that
 | nearly sorted | budgeted insertion | linear in n plus inversions |
 | one dominant key | equality partition | one partition, the equal band is done |
 | sorted with a short outlier run | rotate + insertion | the body is routed on fewer bits |
+| at most 8 varying bits, record is its own key | counted window | one counting pass and one fill |
 | everything else | top-digit block partition, then tiles | one streaming pass per node level, then cache-resident tiles |

@@ -114,3 +114,42 @@ The external harness/script/data stay outside Git. `VALIDATION.md` records
 exact commands and source identities. This crate is research only; changing
 its child dependency from a historical core to current main is recorded and
 is not claimed to be a measured improvement by itself.
+
+## Follow-on: direct open-path restoration policy
+
+`Config::path_restore` selects true open paths plus whole-cycle restoration.
+This is a new controlled use of established pull-path machinery on the aligned
+root, not a claim to invent path/cycle permutation. Earlier original research
+controls include `tessera-rank-merge-prototype`'s `restore_pull` and
+`parallel_restore.rs`; no foreign source was used.
+
+A source-unique directory gives each full target one outgoing dependency and
+each physical block at most one incoming dependency. A full target with no
+incoming edge contains no remaining live block token. Its chain must end in a
+scratch block. Different paths and cycles have no shared physical source or
+target, including scratch endpoints. A worker reads each next source before
+overwriting that source on its next step. A closed cycle protects its initial
+source in the worker's one reusable temporary. Fixed points need no copies.
+The partial tail is explicitly excluded from every full source and copied only
+after all workers join.
+
+This **whole restoration-policy change** removes artificial spare completion,
+omits normal-path splitting, and assigns complete components by descending
+copy length to the least-loaded worker. LPT sorting, allocations and planning
+remain inside root timings. If any component exceeds 2*ceil(F/P), the plan is
+dropped before any record copy and the original bounded-snapshot split-cycle
+control runs instead. The report flags that fallback. Its 9PB temporary field
+is an upper bound, and its zero `max_job_copies` means unavailable, not zero
+work. The four measured plans use the direct route with no fallback.
+
+The direct route allocates PB temporary record slots and no snapshots. Node
+and component lists, source-uniqueness/visited flags and worker lists require
+O(F+PR+P) metadata words. No record-sized allocation has F entries. The fallback
+retains the original bounded snapshot allowance. Current benchmark inputs have
+many independent paths, but a single giant path/cycle is explicitly tested both
+on direct P=1 and fallback P=4 routes.
+
+Both `sort` and `partition` accept the policy. `sort` still uses a full root
+barrier followed by the same current-main serial children. There is no new
+lifecycle/overlap machinery and no adaptive production routing added to make
+particular distributions look better.

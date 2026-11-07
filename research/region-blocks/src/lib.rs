@@ -14,6 +14,7 @@ use std::{
 };
 
 mod broker;
+mod path_restore;
 pub mod probe;
 mod restore;
 
@@ -81,6 +82,7 @@ pub struct Config {
     pub parallel: bool,
     pub parallel_restore: bool,
     pub broker_restore: bool,
+    pub path_restore: bool,
     pub capture_plan: bool,
 }
 impl Default for Config {
@@ -97,6 +99,7 @@ impl Default for Config {
             parallel: !cfg!(miri),
             parallel_restore: false,
             broker_restore: false,
+            path_restore: false,
             capture_plan: false,
         }
     }
@@ -117,6 +120,7 @@ pub struct Stats {
     pub restore_records: usize,
     pub probe: Option<probe::Report>,
     pub broker: Option<broker::Report>,
+    pub path: Option<path_restore::Report>,
 }
 
 #[derive(Clone, Copy)]
@@ -223,6 +227,7 @@ struct Shard<T> {
 /// use the same native layout; no n-sized record buffer or virtual child API exists.
 pub fn partition<T: Record>(arr: &mut [T], config: Config) -> (Vec<usize>, Stats) {
     assert!((1..=12).contains(&config.radix_bits));
+    assert!(!(config.path_restore && config.broker_restore));
     assert!(config.shift <= 64 - config.radix_bits);
     let n = arr.len();
     let r = 1usize << config.radix_bits;
@@ -416,7 +421,19 @@ pub fn partition<T: Record>(arr: &mut [T], config: Config) -> (Vec<usize>, Stats
         ));
     }
     let clock = Instant::now();
-    stats.restore_records = if config.broker_restore {
+    stats.restore_records = if config.path_restore {
+        let result = path_restore::restore(
+            &memory,
+            &directory,
+            f + scratch_blocks,
+            n,
+            p,
+            config.parallel,
+        );
+        let copies = result.copy_records;
+        stats.path = Some(result);
+        copies
+    } else if config.broker_restore {
         let result = broker::restore(
             &memory,
             &mut directory,
@@ -646,6 +663,7 @@ mod tests {
                             parallel: false,
                             parallel_restore: false,
                             broker_restore: false,
+                            path_restore: false,
                             capture_plan: false,
                         };
                         let original = rows.clone();
@@ -656,6 +674,7 @@ mod tests {
                             Config {
                                 parallel_restore: true,
                                 broker_restore: false,
+                                path_restore: false,
                                 capture_plan: false,
                                 ..config
                             },
@@ -694,6 +713,7 @@ mod tests {
                     parallel: false,
                     parallel_restore: false,
                     broker_restore: false,
+                    path_restore: false,
                     capture_plan: false,
                 },
             );
@@ -722,6 +742,7 @@ mod tests {
                         parallel: true,
                         parallel_restore: true,
                         broker_restore: false,
+                        path_restore: false,
                         capture_plan: false,
                     },
                 )
@@ -764,6 +785,7 @@ mod tests {
                             parallel: true,
                             parallel_restore: true,
                             broker_restore: false,
+                            path_restore: false,
                             capture_plan: false,
                         },
                     )
@@ -829,6 +851,7 @@ mod region_tests {
                             parallel,
                             parallel_restore: false,
                             broker_restore: true,
+                            path_restore: false,
                             capture_plan: true,
                         };
                         let (ends, stats) = test_pool(p, || partition(&mut values, config));
@@ -882,6 +905,133 @@ mod region_tests {
                     parallel: true,
                     parallel_restore: false,
                     broker_restore: true,
+                    path_restore: false,
+                    capture_plan: true,
+                },
+            )
+        });
+        assert_eq!(values, expected);
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+    fn next(s: &mut u64) -> u64 {
+        *s = s.wrapping_add(0x9e3779b97f4a7c15);
+        let mut x = *s;
+        x = (x ^ (x >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+        x = (x ^ (x >> 27)).wrapping_mul(0x94d049bb133111eb);
+        x ^ (x >> 31)
+    }
+    #[test]
+    fn path_stable_boundaries_and_modes() {
+        let lengths: &[usize] = if cfg!(miri) {
+            &[1, 7, 17, 33]
+        } else {
+            &[1, 2, 3, 7, 8, 9, 17, 31, 32, 33, 63, 64, 65, 257, 1027]
+        };
+        let shapes = if cfg!(miri) { 3 } else { 7 };
+        for &n in lengths {
+            for shape in 0..shapes {
+                let mut seed = 9;
+                let input: Vec<_> = (0..n)
+                    .map(|id| {
+                        let raw = next(&mut seed);
+                        let key = match shape {
+                            0 => raw,
+                            1 => (raw % 3) << 61,
+                            2 => 0,
+                            3 => ((id as u64) << 56) / n as u64,
+                            4 => (((n - id) as u64) << 56) / n as u64,
+                            5 => {
+                                if raw % 100 < 99 {
+                                    0
+                                } else {
+                                    raw
+                                }
+                            }
+                            _ => (raw % 16) << 60,
+                        };
+                        Row16 { key, id: id as u64 }
+                    })
+                    .collect();
+                for p in [1, 3] {
+                    for parallel in [false, true] {
+                        let mut values = input.clone();
+                        let mut expected = input.clone();
+                        expected.sort_by_key(|r| r.key >> 61);
+                        let config = Config {
+                            shards: p,
+                            radix_bits: 3,
+                            shift: 61,
+                            block_size: Some(4),
+                            parallel,
+                            parallel_restore: false,
+                            broker_restore: false,
+                            path_restore: true,
+                            capture_plan: true,
+                        };
+                        let (ends, stats) = test_pool(p, || partition(&mut values, config));
+                        assert_eq!(values, expected);
+                        assert_eq!(ends.last(), Some(&n));
+                        assert!(
+                            stats.path.as_ref().unwrap().temporary_records
+                                <= p * 4
+                                    * if stats.path.as_ref().unwrap().used_split_cycle_fallback {
+                                        9
+                                    } else {
+                                        1
+                                    }
+                        );
+                        assert_eq!(
+                            stats
+                                .probe
+                                .as_ref()
+                                .unwrap()
+                                .bucket_records
+                                .iter()
+                                .sum::<usize>(),
+                            n
+                        );
+                        // Same root also integrates with the current serial child.
+                        if !cfg!(miri) {
+                            let mut values = input.clone();
+                            let mut expected = input.clone();
+                            expected.sort_by_key(|r| r.key);
+                            test_pool(p, || sort(&mut values, config));
+                            assert_eq!(values, expected);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn path_wide_record_payload_stability() {
+        let mut seed = 11;
+        let input: Vec<_> = (0..137)
+            .map(|id| Row128 {
+                key: (next(&mut seed) % 8) << 61,
+                id,
+                payload: [id.wrapping_mul(17); 14],
+            })
+            .collect();
+        let mut expected = input.clone();
+        expected.sort_by_key(|r| r.key);
+        let mut values = input;
+        test_pool(3, || {
+            partition(
+                &mut values,
+                Config {
+                    shards: 3,
+                    radix_bits: 3,
+                    shift: 61,
+                    block_size: Some(7),
+                    parallel: true,
+                    parallel_restore: false,
+                    broker_restore: false,
+                    path_restore: true,
                     capture_plan: true,
                 },
             )

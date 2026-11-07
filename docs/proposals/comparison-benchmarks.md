@@ -113,16 +113,17 @@ The Rust crates alone would leave out the fastest single-threaded sorts known, w
 
 These variants are called through small C shims written for this repository, one exported function per algorithm and element type, such as `bench_ips4o_sort_u64(ptr, len)`. Each call sorts a whole buffer, and the batch loop and clock stay in Rust, so the comparison measures the same thing as for the Rust variants; a call costs a few nanoseconds, negligible at the smallest length in the suite (1,000). This is not the per-call FFI the protocol excludes, which times a binding's conversion of each call. Records are passed as `#[repr(C)]` structs with the same layout on both sides, and comparison sorts receive an inlined key comparison in C++, not a callback into Rust.
 
-Dovetail sort, listed in [Benchmarking](../development/benchmarking.md#c-runner), is a parallel algorithm; it joins only if it has a sequential entry point. VQSort and x86-simd-sort choose their instruction set at run time, like Tessera's Portable SIMD build, so the Bencher host's CPU decides; the report names the level each one dispatched to.
+Dovetail sort, listed in [Benchmarking](../development/benchmarking.md#c-runner), is a parallel algorithm and is not included. VQSort and x86-simd-sort choose their instruction set at run time, like Tessera's Portable SIMD build, so the Bencher host's CPU decides; the report names the level each one dispatched to.
 
 Rules:
 
 - **Same task only.** A table compares only variants that perform the task. A variant whose output fails validation for a case, for example because it orders floats differently from `total_cmp`, is listed as unsupported for that type rather than compared with different semantics. `radsort` documents a float order that matches `total_cmp` on NaN signs; `voracious` and `rdst` are checked by validation.
 - **Stability where it is observable.** On `keys`, equal keys are indistinguishable, so a stable and an unstable sort produce the same output and compete directly; every mark still shows which kind it is. On `rows`, `records` and `owned`, unstable variants are listed separately, because they do not perform the task.
-- **Single-threaded, default configuration.** No variant enables threads or crate features that change its algorithm.
+- **Default configuration.** No variant enables crate features that change its algorithm.
 - **Pinned versions.** Crates are pinned with `=x.y.z` in `bench/rust/Cargo.toml`, C and C++ sources by commit and SHA-256; both are upgraded deliberately, and the version or commit appears in the report.
 - **Sources stay out.** Third-party C and C++ sources are fetched into an ignored directory, never committed or copied into the shims ([decision 0001](../decisions/0001-single-bsd-2-clause-license.md)). Each license is checked when its commit is pinned, because the measured image is pushed to Bencher's registry.
-- **Not included.** Parallel sorts and parallel modes (Tessera is single-threaded); `sort_by_cached_key` (it answers a key-cost question, not a sort question); string and comparator sorts (Tessera does not support them).
+- **No parallel sorting.** Tessera is single-threaded, so the comparison is too. Every variant runs on one thread: crates without their thread features (`rdst` without `multi-threaded`, `voracious` without `voracious_multithread`), IPS²Ra and IPS⁴o through their sequential entry points, built without their parallel runtime, and nothing that needs a thread pool. Sorts that are only parallel, such as Dovetail sort, are left out. The runner checks this: each shard counts the process's threads after every variant's first sort and fails if any variant started one.
+- **Not included.** `sort_by_cached_key` (it answers a key-cost question, not a sort question); string and comparator sorts (Tessera does not support them).
 
 ## Inputs
 

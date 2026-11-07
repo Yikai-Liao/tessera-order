@@ -135,3 +135,48 @@ and11,258,012 for Row16 at eight workers, about6.1 times the serial comparison.
 Histogram cost, root write-cursor cost, and lost root/child overlap remain in
 the end-to-end accounting. See the crate README and validation record for the
 individual controls, noisy/adverse measurements, and unsupported contracts.
+
+
+## Bounded halo squeeze: no adoption
+
+A generic `T: Send` follow-on to the frozen strongest combined implementation
+keeps native scatter and block permutation, stages bounded threatened-source
+snapshots, and runs each group's squeeze plus ordinary contiguous child sorts
+in parallel. It uses no full-input record buffer. The snapshot cap is
+`min(floor(n/8), 32 * P * ceil(sqrt(n)))` record cells; root buffers and child
+workspaces are additional and measured separately.
+
+The corrected same-binary screen uses random seed-1 u64 and 16-byte records,
+10 million records, four/eight workers, and three randomized blocks. It verifies
+84 measured and 28 warmup outputs. Paired halo/combined medians are 1.453/1.030
+for u64 at four/eight workers and 1.147/1.198 for 16-byte records. None supports
+adoption. The u64 four-worker ratio is slower in all three blocks and exceeds
+the baseline A/A-plus-placement envelope of 1.229. Candidate-repeat envelopes
+reach 3.151 and 3.782 because long samples remain unexplained; they do not excuse
+the regression. Independent timing medians must not replace within-block ratios.
+
+Measured additional peak heap at eight workers increases from 6,168,395 to
+9,191,622 bytes for u64 and from 7,971,658 to 10,351,952 bytes for 16-byte records.
+All allocator runs end with zero retained delta. Four-worker peaks increase by
+600 bytes each despite nonzero halo capacity because allocation lifetimes differ.
+These are allocator peaks, not sums of separate capacity maxima.
+
+The initial pilot is preserved separately. Its record H1/H2 labels used
+semantically equivalent but distinct closure monomorphizations, so their ratio
+was not exact-entry A/A. Only the driver dispatch changed for the corrected
+screen; all algorithm bytes and allocator measurements remain unchanged.
+Neither pilot establishes an improvement, and no further run seeks a winner.
+
+Validation is deliberately qualified: 72 default debug tests, 10 applicable
+opt-in public tests, ten optimized halo tests, eight strict-provenance default
+Stacked Borrows serial/scoped-thread Miri tests, lint/docs and no-default checks
+pass. Rust 1.85 was a compile check, not a full test run. Two old opt-in worker
+injection probes fail on a verified cap-driven serial-child fallback; they are
+retained and the whole opt-in suite is not called passing. Actual Rayon-under-
+Miri is not covered. Production defaults remain unchanged.
+
+The source patch, worker-explicit ownership/space argument, application hashes,
+and complete two-pilot report are archived under `research/patches/halo-squeeze.*`.
+They apply after the historical combined patch, not directly to current main.
+Full raw evidence and the harness stay outside Git. The screen's main/SIMD
+controls remain frozen at `72c2984`, not the subsequently merged `5b13ac1`.

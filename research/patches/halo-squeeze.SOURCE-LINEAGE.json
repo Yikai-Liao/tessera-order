@@ -1,0 +1,85 @@
+{
+  "checkpoint": "bounded-parallel-halo-squeeze",
+  "status": "research-only; neither initial nor corrected screen supports adoption; corrected u64 W4 adverse, unexplained tails retained",
+  "historical_base_commit": "60873c86558456aca496ca8c4e084007415b58b1",
+  "prerequisite_patch": "combined-rayon.patch",
+  "prerequisite_patch_sha256": "ac27669d2009d1b0fdadf10535beb9edb3c29d984304f0181a1512bbd09ae751",
+  "follow_on_patch": "halo-squeeze.patch",
+  "follow_on_patch_sha256": "260ce0be15152fe615ced3242f631f67964fd758888d04e0f030cbb4a98b69b3",
+  "frozen_source_manifest_sha256": "c66e83aeee558b31312895b51ba284f3a4f1a7df370b9147cef3b44cf21a287e",
+  "frozen_source_archive_sha256": "195ad328a4da3c10e25b1f19b2a18b267e9e6495d038c61f6406bf1ceeedfd2c",
+  "base_hashes_file": "halo-squeeze.base-hashes.txt",
+  "result_hashes_file": "halo-squeeze.source-hashes.txt",
+  "benchmark_rust_source_comparison": {
+    "rust_files_checked": 17,
+    "byte_identical": true,
+    "manifest_change": "package name changed only for linked benchmark identity"
+  },
+  "release_halo_only_gate": {
+    "tests_passed": 10,
+    "filter": "halo_",
+    "profile": "release (optimized)",
+    "full_release_suite": false,
+    "log_sha256": "6ba35cb015de805c86f3cbe2cbe60fc5bba92a80da23a6341daa99acaa0f2d4f"
+  },
+  "debug_default_tests": {
+    "unit": 51,
+    "integration": 21
+  },
+  "debug_opt_in_public_tests": {
+    "passed": 10,
+    "failed_injection_assumptions": 2,
+    "full_suite_passed": false
+  },
+  "msrv": {
+    "version": "1.85",
+    "operation": "check --all-features",
+    "tests_run": false
+  },
+  "miri": {
+    "passed": 8,
+    "model": "default Stacked Borrows",
+    "strict_provenance": true,
+    "schedules": [
+      "serial",
+      "std::thread::scope"
+    ],
+    "actual_rayon_execution": false
+  },
+  "packaging_actions": {
+    "apply_check": true,
+    "apply": true,
+    "result_hash_check": true,
+    "reverse_apply_check": true,
+    "compile": false,
+    "format": false,
+    "benchmark": false,
+    "shared_repository_write": false,
+    "commit": false,
+    "push": false
+  },
+  "excluded": [
+    "raw logs",
+    "raw benchmark samples",
+    "harnesses",
+    "target directories",
+    "binaries",
+    "source archives"
+  ],
+  "screen": {
+    "report": "halo-squeeze.SCREEN.md",
+    "report_sha256": "66bbe5a578f09c4a15299523a7adea2b8a85975eccf462841c10735d971114b9",
+    "algorithm_source_changed_between_pilots": false,
+    "initial_row16_candidate_repeats_exact_entry": false,
+    "corrected_candidate_repeats_exact_entry": true,
+    "adoption_supported": false,
+    "w8_extra_heap_delta_bytes": {
+      "u64": 3023227,
+      "row16": 2380294
+    },
+    "w4_extra_heap_delta_bytes": {
+      "u64": 600,
+      "row16": 600
+    }
+  }
+}

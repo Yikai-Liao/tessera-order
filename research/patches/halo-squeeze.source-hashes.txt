@@ -1,0 +1,5 @@
+351b80522198d0876ca848d7c7db8718d15281b549bd0f38ab546c94aa4e7b8d  rust/tessera-sort/src/block.rs
+554a7f3808546d27ba6f14c5ddc489a19cffaa5fdec9e4de034bfb4878ee7c2b  rust/tessera-sort/src/block/parallel.rs
+0830aeb19a2b6430bf8c21d5aef3214d567dc913bc8ccebeae50a96f548db455  rust/tessera-sort/src/block/parallel/compact.rs
+1419885453efe24d95f45114f39cc86c2a94bdf0c0a5a495c51dc2d96265bd25  rust/tessera-sort/src/engine/parallel.rs
+d669fed59b804fc355265f79b60afc838eafedd84fcc3851b3f5809d176e5e1e  rust/tessera-sort/src/block/parallel/halo.rs

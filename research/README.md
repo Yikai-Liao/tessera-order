@@ -9,6 +9,10 @@ ownership proof, validation record, and limitations before using it.
 - `patches/combined-rayon.patch`: native root scatter, parallel block movement,
   pipelined child sorting and the consumer-wait fix, against the documented v3
   base. It is archived for review, not applied to the default crate.
+- [Bounded halo squeeze](patches/halo-squeeze.README.md): generic parallel
+  materialization with bounded threatened-source snapshots. Neither screen
+  establishes a win; the corrected four-worker case regresses and unexplained
+  candidate tails remain. The source is archived without adoption.
 - `aligned-root/`: sealed Copy histogram-aligned root scatter with packed block
   restoration and real contiguous child sorts. The prototype removes squeeze,
   but its verified screens do not establish an end-to-end win.

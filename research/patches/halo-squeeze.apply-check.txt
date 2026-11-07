@@ -1,0 +1,14 @@
+Source-only application verification, 2026-11-07.
+
+1. Created an independent git archive of 60873c86558456aca496ca8c4e084007415b58b1.
+2. Checked/applied combined-rayon.patch with --whitespace=error-all.
+3. Verified all ten combined exported source hashes.
+4. Compared the four follow-on base files byte-for-byte with the frozen
+   tessera-consumer-wait/candidate; confirmed the new halo.rs was absent.
+5. Checked/applied halo-squeeze.patch with --whitespace=error-all.
+6. Compared all five resulting files byte-for-byte with frozen halo source.
+7. Reverse apply-check passed. The original complete halo manifest reverified.
+
+No compiler, formatter, tests or timings were run during this packaging step.
+No shared repository file, Git worktree registry, branch, commit or remote changed.
+The packet excludes raw logs, harnesses, target directories and binaries.

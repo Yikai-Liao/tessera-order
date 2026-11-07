@@ -1,0 +1,1150 @@
+--- a/rust/tessera-sort/src/block.rs
++++ b/rust/tessera-sort/src/block.rs
+@@ -50,7 +50,10 @@
+ #[cfg(feature = "rayon")]
+ mod parallel;
+ #[cfg(feature = "rayon")]
+-pub(crate) use parallel::partition_digit_parallel_with_visit;
++pub(crate) use parallel::{
++    GroupVisit, halo_enabled, partition_digit_parallel_with_groups,
++    partition_digit_parallel_with_visit,
++};
+ 
+ type PanicPayload = unwind::Payload;
+ 
+--- a/rust/tessera-sort/src/block/parallel.rs
++++ b/rust/tessera-sort/src/block/parallel.rs
+@@ -6,6 +6,42 @@
+ use rayon::prelude::*;
+ 
+ mod compact;
++mod halo;
++pub(crate) use halo::enabled as halo_enabled;
++
++pub(crate) type GroupVisit<'a, T> = alloc::boxed::Box<dyn FnMut(&mut [T]) + Send + 'a>;
++
++struct Visitors<'a, T> {
++    serial: Option<Visit<'a, T>>,
++    groups: Option<Vec<GroupVisit<'a, T>>>,
++}
++
++pub(crate) fn partition_digit_parallel_with_groups<T: Send, E: Extract<T> + Clone + Send>(
++    arr: &mut [T],
++    radix: usize,
++    shift: usize,
++    key: E,
++    buffers: &mut Buffers<T>,
++    requested_shards: usize,
++    visitors: Vec<GroupVisit<'_, T>>,
++) -> Vec<usize> {
++    partition_impl_with_visitors(
++        arr,
++        radix,
++        shift,
++        key,
++        buffers,
++        Config {
++            shards: requested_shards,
++            block_size: None,
++            parallel: true,
++        },
++        Visitors {
++            serial: None,
++            groups: Some(visitors),
++        },
++    )
++}
+ 
+ struct Shard<'a, 'w, T, E> {
+     sorter: Sorter<'a, 'w, T>,
+@@ -85,8 +121,35 @@
+     key: E,
+     buffers: &mut Buffers<T>,
+     config: Config,
+-    mut visit: Option<Visit<'_, T>>,
++    visit: Option<Visit<'_, T>>,
+ ) -> Vec<usize> {
++    partition_impl_with_visitors(
++        arr,
++        radix,
++        shift,
++        key,
++        buffers,
++        config,
++        Visitors {
++            serial: visit,
++            groups: None,
++        },
++    )
++}
++
++fn partition_impl_with_visitors<T: Send, E: Extract<T> + Clone + Send>(
++    arr: &mut [T],
++    radix: usize,
++    shift: usize,
++    key: E,
++    buffers: &mut Buffers<T>,
++    config: Config,
++    visitors: Visitors<'_, T>,
++) -> Vec<usize> {
++    let Visitors {
++        serial: mut visit,
++        groups: mut group_visitors,
++    } = visitors;
+     assert!((1..=MAX_RADIX_BITS).contains(&radix));
+     assert!(shift < E::Value::BITS);
+     assert!(core::mem::size_of::<T>() != 0);
+@@ -113,6 +176,8 @@
+         return partition_digit_with_ends(arr, radix, shift, &mut key, buffers, &mut |child, _| {
+             if let Some(callback) = visit.as_deref_mut() {
+                 callback(child);
++            } else if let Some(visitors) = group_visitors.as_mut() {
++                visitors[0](child);
+             }
+         });
+     }
+@@ -274,10 +339,22 @@
+     drop(local_buffers);
+     #[cfg(debug_assertions)]
+     global.validate();
+-    if cfg!(miri) || std::env::var_os("TESSERA_COMPACT_SERIAL").is_none() {
++    let permuted = group_visitors.is_some()
++        || cfg!(miri)
++        || std::env::var_os("TESSERA_COMPACT_SERIAL").is_none();
++    if permuted {
+         compact::permute_blocks(&mut global, shards, config.parallel);
+     }
+-    let panic = global.compact_with(&ends, visit);
++    let panic = if let Some(visitors) = group_visitors {
++        if !cfg!(miri) && std::env::var_os("TESSERA_HALO_STATS").is_some() {
++            eprintln!(
++                "halo root n={input_len} record_bytes={record_bytes} radix={radix} shift={shift} shards={shards} B={block_size}"
++            );
++        }
++        halo::squeeze(&mut global, &ends, shards, config.parallel, visitors)
++    } else {
++        global.compact_with(&ends, visit)
++    };
+     if let Some(payload) = panic {
+         unwind::resume(payload);
+     }
+--- a/rust/tessera-sort/src/block/parallel/compact.rs
++++ b/rust/tessera-sort/src/block/parallel/compact.rs
+@@ -231,7 +231,7 @@
+     // preallocated state, then restore the input before resuming the panic.
+     let result = unwind::catch(|| {
+         if parallel {
+-            jobs.par_iter_mut().for_each(&run);
++            jobs.par_iter_mut().for_each(run);
+         } else {
+             jobs.iter_mut().for_each(&run);
+         }
+--- a/rust/tessera-sort/src/engine/parallel.rs
++++ b/rust/tessera-sort/src/engine/parallel.rs
+@@ -126,6 +126,38 @@
+         .sort_node(arr, varying);
+         return;
+     }
++    if block::halo_enabled() {
++        // Every extractor clone and visitor allocation precedes root movement.
++        // Group jobs run ordinary contiguous child sorts directly; no waiting
++        // consumers can be stolen by a nested Rayon join in a user callback.
++        let visitors: Vec<block::GroupVisit<'_, T>> = (0..worker_count)
++            .map(|_| {
++                let mut child_key = key.clone();
++                let mut child_workspace = Workspace::new();
++                alloc::boxed::Box::new(move |child: &mut [T]| {
++                    if child.len() > 1 {
++                        let varying = scan_varying_bits(child, candidate, &mut child_key);
++                        Sorter::<T, E, CACHED> {
++                            workspace: &mut child_workspace,
++                            key: &mut child_key,
++                            tile_bytes,
++                        }
++                        .sort_node(child, varying);
++                    }
++                }) as block::GroupVisit<'_, T>
++            })
++            .collect();
++        block::partition_digit_parallel_with_groups(
++            arr,
++            digit.width,
++            digit.shift,
++            key,
++            workspace.block_buffers(),
++            worker_count,
++            visitors,
++        );
++        return;
++    }
+     let mut batch = Vec::new();
+     let mut batch_records = 0usize;
+     let batch_bytes = std::env::var("TESSERA_PIPELINE_BATCH_BYTES")
+--- /dev/null
++++ b/rust/tessera-sort/src/block/parallel/halo.rs
+@@ -0,0 +1,965 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Bounded raw halos for independently compacted semantic bucket groups.
++//!
++//! This research path requires the canonical whole-block permutation. Each
++//! job materializes its entire group before running ordinary contiguous child
++//! sorts. It does not share the serial pipeline's waiting consumer queue.
++
++use super::*;
++use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
++
++#[derive(Clone, Copy, Debug)]
++struct Group {
++    first_bucket: usize,
++    end_bucket: usize,
++    next: usize,
++    end: usize,
++    partial: usize,
++    output: usize,
++    output_end: usize,
++    halo_start: usize,
++    halo_end: usize,
++    halo_offset: usize,
++}
++
++struct Job<'a, T> {
++    group: Group,
++    visitor: GroupVisit<'a, T>,
++    panic: Option<PanicPayload>,
++}
++
++struct Plan {
++    groups: Vec<Group>,
++    cells: usize,
++    cap: usize,
++}
++
++/// Returns the fixed record-cell cap, with no intermediate wrapping.
++fn snapshot_cap(n: usize, workers: usize) -> Option<usize> {
++    let floor = n.isqrt();
++    let root = floor.checked_add(usize::from(floor.checked_mul(floor)? != n))?;
++    Some(32usize.checked_mul(workers)?.checked_mul(root)?.min(n / 8))
++}
++
++fn layout_fits<T>(cells: usize) -> bool {
++    cells
++        .checked_mul(core::mem::size_of::<T>())
++        .is_some_and(|bytes| bytes <= isize::MAX as usize)
++}
++
++fn plan<T>(sorter: &Sorter<'_, '_, T>, ends: &[usize], workers: usize) -> Option<Plan> {
++    let n = sorter.blocks.input_len;
++    let b = sorter.blocks.block_size;
++    let head = sorter.bucket_count;
++    let full = n / b;
++    let buckets = ends.len();
++    let count = sorter.block_order.len();
++    let cap = snapshot_cap(n, workers)?;
++    let report = !cfg!(miri) && std::env::var_os("TESSERA_HALO_STATS").is_some();
++    if buckets == 0 || head % buckets != 0 || sorter.partial_blocks.len() != head {
++        return None;
++    }
++    let roots = head / buckets;
++    if roots == 0 || ends.last().copied() != Some(n) {
++        return None;
++    }
++    // Validate the sole geometry accepted by this movement kernel. No pointer
++    // or ownership changes occur until every checked operation has succeeded.
++    for (logical, &physical) in sorter.block_order.iter().enumerate() {
++        let expected = if logical >= count.checked_sub(head)? {
++            logical - (count - head)
++        } else {
++            logical.checked_add(head)?
++        };
++        if physical as usize != expected {
++            return None;
++        }
++    }
++    let mut records = 0usize;
++    let mut previous = head;
++    for (index, tail) in sorter.partial_blocks.iter().enumerate() {
++        if tail.order_index < previous || tail.len >= b {
++            return None;
++        }
++        records = records
++            .checked_add(tail.order_index.checked_sub(previous)?.checked_mul(b)?)?
++            .checked_add(tail.len)?;
++        previous = tail.order_index.checked_add(1)?;
++        if (index + 1) % roots == 0 && ends[index / roots] != records {
++            return None;
++        }
++    }
++    if records != n || previous != sorter.active_blocks_end {
++        return None;
++    }
++    for q in (2..=workers.min(buckets)).rev() {
++        let mut groups = Vec::new();
++        groups.try_reserve_exact(q).ok()?;
++        let mut cells = 0usize;
++        let mut balanced = true;
++        let max_records = n.div_ceil(q).checked_mul(2).unwrap_or(n);
++        for i in 0..q {
++            let first_bucket = i.checked_mul(buckets)? / q;
++            let end_bucket = (i + 1).checked_mul(buckets)? / q;
++            let first_tail = first_bucket.checked_mul(roots)?;
++            let last_tail = end_bucket.checked_mul(roots)?.checked_sub(1)?;
++            let begin = if first_bucket == 0 {
++                0
++            } else {
++                sorter.partial_blocks[first_tail - 1]
++                    .order_index
++                    .checked_add(1)?
++                    .checked_sub(head)?
++            };
++            let end = sorter.partial_blocks[last_tail]
++                .order_index
++                .checked_add(1)?
++                .checked_sub(head)?;
++            let output = if first_bucket == 0 {
++                0
++            } else {
++                ends[first_bucket - 1]
++            };
++            let output_end = ends[end_bucket - 1];
++            balanced &= output_end.checked_sub(output)? <= max_records;
++            // Clamp before multiplying: scratch virtual coordinates need not
++            // fit the address range of the input allocation.
++            let halo_end = end.min(full).checked_mul(b)?;
++            let halo_start = begin
++                .min(full)
++                .checked_mul(b)?
++                .max(output_end)
++                .min(halo_end);
++            let halo_offset = cells;
++            cells = cells.checked_add(halo_end.checked_sub(halo_start)?)?;
++            groups.push(Group {
++                first_bucket,
++                end_bucket,
++                next: begin,
++                end,
++                partial: first_tail,
++                output,
++                output_end,
++                halo_start,
++                halo_end,
++                halo_offset,
++            });
++        }
++        if report {
++            let largest = groups
++                .iter()
++                .map(|group| group.output_end - group.output)
++                .max()
++                .unwrap_or(0);
++            eprintln!(
++                "halo candidate n={n} B={b} roots={roots} R={buckets} Q={q} raw_cells={cells} cap={cap} largest_group={largest} max_group={max_records} balanced={balanced} fits={}",
++                cells <= cap && layout_fits::<T>(cells)
++            );
++        }
++        if balanced && cells <= cap && layout_fits::<T>(cells) {
++            return Some(Plan { groups, cells, cap });
++        }
++    }
++    None
++}
++
++struct Movement<'a, T> {
++    input: *mut T,
++    block_size: usize,
++    full: usize,
++    head: usize,
++    partials: &'a [PartialBlock],
++    scratch: &'a [*mut T],
++    segment_blocks: usize,
++    snapshots: *const MaybeUninit<T>,
++}
++
++// SAFETY: only raw addresses and immutable integer descriptors are shared.
++// Each job owns disjoint destinations and its sole authoritative sources.
++// Threatened sources are in disjoint staged halos before any job starts.
++unsafe impl<T: Send> Sync for Movement<'_, T> {}
++
++impl<T> Movement<'_, T> {
++    fn finish(&self, group: &mut Group, fault: Option<&Fault>) {
++        while group.next < group.end {
++            let k = group.next;
++            let mut partial = group.partial;
++            let len = if partial < self.partials.len()
++                // SAFETY: the preceding bound is checked, and the directory
++                // was fully validated before movement or snapshot staging.
++                && unsafe { self.partials.get_unchecked(partial).order_index } == self.head + k
++            {
++                // SAFETY: the preceding condition checked this descriptor.
++                let len = unsafe { self.partials.get_unchecked(partial).len };
++                partial += 1;
++                len
++            } else {
++                self.block_size
++            };
++            // SAFETY: validation proves every prefix is initialized, the sum
++            // fits this job's disjoint destination, and all additions fit.
++            // Copies of padding are never read as records. Within a job,
++            // forward memmove cannot destroy a later authoritative source.
++            unsafe {
++                let destination = self.input.add(group.output);
++                if k < self.full {
++                    let start = k * self.block_size;
++                    let original = len.min(group.halo_start.saturating_sub(start));
++                    if original != 0 {
++                        ptr::copy(self.input.add(start), destination, original);
++                    }
++                    if original < len {
++                        let offset = group.halo_offset + start + original - group.halo_start;
++                        ptr::copy_nonoverlapping(
++                            self.snapshots.add(offset).cast::<T>(),
++                            destination.add(original),
++                            len - original,
++                        );
++                    }
++                } else {
++                    let physical = k - self.full;
++                    let base = *self.scratch.get_unchecked(physical / self.segment_blocks);
++                    let source = base.add((physical % self.segment_blocks) * self.block_size);
++                    ptr::copy_nonoverlapping(source, destination, len);
++                }
++            }
++            // This entire copy/commit region cannot allocate, call user code,
++            // or unwind. Recovery resumes only at whole-prefix boundaries.
++            group.output += len;
++            group.partial = partial;
++            group.next += 1;
++            if let Some(fault) = fault {
++                fault.after_copy();
++            }
++        }
++    }
++}
++
++#[derive(Default)]
++struct Fault {
++    completed: AtomicUsize,
++    fail_after: Option<usize>,
++    scheduled: AtomicUsize,
++    fail_schedule_after: Option<usize>,
++    fail_armed: bool,
++    #[cfg(test)]
++    scoped: bool,
++}
++
++impl Fault {
++    fn after_copy(&self) {
++        if let Some(fail_after) = self.fail_after {
++            let completed = self.completed.fetch_add(1, Ordering::Relaxed);
++            assert_ne!(completed, fail_after, "injected halo movement panic");
++        }
++    }
++}
++
++/// Owns the recovery obligation after the legacy directory becomes stale.
++/// Fields containing payloads or visitors drop only after this Drop body has
++/// completed every pending copy and marked the input materialized.
++struct Recovery<'a, 's, 'w, 'v, T> {
++    sorter: &'a mut Sorter<'s, 'w, T>,
++    jobs: Vec<Job<'v, T>>,
++    snapshots: Vec<MaybeUninit<T>>,
++    scratch: Vec<*mut T>,
++    segment_blocks: usize,
++}
++
++impl<T> Recovery<'_, '_, '_, '_, T> {
++    fn finish(&mut self) {
++        let movement = Movement {
++            input: self.sorter.blocks.input,
++            block_size: self.sorter.blocks.block_size,
++            full: self.sorter.blocks.input_len / self.sorter.blocks.block_size,
++            head: self.sorter.bucket_count,
++            partials: &self.sorter.partial_blocks,
++            scratch: &self.scratch,
++            segment_blocks: self.segment_blocks,
++            snapshots: self.snapshots.as_ptr(),
++        };
++        for job in &mut self.jobs {
++            movement.finish(&mut job.group, None);
++        }
++        self.sorter.input_materialized = true;
++    }
++}
++
++impl<T> Drop for Recovery<'_, '_, '_, '_, T> {
++    fn drop(&mut self) {
++        self.finish();
++    }
++}
++
++pub(super) fn squeeze<T: Send>(
++    sorter: &mut Sorter<'_, '_, T>,
++    ends: &[usize],
++    workers: usize,
++    parallel: bool,
++    visitors: Vec<GroupVisit<'_, T>>,
++) -> Option<PanicPayload> {
++    squeeze_with_fault(sorter, ends, workers, parallel, visitors, &Fault::default())
++}
++
++fn squeeze_with_fault<T: Send>(
++    sorter: &mut Sorter<'_, '_, T>,
++    ends: &[usize],
++    workers: usize,
++    parallel: bool,
++    mut visitors: Vec<GroupVisit<'_, T>>,
++    fault: &Fault,
++) -> Option<PanicPayload> {
++    assert!(!visitors.is_empty());
++    let fallback = |sorter: &mut Sorter<'_, '_, T>, visitors: &mut Vec<GroupVisit<'_, T>>| {
++        sorter.compact_with(ends, Some(&mut *visitors[0]))
++    };
++    let Some(plan) = plan(sorter, ends, workers.min(visitors.len())) else {
++        if !cfg!(miri) && std::env::var_os("TESSERA_HALO_STATS").is_some() {
++            eprintln!(
++                "halo fallback: no admissible Q>=2 plan; serial squeeze and one local child visitor"
++            );
++        }
++        return fallback(sorter, &mut visitors);
++    };
++    let mut snapshots = Vec::<MaybeUninit<T>>::new();
++    if snapshots.try_reserve_exact(plan.cells).is_err() || snapshots.capacity() > plan.cap {
++        drop(snapshots);
++        return fallback(sorter, &mut visitors);
++    }
++    snapshots.resize_with(plan.cells, MaybeUninit::uninit);
++    let mut scratch = Vec::new();
++    let segment_blocks = if sorter.blocks.scratch_segments.is_empty() {
++        scratch.push(sorter.blocks.scratch.as_mut_ptr().cast());
++        sorter.blocks.scratch_blocks
++    } else {
++        for segment in &mut sorter.blocks.scratch_segments {
++            scratch.push(segment.as_mut_ptr().cast());
++        }
++        sorter.blocks.scratch_blocks / scratch.len()
++    };
++    let mut jobs = Vec::with_capacity(plan.groups.len());
++    for (group, visitor) in plan.groups.into_iter().zip(visitors.drain(..)) {
++        jobs.push(Job {
++            group,
++            visitor,
++            panic: None,
++        });
++    }
++    // Any unused visitor (including a private generic extractor destructor)
++    // is dropped while the old directory is still authoritative.
++    drop(visitors);
++    if parallel {
++        let _ = rayon::current_num_threads();
++    }
++    let cancelled = AtomicBool::new(false);
++    let used_workers = AtomicUsize::new(0);
++    // Staging is nonpanicking and does not create typed references to holes.
++    // All halo snapshots complete before authority transfers to Recovery.
++    for job in &jobs {
++        let group = &job.group;
++        // SAFETY: these checked, pairwise-disjoint raw ranges lie within full
++        // input blocks, excluding the stale original tail. MaybeUninit copies
++        // preserve holes without reading their bytes as initialized values.
++        unsafe {
++            ptr::copy_nonoverlapping(
++                sorter
++                    .blocks
++                    .input
++                    .add(group.halo_start)
++                    .cast::<MaybeUninit<T>>(),
++                snapshots.as_mut_ptr().add(group.halo_offset),
++                group.halo_end - group.halo_start,
++            );
++        }
++    }
++    #[cfg(test)]
++    HALO_PLANS.with(|count| count.set(count.get() + 1));
++    let mut recovery = Recovery {
++        sorter,
++        jobs,
++        snapshots,
++        scratch,
++        segment_blocks,
++    };
++    assert!(
++        !fault.fail_armed,
++        "injected panic after halo ownership transfer"
++    );
++    let result = {
++        let movement = Movement {
++            input: recovery.sorter.blocks.input,
++            block_size: recovery.sorter.blocks.block_size,
++            full: recovery.sorter.blocks.input_len / recovery.sorter.blocks.block_size,
++            head: recovery.sorter.bucket_count,
++            partials: &recovery.sorter.partial_blocks,
++            scratch: &recovery.scratch,
++            segment_blocks,
++            snapshots: recovery.snapshots.as_ptr(),
++        };
++        let run = |job: &mut Job<'_, T>| {
++            let result = unwind::catch(|| {
++                if parallel {
++                    if let Some(index) = rayon::current_thread_index() {
++                        if index < usize::BITS as usize {
++                            used_workers.fetch_or(1 << index, Ordering::Relaxed);
++                        }
++                    }
++                }
++                movement.finish(&mut job.group, Some(fault));
++                debug_assert_eq!(job.group.output, job.group.output_end);
++                let mut begin = if job.group.first_bucket == 0 {
++                    0
++                } else {
++                    ends[job.group.first_bucket - 1]
++                };
++                for &end in &ends[job.group.first_bucket..job.group.end_bucket] {
++                    if cancelled.load(Ordering::Acquire) {
++                        break;
++                    }
++                    if end > begin {
++                        // SAFETY: the WHOLE group has completed, its sources
++                        // are retired, and other groups cannot read or write
++                        // these disjoint semantic bucket intervals.
++                        let child = unsafe {
++                            core::slice::from_raw_parts_mut(movement.input.add(begin), end - begin)
++                        };
++                        (job.visitor)(child);
++                    }
++                    begin = end;
++                }
++            });
++            if let Err(payload) = result {
++                cancelled.store(true, Ordering::Release);
++                job.panic = Some(payload);
++            }
++            if let Some(fail_after) = fault.fail_schedule_after {
++                let scheduled = fault.scheduled.fetch_add(1, Ordering::Relaxed);
++                if scheduled == fail_after {
++                    cancelled.store(true, Ordering::Release);
++                    panic!("injected halo scheduler panic");
++                }
++            }
++        };
++        // Per-job panics never reach Rayon's first-panic selection. In
++        // particular, independent simultaneous payloads cannot be dropped
++        // until all jobs and child calls have joined and recovery is complete.
++        unwind::catch(|| {
++            #[cfg(test)]
++            if fault.scoped {
++                std::thread::scope(|scope| {
++                    for job in &mut recovery.jobs {
++                        let run = &run;
++                        scope.spawn(move || run(job));
++                    }
++                });
++                return;
++            }
++            if parallel {
++                recovery.jobs.par_iter_mut().for_each(run);
++            } else {
++                recovery.jobs.iter_mut().for_each(run);
++            }
++        })
++    };
++    recovery.finish();
++    if !cfg!(miri) && std::env::var_os("TESSERA_HALO_STATS").is_some() {
++        let group_bytes = recovery
++            .jobs
++            .capacity()
++            .checked_mul(core::mem::size_of::<Job<'_, T>>())
++            .unwrap();
++        let source_bytes = recovery
++            .scratch
++            .capacity()
++            .checked_mul(core::mem::size_of::<*mut T>())
++            .unwrap();
++        let snapshot_bytes = recovery
++            .snapshots
++            .capacity()
++            .checked_mul(core::mem::size_of::<T>())
++            .unwrap();
++        eprintln!(
++            "halo groups={} cells={} capacity={} cap={} snapshot_bytes={} job_bytes={} source_bytes={} movement_workers={}",
++            recovery.jobs.len(),
++            recovery.snapshots.len(),
++            recovery.snapshots.capacity(),
++            plan.cap,
++            snapshot_bytes,
++            group_bytes,
++            source_bytes,
++            used_workers.load(Ordering::Relaxed).count_ones()
++        );
++    }
++    match result {
++        Err(payload) => Some(payload),
++        Ok(()) => recovery.jobs.iter_mut().find_map(|job| job.panic.take()),
++    }
++}
++
++pub(crate) fn enabled() -> bool {
++    #[cfg(test)]
++    if FORCE_HALO.with(core::cell::Cell::get) {
++        return true;
++    }
++    !cfg!(miri) && std::env::var_os("TESSERA_HALO_SQUEEZE").is_some()
++}
++
++#[cfg(test)]
++std::thread_local! {
++    static FORCE_HALO: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
++    static HALO_PLANS: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::cell::Cell;
++    use std::sync::Arc;
++
++    fn visitors<'a, T>(count: usize) -> Vec<GroupVisit<'a, T>> {
++        (0..count)
++            .map(|_| alloc::boxed::Box::new(|_: &mut [T]| {}) as GroupVisit<'a, T>)
++            .collect()
++    }
++
++    #[test]
++    fn halo_cap_checked_and_pathological_layouts() {
++        assert_eq!(snapshot_cap(0, 8), Some(0));
++        assert_eq!(snapshot_cap(10_000_000, 8), Some(809_728));
++        assert_eq!(snapshot_cap(63, 8), Some(7));
++        assert_eq!(snapshot_cap(64, 8), Some(8));
++        assert_eq!(snapshot_cap(usize::MAX, usize::MAX), None);
++        assert!(!layout_fits::<[u8; 16]>(usize::MAX));
++        assert!(layout_fits::<u8>(isize::MAX as usize));
++    }
++
++    #[test]
++    fn halo_stable_patterns_native_partial_boundaries() {
++        let lengths: &[usize] = if cfg!(miri) {
++            &[33, 65]
++        } else {
++            &[2, 31, 63, 64, 65, 127, 128, 129, 257, 1025]
++        };
++        let sizes: &[usize] = if cfg!(miri) { &[2] } else { &[1, 2, 3, 7, 16] };
++        for &n in lengths {
++            for &b in sizes {
++                for pattern in 0..6 {
++                    let mut rows: Vec<_> = (0..n)
++                        .map(|id| {
++                            let key = match pattern {
++                                0 => id * 37 % 64,
++                                1 => id * 64 / n,
++                                2 => (n - 1 - id) * 64 / n,
++                                3 => 31,
++                                4 => (id % 4) * 16,
++                                _ => {
++                                    if id % 19 == 0 {
++                                        id % 64
++                                    } else {
++                                        0
++                                    }
++                                }
++                            };
++                            (key as u64, id)
++                        })
++                        .collect();
++                    let mut expected = rows.clone();
++                    expected.sort_by_key(|row| row.0);
++                    let visitors = (0..3)
++                        .map(|_| {
++                            alloc::boxed::Box::new(|child: &mut [(u64, usize)]| {
++                                child.sort_by_key(|row| row.0)
++                            }) as GroupVisit<'_, (u64, usize)>
++                        })
++                        .collect();
++                    partition_impl_with_visitors(
++                        &mut rows,
++                        2,
++                        4,
++                        crate::key::ByKey(|row: &(u64, usize)| row.0),
++                        &mut Buffers::new(),
++                        Config {
++                            shards: 3,
++                            block_size: Some(b),
++                            parallel: !cfg!(miri),
++                        },
++                        Visitors {
++                            serial: None,
++                            groups: Some(visitors),
++                        },
++                    );
++                    assert_eq!(rows, expected, "n={n} B={b} pattern={pattern}");
++                }
++            }
++        }
++    }
++
++    #[test]
++    fn halo_plan_accepts_uniform_and_falls_back_for_skew() {
++        for skew in [false, true] {
++            let mut rows: Vec<_> = (0..257usize)
++                .map(|id| if skew { 0 } else { id % 4 })
++                .collect();
++            let mut buffers = Buffers::new();
++            let mut sorter = Sorter::new(&mut rows, 4, 3, &mut buffers);
++            let (panic, ends) = sorter.step_with_ends(|row| *row, true);
++            assert!(panic.is_none());
++            compact::permute_blocks(&mut sorter, 4, !cfg!(miri));
++            let plan = plan(&sorter, &ends, 4);
++            if skew {
++                // Q=2 admits the bounded 2*ceil(n/Q) extreme. Higher Q is
++                // rejected; this deliberately does not require Q>2 balance.
++                assert!(plan.as_ref().is_none_or(|plan| plan.groups.len() == 2));
++            } else {
++                assert_eq!(plan.as_ref().unwrap().groups.len(), 4);
++            }
++            assert!(squeeze(&mut sorter, &ends, 4, !cfg!(miri), visitors(4)).is_none());
++        }
++        // The strict n/8 cap rejects even one cell at this geometry.
++        let mut rows = [1usize, 0];
++        let mut buffers = Buffers::new();
++        let mut sorter = Sorter::new(&mut rows, 2, 1, &mut buffers);
++        let (_, ends) = sorter.step_with_ends(|row| *row, true);
++        compact::permute_blocks(&mut sorter, 2, !cfg!(miri));
++        assert!(plan(&sorter, &ends, 2).is_none());
++        assert!(squeeze(&mut sorter, &ends, 2, !cfg!(miri), visitors(2)).is_none());
++    }
++
++    struct Owned {
++        key: usize,
++        id: usize,
++        text: String,
++        non_sync: Cell<usize>,
++        drops: Arc<Vec<AtomicUsize>>,
++    }
++
++    impl Drop for Owned {
++        fn drop(&mut self) {
++            assert_eq!(self.text, self.id.to_string());
++            assert_eq!(self.non_sync.get(), self.id);
++            self.drops[self.id].fetch_add(1, Ordering::SeqCst);
++        }
++    }
++
++    #[test]
++    fn halo_owned_movement_scheduler_and_guard_unwind() {
++        let n = if cfg!(miri) { 65 } else { 257 };
++        for mode in 0..5 {
++            let drops = Arc::new((0..n).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++            let mut rows: Vec<_> = (0..n)
++                .map(|id| Owned {
++                    key: id * 37 % 4,
++                    id,
++                    text: id.to_string(),
++                    non_sync: Cell::new(id),
++                    drops: drops.clone(),
++                })
++                .collect();
++            let result = unwind::catch(|| {
++                let mut buffers = Buffers::new();
++                let mut sorter = Sorter::new(&mut rows, 4, 2, &mut buffers);
++                let (_, ends) = sorter.step_with_ends(|row| row.key, true);
++                compact::permute_blocks(&mut sorter, 2, !cfg!(miri));
++                assert!(plan(&sorter, &ends, 2).is_some());
++                let fault = Fault {
++                    fail_after: match mode {
++                        1 => Some(0),
++                        2 => Some(7),
++                        _ => None,
++                    },
++                    fail_schedule_after: if mode == 3 { Some(0) } else { None },
++                    fail_armed: mode == 4,
++                    ..Fault::default()
++                };
++                if let Some(payload) =
++                    squeeze_with_fault(&mut sorter, &ends, 2, !cfg!(miri), visitors(2), &fault)
++                {
++                    unwind::resume(payload);
++                }
++            });
++            assert_eq!(result.is_err(), mode != 0);
++            let mut expected: Vec<_> = (0..n).collect();
++            expected.sort_by_key(|id| id * 37 % 4);
++            assert_eq!(rows.iter().map(|row| row.id).collect::<Vec<_>>(), expected);
++            assert!(drops.iter().all(|count| count.load(Ordering::SeqCst) == 0));
++            drop(rows);
++            assert!(drops.iter().all(|count| count.load(Ordering::SeqCst) == 1));
++        }
++    }
++
++    #[test]
++    fn halo_exclusive_references_after_child_panic() {
++        let n = if cfg!(miri) { 65 } else { 257 };
++        let mut backing: Vec<_> = (0..n).collect();
++        let mut rows: Vec<_> = backing.iter_mut().enumerate().collect();
++        let result = unwind::catch(|| {
++            let mut buffers = Buffers::new();
++            let mut sorter = Sorter::new(&mut rows, 4, 2, &mut buffers);
++            let (_, ends) = sorter.step_with_ends(|row| row.0 % 4, true);
++            compact::permute_blocks(&mut sorter, 2, !cfg!(miri));
++            assert!(plan(&sorter, &ends, 2).is_some());
++            let visits = (0..2)
++                .map(|_| {
++                    alloc::boxed::Box::new(|child: &mut [(usize, &mut usize)]| -> () {
++                        child.reverse();
++                        panic!("exclusive child panic");
++                    }) as GroupVisit<'_, (usize, &mut usize)>
++                })
++                .collect();
++            if let Some(payload) = squeeze(&mut sorter, &ends, 2, !cfg!(miri), visits) {
++                unwind::resume(payload);
++            }
++        });
++        assert!(result.is_err());
++        let mut ids = Vec::new();
++        for (id, record) in rows {
++            assert_eq!(*record, id);
++            *record += 1;
++            ids.push(id);
++        }
++        ids.sort_unstable();
++        assert_eq!(ids, (0..n).collect::<Vec<_>>());
++        assert_eq!(backing, (1..=n).collect::<Vec<_>>());
++    }
++
++    struct InspectOnDrop {
++        pointer: *const (usize, usize),
++        n: usize,
++        observed: Arc<AtomicUsize>,
++    }
++
++    // SAFETY: this test payload does not access the records until its Drop,
++    // which the recovery contract requires to occur after all jobs joined.
++    unsafe impl Send for InspectOnDrop {}
++
++    impl Drop for InspectOnDrop {
++        fn drop(&mut self) {
++            // SAFETY: the test retains the input allocation, and the contract
++            // under test guarantees full restoration and no remaining jobs.
++            let rows = unsafe { core::slice::from_raw_parts(self.pointer, self.n) };
++            let mut ids: Vec<_> = rows.iter().map(|row| row.1).collect();
++            ids.sort_unstable();
++            assert_eq!(ids, (0..self.n).collect::<Vec<_>>());
++            self.observed.fetch_add(1, Ordering::SeqCst);
++        }
++    }
++
++    #[test]
++    fn halo_payload_drop_observes_restored_input() {
++        let n = 65;
++        let observed = Arc::new(AtomicUsize::new(0));
++        let mut rows: Vec<_> = (0..n).map(|id| (id % 4, id)).collect();
++        let mut buffers = Buffers::new();
++        let mut sorter = Sorter::new(&mut rows, 4, 2, &mut buffers);
++        let (_, ends) = sorter.step_with_ends(|row| row.0, true);
++        compact::permute_blocks(&mut sorter, 2, !cfg!(miri));
++        let mut visits = Vec::new();
++        for _ in 0..2 {
++            let mut payload = Some(InspectOnDrop {
++                pointer: sorter.blocks.input,
++                n,
++                observed: observed.clone(),
++            });
++            visits.push(
++                alloc::boxed::Box::new(move |_: &mut [(usize, usize)]| -> () {
++                    std::panic::panic_any(payload.take().unwrap());
++                }) as GroupVisit<'_, (usize, usize)>,
++            );
++        }
++        let result = squeeze(&mut sorter, &ends, 2, !cfg!(miri), visits);
++        assert!(result.is_some());
++        drop(result);
++        assert_eq!(observed.load(Ordering::SeqCst), 2);
++    }
++
++    #[test]
++    #[cfg(not(miri))]
++    fn halo_independent_simultaneous_payloads() {
++        let pool = rayon::ThreadPoolBuilder::new()
++            .num_threads(4)
++            .build()
++            .unwrap();
++        let n = 1025;
++        let observed = Arc::new(AtomicUsize::new(0));
++        let mut rows: Vec<_> = (0..n).map(|id| (id % 4, id)).collect();
++        pool.install(|| {
++            let mut buffers = Buffers::new();
++            let mut sorter = Sorter::new(&mut rows, 4, 2, &mut buffers);
++            let (_, ends) = sorter.step_with_ends(|row| row.0, true);
++            compact::permute_blocks(&mut sorter, 4, true);
++            assert_eq!(plan(&sorter, &ends, 4).unwrap().groups.len(), 4);
++            let barrier = Arc::new(std::sync::Barrier::new(4));
++            let mut visits = Vec::new();
++            for _ in 0..4 {
++                let barrier = barrier.clone();
++                let mut payload = Some(InspectOnDrop {
++                    pointer: sorter.blocks.input,
++                    n,
++                    observed: observed.clone(),
++                });
++                visits.push(
++                    alloc::boxed::Box::new(move |child: &mut [(usize, usize)]| -> () {
++                        child.reverse();
++                        barrier.wait();
++                        std::panic::panic_any(payload.take().unwrap());
++                    }) as GroupVisit<'_, (usize, usize)>,
++                );
++            }
++            let result = squeeze(&mut sorter, &ends, 4, true, visits);
++            assert!(result.is_some());
++            drop(result);
++            assert_eq!(observed.load(Ordering::SeqCst), 4);
++        });
++    }
++
++    #[test]
++    fn halo_scoped_threads_exclusive_retirement() {
++        let n = if cfg!(miri) { 65 } else { 257 };
++        let mut backing: Vec<_> = (0..n).map(Cell::new).collect();
++        let mut rows: Vec<_> = backing.iter_mut().enumerate().collect();
++        let visited = Arc::new(AtomicUsize::new(0));
++        {
++            let mut buffers = Buffers::new();
++            let mut sorter = Sorter::new(&mut rows, 4, 2, &mut buffers);
++            let (_, ends) = sorter.step_with_ends(|row| row.0 % 4, true);
++            compact::permute_blocks(&mut sorter, 3, false);
++            let q = plan(&sorter, &ends, 3).unwrap().groups.len();
++            assert!(q >= 2);
++            let visits = (0..3)
++                .map(|_| {
++                    let visited = visited.clone();
++                    alloc::boxed::Box::new(move |child: &mut [(usize, &mut Cell<usize>)]| {
++                        child.reverse();
++                        for (id, value) in child {
++                            assert_eq!(value.get(), *id);
++                            value.set(*id + 1);
++                        }
++                        visited.fetch_add(1, Ordering::SeqCst);
++                    }) as GroupVisit<'_, (usize, &mut Cell<usize>)>
++                })
++                .collect();
++            let fault = Fault {
++                scoped: true,
++                ..Fault::default()
++            };
++            assert!(squeeze_with_fault(&mut sorter, &ends, 3, false, visits, &fault).is_none());
++        }
++        assert_eq!(visited.load(Ordering::SeqCst), 4);
++        let mut ids = Vec::new();
++        for (id, value) in rows {
++            assert_eq!(value.get(), id + 1);
++            ids.push(id);
++        }
++        ids.sort_unstable();
++        assert_eq!(ids, (0..n).collect::<Vec<_>>());
++    }
++
++    #[test]
++    #[cfg(not(miri))]
++    fn halo_nested_rayon_and_full_public_sort_make_progress() {
++        let pool = rayon::ThreadPoolBuilder::new()
++            .num_threads(4)
++            .build()
++            .unwrap();
++        let mut rows: Vec<_> = (0..1025usize).map(|id| (id % 4, id)).collect();
++        let nested_done = Arc::new(AtomicBool::new(false));
++        pool.install(|| {
++            let mut buffers = Buffers::new();
++            let mut sorter = Sorter::new(&mut rows, 4, 2, &mut buffers);
++            let (_, ends) = sorter.step_with_ends(|row| row.0, true);
++            compact::permute_blocks(&mut sorter, 4, true);
++            assert_eq!(plan(&sorter, &ends, 4).unwrap().groups.len(), 4);
++            let visits = (0..4)
++                .map(|_| {
++                    let nested_done = nested_done.clone();
++                    alloc::boxed::Box::new(move |child: &mut [(usize, usize)]| {
++                        rayon::join(
++                            || child.reverse(),
++                            || {
++                                if !nested_done.swap(true, Ordering::SeqCst) {
++                                    let mut nested: Vec<_> = (0..131_072u64)
++                                        .map(|i| {
++                                            (i.wrapping_mul(0x9e3779b97f4a7c15)).rotate_left(19)
++                                        })
++                                        .collect();
++                                    let mut expected = nested.clone();
++                                    expected.sort();
++                                    let before = HALO_PLANS.with(core::cell::Cell::get);
++                                    struct Reset;
++                                    impl Drop for Reset {
++                                        fn drop(&mut self) {
++                                            FORCE_HALO.with(|flag| flag.set(false));
++                                        }
++                                    }
++                                    FORCE_HALO.with(|flag| flag.set(true));
++                                    let _reset = Reset;
++                                    crate::par_stable_sort(&mut nested);
++                                    assert_eq!(nested, expected);
++                                    assert!(
++                                        HALO_PLANS.with(core::cell::Cell::get) > before,
++                                        "nested public call must accept an actual Q>1 halo plan"
++                                    );
++                                }
++                            },
++                        );
++                    }) as GroupVisit<'_, (usize, usize)>
++                })
++                .collect();
++            assert!(squeeze(&mut sorter, &ends, 4, true, visits).is_none());
++        });
++        assert!(nested_done.load(Ordering::SeqCst));
++    }
++
++    #[test]
++    fn halo_distinct_group_child_key_panics_after_movement() {
++        let n = if cfg!(miri) { 65 } else { 4097 };
++        let observed = Arc::new(AtomicUsize::new(0));
++        let moved_panics = Arc::new(AtomicUsize::new(0));
++        let barrier = Arc::new(std::sync::Barrier::new(2));
++        let mut rows: Vec<_> = (0..n).map(|id| (id % 2, id)).collect();
++        let mut buffers = Buffers::new();
++        let mut sorter = Sorter::new(&mut rows, 2, 2, &mut buffers);
++        let (_, ends) = sorter.step_with_ends(|row| row.0, true);
++        compact::permute_blocks(&mut sorter, 2, false);
++        assert_eq!(plan(&sorter, &ends, 2).unwrap().groups.len(), 2);
++        let visits = (0..2)
++            .map(|_| {
++                let mut payload = Some(InspectOnDrop {
++                    pointer: sorter.blocks.input,
++                    n,
++                    observed: observed.clone(),
++                });
++                let barrier = barrier.clone();
++                let moved_panics = moved_panics.clone();
++                alloc::boxed::Box::new(move |child: &mut [(usize, usize)]| {
++                    let base = child.as_ptr();
++                    barrier.wait();
++                    crate::stable_sort_by_key(child, |row| {
++                        // SAFETY: stable root partition leaves parity bucket IDs
++                        // in increasing order, at position id/2 within this child.
++                        let initial = unsafe { base.add(row.1 / 2) };
++                        if !core::ptr::eq(row, initial) {
++                            moved_panics.fetch_add(1, Ordering::SeqCst);
++                            std::panic::panic_any(payload.take().unwrap());
++                        }
++                        (row.1 as u64)
++                            .wrapping_mul(0x9e3779b97f4a7c15)
++                            .rotate_left(19)
++                    });
++                }) as GroupVisit<'_, (usize, usize)>
++            })
++            .collect();
++        // Exact production movement/run kernel, but native scoped threads
++        // also work under Miri without the Rayon dependency's assembly path.
++        let fault = Fault {
++            scoped: true,
++            ..Fault::default()
++        };
++        let result = squeeze_with_fault(&mut sorter, &ends, 2, false, visits, &fault);
++        assert!(result.is_some());
++        drop(result);
++        assert_eq!(moved_panics.load(Ordering::SeqCst), 2);
++        assert_eq!(observed.load(Ordering::SeqCst), 2);
++    }
++}

@@ -279,22 +279,12 @@ fn partition_digit_inner<'a, T, E: Extract<T>>(
     let shift = E::Value::from_usize(shift);
     let mask = E::Value::from_usize((1usize << width) - 1) << shift;
     let classify = move |key: &mut E, record: &T| ((key.key(record) & mask) >> shift).to_usize();
-    match staging {
-        // SAFETY: the caller of partition_digit_staged guarantees the staging
-        // region, and this is its only caller.
-        Some(staging) => unsafe {
-            partition_staged(arr, 1 << radix, key, buffers, classify, staging)
-        },
-        None => partition_pass(
-            arr,
-            1 << radix,
-            key,
-            buffers,
-            classify,
-            visit.is_some(),
-            visit,
-        ),
-    }
+    let finishing = match (visit, staging) {
+        (_, Some(staging)) => Finishing::Staged(staging),
+        (Some(visit), None) => Finishing::Visit(visit),
+        (None, None) => Finishing::Nothing,
+    };
+    partition_pass(arr, 1 << radix, key, buffers, classify, finishing)
 }
 
 pub(crate) fn partition_by<T, E: Extract<T>>(
@@ -315,9 +305,22 @@ pub(crate) fn partition_by<T, E: Extract<T>>(
         key,
         buffers,
         move |key, record| classify(key, record).min(buckets - 1),
-        true,
-        None,
+        Finishing::Ends,
     )
+}
+
+/// What finishes each bucket once its records are contiguous.
+enum Finishing<'a, T, E> {
+    /// Nothing: only the input slice is materialized.
+    Nothing,
+    /// Report the cumulative record end of every bucket.
+    Ends,
+    /// Report the ends and hand every bucket to the visitor.
+    Visit(KeyVisit<'a, T, E>),
+    /// Report the ends and stage tile-sized buckets into the buffer, handing
+    /// each one to the visitor together with its destination. The staging
+    /// pointer must be disjoint from the input slice and the block scratch.
+    Staged(Staging<'a, T, E>),
 }
 
 fn partition_pass<T, E: Extract<T>>(
@@ -325,51 +328,15 @@ fn partition_pass<T, E: Extract<T>>(
     buckets: usize,
     key: &mut E,
     buffers: &mut Buffers<T>,
-    classify: impl FnMut(&mut E, &T) -> usize,
-    want_ends: bool,
-    visit: Option<KeyVisit<'_, T, E>>,
-) -> Vec<usize> {
-    partition_pass_inner(arr, buckets, key, buffers, classify, want_ends, visit, None)
-}
-
-/// Like `partition_pass`, but a bucket that fits the staging buffer is copied
-/// there and handed to the visitor together with its destination.
-///
-/// # Safety
-///
-/// The staging pointer must satisfy the requirement of
-/// `partition_digit_staged`.
-unsafe fn partition_staged<T, E: Extract<T>>(
-    arr: &mut [T],
-    buckets: usize,
-    key: &mut E,
-    buffers: &mut Buffers<T>,
-    classify: impl FnMut(&mut E, &T) -> usize,
-    staging: Staging<'_, T, E>,
-) -> Vec<usize> {
-    partition_pass_inner(
-        arr,
-        buckets,
-        key,
-        buffers,
-        classify,
-        true,
-        None,
-        Some(staging),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn partition_pass_inner<T, E: Extract<T>>(
-    arr: &mut [T],
-    buckets: usize,
-    key: &mut E,
-    buffers: &mut Buffers<T>,
     mut classify: impl FnMut(&mut E, &T) -> usize,
-    want_ends: bool,
-    visit: Option<KeyVisit<'_, T, E>>,
-    staging: Option<Staging<'_, T, E>>,
+    finishing: Finishing<'_, T, E>,
 ) -> Vec<usize> {
+    let want_ends = !matches!(finishing, Finishing::Nothing);
+    let (visit, staging) = match finishing {
+        Finishing::Visit(visit) => (Some(visit), None),
+        Finishing::Staged(staging) => (None, Some(staging)),
+        Finishing::Nothing | Finishing::Ends => (None, None),
+    };
     let (staging_ptr, staging_cap, mut staged_visit) = match staging {
         Some(staging) => (staging.ptr, staging.capacity, Some(staging.visit)),
         None => (core::ptr::null_mut(), 0, None),

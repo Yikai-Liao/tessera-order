@@ -283,3 +283,37 @@ scalar/owned/exclusive-borrow tests pass the same Miri model. The historical
 hardware results above are preserved as reported, not relabeled as measurements
 of the correction. Subsequent fair comparisons must identify the corrected
 public source separately from the frozen research combined implementation.
+
+## Bounded indirect leaves: negative result
+
+The optional tile-only LSD index experiment captures normalized keys, stably
+orders u16 indices, validates the bijection and materializes records by cycles.
+It does not allocate an index over the whole input. Default eligibility is at
+least 64 bytes per record in a real 64 KiB tile; a separate explicit control
+admits 32-byte records. The same feature changes serial and research-combined
+leaves, so the serial control receives the same modification.
+
+The four-case, three-block screen establishes no parallel win. Paired
+indirect/literal serial medians were 1.558 (64-byte rows), 1.270 (128-byte rows),
+1.724 (full-u128 keys in 128-byte rows), and 3.017 (owned 32-byte rows), with a
+slowdown in every block. Parallel ratios were 0.970, 0.856, 1.019 and 2.479.
+The apparent wide-row improvement overlaps placement controls; candidate long
+tails remain in the data. Literal reciprocal control widths were 1.051, 1.470,
+1.588 and 1.261. Large candidate-repeat ranges do not erase the consistent
+owned-record slowdown. The complete controls and additional-heap measurements
+are in `research/patches/bounded-indirect-lsd.SCREEN.md`.
+
+Separate test-only diagnostics confirmed the selected leaf route and roughly
+halved logical record copies. They did not measure DRAM traffic or isolate the
+cost of key capture, index ordering, validation and cycle access. No one of those
+costs is yet an established cause of the slowdown. New mechanism expansion is
+paused while the fastest combined and corrected public implementations receive
+phase, overlap, worker-time and synchronization diagnosis.
+
+The historical follow-on patch and its exact source identities, ownership and
+space argument, preserved failed test witnesses, replacement recovery checks and
+runtime geometry are archived beside the report. Optimized default64/explicit32
+suites passed 88/89 tests; five strict-provenance Miri targets and Clippy passed.
+The archive applies after the documented current-main combined research patch,
+not to the newer public scheduler. Production defaults remain unchanged by this
+experiment. Raw samples, traces and the harness remain outside Git.

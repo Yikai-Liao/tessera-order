@@ -1,0 +1,33 @@
+{
+  "scope": "External evidence references only; files are not included in this packet. Paths are relative to the original isolated scratch evidence root, not repository paths.",
+  "sha256": {
+    "tessera-indirect-tile-prototype/VALIDATION_REPORT.md": "ac46c4b256b9a4ee0f7152d198cbacd5fb94bce86a87d635be220d4984b4a4a7",
+    "tessera-indirect-tile-prototype/PROTOTYPE_SOURCE_SHA256.txt": "60dceeb6821055f1d94d257f08edaa5838f59dd04590ea730984331c3093047e",
+    "tessera-indirect-tile-prototype/validation/msrv-185-rayon-32.log": "0ad6d4c71f11bde3cccfc57aba953fcb78a2a69568494a5771856bcc0653e8b6",
+    "tessera-indirect-tile-prototype/validation/msrv-32-movement-corrected.log": "fe94e3bf980b12f63b6b5ccb6095bde42ea66ed77a3ce346179033bdaf1d962d",
+    "tessera-combined-main-indirect/INTEGRATION_VALIDATION.md": "1723b75e69cea44a352d4fabcab155b8c596c245aa8e4af0686d4c06d6237c21",
+    "tessera-combined-main-indirect/integration-evidence/source-manifest-final.json": "88adb6b12051d73ae1214179d6ae4782b836d50693b56551ebdbc0ba6eb8bfad",
+    "tessera-combined-main-indirect-diagnostics/DIAGNOSTIC_REPORT.md": "457d41da7ed0fd32c69dfe5e0aa0b72f17fad8639411a03eed7c2d9e67352199",
+    "tessera-combined-main-indirect-diagnostics/diagnostic-evidence/evidence-manifest.json": "61ae007dd4de26ac6ad7658e710313e469aed60375e4a8ba5898724dea49bdf2",
+    "tessera-combined-main-indirect-diagnostics/diagnostic-evidence/root-geometry.log": "9757b53ffd8d0b280f368c3299a0891f7b1ab8bf4ce935592ab4f1cb5c73a218",
+    "tessera-combined-main-indirect-diagnostics/diagnostic-evidence/exact-shape-routes.json": "fe40bcea1d85e8e1a4b0c270fab5b902b18c166f0cba1c91bcab136c4e8ffa2e",
+    "tessera-indirect-tile-screen/report.md": "6642aba2de5b6114e9329e99080cd6472c190c467dd3ae5f1867bb5fac152015",
+    "tessera-combined-main-indirect/integration-evidence/release-default64-initial.log": "8736a430a8dcb3cbc443c4aae45a6d3d1303fab3bde751f8db0c1f3df3fbc905",
+    "tessera-combined-main-indirect/integration-evidence/release-32-witness-initial.log": "647a57e448c1e7ee7fa67d6a91c28292a38a64ea54ca864be76b122300e77097",
+    "tessera-combined-main-indirect/integration-evidence/release-32-native-root-probe.log": "5a3719b219c43ba6187f336143cd57e949d97dfdfabd828eb1cfff1fb8c26ed8",
+    "tessera-combined-main-indirect/integration-evidence/release-32-all-targets.log": "c55ae53c95a20bb71eb2c7c72611d9380b47a4d97fbf640a0dba8f5bdc3cfac4",
+    "tessera-combined-main-indirect/integration-evidence/release-default64-final.log": "db17c262548cc36b6cdc64691d063ea101fba291362fc7ca08e63a3bee730783",
+    "tessera-combined-main-indirect/integration-evidence/release-32-final.log": "517d3382dd58b97dfcc6d4eb2f69003186f1fe858b6e3c3a0cec5ef41cfa56a4",
+    "tessera-combined-main-indirect/integration-evidence/clippy-all-features-final.log": "1665273f38e237df7a7ee7d36a5055ef11146317f5024232d824b41ebfdd57f7",
+    "tessera-combined-main-indirect/integration-evidence/msrv-185-check.log": "9b15c891bb0499e2d329f45912fd847183c0ba5aea323be905e2586109461175",
+    "tessera-combined-main-indirect/integration-evidence/no-std-check.log": "d824f122be9562500acaaadd37311fb81cf6d0dab9c522a83c4851a11f956383",
+    "tessera-combined-main-indirect/integration-evidence/simd-composition-check.log": "72329cc6658ec0ee529ceb0665df8ef52b186e629f6b53636701e46ebaea40aa",
+    "tessera-combined-main-indirect/integration-evidence/miri-strict-cycles.log": "111a7138e6925dce059170b6e8704547c6ebdb5c278933caf7c010ece465c4a3",
+    "tessera-combined-main-indirect/integration-evidence/miri-strict-borrows.log": "468a59f10a930d95f8c9d65d53aed296487a7723cae8a9182ed200bf98128360",
+    "tessera-combined-main-indirect/integration-evidence/miri-strict-owned-panic.log": "05e40cd2c91f62dead6a1429f96d8946c8470e3e40a529e561a33989cca95988",
+    "tessera-combined-main-indirect/integration-evidence/miri-strict-deferred.log": "e68f7979a0372d08f66347bf1c8de03eabd740ce7db33c17883baf0ed0374136",
+    "tessera-combined-main-indirect/integration-evidence/final-commands.txt": "ffe13406a555a75e11ad4b5ecad1cf42a0ca187084caec3a04385ab62ca22ce3",
+    "tessera-combined-main-indirect/integration-evidence/environment-before-final.txt": "8a048736c9d914f693b2d245c8dbdc37c4efb511efa83228a09e0331873d06f6",
+    "tessera-combined-main-indirect/integration-evidence/environment-final.txt": "ed247db9fdbeae9a34d7976fddd6f63cd76f90d1b5d602ced2b0f95343245a3f"
+  }
+}

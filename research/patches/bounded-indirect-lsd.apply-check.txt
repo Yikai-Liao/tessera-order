@@ -1,0 +1,12 @@
+git apply --check follow-on: PASS
+git apply  follow-on: PASS
+git apply -R --check follow-on: PASS
+Entire candidate and independent verify file/symlink trees: IDENTICAL
+Prerequisite combined patch checked/applied to two independent b1d36ce archives: PASS
+All20 prerequisite runtime/test hashes: PASS
+All23 validated final input hashes: PASS
+All23 normalized archive target hashes after apply: PASS
+All22 final Rust runtime/test files byte-identical to83eb freeze: PASS
+Crate Cargo semantics identical after restoring package=tessera-sort and implicit lib=tessera_sort: PASS
+Root Cargo.toml and Cargo.lock byte-identical to historical base: PASS
+No build/test/timing/commit/push; shared checkout not an apply target.

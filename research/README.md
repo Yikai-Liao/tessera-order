@@ -13,6 +13,11 @@ ownership proof, validation record, and limitations before using it.
   stronger native-root pipeline rebased onto upstream `5b13ac1`, with explicit
   SIMD-off/on controls and an inconclusive four-case pilot. This patch targets
   the documented experimental commit and is not applied to production.
+- [Bounded indirect LSD leaves](patches/bounded-indirect-lsd.README.md): a
+  validated tile-only key/index snapshot and record-cycle experiment. It halved
+  measured logical leaf copies but regressed serial throughput and explicit
+  32-byte owned parallel sorting. Not adopted; follow-on work is paused pending
+  bottleneck diagnosis. Its exact historical apply chain is documented.
 - [Bounded halo squeeze](patches/halo-squeeze.README.md): generic parallel
   materialization with bounded threatened-source snapshots. Neither screen
   establishes a win; the corrected four-worker case regresses and unexplained

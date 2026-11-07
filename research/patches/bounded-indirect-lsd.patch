@@ -1,0 +1,1528 @@
+diff --git a/rust/tessera-sort/Cargo.toml b/rust/tessera-sort/Cargo.toml
+--- a/rust/tessera-sort/Cargo.toml
++++ b/rust/tessera-sort/Cargo.toml
+@@ -23,6 +23,10 @@
+ rayon = ["std", "dep:rayon"]
+ # Vector scans require std and Rust 1.89 or newer.
+ portable-simd = ["std", "dep:fearless_simd"]
++# Research control: bounded indirect leaves for records of at least 64 bytes.
++indirect-tiles = []
++# Explicit research control only; default indirect eligibility remains 64 bytes.
++indirect-tiles-32 = ["indirect-tiles"]
+ 
+ [dependencies]
+ rayon = { version = "1.10", optional = true }
+diff --git a/rust/tessera-sort/src/engine/parallel/safety_gap_tests.rs b/rust/tessera-sort/src/engine/parallel/safety_gap_tests.rs
+--- a/rust/tessera-sort/src/engine/parallel/safety_gap_tests.rs
++++ b/rust/tessera-sort/src/engine/parallel/safety_gap_tests.rs
+@@ -116,6 +116,22 @@
+             assert!(!h.root_key_panic.load(SeqCst));
+         }
+     }
++    #[cfg(feature = "indirect-tiles-32")]
++    if !narrow && key_panic && core::mem::size_of::<OwnedCell>() >= 32 {
++        let published = h.publication.load(SeqCst);
++        let first_key = h.consumer_first_key.load(SeqCst);
++        let moved = h.consumer_first_move.load(SeqCst);
++        let panic = h.consumer_snapshot_panic.load(SeqCst);
++        assert_eq!(panic, h.consumer_key_panic.load(SeqCst));
++        assert!(published > 0 && published < first_key && first_key < moved && moved < panic);
++        assert!(panic < h.sender_closed.load(SeqCst));
++        assert!(h.callbacks_after_publication.load(SeqCst) >= 2);
++        std::println!(
++            "indirect consumer snapshot fault: record_bytes={} published={published} key={first_key} moved={moved} panic={panic} sender_closed={}",
++            core::mem::size_of::<OwnedCell>(),
++            h.sender_closed.load(SeqCst),
++        );
++    }
+     if !late && !key_panic {
+         let actual: Vec<_> = rows.iter().map(|r| (r.key, r.id)).collect();
+         let mut expected: Vec<_> = (0..len).map(|id| (value(id, narrow), id)).collect();
+diff --git a/rust/tessera-sort/src/engine.rs b/rust/tessera-sort/src/engine.rs
+--- a/rust/tessera-sort/src/engine.rs
++++ b/rust/tessera-sort/src/engine.rs
+@@ -220,6 +220,8 @@
+         let (mut current, prefix) = prefix.split_last_mut().unwrap();
+         // The scan already compared this pair, so swap without re-reading keys.
+         core::mem::swap(current, &mut tail[0]);
++        #[cfg(all(test, feature = "indirect-tiles"))]
++        tile_metrics::insertion_swap();
+         swaps += 1;
+         if swaps > budget {
+             return None;
+@@ -229,6 +231,8 @@
+                 break;
+             }
+             core::mem::swap(before, current);
++            #[cfg(all(test, feature = "indirect-tiles"))]
++            tile_metrics::insertion_swap();
+             current = before;
+             swaps += 1;
+             if swaps > budget {
+@@ -959,6 +963,10 @@
+             insertion_sort(arr, self.key);
+             return;
+         }
++        #[cfg(feature = "indirect-tiles")]
++        if crate::indirect::try_sort(arr, self.key, self.workspace) {
++            return;
++        }
+         // Widest counting table this tile can afford; LSD spreads it over passes.
+         let table_width = tile_digit_bits(len, core::mem::size_of::<T>());
+         let mut digits = [Digit { shift: 0, width: 0 }; MAX_DIGITS];
+@@ -995,10 +1003,14 @@
+             // As above, `max(1)` is kept for the optimizer, not for the value.
+             let level_cost = depth.max(1) + MSD_FINISH_PASSES;
+             if level_cost < passes {
++                #[cfg(all(test, feature = "indirect-tiles"))]
++                tile_metrics::msd();
+                 self.partition_tile(arr, digit, varying);
+                 return;
+             }
+         }
++        #[cfg(all(test, feature = "indirect-tiles"))]
++        tile_metrics::lsd(passes);
+         let cache = CACHED;
+         let buckets = if cache {
+             1 << digits[..passes]
+@@ -1073,6 +1085,8 @@
+             core::mem::swap(&mut self.source, destination);
+             #[cfg(all(test, feature = "rayon"))]
+             crate::test_witness::moved();
++            #[cfg(all(test, feature = "indirect-tiles"))]
++            tile_metrics::counting_pass(self.len);
+             largest
+         }
+     }
+@@ -1086,6 +1100,8 @@
+             unsafe {
+                 core::ptr::copy_nonoverlapping(self.source, self.tile, self.len);
+             }
++            #[cfg(all(test, feature = "indirect-tiles"))]
++            tile_metrics::copyback(self.len);
+         }
+     }
+ }
+@@ -1295,3 +1311,138 @@
+ mod parallel;
+ #[cfg(feature = "rayon")]
+ pub(crate) use parallel::{sort as par_sort, use_serial as par_use_serial};
++
++#[cfg(all(test, feature = "indirect-tiles"))]
++pub(crate) mod tile_metrics {
++    extern crate std;
++    use std::cell::Cell;
++
++    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
++    pub(crate) struct Metrics {
++        pub(crate) msd_tiles: usize,
++        pub(crate) lsd_tiles: usize,
++        pub(crate) planned_lsd_passes: usize,
++        pub(crate) counting_passes: usize,
++        pub(crate) scattered_records: usize,
++        pub(crate) copyback_records: usize,
++        pub(crate) insertion_swaps: usize,
++        pub(crate) capture_tiles: usize,
++        pub(crate) capture_active: bool,
++        pub(crate) indirect_tiles: usize,
++        pub(crate) index_passes: usize,
++        pub(crate) permutation_copies: usize,
++    }
++
++    std::thread_local! {
++        static COUNTS: Cell<Metrics> = Cell::new(Metrics::default());
++        static FORCE_LITERAL: Cell<bool> = const { Cell::new(false) };
++    }
++
++    fn update(f: impl FnOnce(&mut Metrics)) {
++        COUNTS.with(|counts| {
++            let mut value = counts.get();
++            f(&mut value);
++            counts.set(value);
++        });
++    }
++
++    pub(crate) fn reset(force_literal: bool) {
++        FORCE_LITERAL.with(|flag| flag.set(force_literal));
++        COUNTS.with(|counts| counts.set(Metrics::default()));
++    }
++
++    pub(crate) fn take() -> Metrics {
++        FORCE_LITERAL.with(|flag| flag.set(false));
++        COUNTS.with(|counts| counts.replace(Metrics::default()))
++    }
++
++    #[cfg(all(
++        feature = "indirect-tiles-32",
++        feature = "rayon",
++        target_pointer_width = "64"
++    ))]
++    pub(crate) fn snapshot() -> Metrics {
++        COUNTS.with(Cell::get)
++    }
++
++    pub(crate) struct CaptureGuard;
++
++    pub(crate) fn begin_capture() -> CaptureGuard {
++        update(|counts| {
++            counts.capture_tiles += 1;
++            counts.capture_active = true;
++        });
++        CaptureGuard
++    }
++
++    impl Drop for CaptureGuard {
++        fn drop(&mut self) {
++            update(|counts| counts.capture_active = false);
++        }
++    }
++
++    #[cfg(feature = "rayon")]
++    pub(crate) fn capture_active() -> bool {
++        COUNTS.with(|counts| counts.get().capture_active)
++    }
++
++    pub(crate) fn literal_forced() -> bool {
++        FORCE_LITERAL.with(Cell::get)
++    }
++
++    pub(crate) fn insertion_swap() {
++        update(|counts| counts.insertion_swaps += 1);
++    }
++
++    pub(crate) fn msd() {
++        update(|counts| counts.msd_tiles += 1);
++    }
++
++    pub(crate) fn lsd(passes: usize) {
++        update(|counts| {
++            counts.lsd_tiles += 1;
++            counts.planned_lsd_passes += passes;
++        });
++    }
++
++    pub(crate) fn counting_pass(len: usize) {
++        update(|counts| {
++            counts.counting_passes += 1;
++            counts.scattered_records += len;
++        });
++    }
++
++    pub(crate) fn copyback(len: usize) {
++        update(|counts| counts.copyback_records += len);
++    }
++
++    #[cfg(feature = "indirect-tiles")]
++    pub(crate) fn indirect(passes: usize, copies: usize) {
++        update(|counts| {
++            counts.indirect_tiles += 1;
++            counts.index_passes += passes;
++            counts.permutation_copies += copies;
++        });
++        // This hook runs only after materialize returned, with every record
++        // restored to its slice; identity maps must not witness a real move.
++        #[cfg(feature = "rayon")]
++        if copies != 0 {
++            crate::test_witness::indirect_completed();
++        }
++    }
++}
++
++#[cfg(all(test, feature = "indirect-tiles"))]
++pub(crate) fn sort_tile_for_test<T, E: Extract<T>>(
++    arr: &mut [T],
++    key: &mut E,
++    workspace: &mut Workspace<T>,
++    varying: u128,
++) {
++    Sorter::<T, E, true> {
++        workspace,
++        key,
++        tile_bytes: TILE_BYTES,
++    }
++    .sort_tile(arr, varying);
++}
+diff --git a/rust/tessera-sort/src/indirect/tests.rs b/rust/tessera-sort/src/indirect/tests.rs
+new file mode 100644
+--- /dev/null
++++ b/rust/tessera-sort/src/indirect/tests.rs
+@@ -0,0 +1,745 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++use super::*;
++use crate::RadixKey;
++use crate::engine::{sort_tile_for_test, tile_metrics};
++use crate::key::ByKey;
++extern crate std;
++use alloc::string::{String, ToString};
++use alloc::vec;
++use core::cell::Cell;
++use core::cmp::Reverse;
++use core::mem::MaybeUninit;
++use std::panic::{AssertUnwindSafe, catch_unwind};
++use std::sync::Arc;
++use std::sync::atomic::{AtomicUsize, Ordering};
++
++#[derive(Clone, Debug)]
++#[repr(C, align(8))]
++struct Row<K, const PAD: usize = 48> {
++    key: K,
++    id: usize,
++    payload: [u8; PAD],
++}
++
++fn rows<K: Copy, const PAD: usize>(keys: &[K]) -> Vec<Row<K, PAD>> {
++    keys.iter()
++        .enumerate()
++        .map(|(id, &key)| Row {
++            key,
++            id,
++            payload: [id as u8; PAD],
++        })
++        .collect()
++}
++
++fn mixed(index: usize) -> u64 {
++    let mut value = (index as u64).wrapping_add(0x9e3779b97f4a7c15);
++    value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
++    value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
++    value ^ (value >> 31)
++}
++
++fn check_keys<K: RadixKey>(keys: &[K]) {
++    let mut records = rows::<K, 64>(keys);
++    let mut expected: Vec<_> = keys
++        .iter()
++        .enumerate()
++        .map(|(id, &key)| (key.encode(), id))
++        .collect();
++    expected.sort_by_key(|&(key, _)| key);
++    let mut workspace = Workspace::new();
++    let mut calls = 0;
++    let handled = try_sort(
++        &mut records,
++        &mut ByKey(|row: &Row<K, 64>| {
++            calls += 1;
++            row.key
++        }),
++        &mut workspace,
++    );
++    assert_eq!(handled, keys.len() >= 2);
++    assert_eq!(calls, if handled { keys.len() } else { 0 });
++    let actual: Vec<_> = records
++        .iter()
++        .map(|row| (row.key.encode(), row.id))
++        .collect();
++    assert!(actual == expected);
++    for row in records {
++        assert_eq!(row.payload, [row.id as u8; 64]);
++    }
++}
++
++#[test]
++fn empty_singleton_and_tile_boundaries() {
++    assert_eq!(size_of::<Row<u64>>(), 64);
++    for len in [0, 1, 2, 47, 48, 49, 1023, 1024, 1025] {
++        let keys: Vec<_> = (0..len).map(mixed).collect();
++        let mut records = rows::<_, 48>(&keys);
++        let mut workspace = Workspace::new();
++        let handled = try_sort(
++            &mut records,
++            &mut ByKey(|row: &Row<u64>| row.key),
++            &mut workspace,
++        );
++        assert_eq!(handled, (2..=1024).contains(&len));
++        if handled {
++            assert!(records.is_sorted_by_key(|row| row.key));
++        } else {
++            assert!(records.iter().map(|row| row.key).eq(keys));
++            assert_eq!(workspace.retained_bytes(), 0);
++        }
++    }
++    // Oversized narrow input is ineligible. With the 64 KiB and >=32-byte
++    // gates, the u16 limit is redundant defensive validation, not a separately
++    // reachable eligible boundary.
++    let mut narrow = vec![0u8; u16::MAX as usize + 1];
++    assert!(!try_sort(
++        &mut narrow,
++        &mut crate::key::Direct,
++        &mut Workspace::new()
++    ));
++    // A giant record does not cause a giant stack temporary or allocation here.
++    let mut huge: Vec<[u8; MAX_RECORD_BYTES + 1]> = Vec::new();
++    huge.resize_with(2, || [0; MAX_RECORD_BYTES + 1]);
++    let mut workspace = Workspace::new();
++    assert!(!try_sort(
++        &mut huge,
++        &mut ByKey(|row: &[u8; MAX_RECORD_BYTES + 1]| row[0]),
++        &mut workspace
++    ));
++    assert_eq!(workspace.retained_bytes(), 0);
++}
++
++#[test]
++fn index_lsd_stability_extremes_and_all_key_widths() {
++    check_keys::<u64>(&[]);
++    check_keys(&[u64::MAX]);
++    check_keys(&vec![u64::MAX; 257]);
++    check_keys(&(0..511).map(|i| mixed(i) % 3).collect::<Vec<_>>());
++    check_keys(&(0..511).map(mixed).collect::<Vec<_>>());
++    check_keys(
++        &(0..257)
++            .map(|i| ((mixed(i) as u128) << 64) | mixed(i + 1) as u128)
++            .collect::<Vec<_>>(),
++    );
++    check_keys(&[0u128, u128::MAX, 1 << 127, 0, u128::MAX, (1 << 64) + 1]);
++    check_keys(&[i128::MIN, -1, 0, i128::MAX, i128::MIN, 1]);
++    check_keys(&[
++        Reverse(i64::MIN),
++        Reverse(0),
++        Reverse(i64::MAX),
++        Reverse(-1),
++        Reverse(0),
++    ]);
++    check_keys(&[0u8, u8::MAX, 1, 0, 127]);
++    check_keys(&[0u16, u16::MAX, 1, 0, 256]);
++    check_keys(&[0u32, u32::MAX, 1, 0, 1 << 31]);
++    check_keys(&[0usize, usize::MAX, 1, 0, usize::MAX / 2]);
++}
++
++#[test]
++fn floats_use_encoded_nan_and_signed_zero_order() {
++    let bits = [
++        0xffff_ffff_ffff_ffff,
++        0xfff8_0000_0000_0001,
++        f64::NEG_INFINITY.to_bits(),
++        (-1f64).to_bits(),
++        (-0f64).to_bits(),
++        0f64.to_bits(),
++        1f64.to_bits(),
++        f64::INFINITY.to_bits(),
++        0x7ff0_0000_0000_0001,
++        0x7ff8_0000_0000_0001,
++        u64::MAX,
++    ];
++    let keys: Vec<_> = bits
++        .iter()
++        .rev()
++        .chain(bits.iter())
++        .map(|&bits| f64::from_bits(bits))
++        .collect();
++    check_keys(&keys);
++    check_keys(&keys.iter().copied().map(Reverse).collect::<Vec<_>>());
++    check_keys(&[
++        f32::from_bits(0xffc0_1234),
++        0f32,
++        -0f32,
++        f32::NAN,
++        f32::NEG_INFINITY,
++        f32::INFINITY,
++    ]);
++}
++
++fn permutations(values: &mut [u16], at: usize, visit: &mut impl FnMut(&[u16])) {
++    if at == values.len() {
++        visit(values);
++        return;
++    }
++    for next in at..values.len() {
++        values.swap(at, next);
++        permutations(values, at + 1, visit);
++        values.swap(at, next);
++    }
++}
++
++#[test]
++fn exhaustively_materialize_every_small_bijection() {
++    let max = if cfg!(miri) { 5 } else { 7 };
++    for len in 0..=max {
++        let mut indices: Vec<u16> = (0..len as u16).collect();
++        permutations(&mut indices, 0, &mut |mapping| {
++            let mut records: Vec<_> = (0..len).map(|index| index.to_string()).collect();
++            let mut order = mapping.to_vec();
++            let mut seen = vec![0; len];
++            assert!(validate_permutation(&order, &mut seen));
++            let copies = permutation_moves(&order, &mut seen);
++            assert!(copies <= len + len / 2);
++            let mut temporary = MaybeUninit::<String>::uninit();
++            // SAFETY: the exhaustive generator yields a bijection; all records
++            // are initialized and temporary is a separate aligned writable slot.
++            unsafe { materialize(records.as_mut_ptr(), &mut order, temporary.as_mut_ptr()) };
++            for (destination, &source) in mapping.iter().enumerate() {
++                assert_eq!(records[destination], source.to_string());
++            }
++            assert!(order.iter().copied().eq(0..len as u16));
++        });
++    }
++    // Explicit two-cycles reach the 1.5N logical-copy bound; identity moves none.
++    assert_eq!(permutation_moves(&[1, 0, 3, 2], &mut [0; 4]), 6);
++    assert_eq!(permutation_moves(&[0, 1, 2, 3], &mut [0; 4]), 0);
++}
++
++#[test]
++fn malformed_maps_are_rejected_before_materialization() {
++    assert!(!validate_permutation(&[0, 0], &mut [0; 2]));
++    assert!(!validate_permutation(&[0, 2], &mut [0; 2]));
++    assert!(!validate_permutation(&[0], &mut [0; 2]));
++    assert!(validate_permutation(&[], &mut []));
++}
++
++#[repr(align(64))]
++struct Owned {
++    key: u64,
++    id: usize,
++    text: String,
++    bytes: Vec<u8>,
++    not_sync: Cell<usize>,
++    drops: Arc<Vec<AtomicUsize>>,
++}
++
++impl Drop for Owned {
++    fn drop(&mut self) {
++        self.drops[self.id].fetch_add(1, Ordering::Relaxed);
++    }
++}
++
++fn owned(len: usize, drops: &Arc<Vec<AtomicUsize>>) -> Vec<Owned> {
++    (0..len)
++        .map(|id| Owned {
++            key: mixed(id) % 23,
++            id,
++            text: id.to_string(),
++            bytes: vec![id as u8; 7],
++            not_sync: Cell::new(id),
++            drops: drops.clone(),
++        })
++        .collect()
++}
++
++#[test]
++fn key_panic_never_moves_this_tiles_records_and_workspace_reuses() {
++    let len = if cfg!(miri) { 65 } else { 129 };
++    for at in 1..=len {
++        let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++        let mut records = owned(len, &drops);
++        let mut workspace = Workspace::new();
++        let mut calls = 0;
++        let result = catch_unwind(AssertUnwindSafe(|| {
++            try_sort(
++                &mut records,
++                &mut ByKey(|row: &Owned| {
++                    calls += 1;
++                    assert!(calls != at, "injected key failure");
++                    row.key
++                }),
++                &mut workspace,
++            )
++        }));
++        assert!(result.is_err());
++        assert_eq!(calls, at);
++        for (id, row) in records.iter().enumerate() {
++            assert_eq!(row.id, id);
++            assert_eq!(row.text, id.to_string());
++            assert_eq!(row.bytes, vec![id as u8; 7]);
++            assert_eq!(row.not_sync.get(), id);
++        }
++        assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 0));
++        assert!(try_sort(
++            &mut records,
++            &mut ByKey(|row: &Owned| row.key),
++            &mut workspace
++        ));
++        assert!(
++            records
++                .windows(2)
++                .all(|pair| (pair[0].key, pair[0].id) <= (pair[1].key, pair[1].id))
++        );
++        drop(records);
++        drop(workspace);
++        assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 1));
++    }
++}
++
++#[test]
++fn inconsistent_callbacks_keep_owned_payloads_exactly_once() {
++    let len = 127;
++    let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++    let mut records = owned(len, &drops);
++    let mut workspace = Workspace::new();
++    let mut calls = 0;
++    for _ in 0..3 {
++        assert!(try_sort(
++            &mut records,
++            &mut ByKey(|row: &Owned| {
++                calls += 1;
++                mixed(calls) ^ row.key
++            }),
++            &mut workspace
++        ));
++        records.sort_by_key(|row| row.id);
++        for (id, row) in records.iter().enumerate() {
++            assert_eq!(row.id, id);
++            assert_eq!(row.text, id.to_string());
++            assert_eq!(row.bytes, vec![id as u8; 7]);
++        }
++    }
++    drop(records);
++    drop(workspace);
++    assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 1));
++}
++
++#[test]
++fn exclusive_references_survive_cycles_and_key_unwind() {
++    struct Borrowed<'a> {
++        key: u64,
++        id: usize,
++        value: &'a mut usize,
++        padding: [u8; 48],
++    }
++    let len = 127;
++    let mut values: Vec<_> = (0..len).collect();
++    {
++        let mut records: Vec<_> = values
++            .iter_mut()
++            .enumerate()
++            .map(|(id, value)| Borrowed {
++                key: mixed(id),
++                id,
++                value,
++                padding: [id as u8; 48],
++            })
++            .collect();
++        let mut workspace = Workspace::new();
++        let mut calls = 0;
++        assert!(
++            catch_unwind(AssertUnwindSafe(|| {
++                try_sort(
++                    &mut records,
++                    &mut ByKey(|row: &Borrowed<'_>| {
++                        calls += 1;
++                        assert!(calls != 31, "borrowed key failure");
++                        row.key
++                    }),
++                    &mut workspace,
++                )
++            }))
++            .is_err()
++        );
++        assert!(try_sort(
++            &mut records,
++            &mut ByKey(|row: &Borrowed<'_>| row.key),
++            &mut workspace
++        ));
++        for row in &mut records {
++            assert_eq!(*row.value, row.id);
++            assert_eq!(row.padding, [row.id as u8; 48]);
++            *row.value += len;
++        }
++    }
++    assert!(values.into_iter().eq(len..2 * len));
++}
++
++#[test]
++fn retained_accounting_includes_old_payload_and_probe_scratch() {
++    let mut workspace = Workspace::<Row<u64>>::new();
++    workspace.tile.resize_with(900, MaybeUninit::uninit);
++    workspace.probe.resize_with(2048, MaybeUninit::uninit);
++    let old_payload = workspace.tile.capacity() * size_of::<Row<u64>>();
++    let old_probe = workspace.probe.capacity() * size_of::<u128>();
++    let old = workspace.retained_bytes();
++    let mut records = rows::<_, 48>(&(0..129).map(mixed).collect::<Vec<_>>());
++    assert!(try_sort(
++        &mut records,
++        &mut ByKey(|row: &Row<u64>| row.key),
++        &mut workspace
++    ));
++    assert_eq!(
++        workspace.tile.capacity() * size_of::<Row<u64>>(),
++        old_payload
++    );
++    assert_eq!(workspace.probe.capacity() * size_of::<u128>(), old_probe);
++    assert_eq!(
++        workspace.retained_bytes(),
++        old + workspace.indirect.retained_bytes()
++    );
++    let retained = workspace.retained_bytes();
++    records.reverse();
++    assert!(try_sort(
++        &mut records,
++        &mut ByKey(|row: &Row<u64>| row.key),
++        &mut workspace
++    ));
++    assert_eq!(workspace.retained_bytes(), retained);
++    workspace.shrink_to_fit();
++    assert_eq!(workspace.retained_bytes(), 0);
++}
++
++#[test]
++fn literal_and_indirect_report_actual_planner_and_record_copies() {
++    for len in [257, 512, 1024] {
++        let keys: Vec<_> = (0..len).map(mixed).collect();
++        let mut literal = rows::<_, 48>(&keys);
++        let mut indirect = literal.clone();
++        tile_metrics::reset(true);
++        sort_tile_for_test(
++            &mut literal,
++            &mut ByKey(|row: &Row<u64>| row.key),
++            &mut Workspace::new(),
++            u64::MAX as u128,
++        );
++        let literal_metrics = tile_metrics::take();
++        tile_metrics::reset(false);
++        sort_tile_for_test(
++            &mut indirect,
++            &mut ByKey(|row: &Row<u64>| row.key),
++            &mut Workspace::new(),
++            u64::MAX as u128,
++        );
++        let indirect_metrics = tile_metrics::take();
++        assert!(
++            literal
++                .iter()
++                .map(|row| (row.key, row.id))
++                .eq(indirect.iter().map(|row| (row.key, row.id)))
++        );
++        assert!(literal.is_sorted_by_key(|row| row.key));
++        assert_eq!(literal_metrics.indirect_tiles, 0);
++        assert_eq!(literal_metrics.msd_tiles, 1);
++        assert_eq!(literal_metrics.counting_passes, 1);
++        assert_eq!(literal_metrics.scattered_records, len);
++        assert_eq!(literal_metrics.copyback_records, len);
++        assert_eq!(indirect_metrics.indirect_tiles, 1);
++        assert_eq!(indirect_metrics.counting_passes, 0);
++        assert_eq!(indirect_metrics.insertion_swaps, 0);
++        assert!(indirect_metrics.permutation_copies <= len + len / 2);
++        std::println!("len={len} literal={literal_metrics:?} indirect={indirect_metrics:?}");
++    }
++}
++
++#[test]
++fn full_encoded_snapshots_ignore_an_incomplete_remaining_mask() {
++    let keys: Vec<_> = (0..257).map(mixed).collect();
++    let mut records = rows::<_, 48>(&keys);
++    // A real consistent parent only suppresses bits constant in this tile.
++    // Even an artificially incomplete nonzero mask cannot truncate the cache.
++    sort_tile_for_test(
++        &mut records,
++        &mut ByKey(|row: &Row<u64>| row.key),
++        &mut Workspace::new(),
++        1,
++    );
++    assert!(records.is_sorted_by_key(|row| row.key));
++}
++
++#[test]
++#[cfg(target_pointer_width = "64")]
++fn explicit_32_byte_control_never_changes_default_gate() {
++    #[repr(C)]
++    struct Actual32 {
++        key: u64,
++        text: String,
++    }
++    assert_eq!(size_of::<Actual32>(), 32);
++    let mut records: Vec<_> = (0..127)
++        .map(|id| Actual32 {
++            key: mixed(id),
++            text: id.to_string(),
++        })
++        .collect();
++    let mut workspace = Workspace::new();
++    let handled = try_sort(
++        &mut records,
++        &mut ByKey(|row: &Actual32| row.key),
++        &mut workspace,
++    );
++    assert_eq!(handled, cfg!(feature = "indirect-tiles-32"));
++    if handled {
++        assert!(records.is_sorted_by_key(|row| row.key));
++        assert!(
++            records
++                .iter()
++                .all(|row| row.key == mixed(row.text.parse().unwrap()))
++        );
++    } else {
++        assert_eq!(workspace.retained_bytes(), 0);
++    }
++}
++
++#[cfg(feature = "rayon")]
++#[test]
++fn public_parallel_accepts_send_not_sync_and_exact_drops() {
++    fn assert_send<T: Send>() {}
++    assert_send::<Owned>();
++    let len = if cfg!(miri) { 129 } else { 20_000 };
++    let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++    let mut records = owned(len, &drops);
++    // Use full-width keys so the public path reaches child-local tile sorting.
++    for row in &mut records {
++        row.key = mixed(row.id);
++    }
++    let pool = rayon::ThreadPoolBuilder::new()
++        .num_threads(2)
++        .build()
++        .unwrap();
++    pool.install(|| crate::par_stable_sort_by_key(&mut records, |row| row.key));
++    assert!(
++        records
++            .windows(2)
++            .all(|pair| (pair[0].key, pair[0].id) <= (pair[1].key, pair[1].id))
++    );
++    assert!(
++        records
++            .iter()
++            .all(|row| row.not_sync.get() == row.id && row.text == row.id.to_string())
++    );
++    drop(records);
++    assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 1));
++}
++
++#[test]
++fn wide_128_tile_limits_and_alignment() {
++    #[repr(C, align(64))]
++    struct Aligned {
++        key: u128,
++        id: usize,
++        bytes: [u8; 104],
++    }
++    assert_eq!(size_of::<Row<u64, 112>>(), 128);
++    for len in [2, 49, 511, 512, 513] {
++        let keys: Vec<_> = (0..len).map(mixed).collect();
++        let mut records = rows::<_, 112>(&keys);
++        let mut workspace = Workspace::new();
++        assert_eq!(
++            try_sort(
++                &mut records,
++                &mut ByKey(|row: &Row<u64, 112>| row.key),
++                &mut workspace
++            ),
++            len <= 512
++        );
++        if len <= 512 {
++            assert!(records.is_sorted_by_key(|row| row.key));
++        }
++    }
++    assert_eq!(size_of::<Aligned>(), 128);
++    let mut records: Vec<_> = (0..129)
++        .map(|id| Aligned {
++            key: (mixed(id) as u128) << 64 | mixed(id + 1) as u128,
++            id,
++            bytes: [id as u8; 104],
++        })
++        .collect();
++    assert!(try_sort(
++        &mut records,
++        &mut ByKey(|row: &Aligned| row.key),
++        &mut Workspace::new()
++    ));
++    assert!(records.is_sorted_by_key(|row| row.key));
++    assert!(records.iter().all(|row| row.bytes == [row.id as u8; 104]));
++}
++
++#[test]
++fn parent_equal_and_insertion_fast_paths_remain() {
++    for len in [0, 1, 2, 48] {
++        let mut records = rows::<_, 48>(&(0..len).map(mixed).collect::<Vec<_>>());
++        tile_metrics::reset(false);
++        sort_tile_for_test(
++            &mut records,
++            &mut ByKey(|row: &Row<u64>| row.key),
++            &mut Workspace::new(),
++            u64::MAX as u128,
++        );
++        assert_eq!(tile_metrics::take().indirect_tiles, 0);
++        assert!(records.is_sorted_by_key(|row| row.key));
++    }
++    let mut records = rows::<_, 48>(&vec![7u64; 257]);
++    let mut workspace = Workspace::new();
++    tile_metrics::reset(false);
++    sort_tile_for_test(
++        &mut records,
++        &mut ByKey(|row: &Row<u64>| row.key),
++        &mut workspace,
++        0,
++    );
++    assert_eq!(tile_metrics::take().indirect_tiles, 0);
++    assert_eq!(workspace.retained_bytes(), 0);
++    assert!(records.iter().enumerate().all(|(id, row)| id == row.id));
++}
++
++#[test]
++fn public_serial_preserves_duplicate_stability_at_parent_boundaries() {
++    let keys: Vec<_> = (0..4097).map(|id| (mixed(id) % 257) << 32).collect();
++    let mut records = rows::<_, 48>(&keys);
++    let mut expected: Vec<_> = keys
++        .into_iter()
++        .enumerate()
++        .map(|(id, key)| (key, id))
++        .collect();
++    expected.sort_by_key(|&(key, _)| key);
++    crate::stable_sort_by_key(&mut records, |row| row.key);
++    assert!(records.iter().map(|row| (row.key, row.id)).eq(expected));
++}
++
++fn narrowed_rows(len: usize, high: bool) -> Vec<Row<u128, 64>> {
++    (0..len)
++        .map(|id| Row {
++            key: if high {
++                ((mixed(id) as u128) << 64) | 0x1234_5678_9abc_def0
++            } else {
++                (0xfedc_ba98_7654_3210u128 << 64) | mixed(id) as u128
++            },
++            id,
++            payload: [id as u8; 64],
++        })
++        .collect()
++}
++
++#[test]
++fn public_wide_u128_uses_both_narrowed_serial_encoders() {
++    for high in [false, true] {
++        let mut records = narrowed_rows(4097, high);
++        tile_metrics::reset(false);
++        crate::stable_sort_by_key(&mut records, |row| row.key);
++        let metrics = tile_metrics::take();
++        assert!(
++            metrics.indirect_tiles > 0,
++            "high={high} metrics={metrics:?}"
++        );
++        assert!(
++            records
++                .windows(2)
++                .all(|pair| (pair[0].key, pair[0].id) <= (pair[1].key, pair[1].id))
++        );
++        assert!(records.iter().all(|row| row.payload == [row.id as u8; 64]));
++    }
++}
++
++#[cfg(feature = "rayon")]
++#[test]
++fn public_wide_u128_uses_both_narrowed_parallel_encoders() {
++    let pool = rayon::ThreadPoolBuilder::new()
++        .num_threads(2)
++        .build()
++        .unwrap();
++    for high in [false, true] {
++        let mut records = narrowed_rows(20_000, high);
++        pool.broadcast(|_| tile_metrics::reset(false));
++        pool.install(|| crate::par_stable_sort_by_key(&mut records, |row| row.key));
++        let metrics = pool.broadcast(|_| tile_metrics::take());
++        assert!(
++            metrics
++                .iter()
++                .map(|count| count.indirect_tiles)
++                .sum::<usize>()
++                > 0,
++            "high={high} metrics={metrics:?}"
++        );
++        assert!(
++            records
++                .windows(2)
++                .all(|pair| (pair[0].key, pair[0].id) <= (pair[1].key, pair[1].id))
++        );
++        assert!(records.iter().all(|row| row.payload == [row.id as u8; 64]));
++    }
++}
++
++#[cfg(all(
++    feature = "rayon",
++    feature = "indirect-tiles-32",
++    target_pointer_width = "64"
++))]
++#[test]
++fn public_32_byte_panic_after_completed_indirect_tile_preserves_owners() {
++    static DROPS: std::sync::OnceLock<Vec<AtomicUsize>> = std::sync::OnceLock::new();
++    #[repr(C)]
++    struct Owned32 {
++        key: u64,
++        text: String,
++    }
++    impl Drop for Owned32 {
++        fn drop(&mut self) {
++            let id: usize = self.text.parse().unwrap();
++            DROPS.get().unwrap()[id].fetch_add(1, Ordering::Relaxed);
++        }
++    }
++    assert_eq!(size_of::<Owned32>(), 32);
++    let len = 40_000;
++    let drops = DROPS.get_or_init(|| (0..len).map(|_| AtomicUsize::new(0)).collect());
++    let mut records: Vec<_> = (0..len)
++        .map(|id| Owned32 {
++            key: mixed(id),
++            text: id.to_string(),
++        })
++        .collect();
++    let pool = rayon::ThreadPoolBuilder::new()
++        .num_threads(2)
++        .build()
++        .unwrap();
++    let triggered = std::sync::atomic::AtomicBool::new(false);
++    pool.broadcast(|_| tile_metrics::reset(false));
++    let outcome = catch_unwind(AssertUnwindSafe(|| {
++        pool.install(|| {
++            crate::par_stable_sort_by_key(&mut records, |row| {
++                // The counter is incremented only after the raw-pointer cycle has
++                // fully materialized a preceding tile on this very worker.
++                let phase = tile_metrics::snapshot();
++                if phase.capture_active
++                    && phase.indirect_tiles > 0
++                    && triggered
++                        .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
++                        .is_ok()
++                {
++                    std::panic::panic_any(0x92u32);
++                }
++                row.key
++            })
++        });
++    }));
++    let counts = pool.broadcast(|_| tile_metrics::take());
++    let completed: usize = counts.iter().map(|count| count.indirect_tiles).sum();
++    assert!(triggered.load(Ordering::Relaxed));
++    assert!(completed > 0);
++    assert_eq!(*outcome.unwrap_err().downcast::<u32>().unwrap(), 0x92);
++    assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 0));
++    records.sort_by_key(|row| row.text.parse::<usize>().unwrap());
++    for (id, row) in records.iter().enumerate() {
++        assert_eq!(row.text, id.to_string());
++        assert_eq!(row.key, mixed(id));
++    }
++    drop(records);
++    assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 1));
++    std::println!(
++        "ordinary_callback_after_completed_tile: record_bytes=32 completed_tiles={completed}"
++    );
++}
+diff --git a/rust/tessera-sort/src/indirect.rs b/rust/tessera-sort/src/indirect.rs
+new file mode 100644
+--- /dev/null
++++ b/rust/tessera-sort/src/indirect.rs
+@@ -0,0 +1,242 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Bounded indirect leaves: snapshot encoded keys, sort indices, then move records.
++
++use alloc::vec::Vec;
++use core::mem::size_of;
++
++use crate::Workspace;
++use crate::key::{Extract, Unsigned};
++
++/// A fixed type-based research gate, independent of the key distribution.
++const MIN_RECORD_BYTES: usize = if cfg!(feature = "indirect-tiles-32") {
++    32
++} else {
++    64
++};
++/// This is a real contiguous record tile, never an index over the whole input.
++const MAX_RECORD_BYTES: usize = 64 * 1024;
++
++/// Key-width-independent storage allows one workspace to serve every key type.
++pub(crate) struct Buffers {
++    keys: Vec<u128>,
++    order: Vec<u16>,
++    spare: Vec<u16>,
++}
++
++impl Buffers {
++    pub(crate) fn new() -> Self {
++        Self {
++            keys: Vec::new(),
++            order: Vec::new(),
++            spare: Vec::new(),
++        }
++    }
++
++    pub(crate) fn retained_bytes(&self) -> usize {
++        self.keys.capacity() * size_of::<u128>()
++            + (self.order.capacity() + self.spare.capacity()) * size_of::<u16>()
++    }
++
++    fn reserve(&mut self, len: usize) {
++        self.keys.clear();
++        if self.keys.capacity() < len {
++            self.keys.reserve_exact(len);
++        }
++        for indices in [&mut self.order, &mut self.spare] {
++            if indices.capacity() < len {
++                indices.reserve_exact(len - indices.len());
++            }
++            indices.resize(len, 0);
++        }
++    }
++}
++
++/// Returns whether this bounded leaf was handled, leaving ineligible input alone.
++///
++/// The parent has already handled insertion-sized and zero-variation leaves.
++/// Encoded keys are captured once here. Earlier parent scans may have called the
++/// extractor; this is not a once-per-sort key guarantee. A changing extractor is
++/// ordered by this tile's snapshot, subject to any earlier parent partitioning.
++/// No ordering guarantee is made for inconsistent callbacks.
++///
++/// Recomputing variation from the snapshot rather than applying the parent's
++/// remaining-bit mask avoids discarding useful bits from these cached keys.
++/// For consistent keys, parent-fixed bits are equal throughout the tile, so
++/// including them cannot change ordering or the relative order of equal keys.
++/// A parent's narrowed encoder is sufficient under the same consistency rule.
++pub(crate) fn try_sort<T, E: Extract<T>>(
++    arr: &mut [T],
++    key: &mut E,
++    workspace: &mut Workspace<T>,
++) -> bool {
++    #[cfg(test)]
++    if crate::engine::tile_metrics::literal_forced() {
++        return false;
++    }
++    let len = arr.len();
++    let record_bytes = size_of::<T>();
++    if len < 2
++        || record_bytes < MIN_RECORD_BYTES
++        || len > u16::MAX as usize
++        || len
++            .checked_mul(record_bytes)
++            .is_none_or(|bytes| bytes > MAX_RECORD_BYTES)
++    {
++        return false;
++    }
++    workspace.indirect.reserve(len);
++    // Reuse retained record scratch as a single aligned slot. Allocating a
++    // Vec<MaybeUninit<T>> never constructs a potentially huge T on the stack.
++    // This does not free or pretend to replace older, larger tile capacity.
++    if workspace.tile.is_empty() {
++        workspace.tile.reserve_exact(1);
++        // SAFETY: capacity is at least one; any bits are valid MaybeUninit<T>.
++        // Its drop never reads or drops a T, including after unwinding.
++        unsafe { workspace.tile.set_len(1) };
++    }
++    let temporary = workspace.tile.as_mut_ptr().cast::<T>();
++    let buffers = &mut workspace.indirect;
++    // Every callback and every allocation finishes while arr still owns all T.
++    #[cfg(test)]
++    let capture = crate::engine::tile_metrics::begin_capture();
++    for record in arr.iter() {
++        buffers.keys.push(key.key(record).to_u128());
++    }
++    #[cfg(test)]
++    drop(capture);
++    let passes = sort_indices(&buffers.keys, &mut buffers.order, &mut buffers.spare);
++    // Reuse the spare index array as validation storage. This is a real check
++    // before any ownership transfer, including in optimized builds.
++    assert!(validate_permutation(&buffers.order, &mut buffers.spare));
++    #[cfg(test)]
++    let moves = permutation_moves(&buffers.order, &mut buffers.spare);
++    // SAFETY: validation proves order is an in-range bijection of arr's indices.
++    // The workspace allocation is aligned and disjoint from arr. No callback,
++    // allocation, bounds check, assertion, or destructor runs inside this cycle.
++    unsafe { materialize(arr.as_mut_ptr(), &mut buffers.order, temporary) };
++    #[cfg(test)]
++    crate::engine::tile_metrics::indirect(passes, moves);
++    #[cfg(not(test))]
++    let _ = passes;
++    true
++}
++
++/// Sorts original indices stably by the already normalized unsigned snapshots.
++fn sort_indices(keys: &[u128], order: &mut Vec<u16>, spare: &mut Vec<u16>) -> usize {
++    let mut varying = 0;
++    let first = keys.first().copied().unwrap_or(0);
++    for (index, &key) in keys.iter().enumerate() {
++        order[index] = index as u16;
++        varying |= key ^ first;
++    }
++    let mut passes = 0;
++    for shift in (0..u128::BITS).step_by(8) {
++        if (varying >> shift) & 255 == 0 {
++            continue;
++        }
++        let mut cursors = [0u16; 256];
++        for &index in order.iter() {
++            let bucket = ((keys[index as usize] >> shift) & 255) as usize;
++            cursors[bucket] += 1;
++        }
++        let mut offset = 0u16;
++        for cursor in &mut cursors {
++            let count = *cursor;
++            *cursor = offset;
++            offset += count;
++        }
++        for &index in order.iter() {
++            let bucket = ((keys[index as usize] >> shift) & 255) as usize;
++            spare[cursors[bucket] as usize] = index;
++            cursors[bucket] += 1;
++        }
++        core::mem::swap(order, spare);
++        passes += 1;
++    }
++    passes
++}
++
++fn validate_permutation(order: &[u16], seen: &mut [u16]) -> bool {
++    if order.len() != seen.len() || order.len() > u16::MAX as usize {
++        return false;
++    }
++    seen.fill(0);
++    for &source in order {
++        let Some(slot) = seen.get_mut(source as usize) else {
++            return false;
++        };
++        if *slot != 0 {
++            return false;
++        }
++        *slot = 1;
++    }
++    true
++}
++
++/// Materializes destination-to-source cycles without constructing a stack T.
++///
++/// # Safety
++///
++/// `records` addresses `order.len()` initialized writable T records. `order` is an
++/// in-range bijection, fits u16, and is disjoint from those records. `temporary`
++/// addresses one writable, correctly aligned T-sized slot disjoint from both.
++/// The scratch slot contains no live T and must not be read or dropped afterward.
++unsafe fn materialize<T>(records: *mut T, order: &mut [u16], temporary: *mut T) {
++    let len = order.len();
++    let map = order.as_mut_ptr();
++    let mut start = 0usize;
++    while start < len {
++        // SAFETY: start < len, and cycle validation establishes all other map
++        // indices below len. A bijection's cycle first returns to its own start.
++        // Each copy fills the unique logical hole and transfers ownership from
++        // its source. The final copy fills the hole from temporary, ending the
++        // temporary's ownership. Rewriting map entries to identity marks cycles
++        // visited without extra allocation. No T is duplicated as a live owner.
++        unsafe {
++            if *map.add(start) as usize != start {
++                core::ptr::copy_nonoverlapping(records.add(start), temporary, 1);
++                let mut hole = start;
++                loop {
++                    let source = *map.add(hole) as usize;
++                    *map.add(hole) = hole as u16;
++                    if source == start {
++                        core::ptr::copy_nonoverlapping(temporary, records.add(hole), 1);
++                        break;
++                    }
++                    core::ptr::copy_nonoverlapping(records.add(source), records.add(hole), 1);
++                    hole = source;
++                }
++            }
++        }
++        start = start.wrapping_add(1);
++    }
++}
++
++/// Counts logical record-copy operations, not machine instructions or bytes.
++#[cfg(test)]
++fn permutation_moves(order: &[u16], seen: &mut [u16]) -> usize {
++    seen.fill(0);
++    let mut moves = 0;
++    for start in 0..order.len() {
++        if seen[start] != 0 || order[start] as usize == start {
++            continue;
++        }
++        let mut position = start;
++        let mut length = 0;
++        loop {
++            seen[position] = 1;
++            length += 1;
++            position = order[position] as usize;
++            if position == start {
++                break;
++            }
++        }
++        // The saved first record makes one extra copy per nontrivial cycle.
++        moves += length + 1;
++    }
++    moves
++}
++
++#[cfg(test)]
++mod tests;
+diff --git a/rust/tessera-sort/src/lib.rs b/rust/tessera-sort/src/lib.rs
+--- a/rust/tessera-sort/src/lib.rs
++++ b/rust/tessera-sort/src/lib.rs
+@@ -37,10 +37,18 @@
+ //!
+ //! Inputs larger than one 64 KiB tile are split by a stable block partition
+ //! that needs O(√n) records of scratch for a fixed record size and key width.
+-//! Each tile is then sorted in a scratch buffer of at most 64 KiB of records,
++//! The literal tile path uses a scratch buffer of at most 64 KiB of records,
+ //! plus up to two bytes per record of cached bucket IDs for
+ //! [`stable_sort_by_key`]. Each tile-local MSD level also keeps a cursor table
+ //! of up to 32 KiB on the stack, with at most 22 levels for 128-bit keys.
++//!
++//! The experimental `indirect-tiles` feature instead sorts eligible wide leaves
++//! through cached encoded keys and u16 indices. At its default 64-byte record
++//! threshold it adds at most 20 KiB of key/index payload per workspace, 512 bytes
++//! of stack cursors and one aligned record slot, reusing existing record scratch.
++//! The explicit `indirect-tiles-32` control doubles the key/index bound to 40 KiB.
++//! Existing tile, probe and block capacity can remain retained in addition to
++//! these buffers. [`Workspace::retained_bytes`] counts all actual heap capacities.
+ //!
+ //! These bounds describe the sequential API. With `rayon`, parallel calls use
+ //! bounded per-worker scratch; see the parallel functions for the worker-count
+@@ -60,6 +68,13 @@
+ //! The optional `rayon` feature enables `par_stable_sort` and
+ //! `par_stable_sort_by_key` and implies `std`. It does not change the
+ //! sequential API or the default feature selection.
++//!
++//! `indirect-tiles` is an opt-in research control for records of at least 64 bytes
++//! in real contiguous leaves of at most 64 KiB. It snapshots encoded keys once
++//! per entered leaf and materializes a stable index permutation without further
++//! key calls. Earlier parent scans can still call keys repeatedly. The separate
++//! `indirect-tiles-32` control lowers the type-size threshold to 32 bytes. Neither
++//! changes the public ordering or inconsistent-callback preservation contract.
+ //!
+ //! `portable-simd` is off by default and requires `std` and Rust 1.89 or newer.
+ //! It adds [`fearless_simd`](https://docs.rs/fearless_simd) for adjacent-key
+@@ -76,6 +91,8 @@
+ 
+ mod block;
+ mod engine;
++#[cfg(feature = "indirect-tiles")]
++mod indirect;
+ mod key;
+ #[cfg(feature = "portable-simd")]
+ mod portable_simd;
+diff --git a/rust/tessera-sort/src/test_witness.rs b/rust/tessera-sort/src/test_witness.rs
+--- a/rust/tessera-sort/src/test_witness.rs
++++ b/rust/tessera-sort/src/test_witness.rs
+@@ -13,6 +13,8 @@
+ thread_local! {
+     static PHASE: Cell<Phase> = const { Cell::new(Phase::None) };
+     static MOVED: Cell<bool> = const { Cell::new(false) };
++    #[cfg(feature = "indirect-tiles")]
++    static INDIRECT_COMPLETED: Cell<bool> = const { Cell::new(false) };
+     static HOOKS: RefCell<Option<Arc<Hooks>>> = const { RefCell::new(None) };
+ }
+ #[derive(Default)]
+@@ -29,6 +31,7 @@
+     pub consumer_first_key: AtomicUsize,
+     pub consumer_first_move: AtomicUsize,
+     pub consumer_key_panic: AtomicUsize,
++    pub consumer_snapshot_panic: AtomicUsize,
+     pub sender_closed: AtomicUsize,
+     pub consumer_finished: AtomicUsize,
+     pub consumers_started: AtomicUsize,
+@@ -61,13 +64,27 @@
+             Phase::Consumer => {
+                 self.consumer_calls.fetch_add(1, SeqCst);
+                 self.once(&self.consumer_first_key);
+-                if has_moved()
++                let after_indirect = {
++                    #[cfg(feature = "indirect-tiles")]
++                    {
++                        INDIRECT_COMPLETED.get() && crate::engine::tile_metrics::capture_active()
++                    }
++                    #[cfg(not(feature = "indirect-tiles"))]
++                    {
++                        false
++                    }
++                };
++                if (has_moved() || after_indirect)
+                     && fail_consumer
+                     && self
+                         .consumer_key_panic
+                         .compare_exchange(0, self.tick(), SeqCst, SeqCst)
+                         .is_ok()
+                 {
++                    if after_indirect {
++                        self.consumer_snapshot_panic
++                            .store(self.consumer_key_panic.load(SeqCst), SeqCst);
++                    }
+                     {
+                         let _lock = self
+                             .signal
+@@ -111,6 +128,8 @@
+ pub(crate) struct PhaseGuard {
+     phase: Phase,
+     moved: bool,
++    #[cfg(feature = "indirect-tiles")]
++    indirect_completed: bool,
+     hooks: Option<Arc<Hooks>>,
+     consumer: bool,
+ }
+@@ -129,10 +148,14 @@
+         }
+         let old_phase = PHASE.replace(phase);
+         let old_moved = MOVED.replace(false);
++        #[cfg(feature = "indirect-tiles")]
++        let old_indirect = INDIRECT_COMPLETED.replace(false);
+         let old_hooks = HOOKS.with(|h| h.replace(hooks));
+         Self {
+             phase: old_phase,
+             moved: old_moved,
++            #[cfg(feature = "indirect-tiles")]
++            indirect_completed: old_indirect,
+             hooks: old_hooks,
+             consumer,
+         }
+@@ -148,6 +171,8 @@
+         }
+         PHASE.set(self.phase);
+         MOVED.set(self.moved);
++        #[cfg(feature = "indirect-tiles")]
++        INDIRECT_COMPLETED.set(self.indirect_completed);
+         HOOKS.with(|h| h.replace(self.hooks.take()));
+     }
+ }
+@@ -166,6 +191,16 @@
+         }
+     }
+ }
++#[cfg(feature = "indirect-tiles")]
++pub(crate) fn indirect_completed() {
++    moved();
++    if phase() == Phase::Consumer {
++        // Unlike MOVED, this evidence survives new_bucket(), but not a consumer
++        // phase change. It is set only after a nonidentity cycle has closed.
++        INDIRECT_COMPLETED.set(true);
++    }
++}
++
+ pub(crate) fn published(h: &Option<Arc<Hooks>>) {
+     if let Some(h) = h {
+         h.once(&h.publication);
+diff --git a/rust/tessera-sort/src/workspace.rs b/rust/tessera-sort/src/workspace.rs
+--- a/rust/tessera-sort/src/workspace.rs
++++ b/rust/tessera-sort/src/workspace.rs
+@@ -44,6 +44,8 @@
+ pub struct Workspace<T> {
+     pub(crate) tile: Vec<MaybeUninit<T>>,
+     pub(crate) probe: Vec<MaybeUninit<u128>>,
++    #[cfg(feature = "indirect-tiles")]
++    pub(crate) indirect: crate::indirect::Buffers,
+     pub(crate) block: Option<block::Buffers<T>>,
+ }
+ 
+@@ -53,6 +55,8 @@
+         Self {
+             tile: Vec::new(),
+             probe: Vec::new(),
++            #[cfg(feature = "indirect-tiles")]
++            indirect: crate::indirect::Buffers::new(),
+             block: None,
+         }
+     }
+@@ -88,9 +92,22 @@
+     /// Returns the heap capacity this workspace keeps, in bytes.
+     ///
+     /// Counts record scratch, cached bucket IDs, order-probe keys and block
+-    /// partition metadata. Stack storage is not included.
++    /// partition metadata. With `indirect-tiles`, this also counts retained
++    /// full-key and index buffers, in addition to any retained record scratch.
++    /// Stack storage is not included.
+     pub fn retained_bytes(&self) -> usize {
+-        self.tile.capacity() * core::mem::size_of::<T>()
++        let indirect = {
++            #[cfg(feature = "indirect-tiles")]
++            {
++                self.indirect.retained_bytes()
++            }
++            #[cfg(not(feature = "indirect-tiles"))]
++            {
++                0
++            }
++        };
++        indirect
++            + self.tile.capacity() * core::mem::size_of::<T>()
+             + self.probe.capacity() * core::mem::size_of::<u128>()
+             + self
+                 .block
+diff --git a/rust/tessera-sort/tests/parallel.rs b/rust/tessera-sort/tests/parallel.rs
+--- a/rust/tessera-sort/tests/parallel.rs
++++ b/rust/tessera-sort/tests/parallel.rs
+@@ -409,6 +409,7 @@
+     start: usize,
+     end: usize,
+     moved_worker_started: AtomicBool,
++    worker_started: AtomicBool,
+     moved_calls: AtomicUsize,
+     at: usize,
+ }
+@@ -422,6 +423,7 @@
+             start,
+             end: start + std::mem::size_of_val(values),
+             moved_worker_started: AtomicBool::new(false),
++            worker_started: AtomicBool::new(false),
+             moved_calls: AtomicUsize::new(0),
+             at,
+         }
+@@ -450,6 +452,7 @@
+             }
+             return;
+         }
++        self.worker_started.store(true, Ordering::Relaxed);
+         if moved {
+             self.moved_worker_started.store(true, Ordering::Relaxed);
+             let call = self.moved_calls.fetch_add(1, Ordering::Relaxed) + 1;
+@@ -494,7 +497,28 @@
+                             movement_key(x.id, block_children)
+                         });
+                     }));
+-                    probe.verify(result);
++                    if cfg!(feature = "indirect-tiles-32")
++                        && std::mem::size_of::<Owned>() >= 32
++                        && !block_children
++                    {
++                        // This fixture's default native root has full 32-record
++                        // blocks and no tail. Indirect child tiles then remove
++                        // every later callback on moved scratch. Large children
++                        // still exercise the original moved-storage panic below.
++                        assert!(result.is_ok());
++                        assert!(probe.worker_started.load(Ordering::Relaxed));
++                        assert_eq!(probe.moved_calls.load(Ordering::Relaxed), 0);
++                        assert!(values.windows(2).all(|pair| {
++                            (movement_key(pair[0].id, false), pair[0].id)
++                                <= (movement_key(pair[1].id, false), pair[1].id)
++                        }));
++                        std::println!(
++                            "default-root indirect tile control: threads={threads} record_bytes={} n={} at={at} any_worker=true moved_calls=0",
++                            std::mem::size_of::<Owned>(), values.len(),
++                        );
++                    } else {
++                        probe.verify(result);
++                    }
+                     assert!(values.iter().any(|x| x.edited.get()));
+                     verify_owned(values, &drops);
+                 }
+diff --git a/rust/tessera-sort/tests/workspace_memory.rs b/rust/tessera-sort/tests/workspace_memory.rs
+--- a/rust/tessera-sort/tests/workspace_memory.rs
++++ b/rust/tessera-sort/tests/workspace_memory.rs
+@@ -84,3 +84,35 @@
+     assert_eq!(freed, -(retained as isize));
+     assert_eq!(workspace.retained_bytes(), 0);
+ }
++
++#[cfg(feature = "indirect-tiles")]
++#[test]
++fn indirect_metadata_is_reported_and_warm_workspace_reuses_it() {
++    #[derive(Clone)]
++    #[repr(C)]
++    struct Wide {
++        key: u64,
++        id: usize,
++        payload: [u8; 112],
++    }
++    let mut input: Vec<_> = (0..4097u64)
++        .map(|id| Wide {
++            key: id.wrapping_mul(0x9e3779b97f4a7c15),
++            id: id as usize,
++            payload: [id as u8; 112],
++        })
++        .collect();
++    let original = input.clone();
++    let mut workspace = Workspace::new();
++    let (_, bytes) = measure(|| workspace.stable_sort_by_key(&mut input, |row| row.key));
++    assert_eq!(workspace.retained_bytes() as isize, bytes);
++    assert!(input.is_sorted_by_key(|row| row.key));
++    assert!(input.iter().all(|row| row.payload == [row.id as u8; 112]));
++    input.clone_from_slice(&original);
++    let (allocations, bytes) = measure(|| workspace.stable_sort_by_key(&mut input, |row| row.key));
++    assert_eq!((allocations, bytes), (0, 0));
++    let retained = workspace.retained_bytes();
++    let (_, freed) = measure(|| workspace.shrink_to_fit());
++    assert_eq!(freed, -(retained as isize));
++    assert_eq!(workspace.retained_bytes(), 0);
++}

@@ -13,6 +13,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
+          # Check with the target branch's script, not PR-controlled code.
+          ref: ${{ github.event.pull_request.base.sha }}
       - name: Check Signed-off-by on every commit
-        run: .github/scripts/check-dco.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+        env:
+          # Read-only access verifies individual Dependabot commits; it does
+          # not exempt a PR's other commits or trust its author fields.
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Fetch objects for fork heads without checking out or running them.
+          git fetch --no-tags origin "$HEAD"
+          .github/scripts/check-dco.sh "$BASE" "$HEAD"

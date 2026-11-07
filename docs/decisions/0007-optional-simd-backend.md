@@ -53,9 +53,19 @@ runtime selection belong to fearless_simd.
 - **Choose the backend by data distribution.** Rejected: the feature must not
   be switched off for the inputs where it happens to be slower in one
   benchmark. Backend choice is per machine, not per input.
-- **AVX-512CD scatters.** Future work: conflict detection could assign output
-  slots for many buckets, but it needs a wider cursor table and a newer
-  toolchain, and the block scatter is memory-bound.
+- **Materialize the ByKey tile keys.** Measured on an 8192-record
+  near-sorted tile: extracting the keys once and moving them alongside the
+  records is 1.4-1.6x slower than the closure path. The default scan already
+  calls the key function once per record, so materialization pays the same
+  extraction cost plus a key array and a second swap per move. It can only
+  win for expensive key functions, and the probe already covers the first
+  tile; the tile finish stays with the closure.
+- **AVX-512CD scatters.** Rejected by the compress measurement: a stable
+  three-way compress scatter of 64K u32 values into three buckets took 460us
+  against 147us for scalar cursor writes, 3.1x slower. Conflict detection
+  would add a wider cursor table — u16 to u32 doubles the 32 KiB table — on
+  top of the same failure: the scalar per-bucket cursor is already cheap and
+  the move cost, not the classification, dominates.
 
 ## Consequences
 
@@ -68,8 +78,9 @@ runtime selection belong to fearless_simd.
   scalar chain in its own microbenchmark and moves the end-to-end random
   cases further in the same direction.
 - The ByKey tile insertion still calls the user key function from scalar
-  code; only the probe and Direct extraction use the vector scan. Extending
-  it needs a materialized key array and is left to future work.
+  code. Materializing the keys measured slower at the tile size, so this is
+  not a pending optimization: only the probe and Direct extraction use the
+  vector scan.
 - A sixteen-lane prefix sum measured slower than the eight-lane one on AVX2
   because of its cross-lane swizzle; the bucket-count prefix sum uses eight
   lanes.

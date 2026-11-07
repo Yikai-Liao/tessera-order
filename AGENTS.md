@@ -10,7 +10,8 @@ Tessera is a stable radix sort with O(√n) auxiliary memory. Everything in the 
 |---|---|
 | `rust/tessera-sort/` | The Rust crate: `lib.rs` (public API), `key.rs` (key encoding), `workspace.rs`, `engine.rs` (routing and tiles), `block.rs` (block partition) |
 | `conformance/semantics.md` | Ordering rules shared by every language |
-| `docs/` | Guides, design, development process, decision records and proposals; index in [`docs/README.md`](docs/README.md) |
+| `docs/` | Guides, the algorithm explanation (`explain/`), design, development process, decision records and proposals; index in [`docs/README.md`](docs/README.md) |
+| `docs/.vitepress/` | Documentation site: VitePress config, Vue figures, and TypeScript models of the engine in `theme/sim/` ([guide](docs/development/docs-site.md)) |
 | `ROADMAP.md` | Planned work, completion criteria and open questions |
 | `RELEASING.md` | Versions, tags, compatibility and CI/CD layout |
 | `.github/` | Per-language CI and release workflows; `scripts/ci_changes.py` selects languages from changed paths |
@@ -26,6 +27,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 cargo +1.85 test --workspace                # MSRV
 cargo +nightly miri test -p tessera-sort    # after any engine, block or key change
 python3 -m unittest discover -s .github/scripts -p "test_*.py"   # after changing CI routing
+npm ci && npm run docs:test && npm run docs:typecheck && npm run docs:build   # after changing docs or the site
 ```
 
 ## Code rules
@@ -47,7 +49,7 @@ Public items are documented to the standard of NumPy's reference documentation, 
 
 Internal comments explain why, not what: the invariant an operation relies on, the hazard a line avoids, or the measurement behind a constant (with its numbers). Write them for a reader of the current code. Do not narrate history, requests or reviews ("restored", "as in the original", "at the user's request"); such history belongs in `docs/design/port.md` or a decision record.
 
-Put new documentation where [`docs/README.md`](docs/README.md) says. A change to ordering, stability, panic behavior or space bounds updates `conformance/semantics.md` in the same change. A settled design choice gets a new decision record; planned work goes in `ROADMAP.md`.
+Put new documentation where [`docs/README.md`](docs/README.md) says. The pages in `docs/explain/` and their models in `docs/.vitepress/theme/sim/` follow the engine: a change to routing, thresholds, digit planning or the block partition updates them in the same change. Their text must say everything a figure shows, because agents read the Markdown without the figures. A change to ordering, stability, panic behavior or space bounds updates `conformance/semantics.md` in the same change. A settled design choice gets a new decision record; planned work goes in `ROADMAP.md`.
 
 ## Measurements
 

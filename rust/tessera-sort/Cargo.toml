@@ -19,8 +19,11 @@ default = ["std"]
 # resume the panic. Without this feature the crate is `no_std`: it uses `core` and
 # `alloc`, needs a global allocator, and aborts on a panic during block partitioning.
 std = []
+# Optional parallel API; sequential builds keep their dependency-free no_std path.
+rayon = ["std", "dep:rayon"]
 
 [dependencies]
+rayon = { version = "1.10", optional = true }
 
 [package.metadata.docs.rs]
 all-features = true

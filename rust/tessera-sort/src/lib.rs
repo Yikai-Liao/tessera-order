@@ -42,6 +42,10 @@
 //! [`stable_sort_by_key`]. Each tile-local MSD level also keeps a cursor table
 //! of up to 32 KiB on the stack, with at most 22 levels for 128-bit keys.
 //!
+//! These bounds describe the sequential API. With `rayon`, parallel calls use
+//! bounded per-worker scratch; see the parallel functions for the worker-count
+//! dependent memory bound.
+//!
 //! The free functions allocate this scratch during each call. A [`Workspace`]
 //! keeps it between calls.
 //!
@@ -52,6 +56,10 @@
 //! during block partitioning aborts rather than exposing partially moved
 //! records, even when the host enables unwinding. Panics elsewhere may unwind
 //! safely. Sorting, ordering and the memory bounds above are the same either way.
+//!
+//! The optional `rayon` feature enables `par_stable_sort` and
+//! `par_stable_sort_by_key` and implies `std`. It does not change the
+//! sequential API or the default feature selection.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]
@@ -134,4 +142,72 @@ pub mod thresholds {
     pub const TILE_BYTES: usize = 64 * 1024;
     pub const MAX_TILE_RECORDS: usize = u16::MAX as usize;
     pub const MAX_CURSOR_BYTES: usize = 32 * 1024;
+}
+
+/// Sorts keys in ascending order in the current Rayon pool, stably.
+///
+/// Requires the `rayon` feature, which enables `std`. Ordering is identical to
+/// [`stable_sort`]. Small inputs and adaptive fast paths run sequentially.
+///
+/// # Memory
+///
+/// Uses bounded per-worker scratch rather than a full-size output buffer.
+/// With P workspaces, heap scratch is O(√n + √(Pn) + P) for a fixed record
+/// size and key width. P is bounded by the current pool size and input grain
+/// count. For fixed P this is O(√n), but memory grows with parallelism. Each
+/// worker may also keep a tile and cursor tables as described in the crate-level
+/// memory documentation. Rayon owns its thread stacks and pool allocations.
+///
+/// # Examples
+///
+/// ```
+/// let mut keys = [42, -7, 42, 0];
+/// tessera_sort::par_stable_sort(&mut keys);
+/// assert_eq!(keys, [-7, 0, 42, 42]);
+/// ```
+#[cfg(feature = "rayon")]
+pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
+    engine::par_sort::<K, _, false>(values, key::Direct);
+}
+
+/// Sorts records by a key in the current Rayon pool, keeping equal keys stable.
+///
+/// Requires the `rayon` feature. Records only need `Send`, not `Sync`, `Copy`
+/// or `Clone`. The key function may run concurrently and therefore implements
+/// `Fn + Sync`; the sequential [`stable_sort_by_key`] also accepts `FnMut`.
+///
+/// # Key function
+///
+/// `key` may be called several times per record, in any order, including from
+/// different threads. It should return the same key for a record throughout
+/// the call. Inconsistent keys produce unspecified ordering, but every record
+/// remains present exactly once.
+///
+/// # Panics
+///
+/// If `key` panics, started tasks finish unwinding before the panic propagates.
+/// Every record is restored to `values`, in an unspecified order. If several
+/// tasks panic, one of those panics propagates.
+///
+/// # Memory
+///
+/// Uses the bounded worker scratch described by [`par_stable_sort`].
+///
+/// # Examples
+///
+/// ```
+/// let mut rows = vec![(2u32, "first"), (1, "middle"), (2, "last")];
+/// tessera_sort::par_stable_sort_by_key(&mut rows, |row| row.0);
+/// assert_eq!(rows, [(1, "middle"), (2, "first"), (2, "last")]);
+/// ```
+#[cfg(feature = "rayon")]
+pub fn par_stable_sort_by_key<T: Send, K: RadixKey, F: Fn(&T) -> K + Sync>(
+    values: &mut [T],
+    key: F,
+) {
+    if engine::par_use_serial::<T>(values.len()) {
+        stable_sort_by_key(values, key);
+        return;
+    }
+    engine::par_sort::<T, _, true>(values, key::ByKey(&key));
 }

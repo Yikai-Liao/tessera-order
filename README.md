@@ -28,7 +28,7 @@ An LSD radix sort is stable and runs in linear time, but it needs a second buffe
 - **Adaptive.** Sorted, reverse-sorted, nearly sorted and heavily repeated inputs take shortcuts, and constant key bits are skipped.
 - **Any record type.** No `Copy`, `Clone`, `Default` or `Ord` needed. Records are moved, never duplicated, even if the key function misbehaves or panics.
 - **Wide keys.** Integers up to 128 bits, `f32` and `f64` in `total_cmp` order, and `Reverse<K>`.
-- **No dependencies.** Pure Rust. `std` is optional: without it the crate is `no_std` and needs `alloc`.
+- **No default runtime dependencies.** Pure Rust. `std` is optional: without it the crate is `no_std` and needs `alloc`. The experimental `rayon` feature adds parallel sorting.
 
 ## Quick start
 
@@ -69,6 +69,19 @@ assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 
 Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 
+## Optional parallel sorting
+
+The experimental `rayon` feature adds `par_stable_sort` and
+`par_stable_sort_by_key` and enables `std`. Both preserve stable ordering and
+panic recovery. Records need only `Send`; parallel key functions need `Fn + Sync`.
+The functions use the current Rayon pool and fall back to sequential work where
+there are no useful independent buckets.
+
+Parallel scratch is O(√n + √(Pn) + P), where P is the bounded number of worker
+workspaces. It remains O(√n) for a fixed worker count, but increases with
+parallelism. See the [parallel design](docs/design/parallel.md) for limits and
+validation. No parallel performance claim is made by this README.
+
 ## Performance
 
 Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). These continuous measurements flag changes to investigate; performance claims require the [A/B protocol](docs/development/benchmarking.md).
@@ -79,7 +92,7 @@ Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.de
 ## When to use something else
 
 - **Orders defined by a comparator**, strings, or other variable-length keys: use `slice::sort_by`.
-- **Parallel sorting**: Tessera is single-threaded.
+- **Parallel comparator sorting**: use Rayon’s comparison sorts; Tessera’s optional parallel API still requires primitive radix keys.
 - **No allocator**: Tessera needs O(√n) scratch memory, so it cannot run without `alloc` (or, in C++, without a heap).
 
 ## Status by language

@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- Experimental optional `rayon` feature with `par_stable_sort` and `par_stable_sort_by_key`, bounded task-group scratch, and parallel stability and panic-recovery tests. Default sequential and `no_std` configurations remain unchanged.
+
 - Rust crate `tessera-sort`, ported to Stable Rust from the research prototype at `sort-research-rs` commit `6c0877f`: `stable_sort`, `stable_sort_by_key`, the sealed `RadixKey` trait (primitive integers, `f32`, `f64`, `Reverse<K>`) and `Workspace<T>`.
 - Tests for ordering, thresholds, panicking and inconsistent key functions, owned and `&mut` records, and workspace allocation; CI runs them with Miri, AddressSanitizer and the MSRV.
 - `no_std` support through a default-on `std` feature: `default-features = false` builds on `core` and `alloc`, with an unwind guard that aborts on key-function panics during block partitioning ([decision 0005](docs/decisions/0005-no-std-with-alloc.md), [decision 0006](docs/decisions/0006-no-std-unwind-guard.md)).

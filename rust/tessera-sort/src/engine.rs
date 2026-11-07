@@ -1209,3 +1209,8 @@ mod tests {
         }
     }
 }
+
+#[cfg(feature = "rayon")]
+mod parallel;
+#[cfg(feature = "rayon")]
+pub(crate) use parallel::{sort as par_sort, use_serial as par_use_serial};

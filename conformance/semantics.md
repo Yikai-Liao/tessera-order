@@ -56,3 +56,26 @@ In Rust, the heap memory comes from `alloc`, so a `no_std` build needs a global 
 ## Language adapters
 
 The rules above apply to Rust and C++. The [planned Python binding](../docs/proposals/python-binding.md) has its own contract: it sorts every NaN last in both directions, treats `-0.0` and `+0.0` as equal, keeps the original value bits, and calls a list's key function exactly once per element. These rules belong to the Python adapter and do not change the Rust encoding or key-extraction guarantees.
+
+## Optional Rust parallel API
+
+The `rayon` Cargo feature enables `par_stable_sort` and
+`par_stable_sort_by_key` and implies `std`. The default features are unchanged;
+`default-features = false` without `rayon` remains `no_std` with `alloc` and has
+no runtime dependencies.
+
+Parallel sorting preserves the same encoding, stability and permutation
+contracts. Records need `Send`, not `Sync`, and are not cloned. A parallel key
+function implements `Fn + Sync` because independent buckets may call it
+concurrently. It need not implement `Send` or `Clone`. A key-function panic
+propagates only after all started tasks have completed or unwound and restored
+every record. When multiple tasks panic, which panic is propagated is unspecified.
+
+The parallel implementation finishes the root stable block partition before
+starting any bucket tasks. It uses at most P workspaces, bounded by the active
+Rayon pool size and input grain count, rather than an O(n) output array. Its
+heap scratch is O(√n + √(Pn) + P) for a fixed record size and key width, excluding
+Rayon's pool and thread stacks. The P term includes per-worker tile and fixed
+metadata storage. For fixed P this remains O(√n); it is not a worker-count-
+independent O(√n) claim. Each active worker has the sequential engine's bounded
+tile-local cursor stack. Parallel free functions release their scratch on return.

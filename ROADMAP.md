@@ -40,9 +40,17 @@ An independent track that binds the Rust crate and does not wait for C++. See th
 
 Rerun the StarRocks and ClickHouse benchmarks against a released crate and link the results from the README. These benchmarks contain upstream Apache-2.0 code, so they live outside this repository ([decision 0001](docs/decisions/0001-single-bsd-2-clause-license.md)).
 
+## Experimental parallel sorting
+
+An optional Rayon API is under evaluation. The first implementation keeps root
+partitioning sequential and parallelizes fully materialized child buckets. It
+retains stability, panic recovery and sublinear scratch for a fixed worker
+count. Acceptance requires controlled A/B measurements, small-input regression
+checks and allocation measurements; see [parallel design](docs/design/parallel.md).
+
 ## Not planned
 
 - A dedicated unstable kernel before 0.1.
 - vcpkg and Conan packages: after the first releases, on demand.
 - A `core`-only build that takes its scratch from the caller instead of `alloc`: only if a real use case without a global allocator appears.
-- Go and parallel sorting: only if a real use case appears.
+- Go: only if a real use case appears.

@@ -30,7 +30,7 @@ python3 -m unittest discover -s .github/scripts -p "test_*.py"   # after changin
 
 ## Code rules
 
-- **Stable Rust.** The crate builds with the `rust-version` in `Cargo.toml`, without nightly features or runtime dependencies.
+- **Stable Rust.** The crate builds with the `rust-version` in `Cargo.toml`, without nightly features. Default and `no_std` builds have no runtime dependencies; the optional `rayon` feature adds parallel support.
 - **License.** Every new source file starts with `// SPDX-License-Identifier: BSD-2-Clause`. Do not copy code from other projects, including `sort-research-rs` test tools and benchmark harness ([decision 0001](docs/decisions/0001-single-bsd-2-clause-license.md)). `block.rs` keeps Robert Clausecker's notice.
 - **Unsafe code.** Every `unsafe` block has a `// SAFETY:` comment directly above it, and every `unsafe fn` has a `# Safety` section. Keep the tests for panicking key functions, inconsistent keys, owned records and `&mut` records passing.
 - **Engine decisions.** The engine reproduces the research prototype's decisions ([port record](docs/design/port.md)). Do not change routing, thresholds, digit planning or inlining without measurements.

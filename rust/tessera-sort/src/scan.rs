@@ -10,10 +10,10 @@ use crate::RadixKey;
 /// Returns the offset of the first adjacent pair whose encoded keys descend.
 ///
 /// Scans 32 pairs per mask update. The inner loop has a fixed trip count and
-/// unchecked indexing, so LLVM turns the comparisons into vector instructions
-/// even when no target features are enabled. Building the mask locates the
-/// first inversion without a second pass over the block.
-#[inline]
+/// unchecked indexing, allowing LLVM to vectorize encodings supported by the
+/// ambient target. Building the mask locates the first inversion without a
+/// second pass over the block.
+#[inline(always)]
 pub(crate) fn first_inversion<K: RadixKey>(keys: &[K]) -> Option<usize> {
     const BLOCK: usize = 32;
     // Most inversions in unsorted input sit within the first few pairs, and a
@@ -58,7 +58,7 @@ pub(crate) fn first_inversion<K: RadixKey>(keys: &[K]) -> Option<usize> {
 ///
 /// Used for encodings whose per-element cost outweighs the wider comparison,
 /// because the baseline vector width cannot compare 64-bit lanes.
-#[inline]
+#[inline(always)]
 pub(crate) fn scalar<K: RadixKey>(keys: &[K]) -> Option<usize> {
     let mut keys = keys.iter();
     let first = keys.next()?;

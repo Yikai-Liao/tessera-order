@@ -240,6 +240,15 @@ pub(crate) fn insertion_loop<T, E: Extract<T>>(
     Some(swaps)
 }
 
+/// Finishes insertion without a swap limit.
+///
+/// The unit return keeps the unused swap total inside the inlined operation,
+/// so it can be discarded before returning across a target-feature boundary.
+#[inline(always)]
+pub(crate) fn finish_insertion<T, E: Extract<T>>(arr: &mut [T], key: &mut E) {
+    let _ = insertion_loop(arr, usize::MAX, key);
+}
+
 /// Number of bits needed to represent `value`; 0 for 0.
 #[inline]
 fn bit_len(value: u128) -> usize {
@@ -527,7 +536,7 @@ fn reverse_stably<T, E: Extract<T>>(arr: &mut [T], extractor: &mut E) {
 
 /// Stable insertion sort on converted keys.
 fn insertion_sort<T, E: Extract<T>>(arr: &mut [T], key: &mut E) {
-    let _ = key.insertion_sort(arr, usize::MAX);
+    key.finish_insertion(arr);
 }
 
 /// One stable counting pass: histogram, prefix sum, then scatter from `source`

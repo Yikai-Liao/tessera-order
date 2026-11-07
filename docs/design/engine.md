@@ -21,11 +21,19 @@ The engine samples the input to classify it as ascending, descending, flat or un
 All extractors share one insertion loop. User key functions scan one record
 at a time and retain the previous encoded key. Direct extraction uses a
 blocked scan, with a scalar scan for `f64`. The optional `portable-simd`
-backend selects an instruction set once for the entire insertion pass and
-supplies its vector scan through the same extractor interface. The loop is
-inlined into that dispatch context so the scan retains the selected target
-features. Already encoded probe keys use direct extraction too; no parallel
-key array is maintained during record insertion.
+backend selects an instruction set once for a vector-eligible insertion pass
+and supplies its vector scan through the same extractor interface. Shorter
+passes use scalar extraction. The loop is inlined into the dispatch context
+so the scan retains the selected target features. Already encoded probe keys
+use direct extraction too; no parallel key array is maintained during record
+insertion.
+
+Budgeted probes return a swap count; finishing passes return `()`. Both call
+the same insertion loop in every backend. The finishing entry point supplies
+an unlimited budget and discards the unused count inside the inlined
+operation, before returning across a target-feature boundary. Direct scan
+entry points are also inlined to preserve caller bounds and avoid a function
+call for every scan. See [decision 0008](../decisions/0008-insertion-finishing-entry-point.md).
 
 ### 2. Varying bits
 

@@ -33,12 +33,20 @@ mod sealed {
     // public ordering contract. Reverse keys can use these defaults without
     // acquiring a second set of primitive SIMD implementations.
     pub trait Sealed: Copy {
-        #[inline]
+        #[inline(always)]
         fn first_inversion(keys: &[Self]) -> Option<usize>
         where
             Self: RadixKey,
         {
             crate::scan::first_inversion(keys)
+        }
+
+        #[inline]
+        fn finish_insertion(keys: &mut [Self])
+        where
+            Self: RadixKey,
+        {
+            crate::engine::finish_insertion(keys, &mut Direct);
         }
 
         #[inline]
@@ -74,6 +82,11 @@ macro_rules! unsigned {
         impl sealed::Sealed for $ty {
             #[cfg(feature = "portable-simd")]
             #[inline]
+            fn finish_insertion(keys: &mut [Self]) {
+                crate::portable_simd::finish_insertion(keys)
+            }
+            #[cfg(feature = "portable-simd")]
+            #[inline]
             fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
                 crate::portable_simd::insertion_sort(keys, budget)
             }
@@ -95,6 +108,11 @@ unsigned!(u8, u16, u32, u64, u128, usize);
 macro_rules! signed {
     ($(($s:ty, $u:ty)),* $(,)?) => {$(
         impl sealed::Sealed for $s {
+            #[cfg(feature = "portable-simd")]
+            #[inline]
+            fn finish_insertion(keys: &mut [Self]) {
+                crate::portable_simd::finish_insertion(keys)
+            }
             #[cfg(feature = "portable-simd")]
             #[inline]
             fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
@@ -121,9 +139,14 @@ signed!(
 macro_rules! float {
     ($(($f:ty, $u:ty, $default:path)),* $(,)?) => {$(
         impl sealed::Sealed for $f {
-            #[inline]
+            #[inline(always)]
             fn first_inversion(keys: &[Self]) -> Option<usize> {
                 $default(keys)
+            }
+            #[cfg(feature = "portable-simd")]
+            #[inline]
+            fn finish_insertion(keys: &mut [Self]) {
+                crate::portable_simd::finish_insertion(keys)
             }
             #[cfg(feature = "portable-simd")]
             #[inline]
@@ -182,10 +205,19 @@ pub(crate) trait Extract<T> {
         None
     }
 
-    /// Stable insertion sort with the given swap budget.
+    /// Finishes an insertion sort without a swap limit.
     ///
-    /// The default scans through the key function once per record. Direct
-    /// extraction overrides it to resolve the vector backend once per call.
+    /// Direct extraction resolves the vector backend once for the whole pass.
+    fn finish_insertion(&mut self, arr: &mut [T])
+    where
+        Self: Sized,
+    {
+        crate::engine::finish_insertion(arr, self);
+    }
+
+    /// Inserts within a swap budget and returns the completed pass's swap count.
+    ///
+    /// Direct extraction resolves the vector backend once for the whole pass.
     fn insertion_sort(&mut self, arr: &mut [T], budget: usize) -> Option<usize>
     where
         Self: Sized,
@@ -214,9 +246,15 @@ impl<K: RadixKey> Extract<K> for Direct {
         record.encode()
     }
 
-    #[inline]
+    // Outlining this chain would add a call per scan and hide caller bounds.
+    #[inline(always)]
     fn first_inversion(&mut self, records: &[K]) -> Option<usize> {
         K::first_inversion(records)
+    }
+
+    #[inline]
+    fn finish_insertion(&mut self, arr: &mut [K]) {
+        K::finish_insertion(arr);
     }
 
     #[inline]

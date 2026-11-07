@@ -11,3 +11,4 @@ Each file records one decision that shapes the project: the context, the decisio
 | [0005](0005-no-std-with-alloc.md) | Support no-std with alloc behind a default-on std feature | 2026-11-06 |
 | [0006](0006-no-std-unwind-guard.md) | Guard record movement against unwinding without std | 2026-11-07 |
 | [0007](0007-optional-simd-backend.md) | Add an optional fearless_simd backend for the inversion scan | 2026-11-07 |
+| [0008](0008-insertion-finishing-entry-point.md) | Give insertion finishing a unit-returning entry point | 2026-11-07 |

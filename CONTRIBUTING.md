@@ -102,6 +102,8 @@ Signed-off-by: Your Name <you@example.com>
 - **Breaking changes** add `!` after the type or scope and explain the migration in a `BREAKING CHANGE:` paragraph.
 - **One type per pull request.** A change that needs two types is usually two pull requests.
 
+Branches do not need to be up to date with `main` to merge; rebase only to resolve a conflict ([decision 0032](docs/decisions/0032-parallel-pull-requests.md)).
+
 `CHANGELOG.md` is still written by hand; the types classify history, they do not generate it.
 
 ## Sign-off (DCO)

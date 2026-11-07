@@ -17,7 +17,7 @@ All notable changes to this project are documented in this file. The format foll
 - Per-language CI and release workflows, selected by changed paths; C++ and Python stay inactive until their projects exist. Release rules in `RELEASING.md`.
 - `rustfmt.toml` and workspace lints for documentation and unsafe code; Biome and Ruff for the documentation site and CI scripts.
 - Repository structure, ordering semantics, design, benchmarking and workspace documentation.
-- Contribution policy: DCO sign-off and Conventional Commits pull request titles checked in CI ([decision 0016](docs/decisions/0016-conventional-commit-titles.md)), AI-assisted contribution rules, code of conduct, and instructions for coding agents.
+- Contribution policy: DCO sign-off and Conventional Commits pull request titles checked in CI ([decision 0032](docs/decisions/0032-parallel-pull-requests.md)), AI-assisted contribution rules, code of conduct, and instructions for coding agents.
 
 ### Changed
 

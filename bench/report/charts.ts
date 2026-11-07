@@ -28,7 +28,7 @@ const formatBytes = (n: number) =>
 const renderText = (x: number, y: number, value: string, cls = "muted", anchor = "start") =>
   `<text x="${x}" y="${y}" class="${cls}" text-anchor="${anchor}">${escapeXml(value)}</text>`;
 function renderSvg(title: string, height: number, body: string) {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="${height}" viewBox="0 0 720 ${height}" role="img" aria-label="${escapeXml(title)}"><title>${escapeXml(title)}</title>${chartStyles}<rect width="720" height="${height}" rx="8" class="panel"/>${body}</svg>\n`;
+  return `<!-- SPDX-License-Identifier: BSD-2-Clause -->\n<svg xmlns="http://www.w3.org/2000/svg" width="720" height="${height}" viewBox="0 0 720 ${height}" role="img" aria-label="${escapeXml(title)}"><title>${escapeXml(title)}</title>${chartStyles}<rect width="720" height="${height}" rx="8" class="panel"/>${body}</svg>\n`;
 }
 function renderTable(headers: string[], rows: string[][]) {
   return `| ${headers.join(" | ")} |\n| ${headers.map(() => "---").join(" | ")} |\n${rows.map((r) => `| ${r.join(" | ")} |`).join("\n")}\n`;

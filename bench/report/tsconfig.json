@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-2-Clause
 {
   "extends": "../../.github/scripts/tsconfig.json",
   "include": ["*.ts"],

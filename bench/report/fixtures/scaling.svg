@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: BSD-2-Clause -->
 <svg xmlns="http://www.w3.org/2000/svg" width="720" height="1265" viewBox="0 0 720 1265" role="img" aria-label="Scaling on random input"><title>Scaling on random input</title><style>
   .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
   .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }

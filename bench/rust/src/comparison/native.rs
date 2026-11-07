@@ -19,7 +19,7 @@ unsafe extern "C" {
     fn bench_kernel(algorithm: u32, ty: u32) -> Option<Sort>;
     /// Reads a native record size, alignment or payload offset.
     fn bench_layout(ty: u32, field: u32) -> usize;
-    /// Returns VQSort's runtime instruction-set target.
+    /// Returns `VQSort`'s runtime instruction-set target.
     fn bench_vqsort_target() -> *const c_char;
     /// Returns x86-simd-sort's runtime instruction-set target.
     fn bench_x86simdsort_target() -> *const c_char;

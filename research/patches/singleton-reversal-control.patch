@@ -1,0 +1,93 @@
+--- a/rust/tessera-sort/src/engine.rs
++++ b/rust/tessera-sort/src/engine.rs
+@@ -565,7 +565,9 @@
+         while end < arr.len() && extractor.key(&arr[end]) == key {
+             end += 1;
+         }
+-        arr[start..end].reverse();
++        if end - start > 1 {
++            arr[start..end].reverse();
++        }
+         start = end;
+     }
+ }
+--- /dev/null
++++ b/rust/tessera-sort/tests/reverse_runs.rs
+@@ -0,0 +1,77 @@
++// SPDX-License-Identifier: BSD-2-Clause
++//! Stable reversal and panic preservation for singleton and duplicate runs.
++use tessera_sort::stable_sort_by_key;
++
++#[test]
++fn descending_run_lengths_keep_original_tie_order() {
++    let n = if cfg!(miri) { 128 } else { 65536 };
++    for run in [1, 2, 3, 16, n / 16, n] {
++        let mut rows: Vec<_> = (0..n).map(|i| ((n - 1 - i) / run, i)).collect();
++        let mut expected = rows.clone();
++        expected.sort_by_key(|row| row.0);
++        stable_sort_by_key(&mut rows, |row| row.0);
++        assert_eq!(rows, expected);
++    }
++}
++
++#[cfg(feature = "std")]
++#[test]
++fn reversing_panic_preserves_owned_values() {
++    use std::panic::{AssertUnwindSafe, catch_unwind};
++    let n = if cfg!(miri) { 128usize } else { 4096 };
++    let before_reverse = 2 * ((n - 1) / (n / 4096).max(1)) + n;
++    for run in [1, 2, 16] {
++        for offset in [1, 2, 3, 17, n / 2] {
++            let mut rows: Vec<_> = (0..n)
++                .map(|i| ((n - 1 - i) / run, i, i.to_string()))
++                .collect();
++            let expected = rows.clone();
++            let mut calls = 0;
++            let result = catch_unwind(AssertUnwindSafe(|| {
++                stable_sort_by_key(&mut rows, |row| {
++                    calls += 1;
++                    assert_ne!(calls, before_reverse + offset, "reversal panic");
++                    row.0
++                });
++            }));
++            assert!(result.is_err());
++            rows.sort_by_key(|row| row.1);
++            assert_eq!(rows, expected);
++        }
++    }
++}
++
++#[cfg(feature = "std")]
++#[test]
++fn reversing_panic_preserves_exclusive_borrows() {
++    use std::panic::{AssertUnwindSafe, catch_unwind};
++    let n = if cfg!(miri) { 128usize } else { 4096 };
++    let before_reverse = 2 * ((n - 1) / (n / 4096).max(1)) + n;
++    for run in [1, 2, 16] {
++        let mut backing: Vec<_> = (0..n).map(|i| i.to_string()).collect();
++        let mut rows: Vec<_> = backing
++            .iter_mut()
++            .enumerate()
++            .map(|(i, value)| ((n - 1 - i) / run, i, value))
++            .collect();
++        let mut calls = 0;
++        let result = catch_unwind(AssertUnwindSafe(|| {
++            stable_sort_by_key(&mut rows, |row| {
++                calls += 1;
++                assert_ne!(calls, before_reverse + 17, "borrowed reversal panic");
++                row.0
++            });
++        }));
++        assert!(result.is_err());
++        rows.sort_by_key(|row| row.1);
++        for (i, row) in rows.iter_mut().enumerate() {
++            assert_eq!(row.1, i);
++            assert_eq!(*row.2, i.to_string());
++            row.2.push('!');
++        }
++        drop(rows);
++        for (i, value) in backing.iter().enumerate() {
++            assert_eq!(value, &format!("{i}!"));
++        }
++    }
++}

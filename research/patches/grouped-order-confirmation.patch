@@ -1,0 +1,136 @@
+--- a/rust/tessera-sort/src/engine.rs
++++ b/rust/tessera-sort/src/engine.rs
+@@ -497,17 +497,61 @@
+ /// Determines direction from the first unequal key, then confirms that order.
+ fn confirm_order<T, E: Extract<T>>(arr: &[T], key: &mut E) -> Order {
+     let first = key.key(&arr[0]);
+-    let mut keys = arr[1..].iter().map(|record| key.key(record));
+-    let Some(key) = keys.find(|&key| key != first) else {
++    let mut records = arr[1..].iter();
++    let Some(value) = records.find_map(|record| {
++        let value = key.key(record);
++        (value != first).then_some(value)
++    }) else {
+         return Order::Ascending;
+     };
+-    if first < key {
+-        keys.try_fold(key, |a, b| (a <= b).then_some(b))
+-            .map_or(Order::Unsorted, |_| Order::Ascending)
++    if first < value {
++        if confirm_direction::<T, E, false>(records.as_slice(), key, value) {
++            Order::Ascending
++        } else {
++            Order::Unsorted
++        }
++    } else if confirm_direction::<T, E, true>(records.as_slice(), key, value) {
++        Order::Descending
+     } else {
+-        keys.try_fold(key, |a, b| (a >= b).then_some(b))
+-            .map_or(Order::Unsorted, |_| Order::Descending)
+-    }
++        Order::Unsorted
++    }
++}
++
++/// Confirms a sampled direction, checking for inversions once per bounded group.
++/// Key extraction stays sequential and only keys, never records, are retained.
++fn confirm_direction<T, E: Extract<T>, const DESCENDING: bool>(
++    arr: &[T],
++    key: &mut E,
++    mut previous: E::Value,
++) -> bool {
++    let mut groups = arr.chunks_exact(16);
++    for group in &mut groups {
++        let mut ordered = true;
++        for record in group {
++            let value = key.key(record);
++            ordered &= if DESCENDING {
++                previous >= value
++            } else {
++                previous <= value
++            };
++            previous = value;
++        }
++        if !ordered {
++            return false;
++        }
++    }
++    for record in groups.remainder() {
++        let value = key.key(record);
++        if if DESCENDING {
++            previous < value
++        } else {
++            previous > value
++        } {
++            return false;
++        }
++        previous = value;
++    }
++    true
+ }
+ 
+ /// Sorts a descending array, stably, by reversing it and then reversing each
+--- /dev/null
++++ b/rust/tessera-sort/tests/order_confirmation.rs
+@@ -0,0 +1,61 @@
++// SPDX-License-Identifier: BSD-2-Clause
++//! Order-confirmation stability, tail and panic coverage.
++use tessera_sort::stable_sort_by_key;
++
++#[test]
++fn confirmation_finds_inversions_between_sample_pairs_and_at_group_edges() {
++    let len = if cfg!(miri) { 128 } else { 65536 };
++    for offset in [0usize, 1, 14, 15, 16, 17, 30, 31] {
++        let mut rows: Vec<_> = (0..len).map(|i| (i as u64, i)).collect();
++        let index = if cfg!(miri) { 32 } else { 1024 } + offset;
++        rows.swap(index, index + 1);
++        let mut expected = rows.clone();
++        expected.sort_by_key(|row| row.0);
++        stable_sort_by_key(&mut rows, |row| row.0);
++        assert_eq!(rows, expected);
++    }
++}
++
++#[test]
++fn ordered_duplicate_prefix_and_tail_preserve_stability() {
++    for len in [2usize, 15, 16, 17, 31, 32, 33, 4097, 65536] {
++        if cfg!(miri) && len > 128 {
++            continue;
++        }
++        for descending in [false, true] {
++            let mut rows: Vec<_> = (0..len)
++                .map(|i| (if descending { (len - i) / 3 } else { i / 3 }, i))
++                .collect();
++            let mut expected = rows.clone();
++            expected.sort_by_key(|row| row.0);
++            stable_sort_by_key(&mut rows, |row| row.0);
++            assert_eq!(rows, expected);
++        }
++    }
++}
++
++#[cfg(feature = "std")]
++#[test]
++fn panic_in_order_confirmation_preserves_every_owned_record() {
++    use std::{
++        cell::Cell,
++        panic::{AssertUnwindSafe, catch_unwind},
++    };
++    let len = if cfg!(miri) { 128usize } else { 65536 };
++    let gate_calls = 2 * ((len - 1) / (len / 4096).max(1));
++    for after_gate in [1usize, 2, 15, 16, 17, 31, 32, 33] {
++        let mut rows: Vec<_> = (0..len).map(|i| (i as u64, i.to_string())).collect();
++        let original = rows.clone();
++        let calls = Cell::new(0);
++        let result = catch_unwind(AssertUnwindSafe(|| {
++            stable_sort_by_key(&mut rows, |row| {
++                let call = calls.get() + 1;
++                calls.set(call);
++                assert_ne!(call, gate_calls + after_gate, "order extraction panic");
++                row.0
++            });
++        }));
++        assert!(result.is_err());
++        assert_eq!(rows, original);
++    }
++}

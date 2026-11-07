@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "binary_sha256": "69c008b6f10aa7f60761c4f899b542d8c547054232fdf42a3b03fd5765c7afc2",
+  "driver_source_sha256": "b5982b9ad11501de709ff627f52629f413d28510e78cc84920a068d2b3ee75cb",
+  "semantic_evidence_sha256": {
+    "scaling_source_freeze": "8ec1cf5200adecf374e5cac5d3ad58685c8a37bf6435cbda1773cbd63002c475",
+    "original_source_and_dependency_freeze": "a369cdaa6fe9acfb3de751b8744869ad24e3fe364c2fe22d1d736a9585e2ead1",
+    "per_worker_count_validated_inputs": "04feb04deae8c509ea82c0b1f977e990428be10481011e419bcc773e45b67449",
+    "complete_analysis_and_tails": "899bdf6b3abc5cecf50f8d06bae78a66adeff5473b873aa9bca6690b3747137a",
+    "complete_report_with_tail_tables": "76e5d028915bd876be28b5e7944330597399d4eddf4d4cadc73ecee808b66d3f",
+    "scaling_timing_evidence_freeze": "e1f6e727117f65a04a0be169979c8d33f1e322b7da11401940aec417aecdd557",
+    "earlier_mixed_W8_evidence_freeze": "deabfa58f5cc41c03a954cb5b4e9e9e84f53c6c26f79e8b8f269444d2229ee01"
+  },
+  "raw_stream_sha256": {
+    "u64/w1": "2fe77884054d21e800d840743e514cf09e13d84f5e19311c942bed10981b767d",
+    "row16/w1": "ccfa0b7831e0e805ed0aab551bbc4f5b7b8bb082e5b4cbd04ab050b1b0b5b1c0",
+    "u64/w2": "e9c31debd651ae90834be0a39b656aa11f4f0771b9df3fa9577476a7f661f4f4",
+    "row16/w2": "4504d58041b83771cc16924a102af33c042b999c91116aac3f62bcfce558f29a",
+    "u64/w4": "de0eaa130bc47e9d3f337f8c328771f84929a32105c15054b50aaeefdcfa9a55",
+    "row16/w4": "5c3282590ac13db2f75763b5d338e808fb8e972f6c02b32f5556c12acc146314"
+  },
+  "counts": {
+    "measured_samples": 648,
+    "warmup_samples": 72,
+    "measured_calls": 715,
+    "warmup_calls": 72,
+    "total_timing_calls": 787,
+    "separate_untimed_smoke_calls": 72
+  },
+  "qualification": "Content hashes identify separately preserved artifacts; raw/harness/binary/tail tables are not included in this packet."
+}

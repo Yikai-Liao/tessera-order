@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "files": {
+    "identities.json": {
+      "sha256": "6b7fbdca164041da9792dfcbfe667cc0ff6f5c8713737d03b8c06f559c7d583d",
+      "bytes": 1843
+    },
+    "summary.md": {
+      "sha256": "b7daada8f7995ee5eeceda044b8e1965b83c15a842978cd8d77de095cf4aa1e8",
+      "bytes": 8615
+    }
+  },
+  "scope": "Public aggregate summary and semantic content-hash identities only."
+}

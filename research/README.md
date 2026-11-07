@@ -126,3 +126,8 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
 - [Rejected two-matching model](two-matching-model/SUMMARY.md):
   equal-logical-copy-cost gate only, not DRAM traffic or measured runtime.
   Sanitized provenance labels; no native mover or performance adoption.
+
+- [Selected native API scaling](native-entry-scaling-results/summary.md):
+  six W1/W2/W4 cases, 648 measured and 72 warmup samples; 787 verified calls.
+  No native/public comparison clears controls. W2 remains concerning;
+  this API-policy curve neither replaces mixed W8 results nor adopts runtime.

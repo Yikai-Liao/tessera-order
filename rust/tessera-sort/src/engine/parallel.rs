@@ -8,7 +8,7 @@ use rayon::Scope;
 /// The archived experiment did not reliably win at 512 KiB; keep 1 MiB as a
 /// starting cutoff until controlled measurements retune it.
 const MIN_PARALLEL_BYTES: usize = 1 << 20;
-/// Starting task size from the archived overlap screen; retune with A/A controls.
+/// Nearby sizes showed no reliable win in controlled 10M random A/B screens.
 const MIN_TASK_BYTES: usize = 256 * 1024;
 
 /// Sorts large inputs by handing complete root buckets to Rayon's current pool.

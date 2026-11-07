@@ -202,3 +202,102 @@ External evidence is held outside the repository in the region-path research
 packet: exact source/binary hashes, compiler/CPU/feature metadata, immutable
 runner, complete raw samples including outliers, interval CSVs, memory results
 and full reference checks. Exclusive window: 2026-11-07 12:47:52–12:48:10 UTC.
+
+# Nine-block causal follow-up: do not promote
+
+The Row16 three-block signal did not pass the predeclared follow-up gate.
+This restoration policy is **not accepted for production or as an overall
+performance improvement**. No more scheduling variants or overlap layers were
+added after this result.
+
+## Frozen setup
+
+The kernel, radix, B, shards, features, inputs and source ownership are unchanged
+from the clean screen. Two independent source-identical package copies isolate
+placement for the candidate and current combined control. The .rs bytes match
+exactly; only package/workspace metadata differ. Separate Row16 types are made
+with typed constructors, never cast. Measured layouts for both are size16,
+alignment8, key offset0, ID offset8.
+
+Each case uses nine randomized blocks with six causal labels: candidate A1/A2,
+candidate placement, combined C1/C2, combined placement. Ready old-cycle,
+public-d6 and strong-serial implementations remain contextual labels. Every
+label receives a warmup before measurement. The process is restricted to CPUs
+0–7 and has eight Rayon workers, with **no individual worker pinning**, matching
+the pilot. SIMD is on consistently; the runtime selector is Avx512. All
+TESSERA_* algorithm overrides and target-codegen overrides are cleared.
+
+Each sample prepares a fresh input on the actual executing pool worker before
+the timer. Sort calls accumulate at least25ms, with at least two sorts. Actual
+repetition counts and every individual duration are retained. All samples used
+two sorts: 162 measured sorts per case, 324 in total. Minimum accumulated
+sample times were40.077ms (u64) and70.123ms (Row16). Every complete output was
+compared to the full stable reference outside timing; no samples or tails were
+dropped. Original three-block data remain archived unchanged.
+
+## Full-sort results, 10M random records
+
+Values below are medians of per-sort times, not accumulated two-sort durations.
+
+| Record | Path A1 / A2 ms | Path placement ms | Combined C1 / C2 ms | Combined placement ms | Old cycle ms | Public d6 ms | Strong serial ms |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| u64 | 25.906 / 27.020 | 26.038 | 24.926 / 23.602 | 23.738 | 26.646 | 36.988 | 84.834 |
+| Row16 | 39.250 / 39.477 | 40.691 | 44.958 / 44.727 | 45.518 | 40.756 | 64.661 | 119.341 |
+
+Within each block, compare the mean of candidate A1/A2 with the mean of
+combined C1/C2, then take the median of those block ratios:
+
+- u64: **1.1278**, candidate slower in **8/9** blocks. Candidate pair versus
+  combined placement is1.1334 and slower in9/9. This is a consistent unfavorable
+  direction, not a slowdown magnitude established outside its own noise envelopes.
+- Row16: **0.8818**, candidate faster in only **7/9** blocks, below the required
+  8/9 agreement. Candidate-placement/combined-pair is0.8984, candidate-pair/
+  combined-placement0.9178, and placement/placement0.9209. Each has only7/9
+  faster blocks. The apparent median benefit remains inside measured controls.
+
+Both algorithms have their own A/A and placement envelopes:
+
+| Record | Path A2/A1 range | Path placement / path-pair range | Combined C2/C1 range | Combined placement / combined-pair range |
+|---|---:|---:|---:|---:|
+| u64 | 0.875–1.140 | 0.841–1.406 | 0.734–1.160 | 0.888–1.100 |
+| Row16 | 0.811–1.257 | 0.937–1.541 | 0.910–1.026 | 0.897–1.107 |
+
+Block-level primary path-pair/combined-pair ratios (blocks0–8, none removed):
+
+- u64:1.1278,1.0427,1.2359,1.1990,1.2472,0.9661,1.0852,1.1349,1.0490. Only block5 favors the candidate.
+- Row16:0.8761,0.8731,0.8110,0.9367,0.8781,0.8818,1.1384,0.9279,1.0376. Blocks6 and8 reverse the apparent benefit.
+
+Individual-sort tails are retained. Candidate-placement maxima are41.763ms
+(u64) and82.306ms (Row16); the u64 old-cycle context reaches119.668ms. None
+was filtered as an outlier. The external aggregation contains every label's
+min/max and all individual durations, not only the favorable median.
+
+Public or serial controls were not substituted for these envelopes. The path
+copy reduction is real, but these measurements do not establish an end-to-end
+win over the strongest current implementation. The algorithm is left as a
+validated research control, not promoted or hidden behind new routing.
+
+## Actual full-sort heap high water
+
+These are independent **complete-sort** counting-allocator runs, one call per
+implementation/case after pool setup, not sums of capacities or root-only
+figures. No instrumented duration is used as performance evidence. Inputs and
+stable references are outside the measured allocation interval. Every full
+output passed and every implementation retained zero additional bytes.
+
+| 10M random records | Direct path peak bytes | Current combined peak bytes | Strong serial peak bytes | Retained delta, all |
+|---|---:|---:|---:|---:|
+| u64 | 7151935 | 6168395 | 2770254 | 0 |
+| Row16 | 9786852 | 7971658 | 3902036 | 0 |
+
+The path peak happens to equal its earlier root-only peak because the root
+scratch is released before serial children start. This equality is measured,
+not assumed. The candidate uses more peak memory than current combined, while
+remaining within its documented O(P sqrt(n)) bound for fixed radix.
+
+Formal exclusive CPU window: 2026-11-07 12:57:33–12:58:11 UTC. The external
+formal evidence packet contains both complete81-sample case files, warmups,
+individual-sort tails, exact binary/source hashes, source-equality manifest,
+feature tree, actual layout dump, affinity and compiler metadata, immutable
+runner, aggregation script and separate full-sort allocation results. No raw
+samples, research harness, binary or profiles are committed here.

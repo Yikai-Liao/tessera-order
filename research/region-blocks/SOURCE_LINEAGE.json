@@ -13,7 +13,7 @@
     "LICENSE": "705d08b60e66eac43d9e0348dfabf8a1e1ef4f450e23c3f63ba3a84aaa8fb405",
     "README.md": "30e626570216ec04cad43838592e9810031911d60c58d31b1b83dd5fe7fde712",
     "Cargo.lock": "fe981231735cb32c7d1c5c5aaf51f6ec5308786686f2599ebb7828107b25a91f",
-    "VALIDATION.md": "444f17c27f6e9f01ea8b778f63784a949f583dd535446547c44d37143e485cc2",
+    "VALIDATION.md": "e1597bfa4016cdb4802e51674982e5bdb29d9cc0250894886d47f0f0840a6568",
     "src/probe.rs": "13786d33a53d2c8328c57c50465b002cbefc1362eb851681eb35390214ce08fd",
     "src/lib.rs": "10a741b151ecf3e017bd8e5000207a964497a013f3e26a7685567872b5a6002a",
     "src/broker.rs": "726ff3c6b7c77323c65bb14f373fe810415edce6af3a891827f7882e5066ca95",
@@ -39,5 +39,6 @@
   },
   "pilot_instrumentation": "one broker clock per bucket and readiness vector enabled; final movement source gates both off unless capture_plan",
   "previous_checkpoint_patch_sha256": "784f74406fbd7cf9959eb4c07bcd9b697a5fbf062224a6b7c944976682723856",
-  "path_policy": "Exact open components, no spare completion, LPT whole-component assignment, explicit pre-movement fallback above 2ceil(F/P); not a novel pull-path algorithm"
+  "path_policy": "Exact open components, no spare completion, LPT whole-component assignment, explicit pre-movement fallback above 2ceil(F/P); not a novel pull-path algorithm",
+  "formal_result": "Nine blocks per u64/Row16 random10M, own A/A and independent source-identical placement for path and combined. No accepted win; u64 slower8/9 is directional evidence within wide noise envelopes, Row16 only7/9 faster. Kernel unchanged."
 }

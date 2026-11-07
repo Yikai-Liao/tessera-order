@@ -3,12 +3,13 @@
 //!
 //! Kernels are written once against `fearless_simd`'s [`Simd`] trait;
 //! [`dispatch!`] picks the widest instruction set the CPU supports at run
-//! time. Dispatch happens once per insertion sort, not once per scan: the
-//! whole loop runs inside the dispatched call, so per-call dispatch overhead
+//! time. Passes too short for a vector scan use scalar extraction. Other
+//! passes select a backend once before the insertion loop, so dispatch cost
 //! does not accumulate over the thousands of scans a sort performs.
 //!
 //! The same generic code serves every key width and every backend.
 
+use crate::key::{ByKey, Extract};
 use fearless_simd::prelude::*;
 use fearless_simd::{Level, Simd, dispatch, u8x16, u16x8};
 
@@ -30,11 +31,24 @@ pub(crate) trait SimdKey: Copy + crate::RadixKey {
     fn scan_with<S: Simd>(simd: S, values: &[Self]) -> Option<usize>;
 }
 
-/// Stable insertion sort with a swap budget, dispatched once.
+/// Finishes an insertion sort without swap accounting.
+pub(crate) fn finish_insertion<K: SimdKey>(arr: &mut [K]) {
+    // Every remaining slice is below the vector scan's minimum too.
+    if arr.len() < SIMD_MIN {
+        ByKey(|value: &K| *value).finish_insertion(arr);
+        return;
+    }
+    dispatch!(Level::new(), simd => crate::engine::finish_insertion(arr, &mut VectorKeys(simd)));
+}
+
+/// Inserts within a swap budget, dispatched once.
 ///
 /// Returns the number of swaps, or `None` when the budget is exhausted; in
 /// that case `arr` is a stable permutation of its input.
 pub(crate) fn insertion_sort<K: SimdKey>(arr: &mut [K], budget: usize) -> Option<usize> {
+    if arr.len() < SIMD_MIN {
+        return ByKey(|value: &K| *value).insertion_sort(arr, budget);
+    }
     dispatch!(Level::new(), simd => crate::engine::insertion_loop(arr, budget, &mut VectorKeys(simd)))
 }
 
@@ -417,12 +431,23 @@ mod tests {
 
     #[test]
     fn insertion_budget() {
-        let mut keys: Vec<u32> = (0..500).map(|index| (index * 37) % 500).collect();
-        assert!(insertion_sort(&mut keys, usize::MAX).is_some());
-        assert!(keys.windows(2).all(|pair| pair[0] <= pair[1]));
-        let mut keys: Vec<u32> = (0..500).rev().collect();
-        assert!(insertion_sort(&mut keys, 10).is_none());
-        keys.sort_unstable();
-        assert_eq!(keys, (0..500).collect::<Vec<_>>());
+        for length in [0u32, 1, 48, 63, 64, 65, if cfg!(miri) { 97 } else { 500 }] {
+            let mut keys: Vec<_> = (0..length).map(|index| (index * 37) % length).collect();
+            let mut expected = keys.clone();
+            expected.sort_unstable();
+            finish_insertion(&mut keys);
+            assert_eq!(keys, expected);
+
+            for budget in [0, 10, usize::MAX] {
+                let mut keys: Vec<_> = (0..length).rev().collect();
+                let swaps = length as usize * length.saturating_sub(1) as usize / 2;
+                assert_eq!(
+                    insertion_sort(&mut keys, budget),
+                    (swaps <= budget).then_some(swaps),
+                );
+                keys.sort_unstable();
+                assert_eq!(keys, (0..length).collect::<Vec<_>>());
+            }
+        }
     }
 }

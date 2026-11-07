@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //! The default adjacent-pair scan.
 //!
-//! This is what `RadixKey::first_inversion` uses when the `portable-simd`
-//! feature is off. It has no dependency and lets the compiler auto-vectorize at
-//! the ambient target width; the feature keeps the same policy and swaps in an
-//! explicit, run-time dispatched backend.
+//! Direct extraction uses this without the `portable-simd` feature. It has no
+//! dependency and lets the compiler auto-vectorize at the ambient target
+//! width. The optional backend dispatches the insertion pass as a whole.
 
 use crate::RadixKey;
 

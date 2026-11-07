@@ -19,10 +19,8 @@ default = ["std"]
 # resume the panic. Without this feature the crate is `no_std`: it uses `core` and
 # `alloc`, needs a global allocator, and aborts on a panic during block partitioning.
 std = []
-# Portable vector scans through `fearless_simd`, which picks SSE2, AVX2,
-# AVX-512, Arm Neon or WebAssembly SIMD at run time for the machine that runs
-# the binary. Off by default: it adds a dependency, one dispatch per insertion
-# pass, and a higher minimum Rust version than the rest of the crate.
+# Vector scans and prefix sums through `fearless_simd`. Requires std and Rust
+# 1.89. Dispatches at run time on x86; other targets use their baseline ISA.
 portable-simd = ["std", "dep:fearless_simd"]
 
 [dependencies]

@@ -35,49 +35,31 @@ pub(crate) trait SimdKey: Copy + crate::RadixKey {
 /// Returns the number of swaps, or `None` when the budget is exhausted; in
 /// that case `arr` is a stable permutation of its input.
 pub(crate) fn insertion_sort<K: SimdKey>(arr: &mut [K], budget: usize) -> Option<usize> {
-    dispatch!(Level::new(), simd => insert_loop(simd, arr, budget))
+    dispatch!(Level::new(), simd => crate::engine::insertion_loop(arr, budget, &mut VectorKeys(simd)))
 }
 
-/// The insertion loop, running inside the dispatched call.
-///
-/// Inlined into the dispatched call so its vector operations compile with the
-/// selected target features.
-#[inline(always)]
-fn insert_loop<S: Simd, K: SimdKey>(simd: S, arr: &mut [K], budget: usize) -> Option<usize> {
-    let mut swaps = 0;
-    let mut start = 0;
-    while let Some(offset) = first_inversion_with(simd, &arr[start..]) {
-        let index = start + offset + 1;
-        let (prefix, tail) = arr.split_at_mut(index);
-        let (mut current, prefix) = prefix.split_last_mut()?;
-        // The scan already compared this pair, so swap without re-reading keys.
-        core::mem::swap(current, &mut tail[0]);
-        swaps += 1;
-        if swaps > budget {
-            return None;
-        }
-        // The record being inserted keeps its key while it moves left.
-        let current_key = current.encode();
-        for before in prefix.iter_mut().rev() {
-            if before.encode() <= current_key {
-                break;
-            }
-            core::mem::swap(before, current);
-            current = before;
-            swaps += 1;
-            if swaps > budget {
-                return None;
-            }
-        }
-        start = index;
+/// Direct extraction with a backend already selected for this insertion pass.
+struct VectorKeys<S>(S);
+
+impl<S: Simd, K: SimdKey> crate::key::Extract<K> for VectorKeys<S> {
+    type Value = K::Encoded;
+
+    #[inline(always)]
+    fn key(&mut self, record: &K) -> Self::Value {
+        record.encode()
     }
-    Some(swaps)
+
+    #[inline(always)]
+    fn first_inversion(&mut self, values: &[K]) -> Option<usize> {
+        first_inversion_with(self.0, values)
+    }
 }
 
 /// Converts per-bucket counts to per-bucket starts, in place.
 ///
 /// The scalar loop is a dependent chain of one add per bucket; a vector
 /// prefix sum shortens the chain to log2(lanes) adds per lane group.
+/// Counting passes bound the total count by `u16::MAX`, so every start fits.
 pub(crate) fn prefix_sum(counts: &mut [u16]) {
     dispatch!(Level::new(), simd => prefix_sum_with(simd, counts))
 }
@@ -256,13 +238,6 @@ macro_rules! wide_key {
 }
 wide_key!(u128, usize, i128, isize);
 
-impl<K: SimdKey> SimdKey for core::cmp::Reverse<K> {
-    #[inline(always)]
-    fn scan_with<S: Simd>(_simd: S, values: &[Self]) -> Option<usize> {
-        scan_encoded(values)
-    }
-}
-
 impl SimdKey for f32 {
     #[inline(always)]
     fn scan_with<S: Simd>(simd: S, values: &[Self]) -> Option<usize> {
@@ -281,12 +256,144 @@ impl SimdKey for f64 {
 mod tests {
     use super::*;
 
+    fn check_sorted_scans<K: SimdKey>(mut values: Vec<K>) {
+        for level in [Level::baseline(), Level::new()] {
+            assert_eq!(
+                dispatch!(level, simd => first_inversion_with(simd, &values)),
+                None
+            );
+            assert_eq!(K::first_inversion(&values), None);
+            for index in 0..values.len().saturating_sub(1) {
+                // Miri still crosses the peel, vector blocks and scalar tail.
+                if cfg!(miri) && index % 16 > 1 && index != 4 && index + 2 != values.len() {
+                    continue;
+                }
+                if values[index].encode() == values[index + 1].encode() {
+                    continue;
+                }
+                values.swap(index, index + 1);
+                assert_eq!(
+                    dispatch!(level, simd => first_inversion_with(simd, &values)),
+                    Some(index),
+                    "level={level:?} len={} index={index}",
+                    values.len()
+                );
+                assert_eq!(K::first_inversion(&values), Some(index));
+                values.swap(index, index + 1);
+            }
+        }
+    }
+
+    #[test]
+    fn integer_scans() {
+        let lengths: &[usize] = if cfg!(miri) {
+            &[0, 1, 64, 65]
+        } else {
+            &[0, 1, 2, 31, 63, 64, 65, 97, 129]
+        };
+        macro_rules! check {
+            ($($ty:ty),*) => {$(
+                for &length in lengths {
+                    let mut seed = 17u64;
+                    let mut values: Vec<$ty> = (0..length).map(|_| {
+                        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                        seed as $ty
+                    }).collect();
+                    values.sort();
+                    check_sorted_scans(values);
+                }
+            )*};
+        }
+        check!(
+            u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
+        );
+    }
+
+    #[test]
+    fn float_scans() {
+        let lengths: &[usize] = if cfg!(miri) {
+            &[0, 1, 64, 65]
+        } else {
+            &[0, 1, 2, 31, 63, 64, 65, 97, 129]
+        };
+        macro_rules! check {
+            ($f:ty, $u:ty) => {{
+                for &length in lengths {
+                    let mut seed = 91u64;
+                    let mut values: Vec<$f> = (0..length)
+                        .map(|_| {
+                            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                            <$f>::from_bits(seed as $u)
+                        })
+                        .collect();
+                    values.extend([
+                        -<$f>::NAN,
+                        <$f>::NEG_INFINITY,
+                        -1.0,
+                        -0.0,
+                        0.0,
+                        <$f>::from_bits(1),
+                        1.0,
+                        <$f>::INFINITY,
+                        <$f>::NAN,
+                    ]);
+                    values.sort_by(<$f>::total_cmp);
+                    check_sorted_scans(values);
+                }
+            }};
+        }
+        check!(f32, u32);
+        check!(f64, u64);
+    }
+
+    #[test]
+    fn prefix_sums() {
+        for length in [0, 1, 7, 8, 9, 15, 16, 17, 31, 32, 257, 16384] {
+            if cfg!(miri) && length > 257 {
+                continue;
+            }
+            for shape in 0..3 {
+                let counts: Vec<u16> = (0..length)
+                    .map(|index| match shape {
+                        0 => 0,
+                        1 => {
+                            if index == length / 2 {
+                                u16::MAX
+                            } else {
+                                0
+                            }
+                        }
+                        _ => ((index * 37 + 11) % 4) as u16,
+                    })
+                    .collect();
+                let mut total = 0u32;
+                let expected: Vec<u16> = counts
+                    .iter()
+                    .map(|&count| {
+                        let start = total;
+                        total += u32::from(count);
+                        assert!(total <= u32::from(u16::MAX));
+                        start as u16
+                    })
+                    .collect();
+                for level in [Level::baseline(), Level::new()] {
+                    let mut actual = counts.clone();
+                    dispatch!(level, simd => prefix_sum_with(simd, &mut actual));
+                    assert_eq!(
+                        actual, expected,
+                        "level={level:?} len={length} shape={shape}"
+                    );
+                }
+            }
+        }
+    }
+
     fn reference<T: Ord + Copy>(values: &[T]) -> Option<usize> {
         values.windows(2).position(|pair| pair[0] > pair[1])
     }
 
     #[test]
-    fn integer_scans_find_the_first_inversion() {
+    fn random_scans() {
         for length in [0usize, 1, 2, 31, 63, 64, 65, 127, 129, 1000] {
             let mut seed = 0x9e37_79b9u64;
             let mut words: Vec<u32> = (0..length)
@@ -309,22 +416,13 @@ mod tests {
     }
 
     #[test]
-    fn float_scans_follow_total_order() {
-        let values = [1.0f64, 0.5, -0.0, 0.0, f64::NAN, -f64::NAN];
-        assert_eq!(first_inversion(&values), Some(0));
-        let ascending = [-f64::NAN, -1.0, -0.0, 0.0, 1.0, f64::NAN];
-        assert_eq!(first_inversion(&ascending), None);
-        let mut inverted = ascending;
-        inverted.swap(2, 3);
-        assert_eq!(first_inversion(&inverted), Some(2));
-    }
-
-    #[test]
-    fn insertion_sort_sorts_and_respects_the_budget() {
+    fn insertion_budget() {
         let mut keys: Vec<u32> = (0..500).map(|index| (index * 37) % 500).collect();
         assert!(insertion_sort(&mut keys, usize::MAX).is_some());
         assert!(keys.windows(2).all(|pair| pair[0] <= pair[1]));
         let mut keys: Vec<u32> = (0..500).rev().collect();
         assert!(insertion_sort(&mut keys, 10).is_none());
+        keys.sort_unstable();
+        assert_eq!(keys, (0..500).collect::<Vec<_>>());
     }
 }

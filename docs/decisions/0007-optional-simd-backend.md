@@ -39,6 +39,12 @@ Every kernel is generic over `Simd`, so the crate contains no per-ISA
 branch, intrinsic or target-feature attribute. The backend list and the
 runtime selection belong to fearless_simd.
 
+Both backends use the engine's insertion loop through its extractor
+interface. Backend selection lives in the sealed key implementations;
+`RadixKey` describes only the ordering encoding. Encoded unsigned probe
+keys are direct keys too, so they need neither a separate extractor nor a
+second insertion algorithm.
+
 ## Alternatives considered
 
 - **Dispatch once per scan.** Measured net loss on random input; the
@@ -71,12 +77,13 @@ runtime selection belong to fearless_simd.
 
 - The feature changes no ordering, stability, panic or space bound. The
   default build is unchanged.
-- Measured on the AVX2 build of the development machine (7 interleaved
-  rounds, A/A range 0.98-1.03, raw data outside the repository): near-sorted
-  inputs are 24-36% faster; most random inputs are 3-13% faster; f64 random
-  is within noise. The bucket-count prefix sum is about 1.4x faster than the
-  scalar chain in its own microbenchmark and moves the end-to-end random
-  cases further in the same direction.
+- The existing AVX2 measurements are exploratory: seven interleaved rounds
+  of separate binaries, summarized by per-round minimum times, with a
+  separate A/A run. They do not implement the nine-block paired timing,
+  duplicate baseline and output-hash checks required by the
+  [benchmark protocol](../development/benchmarking.md). Formal speedup or
+  regression claims need measurements under that protocol; continuous
+  benchmarks provide regression triage rather than that acceptance evidence.
 - The ByKey tile insertion still calls the user key function from scalar
   code. Materializing the keys measured slower at the tile size, so this is
   not a pending optimization: only the probe and Direct extraction use the

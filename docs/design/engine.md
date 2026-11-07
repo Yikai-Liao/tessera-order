@@ -18,6 +18,15 @@ This document describes the engine in `rust/tessera-sort`. It makes the same dec
 
 The engine samples the input to classify it as ascending, descending, flat or unsorted. An ascending input returns immediately. A descending input is reversed stably: runs of equal keys keep their internal order. An unsorted input gets a budgeted stable insertion pass. When the probe window is shorter than the input, the pass first runs on a copy of the window's keys to estimate the number of swaps, and only then touches the records. If the budget runs out, the input is left as a stable permutation of itself and the radix path continues.
 
+All extractors share one insertion loop. User key functions scan one record
+at a time and retain the previous encoded key. Direct extraction uses a
+blocked scan, with a scalar scan for `f64`. The optional `portable-simd`
+backend selects an instruction set once for the entire insertion pass and
+supplies its vector scan through the same extractor interface. The loop is
+inlined into that dispatch context so the scan retains the selected target
+features. Already encoded probe keys use direct extraction too; no parallel
+key array is maintained during record insertion.
+
 ### 2. Varying bits
 
 One scan computes the bitwise union and intersection of all keys. Bits that are equal in every key cannot change the order and are excluded from every later digit. A constant input returns at this point. Wide keys whose variation fits in one 64-bit half are sorted by that half as a 64-bit key.

@@ -1,0 +1,39 @@
+{
+  "public_revision": "55b299b3716cd1af9e997f30b1a3c1813455d8be",
+  "frozen_generic_source_identity": "bf3b2ea730f98fca2dfaf75f3baba732f7f5d67eaea8bafdbae17c684fe11bae",
+  "public_to_native_patch_sha256": "2265e704ebb25e0dba1a08e8d4431d1473fce09a740ac5e67ee5fe0b2c4dda4b",
+  "features": [
+    "default",
+    "std",
+    "rayon",
+    "portable-simd"
+  ],
+  "source_file_sha256": {
+    "public workspace.rs": "d040c5c58dc95f883796df526c1d8379db875f9dc80b4160e9424573a7ffb572",
+    "public engine.rs": "03ff9cc0b923c0aa0aad73bed71b5a3432860828c67f2968420f607564c95325",
+    "public engine/parallel.rs": "fde0588985b4f6e2d01d6f8fb7d9aa9e3d34859b5c929c9cdb0d1ed60fd4c33a",
+    "public block.rs": "fff6282eb72e7f2d5fbf14ae63707122ed17e3c2864361c6a9b4c1a7ea40fd7f",
+    "combined workspace.rs": "d040c5c58dc95f883796df526c1d8379db875f9dc80b4160e9424573a7ffb572",
+    "combined engine.rs": "774d254ed35d6ecd3c6890d2352d903ca775f677ba620b8656cda9f8847fbbe0",
+    "combined engine/parallel.rs": "1af88b8e30e6fa5a0657efee86227dc3a33c4e2e6a1b991506b7f133eab7d46f",
+    "combined block.rs": "c663585d037f9ba1aa32ee85009ce4c9ee8802ae92a21a4f9f083b0b035de910",
+    "combined block/parallel.rs": "b5af386ca5d1b3b20011fe2c757176000e435c63968a1aed883f3bffea4c3a47"
+  },
+  "library_sha256": {
+    "public": "e2e0f6b8961ac6dee03ad07343d92ae04e3122ccd718c89e8a41e6afe3f4b7cc",
+    "public_place": "4fe677ccdd3743173b70f83ea79dfe251a8f828f93def446e7329277c314cbae",
+    "native": "127fd3f9945585f9015f5468f3b2c866f7995227007bf1abf7f7293ce0c9f7b4",
+    "native_place": "4b160dcd7979029cd91cc4f8a784d24f876de87195601aa955d02cf100af0042",
+    "rayon": "bc086c3e00f46824a222923094618b8279ed535bf6c52f3742de0849ed7258f1",
+    "fearless_simd": "09dc23000ff66eb3b3a828b5c857c71f8ed3b6fe80646888c120ceff6b92db64"
+  },
+  "measured_binary_sha256": "24ba5808eea3a64a6c3f25319b9853791903447459d66cda44ad98d3535b593b",
+  "evidence_sha256": {
+    "complete_evidence_manifest": "c163688f572725d8ff55f193f237da0bc64f93841648ea80e96e13fd1fde0e18",
+    "original_heap_result": "9cbf6e70f268e69304cc432158e12e509a71fb7fa273f9dc51e1b3b9ac108f25",
+    "all_observation_analysis": "53d59cafb3040bf75387871321a7fd9d5e93a4b53fcc57f13d119094ba161406",
+    "binary_dependency_freeze": "2258fa6233e198b27d513e1997bdcd1e36b1170f8afb7916e7b2d6d58f543649"
+  },
+  "summary_sha256": "6c2fbaaa781cd7293dafd4c4438da40688462fb662274da68235bc22d6881482",
+  "note": "This packet contains a public summary and hashes only. Original evidence and acceptance qualifications are unchanged."
+}

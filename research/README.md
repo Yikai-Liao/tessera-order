@@ -119,3 +119,10 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   u64 clears controls, Row16 has sensitivity qualifications, Wide128 remains
   inconclusive and Owned32 is concerning. Aggregate-only mixed evidence;
   no new gain over combined or runtime adoption, with further gates open.
+
+- [Native requested-heap observations](native-entry-heap/HEAP-SUMMARY.md):
+  48 balanced captures; wide/owned peaks and unresolved parallel variation
+  remain acceptance qualifications, not universal space guarantees.
+- [Rejected two-matching model](two-matching-model/SUMMARY.md):
+  equal-logical-copy-cost gate only, not DRAM traffic or measured runtime.
+  Sanitized provenance labels; no native mover or performance adoption.

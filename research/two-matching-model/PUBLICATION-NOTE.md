@@ -1,0 +1,3 @@
+# Publication transformation
+
+Original packets remain unchanged outside the repository. ORIGINAL_HASHES.sha256 preserves every original digest in order, replacing local scratch-relative names with semantic artifact labels. Labels identify external evidence, not files included here. The original hash-list SHA256 was 73c8ac7bed5b7e832b6efc65ec3501b1cd0743435b86a86e59be2587fdb646ea. The original manifest SHA256 was 589096611e8ed739820ec11c977ffd9b9d280ce29a541ea67c40ac7b1b1a9e83. MANIFEST.sha256 below is regenerated for this published packet. The source privacy audit describes the original packet; this note records the additional publication sanitization. No raw model inputs or model harness are included.

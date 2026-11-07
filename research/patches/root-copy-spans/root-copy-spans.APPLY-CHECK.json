@@ -1,0 +1,23 @@
+{
+  "upstream_archive": "0bc80b49d5efd5bd8b62165b170015e5803226b7",
+  "published_base_patch_sha256": "0d375cfb6f962fb6032c2a962833d9d003d15951403e220b69a84e0b1e0f6b7d",
+  "base_identity": "305068d9d6f4b1d0621c18426eee4945c8b45514f4b89037a276ed60fef37d70",
+  "base_files_verified": 25,
+  "source_identity": "3903f8d1dfc75231eeddcb2cee4e2d72e72c495bb37f179e92bf6adc1495a41b",
+  "candidate_files_verified": 29,
+  "changed_files": [
+    "rust/tessera-sort/Cargo.toml",
+    "rust/tessera-sort/src/block/parallel.rs",
+    "rust/tessera-sort/src/block/parallel/ordered.rs",
+    "rust/tessera-sort/src/block/parallel/ordered_reference.rs",
+    "rust/tessera-sort/src/block/parallel/ordered_tests.rs",
+    "rust/tessera-sort/src/block/parallel/span_native_tests.rs"
+  ],
+  "patch_sha256": "527af0902646b2f93cd2cae183ff81d1eb72a95abb1f95db61a027fb9f11c803",
+  "apply_check": "passed",
+  "applied_hashes": "all matched",
+  "reverse_check": "passed",
+  "complete_tree_reverse": "all file bytes, file modes and symlink targets restored",
+  "reverse_file_count": 148,
+  "builds_tests_timings_in_this_packaging": "none"
+}

@@ -63,44 +63,50 @@ impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for Narrow<E, SHIFT> {
     }
 }
 
-/// A run of adjacent, fully materialized buckets handed to one task.
-///
-/// The compaction materializes buckets in increasing address order, so
-/// consecutive buckets of a run are contiguous and a run is one slice. The run
-/// owns that slice from the moment the compaction drops it: the copy never
-/// writes a materialized bucket again and never reads one as a copy source.
-struct Job<T> {
+/// One bucket pointer with the provenance of its own materialized slice.
+struct Bucket<T> {
     start: *mut T,
     records: usize,
-    /// Ends of the buckets inside the run, relative to `start` and increasing.
-    bounds: Vec<usize>,
 }
 
-// SAFETY: a job owns its run exclusively. Runs come from disjoint bucket
-// ranges, and the compaction hands a bucket over only once.
+/// Adjacent materialized buckets scheduled together without merging borrows.
+///
+/// Each callback creates an exclusive slice borrow for only one bucket. Its
+/// pointer cannot be extended to cover the next bucket, even if their numeric
+/// addresses are adjacent. Retain each pointer until its child sort completes.
+struct Job<T> {
+    records: usize,
+    buckets: Vec<Bucket<T>>,
+}
+
+// SAFETY: each stored pointer exclusively owns its materialized bucket. The
+// partition transfers disjoint buckets once and no longer accesses them.
 unsafe impl<T: Send> Send for Job<T> {}
 
 impl<T: Send> Job<T> {
-    fn new(start: *mut T) -> Self {
+    fn new() -> Self {
         Job {
-            start,
             records: 0,
-            bounds: Vec::new(),
+            buckets: Vec::new(),
         }
     }
 
-    /// Extends the run by one materialized bucket, if it is adjacent.
+    /// Extends the batch by one adjacent bucket, keeping its individual borrow.
     fn push(&mut self, bucket: *mut T, records: usize, record_bytes: usize) -> bool {
-        // SAFETY: pointer arithmetic only; the comparison is between addresses.
-        let adjacent = unsafe { std::ptr::eq(self.start.add(self.records), bucket) };
-        if !adjacent {
-            return false;
+        if let Some(previous) = self.buckets.last() {
+            // SAFETY: the one-past pointer stays within this bucket's allocation
+            // and is only compared numerically, never dereferenced.
+            let adjacent = unsafe { std::ptr::eq(previous.start.add(previous.records), bucket) };
+            if !adjacent {
+                return false;
+            }
         }
         self.records += records;
-        self.bounds.push(self.records);
-        if core::mem::size_of::<T>() != 0 {
-            debug_assert_eq!(record_bytes, core::mem::size_of::<T>());
-        }
+        self.buckets.push(Bucket {
+            start: bucket,
+            records,
+        });
+        debug_assert_eq!(record_bytes, core::mem::size_of::<T>());
         true
     }
 
@@ -116,13 +122,11 @@ impl<T: Send> Job<T> {
         pool: &Pool<T>,
     ) {
         let mut workspace = pool.take();
-        let mut start = 0;
-        for &end in &self.bounds {
-            // SAFETY: the bounds are monotonic and no larger than the run, and
-            // the run is exclusively owned by this job. The slices are
-            // disjoint, so no other task aliases these records.
-            let child =
-                unsafe { core::slice::from_raw_parts_mut(self.start.add(start), end - start) };
+        for bucket in &self.buckets {
+            // SAFETY: this exact pointer and length came from one exclusive
+            // materialized slice, not a neighboring bucket's narrower borrow.
+            // Jobs are disjoint and compaction no longer accesses this bucket.
+            let child = unsafe { core::slice::from_raw_parts_mut(bucket.start, bucket.records) };
             if child.len() > 1 {
                 let varying = scan_varying_bits(child, candidate, &mut key);
                 Sorter::<T, E, CACHED> {
@@ -132,7 +136,6 @@ impl<T: Send> Job<T> {
                 }
                 .sort_node(child, varying);
             }
-            start = end;
         }
         pool.give(workspace);
     }
@@ -141,7 +144,9 @@ impl<T: Send> Job<T> {
 /// Recycled per-task workspaces.
 ///
 /// A task needs its own tile and block scratch. Allocating one per run would
-/// cost a 64 KiB allocation per 32K records; the pool keeps one per worker.
+/// cost a 64 KiB allocation per 32K records. Completed jobs return their scratch
+/// for reuse. Reentrant key functions can suspend multiple jobs on one worker,
+/// so the number of simultaneously borrowed workspaces is not worker-bounded.
 struct Pool<T> {
     free: std::sync::Mutex<Vec<Workspace<T>>>,
 }
@@ -215,7 +220,7 @@ fn sort_prepared<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
             let mut visit = |bucket: &mut [T], visit_key: &mut E| {
                 let start = bucket.as_mut_ptr();
                 let records = bucket.len();
-                let mut job = pending.take().unwrap_or_else(|| Job::new(start));
+                let mut job = pending.take().unwrap_or_else(Job::new);
                 if !job.push(start, records, record_bytes) {
                     // The compaction materializes buckets in increasing
                     // addresses, so a gap means the previous run is complete.
@@ -227,7 +232,7 @@ fn sort_prepared<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
                         tile_bytes,
                         &pool,
                     );
-                    job = Job::new(start);
+                    job = Job::new();
                     assert!(job.push(start, records, record_bytes));
                 }
                 if job.bytes() >= MIN_TASK_BYTES {
@@ -321,3 +326,6 @@ fn prepare_sort<T, E: Extract<T>>(arr: &mut [T], key: &mut E, tile_bytes: usize)
     }
     Some(varying)
 }
+
+#[cfg(test)]
+mod bucket_borrow_tests;

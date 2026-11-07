@@ -43,8 +43,8 @@
 //! of up to 32 KiB on the stack, with at most 22 levels for 128-bit keys.
 //!
 //! These bounds describe the sequential API. With `rayon`, parallel calls use
-//! bounded per-worker scratch; see the parallel functions for the worker-count
-//! dependent memory bound.
+//! reusable child workspaces; see the parallel functions for the workspace-
+//! count dependent memory bound and the reentrant-key qualification.
 //!
 //! The free functions allocate this scratch during each call. A [`Workspace`]
 //! keeps it between calls.
@@ -162,12 +162,13 @@ pub mod thresholds {
 ///
 /// # Memory
 ///
-/// Uses bounded per-worker scratch rather than a full-size output buffer.
-/// With P workspaces, heap scratch is O(√n + √(Pn) + P) for a fixed record
-/// size and key width. P is bounded by the current pool size and input grain
-/// count. For fixed P this is O(√n), but memory grows with parallelism. Each
-/// worker may also keep a tile and cursor tables as described in the crate-level
-/// memory documentation. Rayon owns its thread stacks and pool allocations.
+/// Uses reusable workspaces rather than a full-size output buffer. With W
+/// workspaces and R root buckets, heap scratch is O(√n + √(Wn) + W + R) for
+/// fixed record size and key width. Ordinary non-reentrant keys lease at most
+/// one workspace per worker. Keys that enter Rayon can suspend several jobs
+/// on one worker; W is then bounded by the number of root bucket jobs rather
+/// than the pool size. Each workspace also retains bounded tile storage.
+/// Rayon owns its thread stacks and pool allocations.
 ///
 /// # Examples
 ///

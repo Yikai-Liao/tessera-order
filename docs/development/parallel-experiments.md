@@ -224,8 +224,11 @@ bucket, and such a bucket is neither written again nor read again as a copy
 source, so the hook is a safe hand-off point: the crate now queues a run of
 adjacent materialized buckets on the Rayon scope as soon as the run reaches
 `MIN_TASK_BYTES`, and the workers sort those runs while the rest of the array
-is still being compacted. Runs take their workspaces from a pool that keeps at
-most one per running worker, so the space bound does not change.
+is still being compacted. Runs take their workspaces from a reusable pool. The
+ordinary non-reentrant benchmark keys keep at most one leased workspace per
+worker; reentrant user keys can suspend several jobs on one worker, so this is
+not an unconditional workspace-count bound. See the current space account in
+[the parallel design](../design/parallel.md).
 
 Measured as before (one binary, interleaved blocks, median, full output
 verification, AMD Ryzen 7 8845H: 8 cores, 16 threads, N=10M):
@@ -264,3 +267,19 @@ serial equality and outlier routes before any partition happens, so
 about 15% on 10M records with 256 distinct values. Removing the serial root above
 would not change that: the whole sort is one materialization pass with no
 independent work behind it.
+
+## Public overlap borrowing correction
+
+Review of `6c657de` found that a batch retained the first materialized bucket's
+pointer and used it to reconstruct later adjacent buckets. Numeric adjacency
+is insufficient: the first pointer's borrowing provenance covers only its own
+slice. A two-bucket test using the actual partition callback and `Job::run`
+reproduced a default Stacked Borrows strict-provenance Miri failure at the second
+slice reconstruction, without invoking Rayon scheduling.
+
+The correction stores each bucket's own pointer and length. Scheduling,
+thresholds, key extraction and root movement are unchanged. Three focused
+scalar/owned/exclusive-borrow tests pass the same Miri model. The historical
+hardware results above are preserved as reported, not relabeled as measurements
+of the correction. Subsequent fair comparisons must identify the corrected
+public source separately from the frozen research combined implementation.

@@ -1,6 +1,7 @@
 # 0012: Optional parallel completion of materialized buckets
 
-Date: 2026-11-07. Status: experimental implementation; performance acceptance pending.
+Date: 2026-11-07. Status: experimental; scheduling and space accounting superseded
+by [0013](0013-materialized-bucket-overlap.md).
 
 ## Context
 

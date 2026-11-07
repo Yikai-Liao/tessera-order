@@ -12,40 +12,42 @@ inputs before partitioning. Inputs smaller than 1 MiB, and one-thread pools, run
 the sequential entry point. Single-digit, sampled-heavy-key and outlier routes
 also keep the existing sequential node engine.
 
-The root stable block partition completes and restores every record to the
-input slice. Only then do Rayon tasks receive sub-slices. Tasks split at bucket
-boundaries with `split_at_mut`; no bucket is divided and equal keys therefore
-cannot cross tasks. Each task also receives exclusive workspace storage.
-128-bit keys retain the sequential 64-bit specialization when only one half
-varies. The temporary order-probe keys are released before partitioning.
-Bucket groups are divided near the midpoint by record count, rather than by
-bucket count, to limit imbalance. At most one workspace per selected task group is
-allocated. The same workspace is reused for all buckets assigned to that task group.
+The root stable block partition materializes buckets in address order. Once a
+bucket is retired as a copy source and destination, the compaction callback
+transfers it to a pending batch. At 256 KiB, that batch becomes a Rayon scoped
+task. Child sorting can therefore overlap the remaining serial compaction.
+Single buckets are never split, so equal keys cannot cross tasks. The root
+scatter and compaction are still serial in this public implementation.
 
-No new unsafe record movement is needed. Existing sequential tile/block guards
-restore records on panic, and `rayon::join` waits for both branches before
-propagating a panic. Key functions implement `Fn + Sync`, while records only
-need `Send`. The API does not require `Clone` or `Copy` records.
-
-The first implementation does not parallelize the root partition or descend in
-parallel inside a single large bucket. Those stages can limit scaling. It also
-finishes small children after root compaction rather than inside its cache-hot
-callback. The split single-thread control measures this scheduling boundary's
-cost separately from parallel execution.
+Each batch stores a separate pointer and length for every bucket. Adjacent
+addresses do not permit extending one exclusive slice's pointer into the next
+slice. Keeping the original bucket pointers preserves their distinct borrowing
+provenance. Each task reconstructs only those exact slices. The pool mutex is
+held only while taking or returning workspace storage, never while invoking a
+key function or sorting records. Existing sequential movement guards restore a
+child on panic, and the scope joins all children before returning to the caller.
+Keys require `Fn + Sync`; records require only `Send`, not `Sync`, `Clone` or
+`Copy`. The 128-bit key path keeps its existing single-half specialization.
 
 ## Space bound
 
-Let P be the number of selected workspaces and n the input length. P is bounded
-by the current Rayon pool size, the input grain count and the root bucket count.
-The root workspace retains O(√n) block scratch. If mᵢ is the largest child ever
-processed by the i-th task group's workspace, the selected children lie in disjoint
-bucket groups, so Σmᵢ ≤ n and Σ√mᵢ ≤ √(Pn). Add O(P) for per-workspace tile,
-probe and fixed metadata storage, with record size and key width fixed.
+Let W be the number of workspace objects simultaneously leased or retained by
+the pool and n the input length. The root retains O(√n) scratch. Each child
+workspace is reused across distinct buckets; if mᵢ is its largest processed
+bucket, the selected maximum buckets are disjoint, so Σmᵢ ≤ n and
+Σ√mᵢ ≤ √(Wn). There is also O(W) fixed tile/cursor storage and O(R) batch
+metadata for R root buckets, with record size and key width fixed. The heap
+bound is O(√n + √(Wn) + W + R); it is not a full-size record output buffer.
 
-Heap scratch is therefore O(√n + √(Pn) + P), excluding Rayon's runtime and thread
-stacks. Fixed P preserves O(√n), but increasing the worker count increases memory.
-Each active worker also has the sequential tile cursor stack bound. Free calls
-drop all workspaces on return; no parallel reusable-workspace API is added yet.
+For ordinary non-reentrant extractors, no more than the pool's worker count
+can hold workspaces simultaneously. That is not a hard guarantee for arbitrary
+user keys: a key can enter Rayon, suspend its current job and execute another
+job on the same thread. W is conservatively bounded by the number of root
+bucket jobs, at most R, rather than by the worker count in that situation.
+Rayon's runtime, thread stacks and work recursively requested by user code are
+separate. A strict worker-count-dependent workspace cap for reentrant keys is
+not implemented by this dynamic scheduler. Free calls drop the pool on return;
+there is no parallel reusable-workspace API.
 
 ## Validation
 
@@ -53,7 +55,11 @@ drop all workspaces on return; no parallel reusable-workspace API is added yet.
 counts, exclusive borrows, Send-but-not-Sync records, Sync-only key functions,
 inconsistent keys, worker panics, integer and float encodings, and explicitly
 sized 1/2/4-thread pools. The existing sequential recovery suite remains relevant
-because tasks invoke the same record-moving kernels. Rayon scheduler tests are
+because tasks invoke the same record-moving kernels. Focused strict-provenance
+Miri tests exercise deferred adjacent bucket pointers with scalar, owned
+`String + Cell`, and exclusive `&mut Cell` records through the actual partition
+callback and batch kernel. These tests execute the batch sequentially; they do
+not validate Rayon scheduling. Rayon scheduler tests are
 not claimed as covered by Miri; they are explicitly excluded under Miri.
 
 Performance experiments follow the repository benchmark protocol: one binary,

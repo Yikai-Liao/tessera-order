@@ -72,6 +72,38 @@ Pull requests that show no sign of human review, such as unrelated edits, calls 
 
 Coding agents working in this repository should read [`AGENTS.md`](AGENTS.md).
 
+## Commit messages
+
+Commit messages and pull request titles follow [Conventional Commits 1.0](https://www.conventionalcommits.org/en/v1.0.0/). Pull requests are squash-merged, so the title becomes the commit on `main`; CI checks it, and commits inside the branch should follow the same form.
+
+```
+type(scope)!: summary
+
+Body: why the change is needed, one line per paragraph.
+
+Signed-off-by: Your Name <you@example.com>
+```
+
+| Type | For |
+|---|---|
+| `feat` | A new public API or user-visible capability |
+| `fix` | A correction of wrong behavior |
+| `perf` | A performance change, with measurements per [benchmarking](docs/development/benchmarking.md) |
+| `refactor` | Code restructured without a change in behavior |
+| `docs` | Documentation, comments and the documentation site |
+| `test` | Tests only |
+| `ci` | Workflows and `.github/scripts` |
+| `build` | Cargo, npm and tool configuration, such as the MSRV, Biome or Ruff |
+| `chore` | Other maintenance, such as releases |
+| `revert` | A revert of an earlier commit |
+
+- **Scope** is optional and one of `engine`, `block`, `key`, `simd`, `site`, `bench`, `fuzz` or `deps`; language packages add their own name when they land.
+- **Summary** is an imperative English phrase that says what changed, starting in lowercase unless it begins with a name, without a final period, and at most 64 characters so that the squash commit with ` (#123)` stays within 72.
+- **Breaking changes** add `!` after the type or scope and explain the migration in a `BREAKING CHANGE:` paragraph.
+- **One type per pull request.** A change that needs two types is usually two pull requests.
+
+`CHANGELOG.md` is still written by hand; the types classify history, they do not generate it.
+
 ## Sign-off (DCO)
 
 Every commit in a pull request must carry a `Signed-off-by` line that certifies the [Developer Certificate of Origin 1.1](https://developercertificate.org/): that you wrote the change or otherwise have the right to submit it under the project license.

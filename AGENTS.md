@@ -54,4 +54,4 @@ Never call a change faster or slower without measurements per [`docs/development
 
 ## Commits
 
-English, with a summary line that says what changed. Sign off (`git commit -s`) with the configured identity and add an `Assisted-by:` or `Co-authored-by:` trailer.
+Commits and pull request titles follow [Conventional Commits](CONTRIBUTING.md#commit-messages): `type(scope)!: summary`, at most 64 characters; CI checks the title, which becomes the squash commit. Sign off (`git commit -s`) with the configured identity and add an `Assisted-by:` or `Co-authored-by:` trailer.

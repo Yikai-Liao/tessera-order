@@ -19,3 +19,4 @@ Each file records one decision that shapes the project: the context, the decisio
 | [0013](0013-compare-with-the-previous-main-sample.md) | Alert on a fixed percentage from the previous main sample | 2026-11-07 |
 | [0014](0014-scalar-default-insertion-finishing.md) | Use scalar extraction for default insertion finishing | 2026-11-07 |
 | [0015](0015-align-continuous-benchmark-branches.md) | Align branches in continuous benchmark builds | 2026-11-07 |
+| [0016](0016-conventional-commit-titles.md) | Write commit and pull request titles as Conventional Commits | 2026-11-07 |

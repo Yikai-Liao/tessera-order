@@ -1,5 +1,7 @@
 ## Summary
 
+<!-- The title follows Conventional Commits, for example `fix(block): keep records when a key panics`; see CONTRIBUTING.md. -->
+
 <!-- What this changes and why. Link the issue it addresses. -->
 
 ## Validation

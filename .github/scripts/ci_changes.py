@@ -16,8 +16,8 @@ DOCS_SITE_FILES = {"package.json", "package-lock.json", ".github/workflows/docs.
 # language's tests implement them.
 PROSE_DIRS = ("assets/",)
 SHARED_PROSE_DIRS = ("conformance/",)
-# The `changes` job tests these scripts and dco.yml runs the sign-off check on
-# every pull request, so no language build needs to rerun for them.
+# The `changes` job tests these scripts, and dco.yml and pr-title.yml run the
+# sign-off and title checks, so no language build needs to rerun for them.
 CI_SCRIPTS = (".github/scripts/",)
 # The `changes` job runs Biome and Ruff over the whole repository, and no
 # language build reads their settings.

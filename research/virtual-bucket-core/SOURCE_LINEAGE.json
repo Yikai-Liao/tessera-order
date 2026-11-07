@@ -1,0 +1,26 @@
+{
+  "validation_origin": "tessera-virtual-bucket-prototype/evidence/VALIDATION.md",
+  "files": {
+    "src/lib.rs": {
+      "origin": "tessera-virtual-bucket-prototype/src/lib.rs",
+      "validated_sha256": "7fc007b5ddd796e0f99cd385f53dbdd9e68ca70bdd79934b9ed7b51bdf504b33",
+      "staged_sha256": "7fc007b5ddd796e0f99cd385f53dbdd9e68ca70bdd79934b9ed7b51bdf504b33"
+    },
+    "tests/stability.rs": {
+      "origin": "tessera-virtual-bucket-prototype/tests/stability.rs",
+      "validated_sha256": "f5ed2fcae48c8756528f972bae61cf2547912ce6f7878bd5d8c0dcdd35078d12",
+      "staged_sha256": "f5ed2fcae48c8756528f972bae61cf2547912ce6f7878bd5d8c0dcdd35078d12"
+    },
+    "Cargo.toml": {
+      "origin": "tessera-virtual-bucket-prototype/Cargo.toml",
+      "validated_sha256": "9a419a59ad0730258bc9203c934f872b9ed323ee6d579a40ada9bd2f961e8540",
+      "staged_sha256": "9a419a59ad0730258bc9203c934f872b9ed323ee6d579a40ada9bd2f961e8540"
+    },
+    "Cargo.lock": {
+      "origin": "tessera-virtual-bucket-prototype/Cargo.lock",
+      "validated_sha256": "91766c4373bcf2b5290f01e1c6a6780b7c1b60ac9168225240de9b933f0f6a53",
+      "staged_sha256": "91766c4373bcf2b5290f01e1c6a6780b7c1b60ac9168225240de9b933f0f6a53"
+    }
+  },
+  "excluded_validated_target": "src/main.rs (benchmark CLI)"
+}

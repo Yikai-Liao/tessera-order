@@ -56,6 +56,24 @@ Step 1 below settles the open points on this hardware:
 2. **Noise.** The A/A range within a job, the spread of one shard across three jobs, and `bencher noise --format json` run in the same image, which measures compute and cache jitter. The A/A pair measures this workload; `bencher noise` explains a wide A/A range when there is one. If the A/A range is wider than the differences the report needs to resolve, block count or sample duration goes up, at the cost of more shards.
 3. **Host conditions.** Bencher documents that its runner, by default, disables ASLR, SMT, turbo boost and the NMI watchdog and sets the performance governor. Step 1 confirms which of these hold on the shared `intel-v1` runners, and the report states them beside the spec, because turbo boost and SMT change absolute times.
 
+### Running on other machines
+
+Bencher's hosted `intel-v1` runners produce the release numbers, but the suite must not depend on them: a contributor must be able to run it on their own hardware, to investigate a result, try a change, or measure a CPU Bencher does not have. Bencher's software is fine to depend on; its hosted machines are not. The runner itself never calls Bencher, and the Bencher CLI drives it the same way everywhere:
+
+| Where | How | Host conditions |
+|---|---|---|
+| Hosted runner (release) | `bencher run --image <digest> --spec intel-v1 --testbed intel-v1-compare` from the workflow | Bencher's runner tuning, confirmed in step 1 |
+| Own machine, plain | `bencher run --testbed <machine> --adapter json -- compare run --shard K` runs the executable on the local host. With `--dry-run`, nothing is stored; without it, the results join the same project as another Testbed, comparable in the console with the release history | As the machine is; the runner records them |
+| Own machine as a runner | Bencher's [self-hosted runner](https://bencher.dev/docs/explanation/self-hosted-runners/) on the machine, assigned its own Spec, and `bencher run --image <digest> --spec <own-spec>`: the same image, job model, stored output and host tuning (ASLR, SMT, turbo and the NMI watchdog off, the performance governor) as the hosted runner. It needs Linux 5.14 or later, root, and KVM for sandboxed jobs | Same tuning as the hosted runner |
+| Offline | The self-hosted runner against a self-hosted Bencher API server (`--host`), with no Bencher Cloud involved | Same tuning as the hosted runner |
+
+- **One result format.** The executable prints BMF on stdout and per-block samples on stderr in every row of the table, and with `--out DIR` also writes them to `DIR/shard-<k>/` as `bmf.json` and `blocks.jsonl`, with a `host.json`. The workflow downloads hosted job outputs into the same layout. The report reads only that directory, so it cannot tell where a run happened, and no path has code the others lack.
+- **The host is recorded by the runner.** `host.json` holds the CPU model, core count, kernel, frequency governor, turbo and SMT state as read from `/proc` and `/sys`, the compiler and flags, and the commit, so every report states its conditions, including runs without Bencher's tuning.
+- **Shards are optional off the hosted runners.** Without the 240 s limit, `compare run` without `--shard` executes every shard in one invocation, still one block plan per shard, so ratios mean the same as on Bencher.
+- **The build is the same.** `bench/fetch.py`, then `cargo build --release -p tessera-bench --features compare,compare-native` produce the executable the image wraps; the image is needed only for the self-hosted runner rows.
+
+Whether the free plan lets a self-hosted runner serve jobs for a project on Bencher Cloud is not documented; step 1 checks it. The plain and offline rows do not depend on the answer.
+
 ## Implementations
 
 | Variant | Crate and call | Stable | Extra memory | Question | Tasks |
@@ -154,7 +172,7 @@ bench/rust/
   src/variant.rs      the variant table and one adapter per implementation
   src/run.rs          batches, blocks, A/A, ratios
   src/shard.rs        suite and shard definitions
-  src/bin/compare.rs  CLI: list, validate, run --shard K, prints BMF
+  src/bin/compare.rs  CLI: list, validate, run [--shard K] --out DIR; prints BMF and block samples
   src/bin/memory.rs   counting allocator, prints BMF
   benches/smoke.rs    the Criterion smoke suite, now using `case`
   native/             C and C++ shims, one exported function per algorithm and element type
@@ -174,7 +192,7 @@ Each module owns one decision, so that a change touches one place:
 
 Two optional features keep third-party code out of the workspace MSRV run (`cargo +1.85 test --workspace`), the Miri run and the smoke build: `compare` adds the Rust crates, and `compare-native` adds the C and C++ variants, which need `bench/fetch.py` and a C++17 compiler. CI runs `validate` with both on stable. `build.rs` never downloads anything; it fails with the fetch command if `compare-native` is on and the sources are missing.
 
-The report is generated by a TypeScript module next to the existing ones in `.github/scripts/bencher/`, from the BMF results of all shards. It reuses their chart and Markdown code, and it is what the release attaches and the README links. The `bench/report/` and `bench/cases/` directories planned in [`bench/README.md`](../../bench/README.md) are no longer needed.
+The report is a TypeScript module in `bench/report/`, run with `npm run bench:report -- DIR` on a results directory, locally or in the workflow. It imports the chart and SVG code of `.github/scripts/bencher/` rather than living there, because it is not tied to CI. Its output is what the release attaches and the README links. The `bench/cases/` directory planned in [`bench/README.md`](../../bench/README.md) is no longer needed; suites live in `shard.rs`.
 
 ## Figures
 
@@ -273,9 +291,9 @@ The report module renders every figure as SVG from the stored job outputs and Me
 
 | Step | Delivers | Done when |
 |---|---|---|
-| 1. Feasibility on Bencher | A throwaway shard: Tessera A/A and `std-stable` on 10 cases, printed as BMF on branch `compare`, plus `bencher noise` | The three points under [Bencher's model](#bencher-s-model) are settled; shard time per case is measured |
+| 1. Feasibility on Bencher | A throwaway shard: Tessera A/A and `std-stable` on 10 cases, printed as BMF on branch `compare`, plus `bencher noise` | The three points under [Bencher's model](#bencher-s-model) and the self-hosted runner question under [Running on other machines](#running-on-other-machines) are settled; shard time per case is measured |
 | 2. Shared generator | `case.rs` in the library; `smoke.rs` uses it | Smoke inputs hash identically before and after; Bencher shows no new IDs |
-| 3. Runner | `variant`, `check`, `run`, `shard`, `compare` with Tessera and the std sorts | Self-test: a deliberately wrong variant that also mutates its input is caught, and every variant receives the original input; `validate` passes in CI |
+| 3. Runner | `variant`, `check`, `run`, `shard`, `compare` with Tessera and the std sorts | `compare run` works on a contributor's machine directly and under `bencher run --dry-run`, writing the results directory without the hosted runners; self-test: a deliberately wrong variant that also mutates its input is caught, and every variant receives the original input; `validate` passes in CI |
 | 4. Rust competitors | The crate adapters behind `compare` | `list` shows the capability table; `validate` passes or marks unsupported types |
 | 5. Native competitors | `fetch.py`, `build.rs`, the shims behind `compare-native` | Every license is recorded with its commit; the static executable builds on the GitHub build host; `validate` passes; the report names each SIMD sort's dispatched level |
 | 6. Memory | `memory` executable | Peak bytes for every variant and case up to 1,000,000 |

@@ -662,12 +662,18 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
 
 /// Chooses the widest cursor table that fits beside the tile, capped by
 /// record count to avoid clearing mostly empty buckets on wide records.
-fn tile_digit_bits(records: usize, record_bytes: usize) -> usize {
+fn tile_digit_bits<T>(records: usize, record_bytes: usize) -> usize {
     let tile_bytes = records.saturating_mul(record_bytes);
     // The widest table that still fits: `2 * 2^width` bytes of cursors.
     let widest = (tile_bytes / 2).max(1).ilog2() as usize;
-    // Limit empty-bucket work to at most eight times the record count.
-    let by_records = records.max(1).ilog2() as usize + 3;
+    // Limit empty-bucket work to at most eight times the record count, or four
+    // when a record is wider than a machine word: a wider record leaves fewer
+    // records per tile for the same table, so a table sized like the record
+    // count would spend the tile on buckets that stay empty. 16-byte records,
+    // 10M keys, random: 7.8% faster at four (9 of 9 rounds, A/A spread 1.8%);
+    // 128-byte records are unchanged, where the byte cap already decides.
+    let slack = if core::mem::size_of::<T>() > 8 { 2 } else { 3 };
+    let by_records = records.max(1).ilog2() as usize + slack;
     widest
         .min(by_records)
         .clamp(MIN_TILE_DIGIT_BITS, MAX_TILE_DIGIT_BITS)
@@ -967,7 +973,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             return;
         }
         // Widest counting table this tile can afford; LSD spreads it over passes.
-        let table_width = tile_digit_bits(len, core::mem::size_of::<T>());
+        let table_width = tile_digit_bits::<T>(len, core::mem::size_of::<T>());
         let mut digits = [Digit { shift: 0, width: 0 }; MAX_DIGITS];
         let passes = plan_digits(varying, table_width, &mut digits);
         // Compare an MSD descent against the flat plan in passes over the tile.

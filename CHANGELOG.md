@@ -17,6 +17,7 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Changed
 
+- Narrow the tile cursor table for records wider than a machine word, so a 16-byte record fills its tile with buckets that hold records: 10M random keys are 7.8% faster (9 of 9 rounds, A/A spread 1.8%).
 - Reuse the optional SIMD scan to confirm ascending primitive keys after the order probe.
 - Use pair-window iteration for scalar inversion scans while retaining one key evaluation per scanned record.
 - Give insertion finishing a unit-returning entry point shared by both backends, and skip portable SIMD dispatch when the existing scan gate guarantees scalar execution.

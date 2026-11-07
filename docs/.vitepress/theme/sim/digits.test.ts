@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
-import { planDigits } from "./digits.ts";
+import { planDigits, tileDigitBits } from "./digits.ts";
 
 const show = (v: bigint, w: number) =>
   planDigits(v, w, 128)
@@ -30,4 +30,10 @@ for (const w of [6, 8, 11, 14]) {
     if ((mask & v) !== v) throw new Error("uncovered bits");
   }
 }
+// `tile_digit_bits`: the table must fit beside the tile, and its buckets are capped at
+// 8 per record, or 4 above 8 bytes. 2,048 16-byte records get 13 bits, not 14.
+check(String(tileDigitBits(1024, 8)), "12");
+check(String(tileDigitBits(1024, 16)), "12");
+check(String(tileDigitBits(4096, 8)), "14");
+check(String(tileDigitBits(2048, 16)), "13");
 console.log("digit planner model ok");

@@ -54,6 +54,8 @@ export function planDigits(varying: bigint, width: number, bits: number): Digit[
 export function tileDigitBits(records: number, recordBytes: number): number {
   const tileBytes = records * recordBytes;
   const widest = Math.floor(Math.log2(Math.max(1, Math.floor(tileBytes / 2))));
-  const byRecords = Math.floor(Math.log2(Math.max(1, records))) + 3;
+  // At most 8 buckets per record, or 4 for records wider than a machine word.
+  const slack = recordBytes > 8 ? 2 : 3;
+  const byRecords = Math.floor(Math.log2(Math.max(1, records))) + slack;
   return Math.min(14, Math.max(6, Math.min(widest, byRecords)));
 }

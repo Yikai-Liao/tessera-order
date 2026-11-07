@@ -1,0 +1,7 @@
+{
+  "source_sha256": "7f15424ade184a46ccabb039084bfc651d32028bbe18a657416df964beedff1c",
+  "original_protocol_sha256": "31d8dcd9e3cc8ae665be3b31fba5da1f21efa5f633914fc29c177174b47be240",
+  "numeric_model_output_sha256": "3ccf09e7769ac261b33c49d42572b12ceea19f80081460afbae6872d9d540287",
+  "execution_result_sha256": "32dd410d35a1c7fd6815fbb366cb31a1685ea024ed2ba5bfe4588daedd375d79",
+  "publication_scope": "Exact safe source; editorial protocol/result summary and extracted invariant proof. Original wrappers and numerical output remain outside repository."
+}

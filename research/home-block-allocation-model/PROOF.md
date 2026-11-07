@@ -1,0 +1,15 @@
+<!-- SPDX-License-Identifier: BSD-2-Clause -->
+# Allocation ownership and credit invariants
+
+## Ownership and progress proof
+
+A physical full-capacity slot is exactly one of UNREAD, FREE(pool,index), or OCCUPIED(logical). Reserved scratch starts occupied but uninitialized and is never in a pool. A source full block is UNREAD through its final record write; only afterward is it pushed into its original shard's pool. The short input tail is never represented as a reusable physical slot. Every source read asserts UNREAD, and every output write asserts the directory's unique occupied logical identity. Each segment owns a disjoint rank interval and advances monotonically once per original record; initialized-count checks cover each logical output length exactly without storing ordinals or payloads.
+
+For a desired full body home d, an immediate positive FREE observation is revalidated under the logically ordered pool transaction. Same-pool selection uses swap_remove and updates any moved entry's inverse index. Foreign selection pops donor q from requester i and replaces d in owner j's existing entry; q's owner/index is updated and d becomes occupied. The requester loses one credit, the foreign pool loses none. Misses, including stale observations, immediately use a normal requester pop; no waiting or eviction exists. Thus each pool has exactly R + original releases - requested body allocations credits. This preserves the baseline no-starvation proof; runtime asserts check it and prevent capacity growth. Counts satisfy total free <= PR+Q; this inventory ceiling is not treated as a probability or hit-rate bound.
+
+Mutation checks verify removed entries and every changed inverse entry locally. Full bidirectional pool/slot scans run initially, finally, every 2,048 large source-block quanta and after every tiny record quantum. Distinct entries cannot share one inverse location, so these scans need no seen array. Final directory/slot inverse checks prove injectivity and absence of leftover UNREAD slots. Initialization counts, cursor endpoints and immutable boundary mappings are checked at completion.
+
+Staged fixtures cover stale same-pool indices after swap_remove, stale owners after foreign donation, stale occupied observations after a competing allocation, and an unread observation followed by source retirement. These validate fail-closed metadata behavior, not native atomics, memory ordering, poisoning, locking, race freedom or a real concurrent implementation. Canonical numeric lock ordering is counted, not executed. No locks are held across simulated source writes.
+
+For H fixed targets and c nontrivial cycles, natural restoration records are (F-H+c)B+tail. Exact savings include changes in cycles, not simply H*B. Reserved boundary fragments are reported separately and cannot gain home placement. Body-home misses are split into unread/occupied; genuinely free homes into same/foreign pool. Count successful homes, inventory at requests, ten fixed progress bins, all pool mutations, location operations, logical lock transactions/acquisitions and failed revalidations. No conversion to nanoseconds.
+

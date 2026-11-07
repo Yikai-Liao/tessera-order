@@ -157,3 +157,8 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   64 full-reference calls and 32 validated traces show early overlap while
   synchronous children delay their own owners. CPU and perturbation caveats
   prevent performance acceptance or hardware attribution; runtime unchanged.
+
+- [Rejected home-block allocation model](home-block-allocation-model/README.md):
+  safe metadata-only credit exchange passed its invariants but missed the
+  predeclared restoration-copy investment gate. No native mover or runtime
+  adoption; original LIFO has no pool locks.

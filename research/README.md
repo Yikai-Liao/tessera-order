@@ -101,3 +101,9 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   exact public-to-combined-to-draining source patches and scoped validation.
   The two-case screen found no accepted gain; broad controls prevent claiming
   a controlled slowdown magnitude. No runtime adoption or raw timing data.
+
+- [R16 coarse-child completion diagnostic](coarse-child-profile/README.md):
+  214 timing-stage and 60 smoke calls passed complete references. Selected
+  child callbacks and parent partition work both remain substantial; two
+  large mode anomalies remain unexplained. No tile-sharing implementation,
+  accepted gain or runtime adoption; summary-only publication.

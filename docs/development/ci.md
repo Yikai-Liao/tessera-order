@@ -4,7 +4,7 @@
 
 ## Lanes
 
-Every job holds one of the account's concurrent job slots, and a free account runs 20 at once. A pull request that touches Rust peaked at 21 jobs before the split below and peaks at 15 now, counting every workflow it triggers: 12 from `CI`, one benchmark build, `DCO` and `PR title`. A language fits into a fixed number of lanes, not one per operating system and compiler version, because the full matrices Rust, C++ and Python already declare would need 28 test cells, plus the lint, Miri and sanitizer jobs each of them adds.
+Every job holds one of the account's concurrent job slots, and a free account runs 20 at once. A pull request that touches Rust peaked at 21 jobs before the split below and peaks at 16 now, counting every workflow it triggers: 13 from `CI`, one benchmark build, `DCO` and `PR title`. A language fits into a fixed number of lanes, not one per operating system and compiler version, because the full matrices Rust, C++ and Python already declare would need 28 test cells, plus the lint, Miri and sanitizer jobs each of them adds.
 
 | Check | Pull request | `main` |
 |---|---|---|
@@ -14,8 +14,9 @@ Every job holds one of the account's concurrent job slots, and a free account ru
 | AddressSanitizer | `asan` | the same |
 | `cargo package` and the no-std target | in `rust / lint` | the same |
 | Benchmark build | one job, both configurations | the same |
+| Native comparison smoke checks and report generation | `comparison`, using Clang | the same |
 
-The split keeps `main` at full coverage, which no pull request waits for, and keeps the pull request path short. Its longest jobs are AddressSanitizer and Miri's std suite, about 90 seconds to two minutes each; both are one runner each, so shortening them further means interpreting or testing less, not adding runners.
+The split keeps `main` at full coverage, which no pull request waits for, and keeps the pull request path short. AddressSanitizer and Miri's std suite take about 90 seconds to two minutes each; both are one runner each, so shortening them further means interpreting or testing less, not adding runners. The comparison job also builds the pinned C/C++ competitors before validating the smoke suite and generating a partial report.
 
 A cell's commands live in one composite action, [`rust-test`](../../.github/actions/rust-test/action.yml), which both the pull request cells and the extra `main` cells call. A job's `if` cannot branch on `matrix` — the matrix is expanded after the condition is evaluated — so the two sets of cells are two jobs over one action rather than one matrix with a skip per cell.
 

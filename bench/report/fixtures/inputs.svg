@@ -1,0 +1,172 @@
+<!-- SPDX-License-Identifier: BSD-2-Clause -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 622" width="720" height="622" role="img" aria-labelledby="t d">
+<title id="t">Tessera is fastest on 0 of 10 input patterns, top 3 on 10</title>
+<desc id="d">1,000,000 u64 keys; each dot is one sort, placed by its speed relative to slice::sort. Speed, Rank: random 2.6×, 2nd; 256 values 2.6×, 2nd; 16 values 2.6×, 2nd; Zipf 1.1 2.6×, 2nd; Zipf 2 2.6×, 2nd; 99% one key 2.6×, 2nd; sorted 2.6×, 2nd; reverse 2.6×, 3rd; 99% sorted 2.6×, 2nd; sorted runs 2.6×, 2nd</desc>
+<style>
+  .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
+  .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
+  .tag { fill: none; stroke: #c9c8c2; }
+  .slower { fill: #e8622f; } .faster { fill: #4a80e6; }
+  .stem-slower { stroke: #e8622f; } .stem-faster { stroke: #4a80e6; }
+  .within { fill: #fafaf8; stroke: #8d8c86; }
+  text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; font-feature-settings: "tnum", "cv11"; }
+  .val { font-size: 12px; } .sub { font-size: 11px; } .tiny { font-size: 10px; } .strong { font-weight: 600; }
+  .hero { font-size: 28px; font-weight: 600; letter-spacing: -0.6px; font-feature-settings: "pnum"; }
+  .stat { font-size: 18px; font-weight: 600; }
+  .caps { font-size: 10.5px; font-weight: 600; letter-spacing: 1.1px; }
+  @media (prefers-color-scheme: dark) {
+    .panel { fill: #1e1e1d; stroke: #3a3a37; } .ring { stroke: #1e1e1d; }
+    .ink { fill: #e8e7e3; } .muted { fill: #a3a29b; } .rule { stroke: #30302e; } .axis { stroke: #6f6e69; }
+    .tag { stroke: #4a4a46; }
+    .within { fill: #1e1e1d; stroke: #6f6e69; }
+  }
+</style>
+<style>
+  .tessera { fill: #4a80e6; } .radix { fill: #e8622f; } .comparison { fill: #8d8c86; }
+  .edge-tessera { stroke: #4a80e6; } .edge-radix { stroke: #e8622f; } .edge-comparison { stroke: #8d8c86; }
+</style>
+<rect class="panel" x="0.5" y="0.5" width="719" height="621" rx="12"/>
+<text class="ink stat" x="24.0" y="40.0">Tessera is fastest on 0 of 10 input patterns, top 3 on 10</text>
+<text class="muted sub" x="24.0" y="60.0">1,000,000 u64 keys; each dot is one sort, placed by its speed relative to slice::sort</text>
+<line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
+<line class="axis" x1="369.7" x2="369.7" y1="90" y2="552" stroke-width="1"/>
+<text class="ink tiny" x="369.7" y="570.0" text-anchor="middle">slice::sort</text>
+<line class="rule" x1="435.7" x2="435.7" y1="90" y2="552" stroke-width="1"/>
+<text class="muted tiny" x="435.7" y="570.0" text-anchor="middle">2×</text>
+<line class="rule" x1="303.8" x2="303.8" y1="90" y2="552" stroke-width="1"/>
+<text class="muted tiny" x="303.8" y="570.0" text-anchor="middle">1/2×</text>
+<line class="rule" x1="501.6" x2="501.6" y1="90" y2="552" stroke-width="1"/>
+<text class="muted tiny" x="501.6" y="570.0" text-anchor="middle">4×</text>
+<line class="rule" x1="237.9" x2="237.9" y1="90" y2="552" stroke-width="1"/>
+<text class="muted tiny" x="237.9" y="570.0" text-anchor="middle">1/4×</text>
+<line class="rule" x1="567.5" x2="567.5" y1="90" y2="552" stroke-width="1"/>
+<text class="muted tiny" x="567.5" y="570.0" text-anchor="middle">8×</text>
+<line class="rule" x1="172.0" x2="172.0" y1="90" y2="552" stroke-width="1"/>
+<text class="muted tiny" x="172.0" y="570.0" text-anchor="middle">1/8×</text>
+<text class="muted sub" x="162.0" y="586.0">← slower</text>
+<text class="muted sub" x="577.5" y="586.0" text-anchor="end">faster →</text>
+<text class="caps muted" x="642.7" y="102.0" text-anchor="end">SPEED</text>
+<text class="caps muted" x="696.0" y="102.0" text-anchor="end">RANK</text>
+<text class="caps muted" x="24.0" y="102.0">UNIFORM</text>
+<text class="ink" x="24.0" y="133.0">random</text>
+<circle class="comparison ring" cx="369.0" cy="129" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="435.6" cy="129" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="447.3" cy="129" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="468.5" cy="122" r="4" stroke-width="2"/>
+<circle class="radix ring" cx="435.7" cy="122" r="4" stroke-width="2"/>
+<circle class="tessera ring" cx="460.9" cy="129" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="482.1" cy="129" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="482.1" cy="129" r="5.5" fill="none" stroke-width="2"/>
+<text class="val ink" x="642.7" y="133.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="133.0" text-anchor="end">2nd</text>
+<text class="caps muted" x="24.0" y="168.0">FEW DISTINCT KEYS</text>
+<text class="ink" x="24.0" y="199.0">256 values</text>
+<circle class="comparison ring" cx="369.0" cy="195" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="435.6" cy="195" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="447.3" cy="195" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="468.5" cy="188" r="4" stroke-width="2"/>
+<circle class="radix ring" cx="435.7" cy="188" r="4" stroke-width="2"/>
+<circle class="tessera ring" cx="460.9" cy="195" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="482.1" cy="195" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="482.1" cy="195" r="5.5" fill="none" stroke-width="2"/>
+<text class="val ink" x="642.7" y="199.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="199.0" text-anchor="end">2nd</text>
+<text class="ink" x="24.0" y="233.0">16 values</text>
+<circle class="comparison ring" cx="369.0" cy="229" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="435.6" cy="229" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="447.3" cy="229" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="468.5" cy="222" r="4" stroke-width="2"/>
+<circle class="radix ring" cx="435.7" cy="222" r="4" stroke-width="2"/>
+<circle class="tessera ring" cx="460.9" cy="229" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="482.1" cy="229" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="482.1" cy="229" r="5.5" fill="none" stroke-width="2"/>
+<text class="val ink" x="642.7" y="233.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="233.0" text-anchor="end">2nd</text>
+<text class="caps muted" x="24.0" y="268.0">SKEWED</text>
+<text class="ink" x="24.0" y="299.0">Zipf 1.1</text>
+<circle class="comparison ring" cx="369.0" cy="295" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="435.6" cy="295" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="447.3" cy="295" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="468.5" cy="288" r="4" stroke-width="2"/>
+<circle class="radix ring" cx="435.7" cy="288" r="4" stroke-width="2"/>
+<circle class="tessera ring" cx="460.9" cy="295" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="482.1" cy="295" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="482.1" cy="295" r="5.5" fill="none" stroke-width="2"/>
+<text class="val ink" x="642.7" y="299.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="299.0" text-anchor="end">2nd</text>
+<text class="ink" x="24.0" y="333.0">Zipf 2</text>
+<circle class="comparison ring" cx="369.0" cy="329" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="435.6" cy="329" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="447.3" cy="329" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="468.5" cy="322" r="4" stroke-width="2"/>
+<circle class="radix ring" cx="435.7" cy="322" r="4" stroke-width="2"/>
+<circle class="tessera ring" cx="460.9" cy="329" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="482.1" cy="329" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="482.1" cy="329" r="5.5" fill="none" stroke-width="2"/>
+<text class="val ink" x="642.7" y="333.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="333.0" text-anchor="end">2nd</text>
+<text class="ink" x="24.0" y="367.0">99% one key</text>
+<circle class="comparison ring" cx="369.0" cy="363" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="435.6" cy="363" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="447.3" cy="363" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="468.5" cy="356" r="4" stroke-width="2"/>
+<circle class="radix ring" cx="435.7" cy="356" r="4" stroke-width="2"/>
+<circle class="tessera ring" cx="460.9" cy="363" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="482.1" cy="363" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="482.1" cy="363" r="5.5" fill="none" stroke-width="2"/>
+<text class="val ink" x="642.7" y="367.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="367.0" text-anchor="end">2nd</text>
+<text class="caps muted" x="24.0" y="402.0">PRESORTED</text>
+<text class="ink" x="24.0" y="433.0">sorted</text>
+<circle class="comparison ring" cx="369.0" cy="429" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="435.6" cy="429" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="447.3" cy="429" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="468.5" cy="422" r="4" stroke-width="2"/>
+<circle class="radix ring" cx="435.7" cy="422" r="4" stroke-width="2"/>
+<circle class="tessera ring" cx="460.9" cy="429" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="482.1" cy="429" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="482.1" cy="429" r="5.5" fill="none" stroke-width="2"/>
+<text class="val ink" x="642.7" y="433.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="433.0" text-anchor="end">2nd</text>
+<text class="ink" x="24.0" y="467.0">reverse</text>
+<circle class="comparison ring" cx="369.0" cy="463" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="435.6" cy="463" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="447.3" cy="463" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="468.5" cy="456" r="4" stroke-width="2"/>
+<circle class="radix ring" cx="494.5" cy="463" r="4" stroke-width="2"/>
+<circle class="tessera ring" cx="460.9" cy="463" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="482.1" cy="463" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="482.1" cy="463" r="5.5" fill="none" stroke-width="2"/>
+<text class="val ink" x="642.7" y="467.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="467.0" text-anchor="end">3rd</text>
+<text class="ink" x="24.0" y="501.0">99% sorted</text>
+<circle class="comparison ring" cx="369.0" cy="497" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="435.6" cy="497" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="447.3" cy="497" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="468.5" cy="490" r="4" stroke-width="2"/>
+<circle class="radix ring" cx="435.7" cy="490" r="4" stroke-width="2"/>
+<circle class="tessera ring" cx="460.9" cy="497" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="482.1" cy="497" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="482.1" cy="497" r="5.5" fill="none" stroke-width="2"/>
+<text class="val ink" x="642.7" y="501.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="501.0" text-anchor="end">2nd</text>
+<text class="ink" x="24.0" y="535.0">sorted runs</text>
+<circle class="comparison ring" cx="369.0" cy="531" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="435.6" cy="531" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="447.3" cy="531" r="4" stroke-width="2"/>
+<circle class="comparison ring" cx="468.5" cy="524" r="4" stroke-width="2"/>
+<circle class="radix ring" cx="460.5" cy="524" r="4" stroke-width="2"/>
+<circle class="tessera ring" cx="460.9" cy="531" r="6.5" stroke-width="2"/>
+<circle class="ring" cx="482.1" cy="531" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="482.1" cy="531" r="5.5" fill="none" stroke-width="2"/>
+<text class="val ink" x="642.7" y="535.0" text-anchor="end">2.6×</text>
+<text class="val ink strong" x="696.0" y="535.0" text-anchor="end">2nd</text>
+<circle class="tessera" cx="28" cy="600" r="4"/>
+<text class="muted sub" x="38.0" y="604.0">Tessera</text>
+<circle class="within edge-tessera" cx="101.69" cy="600" r="3.5" stroke-width="1.5"/>
+<text class="muted sub" x="111.7" y="604.0">Tessera, Portable SIMD</text>
+<circle class="radix" cx="259.2" cy="600" r="4"/>
+<text class="muted sub" x="269.2" y="604.0">other radix sorts</text>
+<circle class="comparison" cx="374.69" cy="600" r="4"/>
+<text class="muted sub" x="384.7" y="604.0">comparison sorts</text>
+</svg>

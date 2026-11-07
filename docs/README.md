@@ -6,10 +6,10 @@ These files are also published as the documentation site, built from this direct
 |---|---|---|
 | [`guide/`](guide/) | Library users | [Getting started](guide/getting-started.md) and [reusing scratch memory with `Workspace`](guide/workspace.md) |
 | [`explain/`](explain/index.md) | Anyone learning the algorithm | [How Tessera works](explain/index.md), in reading order, with interactive figures |
-| [`design/`](design/) | Readers of the engine source | [Engine design](design/engine.md), [parallel sorting](design/parallel.md), and the [port from the research prototype](design/port.md) |
+| [`design/`](design/) | Readers of the engine source | [Engine design](design/engine.md), [parallel sorting](design/parallel.md), [comparison benchmarks](design/comparison-benchmarks.md), and the [port from the research prototype](design/port.md) |
 | [`development/`](development/) | Contributors | [Benchmark protocol](development/benchmarking.md), [continuous benchmarks](development/continuous-benchmarks.md), [parallel experiments](development/parallel-experiments.md), [continuous integration](development/ci.md), and the [documentation site](development/docs-site.md) |
 | [`decisions/`](decisions/README.md) | Anyone asking why | Decision records: context, decision and consequences |
-| [`proposals/`](proposals/) | Reviewers of planned work | [Python binding](proposals/python-binding.md) and [comparison benchmarks](proposals/comparison-benchmarks.md) |
+| [`proposals/`](proposals/) | Reviewers of planned work | [Python binding](proposals/python-binding.md) |
 
 Planned work is tracked in [`ROADMAP.md`](../ROADMAP.md), and release rules are in [`RELEASING.md`](../RELEASING.md).
 

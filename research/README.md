@@ -113,3 +113,9 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   Exact passed and unrun gates, MSRV check-only scope, Miri limitations and
   per-consumer versus per-physical-thread space boundaries remain explicit.
   This checkpoint does not adopt the native candidate into runtime.
+
+- [Existing native entry, formal W8 results](native-entry-w8-results/summary.md):
+  432 measured plus 48 warmup samples; 2,810 plus 48 verified sort calls.
+  u64 clears controls, Row16 has sensitivity qualifications, Wide128 remains
+  inconclusive and Owned32 is concerning. Aggregate-only mixed evidence;
+  no new gain over combined or runtime adoption, with further gates open.

@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "files": {
+    "identities-and-counts.json": {
+      "sha256": "1287295a9a3ce74979f973f35fcbe0d64ce725edfddfbe817bc8e2337656dc3a",
+      "bytes": 2380
+    },
+    "summary.md": {
+      "sha256": "7ee069ed67f7b7ee60835045966bda719ed703b4392f8cbf539ec7c0d6b46197",
+      "bytes": 18010
+    }
+  },
+  "scope": "Public summary aggregates and identities only. No raw samples, implementation source, execution harness, executable, internal paths, or machine identifiers."
+}

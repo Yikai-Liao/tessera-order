@@ -1,0 +1,63 @@
+{
+  "identities": {
+    "public_control_commit": "55b299b3716cd1af9e997f30b1a3c1813455d8be",
+    "native_origin_patch_sha256": "2265e704ebb25e0dba1a08e8d4431d1473fce09a740ac5e67ee5fe0b2c4dda4b",
+    "original_combined_freeze_identity": "bf3b2ea730f98fca2dfaf75f3baba732f7f5d67eaea8bafdbae17c684fe11bae",
+    "source_tree_identities": {
+      "public": "1da10e61b2b97346fbdbf5d0ad03310c66687ee59deb1693ade8bb61aa3eb331",
+      "public_placement": "1da10e61b2b97346fbdbf5d0ad03310c66687ee59deb1693ade8bb61aa3eb331",
+      "combined": "5d648aff62347ecfdded7066ecfbb2f810ebda7048b4a383c1d9ed560fc36c0b",
+      "combined_placement": "5d648aff62347ecfdded7066ecfbb2f810ebda7048b4a383c1d9ed560fc36c0b"
+    },
+    "source_tree_identity_method": "SHA256 of sorted compact JSON mapping every original crate src Rust filename to its SHA256; filenames relative to src, UTF-8, no final newline",
+    "driver_sha256": "b5982b9ad11501de709ff627f52629f413d28510e78cc84920a068d2b3ee75cb",
+    "parser_sha256": "3b307c13c6c6cf5a275ac54194f57f95f0c3987f09ce2eecad11db7c34f02246",
+    "analyzer_sha256": "4ed739491e9a412b49c9c6f5fdccb541b7d4fc6ad14f077b59d1cbac45ba10c6",
+    "binary_sha256": "69c008b6f10aa7f60761c4f899b542d8c547054232fdf42a3b03fd5765c7afc2",
+    "toolchain": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "features": [
+      "default",
+      "std",
+      "rayon",
+      "portable-simd"
+    ]
+  },
+  "counts": {
+    "owned32": {
+      "measured_samples": 108,
+      "warmup_samples": 12,
+      "measured_sort_calls": 2084,
+      "warmup_sort_calls": 12,
+      "all_sort_calls": 2096
+    },
+    "row16": {
+      "measured_samples": 108,
+      "warmup_samples": 12,
+      "measured_sort_calls": 128,
+      "warmup_sort_calls": 12,
+      "all_sort_calls": 140
+    },
+    "u64": {
+      "measured_samples": 108,
+      "warmup_samples": 12,
+      "measured_sort_calls": 165,
+      "warmup_sort_calls": 12,
+      "all_sort_calls": 177
+    },
+    "wide128": {
+      "measured_samples": 108,
+      "warmup_samples": 12,
+      "measured_sort_calls": 433,
+      "warmup_sort_calls": 12,
+      "all_sort_calls": 445
+    }
+  },
+  "totals": {
+    "measured_samples": 432,
+    "warmup_samples": 48,
+    "measured_sort_calls": 2810,
+    "warmup_sort_calls": 48,
+    "all_sort_calls": 2858
+  },
+  "status": "Completed initial four-case phase; mixed result; no adoption or whole-project completion."
+}

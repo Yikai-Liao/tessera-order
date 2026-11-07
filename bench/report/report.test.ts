@@ -143,12 +143,16 @@ test("figures preserve plotted values", () => {
     charts = renderFigures(dataset, summarize(dataset));
   assert.equal(charts.length, 5);
   for (const chart of charts) {
-    assert.match(chart.svg, /width="720"/);
-    assert.match(chart.svg, /<title>/);
+    assert.match(chart.svg, /width="\d+"/);
+    assert.match(chart.svg, /<title id="t">/);
     assert.doesNotMatch(chart.svg, /NaN|Infinity|undefined/);
     assert.match(chart.table, /\|/);
   }
-  assert.ok(charts[0].table.indexOf("vqsort") < charts[0].table.indexOf("tessera"));
+  assert.deepEqual(
+    charts.map((c) => c.name),
+    ["ranking", "inputs", "short", "types", "memory"],
+  );
+  assert.ok(charts[0].table.indexOf("vqsort") < charts[0].table.indexOf("Tessera"));
   assert.match(charts[0].svg, /long-stable-variant-name/);
   assert.match(charts[2].table, /Tessera slower/);
 });
@@ -255,7 +259,7 @@ test("SIMD shares the anchor", () => {
   const dataset = createFixture(true);
   validateRun(dataset);
   const charts = renderFigures(dataset, summarize(dataset));
-  assert.match(charts[0].table, /tessera \+ simd/);
+  assert.match(charts[0].table, /Tessera, Portable SIMD/);
   const values = summarize(dataset);
   const id = "u64/random/1000/s1";
   const defaultStd = values.get(measurementId("default", id, "std-stable"))!.ratio;

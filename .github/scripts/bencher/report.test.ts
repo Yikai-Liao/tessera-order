@@ -35,7 +35,7 @@ test("names cases in words and keeps the ID for copying", () => {
   assert.equal(report.caseLabel("not/a/benchmark"), "not/a/benchmark");
 });
 
-test("leads with counts and both charts, then call-outs and tables", () => {
+test("leads with counts and call-outs, then both charts and the tables", () => {
   const body = render(report.summarize(fixture()),
     { language: "rust", runUrl: "https://run", baseRef: "main", chartRef: "./chart.svg", trendRef: "./trend.svg" });
   assert.equal(body.split("\n")[0], "### Benchmarks · rust · 2 slower, 1 faster, 1 new");
@@ -43,9 +43,9 @@ test("leads with counts and both charts, then call-outs and tables", () => {
   const trend = body.indexOf("](./trend.svg)");
   const caution = body.indexOf("> [!CAUTION]");
   const tip = body.indexOf("> [!TIP]");
-  assert.ok(chart > 0 && chart < trend && trend < caution && caution < tip && tip < body.indexOf("#### Slower"));
-  assert.equal(body.split("\n").slice(0, 5).join("\n"),
-    "### Benchmarks · rust · 2 slower, 1 faster, 1 new\n\n![Changes against main](./chart.svg)\n\n![PR benchmark history](./trend.svg)");
+  assert.ok(caution > 0 && caution < tip && tip < chart && chart < trend && trend < body.indexOf("#### Slower"));
+  assert.equal(body.slice(body.indexOf("](./chart.svg)")).split("\n").slice(0, 3).join("\n"),
+    "](./chart.svg)\n\n![PR benchmark history](./trend.svg)");
   assert.match(body, /Worst: \{u32,u32\} · random · 48, 726 ns → \*\*800 ns\*\*, \*\*\+10\.2%\*\*/);
   assert.match(body, /1 case faster, 1 by 20% or more\.\*\* Best: u64 · 99% sorted · 1,000,000.*\*\*−29\.1%\*\*/);
   assert.match(body, /\*\*Overall run time −[\d.]+%\*\* against `main`, the geometric mean over 4 cases/);

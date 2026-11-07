@@ -42,8 +42,8 @@ The scripts run directly on Node.js 24. `report.ts` owns the result model and cu
 A comment is written to be read top-down:
 
 1. The title counts slower, faster and new cases. It is also the check title.
-2. Two embedded charts follow directly: the comparison of the current run with main, and on a PR, how the PR's own runs moved against main.
-3. A caution box names the worst slowdown. A tip names the best speedup and counts changes of 20% or more.
+2. A caution box names the worst slowdown. A tip names the best speedup and counts changes of 20% or more.
+3. Two embedded charts follow: the comparison of the current run with main, and on a PR, how the PR's own runs moved against main.
 4. An overall line gives the change against main as the geometric mean of current/baseline over all compared cases.
 5. Slower and faster tables separate input, key type, record count and allocation mode into columns. Changes of 20% or more are bold. Each input links to its public history chart; its link title holds the benchmark ID.
 6. A small line counts new cases without a baseline; their details remain in the collapsed All Cases table.

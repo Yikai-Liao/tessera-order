@@ -143,12 +143,13 @@ export function render(s: ReportSummary, options: RenderOptions) {
   const slower = s.rows.filter(r => r.verdict === "regression");
   const faster = s.rows.filter(r => r.verdict === "improvement");
   const out = [`### Benchmarks · ${language} · ${headline(s)}`];
-  // The charts lead: the comparison with main, then the PR's own history,
-  // whose headline names it. Text and tables follow for the exact numbers.
-  if (chartRef) out.push("", `![Changes against main](${chartRef})`);
-  if (trendRef) out.push("", `![PR benchmark history](${trendRef})`);
+  // The call-outs name the worst and best case; the charts follow: the
+  // comparison with main, then the PR's own history, whose headline names
+  // it. Text and tables after them carry the exact numbers.
   const boxes = callouts(s);
   if (boxes) out.push("", boxes);
+  if (chartRef) out.push("", `![Changes against main](${chartRef})`);
+  if (trendRef) out.push("", `![PR benchmark history](${trendRef})`);
   const summaryLine = overall(s, baseRef);
   if (summaryLine) out.push("", summaryLine);
   if (slower.length) out.push("", "#### Slower", "", alertTable(slower, s));

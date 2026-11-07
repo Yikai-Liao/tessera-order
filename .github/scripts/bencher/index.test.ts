@@ -170,9 +170,10 @@ test("publishes one check per build and one comment with builds as columns", asy
   assert.doesNotMatch(body, /^\| stable \|/m);
   assert.match(body, /> \*\*2 cases slower\*\*: 2 in Default only\./);
   assert.match(body, /> - \{u32,u32\} · random · 48: Default \*\*\+10\.2%\*\*, Portable SIMD \+10\.2%/);
-  assert.match(body, /^\*\*1 case faster\*\*: 1 in both\. Best: u64 · 99% sorted · 1,000,000, Default \*\*−29\.1%\*\*\.$/m);
+  assert.match(body, /^> \*\*1 case faster\*\*: 1 in both\. Best: u64 · 99% sorted · 1,000,000, Default \*\*−29\.1%\*\*\. Nice work\.$/m);
   assert.equal(body.match(/\[!CAUTION\]/g)?.length, 1);
-  assert.doesNotMatch(body, /\[!TIP\]|Nice work|Overall run time/);
+  assert.equal(body.match(/\[!TIP\]/g)?.length, 1);
+  assert.doesNotMatch(body, /Overall run time|Each build is compared/);
   assert.match(body, /<details><summary>3 changed cases<\/summary>/);
   assert.match(body, /^\| Input \| Type \| N \| Mode \| Default \| Portable SIMD \|$/m);
   assert.match(body, /\| u64 \| 49 \| stable \| \*\*\+3\.8%\*\* <sub>736 ns<\/sub> \| −26\.4% <sub>736 ns<\/sub> \|/);

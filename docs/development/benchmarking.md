@@ -108,9 +108,9 @@ Reports are regenerated from raw data. The report script fails on missing or dup
 |---|---|---|
 | `default` | `cargo build --release` | Main report: what crate users get |
 | `native` | `-C target-cpu=native`, fat LTO | Additional column |
-| `branch-aligned` | `default` plus `-C llvm-args=-x86-branches-within-32B-boundaries` (x86-64 only) | A/B comparisons on CPUs with Intel's JCC erratum (Skylake-derived cores); not a report column |
+| `branch-aligned` | `default` plus `-C llvm-args=-x86-branches-within-32B-boundaries` (x86-64 only) | Continuous benchmarks and A/B comparisons on CPUs with Intel's JCC erratum (Skylake-derived cores); not a release report column |
 
-On the development machine, the `branch-aligned` profile removed placement swings of up to 1.9× on ordered inputs, but not the swings at n ≤ 128, so the placement control stays required. It changes absolute times by up to −30% and +69%, so `default` remains what reports show.
+On the development machine, the `branch-aligned` profile removed placement swings of up to 1.9× on ordered inputs, but not the swings at n ≤ 128, so the placement control stays required. It changes absolute times by up to −30% and +69%, so `default` remains what release reports show. Continuous builds apply branch alignment to both feature configurations, with static linking added as described in the [continuous benchmark guide](continuous-benchmarks.md).
 
 ## Memory
 

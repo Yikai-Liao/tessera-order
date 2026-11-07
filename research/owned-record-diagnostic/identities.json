@@ -1,0 +1,17 @@
+{
+  "source_identity": "b6a956c74ac3264cc5bca1c21fff79326d5687eab837db3e4db2783edbc6b0c4",
+  "sha256": {
+    "source_freeze": "c6f1bbfec202e80865f83e1faea78ee76658c12755cc8588bcd3594be963df05",
+    "binary": "a5a5c63d628097db482dbb8837a4f622ac587079a9ddefc3f9b85e9021213fc2",
+    "diagnostic_library": "9e71dadf0cee47a743fa72c28e1f7b6303d37c932b426533284c5ffd8dbd0018",
+    "raw_timing": "82a384f153798e0821ffe4410662434b3e60b3358f2af4dd230714700e1150eb",
+    "full_report": "c2f83604336f184ca25d63a58c330a420650fbdb5c0fa1af20543493dfea9cb1",
+    "all_calls_analysis": "f68c6c6f8dadea2f7eca6e5438c7df0ff151c73da45498a43127fd5fda77a5a3",
+    "public_summary": "0adf181c1cd4e261b3a5f5e7c009a7bf6e22a1eae92137313a27fcc309f0bcdc"
+  },
+  "counts": {
+    "reference_verified_calls": 216,
+    "enabled_traces": 27
+  },
+  "scope": "Summary and semantic content identities only. Original evidence retained externally; no new measurements, runtime change or adoption."
+}

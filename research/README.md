@@ -131,3 +131,8 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   six W1/W2/W4 cases, 648 measured and 72 warmup samples; 787 verified calls.
   No native/public comparison clears controls. W2 remains concerning;
   this API-policy curve neither replaces mixed W8 results nor adopts runtime.
+
+- [Owned-record diagnostic](owned-record-diagnostic/summary.md):
+  216 verified calls and 27 retained traces did not reproduce the earlier
+  sustained slowdown. Tracer perturbation and isolated tails remain;
+  no established cause, performance win or adoption decision.

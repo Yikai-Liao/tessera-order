@@ -12,9 +12,10 @@ import subprocess
 DOCS_SITE = ("docs/.vitepress/", "docs/public/")
 DOCS_SITE_FILES = {"package.json", "package-lock.json", ".github/workflows/docs.yml"}
 # No language build reads Markdown outside its own directory or images under
-# `assets/`; the crate's README symlink is packaged, but `cargo package` only
-# needs the file to exist. The conformance rules stay shared because every
-# language's tests implement them.
+# `assets/`. The crate packages the root README through a symlink, but `cargo
+# package` only needs the file to exist, which `test_symlinks_resolve` checks.
+# The conformance rules stay shared because every language's tests implement
+# them.
 PROSE_DIRS = ("assets/",)
 SHARED_PROSE_DIRS = ("conformance/",)
 # The `changes` job tests these scripts and dco.yml runs the sign-off check on

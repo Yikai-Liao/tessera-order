@@ -63,6 +63,17 @@ class LanguageSelection(unittest.TestCase):
                 with self.subTest(source=source.relative_to(ROOT).as_posix(), target=path):
                     self.assertTrue(select([path])["rust"])
 
+    def test_symlinks_resolve(self):
+        # The crate packages the root README and LICENSE through symlinks, and
+        # those files select no language. The `changes` job runs this test on
+        # every push, so deleting or renaming a target fails there.
+        for link in ROOT.glob("**/*"):
+            if "node_modules" in link.parts or "target" in link.parts or ".git" in link.parts:
+                continue
+            if link.is_symlink():
+                with self.subTest(link=link.relative_to(ROOT).as_posix()):
+                    self.assertTrue(link.exists())
+
     def test_changes_accumulate_across_languages(self):
         self.assertEqual(select(["rust/a.rs", "cpp/b.hpp"]),
                          {"rust": True, "cpp": True, "python": True})

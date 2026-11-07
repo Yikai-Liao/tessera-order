@@ -87,12 +87,12 @@ $$
 b^{*} = \sqrt{\frac{10\, n}{2 R s}}, \qquad \text{memory}(b^{*}) = 2\sqrt{20\, R\, s\, n} = O(\sqrt{n}).
 $$
 
-With b = c·b\*, the total is (c + 1/c)/2 times the minimum, which grows on both sides. So the formula takes b\* itself (rounded up), with two floors:
+With b = c·b\*, the total is (c + 1/c)/2 times the minimum, which grows on both sides. Minimum memory is not minimum time, though: compaction reads every block at a random address, and that read does not shrink with the block. So the formula takes **4·b\*** (rounded up), which costs 2.1 times the minimum memory, with two floors:
 
 - at least **1,024 bytes** of records per block, because compaction moves a block with one copy, and a smaller copy costs more than it saves;
 - at least **32 records** per block, because a block's bookkeeping (its table entries and one copy call) costs the same whatever the record width.
 
-Neither floor depends on n, so the bound stays O(√n). The engine computes `max(1, ceil(b*), floor(1024 / s), 32)` in `default_block_size`.
+Neither floor depends on n, so the bound stays O(√n). The engine computes `max(1, 4 * ceil(b*), floor(1024 / s), 32)` in `default_block_size`.
 
 <BlockSizeChart />
 

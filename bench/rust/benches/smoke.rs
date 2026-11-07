@@ -19,6 +19,7 @@ const BATCH_ELEMENTS: usize = 1 << 18;
 
 const MID: usize = 65_536;
 const LARGE: usize = 1_000_000;
+const HUGE: usize = 10_000_000;
 
 fn suite(c: &mut Criterion) {
     // Insertion limit, one past it, and one past the tile capacity for 8- and
@@ -71,6 +72,12 @@ fn suite(c: &mut Criterion) {
     // Eight keys in 256 top-digit buckets: digit widening.
     keys::<u128>(c, "sparse8", LARGE, false);
     rows::<u64>(c, "random", LARGE, false);
+
+    // Ten million records leave the caches and go through the block partition
+    // on every level, which is where the block size and the scratch working set
+    // decide. Random is the worst case for routing and Zipf the common skew.
+    keys::<u64>(c, "random", HUGE, false);
+    keys::<u64>(c, "zipf2", HUGE, false);
 }
 
 /// A key type with a name for case IDs and an exact equality for validation.
@@ -316,7 +323,11 @@ fn measure<T: Copy>(
     let mut group = c.benchmark_group(id);
     // A sort of 10^6 keys takes milliseconds, so a 1.5 s window gives it only
     // a few hundred sorts; it gets more time and samples to narrow its limits.
-    let (warm_up, window, samples) = if input.len() >= LARGE {
+    let (warm_up, window, samples) = if input.len() >= HUGE {
+        // One sort takes about a fifth of a second, so 40 samples would need
+        // eight; 20 fill the same window and the spread per iteration is small.
+        (1000, 4000, 20)
+    } else if input.len() >= LARGE {
         (1000, 4000, 40)
     } else {
         (500, 1500, 30)

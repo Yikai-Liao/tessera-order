@@ -3,8 +3,8 @@
 import { computed, ref } from 'vue'
 
 // `default_block_size` in block.rs: scratch 2·R·b·s bytes plus 10·n/b bytes
-// of block tables, balanced at b* = ceil(sqrt(10n / (2Rs))), then floored at
-// max(1024 / s, 32) records.
+// of block tables, balanced at b* = ceil(sqrt(10n / (2Rs))), scaled by 4, then
+// floored at max(1024 / s, 32) records.
 const logN = ref(7)
 const recordBytes = ref(8)
 const radix = ref(8)
@@ -16,7 +16,7 @@ const tables = (b: number) => (10 * n.value) / b
 const total = (b: number) => scratch(b) + tables(b)
 const balanced = computed(() => Math.ceil(Math.sqrt((10 * n.value) / (2 * R.value * recordBytes.value))))
 const floors = computed(() => Math.max(Math.floor(1024 / recordBytes.value), 32))
-const chosen = computed(() => Math.max(1, balanced.value, floors.value))
+const chosen = computed(() => Math.max(1, 4 * balanced.value, floors.value))
 const lsdBuffer = computed(() => n.value * recordBytes.value)
 
 // Log-log axes: both cost terms are straight lines and the total is a V.

@@ -21,9 +21,10 @@ Benchmark IDs are `<language>/<case_id>/<mode>`, with `case_id` as in the [proto
 - 99% sorted `u32` and `f64` keys at 65,536, reaching long integer and float inversion scans;
 - sorted `f64` keys at 65,536, reaching vector ascending-order confirmation;
 - 1,000,000 records for `u64` (random, Zipf, `skew99`, `two_values`, 99% sorted), `u32`, `u128` (random, and `sparse8`, which widens the top digit) and `{u64, u32}` rows;
+- 10,000,000 `u64` records, random and Zipf, where every level goes through the block partition and the scratch working set leaves the caches;
 - `workspace` mode beside `api` only where scratch allocation is a visible share of the time.
 
-Cases at 1,000,000 records warm up for 1 s and take 40 samples over 4 s; a 1.5 s window gives them only a few hundred sorts, and their Bencher limits were the widest, ±5% to ±18%. The other cases warm up for 0.5 s and take 30 samples over 1.5 s.
+Cases at 1,000,000 records warm up for 1 s and take 40 samples over 4 s; a 1.5 s window gives them only a few hundred sorts, and their Bencher limits were the widest, ±5% to ±18%. Cases at 10,000,000 records take the same window with 20 samples, because 40 sorts of that length would need eight seconds. The other cases warm up for 0.5 s and take 30 samples over 1.5 s.
 
 Every case is checked against a stable standard-library sort before timing; for rows the check includes the original index. Each Criterion batch prepares about 2^18 elements, so the cache footprint does not depend on measured times. Input copies are made outside the timed region.
 
@@ -55,9 +56,9 @@ Each case is named once however many builds measured it, and each alert says whe
 A comment reads top-down:
 
 1. The title, `Benchmarks · rust · 3 slower, 12 faster`, counts distinct cases: a case slower in two builds is one slower case. A failed build is appended, such as `, Portable SIMD failed`.
-2. The overview table has one column per build and the rows `All cases` and, when the suite has more than one mode, each mode (`stable`, `stable, workspace`, `unstable`, …). A cell is the geometric mean of current/baseline over that build's compared cases in that row, followed by its alert counts, such as `−4.7% · **2 slower** · 12 faster`. Bold marks alerts. A build with no compared case shows `—`, and its headline says "no baseline" rather than "no significant change". There is no column across builds: their builds differ, so a combined mean could hide one build's regression behind the other's speedup.
+2. The overview table has one column per build and the rows `All cases` and, when the suite has more than one mode, each mode (`stable`, `stable, workspace`, `unstable`, …). A cell is the geometric mean of current/baseline over that build's compared cases in that row, followed by its alert counts, such as `−4.7% · **2 slower** · 12 faster`. Bold marks alerts. Each build is compared with its own baseline on `main`. A build with no compared case shows `—`, and its headline says "no baseline" rather than "no significant change". There is no column across builds: their builds differ, so a combined mean could hide one build's regression behind the other's speedup.
 3. A caution box counts the slower cases by where they occur, such as "1 in Portable SIMD only, 2 in both", and lists the three worst with every build's change, such as `u64 · Zipf 2 · 1,000,000: Default +0.6%, Portable SIMD +13.0%`; further cases are counted and left to the table.
-4. One plain line does the same for faster cases and names the best. A tip box per good outcome would compete with the regressions for attention.
+4. A tip box does the same for faster cases, names the best and ends with "Nice work."
 5. The two embedded charts follow: the comparison with main and, on a PR, the PR's history.
 6. A collapsed block, "15 changed cases", holds one table of the cases alerted in any build: input, key type, record count and mode, then one column per build with the change and the current time, bold where that build alerted.
 7. A small line counts new cases without a baseline in each build.

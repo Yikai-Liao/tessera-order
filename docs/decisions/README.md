@@ -15,5 +15,6 @@ Each file records one decision that shapes the project: the context, the decisio
 | [0009](0009-benchmark-report-images-and-history.md) | Publish immutable benchmark images and compare PR history with main | 2026-11-07 |
 | [0010](0010-vector-ascending-confirmation.md) | Reuse the vector scan for ascending-order confirmation | 2026-11-07 |
 | [0011](0011-benchmark-feature-configurations.md) | Track default and Portable SIMD benchmarks independently | 2026-11-07 |
-| [0012](0012-optional-bounded-rayon.md) | Add optional parallel completion of materialized buckets | 2026-11-07 |
+| [0012](0012-count-narrow-direct-windows.md) | Count narrow windows of direct keys instead of partitioning them | 2026-11-15 |
 | [0013](0013-materialized-bucket-overlap.md) | Overlap retired bucket batches with serial root compaction | 2026-11-07 |
+| [0014](0014-optional-bounded-rayon.md) | Add optional parallel completion of materialized buckets | 2026-11-07 |

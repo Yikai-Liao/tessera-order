@@ -267,8 +267,7 @@ function caution(configurations: ConfigurationResult[], rows: CaseRow[]) {
   return out.join("\n");
 }
 
-// Speedups get one plain line: a box per good outcome would compete with the
-// regressions for attention.
+// A speedup gets a tip box of its own, a single line below any caution box.
 function speedups(configurations: ConfigurationResult[], rows: CaseRow[]) {
   const faster = rows.filter(row => !isSlower(row)).sort((a, b) => severity(a) - severity(b));
   if (!faster.length) return null;
@@ -280,7 +279,11 @@ function speedups(configurations: ConfigurationResult[], rows: CaseRow[]) {
   const where = [...groups].filter(([key]) => key).map(([key, n]) => `${n} in ${key}`).join(", ");
   const best = faster[0];
   const i = best.cells.findIndex(c => c?.verdict === "improvement" && c.change === severity(best));
-  return `**${plural(faster.length, "case")} faster**${where ? `: ${where}` : ""}. Best: ${best.label}, ${configurations[i].name} **${signed(severity(best))}**.`;
+  return [
+    "> [!TIP]",
+    `> **${plural(faster.length, "case")} faster**${where ? `: ${where}` : ""}. ` +
+      `Best: ${best.label}, ${configurations[i].name} **${signed(severity(best))}**. Nice work.`,
+  ].join("\n");
 }
 
 function changedTable(configurations: ConfigurationResult[], rows: CaseRow[]) {
@@ -317,8 +320,6 @@ export function renderCombined(configurations: ConfigurationResult[], options: C
   const rows = changedRows(measured);
   const out = [`### Benchmarks · ${language} · ${combinedHeadline(configurations, rows)}`];
   out.push("", overview(configurations));
-  out.push("", `<sub>Each build is compared with its own baseline on \`${baseRef}\`: geometric mean of current/baseline ` +
-    `over its compared cases. Bold marks an alert.</sub>`);
   for (const c of configurations) {
     if (!c.summary) out.push("", `**${c.name}** was not measured: ${c.reason ?? "the measurement failed"}. See the [workflow run](${runUrl}).`);
   }

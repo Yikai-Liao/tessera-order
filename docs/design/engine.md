@@ -49,7 +49,9 @@ One scan computes the bitwise union and intersection of all keys. Bits that are 
 
 ### 3. Node partitioning
 
-A node is split by one of three partitions, all of them stable:
+A node whose remaining variation spans at most eight bits is one window away from sorted. When the records are their own keys (`Direct`), it is finished by counting that window: one `usize` count and one remembered record per bucket, then each run is filled from its record. Every sealed encoding is a bijection on bit patterns, so equal keys mean equal records and a filled run is the same permutation the block partition would produce, without block tables or record moves. A user key function keeps payloads that its key does not identify, so `ByKey` declines and takes the partition. See [decision 0012](../decisions/0012-count-narrow-direct-windows.md).
+
+Otherwise the node is split by one of three partitions, all of them stable:
 
 - **Repeated key.** The node samples 64 keys in runs of 8. If one value covers at least a quarter of the sample, an equality partition separates it from the rest, so heavily repeated keys stop costing passes.
 - **Outlier run.** If a short run at either end of the node (at most 1,024 records) disagrees with all other records on the highest varying bit, the run is split off and finished by insertion sort, and the rest of the node keeps a narrower set of varying bits.
@@ -58,12 +60,12 @@ A node is split by one of three partitions, all of them stable:
 The digit partition uses the block LSD scheme of Clausecker and Schintke. Buckets are filled block by block, consumed input blocks are reused as output blocks, and permutation metadata records their logical order. Stability holds without a full-size output buffer, and the extra space is O(√n) for a fixed digit width and record size. The block size in records is
 
 ```
-max(1, ceil(sqrt(10n / (2 R s))), floor(1024 / s), 32)
+max(1, 4 * ceil(sqrt(10n / (2 R s))), floor(1024 / s), 32)
 ```
 
 where `n` is the input length, `s` the record size and `R` the number of buckets.
 
-The root is the paper's trade-off evaluated for this implementation. A block size `b` costs `2 R b s` bytes of scratch — one output block per bucket, plus as many in reserve, because an input block may only be recycled once every record in it has been read — and `10 n / b` bytes of tables, because a block position owns two `u32` block-order entries and one `u16` bucket id. The two terms are equal at that root, so it is the minimum of the sum: substituting `b = c b*` multiplies the total by `(c + 1/c) / 2`, which grows in both directions. No scale of the root is worth its memory, and the formula takes the minimum.
+The root is the paper's trade-off evaluated for this implementation. A block size `b` costs `2 R b s` bytes of scratch — one output block per bucket, plus as many in reserve, because an input block may only be recycled once every record in it has been read — and `10 n / b` bytes of tables, because a block position owns two `u32` block-order entries and one `u16` bucket id. The two terms are equal at that root, so it is the minimum of the sum: substituting `b = c b*` multiplies the total by `(c + 1/c) / 2`, which grows in both directions. The engine takes four times that root: the minimum is where memory is smallest, not where the sort is fastest, and a larger block amortises the random read that compaction pays per block.
 
 The lower bounds are not from the paper. The compaction pass moves a block with one copy, so a block holds at least a kilobyte of records; and the bookkeeping of a block does not shrink with the record, so a block holds at least 32 records whatever their width. Their cost does not depend on `n`, so the O(√n) bound holds for a fixed record size and digit width.
 

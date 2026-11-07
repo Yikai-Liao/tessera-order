@@ -71,6 +71,13 @@ const DESCRIPTOR_BYTES_PER_POSITION: usize =
 /// enough bytes for a copy to be worth its own overhead.
 const BLOCK_BYTES_FLOOR: usize = 1024;
 
+/// Multiple of the balanced block size that the engine uses.
+///
+/// The balanced size minimises memory, not time: compaction reads a block at a
+/// random address, and that read does not get cheaper with a smaller block. A
+/// multiple amortises it, at a multiple of the minimum memory to match.
+const BLOCK_SCALE: usize = 4;
+
 /// Smallest block, counted in records.
 ///
 /// The bookkeeping of a block — its order entry, its bucket id and one copy
@@ -97,8 +104,9 @@ const BLOCK_RECORDS_FLOOR: usize = 32;
 /// bytes of auxiliary memory, and the two terms are equal at
 /// `b = sqrt(10 n / (2 R s))`. That root minimizes the sum: writing `b = c b*`
 /// turns the total into `(c + 1 / c) / 2` times the minimum, which grows in
-/// both directions. A larger block saves only the per-block work, and the floors
-/// below bound that on their own.
+/// both directions. The engine takes [`BLOCK_SCALE`] times the root to amortise
+/// the per-block work, and the floors below bound the small inputs where the
+/// root alone would buy nothing.
 ///
 /// # Memory
 ///
@@ -111,6 +119,7 @@ const BLOCK_RECORDS_FLOOR: usize = 32;
 pub(crate) fn default_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
     let floors = (BLOCK_BYTES_FLOOR / record_bytes).max(BLOCK_RECORDS_FLOOR);
     balanced_block_size(len, record_bytes, radix)
+        .saturating_mul(BLOCK_SCALE)
         .max(floors)
         .max(1)
 }
@@ -959,6 +968,186 @@ mod tests {
         // A remainder must round up even when the integer quotient is a square.
         assert_eq!(balanced_block_size_integer(20, 50, 1), 1);
         assert_eq!(balanced_block_size_integer(21, 50, 1), 2);
+    }
+
+    /// Records carry a unique id so a permutation check also proves that no
+    /// record was lost or duplicated.
+    #[cfg(feature = "std")]
+    fn records(len: usize) -> Vec<(u32, u32)> {
+        (0..len as u32)
+            .map(|id| (id.wrapping_mul(0x9e37_79b9), id))
+            .collect()
+    }
+
+    #[cfg(feature = "std")]
+    fn ids(records: &[(u32, u32)]) -> Vec<u32> {
+        let mut ids: Vec<u32> = records.iter().map(|record| record.1).collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// Scatters until the key function panics at call `at`, then checks the
+    /// recovered pass: the key is not called again, the unread records land in
+    /// bucket 0, and compaction restores the input slice.
+    #[cfg(feature = "std")]
+    fn scatter_until_panic(len: usize, block_size: usize, at: usize) {
+        let mut arr = records(len);
+        // A pass reads records in input order. Records before the panicking
+        // call were classified; every later record goes to bucket 0, so the
+        // exact expected ends follow from the input alone.
+        let mut counts = [0usize; 4];
+        for (index, record) in arr.iter().enumerate() {
+            let bucket = if index + 1 < at {
+                (record.0 & 3) as usize
+            } else {
+                0
+            };
+            counts[bucket] += 1;
+        }
+        let mut total = 0;
+        let expected: Vec<usize> = counts
+            .iter()
+            .map(|count| {
+                total += count;
+                total
+            })
+            .collect();
+        let mut buffers = Buffers::new();
+        let mut calls = 0;
+        let panic = {
+            let mut sorter = Sorter::new(&mut arr, 4, block_size, &mut buffers);
+            let (panic, ends) = sorter.step_with_ends(
+                |record: &(u32, u32)| {
+                    calls += 1;
+                    if calls == at {
+                        std::panic::panic_any(0x71u32);
+                    }
+                    (record.0 & 3) as usize
+                },
+                true,
+            );
+            assert!(panic.is_some(), "panic at {at} of {len} was not caught");
+            // The recovery re-scatters unread records without the failed
+            // extractor, which must not run a second time.
+            assert_eq!(calls, at, "key called after it panicked");
+            assert_eq!(ends, expected, "recovered ends at panic {at}");
+            assert!(sorter.compact_with(&ends, None).is_none());
+            // Drop also compacts, so the check must run before the sorter does.
+            assert!(sorter.input_materialized, "compaction did not finish");
+            panic
+        };
+        assert_eq!(*panic.unwrap().downcast::<u32>().unwrap(), 0x71);
+        assert_eq!(ids(&arr), (0..len as u32).collect::<Vec<_>>());
+    }
+
+    /// `(len, block_size)` pairs. The short pair has a one-record tail over
+    /// tiny blocks, which Miri can afford; the floors in `default_block_size`
+    /// make a production block longer than the whole short input, so the short
+    /// case sets one. The long pairs are a production block with and without a
+    /// tail, and a longer input where the root formula picks the block size.
+    #[cfg(feature = "std")]
+    fn configs() -> Vec<(usize, usize)> {
+        let record_bytes = core::mem::size_of::<(u32, u32)>();
+        let mut configs = vec![(29, 4), (32, 4)];
+        if cfg!(miri) {
+            return configs;
+        }
+        let long = [
+            (4093, default_block_size(4093, record_bytes, 2)),
+            (4096, default_block_size(4096, record_bytes, 2)),
+            (8193, default_block_size(8193, record_bytes, 2)),
+        ];
+        // The recovery offset depends on consumed input blocks, so every long
+        // input must stay many blocks wide if the block size constant changes.
+        for &(len, block_size) in &long {
+            assert!(
+                len / block_size >= 8,
+                "{block_size}-record blocks leave too few full blocks at {len}"
+            );
+        }
+        // Above the floors the formula decides, and an odd block size keeps
+        // the case from repeating the power-of-two ones.
+        assert!(!long[2].1.is_power_of_two(), "the root formula must decide");
+        configs.extend(long);
+        configs
+    }
+
+    /// A scatter panic can leave the pass read up to any record. The recovery
+    /// reconstructs the read offset from the bucket cursors and consumed input
+    /// blocks, so every offset near a block boundary is checked.
+    #[cfg(feature = "std")]
+    #[test]
+    fn scatter_panic_keeps_records() {
+        for (len, block_size) in configs() {
+            // About sixty points across the pass, plus the block edges below.
+            let mut points: Vec<usize> = (1..=len).step_by((len / 61).max(1)).collect();
+            // Block boundaries decide how much of the pass is still unread.
+            for at in [
+                1,
+                block_size - 1,
+                block_size,
+                block_size + 1,
+                2 * block_size,
+                len - 1,
+                len,
+            ] {
+                if (1..=len).contains(&at) {
+                    points.push(at);
+                }
+            }
+            points.sort_unstable();
+            points.dedup();
+            for at in points {
+                scatter_until_panic(len, block_size, at);
+            }
+        }
+    }
+
+    /// A callback panic must not interrupt materialization: the remaining
+    /// buckets are still copied back, and the payload is returned afterwards.
+    #[cfg(feature = "std")]
+    #[test]
+    fn callback_panic_keeps_records() {
+        for (len, block_size) in configs() {
+            // Every bucket receives records, so each of the four callbacks exists.
+            for at in 1..=4 {
+                let mut arr = records(len);
+                let mut buffers = Buffers::new();
+                let mut visited = 0;
+                let payload = {
+                    let mut sorter = Sorter::new(&mut arr, 4, block_size, &mut buffers);
+                    let (panic, ends) =
+                        sorter.step_with_ends(|record: &(u32, u32)| (record.0 & 3) as usize, true);
+                    assert!(panic.is_none());
+                    let mut callback = |bucket: &mut [(u32, u32)]| {
+                        // Buckets materialize in order, so the slice must hold
+                        // exactly the records of the bucket that just landed.
+                        assert!(
+                            bucket
+                                .iter()
+                                .all(|record| (record.0 & 3) as usize == visited)
+                        );
+                        visited += 1;
+                        if visited == at {
+                            std::panic::panic_any(0x71u32);
+                        }
+                    };
+                    let payload = sorter.compact_with(&ends, Some(&mut callback));
+                    // Drop also compacts, so the check must run before it does.
+                    assert!(sorter.input_materialized, "compaction did not finish");
+                    payload
+                };
+                assert_eq!(
+                    *payload
+                        .unwrap_or_else(|| panic!("callback {at} was not called"))
+                        .downcast::<u32>()
+                        .unwrap(),
+                    0x71
+                );
+                assert_eq!(visited, at, "callbacks continued after the panic");
+                assert_eq!(ids(&arr), (0..len as u32).collect::<Vec<_>>());
+            }
+        }
     }
 
     /// The integer form must reproduce the floating-point block size: a

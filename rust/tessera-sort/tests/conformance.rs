@@ -140,6 +140,41 @@ fn record_shapes_thresholds_and_key_halves() {
 }
 
 #[test]
+fn narrow_direct_ranges_fill_by_counting() {
+    // Above one tile, a node whose keys differ only inside one eight-bit window
+    // is finished by counting rather than by the block partition. Float keys
+    // check what the fill has to preserve: equal encoded keys are equal bit
+    // patterns, signed zeros and NaN payloads included.
+    let lengths: &[usize] = if cfg!(miri) { &[257] } else { &[8193, 65_537] };
+    let mut state = 4242;
+    for &len in lengths {
+        // Windows at the bottom, in the middle, in the exponent and at the top
+        // of the key.
+        for (low, width) in [(0usize, 8usize), (0, 3), (9, 8), (52, 8)] {
+            let value_mask = (1u64 << width) - 1;
+            let base = next(&mut state) & !(value_mask << low);
+            let draw = |id: usize| {
+                let random = (id as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+                base | ((random & value_mask) << low)
+            };
+            let mut values: Vec<f64> = (0..len).map(|id| f64::from_bits(draw(id))).collect();
+            let mut expected = values.clone();
+            expected.sort_by(f64::total_cmp);
+            stable_sort(&mut values);
+            let sorted: Vec<u64> = values.iter().map(|x| x.to_bits()).collect();
+            let wanted: Vec<u64> = expected.iter().map(|x| x.to_bits()).collect();
+            assert_eq!(sorted, wanted, "f64 len={len} low={low} width={width}");
+
+            // Only the high half varies, so a 128-bit key continues as one half.
+            let mut values: Vec<u128> = (0..len).map(|id| u128::from(draw(id)) << 64).collect();
+            let mut expected = values.clone();
+            expected.sort();
+            stable_sort(&mut values);
+            assert_eq!(values, expected, "u128 len={len} low={low} width={width}");
+        }
+    }
+}
+#[test]
 fn wide_aligned_and_zero_sized_records() {
     #[repr(align(128))]
     struct Wide {

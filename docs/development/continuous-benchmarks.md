@@ -30,7 +30,7 @@ Every case is checked against a stable standard-library sort before timing; for 
 
 ## Alerts
 
-Each configuration uses its own Testbed and thresholds. `main` uses a t-test on latency against up to its last 32 samples, requiring at least 5 samples. Both the upper and lower boundaries are 0.999, flagging potential regressions and improvements. PRs start from their base commit on `main` and inherit its thresholds. Cases with high variance, such as the placement-sensitive cases at n ≤ 49, get wider limits automatically.
+Each configuration uses its own Testbed and thresholds. `main` uses a percentage test on latency against its previous sample: a value more than 5% above or below it is an alert, flagging potential regressions and improvements. PRs start from their base commit on `main` and inherit its thresholds. The limits are the same ±5% for every case, so a case whose noise exceeds 5% alerts on noise and needs its own boundary or a new ID. Why not a statistical test over a window of samples: [decision 0013](../decisions/0013-compare-with-the-previous-main-sample.md).
 
 History and alerts are available on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). Investigate an alert with the A/A and placement controls of the full protocol.
 
@@ -65,7 +65,7 @@ A comment reads top-down:
 8. A collapsed "All cases, by build" block holds each build's full table with baseline, limits, current value, alert and benchmark ID.
 9. A compact footer holds the measured and base commits, the workflow run, and per build its Testbed and links to the Bencher report, its JSON and the alerted cases' history.
 
-Every change is the signed change in run time, such as −37.4%: minus means less time. The threshold model alone decides alerts. The baseline is the threshold model's mean of `main` samples up to the base commit, not a single run of the base commit.
+Every change is the signed change in run time, such as −37.4%: minus means less time. The threshold model alone decides alerts. The baseline is the latest `main` sample up to the base commit, so one run's noise is part of every limit.
 
 ### Comparison chart
 
@@ -105,7 +105,7 @@ Pushes to `main` that do not change code still run, adding samples of unchanged 
 | Default | default (`std`) | `intel-v1` | `intel-v1` |
 | Portable SIMD | default + `portable-simd` | `intel-v1-portable-simd` | `intel-v1` |
 
-These retain the existing default-feature and SIMD histories because their build flags and case IDs are unchanged. After merging, run **Build benchmarks** on `main` five times to ensure both configurations have enough baseline samples. PR comparisons need a base sample in each Testbed. Do not use one configuration's results to seed the other. See [decision 0011](../decisions/0011-benchmark-feature-configurations.md).
+These retain the existing default-feature and SIMD histories because their build flags and case IDs are unchanged. After merging, run **Build benchmarks** on `main` once to ensure both configurations have a baseline sample. PR comparisons need a base sample in each Testbed. Do not use one configuration's results to seed the other. See [decision 0011](../decisions/0011-benchmark-feature-configurations.md).
 
 ## Adding a language
 
@@ -115,7 +115,7 @@ Each language adds its own build job (unprivileged, uploading one artifact per c
 
 1. Claim a public Bencher project on the Free plan. Unclaimed projects only allow 1-minute jobs.
 2. In Settings → Environments → `benchmark` (deployments from `main` only, no reviewers), set the variable `BENCHER_PROJECT` to the project slug and the secret `BENCHER_API_KEY` to a project API key. The registry login uses the slug as its username.
-3. The tracking workflow only runs once it is on the default branch. After merging, run **Build benchmarks** on `main` five times to seed the baseline; alerts start after five samples.
+3. The tracking workflow only runs once it is on the default branch. After merging, run **Build benchmarks** on `main` once to seed the baseline; alerts start with the second sample.
 4. Once reports appear on PRs, **Benchmarks (rust, Default)** and **Benchmarks (rust, Portable SIMD)** can be made required checks. Replace any requirement for the former **Benchmarks (rust)** check. They fail on possible regressions, so require them only if an alert should block merging until someone reviews it.
 
 ## Local use

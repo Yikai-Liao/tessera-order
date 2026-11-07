@@ -1,4 +1,4 @@
-# 0013: Overlap retired bucket batches with root compaction
+# 0015: Overlap retired bucket batches with root compaction
 
 Date: 2026-11-07. Status: experimental; controlled acceptance pending.
 

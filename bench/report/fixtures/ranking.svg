@@ -47,7 +47,6 @@
 <circle class="within edge-tessera" cx="591.2" cy="131" r="5.5" stroke-width="2"/>
 <text class="val ink strong" x="696.0" y="135.0" text-anchor="end">3.3×</text>
 <text class="ink strong" x="24.0" y="173.0">Tessera</text>
-<line class="stem-faster" x1="420.4" x2="558.9" y1="169" y2="169" stroke-width="2" stroke-linecap="round"/>
 <circle class="tessera ring" cx="558.9" cy="169" r="6.5" stroke-width="2"/>
 <text class="val ink strong" x="696.0" y="173.0" text-anchor="end">2.6×</text>
 <text class="ink" x="24.0" y="211.0">radsort</text>

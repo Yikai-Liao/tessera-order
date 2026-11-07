@@ -160,7 +160,6 @@ interface Mark {
   value: number;
   tone: Tone;
   dy?: number;
-  stem?: boolean;
   hollow?: boolean;
 }
 interface Row {
@@ -363,12 +362,6 @@ function renderChart(spec: Chart) {
           `<line class="edge-${row.marks[0].tone}" x1="${x(row.span[0]).toFixed(1)}" x2="${x(row.span[1]).toFixed(1)}" y1="${cy}" y2="${cy}" stroke-width="2" stroke-linecap="round"/>`,
         );
       }
-      for (const m of row.marks) {
-        if (!m.stem || spec.scale.origin === undefined) continue;
-        out.push(
-          `<line class="stem-faster" x1="${x(spec.scale.origin).toFixed(1)}" x2="${x(m.value).toFixed(1)}" y1="${cy}" y2="${cy}" stroke-width="2" stroke-linecap="round"/>`,
-        );
-      }
       if (row.swarm) dodge(row.marks, x);
       const depth = (m: Mark) => DEPTH[m.tone] + (m.hollow ? 0 : 0.5);
       for (const m of [...row.marks].sort((a, b) => depth(a) - depth(b)))
@@ -478,7 +471,7 @@ function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figur
   const rank = 1 + others.filter((e) => e.speeds[at] > anchor.speeds[at]).length;
   const row = (e: (typeof complete)[number]): Row => ({
     name: e.cell,
-    marks: [{ value: e.speeds[at], tone: e.tone, stem: e.cell.strong && !e.simd, hollow: e.simd }],
+    marks: [{ value: e.speeds[at], tone: e.tone, hollow: e.simd }],
     cells: [times(e.speeds[at])],
     strong: e.cell.strong,
   });

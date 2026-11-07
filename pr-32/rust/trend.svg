@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 200" width="720" height="200" role="img" aria-labelledby="t d">
-<title id="t">PR benchmark history: Default +0.0% run time over 1 runs; Portable SIMD +0.0% run time over 1 runs</title>
-<desc id="d">Overall: Default −1.1%; Portable SIMD −0.4%</desc>
+<title id="t">PR benchmark history: Default +0.1% run time over 2 runs; Portable SIMD +0.6% run time over 2 runs</title>
+<desc id="d">Overall: Default −1.1%, −1.0%; Portable SIMD −0.4%, +0.2%</desc>
 <style>
   .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
   .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
@@ -27,22 +27,27 @@
 <rect class="panel" x="0.5" y="0.5" width="719" height="199" rx="12"/>
 <text class="ink strong" x="24.0" y="36.0">Run time during this PR</text>
 <text class="muted sub" x="24.0" y="51.0">first to latest run</text>
-<text class="hero ink" x="197.0" y="50.0">+0.0%</text>
+<text class="hero slower" x="197.0" y="50.0">+0.1%</text>
 <text class="ink strong" x="291.0" y="36.0">Default</text>
-<text class="muted sub" x="291.0" y="51.0">1 runs</text>
-<text class="hero ink" x="456.5" y="50.0">+0.0%</text>
+<text class="muted sub" x="291.0" y="51.0">2 runs</text>
+<text class="hero slower" x="456.5" y="50.0">+0.6%</text>
 <text class="ink strong" x="550.5" y="36.0">Portable SIMD</text>
-<text class="muted sub" x="550.5" y="51.0">1 runs</text>
+<text class="muted sub" x="550.5" y="51.0">2 runs</text>
 <line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
 <text class="ink strong" x="24.0" y="107.0">Overall</text>
 <text class="muted sub" x="24.0" y="122.0">geometric mean</text>
-<line class="axis main" x1="203" x2="370.5" y1="109.4" y2="109.4" stroke-width="1"/>
-<circle class="faster ring" cx="370.5" cy="114.6" r="4" stroke-width="2"/>
-<text class="val ink strong" x="436.5" y="113.0" text-anchor="end">−1.1%</text>
-<line class="axis main" x1="462.5" x2="630.0" y1="109.4" y2="109.4" stroke-width="1"/>
-<circle class="faster ring" cx="630.0" cy="111.1" r="4" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="113.0" text-anchor="end">−0.4%</text>
+<line class="axis main" x1="203" x2="370.5" y1="110.0" y2="110.0" stroke-width="1"/>
+<line class="stem-faster" x1="203.0" y1="115.1" x2="370.5" y2="114.9" stroke-width="2" stroke-linecap="round"/>
+<circle class="faster ring" cx="203.0" cy="115.1" r="2.5" stroke-width="1.5"/>
+<circle class="faster ring" cx="370.5" cy="114.9" r="4" stroke-width="2"/>
+<text class="val ink strong" x="436.5" y="113.0" text-anchor="end">−1.0%</text>
+<line class="axis main" x1="462.5" x2="630.0" y1="110.0" y2="110.0" stroke-width="1"/>
+<line class="stem-faster" x1="462.5" y1="111.7" x2="564.7" y2="110.0" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-slower" x1="564.7" y1="110.0" x2="630.0" y2="108.9" stroke-width="2" stroke-linecap="round"/>
+<circle class="faster ring" cx="462.5" cy="111.7" r="2.5" stroke-width="1.5"/>
+<circle class="slower ring" cx="630.0" cy="108.9" r="4" stroke-width="2"/>
+<text class="val ink strong" x="696.0" y="113.0" text-anchor="end">+0.2%</text>
 <line class="axis main" x1="24" x2="38" y1="174" y2="174" stroke-width="1"/>
-<text class="muted sub" x="44.0" y="178.0">main e1d2529 · runs 5d0c7d1 → 5d0c7d1</text>
+<text class="muted sub" x="44.0" y="178.0">main e1d2529 · runs 5d0c7d1 → 6614198</text>
 <text class="muted sub" x="696.0" y="178.0" text-anchor="end">value: latest run against main · one scale per row</text>
 </svg>

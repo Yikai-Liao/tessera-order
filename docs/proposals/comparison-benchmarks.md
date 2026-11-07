@@ -2,7 +2,7 @@
 
 Status: draft, for discussion. Date: 2026-11-07.
 
-This proposal plans how Tessera is compared with other sorts before the Rust 0.1 release: which questions the comparison answers, where it runs, which sorts and inputs it covers, and how the code is structured. It also narrows the runner described in [Benchmarking](../development/benchmarking.md), which was written before the [continuous benchmarks](../development/continuous-benchmarks.md) existed and still plans for the full matrix of the research harness.
+This proposal plans how Tessera is compared with other sorts before the Rust 0.1 release: which questions the comparison answers, where it runs, which sorts and inputs it covers, how the code is structured and how the results are shown. It also narrows the runner described in [Benchmarking](../development/benchmarking.md), which was written before the [continuous benchmarks](../development/continuous-benchmarks.md) existed and still plans for the full matrix of the research harness.
 
 ## Scope: answer four questions, not survey sorting
 
@@ -15,76 +15,53 @@ This proposal plans how Tessera is compared with other sorts before the Rust 0.1
 | Q3 | How does it compare with the fastest sorts of any kind? | Time against the fastest single-threaded unstable sorts, SIMD quicksorts and in-place radix sorts among them, on tasks where stability is not observable |
 | Q4 | What memory does that speed need? | Peak extra memory against every variant, and time against a stable sort given the same small buffer |
 
-Measurements of the research prototype, which are outside this repository, put Tessera several times ahead of common radix sorts, level with VQSort, the fastest single-threaded unstable sort known, ahead of most other unstable sorts, and with few equals among stable sorts. The crate has become faster than the prototype since the port, so those numbers are a starting point, not the current standing; the [continuous benchmarks](../development/continuous-benchmarks.md) show the trend but are not evidence for a comparison. This runner exists to measure where the crate stands on reproducible hardware, and the [figures](#figures) are designed to show it at a glance if it holds and to show where it does not.
+Measurements of the research prototype, which are outside this repository, put Tessera several times ahead of common radix sorts, level with VQSort, the fastest single-threaded unstable sort known, ahead of most other unstable sorts, and with few equals among stable sorts. The crate has become faster than the prototype since the port, so those numbers are a starting point, not the current standing; the [continuous benchmarks](../development/continuous-benchmarks.md) show the trend but are not evidence for a comparison. This runner exists to measure where the crate stands, in a way anyone can rerun, and the [figures](#figures) are designed to show it at a glance if it holds and to show where it does not.
 
 An implementation, type or input that answers none of them stays out. Engine paths that users do not choose between, such as `sparse8` or `sorted_tail`, stay in the smoke suite, where they guard against regressions.
 
 The regression A/B question (is a change faster than `main`) uses the same runner with a Tessera build as the baseline, so it needs no second design. The research harness is not reproduced here, in line with [decision 0001](../decisions/0001-single-bsd-2-clause-license.md).
 
-## Where it runs: serial Bencher jobs
+## Where it runs: one machine, one session
 
-The release comparison runs on Bencher Bare Metal, the same `intel-v1` hardware spec as the continuous suite, as a sequence of remote jobs. This makes the result reproducible by anyone with access to the workflow: the image digest pins the executable, the hardware spec is public, and the workflow defines every flag. A local machine remains useful for investigation but is not where release numbers come from.
+The 0.1 comparison runs on a machine the maintainer controls, in one session that measures every case. Nothing in it depends on GitHub Actions or a hosted service, so a contributor reruns it with the same commands on their own hardware. Running on [Bencher's hosted machines](#later-hosted-runs) is a later addition that reuses the same runner and results directory.
 
-The free plan's limits shape the design:
+```sh
+python3 bench/fetch.py                                     # pinned C and C++ sources, once
+cargo build --release -p tessera-bench --features compare,compare-native
+target/release/compare validate --suite release
+taskset -c 2 target/release/compare run --suite release --out results/2026-12-01
+taskset -c 2 target/release/memory --suite release --out results/2026-12-01
+npm run bench:report -- results/2026-12-01
+```
 
-| Limit | Consequence |
-|---|---|
-| One job at a time per organization, 5 minutes each (240 s timeout in use) | The suite is split into **shards**, each a fixed list of cases that finishes in under 240 s. A workflow submits them one after another through the existing `bencher-bare-metal` concurrency group. |
-| Consecutive jobs may run on different machines of the same spec | Every ratio is computed **within one job**: a shard contains every variant of its cases, interleaved in blocks, with Tessera twice as an A/A control. Ratios from different shards are comparable; raw nanoseconds across shards are reported but not compared. Figure 4, which compares absolute times across lengths, gets [its own shards](#figure-4-scaling-with-length). |
-| The tracking job holds the concurrency slot while it waits | Comparison runs are started manually or by a release tag, never by PRs, so they do not block PR benchmarks for long. A shard that fails or times out is resubmitted alone. |
-| 65,535 Metrics per day | A full run stores one Metric per case, variant and Measure, about 3,000 per Measure for the whole suite, so summaries fit easily. Per-block values do not go into Metrics: nine blocks per Metric would put two builds near the daily limit. They stay in the job output (below). |
-| Shared runners have no network access | The image holds the runner and every competitor, built on the GitHub host. |
+The Bencher CLI may wrap the run to keep a history of it, as one more Testbed of the existing project: `bencher run --testbed <machine> --adapter json --file DIR/bmf.json -- compare run ...`, or with `--dry-run` to store nothing. No step needs it.
 
-### Bencher's model
+### Results directory
 
-The comparison uses Bencher's concepts for what they mean, so its history accumulates like any other Bencher data:
-
-| Concept | Use |
-|---|---|
-| Branch | One fixed branch, `compare`. Every shard of a run passes `--branch compare --hash <commit>`; reports with the same branch and hash belong to the same version, so the shards of one run form one version, and successive runs of `main` or of release candidates form that branch's history |
-| Testbed | One Testbed, `intel-v1-compare`, with spec `intel-v1`. A Testbed is the measurement environment, not a build, so the Portable SIMD build is a segment of the benchmark ID instead. The continuous suite keeps a Testbed per build ([decision 0011](../decisions/0011-benchmark-feature-configurations.md)) because thresholds are scoped by Testbed; the comparison sets no thresholds |
-| Benchmark | `compare/<case_id>/<variant>/<build>`, for example `compare/u64/random/1000000/s1/radsort/default` |
-| Measures | `ratio`: the median over blocks of the variant's time over the mean of Tessera's A/A pair, with the smallest and largest per-block ratio as `lower_value` and `upper_value`, so the bounds describe that ratio and nothing else. `latency`: the median nanoseconds per element. The A/A control is its own benchmark, variant `tessera-aa`, whose `ratio` is A2 / A1, so the noise range is stored as a value, not disguised as another metric's bounds |
-| Iterations | One `bencher run` iteration per shard. The nine blocks run inside one process, because pairing a variant with Tessera within the same block is the point of the design. Blocks are the harness's statistical unit, not Bencher iterations: each `--iter` runs the executable again, while the protocol needs one setup, one interleaving plan and the A/A pair shared by all nine blocks in one process. `--iter` with `--fold median` would fold the results, but it would fold absolute times across processes, which is not the paired ratio |
-| GitHub integration | None. Comparison runs are not tied to a PR, so `--github-actions` checks and comments do not apply; the workflow writes a job summary with links to the Bencher reports |
-
-Bencher keeps each finished job's stdout, stderr, exit code and output files. The runner therefore prints its per-block samples to stderr as JSON lines, beside the BMF on stdout, and the workflow rebuilds the [results directory](#running-on-other-machines) from them, from which the report is regenerated as [Benchmarking](../development/benchmarking.md#raw-data) requires. Bencher's [Project Jobs API](https://bencher.dev/docs/api/projects/jobs/) returns a finished job's output to callers with `view` permission, which the trusted workflow's API key has, but the same page lists viewing a job as a Bencher Plus feature.
-
-Step 1 below settles the open points on this hardware:
-
-1. **Retrieving the output.** Whether the free plan, with the project's API key, returns a job's output through `bencher job view`. If it does not, the per-block ratios go into Metrics on the same benchmarks, under nine fixed Measures `ratio-b0` to `ratio-b8`. That adds about 30,000 Metrics to a full run, which still fits under 65,535 per day with the summaries and memory, but leaves room for one full run per day, not two.
-2. **Noise.** The A/A range within a job, the spread of one shard across three jobs, and `bencher noise --format json` run in the same image, which measures compute and cache jitter. The A/A pair measures this workload; `bencher noise` explains a wide A/A range when there is one. If the A/A range is wider than the differences the report needs to resolve, block count or sample duration goes up, at the cost of more shards.
-3. **Host conditions.** Bencher documents that its runner, by default, disables ASLR, SMT, turbo boost and the NMI watchdog and sets the performance governor. Step 1 confirms which of these hold on the shared `intel-v1` runners, and the report states them beside the spec, because turbo boost and SMT change absolute times.
-
-### Running on other machines
-
-Bencher's hosted `intel-v1` runners produce the release numbers, but the suite must not depend on them: a contributor must be able to run it on their own hardware, to investigate a result, try a change, or measure a CPU Bencher does not have. Bencher's CLI is fine to depend on; its hosted machines are not. Tessera's runner defines the experiment, the Bencher CLI orchestrates and records it, and the hosted runners only supply the reference machine:
-
-| Where | How | Use |
-|---|---|---|
-| Hosted runner | `bencher run --image <digest> --spec intel-v1 --testbed intel-v1-compare` from the workflow | Release numbers for the README and the Performance page |
-| Own machine | `bencher run --testbed <machine> --adapter json -- compare run --out DIR` runs the executable on the local host, and the results join the same project as another Testbed | Tuning, reproduction, other CPUs |
-| Own machine, not stored | The same with `--dry-run` | Local experiments |
-| Without Bencher | `compare run --out DIR` directly | Debugging the runner itself |
-
-Bencher's self-hosted runners and a self-hosted Bencher server could be used later, but are not required or validated for the 0.1 workflow.
-
-The runner's results directory is the source of truth, in every row of the table:
+The runner's output directory is the source of truth. The report reads nothing else, and a release attaches it as a compressed archive, so every published number can be recomputed.
 
 ```text
 DIR/
-  manifest.json      commit, compiler and flags, variant versions and source commits, image digest, suite version
-  shard-<k>/
-    bmf.json         the BMF printed on stdout
-    blocks.jsonl     the per-block samples printed on stderr
-    host.json        CPU model, cores, kernel, governor, turbo and SMT state, read from /proc and /sys
+  manifest.json      commit, rustc -vV, flags and features, variant versions and source commits, suite version
+  host.json          CPU model, cores, kernel, frequency governor, turbo and SMT state, other load
+  blocks.jsonl       one line per sample: case, variant, build, block, slot, batch, elapsed time, verified
+  bmf.json           summaries in Bencher Metric Format, for optional upload
+  memory.jsonl       peak extra bytes per case and variant
 ```
 
-- **On a local machine,** `compare run` writes the whole directory itself.
-- **On the hosted runners,** the workflow writes `manifest.json` from what it already knows, because the build happens there; nothing in it depends on job output. It then rebuilds each shard's files from the job's stdout and stderr. If the free plan does not return job output, `blocks.jsonl` is rebuilt from the `ratio-b0` to `ratio-b8` Metrics, and `host.json` records the host as unknown apart from the `intel-v1` spec, rather than guessing.
-- **The report reads only the directory** (`npm run bench:report -- DIR`), so it cannot tell where a run happened, and no path has code the others lack. Its header prints the manifest and each shard's host conditions, and says whether the run was local.
-- **Shards are optional off the hosted runners.** Without the 240 s limit, `compare run` without `--shard` executes every shard in one invocation, still one block plan per shard, so ratios mean the same as on Bencher.
-- **The build is the same.** `bench/fetch.py`, then `cargo build --release -p tessera-bench --features compare,compare-native` produce the executable the image wraps.
+The runner writes all of it: build information comes from `build.rs` and `sources.toml`, host conditions from `/proc` and `/sys`. It never changes the host. The [Benchmarking](../development/benchmarking.md#build-profiles) page will list the recommended setup (performance governor, turbo boost and SMT off where the machine allows, an otherwise idle system, the run pinned to one core); the report prints the recorded conditions in its header and marks any that differ from the recommendation. A run interrupted part-way resumes with `--group`, and the report fails if `host.json` differs between the parts.
+
+### Measurement
+
+The procedure in [Benchmarking](../development/benchmarking.md#timing) stays: restore the batch outside the timed region, time the batch, verify outside the timed region, random variant order within each block, Tessera twice per block, nine blocks, the median ratio with its per-block minimum and maximum, and at least 8 of 9 blocks agreeing on a direction before a result is called faster or slower. The A/A control is reported separately, as variant `tessera-aa` with ratio A2 / A1, and a result also needs its median outside that A/A range.
+
+Memory is measured in a separate executable with a counting global allocator, because a counting allocator changes the allocation cost that `api` mode times. It reports peak extra bytes for every variant and case up to 1,000,000, and for `u64` keys at 10,000,000, which the headline figure needs; this answers Q4 and supplies the buffer size for `glidesort-sqrt`. A Rust global allocator does not see C `malloc` or C++ `operator new`, so the memory executable also links with `--wrap` for `malloc`, `calloc`, `realloc`, `free`, `aligned_alloc` and `posix_memalign`, which libstdc++'s `operator new` reaches, and counts both into one peak.
+
+The `workspace` mode, cold-cache mode, more seeds, the `native` and `branch-aligned` profiles stay out of the release comparison. They answer investigation questions and run with the same runner.
+
+### Builds
+
+The `portable-simd` feature changes only Tessera, so the competitors are measured once. Cargo cannot link one crate with two feature sets into one executable, so the Portable SIMD build is a second, smaller executable, run in the same session: Tessera's A/A pair and `slice::sort` on the same cases. `slice::sort` is the anchor that puts its results on the same relative scale as the other variants, and catches a drift in the machine between the two processes.
 
 ## Implementations
 
@@ -113,7 +90,7 @@ The Rust crates alone would leave out the fastest single-threaded sorts known, w
 
 These variants are called through small C shims written for this repository, one exported function per algorithm and element type, such as `bench_ips4o_sort_u64(ptr, len)`. Each call sorts a whole buffer, and the batch loop and clock stay in Rust, so the comparison measures the same thing as for the Rust variants; a call costs a few nanoseconds, negligible at the smallest length in the suite (1,000). This is not the per-call FFI the protocol excludes, which times a binding's conversion of each call. Records are passed as `#[repr(C)]` structs with the same layout on both sides, and comparison sorts receive an inlined key comparison in C++, not a callback into Rust.
 
-Dovetail sort, listed in [Benchmarking](../development/benchmarking.md#c-runner), is a parallel algorithm and is not included. VQSort and x86-simd-sort choose their instruction set at run time, like Tessera's Portable SIMD build, so the Bencher host's CPU decides; the report names the level each one dispatched to.
+Dovetail sort, listed in [Benchmarking](../development/benchmarking.md#c-runner), is a parallel algorithm and is not included. VQSort and x86-simd-sort choose their instruction set at run time, like Tessera's Portable SIMD build, so the measuring machine's CPU decides; the report names the level each one dispatched to.
 
 Rules:
 
@@ -121,8 +98,8 @@ Rules:
 - **Stability where it is observable.** On `keys`, equal keys are indistinguishable, so a stable and an unstable sort produce the same output and compete directly; every mark still shows which kind it is. On `rows`, `records` and `owned`, unstable variants are listed separately, because they do not perform the task.
 - **Default configuration.** No variant enables crate features that change its algorithm.
 - **Pinned versions.** Crates are pinned with `=x.y.z` in `bench/rust/Cargo.toml`, C and C++ sources by commit and SHA-256; both are upgraded deliberately, and the version or commit appears in the report.
-- **Sources stay out.** Third-party C and C++ sources are fetched into an ignored directory, never committed or copied into the shims ([decision 0001](../decisions/0001-single-bsd-2-clause-license.md)). Each license is checked when its commit is pinned, because the measured image is pushed to Bencher's registry.
-- **No parallel sorting.** Tessera is single-threaded, so the comparison is too. Every variant runs on one thread: crates without their thread features (`rdst` without `multi-threaded`, `voracious` without `voracious_multithread`), IPS²Ra and IPS⁴o through their sequential entry points, built without their parallel runtime, and nothing that needs a thread pool. Sorts that are only parallel, such as Dovetail sort, are left out. The runner checks this: each shard counts the process's threads after every variant's first sort and fails if any variant started one.
+- **Sources stay out.** Third-party C and C++ sources are fetched into an ignored directory, never committed or copied into the shims ([decision 0001](../decisions/0001-single-bsd-2-clause-license.md)). Each license is checked when its commit is pinned, because the executable links the code and the results archive names it.
+- **No parallel sorting.** Tessera is single-threaded, so the comparison is too. Every variant runs on one thread: crates without their thread features (`rdst` without `multi-threaded`, `voracious` without `voracious_multithread`), IPS²Ra and IPS⁴o through their sequential entry points, built without their parallel runtime, and nothing that needs a thread pool. Sorts that are only parallel, such as Dovetail sort, are left out. The runner checks this: it counts the process's threads after every variant's first sort and fails the run if any variant started one.
 - **Not included.** `sort_by_cached_key` (it answers a key-cost question, not a sort question); string and comparator sorts (Tessera does not support them).
 
 ## Inputs
@@ -162,17 +139,7 @@ Removed from the comparison: `skew50` and `sorted95` (between two shapes already
 | 1,000,000 | The size at which engine decisions were measured; data in L3 or beyond |
 | 10,000,000 | Out of cache, where the O(n) buffer of other radix sorts costs bandwidth; `keys` and `rows` only, because 128-byte and owned records at this size need more than 1 GiB per buffer |
 
-The suite has 5 types × 10 distributions × 4 lengths, less the 20 large cases for `records` and `owned`: about 180 cases. With up to 16 variants per case, a first estimate, to be replaced by step 1's measurement: cases up to 1,000,000 need about 5 s each, so about five shards; each 10,000,000 case needs about 60 s, so the 40 of them take about twelve shards. Seventeen to twenty shards is one and a half to two hours of queue time.
-
-The `portable-simd` feature changes only Tessera, so the competitors are measured once. Cargo cannot link one crate with two feature sets into one executable, so the Portable SIMD build is a second, smaller executable: Tessera's A/A pair and `slice::sort` on the same cases, in its own shards. `slice::sort` is the anchor that puts its results on the same relative scale as the other variants, because its jobs may run on other machines. With 3 of up to 16 slots per case, its shards add roughly a fifth to the run.
-
-## Measurement within a job
-
-The procedure in [Benchmarking](../development/benchmarking.md#timing) stays: restore the batch outside the timed region, time the batch, verify outside the timed region, random variant order within each block, Tessera twice per block, nine blocks, the median ratio with its per-block minimum and maximum, and at least 8 of 9 blocks agreeing on a direction before a result is called faster or slower. The A/A control is reported separately as the `tessera-aa` benchmark, and a result also needs its median outside that A/A range.
-
-Memory is measured in a separate executable with a counting global allocator, because a counting allocator changes the allocation cost that `api` mode times. It reports peak extra bytes for every variant and case up to 1,000,000, and for `u64` keys at 10,000,000, which the headline figure needs; this answers Q4 and supplies the buffer size for `glidesort-sqrt`. A Rust global allocator does not see C `malloc` or C++ `operator new`, so the memory executable also links with `--wrap` for `malloc`, `calloc`, `realloc`, `free`, `aligned_alloc` and `posix_memalign`, which libstdc++'s `operator new` reaches, and counts both into one peak. It runs as one more Bencher job, with a `bytes` measure.
-
-The `workspace` mode, cold-cache mode, more seeds, the `native` and `branch-aligned` profiles stay out of the release comparison. They answer investigation questions and can be run locally with the same runner.
+The suite has 5 types × 10 distributions × 4 lengths, less the 20 large cases for `records` and `owned`: about 180 cases. With up to 16 variants per case, a first estimate, to be replaced by the first run: cases up to 1,000,000 need about 5 s each and each 10,000,000 case about 60 s, so a full run takes one and a half to two hours, and the Portable SIMD executable adds about a fifth.
 
 ## Code structure
 
@@ -184,9 +151,10 @@ bench/rust/
   src/check.rs        order, permutation and stability check against the reference
   src/variant.rs      the variant table and one adapter per implementation
   src/run.rs          batches, blocks, A/A, ratios
-  src/shard.rs        suite and shard definitions
-  src/bin/compare.rs  CLI: list, validate, run [--shard K] --out DIR; prints BMF and block samples
-  src/bin/memory.rs   counting allocator, prints BMF
+  src/suite.rs        suite definitions: exact case IDs and their groups
+  src/host.rs         reads the host conditions from /proc and /sys
+  src/bin/compare.rs  CLI: list, validate, run [--group G] --out DIR
+  src/bin/memory.rs   counting allocator, writes memory.jsonl
   benches/smoke.rs    the Criterion smoke suite, now using `case`
   native/             C and C++ shims, one exported function per algorithm and element type
   native/sources.toml pinned repository, commit and SHA-256 of each third-party source
@@ -199,13 +167,14 @@ Each module owns one decision, so that a change touches one place:
 - **`case` owns the inputs.** The generator moves out of `smoke.rs` into the library, and the smoke suite, the comparison and the memory executable all use it. The move must leave every smoke input byte-identical, because Bencher history is keyed by case ID; a test pins the hash of a few inputs per distribution so the generator cannot drift silently. The cross-language golden hashes in `conformance/vectors/` wait until a second language has a generator.
 - **`variant` owns capabilities.** A variant is a name, a stability flag and a function `prepare(&Case) -> Option<Box<dyn Kernel>>`. Returning `None` is the only way to say "unsupported", so `list` derives the capability table by asking every variant, and there is no separate table to keep consistent. `Kernel` has `restore`, `run_batch` and `check`. It is implemented by one generic struct per element type, so each sort inside a batch is a monomorphized call and the dynamic call happens once per batch.
 - **`check` owns correctness.** Every record carries its original index; `check` compares keys with the reference order and, for stable variants, the indices of equal keys. `validate` runs it for every case and variant, and `run` runs it after every sample.
-- **`run` owns the statistics.** It is the only module that knows about blocks, slots and the A/A pair, and it produces the ratios that `compare` prints.
+- **`run` owns the statistics.** It is the only module that knows about blocks, slots and the A/A pair, and it produces the ratios that `compare` writes.
 - **`native` owns the foreign boundary.** The shims are the only code that knows a third-party C or C++ signature. Rust sees `extern "C" fn(*mut T, usize)` per element type, and the record layouts are checked by a test that compares `size_of` and field offsets reported by the shim. A shim never allocates on behalf of Rust or holds state between calls, so a failed sort cannot leave anything behind.
-- **`shard` owns the plan.** Suites and shards are Rust constants of exact case IDs, checked by a test that every case of a suite appears in exactly one of its shards. The `scaling` suite of figure 4 is separate, so its cases may repeat cases of the main suite. A text format shared with other languages is added when another language needs it.
+- **`suite` owns the plan.** Suites are Rust constants of exact case IDs, divided into **groups** that each run under one block plan, checked by a test that every case of a suite appears in exactly one group. Groups make a run resumable and let one group be rerun alone; they are not a time limit. A text format shared with other languages is added when another language needs it.
+- **`host` owns the conditions.** It is the only code that reads the machine's state, and the runner never changes that state: tuning the host is the operator's choice, recording it is the runner's job.
 
 Two optional features keep third-party code out of the workspace MSRV run (`cargo +1.85 test --workspace`), the Miri run and the smoke build: `compare` adds the Rust crates, and `compare-native` adds the C and C++ variants, which need `bench/fetch.py` and a C++17 compiler. CI runs `validate` with both on stable. `build.rs` never downloads anything; it fails with the fetch command if `compare-native` is on and the sources are missing.
 
-The report is a TypeScript module in `bench/report/`, run with `npm run bench:report -- DIR` on a results directory, locally or in the workflow. It imports the chart and SVG code of `.github/scripts/bencher/` rather than living there, because it is not tied to CI. Its output is what the release attaches and the README links. The `bench/cases/` directory planned in [`bench/README.md`](../../bench/README.md) is no longer needed; suites live in `shard.rs`.
+The report is a TypeScript module in `bench/report/`, run with `npm run bench:report -- DIR` on a results directory. It imports the chart and SVG code of `.github/scripts/bencher/` rather than living there, because it is not tied to CI. Its output is what the README and the Performance page show. The `bench/cases/` directory planned in [`bench/README.md`](../../bench/README.md) is no longer needed; suites live in `suite.rs`.
 
 ## Figures
 
@@ -215,7 +184,7 @@ The comparison has eight dimensions: variant, stability, task, type, distributio
 |---|---|---|---|
 | A visitor deciding whether to look further | 30 seconds | README, Performance section | The one claim, and that it holds across input shapes |
 | A user deciding whether Tessera suits their data | Minutes | A Performance page on the documentation site, regenerated per release and linked from the README | How it behaves for their record type, length and data shape, and what it costs in memory |
-| A contributor checking a change | Per PR | The existing Bencher report in PR comments | Regressions against `main`; not part of this comparison |
+| A contributor checking a change | Per PR | The existing continuous benchmark report in PR comments | Regressions against `main`; not part of this comparison |
 
 | # | Figure | Question | Varies | Fixed | Form | Where |
 |---|---|---|---|---|---|---|
@@ -229,10 +198,10 @@ Figures 2 and 3 use the same grid, and figures 4 and 5 the same line chart, so a
 
 ### Rules for every figure
 
-- **The case selection is fixed before any data exists.** The type, length and aggregation below are part of this proposal. Choosing the most flattering case after seeing results would make the figure an advertisement, and a reader who reruns the workflow would find out.
+- **The case selection is fixed before any data exists.** The type, length and aggregation below are part of this proposal. Choosing the most flattering case after seeing results would make the figure an advertisement, and a reader who reruns the suite would find out.
 - **The figure shows what the data says.** If a competitor beats Tessera, its row ranks above Tessera's and its cell is orange. The headline numbers are computed by fixed rules, not picked.
 - **Every number in a figure is also in text.** Below each figure, a collapsed table lists every plotted value, as the [documentation rules](../../CLAUDE.md#documentation-rules) require for agents and screen readers.
-- **Default is Tessera; Portable SIMD is a second row.** Every figure shows the Default build as Tessera, because that is what `cargo add` gives, and it is the conservative comparison: VQSort and x86-simd-sort dispatch to AVX2 or AVX-512 on the Bencher host, while Default uses the baseline x86-64 instruction set and compiler auto-vectorization. Figure 1 adds a second Tessera row for the `portable-simd` build, ranked like any other, so users see what the feature buys; figure 3's caption gives the Portable SIMD result beside Default's, and the tables have both. This holds however large or small the difference turns out to be. The Portable SIMD row comes from its own smaller executable, anchored by `slice::sort` (see [Lengths](#lengths)).
+- **Default is Tessera; Portable SIMD is a second row.** Every figure shows the Default build as Tessera, because that is what `cargo add` gives, and it is the conservative comparison: VQSort and x86-simd-sort dispatch to AVX2 or AVX-512 where the CPU has them, while Default uses the baseline x86-64 instruction set and compiler auto-vectorization. Figure 1 adds a second Tessera row for the `portable-simd` build, ranked like any other, so users see what the feature buys; figure 3's caption gives the Portable SIMD result beside Default's, and the tables have both. This holds however large or small the difference turns out to be. The Portable SIMD row comes from its own smaller executable, anchored by `slice::sort` (see [Builds](#builds)).
 - **One look across figures.** The SVGs reuse the report's styles in `.github/scripts/bencher/svg.ts`: the same surfaces and inks, light and dark through `prefers-color-scheme` inside the SVG, 720 px wide. Blue `#4a80e6` means Tessera or less time, orange `#e8622f` more time, and every other mark is the report's muted grey. The blue and orange pair passes the colour-vision and contrast checks on both surfaces (`#fafaf8`, `#1e1e1d`); grey is de-emphasis, not a series colour, and identity never depends on colour alone, because every mark is labelled.
 
 ### Figure 1: speed ranking
@@ -265,7 +234,7 @@ The values in this sketch are placeholders that show the layout only.
 |---|---|
 | Case | `u64` keys, where stability is unobservable and every variant runs, so stable and unstable sorts compete on equal terms. Three lengths: 65,536 (in cache), 1,000,000 and 10,000,000 (out of cache) |
 | Rows | One per variant, ranked by speed at 10,000,000, fastest first. The order is the result, so it is computed, never arranged |
-| Columns | One per length, all on the same log scale: speed relative to `slice::sort`, the geometric mean over the 10 distributions of `t(slice::sort) / t(variant)`. Each ratio comes from one job through Tessera's interleaved A/A pair, so it is comparable across shards |
+| Columns | One per length, all on the same log scale: speed relative to `slice::sort`, the geometric mean over the 10 distributions of `t(slice::sort) / t(variant)`. Each ratio is paired within a block through Tessera's interleaved A/A pair |
 | Marks | A thin stem from 1× to a dot. Filled for stable, hollow for unstable, so stability is a shape, not a colour. Tessera's row is blue with a bold label; the others are grey. A thin vertical line through Tessera's dot in each column makes "who is ahead" a matter of left or right |
 | Memory | A text column, not an axis: peak extra memory at 10,000,000. It shows that the speed does not come from a second copy of the data, without a second scale |
 | Header | Three large numbers computed from the Default build's plotted values at 10,000,000: Tessera against `slice::sort`, against the fastest unstable variant, and against the fastest other stable variant |
@@ -290,7 +259,7 @@ How does Tessera compare with the fastest sorts of any kind (Q3)? The figure 2 g
 
 ### Figure 4: scaling with length
 
-Where does Tessera overtake comparison sorts, and does the lead hold out of cache? One panel per type (`u64` keys, rows, 128-byte records, owned), random input only, because figures 2 and 3 already cover shapes. The horizontal axis is the length on a log scale (1,000 to 10,000,000), the vertical axis nanoseconds per element, so a linear-time sort is a flat line and an n log n sort rises. These are absolute times compared across lengths, which the shard model otherwise forbids, so each type's curve has its own **scaling shard**: `u64/random` at all four lengths with every stable variant in one job, and likewise for rows, 128-byte records and owned records. Every point of a panel then comes from the same machine and the same process. These cases repeat some of the main suite's random cases; the repetition costs four short jobs and keeps figure 4's comparisons valid. If a scaling shard cannot fit in 240 s, its panel is labelled as descriptive timings on the same hardware spec and is not used for claims across lengths. Tessera is the blue line, `slice::sort` a dark grey line, the other stable variants light grey; every line is labelled at its right end. Panels share the horizontal axis and each has its own vertical axis, stated in its title, because a 128-byte record costs several times a key. Unstable variants are left out to keep each panel to at most eight lines; they are in figures 1 and 3.
+Where does Tessera overtake comparison sorts, and does the lead hold out of cache? One panel per type (`u64` keys, rows, 128-byte records, owned), random input only, because figures 2 and 3 already cover shapes. The horizontal axis is the length on a log scale (1,000 to 10,000,000), the vertical axis nanoseconds per element, so a linear-time sort is a flat line and an n log n sort rises. These are absolute times compared across lengths, which is valid because a release run measures every case on one machine in one session; the report refuses to draw this figure from a results directory whose groups were measured on different hosts. Tessera is the blue line, `slice::sort` a dark grey line, the other stable variants light grey; every line is labelled at its right end. Panels share the horizontal axis and each has its own vertical axis, stated in its title, because a 128-byte record costs several times a key. Unstable variants are left out to keep each panel to at most eight lines; they are in figures 1 and 3.
 
 ### Figure 5: memory growth
 
@@ -298,24 +267,52 @@ How does the extra memory grow? Peak extra bytes against length, both on log sca
 
 ### Producing the figures
 
-The report module renders every figure as SVG from the stored job outputs and Metrics, alongside the report tables. Before real data exists, its tests render them from a synthetic fixture, as `fixtures/chart.svg` does for the continuous report, so the layout is settled and reviewed first: long variant names, close values in one column and a Tessera row that is not first must all render legibly. The documentation site can later show the same data with hover detail, but the README images are static SVGs, so nothing in them depends on hovering.
+The report module renders every figure as SVG from the results directory, alongside the report tables. Before real data exists, its tests render them from a synthetic fixture, as `fixtures/chart.svg` does for the continuous report, so the layout is settled and reviewed first: long variant names, close values in one column and a Tessera row that is not first must all render legibly. The documentation site can later show the same data with hover detail, but the README images are static SVGs, so nothing in them depends on hovering.
 
 ## Steps
 
 | Step | Delivers | Done when |
 |---|---|---|
-| 1. Feasibility on Bencher | A throwaway shard: Tessera A/A and `std-stable` on 10 cases, printed as BMF on branch `compare`, plus `bencher noise` | The three points under [Bencher's model](#bencher-s-model) are settled; shard time per case is measured |
-| 2. Shared generator | `case.rs` in the library; `smoke.rs` uses it | Smoke inputs hash identically before and after; Bencher shows no new IDs |
-| 3. Runner | `variant`, `check`, `run`, `shard`, `compare` with Tessera and the std sorts | `compare run` works on a contributor's machine directly and under `bencher run --dry-run`, writing the results directory without the hosted runners; self-test: a deliberately wrong variant that also mutates its input is caught, and every variant receives the original input; `validate` passes in CI |
-| 4. Rust competitors | The crate adapters behind `compare` | `list` shows the capability table; `validate` passes or marks unsupported types |
-| 5. Native competitors | `fetch.py`, `build.rs`, the shims behind `compare-native` | Every license is recorded with its commit; the static executable builds on the GitHub build host; `validate` passes; the report names each SIMD sort's dispatched level |
-| 6. Memory | `memory` executable | Peak bytes for every variant and case up to 1,000,000 |
-| 7. Workflow and report | A `bench-compare.yml` that submits every shard, and the report module with its figures | The figures render from a synthetic fixture and are reviewed before any real run; one full run on `main` produces the report and figures from the stored job outputs and Metrics alone |
-| 8. Release report | The first run on the release candidate | The README links the report and its numbers name the variant versions and the A/A ranges |
+| 1. Shared generator | `case.rs` in the library; `smoke.rs` uses it | Smoke inputs hash identically before and after; Bencher shows no new IDs |
+| 2. Runner | `variant`, `check`, `run`, `suite`, `host`, `compare` with Tessera and the std sorts | `compare run` writes the results directory on a contributor's machine with no network access; self-test: a deliberately wrong variant that also mutates its input is caught, and every variant receives the original input; `validate` passes in CI |
+| 3. Rust competitors | The crate adapters behind `compare` | `list` shows the capability table; `validate` passes or marks unsupported types |
+| 4. Native competitors | `fetch.py`, `build.rs`, the shims behind `compare-native` | Every license is recorded with its commit; the executable builds on Linux x86-64; `validate` passes; the report names each SIMD sort's dispatched level |
+| 5. Memory | `memory` executable | Peak bytes for every variant and case up to 1,000,000, and `u64` keys at 10,000,000 |
+| 6. Report | The report module with its figures and tables | The figures render from a synthetic fixture and are reviewed before any real run; a full run's directory produces the report alone, and a second run on the same machine reproduces its verdicts |
+| 7. Release report | The first run on the release candidate, on the maintainer's machine | The README and the Performance page show its figures; the release attaches the results directory; the report names the machine, its conditions, the variant versions and the A/A ranges |
 
 ## Changes to existing documents
 
-When step 3 lands, [Benchmarking](../development/benchmarking.md) is rewritten to describe the runner that exists: the four questions, the shard model, the reduced matrix, BMF output and the TypeScript report. The parts this proposal defers (`samples.jsonl` and its manifest schema, the `core` and `extended` suites, cold-cache mode, cross-language JSONL) are removed or moved to [`ROADMAP.md`](../../ROADMAP.md), where the C++ milestone takes over the golden hashes. The C++ runner's list of baselines moves here, because they now run in the Rust runner; the C++ runner keeps the job of measuring the C++ implementation. The rule against per-call FFI is reworded to say what it excludes: timing a binding's per-call conversion, not a native sort that the runner calls once per buffer. The choice to run release comparisons on Bencher becomes a decision record.
+When step 2 lands, [Benchmarking](../development/benchmarking.md) is rewritten to describe the runner that exists: the four questions, the results directory, the reduced matrix, the recommended host setup and the TypeScript report. The parts this proposal defers (the `core` and `extended` suites, cold-cache mode, cross-language JSONL) are removed or moved to [`ROADMAP.md`](../../ROADMAP.md), where the C++ milestone takes over the golden hashes. The C++ runner's list of baselines moves here, because they now run in the Rust runner; the C++ runner keeps the job of measuring the C++ implementation. The rule against per-call FFI is reworded to say what it excludes: timing a binding's per-call conversion, not a native sort that the runner calls once per buffer. The choice to measure release comparisons on a maintainer's machine, with hosted runs as a later addition, becomes a decision record.
+
+## Later: hosted runs
+
+Running the same comparison on Bencher Bare Metal's `intel-v1` machines would let anyone rerun it on the same public hardware, from a pinned image. It is not part of 0.1, because the free plan's limits would shape the runner: what follows records what that addition needs, so that the 0.1 design does not block it.
+
+| Limit | Consequence |
+|---|---|
+| One job at a time, 5 minutes each | Groups become **shards** that finish in under 240 s each, submitted one after another through the existing `bencher-bare-metal` concurrency group, by manual dispatch or a release tag, never by PRs |
+| Consecutive jobs may run on different machines of the same spec | Ratios stay comparable across shards, but absolute times do not: figure 4 needs one shard per type with every length, or it is labelled descriptive |
+| 65,535 Metrics per day | Summaries take about 3,000 Metrics per Measure for the whole suite; per-block values stay in the job output, not in Metrics |
+| No network access on shared runners | The image holds the runner and every competitor, built on the GitHub host; the image digest goes into `manifest.json` |
+
+The Bencher model for those runs:
+
+| Concept | Use |
+|---|---|
+| Branch | One fixed branch, `compare`, with `--hash <commit>`: the shards of one run share a branch and hash and so form one version, and successive runs form that branch's history |
+| Testbed | One Testbed, `intel-v1-compare`, spec `intel-v1`. A Testbed is the measurement environment, not a build, so the build is a segment of the benchmark ID. The continuous suite keeps a Testbed per build ([decision 0011](../decisions/0011-benchmark-feature-configurations.md)) because thresholds are scoped by Testbed; the comparison sets no thresholds |
+| Benchmark | `compare/<case_id>/<variant>/<build>`, for example `compare/u64/random/1000000/s1/radsort/default` |
+| Measures | `ratio`, the median over blocks with the per-block minimum and maximum as its bounds; `latency`, the median nanoseconds per element. The A/A control is its own benchmark, `tessera-aa`, never another metric's bounds |
+| Iterations | One `bencher run` iteration per shard. Blocks are the runner's statistical unit: each `--iter` restarts the executable, and `--fold median` would fold absolute times across processes, not paired ratios |
+
+Bencher keeps each finished job's stdout, stderr, exit code and output files, so the runner would print the BMF on stdout and the per-block samples on stderr, and the workflow would rebuild the results directory from them, writing `manifest.json` itself from the build. Bencher's [Project Jobs API](https://bencher.dev/docs/api/projects/jobs/) returns a finished job's output to callers with `view` permission but also lists viewing a job as a Bencher Plus feature. Before this addition is built, a feasibility shard settles three points:
+
+1. **Output.** Whether the free plan returns job output to the project's API key. If not, the per-block ratios go into nine fixed Measures `ratio-b0` to `ratio-b8` on the same benchmarks, about 30,000 more Metrics per run, which leaves room for one full run per day.
+2. **Noise.** The A/A range within a job, the spread of one shard across three jobs, and `bencher noise --format json` run in the same image.
+3. **Host conditions.** Bencher's runner documents ASLR, SMT, turbo boost and the NMI watchdog off and the performance governor by default; whether this holds on the shared runners is confirmed and recorded in `host.json`, or `host.json` records the host as unknown apart from the spec.
+
+Bencher's self-hosted runners and a self-hosted Bencher server could serve the same jobs on other machines; they are not planned.
 
 ## Open questions
 

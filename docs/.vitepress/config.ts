@@ -14,7 +14,6 @@ const sharedPages = new Set([
   "ROADMAP.md",
   "RELEASING.md",
   "CONTRIBUTING.md",
-  "CHANGELOG.md",
 ]);
 // `docs/README.md` indexes the directory for GitHub readers; the site's home
 // page and sidebar replace it.
@@ -128,7 +127,7 @@ export default defineConfig({
         text: "Development",
         link: "/design/engine",
         activeMatch:
-          "^/(design|development|decisions|proposals)/|^/(CONTRIBUTING|RELEASING|ROADMAP|CHANGELOG)",
+          "^/(design|development|decisions|proposals)/|^/(CONTRIBUTING|RELEASING|ROADMAP)",
       },
     ],
     sidebar: {
@@ -209,7 +208,6 @@ function developmentSidebar() {
       text: "Planning",
       items: [
         { text: "Roadmap", link: "/ROADMAP" },
-        { text: "Changelog", link: "/CHANGELOG" },
         { text: "Python binding proposal", link: "/proposals/python-binding" },
         { text: "Comparison benchmarks proposal", link: "/proposals/comparison-benchmarks" },
       ],

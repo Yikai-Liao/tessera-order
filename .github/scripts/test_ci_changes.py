@@ -51,7 +51,7 @@ class LanguageSelection(unittest.TestCase):
     def test_prose_selects_no_language(self):
         for path in [
             "README.md",
-            "CHANGELOG.md",
+            "RELEASING.md",
             "ROADMAP.md",
             "docs/explain/keys.md",
             "docs/decisions/0001-single-bsd-2-clause-license.md",

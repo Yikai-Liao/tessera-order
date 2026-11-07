@@ -46,7 +46,7 @@ Run these locally. Miri, the MSRV, other platforms and benchmarks run in CI on a
 - Public Rust items: a one-line summary, a paragraph on the contract with intra-doc links, then `# Key function`, `# Panics`, `# Safety`, `# Memory`, `# Examples` as they apply, with examples as asserting doctests. Internal items get at least the summary.
 - Comments explain why — the invariant, the hazard, the measurement behind a constant with its numbers — for a reader of the current code. History belongs in `docs/design/port.md` or a decision record.
 - Markdown paragraphs are one line each.
-- Update in the same change: `docs/explain/` and `theme/sim/` for routing, thresholds, digit planning or the block partition (their text says all a figure shows); `conformance/semantics.md` for ordering, stability, panics or space bounds; a decision record, numbered by its pull request, for a settled choice; `ROADMAP.md` for planned work; `CHANGELOG.md` for user-visible changes.
+- Update in the same change: `docs/explain/` and `theme/sim/` for routing, thresholds, digit planning or the block partition (their text says all a figure shows); `conformance/semantics.md` for ordering, stability, panics or space bounds; a decision record, numbered by its pull request, for a settled choice; `ROADMAP.md` for planned work; the pull request description for user-visible changes, which release notes are written from.
 
 ## Measurements
 

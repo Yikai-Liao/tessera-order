@@ -104,8 +104,6 @@ Signed-off-by: Your Name <you@example.com>
 
 Branches do not need to be up to date with `main` to merge; rebase only to resolve a conflict ([decision 0032](docs/decisions/0032-parallel-pull-requests.md)).
 
-`CHANGELOG.md` is still written by hand; the types classify history, they do not generate it.
-
 ## Sign-off (DCO)
 
 Every commit in a pull request must carry a `Signed-off-by` line that certifies the [Developer Certificate of Origin 1.1](https://developercertificate.org/): that you wrote the change or otherwise have the right to submit it under the project license.

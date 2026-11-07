@@ -37,6 +37,8 @@ export interface Manifest {
   features: string[];
   target: string;
   profile: string;
+  opt_level: string;
+  debug: string;
   dispatch?: Record<string, string>;
   [measurementId: string]: unknown;
 }
@@ -121,11 +123,11 @@ export function summarize(dataset: Dataset): Map<string, Summary> {
     const times = (values: Sample[]) => new Map(values.map((s) => [s.block, time(s)]));
     const first = times(a),
       second = times(b);
-    const aa = a.map((s) => second.get(s.block)! / time(s));
+    const mean = (block: number) => (first.get(block)! + second.get(block)!) / 2;
+    // Both controls use the competitor's denominator, so their labels cannot change a verdict.
+    const aa = a.flatMap((s) => [time(s) / mean(s.block), second.get(s.block)! / mean(s.block)]);
     const ratios = samples.map((s) =>
-      variant === "tessera-aa"
-        ? time(s) / first.get(s.block)!
-        : time(s) / ((first.get(s.block)! + second.get(s.block)!) / 2),
+      variant === "tessera-aa" ? time(s) / first.get(s.block)! : time(s) / mean(s.block),
     );
     const ratio = median(ratios),
       aaLow = Math.min(...aa),

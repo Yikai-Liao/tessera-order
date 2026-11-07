@@ -61,6 +61,8 @@ function parseManifest(value: unknown): Manifest {
     "cargo_lock",
     "target",
     "profile",
+    "opt_level",
+    "debug",
   ])
     assertString(value[name]);
   if (!Array.isArray(value.cases) || !Array.isArray(value.variants))
@@ -227,6 +229,8 @@ export async function loadRun(directories: string[], partial = false): Promise<D
         "rustc",
         "target",
         "profile",
+        "opt_level",
+        "debug",
         "features",
         "cargo_encoded_rustflags",
         "native_build",
@@ -254,6 +258,8 @@ export async function loadRun(directories: string[], partial = false): Promise<D
       "rustc",
       "target",
       "profile",
+      "opt_level",
+      "debug",
       "cargo_encoded_rustflags",
       "cargo_lock",
     ]) {

@@ -11,14 +11,15 @@ import { collectWarnings, writeReport } from "./index.ts";
 import { loadRun, validateRun } from "./load.ts";
 import { measurementId, summarize } from "./model.ts";
 
-async function writeFixture(directory: string) {
-  const dataset = createFixture();
+async function writeFixture(directory: string, simd = false) {
+  const dataset = createFixture(simd);
   await Promise.all([
     writeFile(join(directory, "host.json"), JSON.stringify(dataset.host)),
-    writeFile(join(directory, "manifest.json"), JSON.stringify(dataset.manifests.get("default"))),
-    writeFile(
-      join(directory, "memory-manifest-default.json"),
-      JSON.stringify(dataset.manifests.get("default")),
+    ...[...dataset.manifests].flatMap(([build, manifest]) =>
+      [
+        build === "default" ? "manifest.json" : `manifest-${build}.json`,
+        `memory-manifest-${build}.json`,
+      ].map((file) => writeFile(join(directory, file), JSON.stringify(manifest))),
     ),
     writeFile(
       join(directory, "blocks.jsonl"),
@@ -64,6 +65,40 @@ test("paired ratios respect noise", () => {
     summarize(dataset).get(measurementId("default", s.caseId, "std-stable"))!.verdict,
     "within noise",
   );
+});
+
+test("A/A verdicts use the paired mean and survive swapping control labels", () => {
+  const dataset = createFixture();
+  const id = "u64/random/1000/s1";
+  dataset.samples = dataset.samples.filter((s) => s.case_id === id);
+  const key = measurementId("default", id, "std-stable");
+  for (const [opponent, verdict] of [
+    [109, "within noise"],
+    [99, "faster"],
+    [100, "within noise"],
+    [110, "within noise"],
+    [120, "within noise"],
+    [121, "slower"],
+  ] as const) {
+    for (const s of dataset.samples) {
+      const time = s.variant === "tessera" ? 100 : s.variant === "tessera-aa" ? 120 : opponent;
+      s.elapsed_ns = s.batch * time;
+    }
+    const summaries = summarize(dataset);
+    const summary = summaries.get(key)!;
+    assert.equal(summary.verdict, verdict, `opponent time ${opponent}`);
+    assert.equal(summary.ratio, opponent / 110);
+    assert.equal(summary.aaLow, 100 / 110);
+    assert.equal(summary.aaHigh, 120 / 110);
+    assert.equal(summaries.get(measurementId("default", id, "tessera-aa"))!.ratio, 120 / 100);
+    for (const s of dataset.samples) {
+      if (s.variant === "tessera") s.variant = "tessera-aa";
+      else if (s.variant === "tessera-aa") s.variant = "tessera";
+    }
+    const swapped = summarize(dataset);
+    assert.deepEqual(swapped.get(key), summary);
+    assert.equal(swapped.get(measurementId("default", id, "tessera-aa"))!.ratio, 100 / 120);
+  }
 });
 
 test("invalid samples fail validation", () => {
@@ -137,6 +172,42 @@ test("raw results round trip", async () => {
       await assert.rejects(loadRun([dir, other]), /fingerprints differ/);
     } finally {
       await rm(other, { recursive: true });
+    }
+  } finally {
+    await rm(dir, { recursive: true });
+  }
+});
+
+test("optimization and debug settings must agree across timing, memory and SIMD", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tessera-build-config-"));
+  try {
+    const dataset = await writeFixture(dir, true);
+    await loadRun([dir]);
+    for (const field of ["opt_level", "debug"]) {
+      const different = field === "opt_level" ? "1" : "true";
+      for (const [build, manifest] of dataset.manifests) {
+        const memoryPath = join(dir, `memory-manifest-${build}.json`);
+        await writeFile(memoryPath, JSON.stringify({ ...manifest, [field]: different }));
+        await assert.rejects(
+          loadRun([dir]),
+          new RegExp(`memory provenance differs: ${build}/${field}`),
+        );
+        await writeFile(memoryPath, JSON.stringify(manifest));
+      }
+      const simd = dataset.manifests.get("portable-simd")!;
+      const simdPaths = ["manifest-portable-simd.json", "memory-manifest-portable-simd.json"];
+      for (const path of simdPaths)
+        await writeFile(join(dir, path), JSON.stringify({ ...simd, [field]: different }));
+      await assert.rejects(loadRun([dir]), new RegExp(`compiler configuration: ${field}`));
+      for (const path of simdPaths) await writeFile(join(dir, path), JSON.stringify(simd));
+
+      const incomplete: Record<string, unknown> = { ...dataset.manifests.get("default")! };
+      delete incomplete[field];
+      for (const path of ["manifest.json", "memory-manifest-default.json"])
+        await writeFile(join(dir, path), JSON.stringify(incomplete));
+      await assert.rejects(loadRun([dir]), /expected a nonempty string/);
+      for (const path of ["manifest.json", "memory-manifest-default.json"])
+        await writeFile(join(dir, path), JSON.stringify(dataset.manifests.get("default")));
     }
   } finally {
     await rm(dir, { recursive: true });

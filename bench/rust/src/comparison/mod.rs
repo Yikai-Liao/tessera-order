@@ -227,6 +227,8 @@ fn verify_memory_build(options: &Options) -> Result<()> {
         "rustc",
         "target",
         "profile",
+        "opt_level",
+        "debug",
         "features",
         "cargo_encoded_rustflags",
         "native_build",
@@ -430,6 +432,44 @@ fn measure_memory(options: &Options, cases: &[Case]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn memory_build_requires_matching_compiler_settings() {
+        let output_dir = std::env::temp_dir().join(format!(
+            "tessera-memory-build-{}-{}",
+            std::process::id(),
+            super::BUILD
+        ));
+        std::fs::create_dir_all(&output_dir).unwrap();
+        let options = super::Options {
+            command: "run".into(),
+            suite: "smoke".into(),
+            group: None,
+            output_dir,
+            min_sample_ns: 1_000_000,
+            prepared_cap_bytes: 1 << 20,
+        };
+        let path = options
+            .output_dir
+            .join(format!("memory-manifest-{}.json", super::BUILD));
+        let timing: serde_json::Value =
+            serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/provenance.json")))
+                .unwrap();
+        std::fs::write(&path, serde_json::to_vec(&timing).unwrap()).unwrap();
+        super::verify_memory_build(&options).unwrap();
+        for field in ["opt_level", "debug"] {
+            let mut memory = timing.clone();
+            memory[field] = serde_json::json!("different");
+            std::fs::write(&path, serde_json::to_vec(&memory).unwrap()).unwrap();
+            assert_eq!(
+                super::verify_memory_build(&options)
+                    .unwrap_err()
+                    .to_string(),
+                format!("memory executable differs from timing executable: {field}")
+            );
+        }
+        std::fs::remove_dir_all(&options.output_dir).unwrap();
+    }
+
     #[test]
     fn journal_recovers_truncated_tail() {
         let path =

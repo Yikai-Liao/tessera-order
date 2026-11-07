@@ -79,7 +79,7 @@ export function collectWarnings(dataset: Dataset): string[] {
 }
 function renderResults(dataset: Dataset, summaries: Map<string, Summary>): string {
   let output =
-    "## Full results\n\nTimes include each sort's scratch allocation. Ratios divide the variant's time by the mean of Tessera's paired samples in the same block. Bounds are per-block minima and maxima. Faster/slower describes the variant relative to Tessera; it requires 8 of 9 blocks to agree and the median to fall outside the A/A range. A/A is A2 / A1.\n\n";
+    "## Full results\n\nTimes include each sort's scratch allocation. Ratios divide the variant's time by the mean of Tessera's paired samples in the same block. Bounds are per-block minima and maxima. The A/A noise range spans both Tessera samples divided by their block mean, across all blocks. Faster/slower describes the variant relative to Tessera; it requires 8 of 9 blocks to agree and the median to fall outside that range. The tessera-aa row separately reports A2 / A1.\n\n";
   const variants = [
     ...new Set([...dataset.manifests.values()].flatMap((m) => m.variants.map((v) => v.name))),
     "tessera-aa",
@@ -129,7 +129,7 @@ function renderCapabilities(dataset: Dataset) {
 function renderProvenance(dataset: Dataset) {
   let out = `## Measurement environment\n\n${renderTable(["Condition", "Recorded value"], Object.entries(dataset.host))}\n`;
   for (const [build, manifest] of dataset.manifests) {
-    out += `### ${build}\n\nCommit \`${manifest.commit}\` (${manifest.dirty ? "modified tree" : "clean tree"}), target \`${manifest.target}\`, profile \`${manifest.profile}\`. Source SHA-256: \`${manifest.source_sha256}\`. Executable SHA-256: \`${manifest.binary_sha256}\`.\n\n`;
+    out += `### ${build}\n\nCommit \`${manifest.commit}\` (${manifest.dirty ? "modified tree" : "clean tree"}), target \`${manifest.target}\`, profile \`${manifest.profile}\`, optimization level \`${manifest.opt_level}\`, debug \`${manifest.debug}\`. Source SHA-256: \`${manifest.source_sha256}\`. Executable SHA-256: \`${manifest.binary_sha256}\`.\n\n`;
     out += `\`\`\`text\n${manifest.rustc}\n\`\`\`\n\n`;
     out += `Features: ${manifest.features.map(formatCell).join(", ")}. Rust flags: \`${formatCell(manifest.cargo_encoded_rustflags).replaceAll("\u001f", " ")}\`.\n\n`;
     if (manifest.dispatch)
@@ -156,6 +156,8 @@ export async function writeReport(directories: string[], partial = false): Promi
   const out = join(directories[0], "report");
   await mkdir(out, { recursive: true });
   let markdown = `# Sorting comparison\n\n${partial ? "Partial suite; only completed groups are shown." : `${dataset.manifests.get("default")!.suite} suite, version 1.`} Every value is regenerated from the accompanying manifests, host fingerprint, blocks and memory samples.\n\n`;
+  markdown +=
+    "Nine blocks reuse each case's seed-one input. Their range measures execution variability on that input; it does not measure variability across random inputs. Calibration can choose different batch sizes for different variants, changing the prepared-buffer working set and cache behavior.\n\n";
   markdown += renderProvenance(dataset);
   const conditions = collectWarnings(dataset);
   if (conditions.length)

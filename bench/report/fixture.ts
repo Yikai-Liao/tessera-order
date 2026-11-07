@@ -53,6 +53,8 @@ export function createFixture(simd = false): Dataset {
     features: ["COMPARE"],
     target: "x86_64-unknown-linux-gnu",
     profile: "release",
+    opt_level: "3",
+    debug: "false",
   };
   const dataset: Dataset = {
     host: {

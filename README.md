@@ -14,6 +14,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSD--2--Clause-blue.svg" alt="License: BSD-2-Clause"></a>
   <img src="https://img.shields.io/badge/MSRV-1.85-orange.svg" alt="MSRV 1.85">
   <img src="https://img.shields.io/badge/status-pre--release-lightgrey.svg" alt="Status: pre-release">
+  <a href="https://yikai-liao.github.io/tessera-sort/"><img src="https://img.shields.io/badge/docs-online-8b5cf6.svg" alt="Documentation"></a>
 </p>
 
 > [!IMPORTANT]
@@ -101,9 +102,10 @@ A Python binding is planned as well; see the [roadmap](ROADMAP.md).
 | Topic | Document |
 |---|---|
 | Ordering, key functions, floats, panics and memory bounds | [`conformance/semantics.md`](conformance/semantics.md) |
+| How the algorithm works, with interactive figures | [Algorithm explanation](https://yikai-liao.github.io/tessera-sort/explain/) |
 | How the engine works | [`docs/design/engine.md`](docs/design/engine.md) |
 | Why every record type caches bucket IDs | [Decision 0002](docs/decisions/0002-cache-bucket-ids-for-every-record.md) |
-| All documentation | [`docs/README.md`](docs/README.md) |
+| All documentation | [Documentation site](https://yikai-liao.github.io/tessera-sort/) · [Source index](docs/README.md) |
 
 ## Contributing
 

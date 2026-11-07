@@ -112,7 +112,9 @@ Every commit in a pull request must carry a `Signed-off-by` line that certifies 
 git commit -s
 ```
 
-The name and email in the sign-off must match the commit author. CI checks every commit of a pull request. To add a missing sign-off to the commits already on your branch:
+The name and email in the sign-off must match the commit author. CI checks every commit of a pull request. Dependabot uses a different email in its standard sign-off, so its current head commit is exempt only when the authenticated Dependabot account opened or updated its same-repository pull request and GitHub verifies the commit's signature and bot attribution. All other commits, including human additions to a bot pull request, still need matching sign-offs. Verification failures grant no exception. If a human updates a Dependabot branch, ask Dependabot to rebase it rather than rewriting the bot's sign-off.
+
+To add a missing sign-off to the commits already on your branch:
 
 ```sh
 git rebase --signoff origin/main

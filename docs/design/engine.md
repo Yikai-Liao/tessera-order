@@ -31,7 +31,7 @@ at a time and retain the previous encoded key. In the default build, direct
 extraction uses a blocked scan for budgeted probes, with a scalar scan for
 `f64`. Insertion finishing reuses the scalar key-function extractor: the
 short ordered runs left by a radix partition do not amortize a block mask.
-See [decision 0013](../decisions/0013-scalar-default-insertion-finishing.md).
+See [decision 0014](../decisions/0014-scalar-default-insertion-finishing.md).
 The optional `portable-simd`
 backend selects an instruction set once for a vector-eligible insertion pass
 and supplies its vector scan through the same extractor interface. Shorter

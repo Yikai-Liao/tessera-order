@@ -3,7 +3,7 @@
 Date: 2026-11-07. Status: accepted.
 
 The default insertion-finishing scan is amended by
-[decision 0013](0013-scalar-default-insertion-finishing.md).
+[decision 0014](0014-scalar-default-insertion-finishing.md).
 
 ## Context
 

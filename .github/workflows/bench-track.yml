@@ -109,10 +109,13 @@ jobs:
             args=(--start-point "$BASE" --start-point-hash "$BASE_HASH"
               --start-point-clone-thresholds --start-point-reset)
           else
-            # A t-test against recent main history: noisy cases get wider limits.
-            args=(--threshold-measure latency --threshold-test t_test
-              --threshold-min-sample-size 5 --threshold-max-sample-size 32
-              --threshold-upper-boundary 0.999 --threshold-lower-boundary 0.999
+            # Five percent around the previous main sample. A statistical test
+            # over a window of main samples mixes code from before and after
+            # each optimization, so its limits widen into the next one
+            # (decision 0013).
+            args=(--threshold-measure latency --threshold-test percentage
+              --threshold-min-sample-size 1 --threshold-max-sample-size 1
+              --threshold-upper-boundary 0.05 --threshold-lower-boundary 0.05
               --thresholds-reset)
           fi
           # Each configuration gets its own remote job and timeout. A failed

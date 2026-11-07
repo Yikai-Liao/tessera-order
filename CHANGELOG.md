@@ -25,4 +25,4 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Fixed
 
-- Use scalar key extraction for insertion finishing in the default build, keeping blocked budgeted probes and the optional SIMD backend ([decision 0013](docs/decisions/0013-scalar-default-insertion-finishing.md)).
+- Use scalar key extraction for insertion finishing in the default build, keeping blocked budgeted probes and the optional SIMD backend ([decision 0014](docs/decisions/0014-scalar-default-insertion-finishing.md)).

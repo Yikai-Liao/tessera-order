@@ -36,8 +36,8 @@ jobs:
         uses: actions/github-script@v9
         with:
           script: |
-            const resolve = require('./.github/scripts/bencher_context.cjs');
-            await resolve({ github, context, core });
+            const { resolveSource } = require('./.github/scripts/bencher/github.ts');
+            await resolveSource({ github, context, core });
       - name: Start the report check
         id: check
         if: steps.source.outputs.eligible == 'true'
@@ -45,14 +45,9 @@ jobs:
         env:
           HASH: ${{ steps.source.outputs.hash }}
         with:
-          # Shows the head as being measured while the Bencher job runs.
           script: |
-            const { data } = await github.rest.checks.create({
-              ...context.repo, name: "Benchmarks (rust)", head_sha: process.env.HASH,
-              status: "in_progress",
-              details_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-            });
-            core.setOutput("id", String(data.id));
+            const { startReport } = require('./.github/scripts/bencher/github.ts');
+            await startReport({ github, context, core, hash: process.env.HASH });
       - uses: actions/download-artifact@v4
         if: steps.source.outputs.eligible == 'true'
         with:
@@ -115,9 +110,6 @@ jobs:
             --image "$IMAGE" --job-timeout 240 \
             --adapter rust_criterion --format json --quiet \
             "${args[@]}" --exec -- /bench --bench > "$RUNNER_TEMP/bencher-report.json"
-      # bencher_report.cjs writes the check, the job summary and the PR comment
-      # instead of `bencher run --github-actions`, whose comment needs a login
-      # for its links and stays at the PR's first report.
       - name: Publish report
         id: report
         if: always() && steps.check.outputs.id
@@ -130,14 +122,15 @@ jobs:
           OUTCOME: ${{ steps.measure.outcome }}
         with:
           script: |
-            const publish = require('./.github/scripts/bencher_report.cjs');
+            const { publishReport } = require('./.github/scripts/bencher/index.ts');
             const env = process.env;
-            await publish({ github, context, core, inputs: {
+            await publishReport({ github, context, core, inputs: {
               language: "rust", hash: env.HASH, number: env.PR_NUMBER,
               baseRef: env.BASE || "main", checkId: env.CHECK_ID,
               // A skipped step means an earlier one failed.
               outcome: env.OUTCOME === "skipped" ? "failure" : env.OUTCOME,
               reportPath: `${env.RUNNER_TEMP}/bencher-report.json`,
+              chartPath: `${env.RUNNER_TEMP}/benchmark-chart.svg`,
             } });
       - name: Upload benchmark chart
         if: always() && steps.report.outputs.chart == 'true'

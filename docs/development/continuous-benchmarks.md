@@ -5,7 +5,7 @@ Every push to `main` and every PR that touches Rust code runs a small Criterion 
 ## Pipeline
 
 1. `bench-build.yml` runs without secrets, also for forks. It builds `bench/rust/benches/smoke.rs` as a static glibc executable and uploads it as an artifact. Static glibc keeps glibc's allocator, which `api` mode measures.
-2. `bench-track.yml` runs trusted default-branch code through `workflow_run`. It looks up the source PR through the GitHub API ([`bencher_context.cjs`](../../.github/scripts/bencher_context.cjs)) and skips closed or superseded PRs. It then wraps the executable in a `FROM scratch` image that the workflow defines itself, pushes the image and submits its digest to Bencher. The executable only ever runs on Bencher's runner, which receives no credentials.
+2. `bench-track.yml` runs trusted default-branch code through `workflow_run`. It looks up the source PR through the GitHub API ([`github.ts`](../../.github/scripts/bencher/github.ts)) and skips closed or superseded PRs. It then wraps the executable in a `FROM scratch` image that the workflow defines itself, pushes the image and submits its digest to Bencher. The executable only ever runs on Bencher's runner, which receives no credentials.
 
 Bencher Free allows one job per organization, at most 5 minutes each. Tracking jobs share the `bencher-bare-metal` concurrency group with [`queue: max`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-queueing-multiple-pending-runs), which keeps up to 100 pending runs. Each job waits for its remote run. The remote timeout is 240 seconds. The suite takes about 130 seconds locally; keep it under 3 minutes when adding cases.
 
@@ -31,11 +31,13 @@ History and alerts are available on the [public Bencher dashboard](https://bench
 
 ## Reports
 
-[`bencher_report.cjs`](../../.github/scripts/bencher_report.cjs) turns the JSON report from `bencher run` into three outputs:
+[`bencher/index.ts`](../../.github/scripts/bencher/index.ts) turns the JSON report from `bencher run` into three outputs:
 
 - **Check `Benchmarks (rust)`** on the measured commit. It shows as in progress while the Bencher job runs. It fails for possible regressions or a failed measurement, and passes when the only alerts are improvements. The workflow itself does not fail on alerts.
 - **Job summary** of the tracking run, for `main` and PRs.
 - **PR comment** for each measured head. A rerun of the same head updates its comment. A new head gets a new comment at the end of the timeline, and earlier reports (including comments from `bencher run --github-actions`) are minimized as outdated. That way the newest result is the visible one, and the PR shows one expanded report however often it is pushed. If the PR moves on while a run is queued, the stale result goes to the job summary only.
+
+The scripts run directly on Node.js 24. `report.ts` defines the Bencher result model and computes the summary, `chart.ts` generates the SVG, `markdown.ts` renders the report text, and `github.ts` resolves commits and publishes checks and comments. Run `npm ci`, `npm run scripts:typecheck` and `npm run scripts:test` to check them.
 
 A comment is written to be read top-down:
 

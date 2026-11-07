@@ -16,7 +16,7 @@ The documentation site is built with [VitePress](https://vitepress.dev) from the
 
 ## Commands
 
-Run these from the repository root, with Node.js 22 or later. The npm project sits at the root so that pages outside `docs/`, such as `ROADMAP.md`, resolve the same dependencies.
+Run these from the repository root, with Node.js 24 or later. The npm project sits at the root so that pages outside `docs/`, such as `ROADMAP.md`, resolve the same dependencies.
 
 ```sh
 npm ci                   # install the pinned toolchain

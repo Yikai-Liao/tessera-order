@@ -1,21 +1,27 @@
 {
-  "name": "tessera-sort-docs",
+  "name": "tessera-sort-tools",
   "private": true,
-  "description": "Documentation site for Tessera; see docs/development/docs-site.md",
+  "description": "Documentation site and CI tooling for Tessera",
   "type": "module",
   "scripts": {
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
     "docs:typecheck": "vue-tsc --noEmit -p docs/.vitepress",
-    "docs:test": "node --test \"docs/.vitepress/theme/sim/*.test.ts\""
+    "docs:test": "node --test \"docs/.vitepress/theme/sim/*.test.ts\"",
+    "scripts:typecheck": "tsc --noEmit -p .github/scripts",
+    "scripts:test": "node --test \".github/scripts/bencher/*.test.ts\""
   },
   "devDependencies": {
+    "@actions/github": "^9.1.1",
     "@types/node": "^24.19.2",
     "markdown-it-mathjax3": "^4.3.2",
     "typescript": "^6.0.3",
     "vitepress": "^1.6.4",
     "vue": "^3.5.45",
     "vue-tsc": "^3.3.14"
+  },
+  "engines": {
+    "node": ">=24.0.0"
   }
 }

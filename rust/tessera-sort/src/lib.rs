@@ -63,14 +63,14 @@
 //!
 //! `portable-simd` is off by default and requires `std` and Rust 1.89 or newer.
 //! It adds [`fearless_simd`](https://docs.rs/fearless_simd) for adjacent-key
-//! scans, ascending-order confirmation and bucket-count prefix sums. On x86
-//! it selects a supported SIMD backend at run time, once per insertion pass,
-//! ascending confirmation or prefix sum. Other targets
-//! use their compile-time baseline, including Arm Neon and WebAssembly SIMD
-//! when enabled for the target. Keys without a vector kernel use scalar scans.
+//! scans, ascending-order confirmation and bucket-count prefix sums. On x86 it
+//! selects a supported instruction set at run time, once per insertion pass,
+//! ascending confirmation or prefix sum. Other targets use their compile-time
+//! baseline, including Arm Neon and WebAssembly SIMD when enabled for the
+//! target. Keys without a vector kernel use scalar scans. Results are the same
+//! with and without the feature.
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![warn(missing_docs)]
 
 extern crate alloc;
 
@@ -88,9 +88,16 @@ pub use workspace::Workspace;
 
 /// Sorts keys in ascending order, keeping equal keys in input order.
 ///
-/// The keys are encoded by Tessera, so their order is fully determined by
-/// [`RadixKey`]. To reuse scratch memory across calls, use
+/// The order is the encoded order documented on [`RadixKey`]: integers in their
+/// usual order, floats as [`f64::total_cmp`], and [`Reverse`](core::cmp::Reverse)
+/// keys descending. To reuse scratch memory across calls, use
 /// [`Workspace::stable_sort`].
+///
+/// # Memory
+///
+/// Allocates the scratch described in the [crate documentation](crate#memory)
+/// and frees it before returning. Inputs that are already ordered or constant
+/// do not allocate.
 ///
 /// # Examples
 ///
@@ -125,6 +132,11 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 /// dropped or duplicated. Without the `std` feature, a panic during block
 /// partitioning aborts; panics elsewhere may unwind with every record preserved.
 ///
+/// # Memory
+///
+/// As [`stable_sort`], plus up to two bytes per tile record of cached bucket
+/// IDs.
+///
 /// # Examples
 ///
 /// ```
@@ -147,11 +159,17 @@ pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], k
 }
 
 /// Internal thresholds, exported for benchmarks that probe boundary sizes.
+///
+/// Not part of the public API: the values may change in any release.
 #[doc(hidden)]
 pub mod thresholds {
+    /// Largest tile or bucket that is finished by insertion sort.
     pub const INSERTION_MAX: usize = 48;
+    /// Default tile budget, in bytes of records.
     pub const TILE_BYTES: usize = 64 * 1024;
+    /// Most records in one tile, so that a `u16` cursor addresses any of them.
     pub const MAX_TILE_RECORDS: usize = u16::MAX as usize;
+    /// Largest cursor table of a tile-local pass, in bytes.
     pub const MAX_CURSOR_BYTES: usize = 32 * 1024;
 }
 

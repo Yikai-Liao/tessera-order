@@ -1,7 +1,26 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { attribution, changedRows, geomean, isSlower, modeName, modes, severity, type CaseRow, type Configuration } from "./matrix.ts";
-import { formatChange, formatTime, isMajor, MAJOR, short, type ReportSummary, type Row, type Verdict } from "./report.ts";
+import {
+  attribution,
+  type CaseRow,
+  type Configuration,
+  changedRows,
+  geomean,
+  isSlower,
+  modeName,
+  modes,
+  severity,
+} from "./matrix.ts";
+import {
+  formatChange,
+  formatTime,
+  isMajor,
+  MAJOR,
+  type ReportSummary,
+  type Row,
+  short,
+  type Verdict,
+} from "./report.ts";
 
 const BENCHER = "https://bencher.dev";
 const API = "https://api.bencher.dev/v0";
@@ -44,7 +63,8 @@ export function headline(s: ReportSummary) {
   if (s.improvements) parts.push(`${s.improvements} faster`);
   if (s.missing) parts.push(`${s.missing} new`);
   // Without a single compared case there is nothing to call unchanged.
-  if (!s.regressions && !s.improvements) parts.push(s.compared ? "no significant change" : "no baseline");
+  if (!s.regressions && !s.improvements)
+    parts.push(s.compared ? "no significant change" : "no baseline");
   return parts.join(", ");
 }
 
@@ -56,22 +76,27 @@ function caseLine(r: Row) {
 // before anyone reads a table. Regressions come first: they need action.
 function callouts(s: ReportSummary) {
   const out = [];
-  const major = (verdict: Verdict) => s.rows.filter(r => r.verdict === verdict && isMajor(r)).length;
+  const major = (verdict: Verdict) =>
+    s.rows.filter((r) => r.verdict === verdict && isMajor(r)).length;
   if (s.worst) {
     const n = major("regression");
-    out.push([
-      "> [!CAUTION]",
-      `> **${plural(s.regressions, "case")} slower${n ? `, ${n} by ${MAJOR * 100}% or more` : ""}.** ` +
-        `Worst: ${caseLine(s.worst)}, **${formatChange(s.worst.change)}**.  `,
-    ].join("\n"));
+    out.push(
+      [
+        "> [!CAUTION]",
+        `> **${plural(s.regressions, "case")} slower${n ? `, ${n} by ${MAJOR * 100}% or more` : ""}.** ` +
+          `Worst: ${caseLine(s.worst)}, **${formatChange(s.worst.change)}**.  `,
+      ].join("\n"),
+    );
   }
   if (s.best) {
     const n = major("improvement");
-    out.push([
-      "> [!TIP]",
-      `> **${plural(s.improvements, "case")} faster${n ? `, ${n} by ${MAJOR * 100}% or more` : ""}.** ` +
-        `Best: ${caseLine(s.best)}, **${formatChange(s.best.change)}**. Nice work.  `,
-    ].join("\n"));
+    out.push(
+      [
+        "> [!TIP]",
+        `> **${plural(s.improvements, "case")} faster${n ? `, ${n} by ${MAJOR * 100}% or more` : ""}.** ` +
+          `Best: ${caseLine(s.best)}, **${formatChange(s.best.change)}**. Nice work.  `,
+      ].join("\n"),
+    );
   }
   return out.join("\n\n");
 }
@@ -86,19 +111,30 @@ function overall(s: ReportSummary, baseRef: string) {
 // comment. A PR page plots the PR head beside its start point on main.
 function perfUrl(s: ReportSummary, benchmarks: string[], base = `${BENCHER}/perf/${s.project}`) {
   const query = new URLSearchParams({
-    branches: s.history.map(source => source.branch).join(","),
-    heads: s.history.map(source => source.head).join(","),
-    testbeds: s.testbed.uuid, benchmarks: benchmarks.join(","),
-    measures: [...new Set(s.rows.map(r => r.measure))].join(","),
+    branches: s.history.map((source) => source.branch).join(","),
+    heads: s.history.map((source) => source.head).join(","),
+    testbeds: s.testbed.uuid,
+    benchmarks: benchmarks.join(","),
+    measures: [...new Set(s.rows.map((r) => r.measure))].join(","),
   });
   return `${base}?${query}`;
 }
 
 function links(s: ReportSummary) {
   const api = `${API}/projects/${s.project}`;
-  const alerted = s.rows.filter(r => r.verdict === "regression" || r.verdict === "improvement");
-  const parts = [`[Report](${BENCHER}/perf/${s.project}/reports/${s.uuid})`, `[JSON](${api}/reports/${s.uuid})`];
-  if (alerted.length) parts.push(`[History](${perfUrl(s, alerted.map(r => r.benchmark), `${api}/perf`)})`);
+  const alerted = s.rows.filter((r) => r.verdict === "regression" || r.verdict === "improvement");
+  const parts = [
+    `[Report](${BENCHER}/perf/${s.project}/reports/${s.uuid})`,
+    `[JSON](${api}/reports/${s.uuid})`,
+  ];
+  if (alerted.length)
+    parts.push(
+      `[History](${perfUrl(
+        s,
+        alerted.map((r) => r.benchmark),
+        `${api}/perf`,
+      )})`,
+    );
   return parts;
 }
 
@@ -131,13 +167,20 @@ function inputCell(p: Row["parts"], s?: ReportSummary, r?: Row) {
 
 function caseCells(r: Row, s?: ReportSummary) {
   const p = r.parts;
-  return [inputCell(p, s, r), cell(p.type) || "—", p.n || "—", cell(modeName(p.mode)) || "—"].join(" | ");
+  return [inputCell(p, s, r), cell(p.type) || "—", p.n || "—", cell(modeName(p.mode)) || "—"].join(
+    " | ",
+  );
 }
 
 function alertTable(rows: Row[], s: ReportSummary) {
-  const lines = ["| Input | Type | N | Mode | Baseline | Current | Change |", "|---|---|---:|---|---:|---:|---:|"];
+  const lines = [
+    "| Input | Type | N | Mode | Baseline | Current | Change |",
+    "|---|---|---:|---|---:|---:|---:|",
+  ];
   for (const r of rows) {
-    lines.push(`| ${caseCells(r, s)} | ${formatTime(r.baseline)} | ${formatTime(r.value)} | ${changeCell(r)} |`);
+    lines.push(
+      `| ${caseCells(r, s)} | ${formatTime(r.baseline)} | ${formatTime(r.value)} | ${changeCell(r)} |`,
+    );
   }
   return lines.join("\n");
 }
@@ -145,12 +188,16 @@ function alertTable(rows: Row[], s: ReportSummary) {
 const STATUS = { regression: "slower", improvement: "faster", missing: "new", within: "" };
 
 function fullTable(rows: Row[]) {
-  const lines = ["| Input | Type | N | Mode | Baseline | Limits | Current | Change | Alert | ID |",
-    "|---|---|---:|---|---:|---:|---:|---:|---|---|"];
+  const lines = [
+    "| Input | Type | N | Mode | Baseline | Limits | Current | Change | Alert | ID |",
+    "|---|---|---:|---|---:|---:|---:|---:|---|---|",
+  ];
   for (const r of rows) {
     const limits = r.lower == null ? "—" : `${formatTime(r.lower)} – ${formatTime(r.upper)}`;
-    lines.push(`| ${caseCells(r)} | ${formatTime(r.baseline)} | ${limits} | ${formatTime(r.value)} | ` +
-      `${formatChange(r.change)} | ${STATUS[r.verdict]} | \`${r.name}\` |`);
+    lines.push(
+      `| ${caseCells(r)} | ${formatTime(r.baseline)} | ${limits} | ${formatTime(r.value)} | ` +
+        `${formatChange(r.change)} | ${STATUS[r.verdict]} | \`${r.name}\` |`,
+    );
   }
   return lines.join("\n");
 }
@@ -159,9 +206,11 @@ function fullTable(rows: Row[]) {
 // reader opens from the check list without the PR comment around it.
 export function render(s: ReportSummary, options: RenderOptions) {
   const { language, configuration, baseRef = "main", chartRef, trendRef, runUrl } = options;
-  const slower = s.rows.filter(r => r.verdict === "regression");
-  const faster = s.rows.filter(r => r.verdict === "improvement");
-  const out = [`### Benchmarks · ${[language, configuration, headline(s)].filter(Boolean).join(" · ")}`];
+  const slower = s.rows.filter((r) => r.verdict === "regression");
+  const faster = s.rows.filter((r) => r.verdict === "improvement");
+  const out = [
+    `### Benchmarks · ${[language, configuration, headline(s)].filter(Boolean).join(" · ")}`,
+  ];
   const boxes = callouts(s);
   if (boxes) out.push("", boxes);
   // The charts hold every configuration; the check's own column is named in
@@ -173,8 +222,21 @@ export function render(s: ReportSummary, options: RenderOptions) {
   if (slower.length) out.push("", "#### Slower", "", alertTable(slower, s));
   if (faster.length) out.push("", "#### Faster", "", alertTable(faster, s));
   if (s.missing) out.push("", `<sub>${plural(s.missing, "new case")} without a baseline.</sub>`);
-  out.push("", `<details><summary>All ${s.rows.length} cases</summary>`, "", fullTable(s.rows), "", "</details>");
-  const footer = [commits(s, baseRef), `\`${s.testbed.name}\``, `[Run](${runUrl})`, ...links(s), ...unavailable(options)];
+  out.push(
+    "",
+    `<details><summary>All ${s.rows.length} cases</summary>`,
+    "",
+    fullTable(s.rows),
+    "",
+    "</details>",
+  );
+  const footer = [
+    commits(s, baseRef),
+    `\`${s.testbed.name}\``,
+    `[Run](${runUrl})`,
+    ...links(s),
+    ...unavailable(options),
+  ];
   out.push("", `<sub>${footer.join(" · ")}</sub>`);
   return out.join("\n");
 }
@@ -209,9 +271,9 @@ function combinedHeadline(configurations: ConfigurationResult[], rows: CaseRow[]
   const parts = [];
   if (slower) parts.push(`${slower} slower`);
   if (faster) parts.push(`${faster} faster`);
-  const measured = configurations.filter(c => c.summary);
+  const measured = configurations.filter((c) => c.summary);
   if (!slower && !faster) {
-    parts.push(measured.some(c => c.summary!.compared) ? "no significant change" : "no baseline");
+    parts.push(measured.some((c) => c.summary!.compared) ? "no significant change" : "no baseline");
   }
   for (const c of configurations) {
     if (!c.summary) parts.push(`${c.name} ${c.outcome === "cancelled" ? "cancelled" : "failed"}`);
@@ -221,10 +283,12 @@ function combinedHeadline(configurations: ConfigurationResult[], rows: CaseRow[]
 
 function overviewCell(summary: ReportSummary, mode?: string) {
   const g = geomean(summary, mode);
-  const rows = summary.rows.filter(r => mode === undefined || r.parts.mode === mode);
-  const slower = rows.filter(r => r.verdict === "regression").length;
-  const faster = rows.filter(r => r.verdict === "improvement").length;
-  const counts = [slower ? `**${slower} slower**` : "", faster ? `${faster} faster` : ""].filter(Boolean).join(" · ");
+  const rows = summary.rows.filter((r) => mode === undefined || r.parts.mode === mode);
+  const slower = rows.filter((r) => r.verdict === "regression").length;
+  const faster = rows.filter((r) => r.verdict === "improvement").length;
+  const counts = [slower ? `**${slower} slower**` : "", faster ? `${faster} faster` : ""]
+    .filter(Boolean)
+    .join(" · ");
   const value = g ? signed(g.change) : "—";
   return counts ? `${value} · ${counts}` : value;
 }
@@ -234,10 +298,23 @@ function overviewCell(summary: ReportSummary, mode?: string) {
 // with that configuration's alert counts, so a change confined to one API
 // or one build stands out without reading any case.
 function overview(configurations: ConfigurationResult[]) {
-  const header = ["", ...configurations.map(c => c.name)];
-  const lines = [`| ${header.join(" | ")} |`, `|---|${configurations.map(() => "---:").join("|")}|`];
-  const row = (label: string, mode?: string) => lines.push(`| ${label} | ${configurations.map(c =>
-    c.summary ? overviewCell(c.summary, mode) : (c.outcome === "cancelled" ? "cancelled" : "failed")).join(" | ")} |`);
+  const header = ["", ...configurations.map((c) => c.name)];
+  const lines = [
+    `| ${header.join(" | ")} |`,
+    `|---|${configurations.map(() => "---:").join("|")}|`,
+  ];
+  const row = (label: string, mode?: string) =>
+    lines.push(
+      `| ${label} | ${configurations
+        .map((c) =>
+          c.summary
+            ? overviewCell(c.summary, mode)
+            : c.outcome === "cancelled"
+              ? "cancelled"
+              : "failed",
+        )
+        .join(" | ")} |`,
+    );
   const all = modes(configurations);
   row("**All cases**");
   if (all.length > 1) for (const mode of all) row(modeName(mode), mode);
@@ -245,7 +322,15 @@ function overview(configurations: ConfigurationResult[]) {
 }
 
 const cellText = (r: Row | undefined, bold = true) =>
-  !r ? "—" : r.change == null ? "new" : r.verdict === "within" ? signed(r.change) : bold ? `**${signed(r.change)}**` : signed(r.change);
+  !r
+    ? "—"
+    : r.change == null
+      ? "new"
+      : r.verdict === "within"
+        ? signed(r.change)
+        : bold
+          ? `**${signed(r.change)}**`
+          : signed(r.change);
 
 // The worst slowdowns across configurations, one line per case with every
 // configuration's change, so a reader sees at once whether it is shared.
@@ -254,31 +339,52 @@ function caution(configurations: ConfigurationResult[], rows: CaseRow[]) {
   if (!slower.length) return null;
   const groups = new Map<string | null, number>();
   for (const row of slower) {
-    const key = attribution(configurations, row.cells.map(c => c?.verdict === "regression"));
+    const key = attribution(
+      configurations,
+      row.cells.map((c) => c?.verdict === "regression"),
+    );
     groups.set(key, (groups.get(key) ?? 0) + 1);
   }
-  const where = [...groups].filter(([key]) => key).map(([key, n]) => `${n} in ${key}`).join(", ");
+  const where = [...groups]
+    .filter(([key]) => key)
+    .map(([key, n]) => `${n} in ${key}`)
+    .join(", ");
   const shown = 3;
-  const out = ["> [!CAUTION]", `> **${plural(slower.length, "case")} slower**${where ? `: ${where}` : ""}.`];
+  const out = [
+    "> [!CAUTION]",
+    `> **${plural(slower.length, "case")} slower**${where ? `: ${where}` : ""}.`,
+  ];
   for (const row of slower.slice(0, shown)) {
-    out.push(`> - ${row.label}: ` + configurations.map((c, i) => `${c.name} ${cellText(row.cells[i])}`).join(", "));
+    out.push(
+      `> - ${row.label}: ` +
+        configurations.map((c, i) => `${c.name} ${cellText(row.cells[i])}`).join(", "),
+    );
   }
-  if (slower.length > shown) out.push(`> - and ${slower.length - shown} more in the changed cases below.`);
+  if (slower.length > shown)
+    out.push(`> - and ${slower.length - shown} more in the changed cases below.`);
   return out.join("\n");
 }
 
 // A speedup gets a tip box of its own, a single line below any caution box.
 function speedups(configurations: ConfigurationResult[], rows: CaseRow[]) {
-  const faster = rows.filter(row => !isSlower(row)).sort((a, b) => severity(a) - severity(b));
+  const faster = rows.filter((row) => !isSlower(row)).sort((a, b) => severity(a) - severity(b));
   if (!faster.length) return null;
   const groups = new Map<string | null, number>();
   for (const row of faster) {
-    const key = attribution(configurations, row.cells.map(c => c?.verdict === "improvement"));
+    const key = attribution(
+      configurations,
+      row.cells.map((c) => c?.verdict === "improvement"),
+    );
     groups.set(key, (groups.get(key) ?? 0) + 1);
   }
-  const where = [...groups].filter(([key]) => key).map(([key, n]) => `${n} in ${key}`).join(", ");
+  const where = [...groups]
+    .filter(([key]) => key)
+    .map(([key, n]) => `${n} in ${key}`)
+    .join(", ");
   const best = faster[0];
-  const i = best.cells.findIndex(c => c?.verdict === "improvement" && c.change === severity(best));
+  const i = best.cells.findIndex(
+    (c) => c?.verdict === "improvement" && c.change === severity(best),
+  );
   return [
     "> [!TIP]",
     `> **${plural(faster.length, "case")} faster**${where ? `: ${where}` : ""}. ` +
@@ -287,15 +393,21 @@ function speedups(configurations: ConfigurationResult[], rows: CaseRow[]) {
 }
 
 function changedTable(configurations: ConfigurationResult[], rows: CaseRow[]) {
-  const head = ["Input", "Type", "N", "Mode", ...configurations.map(c => c.name)];
-  const lines = [`| ${head.join(" | ")} |`, `|---|---|---:|---|${configurations.map(() => "---:").join("|")}|`];
+  const head = ["Input", "Type", "N", "Mode", ...configurations.map((c) => c.name)];
+  const lines = [
+    `| ${head.join(" | ")} |`,
+    `|---|---|---:|---|${configurations.map(() => "---:").join("|")}|`,
+  ];
   for (const row of rows) {
-    const first = row.cells.findIndex(c => c);
+    const first = row.cells.findIndex((c) => c);
     const s = configurations[first].summary!;
-    const cells = row.cells.map(r => !r ? "—" : r.change == null ? "new"
-      : `${cellText(r)} <sub>${formatTime(r.value)}</sub>`);
-    lines.push(`| ${inputCell(row.parts, s, row.cells[first])} | ${cell(row.parts.type) || "—"} | ${row.parts.n || "—"} | ` +
-      `${cell(modeName(row.parts.mode))} | ${cells.join(" | ")} |`);
+    const cells = row.cells.map((r) =>
+      !r ? "—" : r.change == null ? "new" : `${cellText(r)} <sub>${formatTime(r.value)}</sub>`,
+    );
+    lines.push(
+      `| ${inputCell(row.parts, s, row.cells[first])} | ${cell(row.parts.type) || "—"} | ${row.parts.n || "—"} | ` +
+        `${cell(modeName(row.parts.mode))} | ${cells.join(" | ")} |`,
+    );
   }
   return lines.join("\n");
 }
@@ -316,36 +428,63 @@ export function renderCombined(configurations: ConfigurationResult[], options: C
   // A build that was not measured stays in the overview and gets a line of
   // its own; the case lines, table and charts cover only measured builds, so
   // "only" never means "the other build failed".
-  const measured = configurations.filter(c => c.summary);
+  const measured = configurations.filter((c) => c.summary);
   const rows = changedRows(measured);
   const out = [`### Benchmarks · ${language} · ${combinedHeadline(configurations, rows)}`];
   out.push("", overview(configurations));
   for (const c of configurations) {
-    if (!c.summary) out.push("", `**${c.name}** was not measured: ${c.reason ?? "the measurement failed"}. See the [workflow run](${runUrl}).`);
+    if (!c.summary)
+      out.push(
+        "",
+        `**${c.name}** was not measured: ${c.reason ?? "the measurement failed"}. See the [workflow run](${runUrl}).`,
+      );
   }
   const boxes = [caution(measured, rows), speedups(measured, rows)].filter(Boolean);
   if (boxes.length) out.push("", boxes.join("\n\n"));
   if (chartRef) out.push("", `![Changes against main](${chartRef})`);
   if (trendRef) out.push("", `![PR benchmark history](${trendRef})`);
   if (rows.length) {
-    out.push("", `<details><summary>${plural(rows.length, "changed case")}</summary>`, "", changedTable(measured, rows), "", "</details>");
+    out.push(
+      "",
+      `<details><summary>${plural(rows.length, "changed case")}</summary>`,
+      "",
+      changedTable(measured, rows),
+      "",
+      "</details>",
+    );
   }
-  const fresh = measured.filter(c => c.summary!.missing);
+  const fresh = measured.filter((c) => c.summary!.missing);
   if (fresh.length) {
-    const same = fresh.length === measured.length && fresh.every(c => c.summary!.missing === fresh[0].summary!.missing);
-    out.push("", same && measured.length > 1
-      ? `<sub>${plural(fresh[0].summary!.missing, "new case")} without a baseline in each build.</sub>`
-      : `<sub>New without a baseline: ${fresh.map(c => `${c.summary!.missing} in ${c.name}`).join(", ")}.</sub>`);
+    const same =
+      fresh.length === measured.length &&
+      fresh.every((c) => c.summary!.missing === fresh[0].summary!.missing);
+    out.push(
+      "",
+      same && measured.length > 1
+        ? `<sub>${plural(fresh[0].summary!.missing, "new case")} without a baseline in each build.</sub>`
+        : `<sub>New without a baseline: ${fresh.map((c) => `${c.summary!.missing} in ${c.name}`).join(", ")}.</sub>`,
+    );
   }
   if (measured.length) {
     out.push("", "<details><summary>All cases, by build</summary>", "");
-    for (const c of measured) out.push(`**${c.name}** · \`${c.summary!.testbed.name}\``, "", fullTable(c.summary!.rows), "");
+    for (const c of measured)
+      out.push(
+        `**${c.name}** · \`${c.summary!.testbed.name}\``,
+        "",
+        fullTable(c.summary!.rows),
+        "",
+      );
     out.push("</details>");
   }
   const first = measured[0]?.summary;
-  const footer = [first ? commits(first, baseRef) : short(hash), `[Run](${runUrl})`,
-    ...measured.map(c => `${c.name}: \`${c.summary!.testbed.name}\` ${links(c.summary!).join(" ")}`),
-    ...unavailable({ ...options, language })];
+  const footer = [
+    first ? commits(first, baseRef) : short(hash),
+    `[Run](${runUrl})`,
+    ...measured.map(
+      (c) => `${c.name}: \`${c.summary!.testbed.name}\` ${links(c.summary!).join(" ")}`,
+    ),
+    ...unavailable({ ...options, language }),
+  ];
   out.push("", `<sub>${footer.join(" · ")}</sub>`);
   return out.join("\n");
 }

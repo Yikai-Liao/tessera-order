@@ -7,7 +7,7 @@ The documentation site is built with [VitePress](https://vitepress.dev) from the
 | Path | Contents |
 |---|---|
 | `docs/**/*.md` | Pages. `docs/index.md` is the home page; `docs/README.md` is the directory index for GitHub and is not a page. |
-| `conformance/semantics.md`, `ROADMAP.md`, `RELEASING.md`, `CONTRIBUTING.md`, `CHANGELOG.md` | Shared documents, also rendered as pages (`sharedPages` in the config) |
+| `conformance/semantics.md`, `ROADMAP.md`, `RELEASING.md`, `CONTRIBUTING.md` | Shared documents, also rendered as pages (`sharedPages` in the config) |
 | `docs/.vitepress/config.ts` | Site configuration, navigation and link handling |
 | `docs/.vitepress/theme/components/` | Vue components used by the explanation pages |
 | `docs/.vitepress/theme/sim/` | TypeScript models of the engine that drive the figures, with their tests |

@@ -83,8 +83,8 @@ export function short(hash: string | null) {
 // Latency is in nanoseconds; three significant digits are enough for triage.
 export function formatTime(ns: number | null) {
   if (ns == null || !Number.isFinite(ns)) return "—";
-  const [unit, scale] = ns >= 1e9 ? ["s", 1e9] : ns >= 1e6 ? ["ms", 1e6]
-    : ns >= 1e3 ? ["µs", 1e3] : ["ns", 1];
+  const [unit, scale] =
+    ns >= 1e9 ? ["s", 1e9] : ns >= 1e6 ? ["ms", 1e6] : ns >= 1e3 ? ["µs", 1e3] : ["ns", 1];
   return `${(ns / scale).toPrecision(3)} ${unit}`;
 }
 
@@ -119,16 +119,28 @@ export function isMajor(r: Row) {
 // as in docs/development/benchmarking.md. Readers get the words; the ID stays
 // in link titles and the full table, where it is copied into `cargo bench`.
 const DISTRIBUTIONS: Record<string, string> = {
-  random: "random", sorted: "sorted", reverse: "reverse", equal: "all equal",
-  runs: "runs", d16: "16 values", d256: "256 values", "zipf1.1": "Zipf 1.1",
-  zipf2: "Zipf 2", sorted95: "95% sorted", sorted99: "99% sorted",
-  skew50: "50% one key", skew99: "99% one key", two_values: "two values",
-  sparse8: "8 wide keys", sorted_tail: "sorted + tail",
+  random: "random",
+  sorted: "sorted",
+  reverse: "reverse",
+  equal: "all equal",
+  runs: "runs",
+  d16: "16 values",
+  d256: "256 values",
+  "zipf1.1": "Zipf 1.1",
+  zipf2: "Zipf 2",
+  sorted95: "95% sorted",
+  sorted99: "99% sorted",
+  skew50: "50% one key",
+  skew99: "99% one key",
+  two_values: "two values",
+  sparse8: "8 wide keys",
+  sorted_tail: "sorted + tail",
 };
 
 export function caseParts(id: string) {
   const parts = id.split("/");
-  if (parts.length !== 6 || !/^\d+$/.test(parts[3])) return { type: "", input: id, n: "", extra: "", seed: "", mode: "" };
+  if (parts.length !== 6 || !/^\d+$/.test(parts[3]))
+    return { type: "", input: id, n: "", extra: "", seed: "", mode: "" };
   const [, type, distribution, length, seed, mode] = parts;
   const row = type.match(/^row_(\w+)$/);
   // Seed 1 and the public API are the defaults; only departures are named.
@@ -160,9 +172,7 @@ export function summarize(report: BencherReport) {
     alerts.set(alert.metric.uuid, alert.limit);
   }
   const results = report.results?.[0] ?? [];
-  const measureCount = new Set(
-    results.flatMap(r => r.measures.map(m => m.measure.uuid)),
-  ).size;
+  const measureCount = new Set(results.flatMap((r) => r.measures.map((m) => m.measure.uuid))).size;
   const rows: Row[] = [];
   for (const result of results) {
     for (const m of result.measures) {
@@ -170,12 +180,14 @@ export function summarize(report: BencherReport) {
       const boundary = m.boundary ?? null;
       const baseline = boundary?.baseline ?? null;
       const limit = alerts.get(m.metric?.uuid);
-      const verdict = limit === "upper" ? "regression"
-        : limit === "lower" ? "improvement"
-        : "within";
+      const verdict =
+        limit === "upper" ? "regression" : limit === "lower" ? "improvement" : "within";
       const name = result.benchmark.name;
-      if (!Number.isFinite(value) || value < 0 ||
-          (baseline !== null && (!Number.isFinite(baseline) || baseline <= 0))) {
+      if (
+        !Number.isFinite(value) ||
+        value < 0 ||
+        (baseline !== null && (!Number.isFinite(baseline) || baseline <= 0))
+      ) {
         throw new Error(`Invalid latency or baseline for ${name}`);
       }
       if (limit && baseline === null) {
@@ -197,11 +209,15 @@ export function summarize(report: BencherReport) {
     }
   }
   // Worst first: the largest slowdowns, then the largest speedups.
-  rows.sort((a, b) =>
-    VERDICTS[a.verdict].order - VERDICTS[b.verdict].order ||
-    (a.verdict === "improvement" ? (a.change ?? 0) - (b.change ?? 0) : (b.change ?? 0) - (a.change ?? 0)) ||
-    a.name.localeCompare(b.name));
-  const count = (verdict: Verdict) => rows.filter(r => r.verdict === verdict).length;
+  rows.sort(
+    (a, b) =>
+      VERDICTS[a.verdict].order - VERDICTS[b.verdict].order ||
+      (a.verdict === "improvement"
+        ? (a.change ?? 0) - (b.change ?? 0)
+        : (b.change ?? 0) - (a.change ?? 0)) ||
+      a.name.localeCompare(b.name),
+  );
+  const count = (verdict: Verdict) => rows.filter((r) => r.verdict === verdict).length;
   const head = report.branch.head;
   const history = [{ branch: report.branch.uuid, head: head.uuid }];
   if (head.start_point) {
@@ -211,14 +227,16 @@ export function summarize(report: BencherReport) {
   // and on a 10 ms case equally, which an arithmetic mean of times would not.
   const compared = rows.filter((r): r is ComparedRow => r.baseline !== null && r.value > 0);
   const geomean = compared.length
-    ? Math.exp(compared.reduce((sum, r) => sum + Math.log(r.value / r.baseline), 0) / compared.length)
+    ? Math.exp(
+        compared.reduce((sum, r) => sum + Math.log(r.value / r.baseline), 0) / compared.length,
+      )
     : null;
   return {
     rows,
     compared: compared.length,
     geomean,
-    best: rows.find(r => r.verdict === "improvement") ?? null,
-    worst: rows.find(r => r.verdict === "regression") ?? null,
+    best: rows.find((r) => r.verdict === "improvement") ?? null,
+    worst: rows.find((r) => r.verdict === "regression") ?? null,
     regressions: count("regression"),
     improvements: count("improvement"),
     missing: count("missing"),

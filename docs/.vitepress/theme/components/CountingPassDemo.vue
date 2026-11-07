@@ -1,107 +1,118 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
-import { computed } from 'vue'
-import { bucketColor, recordLabel } from '../palette'
-import { useStepper } from '../useStepper'
-import StepControls from './StepControls.vue'
+import { computed } from "vue";
+import { bucketColor, recordLabel } from "../palette";
+import { useStepper } from "../useStepper";
+import StepControls from "./StepControls.vue";
 
 // One stable counting pass, as in `counting_pass` in engine.rs: histogram,
 // exclusive prefix sum, then scatter into a second buffer.
-const BUCKETS = 4
-const keys = [31, 12, 7, 25, 14, 38, 3, 19, 22, 11, 30, 16]
-const digit = (key: number) => Math.floor(key / 10)
+const BUCKETS = 4;
+const keys = [31, 12, 7, 25, 14, 38, 3, 19, 22, 11, 30, 16];
+const digit = (key: number) => Math.floor(key / 10);
 
-type Phase = 'histogram' | 'prefix' | 'scatter' | 'done'
+type Phase = "histogram" | "prefix" | "scatter" | "done";
 interface Frame {
-  phase: Phase
-  caption: string
-  counts: number[]
-  cursor: number[] | null
-  output: (number | null)[]
-  reading: number | null
-  bucket: number | null
-  wrote: number | null
+  phase: Phase;
+  caption: string;
+  counts: number[];
+  cursor: number[] | null;
+  output: (number | null)[];
+  reading: number | null;
+  bucket: number | null;
+  wrote: number | null;
 }
 
 const frames = computed<Frame[]>(() => {
-  const out: Frame[] = []
-  const counts = new Array(BUCKETS).fill(0)
-  const output: (number | null)[] = new Array(keys.length).fill(null)
-  const push = (f: Omit<Frame, 'counts' | 'output'> & { cursor: number[] | null }) =>
-    out.push({ ...f, counts: [...counts], output: [...output], cursor: f.cursor ? [...f.cursor] : null })
+  const out: Frame[] = [];
+  const counts = new Array(BUCKETS).fill(0);
+  const output: (number | null)[] = new Array(keys.length).fill(null);
+  const push = (f: Omit<Frame, "counts" | "output"> & { cursor: number[] | null }) =>
+    out.push({
+      ...f,
+      counts: [...counts],
+      output: [...output],
+      cursor: f.cursor ? [...f.cursor] : null,
+    });
   push({
-    phase: 'histogram',
-    caption: 'The digit is the tens place, so there are four buckets. First, count how many keys fall in each bucket.',
+    phase: "histogram",
+    caption:
+      "The digit is the tens place, so there are four buckets. First, count how many keys fall in each bucket.",
     cursor: null,
     reading: null,
     bucket: null,
     wrote: null,
-  })
+  });
   keys.forEach((key, i) => {
-    counts[digit(key)]++
+    counts[digit(key)]++;
     push({
-      phase: 'histogram',
+      phase: "histogram",
       caption: `Key ${key} has digit ${digit(key)}: bucket ${digit(key)} now counts ${counts[digit(key)]}.`,
       cursor: null,
       reading: i,
       bucket: digit(key),
       wrote: null,
-    })
-  })
-  const cursor = new Array(BUCKETS).fill(0)
-  let sum = 0
+    });
+  });
+  const cursor = new Array(BUCKETS).fill(0);
+  let sum = 0;
   for (let b = 0; b < BUCKETS; b++) {
-    cursor[b] = sum
-    sum += counts[b]
+    cursor[b] = sum;
+    sum += counts[b];
     push({
-      phase: 'prefix',
+      phase: "prefix",
       caption: `Bucket ${b} starts at output position ${cursor[b]}: the number of keys in the buckets before it.`,
       cursor: cursor.map((c, i) => (i <= b ? c : NaN)),
       reading: null,
       bucket: b,
       wrote: null,
-    })
+    });
   }
   keys.forEach((key, i) => {
-    const b = digit(key)
-    const slot = cursor[b]++
-    output[slot] = i
+    const b = digit(key);
+    const slot = cursor[b]++;
+    output[slot] = i;
     push({
-      phase: 'scatter',
+      phase: "scatter",
       caption: `Key ${key} goes to position ${slot}, and bucket ${b}'s cursor moves to ${cursor[b]}. Reading the input front to back keeps equal digits in input order.`,
       cursor,
       reading: i,
       bucket: b,
       wrote: slot,
-    })
-  })
+    });
+  });
   push({
-    phase: 'done',
-    caption: 'Every key is grouped by its digit, and within a group the input order is kept: the pass is stable. It needed an output buffer as large as the input.',
+    phase: "done",
+    caption:
+      "Every key is grouped by its digit, and within a group the input order is kept: the pass is stable. It needed an output buffer as large as the input.",
     cursor,
     reading: null,
     bucket: null,
     wrote: null,
-  })
-  return out
-})
+  });
+  return out;
+});
 
-const stepper = useStepper(computed(() => frames.value.length))
-const frame = computed(() => frames.value[stepper.index.value])
+const stepper = useStepper(computed(() => frames.value.length));
+const frame = computed(() => frames.value[stepper.index.value]);
 const marks = computed(() => {
   const labels: Record<Phase, string> = {
-    histogram: '1 · Histogram',
-    prefix: '2 · Prefix sum',
-    scatter: '3 · Scatter',
-    done: 'Done',
-  }
-  const seen = new Set<Phase>()
-  return frames.value.flatMap((f, at) => (seen.has(f.phase) ? [] : (seen.add(f.phase), [{ at, label: labels[f.phase] }])))
-})
+    histogram: "1 · Histogram",
+    prefix: "2 · Prefix sum",
+    scatter: "3 · Scatter",
+    done: "Done",
+  };
+  const seen = new Set<Phase>();
+  return frames.value.flatMap((f, at) => {
+    if (seen.has(f.phase)) return [];
+    seen.add(f.phase);
+    return [{ at, label: labels[f.phase] }];
+  });
+});
 
-const CW = 40
-const LEFT = 92
-const width = LEFT + keys.length * CW + 12
+const CW = 40;
+const LEFT = 92;
+const width = LEFT + keys.length * CW + 12;
 </script>
 
 <template>

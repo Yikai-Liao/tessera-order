@@ -1,30 +1,61 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { comparisonInput } from '../sim/comparisonInput'
-import { blockLsd, instabilities, lsd, msdInPlace, tessera, type Stage } from '../sim/radixVariants'
-import { bucketColor, recordLabel } from '../palette'
+import { computed, ref } from "vue";
+import { bucketColor, recordLabel } from "../palette";
+import { comparisonInput } from "../sim/comparisonInput";
+import {
+  blockLsd,
+  instabilities,
+  lsd,
+  msdInPlace,
+  type Stage,
+  tessera,
+} from "../sim/radixVariants";
 
 interface Lane {
-  name: string
-  stable: boolean
-  memory: string
-  order: string
-  stages: Stage[]
+  name: string;
+  stable: boolean;
+  memory: string;
+  order: string;
+  stages: Stage[];
 }
 
 const lanes = computed<Lane[]>(() => [
-  { name: 'LSD radix sort', stable: true, memory: 'n records', order: 'low digit → high digit', stages: lsd(comparisonInput) },
-  { name: 'Block LSD', stable: true, memory: 'O(√n)', order: 'low digit → high digit', stages: blockLsd(comparisonInput) },
-  { name: 'In-place MSD', stable: false, memory: 'O(1) per level', order: 'high digit → low digit', stages: msdInPlace(comparisonInput) },
-  { name: 'Tessera', stable: true, memory: 'O(√n)', order: 'high digit split, then tiles', stages: tessera(comparisonInput) },
-])
+  {
+    name: "LSD radix sort",
+    stable: true,
+    memory: "n records",
+    order: "low digit → high digit",
+    stages: lsd(comparisonInput),
+  },
+  {
+    name: "Block LSD",
+    stable: true,
+    memory: "O(√n)",
+    order: "low digit → high digit",
+    stages: blockLsd(comparisonInput),
+  },
+  {
+    name: "In-place MSD",
+    stable: false,
+    memory: "O(1) per level",
+    order: "high digit → low digit",
+    stages: msdInPlace(comparisonInput),
+  },
+  {
+    name: "Tessera",
+    stable: true,
+    memory: "O(√n)",
+    order: "high digit split, then tiles",
+    stages: tessera(comparisonInput),
+  },
+]);
 
-const stage = ref(2)
-const tens = (key: number) => Math.floor(key / 10)
+const stage = ref(2);
+const tens = (key: number) => Math.floor(key / 10);
 
 function groupStarts(s: Stage): Set<number> {
-  return new Set((s.groups ?? []).map(([start]) => start).filter((start) => start > 0))
+  return new Set((s.groups ?? []).map(([start]) => start).filter((start) => start > 0));
 }
 </script>
 

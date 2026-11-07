@@ -1,29 +1,30 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
 defineProps<{
-  index: number
-  last: number
-  playing: boolean
-  speed: number
-  marks?: { at: number; label: string }[]
-}>()
+  index: number;
+  last: number;
+  playing: boolean;
+  speed: number;
+  marks?: { at: number; label: string }[];
+}>();
 const emit = defineEmits<{
-  toggle: []
-  step: [delta: number]
-  seek: [to: number]
-  speed: [value: number]
-}>()
+  toggle: [];
+  step: [delta: number];
+  seek: [to: number];
+  speed: [value: number];
+}>();
 function onKey(event: KeyboardEvent) {
-  if (event.key === 'ArrowRight') emit('step', 1)
-  else if (event.key === 'ArrowLeft') emit('step', -1)
-  else if (event.key === ' ') emit('toggle')
-  else return
-  event.preventDefault()
+  if (event.key === "ArrowRight") emit("step", 1);
+  else if (event.key === "ArrowLeft") emit("step", -1);
+  else if (event.key === " ") emit("toggle");
+  else return;
+  event.preventDefault();
 }
 </script>
 
 <template>
-  <div class="tsr-controls" tabindex="0" @keydown="onKey" aria-label="Animation controls: arrow keys step, space plays">
+  <!-- biome-ignore lint/a11y/noNoninteractiveTabindex: the toolbar takes focus to receive the arrow-key and space shortcuts. -->
+  <div class="tsr-controls" role="toolbar" tabindex="0" @keydown="onKey" aria-label="Animation controls: arrow keys step, space plays">
     <button type="button" @click="emit('seek', 0)" title="First step" aria-label="First step">⏮</button>
     <button type="button" @click="emit('step', -1)" title="Previous step (←)" aria-label="Previous step">◀</button>
     <button type="button" class="tsr-play" @click="emit('toggle')" :aria-label="playing ? 'Pause' : 'Play'">

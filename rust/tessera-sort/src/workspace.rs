@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+//! Reusable scratch memory.
+
 use crate::key::{ByKey, Direct};
 use crate::{RadixKey, block, engine};
 use alloc::vec::Vec;
@@ -42,8 +44,12 @@ use core::mem::MaybeUninit;
 /// }
 /// ```
 pub struct Workspace<T> {
+    /// Tile scratch records, followed by cached bucket IDs that do not fit in
+    /// the cursor table.
     pub(crate) tile: Vec<MaybeUninit<T>>,
+    /// Encoded keys of the insertion probe window.
     pub(crate) probe: Vec<MaybeUninit<u128>>,
+    /// Block-partition buffers, created when a node first needs them.
     pub(crate) block: Option<block::Buffers<T>>,
 }
 
@@ -64,6 +70,16 @@ impl<T> Workspace<T> {
     /// Sorts keys in ascending order, keeping equal keys in input order.
     ///
     /// Same as [`crate::stable_sort`], with scratch from this workspace.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut workspace = tessera_sort::Workspace::new();
+    /// for mut batch in [vec![3u64, 1, 2], vec![9, 8]] {
+    ///     workspace.stable_sort(&mut batch);
+    ///     assert!(batch.is_sorted());
+    /// }
+    /// ```
     pub fn stable_sort(&mut self, values: &mut [T])
     where
         T: RadixKey,
@@ -81,6 +97,15 @@ impl<T> Workspace<T> {
     /// back into `values`, in an unspecified order. The workspace stays usable.
     /// Without the `std` feature, a panic during block partitioning aborts;
     /// panics elsewhere may unwind with every record preserved.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut workspace = tessera_sort::Workspace::new();
+    /// let mut rows = vec![(2u8, "b"), (1, "a"), (2, "c")];
+    /// workspace.stable_sort_by_key(&mut rows, |row| row.0);
+    /// assert_eq!(rows, [(1, "a"), (2, "b"), (2, "c")]);
+    /// ```
     pub fn stable_sort_by_key<K: RadixKey, F: FnMut(&T) -> K>(&mut self, values: &mut [T], key: F) {
         engine::sort::<T, _, true>(values, &mut ByKey(key), Some(self));
     }

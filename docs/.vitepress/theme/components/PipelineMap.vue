@@ -1,41 +1,151 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
-import { useRouter, withBase } from 'vitepress'
+import { useRouter, withBase } from "vitepress";
 
 // The route an input takes through `engine.rs`. Every box links to the page
 // that explains it. Boxes navigate with the router instead of SVG `<a>`
 // elements, whose `href` VitePress's link prefetcher cannot read.
 interface Box {
-  id: string
-  x: number
-  y: number
-  w: number
-  title: string
-  detail: string
-  link: string
-  kind?: 'exit' | 'node' | 'tile'
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  title: string;
+  detail: string;
+  link: string;
+  kind?: "exit" | "node" | "tile";
 }
 const boxes: Box[] = [
-  { id: 'probe', x: 200, y: 10, w: 280, title: 'Order probe', detail: 'ascending · descending · flat · unsorted', link: '/explain/routing#order-probe' },
-  { id: 'sorted', x: 530, y: 10, w: 160, title: 'Done', detail: 'or reverse stably', link: '/explain/routing#order-probe', kind: 'exit' },
-  { id: 'insertion', x: 200, y: 80, w: 280, title: 'Budgeted insertion', detail: 'nearly sorted inputs finish here', link: '/explain/routing#budgeted-insertion' },
-  { id: 'varying', x: 200, y: 150, w: 280, title: 'Varying bits', detail: 'drop bits equal in every key', link: '/explain/keys#varying-bits' },
-  { id: 'constant', x: 530, y: 150, w: 160, title: 'Done', detail: 'all keys equal', link: '/explain/keys#varying-bits', kind: 'exit' },
-  { id: 'node', x: 200, y: 230, w: 280, title: 'Larger than a tile?', detail: '64 KiB of records', link: '/explain/routing#nodes-and-tiles' },
-  { id: 'mode', x: 30, y: 320, w: 190, title: 'Repeated key', detail: 'equality partition', link: '/explain/routing#repeated-key', kind: 'node' },
-  { id: 'outlier', x: 260, y: 320, w: 190, title: 'Outlier run', detail: 'lift a short end run', link: '/explain/routing#outlier-run', kind: 'node' },
-  { id: 'digit', x: 490, y: 320, w: 190, title: 'Top digit', detail: 'stable block partition', link: '/explain/block-partition', kind: 'node' },
-  { id: 'leafI', x: 30, y: 456, w: 190, title: 'Insertion sort', detail: '≤ 48 records', link: '/explain/tiles#insertion', kind: 'tile' },
-  { id: 'leafM', x: 260, y: 456, w: 190, title: 'Tile MSD', detail: 'partition, then recurse', link: '/explain/tiles#tile-msd', kind: 'tile' },
-  { id: 'leafL', x: 490, y: 456, w: 190, title: 'Tile LSD', detail: 'counting passes in scratch', link: '/explain/tiles#tile-lsd', kind: 'tile' },
-]
-const H = 46
-const centers = [125, 355, 585]
+  {
+    id: "probe",
+    x: 200,
+    y: 10,
+    w: 280,
+    title: "Order probe",
+    detail: "ascending · descending · flat · unsorted",
+    link: "/explain/routing#order-probe",
+  },
+  {
+    id: "sorted",
+    x: 530,
+    y: 10,
+    w: 160,
+    title: "Done",
+    detail: "or reverse stably",
+    link: "/explain/routing#order-probe",
+    kind: "exit",
+  },
+  {
+    id: "insertion",
+    x: 200,
+    y: 80,
+    w: 280,
+    title: "Budgeted insertion",
+    detail: "nearly sorted inputs finish here",
+    link: "/explain/routing#budgeted-insertion",
+  },
+  {
+    id: "varying",
+    x: 200,
+    y: 150,
+    w: 280,
+    title: "Varying bits",
+    detail: "drop bits equal in every key",
+    link: "/explain/keys#varying-bits",
+  },
+  {
+    id: "constant",
+    x: 530,
+    y: 150,
+    w: 160,
+    title: "Done",
+    detail: "all keys equal",
+    link: "/explain/keys#varying-bits",
+    kind: "exit",
+  },
+  {
+    id: "node",
+    x: 200,
+    y: 230,
+    w: 280,
+    title: "Larger than a tile?",
+    detail: "64 KiB of records",
+    link: "/explain/routing#nodes-and-tiles",
+  },
+  {
+    id: "mode",
+    x: 30,
+    y: 320,
+    w: 190,
+    title: "Repeated key",
+    detail: "equality partition",
+    link: "/explain/routing#repeated-key",
+    kind: "node",
+  },
+  {
+    id: "outlier",
+    x: 260,
+    y: 320,
+    w: 190,
+    title: "Outlier run",
+    detail: "lift a short end run",
+    link: "/explain/routing#outlier-run",
+    kind: "node",
+  },
+  {
+    id: "digit",
+    x: 490,
+    y: 320,
+    w: 190,
+    title: "Top digit",
+    detail: "stable block partition",
+    link: "/explain/block-partition",
+    kind: "node",
+  },
+  {
+    id: "leafI",
+    x: 30,
+    y: 456,
+    w: 190,
+    title: "Insertion sort",
+    detail: "≤ 48 records",
+    link: "/explain/tiles#insertion",
+    kind: "tile",
+  },
+  {
+    id: "leafM",
+    x: 260,
+    y: 456,
+    w: 190,
+    title: "Tile MSD",
+    detail: "partition, then recurse",
+    link: "/explain/tiles#tile-msd",
+    kind: "tile",
+  },
+  {
+    id: "leafL",
+    x: 490,
+    y: 456,
+    w: 190,
+    title: "Tile LSD",
+    detail: "counting passes in scratch",
+    link: "/explain/tiles#tile-lsd",
+    kind: "tile",
+  },
+];
+const H = 46;
+const centers = [125, 355, 585];
 const stroke = (b: Box) =>
-  b.kind === 'exit' ? '#1baf7a' : b.kind === 'node' ? '#5CA4F8' : b.kind === 'tile' ? '#B482F8' : 'var(--vp-c-text-3)'
+  b.kind === "exit"
+    ? "#1baf7a"
+    : b.kind === "node"
+      ? "#5CA4F8"
+      : b.kind === "tile"
+        ? "#B482F8"
+        : "var(--vp-c-text-3)";
 
-const router = useRouter()
-const go = (link: string) => router.go(withBase(link))
+const router = useRouter();
+const go = (link: string) => router.go(withBase(link));
 </script>
 
 <template>
@@ -82,6 +192,7 @@ const go = (link: string) => router.go(withBase(link))
         <text x="140" y="422">the cost model picks one leaf</text>
       </g>
 
+      <!-- biome-ignore lint/a11y/useSemanticElements: SVG `<a>` breaks VitePress prefetching (see the script comment). -->
       <g
         v-for="b in boxes"
         :key="b.id"

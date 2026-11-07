@@ -5,4 +5,4 @@ export const VARIANTS = [
   { id: "portable-simd", name: "Portable SIMD", testbed: "intel-v1-portable-simd" },
 ] as const;
 
-export type Variant = typeof VARIANTS[number];
+export type Variant = (typeof VARIANTS)[number];

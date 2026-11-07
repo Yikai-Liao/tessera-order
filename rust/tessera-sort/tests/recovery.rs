@@ -84,7 +84,7 @@ fn exercise(len: usize, changing: bool) {
 
 #[cfg(feature = "std")]
 #[test]
-fn panic_payload_records_edits_and_reuse() {
+fn key_panic_recovery() {
     for len in if cfg!(miri) {
         vec![12, 80]
     } else {
@@ -173,14 +173,14 @@ fn no_std_block_panic_aborts() {
 }
 
 #[test]
-fn changing_keys_preserve_owned_records() {
+fn changing_keys_owned_records() {
     for len in if cfg!(miri) { vec![80] } else { vec![80, 5000] } {
         exercise(len, true);
     }
 }
 
 #[test]
-fn changing_keys_preserve_exclusive_borrows_without_drop() {
+fn changing_keys_borrowed_records() {
     struct Borrowed<'a> {
         id: usize,
         value: &'a mut usize,

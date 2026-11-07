@@ -131,7 +131,7 @@ impl<T: Send> Job<T> {
                 let varying = scan_varying_bits(child, candidate, &mut key);
                 Sorter::<T, E, CACHED> {
                     workspace: &mut workspace,
-                    key: &mut key,
+                    extractor: &mut key,
                     tile_bytes,
                 }
                 .sort_node(child, varying);
@@ -195,7 +195,7 @@ fn sort_prepared<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
     {
         Sorter::<T, E, CACHED> {
             workspace: &mut workspace,
-            key: &mut key,
+            extractor: &mut key,
             tile_bytes,
         }
         .sort_node(arr, varying);

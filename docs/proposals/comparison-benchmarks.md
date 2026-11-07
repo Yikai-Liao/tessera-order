@@ -48,7 +48,7 @@ The comparison uses Bencher's concepts for what they mean, so its history accumu
 | Iterations | One `bencher run` iteration per shard. The nine blocks run inside one process, because pairing a variant with Tessera within the same block is the point of the design. Blocks are the harness's statistical unit, not Bencher iterations: each `--iter` runs the executable again, while the protocol needs one setup, one interleaving plan and the A/A pair shared by all nine blocks in one process. `--iter` with `--fold median` would fold the results, but it would fold absolute times across processes, which is not the paired ratio |
 | GitHub integration | None. Comparison runs are not tied to a PR, so `--github-actions` checks and comments do not apply; the workflow writes a job summary with links to the Bencher reports |
 
-Bencher keeps each finished job's stdout, stderr, exit code and output files. The runner therefore prints its per-block samples to stderr as JSON lines, beside the BMF on stdout, and the report is regenerated from those samples as [Benchmarking](../development/benchmarking.md#raw-data) requires. Bencher's [Project Jobs API](https://bencher.dev/docs/api/projects/jobs/) returns a finished job's output to callers with `view` permission, which the trusted workflow's API key has, but the same page lists viewing a job as a Bencher Plus feature.
+Bencher keeps each finished job's stdout, stderr, exit code and output files. The runner therefore prints its per-block samples to stderr as JSON lines, beside the BMF on stdout, and the workflow rebuilds the [results directory](#running-on-other-machines) from them, from which the report is regenerated as [Benchmarking](../development/benchmarking.md#raw-data) requires. Bencher's [Project Jobs API](https://bencher.dev/docs/api/projects/jobs/) returns a finished job's output to callers with `view` permission, which the trusted workflow's API key has, but the same page lists viewing a job as a Bencher Plus feature.
 
 Step 1 below settles the open points on this hardware:
 
@@ -58,21 +58,33 @@ Step 1 below settles the open points on this hardware:
 
 ### Running on other machines
 
-Bencher's hosted `intel-v1` runners produce the release numbers, but the suite must not depend on them: a contributor must be able to run it on their own hardware, to investigate a result, try a change, or measure a CPU Bencher does not have. Bencher's software is fine to depend on; its hosted machines are not. The runner itself never calls Bencher, and the Bencher CLI drives it the same way everywhere:
+Bencher's hosted `intel-v1` runners produce the release numbers, but the suite must not depend on them: a contributor must be able to run it on their own hardware, to investigate a result, try a change, or measure a CPU Bencher does not have. Bencher's CLI is fine to depend on; its hosted machines are not. Tessera's runner defines the experiment, the Bencher CLI orchestrates and records it, and the hosted runners only supply the reference machine:
 
-| Where | How | Host conditions |
+| Where | How | Use |
 |---|---|---|
-| Hosted runner (release) | `bencher run --image <digest> --spec intel-v1 --testbed intel-v1-compare` from the workflow | Bencher's runner tuning, confirmed in step 1 |
-| Own machine, plain | `bencher run --testbed <machine> --adapter json -- compare run --shard K` runs the executable on the local host. With `--dry-run`, nothing is stored; without it, the results join the same project as another Testbed, comparable in the console with the release history | As the machine is; the runner records them |
-| Own machine as a runner | Bencher's [self-hosted runner](https://bencher.dev/docs/explanation/self-hosted-runners/) on the machine, assigned its own Spec, and `bencher run --image <digest> --spec <own-spec>`: the same image, job model, stored output and host tuning (ASLR, SMT, turbo and the NMI watchdog off, the performance governor) as the hosted runner. It needs Linux 5.14 or later, root, and KVM for sandboxed jobs | Same tuning as the hosted runner |
-| Offline | The self-hosted runner against a self-hosted Bencher API server (`--host`), with no Bencher Cloud involved | Same tuning as the hosted runner |
+| Hosted runner | `bencher run --image <digest> --spec intel-v1 --testbed intel-v1-compare` from the workflow | Release numbers for the README and the Performance page |
+| Own machine | `bencher run --testbed <machine> --adapter json -- compare run --out DIR` runs the executable on the local host, and the results join the same project as another Testbed | Tuning, reproduction, other CPUs |
+| Own machine, not stored | The same with `--dry-run` | Local experiments |
+| Without Bencher | `compare run --out DIR` directly | Debugging the runner itself |
 
-- **One result format.** The executable prints BMF on stdout and per-block samples on stderr in every row of the table, and with `--out DIR` also writes them to `DIR/shard-<k>/` as `bmf.json` and `blocks.jsonl`, with a `host.json`. The workflow downloads hosted job outputs into the same layout. The report reads only that directory, so it cannot tell where a run happened, and no path has code the others lack.
-- **The host is recorded by the runner.** `host.json` holds the CPU model, core count, kernel, frequency governor, turbo and SMT state as read from `/proc` and `/sys`, the compiler and flags, and the commit, so every report states its conditions, including runs without Bencher's tuning.
+Bencher's self-hosted runners and a self-hosted Bencher server could be used later, but are not required or validated for the 0.1 workflow.
+
+The runner's results directory is the source of truth, in every row of the table:
+
+```text
+DIR/
+  manifest.json      commit, compiler and flags, variant versions and source commits, image digest, suite version
+  shard-<k>/
+    bmf.json         the BMF printed on stdout
+    blocks.jsonl     the per-block samples printed on stderr
+    host.json        CPU model, cores, kernel, governor, turbo and SMT state, read from /proc and /sys
+```
+
+- **On a local machine,** `compare run` writes the whole directory itself.
+- **On the hosted runners,** the workflow writes `manifest.json` from what it already knows, because the build happens there; nothing in it depends on job output. It then rebuilds each shard's files from the job's stdout and stderr. If the free plan does not return job output, `blocks.jsonl` is rebuilt from the `ratio-b0` to `ratio-b8` Metrics, and `host.json` records the host as unknown apart from the `intel-v1` spec, rather than guessing.
+- **The report reads only the directory** (`npm run bench:report -- DIR`), so it cannot tell where a run happened, and no path has code the others lack. Its header prints the manifest and each shard's host conditions, and says whether the run was local.
 - **Shards are optional off the hosted runners.** Without the 240 s limit, `compare run` without `--shard` executes every shard in one invocation, still one block plan per shard, so ratios mean the same as on Bencher.
-- **The build is the same.** `bench/fetch.py`, then `cargo build --release -p tessera-bench --features compare,compare-native` produce the executable the image wraps; the image is needed only for the self-hosted runner rows.
-
-Whether the free plan lets a self-hosted runner serve jobs for a project on Bencher Cloud is not documented; step 1 checks it. The plain and offline rows do not depend on the answer.
+- **The build is the same.** `bench/fetch.py`, then `cargo build --release -p tessera-bench --features compare,compare-native` produce the executable the image wraps.
 
 ## Implementations
 
@@ -291,7 +303,7 @@ The report module renders every figure as SVG from the stored job outputs and Me
 
 | Step | Delivers | Done when |
 |---|---|---|
-| 1. Feasibility on Bencher | A throwaway shard: Tessera A/A and `std-stable` on 10 cases, printed as BMF on branch `compare`, plus `bencher noise` | The three points under [Bencher's model](#bencher-s-model) and the self-hosted runner question under [Running on other machines](#running-on-other-machines) are settled; shard time per case is measured |
+| 1. Feasibility on Bencher | A throwaway shard: Tessera A/A and `std-stable` on 10 cases, printed as BMF on branch `compare`, plus `bencher noise` | The three points under [Bencher's model](#bencher-s-model) are settled; shard time per case is measured |
 | 2. Shared generator | `case.rs` in the library; `smoke.rs` uses it | Smoke inputs hash identically before and after; Bencher shows no new IDs |
 | 3. Runner | `variant`, `check`, `run`, `shard`, `compare` with Tessera and the std sorts | `compare run` works on a contributor's machine directly and under `bencher run --dry-run`, writing the results directory without the hosted runners; self-test: a deliberately wrong variant that also mutates its input is caught, and every variant receives the original input; `validate` passes in CI |
 | 4. Rust competitors | The crate adapters behind `compare` | `list` shows the capability table; `validate` passes or marks unsupported types |

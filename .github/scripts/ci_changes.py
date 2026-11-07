@@ -17,12 +17,15 @@ DOCS_SITE_FILES = {"package.json", "package-lock.json", ".github/workflows/docs.
 # language's tests implement them.
 PROSE_DIRS = ("assets/",)
 SHARED_PROSE_DIRS = ("conformance/",)
+# The `changes` job tests these scripts and dco.yml runs the sign-off check on
+# every pull request, so no language build needs to rerun for them.
+CI_SCRIPTS = (".github/scripts/",)
 
 
 def select(paths):
     rust = cpp = python = False
     for path in paths:
-        if path.startswith(DOCS_SITE) or path in DOCS_SITE_FILES:
+        if path.startswith(DOCS_SITE + CI_SCRIPTS) or path in DOCS_SITE_FILES:
             continue
         if path.startswith(("rust/", "bench/rust/")) or path in {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml"}:
             rust = True
@@ -41,19 +44,34 @@ def select(paths):
     return {"rust": rust, "cpp": cpp, "python": python}
 
 
+def changed_paths(base, head):
+    """Return paths changed on `head` since it left `base`, or None if unknown."""
+    # Diffing from the merge base ignores commits that landed on the base branch
+    # after the pull request branched, which main's own CI already validated.
+    # A force push can leave `base` unreachable; then the change is unknown.
+    try:
+        start = subprocess.check_output(["git", "merge-base", base, head], text=True).strip()
+        output = subprocess.check_output(
+            ["git", "diff", "--no-renames", "--name-only", "-z", start, head], text=True
+        )
+    except subprocess.CalledProcessError:
+        return None
+    return [path for path in output.split("\0") if path]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
-    if not args.base or set(args.base) == {"0"}:
+    paths = None
+    if args.base and set(args.base) != {"0"}:
+        paths = changed_paths(args.base, args.head)
+    if paths is None:
         result = {"rust": True, "cpp": True, "python": True}
     else:
-        paths = subprocess.check_output(
-            ["git", "diff", "--no-renames", "--name-only", "-z", args.base, args.head]
-        ).decode().split("\0")
-        result = select(path for path in paths if path)
+        result = select(paths)
     result["cpp_present"] = Path("cpp/CMakeLists.txt").is_file()
     result["python_present"] = all(Path(p).is_file() for p in ("python/pyproject.toml", "python/Cargo.toml"))
     with open(args.out, "a") as output:

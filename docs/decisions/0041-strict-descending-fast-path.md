@@ -12,7 +12,7 @@ The fast path must retain the stable behavior for descending inputs with ties an
 
 ## Decision
 
-Have `confirm_order` mark a descending result as strict only when every adjacent key is strictly descending. Route that result to a whole-slice reversal and return. Keep `reverse_stably` for all other confirmed descending inputs, including those with equal keys.
+Have `probe_order` and `confirm_order` report strictness separately from `Order`, setting it only when every adjacent key is strictly descending. Route that result to `reverse_strictly` and return; keep `reverse_stably` for all other confirmed descending inputs, including those with equal keys. Keep the whole-slice reversal loop in a `#[inline(never)]` helper so it stays out of the general sort path.
 
 Do not add a size threshold: strict descent is established by the existing confirmation scan, and the direct reversal is the simplest correct path. On strictly descending data, the check uses one greater-than comparison per pair; equality checks are reached only when a pair is not strictly descending.
 
@@ -30,7 +30,17 @@ Ratios below are median baseline-copy time divided by the candidate A/A mean, so
 | `record128/reverse/1000000` | 9.334 | 1.52 / 1.52 |
 | `owned/reverse/1000000` | 2.024 | 1.38 / 1.39 |
 
-A separate-process measurement had suggested a small regression on `record128/reverse/1000`. The paired result put both baseline copies inside the candidate A/A band (0.977–1.023), so it establishes neither a gain nor a regression for that case. Baseline-copy ratios varied on some scalar cases, exposing code-placement sensitivity; both copies nevertheless showed the improvement outside the controls on the other 21 cases. Raw samples and the temporary comparison adapters stay outside the repository.
+In the first run, `record128/reverse/1000` remained within noise; an apparent separate-process loss did not reproduce in the paired run. Baseline-copy ratios also varied on some scalar cases, exposing code-placement sensitivity.
+
+The first 22-case release comparison preceded the final code-placement follow-up. A same-binary A/B run then checked the final out-of-line implementation on `u64` reverse inputs, with baseline and candidate copies, nine shuffled blocks, stable-reference verification, and CPU 2 pinned on a Ryzen 7 8845H. Ratios are baseline-copy time divided by the candidate A/A mean; values above one favor the change.
+
+| Case | Candidate ns/record | Baseline A/B ratio |
+|---|---:|---:|
+| `u64/reverse/65536` | 1.088 | 1.16 / 1.16 |
+| `u64/reverse/1000000` | 0.800 | 1.32 / 1.32 |
+| `u64/reverse/10000000` | 0.887 | 1.24 / 1.24 |
+
+Both baseline copies are slower than the candidate range in all three cases. The continuous CI benchmark is a regression screen without A/A controls; reruns of the final source alternated between no alert and small-input alerts in different cases. Those alerts are not performance evidence; see the [continuous benchmark protocol](../development/continuous-benchmarks.md). Raw samples and the temporary comparison adapters stay outside the repository.
 
 `cargo test --workspace --all-targets`, `cargo test --workspace --doc`, `cargo test -p tessera-sort --all-targets --features portable-simd`, and Clippy with warnings denied pass. The docs formatter, simulator tests, typecheck and site build also pass.
 

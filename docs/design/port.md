@@ -95,6 +95,8 @@ The release comparison runner measured 22 reverse cases in one release binary: t
 
 Both baseline copies are slower than the candidate outside its A/A range in 21 of 22 cases; `record128/reverse/1000` is within noise. A separate-process run had suggested a small loss there, but the paired run placed both baseline copies inside the candidate's A/A band (0.977–1.023), and the second candidate copy also tracked the primary. The small case therefore shows no established gain or regression. Baseline-copy ratios vary on some scalar cases, which exposes code-placement sensitivity; the improvement remains in both copies. Raw samples and the temporary comparison adapters stay outside the repository.
 
+The final implementation keeps strictness as a separate order-probe result and isolates whole-slice reversal in a non-inlined helper. A paired A/B rerun of that source confirmed the `u64` reverse speedup at 65,536, 1,000,000 and 10,000,000 records; see [decision 0041](../decisions/0041-strict-descending-fast-path.md). The continuous suite has no A/A control and alternated between no alert and alerts on different short cases in reruns, so it serves only as a regression screen.
+
 ## Not yet done
 
 - A crates.io release. See [RELEASING.md](../../RELEASING.md).

@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 338" width="720" height="338" role="img" aria-labelledby="t d">
+<title id="t">PR benchmark history: Default +0.0% run time over 1 runs; Portable SIMD +0.0% run time over 1 runs</title>
+<desc id="d">Overall: Default −1.3%; Portable SIMD −1.8% | rust/u64/random/8193/s1/api: Default +0.8%; Portable SIMD +3.2% | rust/u64/random/8193/s1/workspace: Default +1.5%; Portable SIMD +4.4% | rust/u64/reverse/65536/s1/api: Default +3.9%; Portable SIMD +11.9%</desc>
+<style>
+  .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
+  .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
+  .tag { fill: none; stroke: #c9c8c2; }
+  .slower { fill: #e8622f; } .faster { fill: #4a80e6; }
+  .stem-slower { stroke: #e8622f; } .stem-faster { stroke: #4a80e6; }
+  .within { fill: #fafaf8; stroke: #8d8c86; }
+  text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; font-feature-settings: "tnum", "cv11"; }
+  .val { font-size: 12px; } .sub { font-size: 11px; } .tiny { font-size: 10px; } .strong { font-weight: 600; }
+  .hero { font-size: 28px; font-weight: 600; letter-spacing: -0.6px; font-feature-settings: "pnum"; }
+  .stat { font-size: 18px; font-weight: 600; }
+  .caps { font-size: 10.5px; font-weight: 600; letter-spacing: 1.1px; }
+  @media (prefers-color-scheme: dark) {
+    .panel { fill: #1e1e1d; stroke: #3a3a37; } .ring { stroke: #1e1e1d; }
+    .ink { fill: #e8e7e3; } .muted { fill: #a3a29b; } .rule { stroke: #30302e; } .axis { stroke: #6f6e69; }
+    .tag { stroke: #4a4a46; }
+    .within { fill: #1e1e1d; stroke: #6f6e69; }
+  }
+</style>
+<style>
+  .main { stroke-dasharray: 3 3; } .on-main { fill: #8d8c86; }
+  @media (prefers-color-scheme: dark) { .on-main { fill: #6f6e69; } }
+</style>
+<rect class="panel" x="0.5" y="0.5" width="719" height="337" rx="12"/>
+<text class="ink strong" x="24.0" y="36.0">Run time during this PR</text>
+<text class="muted sub" x="24.0" y="51.0">first to latest run</text>
+<text class="hero ink" x="197.0" y="50.0">+0.0%</text>
+<text class="ink strong" x="291.0" y="36.0">Default</text>
+<text class="muted sub" x="291.0" y="51.0">1 runs</text>
+<text class="hero ink" x="456.5" y="50.0">+0.0%</text>
+<text class="ink strong" x="550.5" y="36.0">Portable SIMD</text>
+<text class="muted sub" x="550.5" y="51.0">1 runs</text>
+<line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
+<line class="rule" x1="24" x2="696" y1="138" y2="138" stroke-width="1"/>
+<text class="ink strong" x="24.0" y="107.0">Overall</text>
+<text class="muted sub" x="24.0" y="122.0">geometric mean</text>
+<line class="axis main" x1="203" x2="370.5" y1="107.6" y2="107.6" stroke-width="1"/>
+<circle class="faster ring" cx="370.5" cy="113.8" r="4" stroke-width="2"/>
+<text class="val ink strong" x="436.5" y="113.0" text-anchor="end">−1.3%</text>
+<line class="axis main" x1="462.5" x2="630.0" y1="107.6" y2="107.6" stroke-width="1"/>
+<circle class="faster ring" cx="630.0" cy="116.4" r="4" stroke-width="2"/>
+<text class="val ink strong" x="696.0" y="113.0" text-anchor="end">−1.8%</text>
+<text class="ink" x="24.0" y="165.0">random</text>
+<text class="muted sub" x="24.0" y="180.0">u64 · 8,193</text>
+<line class="axis main" x1="203" x2="370.5" y1="177.7" y2="177.7" stroke-width="1"/>
+<circle class="slower ring" cx="370.5" cy="173.9" r="4" stroke-width="2"/>
+<text class="val ink" x="436.5" y="171.0" text-anchor="end">+0.8%</text>
+<line class="axis main" x1="462.5" x2="630.0" y1="177.7" y2="177.7" stroke-width="1"/>
+<circle class="slower ring" cx="630.0" cy="162.3" r="4" stroke-width="2"/>
+<text class="val ink" x="696.0" y="171.0" text-anchor="end">+3.2%</text>
+<text class="ink" x="24.0" y="211.0">random</text>
+<rect class="tag" x="74.5" y="200" width="62.7" height="14" rx="7" stroke-width="1"/>
+<text class="muted tiny" x="105.8" y="210.0" text-anchor="middle">workspace</text>
+<text class="muted sub" x="24.0" y="226.0">u64 · 8,193</text>
+<line class="axis main" x1="203" x2="370.5" y1="226.5" y2="226.5" stroke-width="1"/>
+<circle class="slower ring" cx="370.5" cy="219.0" r="4" stroke-width="2"/>
+<text class="val ink" x="436.5" y="217.0" text-anchor="end">+1.5%</text>
+<line class="axis main" x1="462.5" x2="630.0" y1="226.5" y2="226.5" stroke-width="1"/>
+<circle class="slower ring" cx="630.0" cy="205.5" r="4" stroke-width="2"/>
+<text class="val ink" x="696.0" y="217.0" text-anchor="end">+4.4%</text>
+<text class="ink" x="24.0" y="257.0">reverse</text>
+<text class="muted sub" x="24.0" y="272.0">u64 · 65,536</text>
+<line class="axis main" x1="203" x2="370.5" y1="274.0" y2="274.0" stroke-width="1"/>
+<circle class="slower ring" cx="370.5" cy="266.2" r="4" stroke-width="2"/>
+<text class="val ink" x="436.5" y="263.0" text-anchor="end">+3.9%</text>
+<line class="axis main" x1="462.5" x2="630.0" y1="274.0" y2="274.0" stroke-width="1"/>
+<circle class="slower ring" cx="630.0" cy="250.0" r="4" stroke-width="2"/>
+<text class="val ink" x="696.0" y="263.0" text-anchor="end">+11.9%</text>
+<line class="axis main" x1="24" x2="38" y1="312" y2="312" stroke-width="1"/>
+<text class="muted sub" x="44.0" y="316.0">main 26b340c · runs 54d2732 → 54d2732</text>
+<text class="muted sub" x="696.0" y="316.0" text-anchor="end">value: latest run against main · one scale per row</text>
+</svg>

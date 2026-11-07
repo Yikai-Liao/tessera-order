@@ -16,7 +16,7 @@ This document describes the engine in `rust/tessera-sort`. It makes the same dec
 
 ### 1. Order probe
 
-The engine samples up to 4,096 evenly spaced adjacent pairs to classify the input as ascending, descending, flat (every sampled pair equal) or unsorted. An ascending or descending sample is confirmed by a full scan, which takes its direction from the first unequal key. A confirmed ascending input returns immediately. A confirmed descending input is reversed stably: the whole slice is reversed, then each run of equal keys is reversed back. A flat sample is confirmed after the varying-bit scan below, since a constant input stops there.
+The engine samples up to 4,096 evenly spaced adjacent pairs to classify the input as ascending, descending, flat (every sampled pair equal) or unsorted. An ascending or descending sample is confirmed by a full scan, which takes its direction from the first unequal key. A confirmed ascending input returns immediately. A confirmed descending input is reversed stably. Strictly descending keys need only the whole-slice reversal; otherwise each run of equal keys is reversed back. A flat sample is confirmed after the varying-bit scan below, since a constant input stops there.
 
 An unsorted input gets a budgeted stable insertion pass. When the probe window, one tile of records, is shorter than the input, the pass first runs on a copy of the window's keys to estimate the number of swaps, and only then touches the records with a budget scaled to the whole input. If the budget runs out, the input is left as a stable permutation of itself and the radix path continues. See [Insertion and scans](#insertion-and-scans) for how the pass finds inversions.
 

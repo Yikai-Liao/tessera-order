@@ -20,7 +20,7 @@ A radix sort reads digits of the key instead of comparing keys, so it runs in ti
 
 The figure, as a list:
 
-1. **Order probe.** Sample adjacent pairs. Ascending inputs return at once. Descending inputs are reversed stably.
+1. **Order probe.** Sample adjacent pairs. Ascending inputs return at once. Strictly descending inputs reverse directly; other descending inputs reverse stably.
 2. **Budgeted insertion.** Unsorted inputs get an insertion pass with a swap budget. Nearly sorted inputs finish here.
 3. **Varying bits.** One scan finds the bits that differ between keys. If none do, the input is done. Later digits cover only the varying bits.
 4. **Node or tile.** An input larger than 64 KiB of records is a *node*, and anything smaller is a *tile*.

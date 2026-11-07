@@ -391,6 +391,10 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
     let sampled = probe_order(records, extractor);
     match sampled {
         Order::Ascending => return,
+        Order::StrictDescending => {
+            records.reverse();
+            return;
+        }
         Order::Descending => {
             reverse_stably(records, extractor);
             return;
@@ -505,6 +509,8 @@ fn insertion_probe<T, E: Extract<T>>(
 enum Order {
     Ascending,
     Descending,
+    /// Every adjacent key is strictly descending.
+    StrictDescending,
     /// Every sampled pair was equal; gaps may still contain differing keys.
     Flat,
     Unsorted,
@@ -553,8 +559,22 @@ fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
             Order::Unsorted
         }
     } else {
-        keys.try_fold(current, |a, b| (a >= b).then_some(b))
-            .map_or(Order::Unsorted, |_| Order::Descending)
+        keys.try_fold((current, true), |(before, strict), after| {
+            if before > after {
+                Some((after, strict))
+            } else if before == after {
+                Some((after, false))
+            } else {
+                None
+            }
+        })
+        .map_or(Order::Unsorted, |(_, strict)| {
+            if strict {
+                Order::StrictDescending
+            } else {
+                Order::Descending
+            }
+        })
     }
 }
 
@@ -1185,6 +1205,53 @@ mod tests {
                 records.iter().map(|record| record.1).collect::<Vec<_>>()
             );
         }
+    }
+
+    #[test]
+    fn strict_reverse_skips_rescan() {
+        let mut records: Vec<_> = (0..257u64).rev().map(|key| (key, key)).collect();
+        let mut expected = records.clone();
+        expected.reverse();
+
+        let mut probe_calls = 0;
+        assert!(
+            probe_order(
+                &records,
+                &mut ByKey(|record: &(u64, u64)| {
+                    probe_calls += 1;
+                    record.0
+                }),
+            ) == Order::StrictDescending
+        );
+
+        let mut calls = 0;
+        sort_with_tile_bytes::<_, _, true>(
+            &mut records,
+            &mut ByKey(|record: &(u64, u64)| {
+                calls += 1;
+                record.0
+            }),
+            None,
+            TILE_BYTES,
+        );
+        assert_eq!(calls, probe_calls);
+        assert_eq!(records, expected);
+    }
+
+    #[test]
+    fn reverse_keeps_equal_order() {
+        let mut records: Vec<_> = (0..257u64).map(|id| (id / 4, id)).collect();
+        records.reverse();
+        let mut expected = records.clone();
+        expected.sort_by_key(|record| record.0);
+
+        sort_with_tile_bytes::<_, _, true>(
+            &mut records,
+            &mut ByKey(|record: &(u64, u64)| record.0),
+            None,
+            TILE_BYTES,
+        );
+        assert_eq!(records, expected);
     }
 
     #[test]

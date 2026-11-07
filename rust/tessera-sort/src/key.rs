@@ -54,7 +54,10 @@ mod sealed {
         where
             Self: RadixKey,
         {
-            crate::engine::finish_insertion(keys, &mut Direct);
+            // Tile finishing repeatedly crosses short ordered runs. The scalar
+            // extractor avoids building a block mask for each inversion search;
+            // budgeted probes keep the blocked scan for long ordered stretches.
+            crate::engine::finish_insertion(keys, &mut super::ByKey(|key: &Self| *key));
         }
 
         #[inline]

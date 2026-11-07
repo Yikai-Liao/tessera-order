@@ -1,4 +1,4 @@
-# 0015: Overlap retired bucket batches with root compaction
+# 0017: Overlap retired bucket batches with root compaction
 
 Date: 2026-11-07. Status: experimental; controlled acceptance pending.
 
@@ -16,7 +16,7 @@ each bucket's own pointer and length and sort it through the existing child
 kernels. Reuse workspace objects through a pool whose mutex never covers user
 code. Preserve the sequential API, adaptive fallback, and std/no_std defaults.
 This supersedes only the all-materialized scheduling and pool-size assumptions
-in [decision 0014](0014-optional-bounded-rayon.md); it does not adopt the archived native-root research patch.
+in [decision 0016](0016-optional-bounded-rayon.md); it does not adopt the archived native-root research patch.
 
 ## Consequences
 

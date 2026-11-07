@@ -1,7 +1,7 @@
-# 0014: Optional parallel completion of materialized buckets
+# 0016: Optional parallel completion of materialized buckets
 
 Date: 2026-11-07. Status: experimental; scheduling and space accounting superseded
-by [0015](0015-materialized-bucket-overlap.md).
+by [0017](0017-materialized-bucket-overlap.md).
 
 ## Context
 

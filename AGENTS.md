@@ -1,60 +1,57 @@
 # Instructions for coding agents
 
-This file is for AI coding agents. Human contributors should read [`CONTRIBUTING.md`](CONTRIBUTING.md); these rules follow it. `CLAUDE.md` is a link to this file.
+For AI coding agents; humans read [`CONTRIBUTING.md`](CONTRIBUTING.md), and these rules follow it. `CLAUDE.md` links here.
 
-## Project
+Tessera is a stable radix sort with O(√n) auxiliary memory, built as a mature open-source project, not an experiment. Code is concise, readable and easy for a newcomer to follow. Documentation and comments follow each language's conventions at the standard of NumPy's reference documentation. Leave every file you touch cleaner than you found it. Everything is in English.
 
-Tessera is a stable radix sort with O(√n) auxiliary memory. Everything in the repository is written in English.
+## Layout
 
 | Path | Contents |
 |---|---|
-| `rust/tessera-sort/` | The Rust crate: `lib.rs` (public API), `key.rs` (key encoding), `workspace.rs`, `engine.rs` (routing and tiles), `block.rs` (block partition) |
+| `rust/tessera-sort/` | The crate: `lib.rs` (API), `key.rs` (encoding), `engine.rs` (routing, tiles), `block.rs` (block partition) |
 | `conformance/semantics.md` | Ordering rules shared by every language |
-| `docs/` | Guides, the algorithm explanation (`explain/`), design, development process, decision records and proposals; index in [`docs/README.md`](docs/README.md) |
-| `docs/.vitepress/` | Documentation site: VitePress config, Vue figures, and TypeScript models of the engine in `theme/sim/` ([guide](docs/development/docs-site.md)) |
-| `ROADMAP.md` | Planned work, completion criteria and open questions |
-| `RELEASING.md` | Versions, tags, compatibility and CI/CD layout |
-| `.github/` | Per-language CI and release workflows; `scripts/ci_changes.py` selects languages from changed paths |
+| `docs/` | Guides, explanation (`explain/`), design, development, decisions, proposals; [index](docs/README.md) |
+| `docs/.vitepress/` | Documentation site; TypeScript models of the engine in `theme/sim/` |
 
 ## Commands
 
 ```sh
-cargo fmt --all
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --all-targets
-cargo test --workspace --doc
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
-cargo +1.85 test --workspace                # MSRV
-cargo +nightly miri test -p tessera-sort    # after any engine, block or key change
-python3 -m unittest discover -s .github/scripts -p "test_*.py"   # after changing CI routing
-npm ci && npm run docs:test && npm run docs:typecheck && npm run docs:build   # after changing docs or the site
+cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --all-targets && cargo test --workspace --doc
+npm ci && npm run format && uvx ruff@0.17.4 format && uvx ruff@0.17.4 check
+npm run docs:test && npm run docs:typecheck && npm run docs:build   # site changes
+python3 -m unittest discover -s .github/scripts -p "test_*.py"     # CI routing changes
 ```
 
-## Code rules
+Run these locally. Miri, the MSRV, other platforms and benchmarks run in CI on a non-draft pull request; push commits and read the results there.
 
-- **Stable Rust.** The crate builds with the `rust-version` in `Cargo.toml`, without nightly features or runtime dependencies.
-- **License.** Every new source file starts with `// SPDX-License-Identifier: BSD-2-Clause`. Do not copy code from other projects, including `sort-research-rs` test tools and benchmark harness ([decision 0001](docs/decisions/0001-single-bsd-2-clause-license.md)). `block.rs` keeps Robert Clausecker's notice.
-- **Unsafe code.** Every `unsafe` block has a `// SAFETY:` comment directly above it, and every `unsafe fn` has a `# Safety` section. Keep the tests for panicking key functions, inconsistent keys, owned records and `&mut` records passing.
-- **Engine decisions.** The engine reproduces the research prototype's decisions ([port record](docs/design/port.md)). Do not change routing, thresholds, digit planning or inlining without measurements.
-- **Formatting and lints.** `rustfmt.toml` uses stable options only. Lints are configured in the workspace `Cargo.toml`; fix the cause instead of adding `allow`.
+## Code
 
-## Documentation rules
+- **Simple first.** Write the smallest change that reads clearly. Delete dead code and helpers or aliases that add a jump without a concept; extract a function when it names a complete stage.
+- **Stable Rust**, no required dependencies, MSRV from `Cargo.toml`.
+- **License.** New files start with an `SPDX-License-Identifier: BSD-2-Clause` comment. Never copy code from other projects, including `sort-research-rs` ([decision 0001](docs/decisions/0001-single-bsd-2-clause-license.md)); `block.rs` keeps Robert Clausecker's notice.
+- **Unsafe.** A `// SAFETY:` comment above every `unsafe` block, a `# Safety` section on every `unsafe fn`. Keep the panic, inconsistent-key, owned-record and `&mut`-record tests passing.
+- **Engine decisions.** Routing, thresholds, digit planning and inlining change only with measurements ([port record](docs/design/port.md)).
+- **Tools own format and lints**: rustfmt, Biome, Ruff, configured in `Cargo.toml`, `biome.json`, `ruff.toml`. Fix the cause; suppress only at the site, with the reason.
 
-Public items are documented to the standard of NumPy's reference documentation, written in rustdoc's conventions:
+## Naming
 
-1. A one-line summary in the imperative or descriptive form (`Sorts keys in ascending order, ...`).
-2. A paragraph on behavior and contract: ordering, stability, what happens to records, related items as intra-doc links.
-3. Sections, in this order, when they apply: `# Key function`, `# Panics`, `# Safety`, `# Memory`, `# Examples`.
-4. Examples are complete, compiled doctests with assertions, not fragments.
+- One concept, one name, across code, docs and models, from the [engine vocabulary](docs/design/engine.md): record, key, digit, bucket, node, tile, block, cursor.
+- Names say what a value is: `records`, `keys`, `extractor`, `len`; never `arr`, `tmp` or `data`. Units go in the name: `_bytes`, `_bits`, `_len`.
+- Functions are verbs; `try_` may decline, `is_`/`has_` return `bool`. Types are nouns, unique across modules.
+- Test names state the behavior in two to four words (`scatter_panic_keeps_records`); details go in a comment.
 
-Internal comments explain why, not what: the invariant an operation relies on, the hazard a line avoids, or the measurement behind a constant (with its numbers). Write them for a reader of the current code. Do not narrate history, requests or reviews ("restored", "as in the original", "at the user's request"); such history belongs in `docs/design/port.md` or a decision record.
+## Documentation
 
-Put new documentation where [`docs/README.md`](docs/README.md) says. The pages in `docs/explain/` and their models in `docs/.vitepress/theme/sim/` follow the engine: a change to routing, thresholds, digit planning or the block partition updates them in the same change. Their text must say everything a figure shows, because agents read the Markdown without the figures. A change to ordering, stability, panic behavior or space bounds updates `conformance/semantics.md` in the same change. A settled design choice gets a new decision record; planned work goes in `ROADMAP.md`.
+- Public Rust items: a one-line summary, a paragraph on the contract with intra-doc links, then `# Key function`, `# Panics`, `# Safety`, `# Memory`, `# Examples` as they apply, with examples as asserting doctests. Internal items get at least the summary.
+- Comments explain why — the invariant, the hazard, the measurement behind a constant with its numbers — for a reader of the current code. History belongs in `docs/design/port.md` or a decision record.
+- Markdown paragraphs are one line each.
+- Update in the same change: `docs/explain/` and `theme/sim/` for routing, thresholds, digit planning or the block partition (their text says all a figure shows); `conformance/semantics.md` for ordering, stability, panics or space bounds; a decision record for a settled choice; `ROADMAP.md` for planned work; `CHANGELOG.md` for user-visible changes.
 
 ## Measurements
 
-Do not say that a change is faster or slower without measurements that follow [`docs/development/benchmarking.md`](docs/development/benchmarking.md), and report the A/A range. A slowdown outside the controls is investigated, not assumed to be noise. Raw benchmark data, profiles and the research harness stay out of the repository.
+Never call a change faster or slower without measurements per [`docs/development/benchmarking.md`](docs/development/benchmarking.md), with the A/A range. A slowdown outside the controls is investigated, not assumed to be noise. Raw data, profiles and the research harness stay out of the repository.
 
 ## Commits
 
-Write commit messages in English, with a summary line that says what changed. Sign off every commit (`git commit -s`) with the configured Git identity. Disclose your assistance with an `Assisted-by:` or `Co-authored-by:` trailer.
+English, with a summary line that says what changed. Sign off (`git commit -s`) with the configured identity and add an `Assisted-by:` or `Co-authored-by:` trailer.

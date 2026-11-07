@@ -18,6 +18,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
+The documentation site and CI scripts are formatted and linted with [Biome](https://biomejs.dev/) (TypeScript, Vue, CSS, JSON) and [Ruff](https://docs.astral.sh/ruff/) (Python); CI checks both:
+
+```sh
+npm ci && npm run format
+uvx ruff@0.17.4 format && uvx ruff@0.17.4 check
+```
+
 Engine changes also need Miri, which requires nightly:
 
 ```sh

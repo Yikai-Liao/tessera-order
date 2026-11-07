@@ -45,7 +45,8 @@ Benchmark manifests record the implementation (for example `tessera-rust`), pack
 | `rust/`, `bench/rust/`, root Cargo and rustfmt files | Rust, and Python because it embeds the Rust core |
 | `cpp/`, `bench/cpp/`, root CMake files | C++ |
 | `python/`, `bench/python/` | Python |
-| Anything else (semantics, vectors, docs, license, workflows) | Every implemented language |
+| Markdown outside `conformance/` and the language directories, `assets/`, the documentation site's tooling | No language; `docs.yml` builds the site when its pages change |
+| Anything else (`conformance/`, vectors, license, workflows) | Every implemented language |
 
 A manual run selects everything. In `rust-ci.yml`, tests, lints, packaging, Miri and ASan are separate jobs.
 

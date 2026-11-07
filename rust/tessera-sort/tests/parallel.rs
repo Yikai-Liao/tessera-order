@@ -28,6 +28,42 @@ fn random(id: usize) -> u64 {
 }
 
 #[test]
+fn widened_root_digit_finishes_sparse_keys_at_parallel_gate() {
+    for threads in [1, 2, 4, 8] {
+        pool(threads).install(|| {
+            // Straddle the one-digit span and the 1 MiB parallel gate. The
+            // nine-bit fixture widens its root digit to cover all variation;
+            // that digit still has to run even though no child bits remain.
+            for width in [8, 9, 10] {
+                let key = |id: usize| {
+                    let k = (id * 5) % 8;
+                    ((k & 3) | ((k & 4) << (width - 3))) as u64
+                };
+                for offset in [-1isize, 0, 1] {
+                    let len = (1024 * 1024 / size_of::<u64>())
+                        .checked_add_signed(offset)
+                        .unwrap();
+                    let mut values: Vec<_> = (0..len).map(key).collect();
+                    let mut expected = values.clone();
+                    expected.sort();
+                    par_stable_sort(&mut values);
+                    assert_eq!(values, expected, "direct W={threads} width={width} n={len}");
+
+                    let len = (1024 * 1024 / size_of::<(u64, usize)>())
+                        .checked_add_signed(offset)
+                        .unwrap();
+                    let mut rows: Vec<_> = (0..len).map(|id| (key(id), id)).collect();
+                    let mut expected = rows.clone();
+                    expected.sort_by_key(|row| row.0);
+                    par_stable_sort_by_key(&mut rows, |row| row.0);
+                    assert_eq!(rows, expected, "by key W={threads} width={width} n={len}");
+                }
+            }
+        });
+    }
+}
+
+#[test]
 fn integer_keys_in_each_pool() {
     for threads in [1, 2, 4] {
         pool(threads).install(|| {

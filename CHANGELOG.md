@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Fixed
+
+- Complete the selected root partition in the experimental parallel sorter when digit widening covers all remaining key bits. Sparse key ranges must not return unsorted merely because no child work remains.
+
 ### Added
 
 - Experimental optional `rayon` feature with `par_stable_sort` and `par_stable_sort_by_key`, bounded task-group scratch, and parallel stability and panic-recovery tests. Default sequential and `no_std` configurations remain unchanged.

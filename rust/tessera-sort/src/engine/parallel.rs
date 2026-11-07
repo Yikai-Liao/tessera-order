@@ -204,6 +204,15 @@ fn sort_prepared<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
     let digit = choose_split_digit(arr, top, tile_bytes, &mut key);
     let candidate = varying & !digit.mask::<E::Value>().to_u128();
     if candidate == 0 {
+        // The selected digit covers every varying bit, so its partition
+        // finishes the root. There are no unfinished children to schedule.
+        block::partition_digit(
+            arr,
+            digit.width,
+            digit.shift,
+            &mut key,
+            workspace.block_buffers(),
+        );
         return;
     }
     // The compaction is the longest serial phase of a parallel call, and the
@@ -329,3 +338,5 @@ fn prepare_sort<T, E: Extract<T>>(arr: &mut [T], key: &mut E, tile_bytes: usize)
 
 #[cfg(test)]
 mod bucket_borrow_tests;
+#[cfg(test)]
+mod sparse_root_tests;

@@ -35,15 +35,14 @@ An independent track that binds the Rust crate and does not wait for C++. See th
 
 ## Rayon parallel sorting
 
-An independent Rust track, described in the [Rayon proposal](docs/proposals/rayon-parallel-sort.md). The optional `rayon` feature schedules complete root buckets and permutes root blocks in parallel; root scatter remains serial, and performance acceptance is pending.
+An independent Rust track, described in the [Rayon proposal](docs/proposals/rayon-parallel-sort.md). The optional `rayon` feature schedules complete root buckets in the caller's pool while root partitioning remains serial; controlled acceptance measurements and parallel root scatter remain open.
 
 | Deliverable | Done when |
 |---|---|
-| API and module scaffold | Implemented; the feature builds on Rust 1.85, preserves serial semantics and uses caller-owned Rayon pools |
-| Concurrent bucket sorting | Implemented through shared engine stages with a serial fallback and per-call scratch bound |
-| Root block permutation | Implemented with bounded O(P√n) scratch; A/B results still need a conclusive win outside A/A noise |
-| Parallel root scatter | Stable root scattering runs in parallel without an n-record buffer, with panic recovery and documented scratch bounds |
-| Acceptance | Owned-record, inconsistent-key and exclusive-borrow tests pass; controlled A/A reports show whole-call scaling and measured peak memory |
+| API and module scaffold | Feature-gated entry points preserve serial semantics and work inside caller-owned Rayon pools |
+| Concurrent bucket sorting | Disjoint root buckets run as Rayon tasks through shared engine stages, with bounded scratch and a serial fallback |
+| Parallel root scatter | Stable classification and scatter run in parallel without an n-record buffer, with panic recovery and documented memory bounds |
+| Acceptance | Panic, inconsistent-key, owned-record and exclusive-borrow tests pass; controlled A/A reports cover whole-call scaling and memory use |
 
 ## C++
 

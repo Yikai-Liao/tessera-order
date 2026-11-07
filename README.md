@@ -68,7 +68,7 @@ assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 
 Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 
-The optional `rayon` feature adds `par_stable_sort` and `par_stable_sort_by_key`, requiring `Send` records and a shared `Fn + Sync` key function. Large inputs sort complete root buckets in the caller's pool and permute root blocks in parallel; root scatter remains serial. See the [Rayon proposal](docs/proposals/rayon-parallel-sort.md) for current status and remaining work.
+The optional `rayon` feature adds `par_stable_sort` and `par_stable_sort_by_key`, requiring `Send` records and a shared `Fn + Sync` key function. Large inputs partition the root serially, then sort complete buckets in the caller's Rayon pool; root scatter remains serial. Small inputs and one-thread pools use the serial engine. See the [Rayon proposal](docs/proposals/rayon-parallel-sort.md) for current status.
 
 ## Performance
 
@@ -80,7 +80,7 @@ Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.de
 ## When to use something else
 
 - **Orders defined by a comparator**, strings, or other variable-length keys: use `slice::sort_by`.
-- **Parallel sorting**: Tessera is single-threaded.
+- **Parallel sorting without the optional `rayon` feature**: Tessera is single-threaded.
 - **No allocator**: Tessera needs O(√n) scratch memory, so it cannot run without `alloc` (or, in C++, without a heap).
 
 ## Status by language

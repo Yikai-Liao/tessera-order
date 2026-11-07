@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Focused scaling screen for the optional Rayon entry points.
+//! Focused whole-call comparison for the optional Rayon entry points.
 
 use criterion::{BatchSize, Criterion};
 use std::hint::black_box;
@@ -55,27 +55,25 @@ fn suite(criterion: &mut Criterion, len: usize) {
             );
         });
 
-        for threads in [1, 2, 4, 6] {
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(threads)
-                .build()
-                .unwrap();
-            let mut check = original.clone();
-            pool.install(|| par_stable_sort_by_key(&mut check, |row| row.0));
-            assert_eq!(check, expected);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap();
+        let mut check = original.clone();
+        pool.install(|| par_stable_sort_by_key(&mut check, |row| row.0));
+        assert_eq!(check, expected);
 
-            group.bench_function(format!("rayon-{threads}"), |bench| {
-                bench.iter_batched_ref(
-                    || original.clone(),
-                    |rows| {
-                        pool.install(|| {
-                            par_stable_sort_by_key(black_box(rows.as_mut_slice()), |row| row.0);
-                        });
-                    },
-                    BatchSize::LargeInput,
-                );
-            });
-        }
+        group.bench_function("rayon-4", |bench| {
+            bench.iter_batched_ref(
+                || original.clone(),
+                |rows| {
+                    pool.install(|| {
+                        par_stable_sort_by_key(black_box(rows.as_mut_slice()), |row| row.0);
+                    });
+                },
+                BatchSize::LargeInput,
+            );
+        });
         group.finish();
     }
 }

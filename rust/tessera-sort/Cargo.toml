@@ -22,9 +22,8 @@ std = []
 # Vector scans and prefix sums through `fearless_simd`. Requires std and Rust
 # 1.89. Dispatches at run time on x86; other targets use their baseline ISA.
 portable-simd = ["std", "dep:fearless_simd"]
-# Rayon entry points. Complete root buckets and the root block permutation use
-# the caller's pool; root scatter remains serial. Requires std, also without
-# the default features.
+# Rayon entry points. Large inputs sort complete root buckets in the caller's
+# pool; the root partition remains serial. Requires std, including without defaults.
 rayon = ["std", "dep:rayon"]
 
 [dependencies]

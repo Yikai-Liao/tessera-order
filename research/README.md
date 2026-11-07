@@ -162,3 +162,8 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   safe metadata-only credit exchange passed its invariants but missed the
   predeclared restoration-copy investment gate. No native mover or runtime
   adoption; original LIFO has no pool locks.
+
+- [Matched scatter diagnostic](matched-scatter-diagnostic/SUMMARY.md):
+  64 verified calls and exact-binary inspection locate aligned/native loop
+  differences while revealing instrumentation-induced per-record reloads.
+  No isolated instruction cost, performance acceptance or runtime change.

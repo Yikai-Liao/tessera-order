@@ -1,0 +1,14 @@
+[package]
+name = "tessera-region-block-prototype"
+version = "0.0.0"
+publish = false
+edition = "2024"
+rust-version = "1.85"
+license = "BSD-2-Clause"
+[workspace]
+exclude = ["vendor/tessera-leaf"]
+[dependencies]
+rayon = "1.10"
+tessera = { package = "tessera-serial-current-main", path = "vendor/tessera-leaf" }
+[profile.release]
+debug = true

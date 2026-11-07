@@ -1,0 +1,34 @@
+[package]
+name = "tessera-serial-current-main"
+# Unreleased. Publication waits for the benchmark runner and release report.
+version = "0.0.0"
+publish = false
+description = "Stable radix sort with O(sqrt(n)) auxiliary memory"
+readme = "README.md"
+keywords = ["sort", "radix-sort", "stable-sort", "sorting", "algorithm"]
+categories = ["algorithms"]
+edition = "2024"
+rust-version = "1.85"
+license = "BSD-2-Clause"
+repository = "https://github.com/Yikai-Liao/tessera-sort"
+authors = ["Yikai Liao <lyk-boya@outlook.com>"]
+
+[features]
+default = ["std"]
+# Catch a key-function panic, move every record back into the caller's slice and
+# resume the panic. Without this feature the crate is `no_std`: it uses `core` and
+# `alloc`, needs a global allocator, and aborts on a panic during block partitioning.
+std = []
+# Vector scans and prefix sums through `fearless_simd`. Requires std and Rust
+# 1.89. Dispatches at run time on x86; other targets use their baseline ISA.
+portable-simd = ["std", "dep:fearless_simd"]
+
+[dependencies]
+fearless_simd = { version = "1.2", optional = true }
+
+[package.metadata.docs.rs]
+all-features = true
+
+
+[lib]
+name = "tessera_sort"

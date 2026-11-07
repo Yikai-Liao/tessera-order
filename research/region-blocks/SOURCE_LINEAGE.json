@@ -1,0 +1,40 @@
+{
+  "base_aligned": {
+    "src/lib.rs": "b328abb6389e5e4bb5bce4df04f5fa7b98c467e813b4e165d409d9a5a35fe971",
+    "src/restore.rs": "45be99f7e0315a7385ff7d036d579cdc9f63903be231fc3564d704eecaf0cb5b"
+  },
+  "current_public_reference": {
+    "commit": "d6f303b74a0f19b6ae3c14a781539e3c39b9c4c0",
+    "tree": "cae516f98b8d3d8aa9e90630a6f4a1576b95d757"
+  },
+  "serial_child": "Frozen serial current main0bc80b49d5efd5bd8b62165b170015e5803226b7; original bytes from tessera-current-main-frozen, package metadata standalone only",
+  "source": {
+    "Cargo.toml": "1f043a0004437d46bec7e3347df9c678fe9e5dfbde62f73096f64d4ea9808b16",
+    "LICENSE": "705d08b60e66eac43d9e0348dfabf8a1e1ef4f450e23c3f63ba3a84aaa8fb405",
+    "README.md": "2b3fc4689655ba3596a741bf3b88e2e521c0421a0ab901dbeb95f14fda372134",
+    "Cargo.lock": "fe981231735cb32c7d1c5c5aaf51f6ec5308786686f2599ebb7828107b25a91f",
+    "VALIDATION.md": "873c8de7b4db1d19e37fb5076d89d0f34b49148ae7d7a6698f379934e999f787",
+    "src/probe.rs": "13786d33a53d2c8328c57c50465b002cbefc1362eb851681eb35390214ce08fd",
+    "src/lib.rs": "4c3d80da5e15694733855c50960807b837d2cf4ad5019092b15c4159dc6e67a2",
+    "src/broker.rs": "726ff3c6b7c77323c65bb14f373fe810415edce6af3a891827f7882e5066ca95",
+    "src/restore.rs": "45be99f7e0315a7385ff7d036d579cdc9f63903be231fc3564d704eecaf0cb5b",
+    "vendor/tessera-leaf/Cargo.toml": "eb8db513b3ff39902cc3a19d271c01a8af723bf9f1146eb5a04be15e70921c62",
+    "vendor/tessera-leaf/LICENSE": "705d08b60e66eac43d9e0348dfabf8a1e1ef4f450e23c3f63ba3a84aaa8fb405",
+    "vendor/tessera-leaf/README.md": "b946a9fa8ff2000343c607503671b75d360c310ca9c1d1ff1d0155b5c3b39c37",
+    "vendor/tessera-leaf/src/portable_simd.rs": "50cd42bddc699cd9e52ef7996ccb3cee7a087efe3100d2390d6f16d044eab3de",
+    "vendor/tessera-leaf/src/engine.rs": "290244a696f85b7a85b073c049e5d127641229501fb9a414cedcc2dbcdc79669",
+    "vendor/tessera-leaf/src/unwind.rs": "82477e2787826509e957dbdccd8cb7641b6ac9c56521c7385f76aef41e5cc614",
+    "vendor/tessera-leaf/src/lib.rs": "d215384c6a184f814a892f8a8571d92d56e2f421dc2610f48fc28d5ac6424523",
+    "vendor/tessera-leaf/src/workspace.rs": "f92fddbcee2d649e78aefd76864c383c7720aa0628497f2689ed7055f021af45",
+    "vendor/tessera-leaf/src/scan.rs": "cc0e490181d96164076b4543554507c98db77b5b5c7b88c124a2a572c9338916",
+    "vendor/tessera-leaf/src/block.rs": "044756f31b5baaf7b414c3daf99fa85a805a05fc9de2e2e5eb347e6b9738cb9d",
+    "vendor/tessera-leaf/src/key.rs": "219e737b5dc69d6e0af8c997aa4c15b5f89b886de5214d9218ac41584be6c6e8"
+  },
+  "pilot_source": {
+    "probe.rs": "13786d33a53d2c8328c57c50465b002cbefc1362eb851681eb35390214ce08fd",
+    "lib.rs": "e1ded9e5e5b8bec75fd35503efcfd648515ba8e8b538e866f608effb913c65dc",
+    "broker.rs": "90c13001f58b757eaa4af0f7e73e1681fcd14c24d7b1fa823e57bfaa370292b4",
+    "restore.rs": "45be99f7e0315a7385ff7d036d579cdc9f63903be231fc3564d704eecaf0cb5b"
+  },
+  "pilot_instrumentation": "one broker clock per bucket and readiness vector enabled; final movement source gates both off unless capture_plan"
+}

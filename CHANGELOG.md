@@ -19,4 +19,6 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Changed
 
+- Use pair-window iteration for scalar inversion scans while retaining one key evaluation per scanned record.
+- Give insertion finishing a unit-returning entry point shared by both backends, and skip portable SIMD dispatch when the existing scan gate guarantees scalar execution.
 - Derive the block-partition block size from the scratch-versus-tables trade-off instead of a tuned multiple of it, and keep the per-block copy and bookkeeping amortised with a floor in bytes and one in records. The removed factor sat at 2.1 times the minimum auxiliary memory of the scheme; the asymptotic bound is unchanged.

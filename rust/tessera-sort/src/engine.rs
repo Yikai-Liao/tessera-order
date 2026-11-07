@@ -15,7 +15,7 @@
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 
-use crate::key::{Extract, KeyHalf, Unsigned};
+use crate::key::{Direct, Extract, KeyHalf, Unsigned};
 use crate::{Workspace, block};
 
 type KeyValue<T, E> = <E as Extract<T>>::Value;
@@ -201,19 +201,20 @@ fn outlier_run<T, E: Extract<T>>(
     })
 }
 
-/// Scans for inversions and uses budgeted stable insertion on key copies or
-/// records. On failure the input remains a stable permutation.
-fn budgeted_insertion_sort<T, K: Ord>(
+/// Stably inserts inverted records until sorted or the swap budget runs out.
+/// A failed pass still leaves a stable permutation of the input.
+///
+/// The SIMD extractor calls this from a target-feature context. Keeping the
+/// loop in that context avoids out-of-line calls for each vector operation.
+#[inline(always)]
+pub(crate) fn insertion_loop<T, E: Extract<T>>(
     arr: &mut [T],
     budget: usize,
-    mut key: impl FnMut(&T) -> K,
+    key: &mut E,
 ) -> Option<usize> {
     let mut swaps = 0;
     let mut start = 0;
-    while let Some(offset) = arr[start..]
-        .windows(2)
-        .position(|pair| key(&pair[0]) > key(&pair[1]))
-    {
+    while let Some(offset) = key.first_inversion(&arr[start..]) {
         let index = start + offset + 1;
         let (prefix, tail) = arr.split_at_mut(index);
         let (mut current, prefix) = prefix.split_last_mut().unwrap();
@@ -224,7 +225,7 @@ fn budgeted_insertion_sort<T, K: Ord>(
             return None;
         }
         for before in prefix.iter_mut().rev() {
-            if key(before) <= key(current) {
+            if key.key(before) <= key.key(current) {
                 break;
             }
             core::mem::swap(before, current);
@@ -237,6 +238,15 @@ fn budgeted_insertion_sort<T, K: Ord>(
         start = index;
     }
     Some(swaps)
+}
+
+/// Finishes insertion without a swap limit.
+///
+/// The unit return keeps the unused swap total inside the inlined operation,
+/// so it can be discarded before returning across a target-feature boundary.
+#[inline(always)]
+pub(crate) fn finish_insertion<T, E: Extract<T>>(arr: &mut [T], key: &mut E) {
+    let _ = insertion_loop(arr, usize::MAX, key);
 }
 
 /// Number of bits needed to represent `value`; 0 for 0.
@@ -373,7 +383,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
     if sampled == Order::Unsorted {
         let probe = (tile_bytes / record_bytes).max(2).min(arr.len());
         let swaps = if probe == arr.len() {
-            budgeted_insertion_sort(arr, probe, |record| key.key(record))
+            key.insertion_sort(arr, probe)
         } else {
             // The buffer holds keys, never records. Its `u128` elements give
             // alignment for every encoded key width.
@@ -394,11 +404,9 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
             // SAFETY: every key slot was initialized above; this borrow ends
             // before the workspace is used by the sorting engine.
             let keys = unsafe { core::slice::from_raw_parts_mut(ptr, probe) };
-            match budgeted_insertion_sort(keys, probe, |&key| key) {
+            match Direct.insertion_sort(keys, probe) {
                 Some(0) => None,
-                Some(swaps) => budgeted_insertion_sort(arr, swaps * arr.len() / probe, |record| {
-                    key.key(record)
-                }),
+                Some(swaps) => key.insertion_sort(arr, swaps * arr.len() / probe),
                 None => None,
             }
         };
@@ -528,7 +536,7 @@ fn reverse_stably<T, E: Extract<T>>(arr: &mut [T], extractor: &mut E) {
 
 /// Stable insertion sort on converted keys.
 fn insertion_sort<T, E: Extract<T>>(arr: &mut [T], key: &mut E) {
-    let _ = budgeted_insertion_sort(arr, usize::MAX, |record| key.key(record));
+    key.finish_insertion(arr);
 }
 
 /// One stable counting pass: histogram, prefix sum, then scatter from `source`
@@ -590,12 +598,21 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
             *cursor.add(bucket) = count;
             largest = largest.max(count);
         }
-        let mut offset = 0u16;
-        for slot in 0..buckets {
-            // SAFETY: as above.
-            let count = *cursor.add(slot);
-            *cursor.add(slot) = offset;
-            offset += count;
+        #[cfg(feature = "portable-simd")]
+        {
+            // SAFETY: the caller guarantees `buckets` writable cursor slots.
+            let starts = core::slice::from_raw_parts_mut(cursor, buckets);
+            crate::portable_simd::prefix_sum(starts);
+        }
+        #[cfg(not(feature = "portable-simd"))]
+        {
+            let mut offset = 0u16;
+            for slot in 0..buckets {
+                // SAFETY: as above.
+                let count = *cursor.add(slot);
+                *cursor.add(slot) = offset;
+                offset += count;
+            }
         }
         for index in 0..len {
             let record = source.add(index);

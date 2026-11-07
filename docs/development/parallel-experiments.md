@@ -9,6 +9,21 @@ The initial implementation and measurements used upstream `d3b3c35`. Commit `608
 
 After the merge, all-feature workspace tests and doctests, warnings-denied Clippy and rustdoc, no-default-feature tests, Rust 1.85 tests, seven CI-routing tests, and the documentation model tests, type check, and site build passed. An independent old/new same-binary check completed five cases and 675 fully verified timing samples, each accumulating at least 25 ms. Merged child-parallel versus pre-merge child-parallel paired ratios were 1.009, 0.987, 1.036, 1.001, and 1.005, all within their combined A/A and placement envelopes. This establishes no measured integration regression in these cases, not the absence of a smaller regression below the controls. Identical-source serial sorted-u64 copies differed substantially again; this is a code-layout investigation signal, not an upstream algorithmic speedup.
 
+### Later upstream SIMD integration
+
+The experimental branch also merges upstream `72c2984`, which follows `52dab6a` with
+four commits. Unlike the first synchronization, this update changes Rust sorting code:
+it adds optional SIMD inversion scans and prefix sums and a shared insertion entry point.
+The parallel preparation path now uses that same entry point. Both `rayon` and
+`portable-simd` stay optional; the former retains Rust 1.85 compatibility, while SIMD
+requires Rust 1.89. The parallel ADR is numbered 0010 to preserve upstream ADRs 0007–0009.
+
+The measurements below remain tied to their earlier frozen implementations. They are
+not speedup claims against the newly merged SIMD baseline. New default and SIMD-enabled
+strong-serial comparisons are required before a later performance acceptance decision.
+Research patches retain their explicit historical application bases rather than being
+silently rewritten during this merge.
+
 ## Measurement method
 
 The first broad matrix covers 55 cases across `u32`, `u64`, full-width and half-only `u128`, 16-byte and 128-byte records, and owned records containing a `String`. Cases include random, several skew levels, low cardinality, sorted, reverse, equal, and sparse random swaps. It is a deliberately uneven coverage plan, not a workload weighting or the full type/distribution/size Cartesian product.

@@ -42,6 +42,7 @@ jobs:
           RUSTFLAGS: -C target-feature=+crt-static
         run: |
           cargo bench --locked -p tessera-bench --bench smoke \
+            --features tessera-sort/portable-simd \
             --target x86_64-unknown-linux-gnu --no-run --message-format=json \
             | jq -r 'select(.reason == "compiler-artifact" and .target.name == "smoke")
                      | .executable // empty' > executable.txt

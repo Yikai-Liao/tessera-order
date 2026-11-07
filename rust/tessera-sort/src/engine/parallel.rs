@@ -198,16 +198,14 @@ fn prepare_sort<T, E: Extract<T>>(arr: &mut [T], key: &mut E, tile_bytes: usize)
     if sampled == Order::Unsorted {
         let probe = (tile_bytes / record_bytes).max(2).min(arr.len());
         let swaps = if probe == arr.len() {
-            budgeted_insertion_sort(arr, probe, |record| key.key(record))
+            key.insertion_sort(arr, probe)
         } else {
             // No retained workspace is exposed by the parallel API, so these
             // Copy keys can use a typed temporary without raw scratch casts.
             let mut keys: Vec<_> = arr[..probe].iter().map(|record| key.key(record)).collect();
-            match budgeted_insertion_sort(&mut keys, probe, |&key| key) {
+            match Direct.insertion_sort(&mut keys, probe) {
                 Some(0) => None,
-                Some(swaps) => budgeted_insertion_sort(arr, swaps * arr.len() / probe, |record| {
-                    key.key(record)
-                }),
+                Some(swaps) => key.insertion_sort(arr, swaps * arr.len() / probe),
                 None => None,
             }
         };

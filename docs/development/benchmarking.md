@@ -20,7 +20,7 @@ This document defines how Tessera is measured. The runner described here is not 
 | `validate --suite S` | Checks order, permutation and, for stable variants, the order of equal keys, for every case and variant |
 | `measure --suite S --out DIR` | Times the suite and writes `samples.jsonl` and `manifest.json` |
 
-Cases are selected by exact `case_id`, `type/distribution/length/seed`, for example `u64/random/4096/s1` or `row_u64/zipf2/65536/s1`, never by pattern matching. Distribution names: `random`, `d256` and `d16` (uniform over 256 and 16 values), `zipf1.1` and `zipf2`, `sorted`, `reverse`, `sorted95` and `sorted99`, `runs`, `equal`.
+Cases are selected by exact `case_id`, `type/distribution/length/seed`, for example `u64/random/4096/s1` or `row_u64/zipf2/65536/s1`, never by pattern matching. Distribution names: `random`, `d256` and `d16` (uniform over 256 and 16 values), `zipf1.1` and `zipf2`, `skew50` and `skew99` (one dominant value), `two_values`, `sparse8` (eight full-width keys), `sorted`, `reverse`, `sorted95` and `sorted99`, `sorted_tail` (sorted with an appended run of large keys), `runs`, `equal`.
 
 Variants include the working-tree crate, a baseline release linked under a renamed dependency (`tessera_base = { package = "tessera-sort", git = "...", tag = "rust/v0.1.0" }`), `slice::sort_by_key`, `slice::sort_unstable_by_key`, and other radix sorts from crates.io, such as `radsort` and `rdst`, where they support the task. If Cargo rejects the same package from a path and a git source, the two versions are built as separate binaries and a driver script alternates them.
 
@@ -31,6 +31,11 @@ Inputs are generated from `(distribution, length, seed)` by a generator specifie
 - the random source is SplitMix64;
 - distributions use integer arithmetic only, so no result depends on a math library;
 - float inputs are built from bit patterns and include `±0`, `±inf`, NaNs with several payloads, and subnormals;
+- `skewP` draws from ten values spread over the whole key, `v_k = k · ⌊M / 10⌋` for `k = 0, …, 9`, where `M` is the largest value of the unsigned type of the key's width (for `f64`, `v_k = k · 2^1020`). For each key, if `next() mod 100 < P` the key is `v_0`; otherwise it is `v_(1 + next() mod 9)`, from a second draw;
+- `two_values` uses the same `v_k`: each key is `v_0` if `next() >> 63` is 0 and `v_9` otherwise;
+- `sparse8` first draws eight keys over the type's whole bit range; each record then takes key number `next() mod 8`;
+- `sorted_tail` with `t = ⌊n / 128⌋` holds `0, 1, …, n − t − 1`, followed by `t` keys drawn over the whole bit range with the top bit set (for `f64`, the bits `0x7ff0…0 | next() >> 12`: `+inf` and positive NaNs);
+- `runs` draws `n` keys over the whole bit range, then cuts them into consecutive runs of `16 + next() mod 2048` keys (the last one shorter). Each run is sorted, then reversed if `next() >> 63` is 1;
 - `conformance/vectors/` stores the SHA-256 of every `core` input, and runners verify it at startup.
 
 Inputs are generated in memory and never committed.
@@ -56,7 +61,7 @@ Payloads carry the record's original index so that permutation and stability can
 | `core` | All tasks × all core distributions × all core lengths | Releases and regression A/B |
 | `extended` | More seeds, float edge cases, compound keys, wide records, cold-cache mode | Investigations |
 
-Core distributions: random, uniform over 256 values, uniform over 16 values, Zipf (s = 1.1 and 2.0), sorted, reverse, 95 % and 99 % sorted, runs, all equal.
+Core distributions: random, uniform over 256 values, uniform over 16 values, Zipf (s = 1.1 and 2.0), one value at 50 % and 99 % (`skew50`, `skew99`), sorted, reverse, 95 % and 99 % sorted, runs, all equal.
 
 Core lengths: 8, 16, 32, 64, 256, 1K, 4K, 16K, 64K, 256K, 1M, 10M, plus points around engine thresholds (the insertion limit and the tile capacity for each record size), computed from the crate's constants.
 

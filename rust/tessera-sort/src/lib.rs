@@ -60,6 +60,13 @@
 //! The optional `rayon` feature enables `par_stable_sort` and
 //! `par_stable_sort_by_key` and implies `std`. It does not change the
 //! sequential API or the default feature selection.
+//!
+//! `portable-simd` is off by default and requires `std` and Rust 1.89 or newer.
+//! It adds [`fearless_simd`](https://docs.rs/fearless_simd) for adjacent-key
+//! scans and bucket-count prefix sums. On x86 it selects a supported SIMD
+//! backend at run time, once per insertion pass or prefix sum. Other targets
+//! use their compile-time baseline, including Arm Neon and WebAssembly SIMD
+//! when enabled for the target. Keys without a vector kernel use scalar scans.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]
@@ -69,6 +76,9 @@ extern crate alloc;
 mod block;
 mod engine;
 mod key;
+#[cfg(feature = "portable-simd")]
+mod portable_simd;
+mod scan;
 mod unwind;
 mod workspace;
 

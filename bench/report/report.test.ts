@@ -141,7 +141,7 @@ test("invalid samples fail validation", () => {
 test("figures preserve plotted values", () => {
   const dataset = createFixture(),
     charts = renderFigures(dataset, summarize(dataset));
-  assert.equal(charts.length, 5);
+  assert.equal(charts.length, 6);
   for (const chart of charts) {
     assert.match(chart.svg, /width="\d+"/);
     assert.match(chart.svg, /<title id="t">/);
@@ -150,7 +150,7 @@ test("figures preserve plotted values", () => {
   }
   assert.deepEqual(
     charts.map((c) => c.name),
-    ["ranking", "inputs", "short", "types", "memory"],
+    ["ranking", "inputs", "radix", "short", "types", "memory"],
   );
   assert.ok(charts[0].table.indexOf("vqsort") < charts[0].table.indexOf("Tessera"));
   assert.match(charts[0].svg, /long-stable-variant-name/);

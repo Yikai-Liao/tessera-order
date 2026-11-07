@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 466" width="900" height="466" role="img" aria-labelledby="t d">
-<title id="t">Extra heap memory</title>
-<desc id="d">slice::sort_unstable: 65,536 worst 0 B, 1,000,000 worst 0 B, 10,000,000 worst 0 B; vqsort: 65,536 worst 0 B, 1,000,000 worst 0 B, 10,000,000 worst 0 B; Tessera: 65,536 worst 33 kB, 1,000,000 worst 128 kB, 10,000,000 worst 405 kB; glidesort-sqrt: 65,536 worst 33 kB, 1,000,000 worst 128 kB, 10,000,000 worst 405 kB; slice::sort: 65,536 worst 524 kB, 1,000,000 worst 8 MB, 10,000,000 worst 80 MB; radsort: 65,536 worst 524 kB, 1,000,000 worst 8 MB, 10,000,000 worst 80 MB; long-stable-variant-name: 65,536 worst 524 kB, 1,000,000 worst 8 MB, 10,000,000 worst 80 MB</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 484" width="720" height="484" role="img" aria-labelledby="t d">
+<title id="t">Extra memory for 10,000,000 u64 keys</title>
+<desc id="d">405 kB Tessera at most, 405 kB on random input. Tessera: 405 kB; glidesort-sqrt: 405 kB; slice::sort: 80 MB; radsort: 80 MB; long-stable-variant-name: 80 MB; slice::sort_unstable: none; vqsort: none</desc>
 <style>
   .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
   .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
@@ -22,118 +22,61 @@
   }
 </style>
 <style>
-  .mark { fill: #8d8c86; } .stroke-ink { stroke: #0b0b0b; } .stroke-mark { stroke: #8d8c86; }
-  @media (prefers-color-scheme: dark) { .stroke-ink { stroke: #e8e7e3; } }
+  .mark { fill: #8d8c86; } .stroke-mark { stroke: #8d8c86; }
 </style>
-<rect class="panel" x="0.5" y="0.5" width="899" height="465" rx="12"/>
-<text class="ink strong" x="24.0" y="36.0">Extra heap memory</text>
-<text class="muted sub" x="24.0" y="51.0">u64 keys · peak during one sort</text>
-<text class="hero ink" x="208.0" y="50.0">33 kB</text>
-<text class="ink strong" x="297.0" y="36.0">65,536</text>
-<text class="muted sub" x="297.0" y="51.0">input 524 kB</text>
-<text class="hero ink" x="437.3" y="50.0">128 kB</text>
-<text class="ink strong" x="543.7" y="36.0">1,000,000</text>
-<text class="muted sub" x="543.7" y="51.0">input 8 MB</text>
-<text class="hero ink" x="666.7" y="50.0">405 kB</text>
-<text class="ink strong" x="773.0" y="36.0">10,000,000</text>
-<text class="muted sub" x="773.0" y="51.0">input 80 MB</text>
-<line class="rule" x1="24" x2="876" y1="76" y2="76" stroke-width="1"/>
-<line class="rule" x1="215.0" x2="215.0" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="235.5" x2="235.5" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="256.0" x2="256.0" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="276.4" x2="276.4" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="296.9" x2="296.9" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="317.4" x2="317.4" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="337.9" x2="337.9" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="358.3" x2="358.3" y1="90" y2="414" stroke-width="1"/>
-<text class="muted tiny" x="235.5" y="430.0" text-anchor="middle">1 kB</text>
-<text class="muted tiny" x="296.9" y="430.0" text-anchor="middle">1 MB</text>
-<text class="muted tiny" x="358.3" y="430.0" text-anchor="middle">1 GB</text>
-<line class="axis" x1="291.2" x2="291.2" y1="88" y2="414" stroke-width="1" stroke-dasharray="3 3"/>
-<text class="muted tiny" x="291.2" y="86.0" text-anchor="middle">input</text>
-<line class="rule" x1="444.3" x2="444.3" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="464.8" x2="464.8" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="485.3" x2="485.3" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="505.8" x2="505.8" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="526.2" x2="526.2" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="546.7" x2="546.7" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="567.2" x2="567.2" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="587.7" x2="587.7" y1="90" y2="414" stroke-width="1"/>
-<text class="muted tiny" x="464.8" y="430.0" text-anchor="middle">1 kB</text>
-<text class="muted tiny" x="526.2" y="430.0" text-anchor="middle">1 MB</text>
-<text class="muted tiny" x="587.7" y="430.0" text-anchor="middle">1 GB</text>
-<line class="axis" x1="544.7" x2="544.7" y1="88" y2="414" stroke-width="1" stroke-dasharray="3 3"/>
-<text class="muted tiny" x="544.7" y="86.0" text-anchor="middle">input</text>
-<line class="rule" x1="673.7" x2="673.7" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="694.1" x2="694.1" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="714.6" x2="714.6" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="735.1" x2="735.1" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="755.6" x2="755.6" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="776.0" x2="776.0" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="796.5" x2="796.5" y1="90" y2="414" stroke-width="1"/>
-<line class="rule" x1="817.0" x2="817.0" y1="90" y2="414" stroke-width="1"/>
-<text class="muted tiny" x="694.1" y="430.0" text-anchor="middle">1 kB</text>
-<text class="muted tiny" x="755.6" y="430.0" text-anchor="middle">1 MB</text>
-<text class="muted tiny" x="817.0" y="430.0" text-anchor="middle">1 GB</text>
-<line class="axis" x1="794.5" x2="794.5" y1="88" y2="414" stroke-width="1" stroke-dasharray="3 3"/>
-<text class="muted tiny" x="794.5" y="86.0" text-anchor="middle">input</text>
-<text class="caps muted" x="24.0" y="102.0">STABLE</text>
+<rect class="panel" x="0.5" y="0.5" width="719" height="483" rx="12"/>
+<text class="ink strong" x="24.0" y="36.0">Extra memory for 10,000,000 u64 keys</text>
+<text class="muted sub" x="24.0" y="54.0">Heap allocated during one sort, beyond the 80 MB input</text>
+<text class="hero ink" x="562.8" y="50.0" text-anchor="end">405 kB</text>
+<text class="ink strong" x="574.8" y="36.0">Tessera at most</text>
+<text class="muted sub" x="574.8" y="51.0">405 kB on random input</text>
+<line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
+<line class="rule" x1="230.0" x2="230.0" y1="90" y2="414" stroke-width="1"/>
+<text class="muted tiny" x="230.0" y="432.0" text-anchor="middle">100 kB</text>
+<line class="rule" x1="327.3" x2="327.3" y1="90" y2="414" stroke-width="1"/>
+<text class="muted tiny" x="327.3" y="432.0" text-anchor="middle">1 MB</text>
+<line class="rule" x1="424.5" x2="424.5" y1="90" y2="414" stroke-width="1"/>
+<text class="muted tiny" x="424.5" y="432.0" text-anchor="middle">10 MB</text>
+<line class="rule" x1="521.8" x2="521.8" y1="90" y2="414" stroke-width="1"/>
+<text class="muted tiny" x="521.8" y="432.0" text-anchor="middle">100 MB</text>
+<line class="rule" x1="619.0" x2="619.0" y1="90" y2="414" stroke-width="1"/>
+<text class="muted tiny" x="619.0" y="432.0" text-anchor="middle">1 GB</text>
+<line class="axis" x1="512.3" x2="512.3" y1="88" y2="414" stroke-width="1" stroke-dasharray="3 3"/>
+<text class="muted tiny" x="512.3" y="86.0" text-anchor="middle">input size</text>
+<text class="muted sub" x="220.0" y="448.0">← less memory</text>
+<text class="muted sub" x="629.0" y="448.0" text-anchor="end">more memory →</text>
+<text class="caps muted" x="24.0" y="102.0">STABLE SORTS</text>
 <text class="ink strong" x="24.0" y="129.0">Tessera</text>
-<text class="muted sub" x="24.0" y="144.0">radix</text>
-<circle class="faster ring" cx="266.5" cy="131" r="5.5" stroke-width="2"/>
-<text class="val ink strong" x="417.3" y="135.0" text-anchor="end">33 kB</text>
-<circle class="faster ring" cx="508.0" cy="131" r="5.5" stroke-width="2"/>
-<text class="val ink strong" x="646.7" y="135.0" text-anchor="end">128 kB</text>
-<circle class="faster ring" cx="747.5" cy="131" r="5.5" stroke-width="2"/>
-<text class="val ink strong" x="876.0" y="135.0" text-anchor="end">405 kB</text>
+<text class="muted sub" x="24.0" y="144.0">radix sort</text>
+<circle class="faster ring" cx="289.1" cy="131" r="6" stroke-width="2"/>
+<text class="val ink strong" x="696.0" y="135.0" text-anchor="end">405 kB</text>
 <text class="ink" x="24.0" y="167.0">glidesort-sqrt</text>
-<text class="muted sub" x="24.0" y="182.0">comparison</text>
-<circle class="mark ring" cx="266.5" cy="169" r="3.5" stroke-width="2"/>
-<text class="val muted" x="417.3" y="173.0" text-anchor="end">33 kB</text>
-<circle class="mark ring" cx="508.0" cy="169" r="3.5" stroke-width="2"/>
-<text class="val muted" x="646.7" y="173.0" text-anchor="end">128 kB</text>
-<circle class="mark ring" cx="747.5" cy="169" r="3.5" stroke-width="2"/>
-<text class="val muted" x="876.0" y="173.0" text-anchor="end">405 kB</text>
+<text class="muted sub" x="24.0" y="182.0">glidesort with Tessera's memory</text>
+<circle class="mark ring" cx="289.1" cy="169" r="4" stroke-width="2"/>
+<text class="val muted" x="696.0" y="173.0" text-anchor="end">405 kB</text>
 <text class="ink" x="24.0" y="205.0">slice::sort</text>
-<text class="muted sub" x="24.0" y="220.0">comparison</text>
-<circle class="mark ring" cx="291.2" cy="207" r="3.5" stroke-width="2"/>
-<text class="val muted" x="417.3" y="211.0" text-anchor="end">524 kB</text>
-<circle class="mark ring" cx="544.7" cy="207" r="3.5" stroke-width="2"/>
-<text class="val muted" x="646.7" y="211.0" text-anchor="end">8 MB</text>
-<circle class="mark ring" cx="794.5" cy="207" r="3.5" stroke-width="2"/>
-<text class="val muted" x="876.0" y="211.0" text-anchor="end">80 MB</text>
+<text class="muted sub" x="24.0" y="220.0">comparison sort</text>
+<circle class="mark ring" cx="512.3" cy="207" r="4" stroke-width="2"/>
+<text class="val muted" x="696.0" y="211.0" text-anchor="end">80 MB</text>
 <text class="ink" x="24.0" y="243.0">radsort</text>
-<text class="muted sub" x="24.0" y="258.0">radix</text>
-<circle class="mark ring" cx="291.2" cy="245" r="3.5" stroke-width="2"/>
-<text class="val muted" x="417.3" y="249.0" text-anchor="end">524 kB</text>
-<circle class="mark ring" cx="544.7" cy="245" r="3.5" stroke-width="2"/>
-<text class="val muted" x="646.7" y="249.0" text-anchor="end">8 MB</text>
-<circle class="mark ring" cx="794.5" cy="245" r="3.5" stroke-width="2"/>
-<text class="val muted" x="876.0" y="249.0" text-anchor="end">80 MB</text>
+<text class="muted sub" x="24.0" y="258.0">radix sort</text>
+<circle class="mark ring" cx="512.3" cy="245" r="4" stroke-width="2"/>
+<text class="val muted" x="696.0" y="249.0" text-anchor="end">80 MB</text>
 <text class="ink" x="24.0" y="281.0">long-stable-variant-name</text>
-<text class="muted sub" x="24.0" y="296.0">comparison</text>
-<circle class="mark ring" cx="291.2" cy="283" r="3.5" stroke-width="2"/>
-<text class="val muted" x="417.3" y="287.0" text-anchor="end">524 kB</text>
-<circle class="mark ring" cx="544.7" cy="283" r="3.5" stroke-width="2"/>
-<text class="val muted" x="646.7" y="287.0" text-anchor="end">8 MB</text>
-<circle class="mark ring" cx="794.5" cy="283" r="3.5" stroke-width="2"/>
-<text class="val muted" x="876.0" y="287.0" text-anchor="end">80 MB</text>
-<text class="caps muted" x="24.0" y="324.0">UNSTABLE</text>
+<text class="muted sub" x="24.0" y="296.0">comparison sort</text>
+<circle class="mark ring" cx="512.3" cy="283" r="4" stroke-width="2"/>
+<text class="val muted" x="696.0" y="287.0" text-anchor="end">80 MB</text>
+<text class="caps muted" x="24.0" y="324.0">UNSTABLE SORTS</text>
 <text class="ink" x="24.0" y="351.0">slice::sort_unstable</text>
-<text class="muted sub" x="24.0" y="366.0">comparison</text>
-<text class="val muted" x="417.3" y="357.0" text-anchor="end">none</text>
-<text class="val muted" x="646.7" y="357.0" text-anchor="end">none</text>
-<text class="val muted" x="876.0" y="357.0" text-anchor="end">none</text>
+<text class="muted sub" x="24.0" y="366.0">comparison sort</text>
+<text class="val muted" x="696.0" y="357.0" text-anchor="end">none</text>
 <text class="ink" x="24.0" y="389.0">vqsort</text>
-<text class="muted sub" x="24.0" y="404.0">SIMD</text>
-<text class="val muted" x="417.3" y="395.0" text-anchor="end">none</text>
-<text class="val muted" x="646.7" y="395.0" text-anchor="end">none</text>
-<text class="val muted" x="876.0" y="395.0" text-anchor="end">none</text>
-<circle class="mark" cx="28" cy="448" r="4"/>
-<text class="muted sub" x="38.0" y="452.0">worst of 10 inputs</text>
-<circle class="within" cx="151.61" cy="448" r="3.5" stroke-width="1.5"/>
-<text class="muted sub" x="161.6" y="452.0">random input</text>
-<line class="axis" x1="247.5" x2="247.5" y1="441" y2="455" stroke-width="1" stroke-dasharray="3 3"/>
-<text class="muted sub" x="257.5" y="452.0">input size</text>
-<text class="muted sub" x="876.0" y="452.0" text-anchor="end">log scale · ← less memory</text>
+<text class="muted sub" x="24.0" y="404.0">SIMD sort</text>
+<text class="val muted" x="696.0" y="395.0" text-anchor="end">none</text>
+<circle class="mark" cx="28" cy="462" r="4"/>
+<text class="muted sub" x="38.0" y="466.0">worst of 10 inputs</text>
+<circle class="within" cx="153.61" cy="462" r="3.5" stroke-width="1.5"/>
+<text class="muted sub" x="163.6" y="466.0">random input</text>
+<line class="axis" x1="251.5" x2="251.5" y1="455" y2="469" stroke-width="1" stroke-dasharray="3 3"/>
+<text class="muted sub" x="261.5" y="466.0">input size, 80 MB</text>
 </svg>

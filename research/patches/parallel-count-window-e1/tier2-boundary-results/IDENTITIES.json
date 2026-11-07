@@ -1,0 +1,21 @@
+{
+  "upstream_core": "e1d25297685cecb205d18114e898a39878e3fd83",
+  "baseline_source_identity_sha256": "ab73401745af53e114015e4ba6cc6a87ef91a5cfe3a1daa73036049189050e2a",
+  "candidate_source_identity_sha256": "8f300a35a875c8949d80fc306ed2ec24ddc9fbe6747663d4768369610b641b35",
+  "report_sha256": "871f8f047289ad8b09e62e54141c06ff93b6dcc713d313b97e48cd3ca9fd1fe4",
+  "driver_manifest_sha256": "30ceff0462206494ef4f7fd9a266ef6bd56dff161a8142991a4a7019409d4be0",
+  "evidence_manifest_sha256": "9b8055a5d69ca03e81f17a7ced8315fe6b3d3eb1742a77ab4e040aec343b3f37",
+  "timing_binary_sha256": "85339aeb487de585477da8d60f4c8065a5af03d7254f9224ccf085c6cf85a180",
+  "allocation_binary_sha256": "3d21eb8e77a9bb5d718fc4156b88f66863c4a3e9844439620f022b70746a0f7d",
+  "samples": 630,
+  "individual_timed_sorts": 139113,
+  "cases": 10,
+  "blocks": 9,
+  "labels": 7,
+  "workers": 8,
+  "length": 1000000,
+  "research_feature": false,
+  "supported_favorable": 0,
+  "supported_regressions": 0,
+  "raw_and_harness_in_public_packet": false
+}

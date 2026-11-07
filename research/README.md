@@ -54,3 +54,9 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   504 samples and 20,385 sorts at W8/n1M. Three of four narrow-window cells
   clear controls; u32/d16 and all four wide fallback cells remain inconclusive.
   No default adoption, runtime changes, or later shifted/ordered results.
+
+- [Frozen e1 shifted and early-exit boundaries](patches/parallel-count-window-e1/tier2-boundary-results/REPORT.md):
+  630 samples and 139,113 sorts across ten cells, all inconclusive under full
+  controls. The u32/equal37 slower primary tendency remains unresolved; this
+  does not establish regression-free behavior. Historical e1 source, not the
+  subsequently merged main refactor; no count-window adoption.

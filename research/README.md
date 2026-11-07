@@ -107,3 +107,9 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   child callbacks and parent partition work both remain substantial; two
   large mode anomalies remain unexplained. No tile-sharing implementation,
   accepted gain or runtime adoption; summary-only publication.
+
+- [Existing native entry validation](native-entry-validation/README.md):
+  test-only adapters and source replay for the unchanged combined scheduler.
+  Exact passed and unrun gates, MSRV check-only scope, Miri limitations and
+  per-consumer versus per-physical-thread space boundaries remain explicit.
+  This checkpoint does not adopt the native candidate into runtime.

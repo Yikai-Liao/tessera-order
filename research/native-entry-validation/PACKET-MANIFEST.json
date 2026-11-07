@@ -1,0 +1,49 @@
+{
+  "scope": "Source-only native validation checkpoint",
+  "files": {
+    "privacy-check.json": {
+      "bytes": 232,
+      "sha256": "f9fbbd3591738f5f87d8d3fece0179a50c53fc271afb828a1fa72311785f1516"
+    },
+    "verify.py": {
+      "bytes": 3831,
+      "sha256": "fc634b9d3faee0d325356cf1691fdcdbfa2341c1c039f42146233c7c6f88398a"
+    },
+    "SPACE.md": {
+      "bytes": 2166,
+      "sha256": "d77616a9cab4f0733677ca15bffd9926c376a099e215fbdc00991d8c0955466b"
+    },
+    "LICENSE": {
+      "bytes": 1384,
+      "sha256": "705d08b60e66eac43d9e0348dfabf8a1e1ef4f450e23c3f63ba3a84aaa8fb405"
+    },
+    "README.md": {
+      "bytes": 2864,
+      "sha256": "43c1778a609a06975191c928b6abc144154f4b61e8010b5226b59288c4d6fdb3"
+    },
+    "verification.json": {
+      "bytes": 217,
+      "sha256": "7215ad0f85d130f2decf330e39f98daa48b88ba6f191e01ba3c77c94c2379bc1"
+    },
+    "source-map.json": {
+      "bytes": 11158,
+      "sha256": "db396db4ced84d13ee215ed4a482ecbd39dc7f059f3f43454409f235e14f7eee"
+    },
+    "binary-freeze.json": {
+      "bytes": 1125,
+      "sha256": "ea8b7f418894f910e0c101098ae84700b559ee248bede36067f03417bda78dba"
+    },
+    "provenance.json": {
+      "bytes": 815,
+      "sha256": "32891765c2428f2d5cdf5d05cc790aca0ff7e83341b245b95bd683018e8b01d4"
+    },
+    "VALIDATION.md": {
+      "bytes": 5256,
+      "sha256": "bac5290367045d152228a1e65995d505d1f47bfc4a040832912204d247002d7e"
+    },
+    "patches/validation-tests.patch": {
+      "bytes": 10578,
+      "sha256": "a33582bb8d61411ac9b86628037503f9f51bdca817eb03938d510cf5b26de961"
+    }
+  }
+}

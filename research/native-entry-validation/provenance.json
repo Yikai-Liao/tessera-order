@@ -1,0 +1,12 @@
+{
+  "public_commit": "55b299b3716cd1af9e997f30b1a3c1813455d8be",
+  "published_dependency_commit": "5d06e2cc25704901b1a6838ef53416c0da39fe98",
+  "published_dependency_path": "research/draining-consumer-negative",
+  "dependency_patch": "patches/01-public-to-combined.patch",
+  "dependency_patch_sha256": "2265e704ebb25e0dba1a08e8d4431d1473fce09a740ac5e67ee5fe0b2c4dda4b",
+  "dependency_packet_manifest_sha256": "06e2ee369e38433e73c1bf9108530bed6d82a860d4d379221eb6adbfccb00ee5",
+  "dependency_source_map_sha256": "e6915ec1cf67f03927877e233826e228c5c56d2388e5182c798b36fdbf4052a9",
+  "original_combined_profile_freeze_sha256": "bf3b2ea730f98fca2dfaf75f3baba732f7f5d67eaea8bafdbae17c684fe11bae",
+  "decision": "Validation checkpoint only; no runtime adoption or new performance claim.",
+  "production_changed": false
+}

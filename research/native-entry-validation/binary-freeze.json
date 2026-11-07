@@ -1,0 +1,41 @@
+{
+  "included_binaries": false,
+  "profile": "release; opt-level=3; debug=0; incremental=false",
+  "toolchain": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "features": [
+    "std",
+    "rayon"
+  ],
+  "targets": [
+    {
+      "target": "lib",
+      "sha256": "c38c328b662e5d82bd2a3010e43315a50624b6966539f4620e095afc95ef9bc4",
+      "bytes": 9828808
+    },
+    {
+      "target": "conformance",
+      "sha256": "96fe437b8c88d29950120c321551e422b620ee663fcd1fdf9a8a45433ec2113f",
+      "bytes": 2748552
+    },
+    {
+      "target": "native_duplicate_widths",
+      "sha256": "8320d3a8566222c9db87331569544b125bcbc7b84dee8e31e44564802ded25da",
+      "bytes": 6384352
+    },
+    {
+      "target": "parallel",
+      "sha256": "3531ec30171c661e68da6734d0132a35600f0c099aa75616f93d2c064487bb8c",
+      "bytes": 10319504
+    },
+    {
+      "target": "recovery",
+      "sha256": "d3f8f95f20a90efaa83b0882a0ca10deea7f03c88fdd022a3150b1585eae9102",
+      "bytes": 1319720
+    },
+    {
+      "target": "workspace_memory",
+      "sha256": "36c3ea4708bb17a08fe8b68d2e528d81b64fdc00eda7ebd8368872b72e9c1e29",
+      "bytes": 1179720
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "base_rust_files": 25,
+  "final_source_files": 37,
+  "three_way_patch_replay": true,
+  "production_equivalent": true,
+  "public_metadata_unchanged": true,
+  "builds_tests_or_timing_run": false
+}

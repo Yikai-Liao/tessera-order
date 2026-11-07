@@ -1,0 +1,288 @@
+diff --git a/rust/tessera-sort/src/engine/parallel.rs b/rust/tessera-sort/src/engine/parallel.rs
+index d0b00ebafcf0c922ebc2dae0fa3c0ee620d55b2d..1c2da16cbffadbd7707ea945ebda2296fe83ab15 100644
+--- a/rust/tessera-sort/src/engine/parallel.rs
++++ b/rust/tessera-sort/src/engine/parallel.rs
+@@ -539,3 +539,9 @@ mod progress_tests;
+ 
+ #[cfg(test)]
+ mod current_main_tests;
++
++#[cfg(test)]
++mod native_borrow_tests;
++
++#[cfg(all(test, not(miri)))]
++mod native_sparse_tests;
+diff --git a/rust/tessera-sort/src/engine/parallel/native_borrow_tests.rs b/rust/tessera-sort/src/engine/parallel/native_borrow_tests.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..ab42ba01e35ce48c818a449e008dec4c3c5b0eb5
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/parallel/native_borrow_tests.rs
+@@ -0,0 +1,86 @@
++// SPDX-License-Identifier: BSD-2-Clause
++//! Adapt the public adjacent-borrow regression to native Materialized ownership.
++//! This scoped sequential adapter is Miri-compatible, not a Rayon route witness.
++use super::*;
++use crate::key::ByKey;
++use std::cell::Cell;
++use std::sync::Arc;
++use std::sync::atomic::{AtomicUsize, Ordering};
++
++fn grouped<T: Send, E: Extract<T> + Clone + Send>(values: &mut [T], mut key: E) {
++    let mut workspace = Workspace::new();
++    let mut pending = Vec::new();
++    let mut visit = |bucket: &mut [T], _: &mut E| {
++        pending.push(Materialized {
++            pointer: bucket.as_mut_ptr(),
++            len: bucket.len(),
++        });
++    };
++    block::partition_digit_with_ends(
++        values,
++        1,
++        2,
++        &mut key,
++        workspace.block_buffers(),
++        &mut visit,
++    );
++    assert_eq!(pending.len(), 2, "two separate materialized bucket borrows");
++    consume_buckets::<T, E, true>(pending, 3, &mut key, &mut Workspace::new(), TILE_BYTES);
++}
++
++#[test]
++fn adjacent_materialized_buckets_keep_separate_borrows() {
++    let mut values = [3_u64, 2, 1, 0, 7, 6, 5, 4];
++    grouped(&mut values, Direct);
++    assert_eq!(values, [0, 1, 2, 3, 4, 5, 6, 7]);
++}
++
++#[test]
++fn grouped_owned_cell_records_preserve_stability_and_drops() {
++    struct Row {
++        key: Cell<u64>,
++        id: String,
++        drops: Arc<AtomicUsize>,
++    }
++    impl Drop for Row {
++        fn drop(&mut self) {
++            self.drops.fetch_add(1, Ordering::Relaxed);
++        }
++    }
++    let drops = Arc::new(AtomicUsize::new(0));
++    let mut values: Vec<_> = [3_u64, 2, 3, 0, 7, 6, 7, 4]
++        .into_iter()
++        .enumerate()
++        .map(|(id, key)| Row {
++            key: Cell::new(key),
++            id: id.to_string(),
++            drops: drops.clone(),
++        })
++        .collect();
++    grouped(&mut values, ByKey(&|row: &Row| row.key.get()));
++    assert_eq!(
++        values.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
++        ["3", "1", "0", "2", "7", "5", "4", "6"]
++    );
++    assert_eq!(drops.load(Ordering::Relaxed), 0);
++    drop(values);
++    assert_eq!(drops.load(Ordering::Relaxed), 8);
++}
++
++#[test]
++fn grouped_exclusive_cell_records_keep_individual_borrows() {
++    let mut storage = [3_u64, 2, 1, 0, 7, 6, 5, 4].map(Cell::new);
++    let mut values: Vec<_> = storage.iter_mut().collect();
++    grouped(&mut values, ByKey(&|row: &&mut Cell<u64>| row.get()));
++    assert_eq!(
++        values.iter().map(|row| row.get()).collect::<Vec<_>>(),
++        [0, 1, 2, 3, 4, 5, 6, 7]
++    );
++    for (id, row) in values.into_iter().enumerate() {
++        row.set(id as u64 + 10);
++    }
++    assert_eq!(
++        storage.map(Cell::into_inner),
++        [13, 12, 11, 10, 17, 16, 15, 14]
++    );
++}
+diff --git a/rust/tessera-sort/src/engine/parallel/native_sparse_tests.rs b/rust/tessera-sort/src/engine/parallel/native_sparse_tests.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..e06baee99b70a10738603ee16e5bad8b2fe66ea2
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/parallel/native_sparse_tests.rs
+@@ -0,0 +1,137 @@
++// SPDX-License-Identifier: BSD-2-Clause
++//! Exercise the widened zero-child-bit native root with real shards and recovery.
++use super::*;
++use crate::key::ByKey;
++use crate::test_witness::{self, Hooks};
++use std::cell::Cell;
++use std::panic::{AssertUnwindSafe, catch_unwind};
++use std::sync::Arc;
++use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
++
++const LEN: usize = 131_073;
++const VARYING: u128 = 0x103;
++
++fn sparse_key(id: usize) -> u64 {
++    let k = (id * 5) % 8;
++    ((k & 3) | ((k & 4) << 6)) as u64
++}
++
++fn run<T: Send, E: Extract<T, Value = u64> + Clone + Send>(
++    records: &mut [T],
++    key: E,
++    hooks: Arc<Hooks>,
++    fail: bool,
++) {
++    let digit = choose_split_digit(records, 9, 256, &mut key.clone());
++    assert_eq!((digit.width, digit.shift), (9, 0));
++    assert_eq!(VARYING & !digit.mask::<u64>().to_u128(), 0);
++    let result = catch_unwind(AssertUnwindSafe(|| {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(4)
++            .build()
++            .unwrap()
++            .install(|| {
++                test_witness::with_hooks(hooks.clone(), || {
++                    sort_prepared::<_, _, true>(records, key, VARYING, 256);
++                });
++            });
++    }));
++    assert_eq!(result.is_err(), fail);
++    let geometry = hooks.root_geometry.lock().unwrap();
++    assert_eq!(geometry.len(), 1, "native root was bypassed");
++    assert_eq!(geometry[0].0, LEN);
++    assert_eq!(geometry[0].1, 512);
++    assert!(
++        geometry[0].3 >= 2,
++        "serial partition is not a route witness"
++    );
++    assert_eq!(hooks.root_key_panic.load(SeqCst), fail);
++    assert!(hooks.root_calls.load(SeqCst) > 0);
++}
++
++#[test]
++fn sparse_owned_recovers_stably() {
++    struct Row {
++        value: Cell<(u64, usize)>,
++        payload: String,
++        drops: Arc<Vec<AtomicUsize>>,
++    }
++    impl Drop for Row {
++        fn drop(&mut self) {
++            let id = self.value.get().1;
++            assert_eq!(self.payload, id.to_string());
++            assert_eq!(self.drops[id].fetch_add(1, SeqCst), 0);
++        }
++    }
++    for fail in [false, true] {
++        let drops = Arc::new((0..LEN).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++        let mut records: Vec<_> = (0..LEN)
++            .map(|id| Row {
++                value: Cell::new((sparse_key(id), id)),
++                payload: id.to_string(),
++                drops: drops.clone(),
++            })
++            .collect();
++        let hooks = Arc::new(Hooks::default());
++        let extract_hooks = hooks.clone();
++        run(
++            &mut records,
++            ByKey(move |row: &Row| {
++                extract_hooks.key(false, fail);
++                row.value.get().0
++            }),
++            hooks,
++            fail,
++        );
++        let actual: Vec<_> = records.iter().map(|row| row.value.get()).collect();
++        let mut expected: Vec<_> = (0..LEN).map(|id| (sparse_key(id), id)).collect();
++        expected.sort_by_key(|row| row.0);
++        if !fail {
++            assert_eq!(actual, expected);
++        }
++        let mut ids: Vec<_> = actual.iter().map(|row| row.1).collect();
++        ids.sort_unstable();
++        assert_eq!(ids, (0..LEN).collect::<Vec<_>>());
++        assert!(drops.iter().all(|n| n.load(SeqCst) == 0));
++        drop(records);
++        assert!(drops.iter().all(|n| n.load(SeqCst) == 1));
++    }
++}
++
++#[test]
++fn sparse_exclusive_recovers_borrows() {
++    for fail in [false, true] {
++        let mut backing: Vec<_> = (0..LEN).map(|id| Cell::new((sparse_key(id), id))).collect();
++        let mut records: Vec<_> = backing.iter_mut().collect();
++        let hooks = Arc::new(Hooks::default());
++        let extract_hooks = hooks.clone();
++        run(
++            &mut records,
++            ByKey(move |row: &&mut Cell<(u64, usize)>| {
++                extract_hooks.key(false, fail);
++                row.get().0
++            }),
++            hooks,
++            fail,
++        );
++        let actual: Vec<_> = records.iter().map(|row| row.get()).collect();
++        let mut expected: Vec<_> = (0..LEN).map(|id| (sparse_key(id), id)).collect();
++        expected.sort_by_key(|row| row.0);
++        if !fail {
++            assert_eq!(actual, expected);
++        }
++        let mut ids: Vec<_> = actual.iter().map(|row| row.1).collect();
++        ids.sort_unstable();
++        assert_eq!(ids, (0..LEN).collect::<Vec<_>>());
++        for row in records {
++            let (key, id) = row.get();
++            row.set((key + 1000, id));
++        }
++        assert!(
++            backing
++                .iter()
++                .enumerate()
++                .all(|(id, row)| row.get() == (sparse_key(id) + 1000, id))
++        );
++    }
++}
+diff --git a/rust/tessera-sort/tests/native_duplicate_widths.rs b/rust/tessera-sort/tests/native_duplicate_widths.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..79eac292c1fe8b764c0af8896aa47224049530c6
+--- /dev/null
++++ b/rust/tessera-sort/tests/native_duplicate_widths.rs
+@@ -0,0 +1,33 @@
++// SPDX-License-Identifier: BSD-2-Clause
++//! Payload identities witness stability, unlike unique random-key timing inputs.
++#![cfg(all(feature = "rayon", not(miri)))]
++use std::cmp::Reverse;
++use tessera_sort::par_stable_sort_by_key;
++
++#[test]
++fn duplicate_widths_preserve_payloads() {
++    for threads in [1, 2, 4, 8] {
++        rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap().install(|| {
++            macro_rules! check {
++                ($($ty:ty),*) => {$(
++                    let len = 1024 * 1024 / size_of::<($ty, usize)>() + 1;
++                    let mut rows: Vec<_> = (0..len).map(|id| {
++                        let key = ((id % 513) as u128).wrapping_mul(0x9e3779b97f4a7c15_94d049bb133111eb) as $ty;
++                        (key, id)
++                    }).collect();
++                    let mut expected = rows.clone();
++                    expected.sort_by_key(|row| row.0);
++                    par_stable_sort_by_key(&mut rows, |row| row.0);
++                    assert_eq!(rows, expected);
++                    // Restore original payload order before checking reverse stability.
++                    rows.sort_by_key(|row| row.1);
++                    expected = rows.clone();
++                    expected.sort_by_key(|row| Reverse(row.0));
++                    par_stable_sort_by_key(&mut rows, |row| Reverse(row.0));
++                    assert_eq!(rows, expected);
++                )*};
++            }
++            check!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
++        });
++    }
++}

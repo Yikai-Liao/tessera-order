@@ -210,6 +210,7 @@ function developmentSidebar() {
       items: [
         { text: "Roadmap", link: "/ROADMAP" },
         { text: "Python binding proposal", link: "/proposals/python-binding" },
+        { text: "Rayon parallel sorting proposal", link: "/proposals/rayon-parallel-sort" },
         { text: "Comparison benchmarks proposal", link: "/proposals/comparison-benchmarks" },
       ],
     },

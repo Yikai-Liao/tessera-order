@@ -33,6 +33,17 @@ Open questions for this milestone:
 
 An independent track that binds the Rust crate and does not wait for C++. See the [Python binding proposal](docs/proposals/python-binding.md).
 
+## Rayon parallel sorting
+
+An independent Rust track, described in the [Rayon proposal](docs/proposals/rayon-parallel-sort.md). The optional `rayon` feature and `par_stable_sort` / `par_stable_sort_by_key` entry points are scaffolded; they currently use the serial engine for every input.
+
+| Deliverable | Done when |
+|---|---|
+| API and module scaffold | Feature-gated entry points build on Rust 1.85, preserve serial semantics and work inside caller-owned Rayon pools |
+| Concurrent bucket sorting | Disjoint buckets run as Rayon tasks through shared engine stages, with a documented per-call scratch budget and serial fallback |
+| Parallel block partition | The partition's ownership and recovery invariants hold across tasks, with bounded scratch and measured scaling |
+| Acceptance | Panic, inconsistent-key, owned-record and exclusive-borrow tests pass; the benchmark protocol reports A/A controls, whole-call scaling and memory use |
+
 ## C++
 
 1. **C++ runner.** The same case specification and JSONL output as the Rust runner, with the standard library and pinned third-party sorts as baselines. Done when its generator matches the golden hashes.
@@ -47,4 +58,4 @@ Rerun the StarRocks and ClickHouse benchmarks against a released crate and link 
 - A dedicated unstable kernel before 0.1.
 - vcpkg and Conan packages: after the first releases, on demand.
 - A `core`-only build that takes its scratch from the caller instead of `alloc`: only if a real use case without a global allocator appears.
-- Go and parallel sorting: only if a real use case appears.
+- Go: only if a real use case appears.

@@ -19,6 +19,8 @@ The split keeps `main` at full coverage, which no pull request waits for, and ke
 
 A cell's commands live in one composite action, [`rust-test`](../../.github/actions/rust-test/action.yml), which both the pull request cells and the extra `main` cells call. A job's `if` cannot branch on `matrix` — the matrix is expanded after the condition is evaluated — so the two sets of cells are two jobs over one action rather than one matrix with a skip per cell.
 
+Each cell tests the optional `rayon` entry points, including on Rust 1.85. Stable Linux also tests all features together, so Rayon and Portable SIMD are exercised in one build; stable macOS and Windows compile that combination. The Rayon entry points currently use the serial engine, so their tests check the API and fallback contracts rather than task scheduling.
+
 ## Adding a language
 
 - Add a reusable workflow and a job in `ci.yml` that calls it, gated by `ci_changes.py` so changes outside the language skip it.

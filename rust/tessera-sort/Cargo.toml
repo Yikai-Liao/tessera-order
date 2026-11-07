@@ -22,9 +22,13 @@ std = []
 # Vector scans and prefix sums through `fearless_simd`. Requires std and Rust
 # 1.89. Dispatches at run time on x86; other targets use their baseline ISA.
 portable-simd = ["std", "dep:fearless_simd"]
+# Rayon entry points. Task scheduling is not implemented yet; these currently
+# use the serial engine. Requires std, also without the default features.
+rayon = ["std", "dep:rayon"]
 
 [dependencies]
 fearless_simd = { version = "1.2", optional = true }
+rayon = { version = "1.12", optional = true }
 
 [package.metadata.docs.rs]
 all-features = true

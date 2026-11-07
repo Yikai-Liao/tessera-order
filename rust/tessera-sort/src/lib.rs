@@ -61,6 +61,12 @@
 //! baseline, including Arm Neon and WebAssembly SIMD when enabled for the
 //! target. Keys without a vector kernel use scalar scans. Results are the same
 //! with and without the feature.
+//!
+//! `rayon` is off by default and enables `par_stable_sort` and
+//! `par_stable_sort_by_key`. These entry points currently use the serial
+//! engine; parallel task scheduling is not implemented yet. They require
+//! `std`, `Send` records and a shared (`Fn + Sync`) key function. Enabling the
+//! feature also enables `std` when default features are disabled.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -69,6 +75,8 @@ extern crate alloc;
 mod block;
 mod engine;
 mod key;
+#[cfg(feature = "rayon")]
+mod parallel;
 #[cfg(feature = "portable-simd")]
 mod portable_simd;
 mod scan;
@@ -76,6 +84,8 @@ mod unwind;
 mod workspace;
 
 pub use key::RadixKey;
+#[cfg(feature = "rayon")]
+pub use parallel::{par_stable_sort, par_stable_sort_by_key};
 pub use workspace::Workspace;
 
 /// Sorts keys in ascending order, keeping equal keys in input order.

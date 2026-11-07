@@ -53,6 +53,12 @@ A workspace reuses capacity only. Every call re-establishes which scratch record
 
 In Rust, the heap memory comes from `alloc`, so a `no_std` build needs a global allocator. One call needs O(√n) block scratch for a fixed record size and key width, a tile of up to 64 KiB of records (at least one record), up to two bytes of cached bucket ID per tile record, and at most 65,535 encoded probe keys of up to 16 bytes. Each tile-local MSD level holds up to 32 KiB of cursors on the stack, with at most 22 levels for 128-bit keys. `Workspace::retained_bytes()` reports the retained heap capacity and `shrink_to_fit()` releases all of it.
 
+## Rust Rayon entry points
+
+The optional `rayon` feature enables `std` and exposes `par_stable_sort` and `par_stable_sort_by_key`. Both currently delegate the whole call to the serial engine, with the same ordering, stability, record preservation, panic recovery and scratch bounds. Parallel task scheduling and its memory budget are pending ([proposal](../docs/proposals/rayon-parallel-sort.md)).
+
+Records require `Send` but do not require `Sync`. The by-key entry point requires `Fn + Sync` rather than `FnMut`, allowing future tasks to share a borrow of the key function; the function itself need not implement `Send` or `Clone`. Callers must allow concurrent key evaluations once scheduling is implemented. The serial APIs and `Workspace` retain their existing bounds.
+
 ## Language adapters
 
 The rules above apply to Rust and C++. The [planned Python binding](../docs/proposals/python-binding.md) has its own contract: it sorts every NaN last in both directions, treats `-0.0` and `+0.0` as equal, keeps the original value bits, and calls a list's key function exactly once per element. These rules belong to the Python adapter and do not change the Rust encoding or key-extraction guarantees.

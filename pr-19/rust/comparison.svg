@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 328" width="720" height="328" role="img" aria-labelledby="t d">
+<title id="t">Benchmark changes: 2 slower, 5 faster</title>
+<desc id="d">u64 · random · 48: run time +5.8%; {u32,u32} · random · 49: run time +1.5%; u64 · sorted · 65,536: run time −42.2%</desc>
+<style>
+  .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
+  .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
+  .tag { fill: none; stroke: #c9c8c2; }
+  .slower { fill: #e8622f; } .faster { fill: #4a80e6; }
+  .stem-slower { stroke: #e8622f; } .stem-faster { stroke: #4a80e6; }
+  text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; font-feature-settings: "tnum", "cv11"; }
+  .val { font-size: 12px; } .sub { font-size: 11px; } .tiny { font-size: 10px; } .strong { font-weight: 600; }
+  .hero { font-size: 28px; font-weight: 600; letter-spacing: -0.6px; font-feature-settings: "pnum"; }
+  .stat { font-size: 18px; font-weight: 600; }
+  .caps { font-size: 10.5px; font-weight: 600; letter-spacing: 1.1px; }
+  @media (prefers-color-scheme: dark) {
+    .panel { fill: #1e1e1d; stroke: #3a3a37; } .ring { stroke: #1e1e1d; }
+    .ink { fill: #e8e7e3; } .muted { fill: #a3a29b; } .rule { stroke: #30302e; } .axis { stroke: #6f6e69; }
+    .tag { stroke: #4a4a46; }
+  }
+</style>
+<rect class="panel" x="0.5" y="0.5" width="719" height="327" rx="12"/>
+<text class="hero faster" x="24.0" y="50.0">−1.8%</text>
+<text class="ink" x="120.0" y="36.0">run time overall</text>
+<text class="muted sub" x="120.0" y="51.0">geometric mean of 37 cases</text>
+<text class="muted sub" x="696.0" y="50.0" text-anchor="end">new</text>
+<text class="stat ink" x="669.4" y="50.0" text-anchor="end">1</text>
+<text class="muted sub" x="636.3" y="50.0" text-anchor="end">slower</text>
+<text class="stat slower" x="596.6" y="50.0" text-anchor="end">2</text>
+<text class="muted sub" x="563.5" y="50.0" text-anchor="end">faster</text>
+<text class="stat faster" x="528.4" y="50.0" text-anchor="end">5</text>
+<line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
+<line class="rule" x1="487.7" x2="487.7" y1="90" y2="284" stroke-width="1"/>
+<text class="muted tiny" x="487.7" y="300.0" text-anchor="middle">−10%</text>
+<line class="rule" x1="389.1" x2="389.1" y1="90" y2="284" stroke-width="1"/>
+<text class="muted tiny" x="389.1" y="300.0" text-anchor="middle">−20%</text>
+<line class="rule" x1="290.4" x2="290.4" y1="90" y2="284" stroke-width="1"/>
+<text class="muted tiny" x="290.4" y="300.0" text-anchor="middle">−30%</text>
+<line class="rule" x1="191.7" x2="191.7" y1="90" y2="284" stroke-width="1"/>
+<text class="muted tiny" x="191.7" y="300.0" text-anchor="middle">−40%</text>
+<line class="axis" x1="586.4" x2="586.4" y1="90" y2="284" stroke-width="1"/>
+<text class="muted tiny" x="586.4" y="300.0" text-anchor="middle">0</text>
+<text class="faster sub" x="578.4" y="317.0" text-anchor="end">← less time</text>
+<text class="slower sub" x="594.4" y="317.0">more time →</text>
+<text class="caps slower" x="24.0" y="102.0">SLOWER</text>
+<text class="ink" x="24.0" y="129.0">random</text>
+<text class="muted sub" x="24.0" y="144.0">u64 · 48</text>
+<line class="stem-slower" x1="586.4" x2="644.0" y1="131" y2="131" stroke-width="2" stroke-linecap="round"/>
+<circle class="slower ring" cx="644.0" cy="131" r="4" stroke-width="2"/>
+<text class="val ink" x="654.0" y="135.0" text-anchor="start">+5.8%</text>
+<text class="ink" x="24.0" y="167.0">random</text>
+<text class="muted sub" x="24.0" y="182.0">{u32,u32} · 49</text>
+<line class="stem-slower" x1="586.4" x2="601.3" y1="169" y2="169" stroke-width="2" stroke-linecap="round"/>
+<circle class="slower ring" cx="601.3" cy="169" r="4" stroke-width="2"/>
+<text class="val ink" x="611.3" y="173.0" text-anchor="start">+1.5%</text>
+<text class="caps faster" x="24.0" y="210.0">FASTER</text>
+<text class="ink strong" x="24.0" y="237.0">sorted</text>
+<text class="muted sub" x="24.0" y="252.0">u64 · 65,536</text>
+<line class="stem-faster" x1="586.4" x2="170.0" y1="239" y2="239" stroke-width="2" stroke-linecap="round"/>
+<circle class="faster ring" cx="170.0" cy="239" r="5.5" stroke-width="2"/>
+<text class="val ink strong" x="160.0" y="243.0" text-anchor="end">−42.2%</text>
+<text class="muted sub" x="24.0" y="272.0">4 more faster, each by less than 5%</text>
+</svg>

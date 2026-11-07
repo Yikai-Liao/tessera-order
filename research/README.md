@@ -152,3 +152,8 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   96 samples and 150 full-reference calls establish no accepted native-relative
   benefit. Conservative heap limits and broad controls remain explicit.
   No runtime adoption or acceptance-test expansion.
+
+- [Async retirement overlap diagnostic](async-rank-exchange/retirement-diagnostic/SUMMARY.md):
+  64 full-reference calls and 32 validated traces show early overlap while
+  synchronous children delay their own owners. CPU and perturbation caveats
+  prevent performance acceptance or hardware attribution; runtime unchanged.

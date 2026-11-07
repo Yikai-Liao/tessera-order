@@ -1,0 +1,8 @@
+{
+  "summary_sha256": "85d412bb53309f760bae7e01016d7b042958d337cf3a6e3cf1eb99801d5a657b",
+  "source_manifest_sha256": "3fb709e6d23a3a9dc1ad50c84aa8a9ee1f7880d00570254f8c459e29cd4ab7c7",
+  "private_inventory_sha256": "73c9d80f9a3cceb384a9a5952218146b089f8948fd1d9473f59d3d107d7fd811",
+  "scope": "Exact sanitized aggregate summary only; no raw events, source, binaries or runtime changes. Diagnostic perturbation prevents performance acceptance.",
+  "full_reference_calls": 64,
+  "validated_traces": 32
+}

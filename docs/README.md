@@ -9,7 +9,7 @@ These files are also published as the documentation site, built from this direct
 | [`design/`](design/) | Readers of the engine source | [Engine design](design/engine.md) and the [port from the research prototype](design/port.md) |
 | [`development/`](development/) | Contributors | [Benchmark protocol](development/benchmarking.md), [continuous benchmarks](development/continuous-benchmarks.md) and the [documentation site](development/docs-site.md) |
 | [`decisions/`](decisions/README.md) | Anyone asking why | Decision records: context, decision and consequences |
-| [`proposals/`](proposals/) | Reviewers of planned work | [Python binding](proposals/python-binding.md) |
+| [`proposals/`](proposals/) | Reviewers of planned work | [Python binding](proposals/python-binding.md) and [comparison benchmarks](proposals/comparison-benchmarks.md) |
 
 Planned work is tracked in [`ROADMAP.md`](../ROADMAP.md), and release rules are in [`RELEASING.md`](../RELEASING.md).
 

@@ -1,4 +1,4 @@
-# 0003: Version and release each language package independently
+# 0001c: Version and release each language package independently
 
 Date: 2026-11-06. Status: accepted.
 

@@ -183,7 +183,7 @@ function firstHeading(path: string): string {
 
 function developmentSidebar() {
   const decisions = allMarkdown
-    .filter((p) => /^docs\/decisions\/\d{4}-.*\.md$/.test(p))
+    .filter((p) => /^docs\/decisions\/\d{4}[a-z]?-.*\.md$/.test(p))
     .sort()
     .map((p) => ({ text: firstHeading(p), link: `/${sitePath(p).replace(/\.md$/, "")}` }));
   return [

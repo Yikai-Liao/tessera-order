@@ -1,6 +1,6 @@
 # Versions and releases
 
-Each language package is versioned and released on its own ([decision 0003](docs/decisions/0003-independent-package-versions.md)). No package has been released yet; the versions below are examples.
+Each language package is versioned and released on its own ([decision 0001c](docs/decisions/0001c-independent-package-versions.md)). No package has been released yet; the versions below are examples.
 
 | Object | Identifier | Identifies |
 |---|---|---|

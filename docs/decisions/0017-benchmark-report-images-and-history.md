@@ -1,4 +1,4 @@
-# 0009: Publish immutable report images and compare PR history with main
+# 0017: Publish immutable report images and compare PR history with main
 
 Date: 2026-11-07. Status: accepted.
 

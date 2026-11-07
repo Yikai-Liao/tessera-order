@@ -19,7 +19,7 @@ Measurements of the research prototype, which are outside this repository, put T
 
 An implementation, type or input that answers none of them stays out. Engine paths that users do not choose between, such as `sparse8` or `sorted_tail`, stay in the smoke suite, where they guard against regressions.
 
-The regression A/B question (is a change faster than `main`) uses the same runner with a Tessera build as the baseline, so it needs no second design. The research harness is not reproduced here, in line with [decision 0001](../decisions/0001-single-bsd-2-clause-license.md).
+The regression A/B question (is a change faster than `main`) uses the same runner with a Tessera build as the baseline, so it needs no second design. The research harness is not reproduced here, in line with [decision 0001a](../decisions/0001a-single-bsd-2-clause-license.md).
 
 ## Where it runs: one machine, one session
 
@@ -111,7 +111,7 @@ Rules:
 - **Stability where it is observable.** On `keys`, equal keys are indistinguishable, so a stable and an unstable sort produce the same output and compete directly; every mark still shows which kind it is. On `rows`, `records` and `owned`, unstable variants are listed separately, because they do not perform the task.
 - **Default configuration.** No variant enables crate features that change its algorithm.
 - **Pinned versions.** Crates are pinned with `=x.y.z` in `bench/rust/Cargo.toml`, C and C++ sources by commit and SHA-256; both are upgraded deliberately, and the version or commit appears in the report.
-- **Sources stay out.** Third-party C and C++ sources are fetched into an ignored directory, never committed or copied into the shims ([decision 0001](../decisions/0001-single-bsd-2-clause-license.md)). Each license is checked when its commit is pinned, because the executable links the code and the results archive names it.
+- **Sources stay out.** Third-party C and C++ sources are fetched into an ignored directory, never committed or copied into the shims ([decision 0001a](../decisions/0001a-single-bsd-2-clause-license.md)). Each license is checked when its commit is pinned, because the executable links the code and the results archive names it.
 - **No parallel sorting.** Tessera is single-threaded, so the comparison is too. Every variant runs on one thread: crates without their thread features (`rdst` without `multi-threaded`, `voracious` without `voracious_multithread`), IPS²Ra and IPS⁴o through `ips2ra::sort` and `ips4o::sort`, compiled by `build.rs` without TBB, OpenMP or the threads library, which is what their CMake options `IPS2RA_DISABLE_PARALLEL` and `IPS4O_DISABLE_PARALLEL` do, and nothing that needs a thread pool. Sorts that are only parallel, such as Dovetail sort, are left out. The runner checks this: it counts the process's threads after every variant's first sort and fails the run if any variant started one.
 - **Not included.** `sort_by_cached_key` (it answers a key-cost question, not a sort question); string and comparator sorts (Tessera does not support them).
 
@@ -314,7 +314,7 @@ The Bencher model for those runs:
 | Concept | Use |
 |---|---|
 | Branch | One fixed branch, `compare`, with `--hash <commit>`: the shards of one run share a branch and hash and so form one version, and successive runs form that branch's history |
-| Testbed | One Testbed, `intel-v1-compare`, spec `intel-v1`. A Testbed is the measurement environment, not a build, so the build is a segment of the benchmark ID. The continuous suite keeps a Testbed per build ([decision 0011](../decisions/0011-benchmark-feature-configurations.md)) because thresholds are scoped by Testbed; the comparison sets no thresholds |
+| Testbed | One Testbed, `intel-v1-compare`, spec `intel-v1`. A Testbed is the measurement environment, not a build, so the build is a segment of the benchmark ID. The continuous suite keeps a Testbed per build ([decision 0018](../decisions/0018-benchmark-feature-configurations.md)) because thresholds are scoped by Testbed; the comparison sets no thresholds |
 | Benchmark | `compare/<case_id>/<variant>/<build>`, for example `compare/u64/random/1000000/s1/radsort/default` |
 | Measures | `ratio`, the median over blocks with the per-block minimum and maximum as its bounds; `latency`, the median nanoseconds per element. The A/A control is its own benchmark, `tessera-aa`, never another metric's bounds |
 | Iterations | One `bencher run` iteration per shard. Blocks are the runner's statistical unit: each `--iter` restarts the executable, and `--fold median` would fold absolute times across processes, not paired ratios |

@@ -1,8 +1,8 @@
-# 0011: Track default and Portable SIMD benchmarks independently
+# 0018: Track default and Portable SIMD benchmarks independently
 
 Date: 2026-11-07. Status: accepted.
 
-The shared build flags and history transition are amended by [decision 0015](0015-align-continuous-benchmark-branches.md).
+The shared build flags and history transition are amended by [decision 0031](0031-align-continuous-benchmark-branches.md).
 
 ## Context
 

@@ -1,8 +1,8 @@
-# 0014: Use scalar extraction for default insertion finishing
+# 0030: Use scalar extraction for default insertion finishing
 
 Date: 2026-11-07. Status: accepted.
 
-Amends the default finishing scan in [decision 0007](0007-optional-simd-backend.md). The shared insertion loop and separate finishing entry point from [decision 0008](0008-insertion-finishing-entry-point.md) remain in use.
+Amends the default finishing scan in [decision 0008a](0008a-optional-simd-backend.md). The shared insertion loop and separate finishing entry point from [decision 0008b](0008b-insertion-finishing-entry-point.md) remain in use.
 
 ## Context
 

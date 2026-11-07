@@ -1,6 +1,6 @@
-# 0015: Align branches in continuous benchmark builds
+# 0031: Align branches in continuous benchmark builds
 
-Date: 2026-11-07. Status: accepted. Amends the shared build flags and history transition of [0011](0011-benchmark-feature-configurations.md).
+Date: 2026-11-07. Status: accepted. Amends the shared build flags and history transition of [0018](0018-benchmark-feature-configurations.md).
 
 ## Context
 
@@ -14,6 +14,6 @@ Keep Testbeds `intel-v1` and `intel-v1-portable-simd`, their hardware spec, benc
 
 ## Consequences
 
-The first aligned measurements compare against unaligned baselines, so alerts at the transition may reflect the build flag alone. The previous sample rule from [0013](0013-compare-with-the-previous-main-sample.md) uses an aligned baseline once an aligned `main` result exists at a PR's base commit. Earlier-base PRs still inherit their earlier baseline.
+The first aligned measurements compare against unaligned baselines, so alerts at the transition may reflect the build flag alone. The previous sample rule from [0029](0029-compare-with-the-previous-main-sample.md) uses an aligned baseline once an aligned `main` result exists at a PR's base commit. Earlier-base PRs still inherit their earlier baseline.
 
 Branch alignment changes code size and absolute timing. It targets a known Intel boundary hazard, not every source of layout sensitivity, and does not prove the cause of any particular benchmark alert. Performance claims still require the benchmark protocol's A/A and placement controls. The LLVM option must remain supported by the compiler used to build the benchmarks.

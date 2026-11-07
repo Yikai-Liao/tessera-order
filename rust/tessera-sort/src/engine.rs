@@ -354,7 +354,7 @@ fn plan_digits(varying: u128, width: usize, digits: &mut [Digit]) -> usize {
 ///
 /// `CACHED` stores each record's bucket ID during a tile pass's histogram so
 /// the scatter never calls the key function again; it is `true` for user key
-/// functions and `false` for library-encoded keys (decision 0002).
+/// functions and `false` for library-encoded keys (decision 0001b).
 struct Sorter<'a, T, E, const CACHED: bool> {
     workspace: &'a mut Workspace<T>,
     extractor: &'a mut E,

@@ -1,8 +1,8 @@
-# 0007: Optional fearless_simd backend for the inversion scan
+# 0008a: Optional fearless_simd backend for the inversion scan
 
 Date: 2026-11-07. Status: accepted.
 
-The default insertion-finishing scan is amended by [decision 0014](0014-scalar-default-insertion-finishing.md).
+The default insertion-finishing scan is amended by [decision 0030](0030-scalar-default-insertion-finishing.md).
 
 ## Context
 

@@ -29,7 +29,7 @@ Run these locally. Miri, the MSRV, other platforms and benchmarks run in CI on a
 
 - **Simple first.** Write the smallest change that reads clearly. Delete dead code and helpers or aliases that add a jump without a concept; extract a function when it names a complete stage.
 - **Stable Rust**, no required dependencies, MSRV from `Cargo.toml`.
-- **License.** New files start with an `SPDX-License-Identifier: BSD-2-Clause` comment. Never copy code from other projects, including `sort-research-rs` ([decision 0001](docs/decisions/0001-single-bsd-2-clause-license.md)); `block.rs` keeps Robert Clausecker's notice.
+- **License.** New files start with an `SPDX-License-Identifier: BSD-2-Clause` comment. Never copy code from other projects, including `sort-research-rs` ([decision 0001a](docs/decisions/0001a-single-bsd-2-clause-license.md)); `block.rs` keeps Robert Clausecker's notice.
 - **Unsafe.** A `// SAFETY:` comment above every `unsafe` block, a `# Safety` section on every `unsafe fn`. Keep the panic, inconsistent-key, owned-record and `&mut`-record tests passing.
 - **Engine decisions.** Routing, thresholds, digit planning and inlining change only with measurements ([port record](docs/design/port.md)).
 - **Tools own format and lints**: rustfmt, Biome, Ruff, configured in `Cargo.toml`, `biome.json`, `ruff.toml`. Fix the cause; suppress only at the site, with the reason.

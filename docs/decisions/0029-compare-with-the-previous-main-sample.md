@@ -1,4 +1,4 @@
-# 0013: Alert on a fixed percentage from the previous main sample
+# 0029: Alert on a fixed percentage from the previous main sample
 
 Date: 2026-11-07. Status: accepted. Supersedes the alert rule of [0004](0004-continuous-benchmarks-on-bencher.md).
 

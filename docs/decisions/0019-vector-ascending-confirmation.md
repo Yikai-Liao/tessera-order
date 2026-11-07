@@ -1,4 +1,4 @@
-# 0010: Reuse the vector scan for ascending-order confirmation
+# 0019: Reuse the vector scan for ascending-order confirmation
 
 Date: 2026-11-07. Status: accepted.
 

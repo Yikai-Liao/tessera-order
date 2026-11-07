@@ -1,4 +1,4 @@
-# 0012: Count narrow windows of direct keys instead of partitioning them
+# 0022: Count narrow windows of direct keys instead of partitioning them
 
 Date: 2026-11-07. Status: accepted.
 

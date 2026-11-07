@@ -26,7 +26,7 @@ One scan computes the bitwise union and intersection of all keys. Bits that are 
 
 ### 3. Node partitioning
 
-A node whose remaining variation spans at most eight bits is one window away from sorted. When the records are their own keys (`Direct`), it is finished by counting that window: one `usize` count and one remembered record per bucket, then each run is filled from its record. Every sealed encoding is a bijection on bit patterns, so equal keys mean equal records and a filled run is the same permutation the block partition would produce, without block tables or record moves. A user key function keeps payloads that its key does not identify, so `ByKey` declines and takes the partition. See [decision 0012](../decisions/0012-count-narrow-direct-windows.md).
+A node whose remaining variation spans at most eight bits is one window away from sorted. When the records are their own keys (`Direct`), it is finished by counting that window: one `usize` count and one remembered record per bucket, then each run is filled from its record. Every sealed encoding is a bijection on bit patterns, so equal keys mean equal records and a filled run is the same permutation the block partition would produce, without block tables or record moves. A user key function keeps payloads that its key does not identify, so `ByKey` declines and takes the partition. See [decision 0022](../decisions/0022-count-narrow-direct-windows.md).
 
 Otherwise the node is split by one of three partitions, all of them stable. The first two are tried only on nodes of at least four tiles, which amortize their 64-key sample:
 
@@ -60,7 +60,7 @@ The leaf and the digit widths are chosen by a cost model that counts passes and 
 
 ## Insertion and scans
 
-Every insertion pass, whether a budgeted probe or the finish of a tile or bucket, runs one loop, `insertion_loop`: it scans for the first adjacent pair whose keys descend, moves the later record left, and resumes the scan after it. A probe returns its swap count and may stop at its budget. A finishing pass, `finish_insertion`, has no budget and returns `()`, so the unused count is discarded inside the inlined loop rather than returned across a target-feature boundary ([decision 0008](../decisions/0008-insertion-finishing-entry-point.md)).
+Every insertion pass, whether a budgeted probe or the finish of a tile or bucket, runs one loop, `insertion_loop`: it scans for the first adjacent pair whose keys descend, moves the later record left, and resumes the scan after it. A probe returns its swap count and may stop at its budget. A finishing pass, `finish_insertion`, has no budget and returns `()`, so the unused count is discarded inside the inlined loop rather than returned across a target-feature boundary ([decision 0008b](../decisions/0008b-insertion-finishing-entry-point.md)).
 
 The scan depends on the extractor and the build:
 
@@ -68,10 +68,10 @@ The scan depends on the extractor and the build:
 |---|---|---|
 | Key function (`stable_sort_by_key`) | One record at a time, keeping the previous key, so the key function runs once per scanned record | Same |
 | Direct keys, budgeted probe | Blocked scan of 32 pairs per mask update (`scan::first_inversion`); `f64` uses the scalar scan | Vector scan, with the instruction set selected once per pass |
-| Direct keys, insertion finish | Scalar scan: the short ordered runs a radix partition leaves do not amortize a block mask ([decision 0014](../decisions/0014-scalar-default-insertion-finishing.md)) | Vector scan, with the instruction set selected once per pass |
-| Direct keys, ascending confirmation | Scalar scan | The vector scan, dispatched once ([decision 0010](../decisions/0010-vector-ascending-confirmation.md)) |
+| Direct keys, insertion finish | Scalar scan: the short ordered runs a radix partition leaves do not amortize a block mask ([decision 0030](../decisions/0030-scalar-default-insertion-finishing.md)) | Vector scan, with the instruction set selected once per pass |
+| Direct keys, ascending confirmation | Scalar scan | The vector scan, dispatched once ([decision 0019](../decisions/0019-vector-ascending-confirmation.md)) |
 
-With `portable-simd`, slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time, and `Reverse<K>` keys keep the default-build scans. The insertion loop is inlined into the dispatched function, so its scan runs with the selected target features ([decision 0007](../decisions/0007-optional-simd-backend.md)).
+With `portable-simd`, slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time, and `Reverse<K>` keys keep the default-build scans. The insertion loop is inlined into the dispatched function, so its scan runs with the selected target features ([decision 0008a](../decisions/0008a-optional-simd-backend.md)).
 
 ## Record handling
 
@@ -94,7 +94,7 @@ Key functions are user code and may panic. On a panic:
 
 The slice holds every record afterwards, in an unspecified order. No record is dropped twice or leaked.
 
-Without the `std` feature, a panic cannot be caught. A key-function panic during block partitioning, where the input slice does not own every record, aborts through an unwind guard; panics elsewhere unwind with every record in place ([decision 0006](../decisions/0006-no-std-unwind-guard.md)).
+Without the `std` feature, a panic cannot be caught. A key-function panic during block partitioning, where the input slice does not own every record, aborts through an unwind guard; panics elsewhere unwind with every record in place ([decision 0005b](../decisions/0005b-no-std-unwind-guard.md)).
 
 ## Stack usage
 

@@ -1,4 +1,4 @@
-# 0002: Cache bucket IDs for every record type
+# 0001b: Cache bucket IDs for every record type
 
 Date: 2026-11-06. Status: accepted.
 

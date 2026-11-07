@@ -54,7 +54,7 @@ class LanguageSelection(unittest.TestCase):
             "RELEASING.md",
             "ROADMAP.md",
             "docs/explain/keys.md",
-            "docs/decisions/0001-single-bsd-2-clause-license.md",
+            "docs/decisions/0001a-single-bsd-2-clause-license.md",
             "bench/README.md",
             "assets/logo.svg",
         ]:

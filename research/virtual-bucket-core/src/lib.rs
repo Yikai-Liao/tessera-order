@@ -6,7 +6,7 @@
 //! This is not the generic Tessera API: keys must be deterministic and infallible,
 //! records must be `Copy`, scheduling is serial, and panic recovery is not promised.
 
-use std::mem::{size_of, MaybeUninit};
+use std::mem::{MaybeUninit, size_of};
 use std::time::{Duration, Instant};
 
 mod sealed {
@@ -525,7 +525,7 @@ impl<'a, T: Record> VirtualSorter<'a, T> {
         let mut shards: Vec<_> = (0..shard_count).map(|_| Directory::empty()).collect();
         let total_blocks = initial.blocks.len();
         for (i, span) in initial.blocks.into_iter().enumerate() {
-            let index = i * shard_count / total_blocks;
+            let index = shard_for_block(i, shard_count, total_blocks);
             shards[index].len += span.len;
             shards[index].blocks.push(span);
         }
@@ -686,4 +686,36 @@ pub fn sort<T: Record>(input: &mut [T], config: Config) -> Stats {
     let sorted = sorter.sort_adopted_roots(roots);
     let packed = sorter.repack_global(sorted);
     sorter.restore(packed)
+}
+
+/// Maps an input block to its contiguous shard without pointer-width overflow.
+fn shard_for_block(block: usize, shards: usize, blocks: usize) -> usize {
+    debug_assert!(block < blocks && shards > 0);
+    // Supported usize widths are at most 64 bits, so the product fits in u128.
+    // Since block < blocks, the quotient is below shards and fits back in usize.
+    ((block as u128 * shards as u128) / blocks as u128) as usize
+}
+
+#[cfg(test)]
+mod shard_tests {
+    use super::shard_for_block;
+
+    #[test]
+    fn full_width_shard_arithmetic_preserves_order() {
+        let max = usize::MAX;
+        assert_eq!(shard_for_block(max - 1, max, max), max - 1);
+        assert_eq!(shard_for_block(max / 2, 3, max), 1);
+        assert_eq!(shard_for_block(65_536, 65_537, 65_537), 65_536);
+        for blocks in 1..if cfg!(miri) { 8 } else { 128 } {
+            for shards in 1..=blocks {
+                let mut previous = 0;
+                for block in 0..blocks {
+                    let index = shard_for_block(block, shards, blocks);
+                    assert!(index >= previous && index < shards);
+                    assert_eq!(index, block * shards / blocks);
+                    previous = index;
+                }
+            }
+        }
+    }
 }

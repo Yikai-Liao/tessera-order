@@ -3,9 +3,11 @@
 **Validated serial ownership foundation, not a competitive parallel sorter.** The standalone `[workspace]`
 keeps it out of the repository workspace's default tests. It has no dependencies.
 
-Exact validated `src/lib.rs`, integration tests, Cargo.toml and Cargo.lock are
-preserved. Only the benchmark `src/main.rs` and evidence/build artifacts are
-excluded. Package name stays `virtual-bucket-prototype`, preserving test imports.
+The original checkpoint preserved validated source and tests. A follow-up fixes
+shard-index multiplication overflow on narrow targets and adds a full-width
+arithmetic regression; `SOURCE_LINEAGE.json` records both source identities.
+The benchmark `src/main.rs` and build artifacts remain excluded. Package name
+stays `virtual-bucket-prototype`, preserving test imports.
 
 ## What it establishes
 

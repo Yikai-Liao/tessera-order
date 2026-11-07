@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 244" width="720" height="244" role="img" aria-labelledby="t d">
-<title id="t">Benchmark changes against main: Default no alerts; Portable SIMD 2 faster</title>
-<desc id="d">{u64,u32} · random · 1,000,000: Default +0.1%, Portable SIMD −5.9% improvement; u128 · random · 1,000,000: Default −0.1%, Portable SIMD −5.5% improvement</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 206" width="720" height="206" role="img" aria-labelledby="t d">
+<title id="t">Benchmark changes against main: Default no alerts; Portable SIMD 1 slower</title>
+<desc id="d">rec128_u64 · random · 65,536, workspace: Default +1.5%, Portable SIMD +5.8% regression</desc>
 <style>
   .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
   .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
@@ -20,7 +20,7 @@
     .within { fill: #1e1e1d; stroke: #6f6e69; }
   }
 </style>
-<rect class="panel" x="0.5" y="0.5" width="719" height="243" rx="12"/>
+<rect class="panel" x="0.5" y="0.5" width="719" height="205" rx="12"/>
 <text class="ink strong" x="24.0" y="36.0">Run time against main</text>
 <text class="muted sub" x="24.0" y="51.0">each build, own baseline</text>
 <text class="hero faster" x="189.0" y="50.0">−0.1%</text>
@@ -28,38 +28,31 @@
 <text class="muted sub" x="283.0" y="51.0">no alerts</text>
 <text class="hero slower" x="452.5" y="50.0">+0.4%</text>
 <text class="ink strong" x="546.5" y="36.0">Portable SIMD</text>
-<text class="muted sub" x="546.5" y="51.0">2 faster</text>
+<text class="muted sub" x="546.5" y="51.0">1 slower</text>
 <line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
-<line class="rule" x1="223.3" x2="223.3" y1="90" y2="192" stroke-width="1"/>
-<text class="muted tiny" x="223.3" y="208.0" text-anchor="middle">−5%</text>
-<line class="axis" x1="363.7" x2="363.7" y1="90" y2="192" stroke-width="1"/>
-<text class="muted tiny" x="363.7" y="208.0" text-anchor="middle">0</text>
-<line class="rule" x1="486.8" x2="486.8" y1="90" y2="192" stroke-width="1"/>
-<text class="muted tiny" x="486.8" y="208.0" text-anchor="middle">−5%</text>
-<line class="axis" x1="627.2" x2="627.2" y1="90" y2="192" stroke-width="1"/>
-<text class="muted tiny" x="627.2" y="208.0" text-anchor="middle">0</text>
-<text class="caps muted" x="24.0" y="102.0">STABLE</text>
+<line class="rule" x1="344.0" x2="344.0" y1="90" y2="154" stroke-width="1"/>
+<text class="muted tiny" x="344.0" y="170.0" text-anchor="middle">+5%</text>
+<line class="axis" x1="197.0" x2="197.0" y1="90" y2="154" stroke-width="1"/>
+<text class="muted tiny" x="197.0" y="170.0" text-anchor="middle">0</text>
+<line class="rule" x1="607.5" x2="607.5" y1="90" y2="154" stroke-width="1"/>
+<text class="muted tiny" x="607.5" y="170.0" text-anchor="middle">+5%</text>
+<line class="axis" x1="460.5" x2="460.5" y1="90" y2="154" stroke-width="1"/>
+<text class="muted tiny" x="460.5" y="170.0" text-anchor="middle">0</text>
+<text class="caps muted" x="24.0" y="102.0">STABLE, WORKSPACE</text>
 <text class="ink" x="24.0" y="129.0">random</text>
-<text class="muted sub" x="24.0" y="144.0">{u64,u32} · 1,000,000</text>
-<circle class="within" cx="366.5" cy="131" r="3.5" stroke-width="1.5"/>
-<text class="val muted" x="432.5" y="135.0" text-anchor="end">+0.1%</text>
-<line class="stem-faster" x1="627.2" x2="460.5" y1="131" y2="131" stroke-width="2" stroke-linecap="round"/>
-<circle class="faster ring" cx="460.5" cy="131" r="4" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="135.0" text-anchor="end">−5.9%</text>
-<text class="ink" x="24.0" y="167.0">random</text>
-<text class="muted sub" x="24.0" y="182.0">u128 · 1,000,000</text>
-<circle class="within" cx="360.8" cy="169" r="3.5" stroke-width="1.5"/>
-<text class="val muted" x="432.5" y="173.0" text-anchor="end">−0.1%</text>
-<line class="stem-faster" x1="627.2" x2="472.2" y1="169" y2="169" stroke-width="2" stroke-linecap="round"/>
-<circle class="faster ring" cx="472.2" cy="169" r="4" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="173.0" text-anchor="end">−5.5%</text>
-<circle class="slower" cx="28" cy="226" r="4"/>
-<circle class="faster" cx="38" cy="226" r="4"/>
-<text class="muted sub" x="48.0" y="230.0">alert</text>
-<circle class="within" cx="91.1" cy="226" r="3.5" stroke-width="1.5"/>
-<text class="muted sub" x="101.1" y="230.0">within limits</text>
-<circle class="ink" cx="186.07" cy="226" r="5.5"/>
-<text class="muted sub" x="196.6" y="230.0">20% or more</text>
-<text class="slower sub" x="696.0" y="230.0" text-anchor="end">more time →</text>
-<text class="faster sub" x="621.7" y="230.0" text-anchor="end">← less time</text>
+<text class="muted sub" x="24.0" y="144.0">rec128_u64 · 65,536</text>
+<circle class="within" cx="239.8" cy="131" r="3.5" stroke-width="1.5"/>
+<text class="val muted" x="432.5" y="135.0" text-anchor="end">+1.5%</text>
+<line class="stem-slower" x1="460.5" x2="630.0" y1="131" y2="131" stroke-width="2" stroke-linecap="round"/>
+<circle class="slower ring" cx="630.0" cy="131" r="4" stroke-width="2"/>
+<text class="val ink strong" x="696.0" y="135.0" text-anchor="end">+5.8%</text>
+<circle class="slower" cx="28" cy="188" r="4"/>
+<circle class="faster" cx="38" cy="188" r="4"/>
+<text class="muted sub" x="48.0" y="192.0">alert</text>
+<circle class="within" cx="91.1" cy="188" r="3.5" stroke-width="1.5"/>
+<text class="muted sub" x="101.1" y="192.0">within limits</text>
+<circle class="ink" cx="186.07" cy="188" r="5.5"/>
+<text class="muted sub" x="196.6" y="192.0">20% or more</text>
+<text class="slower sub" x="696.0" y="192.0" text-anchor="end">more time →</text>
+<text class="faster sub" x="621.7" y="192.0" text-anchor="end">← less time</text>
 </svg>

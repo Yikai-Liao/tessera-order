@@ -24,6 +24,13 @@ strong-serial comparisons are required before a later performance acceptance dec
 Research patches retain their explicit historical application bases rather than being
 silently rewritten during this merge.
 
+The later [combined phase and worker-count study](best-combined-profile.md) now supplies
+same-binary comparisons against both default and portable-SIMD serial code from
+`72c2984`. It retains the old-core combined implementation as an explicitly frozen
+candidate. Its 16 targeted cases establish large random-data advantages but retain
+low-cardinality plateaus, broad controls, and an unresolved trace-disabled outlier.
+The historical matrix below is not replaced or relabeled by that study.
+
 ## Measurement method
 
 The first broad matrix covers 55 cases across `u32`, `u64`, full-width and half-only `u128`, 16-byte and 128-byte records, and owned records containing a `String`. Cases include random, several skew levels, low cardinality, sorted, reverse, equal, and sparse random swaps. It is a deliberately uneven coverage plan, not a workload weighting or the full type/distribution/size Cartesian product.

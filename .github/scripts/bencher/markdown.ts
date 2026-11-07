@@ -22,6 +22,32 @@ interface FailureOptions {
   reason: string;
 }
 
+export interface ConfigurationResult {
+  name: string;
+  outcome: string;
+  summary: ReportSummary | null;
+}
+
+export function renderOverview(language: string, baseRef: string, configurations: ConfigurationResult[]) {
+  const out = [
+    `### Benchmarks · ${language}`,
+    "",
+    `Each configuration is compared with its own baseline on \`${baseRef}\`.`,
+    "",
+    "| Configuration | Status | Slower | Faster | New | Overall run time |",
+    "|---|---|---:|---:|---:|---:|",
+  ];
+  for (const { name, outcome, summary: s } of configurations) {
+    if (s) {
+      out.push(`| ${name} | ${s.regressions ? "Possible regressions" : "Passed"} | ` +
+        `${s.regressions} | ${s.improvements} | ${s.missing} | ${formatChange(s.geomean === null ? null : s.geomean - 1)} |`);
+    } else {
+      out.push(`| ${name} | ${outcome === "cancelled" ? "Cancelled" : "Measurement failed"} | — | — | — | — |`);
+    }
+  }
+  return out.join("\n");
+}
+
 function plural(n: number, word: string) {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }

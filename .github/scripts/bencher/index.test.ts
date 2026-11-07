@@ -8,6 +8,7 @@ import { test, type TestContext } from "node:test";
 import { publishReport } from "./index.ts";
 import { mockGitHub } from "./fixtures/github.ts";
 import { fixture, hash } from "./fixtures/report.ts";
+import { VARIANTS, type Variant } from "./variants.ts";
 
 function publication(t: TestContext, outcome = "success", imageFailure = false) {
   const dir = mkdtempSync(join(tmpdir(), "tessera-report-"));
@@ -34,29 +35,31 @@ function publication(t: TestContext, outcome = "success", imageFailure = false) 
   };
   return {
     ...mock, outputs, summaries, core,
-    fetchHistory: async () => new Response("[]"),
+    fetchHistory: (async () => new Response("[]")) as typeof fetch,
     context: { repo: { owner: "o", repo: "r" }, payload: {}, serverUrl: "https://github.com", runId: 1 },
-    inputs: { language: "rust", hash, outcome, reportPath, checkId: "42", number: "7" },
+    inputs: { language: "rust", hash, number: "7",
+      variants: [{ variant: VARIANTS[0] as Variant, outcome, reportPath, checkId: "42" }],
+    },
   };
 }
 
 // The SVG files written to the image branch, by path.
 function publishedImages(action: ReturnType<typeof publication>) {
-  const tree = action.requests.find(request => request.path.endsWith("/git/trees"))?.body.tree as
-    { path: string; content: string }[] | undefined;
-  return new Map((tree ?? []).map(file => [file.path, file.content]));
+  const files = action.requests.filter(request => request.path.endsWith("/git/trees"))
+    .flatMap(request => request.body.tree as { path: string; content: string }[]);
+  return new Map(files.map(file => [file.path, file.content]));
 }
 
 test("embeds both published charts in the summary, check and PR comment", async t => {
   const action = publication(t);
   await publishReport(action);
   const images = publishedImages(action);
-  assert.deepEqual([...images.keys()], ["pr-7/rust/comparison.svg", "pr-7/rust/trend.svg"]);
-  assert.equal(images.get("pr-7/rust/comparison.svg"),
+  assert.deepEqual([...images.keys()], ["pr-7/rust/default/comparison.svg", "pr-7/rust/default/trend.svg"]);
+  assert.equal(images.get("pr-7/rust/default/comparison.svg"),
     readFileSync(new URL("./fixtures/chart.svg", import.meta.url), "utf8"));
-  assert.ok(images.get("pr-7/rust/trend.svg")!.startsWith("<svg"));
+  assert.ok(images.get("pr-7/rust/default/trend.svg")!.startsWith("<svg"));
   assert.match(action.summaries[0], /2 slower, 1 faster, 1 new/);
-  const raw = "https://raw.githubusercontent.com/o/r/image-commit/pr-7/rust";
+  const raw = "https://raw.githubusercontent.com/o/r/image-commit/pr-7/rust/default";
   for (const [alt, file] of [["Changes against main", "comparison"], ["PR benchmark history", "trend"]]) {
     const embed = `![${alt}](${raw}/${file}.svg)`;
     assert.ok(action.summaries[0].includes(embed), embed);
@@ -72,7 +75,7 @@ test("passes a check when all active alerts are improvements", async t => {
   const action = publication(t);
   const input = fixture();
   input.alerts = input.alerts.filter(alert => alert.limit === "lower");
-  writeFileSync(action.inputs.reportPath, JSON.stringify(input));
+  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(input));
   await publishReport(action);
   assert.equal(action.requests.find(request => request.path.endsWith("/check-runs/42"))?.body.conclusion, "success");
 });
@@ -81,7 +84,7 @@ test("keeps the current verdict and comparison when history is unavailable", asy
   const action = publication(t);
   action.fetchHistory = async () => new Response("unavailable", { status: 503 });
   await publishReport(action);
-  assert.deepEqual([...publishedImages(action).keys()], ["pr-7/rust/comparison.svg"]);
+  assert.deepEqual([...publishedImages(action).keys()], ["pr-7/rust/default/comparison.svg"]);
   assert.match(action.summaries[0], /Changes against main/);
   assert.match(action.summaries[0], /\[Trend unavailable\]/);
   assert.equal(action.requests.find(request => request.path.endsWith("/check-runs/42"))?.body.conclusion, "failure");
@@ -113,11 +116,96 @@ for (const [name, contents] of [
 ]) {
   test(`fails the check for an ${name} report`, async t => {
     const action = publication(t);
-    if (contents === null) rmSync(action.inputs.reportPath);
-    else writeFileSync(action.inputs.reportPath, contents);
+    if (contents === null) rmSync(action.inputs.variants[0].reportPath);
+    else writeFileSync(action.inputs.variants[0].reportPath, contents);
     await publishReport(action);
     assert.equal(publishedImages(action).size, 0);
     assert.equal(action.requests[0].body.conclusion, "failure");
     assert.match(action.summaries[0], /measurement failed/);
+  });
+}
+
+function addSimd(action: ReturnType<typeof publication>) {
+  const report = fixture();
+  report.uuid = "r-simd";
+  report.testbed = { ...report.testbed, uuid: "t-simd", name: VARIANTS[1].testbed };
+  report.alerts = report.alerts.filter(alert => alert.limit === "lower");
+  // Its baseline differs from Default, so a mixed comparison is observable.
+  report.results[0][0].measures[0].boundary!.baseline = 1000;
+  const reportPath = join(action.inputs.variants[0].reportPath, "..", "simd.json");
+  writeFileSync(reportPath, JSON.stringify(report));
+  action.inputs.variants.push({ variant: VARIANTS[1], outcome: "success", reportPath, checkId: "43" });
+}
+
+test("publishes two independent checks, image sets and baselines in one comment", async t => {
+  const action = publication(t);
+  addSimd(action);
+  const histories: string[] = [];
+  action.fetchHistory = async (...args: Parameters<typeof fetch>) => {
+    histories.push(String(args[0]));
+    return new Response("[]");
+  };
+  await publishReport(action);
+  const checks = action.requests.filter(request => request.path.includes("/check-runs/"));
+  assert.deepEqual(checks.map(request => request.body.conclusion), ["failure", "success"]);
+  assert.match(JSON.stringify(checks[0].body.output), /Default/);
+  assert.match(JSON.stringify(checks[1].body.output), /Portable SIMD/);
+  assert.match(JSON.stringify(checks[1].body.output), /−26.4%/);
+  assert.deepEqual([...publishedImages(action).keys()], [
+    "pr-7/rust/default/comparison.svg", "pr-7/rust/default/trend.svg",
+    "pr-7/rust/portable-simd/comparison.svg", "pr-7/rust/portable-simd/trend.svg",
+  ]);
+  assert.deepEqual(histories.map(url => new URL(url).searchParams.get("testbed")), ["t-1", "t-simd"]);
+  const comments = action.requests.filter(request => request.method === "POST" && request.path.endsWith("/issues/7/comments"));
+  assert.equal(comments.length, 1);
+  const body = String(comments[0].body.body);
+  assert.match(body, /\| Default \| Possible regressions \| 2 \| 1 \| 1 \|/);
+  assert.match(body, /\| Portable SIMD \| Passed \| 0 \| 1 \| 1 \|/);
+  assert.match(body, /rust\/default\/comparison.svg/);
+  assert.match(body, /rust\/portable-simd\/comparison.svg/);
+});
+
+test("publishes both configurations on main without loading PR history or commenting", async t => {
+  const action = publication(t);
+  addSimd(action);
+  action.fetchHistory = async () => { throw new Error("Main must not load PR history"); };
+  await publishReport({ ...action, inputs: { ...action.inputs, number: undefined } });
+  assert.deepEqual([...publishedImages(action).keys()], [
+    "main/rust/default/comparison.svg", "main/rust/portable-simd/comparison.svg",
+  ]);
+  assert.equal(action.requests.filter(request => request.path.includes("/check-runs/")).length, 2);
+  assert.ok(action.requests.every(request => !request.path.includes("/issues/") && !request.path.includes("/pulls/")));
+  assert.match(action.summaries[0], /\| Default \|/);
+  assert.match(action.summaries[0], /\| Portable SIMD \|/);
+  assert.doesNotMatch(action.summaries[0], /Trend unavailable/);
+});
+
+for (const failed of [0, 1]) {
+  test(`preserves the other configuration when configuration ${failed} fails`, async t => {
+    const action = publication(t);
+    addSimd(action);
+    action.inputs.variants[failed].outcome = "failure";
+    await publishReport(action);
+    const checks = action.requests.filter(request => request.path.includes("/check-runs/"));
+    assert.equal(checks[failed].body.conclusion, "failure");
+    assert.match(JSON.stringify(checks[failed].body.output), /measurement failed/);
+    assert.doesNotMatch(JSON.stringify(checks[1 - failed].body.output), /measurement failed/);
+    assert.equal(publishedImages(action).size, 2);
+    assert.match(action.summaries[0], /Measurement failed/);
+    assert.match(action.summaries[0], /1 faster, 1 new/);
+  });
+}
+
+for (const mismatch of ["testbed", "commit"]) {
+  test(`rejects a report with the wrong ${mismatch}`, async t => {
+    const action = publication(t);
+    const input = fixture();
+    if (mismatch === "testbed") input.testbed.name = VARIANTS[1].testbed;
+    else input.branch.head.version!.hash = "c".repeat(40);
+    writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(input));
+    await publishReport(action);
+    assert.match(action.summaries[0], /does not match the expected configuration and commit/);
+    assert.equal(action.requests[0].body.conclusion, "failure");
+    assert.equal(publishedImages(action).size, 0);
   });
 }

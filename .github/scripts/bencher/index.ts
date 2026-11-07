@@ -5,18 +5,24 @@ import { chartSvg } from "./chart.ts";
 import { loadHistory, summarizeTrend } from "./history.ts";
 import { publishImages, type ChartImage, type ChartLinks } from "./images.ts";
 import { publishComment, workflowUrl, type ActionContext, type ActionsCore, type GitHub } from "./github.ts";
-import { headline, render, renderFailure } from "./markdown.ts";
+import { headline, render, renderFailure, renderOverview, type ConfigurationResult } from "./markdown.ts";
 import { summarize, type BencherReport, type ReportSummary } from "./report.ts";
 import { trendSvg } from "./trend-chart.ts";
+import type { Variant } from "./variants.ts";
+
+interface VariantInputs {
+  variant: Variant;
+  checkId?: string;
+  outcome: string;
+  reportPath: string;
+}
 
 interface ReportInputs {
   language: string;
   hash: string;
   number?: string;
   baseRef?: string;
-  checkId?: string;
-  outcome: string;
-  reportPath: string;
+  variants: VariantInputs[];
 }
 
 interface ReportOptions {
@@ -30,45 +36,60 @@ interface ReportOptions {
 type Measurement = { ok: true; report: BencherReport; summary: ReportSummary } | { ok: false; reason: string };
 type CompletedMeasurement = Extract<Measurement, { ok: true }>;
 
-export async function publishReport({ github, context, core, inputs, fetchHistory }: ReportOptions) {
-  const { language, hash, number, baseRef, checkId, outcome, reportPath } = inputs;
-  const repo = context.repo;
+export async function publishReport(options: ReportOptions) {
+  const { github, context, core, inputs } = options;
+  const { language, hash, number, baseRef } = inputs;
   const runUrl = workflowUrl(context);
-  const measurement = readMeasurement(outcome, reportPath);
-  let body: string;
-  if (measurement.ok) {
-    const charts = await prepareCharts(measurement, inputs, core, fetchHistory);
-    let links: ChartLinks = {};
-    let imagesUnavailable = false;
-    try {
-      links = await publishImages({ github, context, language, hash, number, images: charts.images });
-    } catch (error) {
-      core.notice(`Benchmark image publication failed: ${errorMessage(error)}`);
-      imagesUnavailable = true;
+  const sections: string[] = [];
+  const configurations: ConfigurationResult[] = [];
+  for (const result of inputs.variants) {
+    const { variant, checkId, outcome } = result;
+    const measurement = readMeasurement(result, hash);
+    configurations.push({ name: variant.name, outcome, summary: measurement.ok ? measurement.summary : null });
+    let body: string;
+    if (measurement.ok) {
+      body = await renderMeasurement(measurement, variant, options);
+    } else {
+      body = renderFailure({ language: `${language} · ${variant.name}`, hash, runUrl, reason: measurement.reason });
     }
-    body = render(measurement.summary, {
-      language, runUrl, baseRef, chartRef: links.comparison, trendRef: links.trend,
-      trendUnavailable: charts.trendUnavailable, imagesUnavailable,
-    });
-  } else {
-    body = renderFailure({ language, hash, runUrl, reason: measurement.reason });
+    sections.push(body);
+    if (checkId) {
+      await github.rest.checks.update({
+        ...context.repo, check_run_id: Number(checkId), status: "completed",
+        conclusion: outcome === "cancelled" ? "cancelled"
+          : !measurement.ok || measurement.summary.regressions ? "failure" : "success",
+        details_url: runUrl,
+        output: {
+          title: measurement.ok ? headline(measurement.summary) : "Measurement failed",
+          summary: body.slice(0, 65000),
+        },
+      });
+    }
   }
+  const body = [renderOverview(language, baseRef || "main", configurations), ...sections].join("\n\n");
   await core.summary.addRaw(body).write();
-  if (checkId) {
-    await github.rest.checks.update({
-      ...repo, check_run_id: Number(checkId), status: "completed",
-      conclusion: outcome === "cancelled" ? "cancelled"
-        : !measurement.ok || measurement.summary.regressions ? "failure" : "success",
-      details_url: runUrl,
-      output: {
-        title: measurement.ok ? headline(measurement.summary) : "Measurement failed",
-        summary: body.slice(0, 65000),
-      },
-    });
+  if (number && inputs.variants.some(result => result.outcome !== "cancelled")) {
+    await publishComment({ github, repo: context.repo, number: Number(number), language, hash, body, core });
   }
-  if (number && outcome !== "cancelled") {
-    await publishComment({ github, repo, number: Number(number), language, hash, body, core });
+}
+
+async function renderMeasurement(measurement: CompletedMeasurement, variant: Variant, options: ReportOptions) {
+  const { github, context, core, inputs, fetchHistory } = options;
+  const { language, hash, number, baseRef } = inputs;
+  const charts = await prepareCharts(measurement, inputs, core, fetchHistory);
+  let links: ChartLinks = {};
+  let imagesUnavailable = false;
+  try {
+    links = await publishImages({ github, context, language, variant: variant.id, hash, number, images: charts.images });
+  } catch (error) {
+    core.notice(`Benchmark image publication failed (${variant.id}): ${errorMessage(error)}`);
+    imagesUnavailable = true;
   }
+  return render(measurement.summary, {
+    language: `${language} · ${variant.name}`, runUrl: workflowUrl(context), baseRef,
+    chartRef: links.comparison, trendRef: links.trend,
+    trendUnavailable: charts.trendUnavailable, imagesUnavailable,
+  });
 }
 
 // Charts are supplemental. A history or image failure must not change the
@@ -95,10 +116,13 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function readMeasurement(outcome: string, reportPath: string): Measurement {
+function readMeasurement({ outcome, reportPath, variant }: VariantInputs, hash: string): Measurement {
   if (outcome !== "success") return { ok: false, reason: `the Bencher job ${outcome}` };
   try {
     const report = JSON.parse(readFileSync(reportPath, "utf8")) as BencherReport;
+    if (report.testbed?.name !== variant.testbed || report.branch?.head?.version?.hash !== hash) {
+      return { ok: false, reason: "the report does not match the expected configuration and commit" };
+    }
     const summary = summarize(report);
     return summary.rows.length
       ? { ok: true, report, summary }

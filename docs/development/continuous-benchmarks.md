@@ -1,13 +1,15 @@
 # Continuous benchmarks
 
-Every push to `main` and every PR that touches Rust code runs a small Criterion suite on [Bencher Bare Metal](https://bencher.dev/docs/explanation/images/). It flags changes worth investigating. It is not the [release and A/B protocol](benchmarking.md): there is no in-process A/A or placement control, so an alert is not evidence for a performance claim.
+Every push to `main` and every PR that touches Rust code runs the same small Criterion suite in two configurations, Default and Portable SIMD, on [Bencher Bare Metal](https://bencher.dev/docs/explanation/images/). It flags changes worth investigating. It is not the [release and A/B protocol](benchmarking.md): there is no in-process A/A or placement control, so an alert is not evidence for a performance claim.
 
 ## Pipeline
 
-1. `bench-build.yml` runs without secrets, also for forks. It builds `bench/rust/benches/smoke.rs` with `tessera-sort/portable-simd` as a static glibc executable and uploads it as an artifact. Static glibc keeps glibc's allocator, which `api` mode measures. The optional feature uses stable Rust and selects the SIMD backend on the benchmark machine.
-2. `bench-track.yml` runs trusted default-branch code through `workflow_run`. It looks up the source PR through the GitHub API ([`github.ts`](../../.github/scripts/bencher/github.ts)) and skips closed or superseded PRs. It then wraps the executable in a `FROM scratch` image that the workflow defines itself, pushes the image and submits its digest to Bencher. The executable only ever runs on Bencher's runner, which receives no credentials.
+1. `bench-build.yml` runs without secrets, also for forks. A build matrix compiles `bench/rust/benches/smoke.rs` twice: with default features, and with `tessera-sort/portable-simd` added. Each static glibc executable has its own artifact, `bench-rust-default` or `bench-rust`. Static glibc keeps glibc's allocator, which `api` mode measures. The builds use the same compiler and flags; only the feature differs. Portable SIMD retains the artifact name and executable path consumed by the default-branch tracker, so a PR introducing this matrix can still be measured before its tracker changes merge.
+2. `bench-track.yml` runs trusted default-branch code through `workflow_run`. It looks up the source PR through the GitHub API ([`github.ts`](../../.github/scripts/bencher/github.ts)) and skips closed or superseded PRs. It then wraps both executables in a `FROM scratch` image that the workflow defines itself, pushes the image and submits its digest to Bencher. It measures each executable in a separate remote job, one after the other, so each gets its own timeout. A failed measurement does not skip the other configuration. The executables only ever run on Bencher's runner, which receives no credentials.
 
-Bencher Free allows one job per organization, at most 5 minutes each. Tracking jobs share the `bencher-bare-metal` concurrency group with [`queue: max`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-queueing-multiple-pending-runs), which keeps up to 100 pending runs. Each job waits for its remote run. The remote timeout is 240 seconds. The suite takes about 130 seconds locally; keep it under 3 minutes when adding cases.
+Default keeps the default-on `std` feature. It may still use the compiler's automatic vectorization. Portable SIMD adds the optional `fearless_simd` backend, using stable Rust and runtime detection on x86. No SIMD level is forced or disabled: the remote CPU's available features determine the backend. `+crt-static` controls linking, and does not cap SIMD dispatch. The build does not use `target-cpu=native`, because the GitHub build host differs from the measurement host.
+
+Bencher Free allows one job per organization, at most 5 minutes each. Tracking jobs share the `bencher-bare-metal` concurrency group with [`queue: max`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-queueing-multiple-pending-runs), which keeps up to 100 pending runs. The tracking job waits for both remote runs while holding the concurrency slot. Each remote run has a 240-second timeout. The suite takes about 130 seconds locally per configuration; keep each under 3 minutes when adding cases.
 
 ## Cases
 
@@ -26,7 +28,7 @@ Every case is checked against a stable standard-library sort before timing; for 
 
 ## Alerts
 
-`main` uses a t-test on latency against up to its last 32 samples, requiring at least 5 samples. Both the upper and lower boundaries are 0.999, flagging potential regressions and improvements. PRs start from their base commit on `main` and inherit its thresholds. Cases with high variance, such as the placement-sensitive cases at n ≤ 49, get wider limits automatically.
+Each configuration uses its own Testbed and thresholds. `main` uses a t-test on latency against up to its last 32 samples, requiring at least 5 samples. Both the upper and lower boundaries are 0.999, flagging potential regressions and improvements. PRs start from their base commit on `main` and inherit its thresholds. Cases with high variance, such as the placement-sensitive cases at n ≤ 49, get wider limits automatically.
 
 History and alerts are available on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). Investigate an alert with the A/A and placement controls of the full protocol.
 
@@ -34,15 +36,17 @@ History and alerts are available on the [public Bencher dashboard](https://bench
 
 [`bencher/index.ts`](../../.github/scripts/bencher/index.ts) turns the JSON report from `bencher run` into three outputs:
 
-- **Check `Benchmarks (rust)`** on the measured commit. It shows as in progress while the Bencher job runs. It fails for possible regressions or a failed measurement, and passes when the only alerts are improvements. The workflow itself does not fail on alerts.
+- **Checks `Benchmarks (rust, default)` and `Benchmarks (rust, portable-simd)`** on the measured commit. Both start as in progress; each completes with its own verdict. A check fails for possible regressions or a failed measurement, and passes when there are no regression alerts. The workflow itself does not fail on alerts or a remote measurement failure; the checks carry those failures.
 - **Job summary** of the tracking run, for `main` and PRs.
-- **PR comment** for each measured head. A rerun of the same head updates its comment. A new head gets a new comment at the end of the timeline, and earlier reports (including comments from `bencher run --github-actions`) are minimized as outdated. That way the newest result is the visible one, and the PR shows one expanded report however often it is pushed. If the PR moves on while a run is queued, the stale result goes to the job summary only.
+- **PR comment** for each measured head, combining both configurations after both measurements finish. A rerun of the same head updates its comment. A new head gets a new comment at the end of the timeline, and earlier reports (including comments from `bencher run --github-actions`) are minimized as outdated. That way the newest result is the visible one, and the PR shows one expanded report however often it is pushed. If the PR moves on while a run is queued, the stale result goes to the job summary only.
 
 The scripts run directly on Node.js 24. `report.ts` owns the result model and current comparison; `history.ts` loads and normalizes PR history. `chart.ts` and `trend-chart.ts` share the SVG styles and text metrics in `svg.ts`. `markdown.ts` formats the report; `images.ts` publishes generated SVGs; `github.ts` resolves commits and manages checks and comments. Run `npm ci`, `npm run scripts:typecheck` and `npm run scripts:test` to check them.
 
-A comment is written to be read top-down:
+A comment starts with an overview table, one row per configuration: status, slower, faster and new case counts, and its geometric mean change against its own main baseline. There is no geometric mean across configurations. A failed measurement stays visible beside the other configuration's results.
 
-1. The title counts slower, faster and new cases. It is also the check title.
+Each configuration then has its own report section, read top-down:
+
+1. The title names the configuration and counts slower, faster and new cases. It is also the check title.
 2. A caution box names the worst slowdown. A tip names the best speedup and counts changes of 20% or more.
 3. Two embedded charts follow: the comparison of the current run with main, and on a PR, how the PR's own runs moved against main.
 4. An overall line gives the change against main as the geometric mean of current/baseline over all compared cases.
@@ -56,11 +60,11 @@ The comparison chart draws every slower case. Faster cases that changed by less 
 
 ### Report images
 
-Comments need image URLs, and Actions artifacts are ZIP downloads, so the tracking job publishes each SVG itself. It has `contents: write` and commits the generated SVGs to the separate `benchmark-images` branch, under `pr-<number>/<language>/` or `main/<language>/`. The comment embeds them from `raw.githubusercontent.com` at that image commit, which GitHub serves as `image/svg+xml` and embeds without a redirect. Pinning the commit keeps the images of earlier comments unchanged. The workflow's shared concurrency group serializes image writers, and branch updates never force-push. Raw report data stays in Bencher. See [decision 0009](../decisions/0009-benchmark-report-images-and-history.md).
+Comments need image URLs, and Actions artifacts are ZIP downloads, so the tracking job publishes each SVG itself. It has `contents: write` and commits the generated SVGs to the separate `benchmark-images` branch, under `pr-<number>/<language>/<configuration>/` or `main/<language>/<configuration>/`. Each configuration has its own comparison and trend SVGs. The comment embeds them from `raw.githubusercontent.com` at that image commit, which GitHub serves as `image/svg+xml` and embeds without a redirect. Pinning the commit keeps the images of earlier comments unchanged. The workflow's shared concurrency group serializes image writers, and branch updates never force-push. Raw report data stays in Bencher. See [decision 0009](../decisions/0009-benchmark-report-images-and-history.md).
 
 ### PR history
 
-History comes from Bencher's report-list API, filtered by PR branch and Testbed, across every reset branch head. Only completed reports with the current hardware spec are compared, up to the current report's measurement time. Report UUIDs distinguish same-commit reruns.
+Each configuration's history comes from Bencher's report-list API, filtered by PR branch and its own Testbed, across every reset branch head. Only completed reports with the current hardware spec are compared, up to the current report's measurement time. Report UUIDs distinguish same-commit reruns.
 
 Every run is compared with main's baseline from the latest report: the same reference as the comparison chart, fixed for the whole history. An earlier run on an older base therefore shows how far that code was from the main the PR would merge into, and rebases or force pushes need no special handling. Cases without a main baseline are left to the table. Every point uses the same set of cases, those with a baseline and a positive value in every run, so a case added to or removed from the suite changes the whole chart, never one point.
 
@@ -76,26 +80,32 @@ The tracking workflow runs from `main`, so a PR that changes `bench-track.yml` o
 
 Pushes to `main` that do not change code still run, adding samples of unchanged code to the history. When a case's input or batch changes, give it a new ID or reset its thresholds. When the compiler, flags or machine change, use a new Testbed. Adding or removing cases and changing sample counts retain the existing Testbed.
 
-The SIMD build uses Testbed `intel-v1-portable-simd` with hardware spec
-`intel-v1`, keeping its history separate from the earlier default-feature
-builds on Testbed `intel-v1`. After merging the build change, seed the new
-baseline with five runs on `main`. PR comparisons need a base sample in the
-new Testbed.
+| Configuration | Features | Testbed | Hardware spec |
+|---|---|---|---|
+| Default | default (`std`) | `intel-v1` | `intel-v1` |
+| Portable SIMD | default + `portable-simd` | `intel-v1-portable-simd` | `intel-v1` |
+
+These retain the existing default-feature and SIMD histories because their build flags and case IDs are unchanged. After merging, run **Build benchmarks** on `main` five times to ensure both configurations have enough baseline samples. PR comparisons need a base sample in each Testbed. Do not use one configuration's results to seed the other. See [decision 0010](../decisions/0010-benchmark-feature-configurations.md).
 
 ## Adding a language
 
-Each language adds its own build job (unprivileged, uploading `bench-<language>`) and track job (same concurrency group, publishing with its own `language`, which names its check and comment). It uses its standard harness with the matching Bencher adapter, such as Google Benchmark with `cpp_google` or pytest-benchmark with `python_pytest`. Benchmark names keep the shared `case_id` under the language prefix. Each language is a separate Bencher job with its own 5-minute limit; the queue runs them one after another.
+Each language adds its own build job (unprivileged, uploading one artifact per configuration) and track job (same concurrency group, publishing with its own `language`, which names its check and comment). It uses its standard harness with the matching Bencher adapter, such as Google Benchmark with `cpp_google` or pytest-benchmark with `python_pytest`. Benchmark names keep the shared `case_id` under the language prefix. Each language configuration is a separate Bencher job with its own 5-minute limit; the queue runs them one after another.
 
 ## Setup
 
 1. Claim a public Bencher project on the Free plan. Unclaimed projects only allow 1-minute jobs.
 2. In Settings → Environments → `benchmark` (deployments from `main` only, no reviewers), set the variable `BENCHER_PROJECT` to the project slug and the secret `BENCHER_API_KEY` to a project API key. The registry login uses the slug as its username.
 3. The tracking workflow only runs once it is on the default branch. After merging, run **Build benchmarks** on `main` five times to seed the baseline; alerts start after five samples.
-4. Once reports appear on PRs, **Benchmarks (rust)** can be made a required check. It fails on possible regressions, so require it only if an alert should block merging until someone reviews it.
+4. Once reports appear on PRs, **Benchmarks (rust, default)** and **Benchmarks (rust, portable-simd)** can be made required checks. Replace any requirement for the former **Benchmarks (rust)** check. They fail on possible regressions, so require them only if an alert should block merging until someone reviews it.
 
 ## Local use
 
 ```sh
+# Default
+cargo test -p tessera-bench --all-targets
+cargo bench -p tessera-bench --bench smoke -- 'rust/u64/random/65536/s1/api' --exact
+
+# Portable SIMD
 cargo test -p tessera-bench --all-targets --features tessera-sort/portable-simd
 cargo bench -p tessera-bench --bench smoke --features tessera-sort/portable-simd -- 'rust/u64/random/65536/s1/api' --exact
 ```

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import type { context, getOctokit } from "@actions/github";
+import type { Variant } from "./variants.ts";
 
 export type GitHub = ReturnType<typeof getOctokit>;
 export type ActionContext = Pick<typeof context, "repo" | "serverUrl" | "runId" | "payload">;
@@ -76,13 +77,13 @@ export async function resolveSource({ github, context, core }: ActionArguments) 
   core.setOutput("eligible", "true");
 }
 
-export async function startReport({ github, context, core, hash }: ActionArguments & { hash: string }) {
+export async function startReport({ github, context, core, hash, variant }: ActionArguments & { hash: string; variant: Variant }) {
   const { data } = await github.rest.checks.create({
-    ...context.repo, name: "Benchmarks (rust)", head_sha: hash,
+    ...context.repo, name: `Benchmarks (rust, ${variant.id})`, head_sha: hash,
     status: "in_progress",
     details_url: workflowUrl(context),
   });
-  core.setOutput("id", String(data.id));
+  core.setOutput(variant.id, String(data.id));
 }
 
 export function workflowUrl(context: ActionContext) {

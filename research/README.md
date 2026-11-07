@@ -167,3 +167,8 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   64 verified calls and exact-binary inspection locate aligned/native loop
   differences while revealing instrumentation-induced per-record reloads.
   No isolated instruction cost, performance acceptance or runtime change.
+
+- [Unchecked-cursor negative control](unchecked-cursor-control/README.md):
+  exact one-expression source patch, scoped safety evidence and 64 verified
+  screen calls. No accepted gain; wide Row16 label asymmetry and emitted
+  code changes prevent single-branch attribution or runtime adoption.

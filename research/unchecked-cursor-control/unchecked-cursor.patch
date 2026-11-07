@@ -1,0 +1,15 @@
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -372,7 +372,11 @@
+                 // Its free pool never contains an unconsumed source block.
+                 let record = unsafe { input_read(&memory, at) };
+                 let bucket = ((record.key() >> config.shift) as usize) & (r - 1);
+-                let cursor = &mut shard.cursors[bucket];
++                // SAFETY: validated radix_bits gives r = 1 << radix_bits, so
++                // masking with r - 1 makes bucket < r. Each cursor vector has
++                // exactly r entries from zipped r-entry start/count rows. Jobs
++                // hold exclusive mutable shards and never resize their cursors.
++                let cursor = unsafe { shard.cursors.get_unchecked_mut(bucket) };
+                 if cursor.next == cursor.end {
+                     let logical = cursor.logical;
+                     let base_rank = logical.checked_mul(b).unwrap();

@@ -9,15 +9,18 @@ Every push to `main` and every PR that touches Rust code runs the same small Cri
 
 Default keeps the default-on `std` feature. It may still use the compiler's automatic vectorization. Portable SIMD adds the optional `fearless_simd` backend, using stable Rust and runtime detection on x86. No SIMD level is forced or disabled: the remote CPU's available features determine the backend. `+crt-static` controls linking, and does not cap SIMD dispatch. The build does not use `target-cpu=native`, because the GitHub build host differs from the measurement host.
 
+Both builds also use `-C llvm-args=-x86-branches-within-32B-boundaries` to keep branches from crossing or ending on 32-byte boundaries, mitigating code-placement effects on Intel CPUs affected by the JCC erratum. This is a benchmark build setting; the published crate does not impose it on users. It does not eliminate every layout effect or replace the A/A and placement controls. See [decision 0031](../decisions/0031-align-continuous-benchmark-branches.md).
+
 Bencher Free allows one job per organization, at most 5 minutes each. Tracking jobs share the `bencher-bare-metal` concurrency group with [`queue: max`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-queueing-multiple-pending-runs), which keeps up to 100 pending runs. The tracking job waits for both remote runs while holding the concurrency slot. Each remote run has a 240-second timeout. The suite takes about 130 seconds locally per configuration; keep each under 3 minutes when adding cases.
 
 ## Cases
 
-Benchmark IDs are `<language>/<case_id>/<mode>`, with `case_id` as in the [protocol](benchmarking.md#runner), for example `rust/u64/random/65536/s1/api`. The mode names the API being timed: `api` is the stable sort with its own scratch allocation, `workspace` the same sort with a prepared workspace. Further APIs, such as an unstable or a parallel sort, get their own mode in the same executable rather than a new build; reports group cases by mode ([Reports](#builds-are-columns-cases-are-rows)). Measure a new API on a representative subset of inputs: each build's run must stay under the remote job limit below. Each case is there for an engine path ([routing](../explain/routing.md)) or a key type. The 38 benchmarks cover:
+Benchmark IDs are `<language>/<case_id>/<mode>`, with `case_id` as in the [protocol](benchmarking.md#runner), for example `rust/u64/random/65536/s1/api`. The mode names the API being timed: `api` is the stable sort with its own scratch allocation, `workspace` the same sort with a prepared workspace. Further APIs, such as an unstable or a parallel sort, get their own mode in the same executable rather than a new build; reports group cases by mode ([Reports](#builds-are-columns-cases-are-rows)). Measure a new API on a representative subset of inputs: each build's run must stay under the remote job limit below. Each case is there for an engine path ([routing](../explain/routing.md)) or a key type. The 39 benchmarks cover:
 
 - the insertion limit (`u64` only), one past it and one past the tile capacity, for `u64` keys and `{u32, u32}` rows, and one past the tile capacity for `{u64, u32}` rows. Cases this short move with code placement, so only the boundaries are kept;
 - at 65,536 `u64` keys, random and one case per route: sorted (confirmed order), reverse (stable reversal), 99% sorted (budgeted insertion), all equal (constant keys), 16 values (one block partition), Zipf (s = 2) and `skew99` (equality partition), `sorted_tail` (outlier run), and `runs`, mixed ascending and descending runs on which the insertion probe must give up;
 - `u32`, `u128` and `f64` random keys, and `{u64, u32}` rows (random, and 16 values), at 65,536;
+- a 128-byte record, random at 65,536, where the record rather than the key sets the tile capacity and the cursor-table cap for wide records;
 - 99% sorted `u32` and `f64` keys at 65,536, reaching long integer and float inversion scans;
 - sorted `f64` keys at 65,536, reaching vector ascending-order confirmation;
 - 1,000,000 records for `u64` (random, Zipf, `skew99`, `two_values`, 99% sorted), `u32`, `u128` (random, and `sparse8`, which widens the top digit) and `{u64, u32}` rows;
@@ -30,7 +33,7 @@ Every case is checked against a stable standard-library sort before timing; for 
 
 ## Alerts
 
-Each configuration uses its own Testbed and thresholds. `main` uses a percentage test on latency against its previous sample: a value more than 5% above or below it is an alert, flagging potential regressions and improvements. PRs start from their base commit on `main` and inherit its thresholds. The limits are the same ±5% for every case, so a case whose noise exceeds 5% alerts on noise and needs its own boundary or a new ID. Why not a statistical test over a window of samples: [decision 0013](../decisions/0013-compare-with-the-previous-main-sample.md).
+Each configuration uses its own Testbed and thresholds. `main` uses a percentage test on latency against its previous sample: a value more than 5% above or below it is an alert, flagging potential regressions and improvements. PRs start from their base commit on `main` and inherit its thresholds. The limits are the same ±5% for every case, so a case whose noise exceeds 5% alerts on noise and needs its own boundary or a new ID. Why not a statistical test over a window of samples: [decision 0029](../decisions/0029-compare-with-the-previous-main-sample.md).
 
 History and alerts are available on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). Investigate an alert with the A/A and placement controls of the full protocol.
 
@@ -78,7 +81,7 @@ The comparison chart is a dot plot of the cases alerted in any build, with a nam
 
 ### Report images
 
-Comments need image URLs, and Actions artifacts are ZIP downloads, so the tracking job publishes each SVG itself. It has `contents: write` and commits the generated SVGs to the separate `benchmark-images` branch, under `pr-<number>/<language>/` or `main/<language>/`. One comparison and one trend SVG hold every build as a column; checks embed the same images. The comment embeds them from `raw.githubusercontent.com` at that image commit, which GitHub serves as `image/svg+xml` and embeds without a redirect. Pinning the commit keeps the images of earlier comments unchanged. The workflow's shared concurrency group serializes image writers, and branch updates never force-push. Raw report data stays in Bencher. See [decision 0009](../decisions/0009-benchmark-report-images-and-history.md).
+Comments need image URLs, and Actions artifacts are ZIP downloads, so the tracking job publishes each SVG itself. It has `contents: write` and commits the generated SVGs to the separate `benchmark-images` branch, under `pr-<number>/<language>/` or `main/<language>/`. One comparison and one trend SVG hold every build as a column; checks embed the same images. The comment embeds them from `raw.githubusercontent.com` at that image commit, which GitHub serves as `image/svg+xml` and embeds without a redirect. Pinning the commit keeps the images of earlier comments unchanged. The workflow's shared concurrency group serializes image writers, and branch updates never force-push. Raw report data stays in Bencher. See [decision 0017](../decisions/0017-benchmark-report-images-and-history.md).
 
 ### PR history
 
@@ -98,14 +101,14 @@ History loading and image publication are supplemental: failures are logged and 
 
 The tracking workflow runs from `main`, so a PR that changes `bench-track.yml` or this script is still reported by the version on `main`. Check the Testbed in the comment when a PR changes the build.
 
-Pushes to `main` that do not change code still run, adding samples of unchanged code to the history. When a case's input or batch changes, give it a new ID or reset its thresholds. When the compiler, flags or machine change, use a new Testbed. Adding or removing cases and changing sample counts retain the existing Testbed.
+Pushes to `main` that do not change code still run, adding samples of unchanged code to the history. When a case's input or batch changes, give it a new ID or reset its thresholds. When the compiler, flags or machine change, use a new Testbed unless a decision record explicitly retains the history and describes the transition, as [decision 0031](../decisions/0031-align-continuous-benchmark-branches.md) does for branch alignment. Adding or removing cases and changing sample counts retain the existing Testbed.
 
 | Configuration | Features | Testbed | Hardware spec |
 |---|---|---|---|
 | Default | default (`std`) | `intel-v1` | `intel-v1` |
 | Portable SIMD | default + `portable-simd` | `intel-v1-portable-simd` | `intel-v1` |
 
-These retain the existing default-feature and SIMD histories because their build flags and case IDs are unchanged. After merging, run **Build benchmarks** on `main` once to ensure both configurations have a baseline sample. PR comparisons need a base sample in each Testbed. Do not use one configuration's results to seed the other. See [decision 0011](../decisions/0011-benchmark-feature-configurations.md).
+These retain the existing default-feature and SIMD histories, including samples from before branch alignment. The first aligned result is compared with an unaligned baseline and can alert because of the flag change alone; it does not establish an engine speedup or regression. Once an aligned `main` result is recorded, subsequent commits based on it use that result as their baseline. PRs based on earlier commits still compare with their earlier baselines. PR comparisons need a base sample in each Testbed. Do not use one configuration's results to seed the other. See [decision 0018](../decisions/0018-benchmark-feature-configurations.md) and [decision 0031](../decisions/0031-align-continuous-benchmark-branches.md).
 
 ## Adding a language
 

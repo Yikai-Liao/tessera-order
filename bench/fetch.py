@@ -5,12 +5,12 @@
 import hashlib
 import io
 import json
-from pathlib import Path
 import shutil
 import tarfile
 import tempfile
 import tomllib
 import urllib.request
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
@@ -35,9 +35,7 @@ def main() -> None:
         stamp = target / ".tessera-source.json"
         if stamp.exists():
             state = json.loads(stamp.read_text())
-            if state["sha256"] == source["sha256"] and state[
-                "tree_sha256"
-            ] == tree_hash(target):
+            if state["sha256"] == source["sha256"] and state["tree_sha256"] == tree_hash(target):
                 print(f"{name}: verified {source['commit']}")
                 continue
         repository = source["repository"].removeprefix("https://github.com/")

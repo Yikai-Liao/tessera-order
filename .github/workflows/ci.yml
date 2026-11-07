@@ -32,6 +32,11 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # Formatting and lints for TypeScript, Vue, CSS, JSON and Python. Both
+      # tools are fast, so they check the whole repository on every run.
+      - run: npm run lint
+      - run: pipx run ruff==0.17.4 format --check
+      - run: pipx run ruff==0.17.4 check
       - run: npm run scripts:typecheck
       - run: npm run scripts:test
       - run: npm run bench:typecheck

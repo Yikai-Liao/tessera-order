@@ -2,11 +2,23 @@
 
 import { readFileSync } from "node:fs";
 import { chartSvg } from "./chart.ts";
+import {
+  type ActionContext,
+  type ActionsCore,
+  type GitHub,
+  publishComment,
+  workflowUrl,
+} from "./github.ts";
 import { loadHistory, summarizeTrend } from "./history.ts";
-import { publishImages, type ChartImage, type ChartLinks } from "./images.ts";
-import { publishComment, workflowUrl, type ActionContext, type ActionsCore, type GitHub } from "./github.ts";
-import { headline, render, renderCombined, renderFailure, type ConfigurationResult } from "./markdown.ts";
-import { summarize, type BencherReport, type ReportSummary } from "./report.ts";
+import { type ChartImage, type ChartLinks, publishImages } from "./images.ts";
+import {
+  type ConfigurationResult,
+  headline,
+  render,
+  renderCombined,
+  renderFailure,
+} from "./markdown.ts";
+import { type BencherReport, type ReportSummary, summarize } from "./report.ts";
 import { trendSvg } from "./trend-chart.ts";
 import type { Variant } from "./variants.ts";
 
@@ -33,42 +45,52 @@ interface ReportOptions {
   fetchHistory?: typeof fetch;
 }
 
-type Measurement = { ok: true; report: BencherReport; summary: ReportSummary } | { ok: false; reason: string };
+type Measurement =
+  | { ok: true; report: BencherReport; summary: ReportSummary }
+  | { ok: false; reason: string };
 
 export async function publishReport(options: ReportOptions) {
   const { github, context, core, inputs, fetchHistory } = options;
   const { language, hash, number, baseRef } = inputs;
   const runUrl = workflowUrl(context);
-  const measured = inputs.variants.map(result => ({ ...result, measurement: readMeasurement(result, hash) }));
-  const configurations: ConfigurationResult[] = measured.map(({ variant, outcome, measurement }) => ({
-    name: variant.name, outcome,
-    summary: measurement.ok ? measurement.summary : null,
-    reason: measurement.ok ? undefined : measurement.reason,
+  const measured = inputs.variants.map((result) => ({
+    ...result,
+    measurement: readMeasurement(result, hash),
   }));
+  const configurations: ConfigurationResult[] = measured.map(
+    ({ variant, outcome, measurement }) => ({
+      name: variant.name,
+      outcome,
+      summary: measurement.ok ? measurement.summary : null,
+      reason: measurement.ok ? undefined : measurement.reason,
+    }),
+  );
 
   // One comparison and one history chart hold every configuration as a
   // column, so a build adds a column rather than another pair of images.
   const images: ChartImage[] = [];
   // Charts draw measured builds only; the overview names a failed one.
-  const comparison = chartSvg(configurations.filter(c => c.summary));
+  const comparison = chartSvg(configurations.filter((c) => c.summary));
   if (comparison) images.push({ kind: "comparison", svg: comparison });
   let trendUnavailable = false;
   // The trend follows a PR branch; main has no PR history to draw.
-  if (number && configurations.some(c => c.summary)) {
-    const trends = await Promise.all(measured.map(async ({ variant, measurement }) => {
-      if (!measurement.ok) return { name: variant.name, trend: null };
-      try {
-        const reports = await loadHistory(measurement.report, fetchHistory);
-        const trend = summarizeTrend(reports, measurement.report, language);
-        if (!trend) trendUnavailable = true;
-        return { name: variant.name, trend };
-      } catch (error) {
-        core.notice(`PR benchmark trend unavailable (${variant.id}): ${errorMessage(error)}`);
-        trendUnavailable = true;
-        return { name: variant.name, trend: null };
-      }
-    }));
-    const trend = trendSvg(trends.filter(c => c.trend));
+  if (number && configurations.some((c) => c.summary)) {
+    const trends = await Promise.all(
+      measured.map(async ({ variant, measurement }) => {
+        if (!measurement.ok) return { name: variant.name, trend: null };
+        try {
+          const reports = await loadHistory(measurement.report, fetchHistory);
+          const trend = summarizeTrend(reports, measurement.report, language);
+          if (!trend) trendUnavailable = true;
+          return { name: variant.name, trend };
+        } catch (error) {
+          core.notice(`PR benchmark trend unavailable (${variant.id}): ${errorMessage(error)}`);
+          trendUnavailable = true;
+          return { name: variant.name, trend: null };
+        }
+      }),
+    );
+    const trend = trendSvg(trends.filter((c) => c.trend));
     if (trend) images.push({ kind: "trend", svg: trend });
   }
   // Charts are supplemental. A history or image failure must not change the
@@ -81,19 +103,42 @@ export async function publishReport(options: ReportOptions) {
     core.notice(`Benchmark image publication failed: ${errorMessage(error)}`);
     imagesUnavailable = true;
   }
-  const charts = { chartRef: links.comparison, trendRef: links.trend, trendUnavailable, imagesUnavailable };
+  const charts = {
+    chartRef: links.comparison,
+    trendRef: links.trend,
+    trendUnavailable,
+    imagesUnavailable,
+  };
 
   // Each configuration keeps its own check, so each can be required; the
   // check stands alone and reads like the comment for one build.
   for (const { variant, checkId, outcome, measurement } of measured) {
     if (!checkId) continue;
     const summary = measurement.ok
-      ? render(measurement.summary, { language, configuration: variant.name, runUrl, baseRef, ...charts })
-      : renderFailure({ language, configuration: variant.name, hash, runUrl, reason: measurement.reason });
+      ? render(measurement.summary, {
+          language,
+          configuration: variant.name,
+          runUrl,
+          baseRef,
+          ...charts,
+        })
+      : renderFailure({
+          language,
+          configuration: variant.name,
+          hash,
+          runUrl,
+          reason: measurement.reason,
+        });
     await github.rest.checks.update({
-      ...context.repo, check_run_id: Number(checkId), status: "completed",
-      conclusion: outcome === "cancelled" ? "cancelled"
-        : !measurement.ok || measurement.summary.regressions ? "failure" : "success",
+      ...context.repo,
+      check_run_id: Number(checkId),
+      status: "completed",
+      conclusion:
+        outcome === "cancelled"
+          ? "cancelled"
+          : !measurement.ok || measurement.summary.regressions
+            ? "failure"
+            : "success",
       details_url: runUrl,
       output: {
         title: measurement.ok ? headline(measurement.summary) : "Measurement failed",
@@ -104,8 +149,16 @@ export async function publishReport(options: ReportOptions) {
 
   const body = renderCombined(configurations, { language, hash, runUrl, baseRef, ...charts });
   await core.summary.addRaw(body).write();
-  if (number && inputs.variants.some(result => result.outcome !== "cancelled")) {
-    await publishComment({ github, repo: context.repo, number: Number(number), language, hash, body, core });
+  if (number && inputs.variants.some((result) => result.outcome !== "cancelled")) {
+    await publishComment({
+      github,
+      repo: context.repo,
+      number: Number(number),
+      language,
+      hash,
+      body,
+      core,
+    });
   }
 }
 
@@ -113,14 +166,23 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function readMeasurement({ outcome, reportPath, variant }: VariantInputs, hash: string): Measurement {
+function readMeasurement(
+  { outcome, reportPath, variant }: VariantInputs,
+  hash: string,
+): Measurement {
   if (outcome !== "success") {
-    return { ok: false, reason: `the Bencher job ${outcome === "failure" ? "failed" : `ended as ${outcome}`}` };
+    return {
+      ok: false,
+      reason: `the Bencher job ${outcome === "failure" ? "failed" : `ended as ${outcome}`}`,
+    };
   }
   try {
     const report = JSON.parse(readFileSync(reportPath, "utf8")) as BencherReport;
     if (report.testbed?.name !== variant.testbed || report.branch?.head?.version?.hash !== hash) {
-      return { ok: false, reason: "the report does not match the expected configuration and commit" };
+      return {
+        ok: false,
+        reason: "the report does not match the expected configuration and commit",
+      };
     }
     const summary = summarize(report);
     return summary.rows.length

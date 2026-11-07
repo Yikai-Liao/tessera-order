@@ -1,4 +1,4 @@
-# 0001: One BSD-2-Clause license for the whole repository
+# 0001a: One BSD-2-Clause license for the whole repository
 
 Date: 2026-11-06. Status: accepted.
 

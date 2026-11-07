@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 export function escapeXml(text: string) {
-  const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
-  return text.replace(/[&<>"]/g, c => entities[c]);
+  const entities: Record<string, string> = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+  };
+  return text.replace(/[&<>"]/g, (c) => entities[c]);
 }
 
 // Approximate advances of Inter in em, enough to lay out a label column
@@ -10,8 +15,17 @@ export function escapeXml(text: string) {
 export function textWidth(text: string, px: number) {
   let em = 0;
   for (const c of text) {
-    em += /[il.,:;'·| ]/.test(c) ? 0.28 : /[{}()[\]frtj]/.test(c) ? 0.36
-      : /[mwMW%×]/.test(c) ? 0.86 : /[0-9]/.test(c) ? 0.62 : /[A-Z]/.test(c) ? 0.68 : 0.55;
+    em += /[il.,:;'·| ]/.test(c)
+      ? 0.28
+      : /[{}()[\]frtj]/.test(c)
+        ? 0.36
+        : /[mwMW%×]/.test(c)
+          ? 0.86
+          : /[0-9]/.test(c)
+            ? 0.62
+            : /[A-Z]/.test(c)
+              ? 0.68
+              : 0.55;
   }
   return em * px;
 }

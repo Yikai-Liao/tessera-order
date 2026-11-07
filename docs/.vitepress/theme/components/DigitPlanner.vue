@@ -1,44 +1,44 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { planDigits, type Digit } from '../sim/digits'
-import { bucketColor } from '../palette'
+import { computed, ref } from "vue";
+import { bucketColor } from "../palette";
+import { type Digit, planDigits } from "../sim/digits";
 
-const BITS = 32
-const varying = ref((1n << 32n) - 1n)
-const width = ref(14)
+const BITS = 32;
+const varying = ref((1n << 32n) - 1n);
+const width = ref(14);
 
 const presets: [string, bigint][] = [
-  ['all 32 bits', (1n << 32n) - 1n],
-  ['low 20 bits', (1n << 20n) - 1n],
-  ['two bytes with a gap', 0xff00ffn],
-  ['scattered', 0x80f0_0f01n],
-]
+  ["all 32 bits", (1n << 32n) - 1n],
+  ["low 20 bits", (1n << 20n) - 1n],
+  ["two bytes with a gap", 0xff00ffn],
+  ["scattered", 0x80f0_0f01n],
+];
 
 function toggle(bit: number) {
-  varying.value ^= 1n << BigInt(bit)
+  varying.value ^= 1n << BigInt(bit);
 }
-const isSet = (bit: number) => ((varying.value >> BigInt(bit)) & 1n) === 1n
+const isSet = (bit: number) => ((varying.value >> BigInt(bit)) & 1n) === 1n;
 
-const plan = computed(() => planDigits(varying.value, width.value, BITS))
+const plan = computed(() => planDigits(varying.value, width.value, BITS));
 /** Fixed windows of the full width from the top bit down, for comparison. */
 const fixed = computed<Digit[]>(() => {
-  const out: Digit[] = []
-  let remaining = varying.value
+  const out: Digit[] = [];
+  let remaining = varying.value;
   while (remaining !== 0n) {
-    const high = remaining.toString(2).length - 1
-    const low = Math.max(0, high + 1 - width.value)
-    out.push({ shift: low, width: high - low + 1 })
-    remaining &= ~(((1n << BigInt(high - low + 1)) - 1n) << BigInt(low))
+    const high = remaining.toString(2).length - 1;
+    const low = Math.max(0, high + 1 - width.value);
+    out.push({ shift: low, width: high - low + 1 });
+    remaining &= ~(((1n << BigInt(high - low + 1)) - 1n) << BigInt(low));
   }
-  return out
-})
-const slots = (digits: Digit[]) => digits.reduce((sum, d) => sum + 2 ** d.width, 0)
+  return out;
+});
+const slots = (digits: Digit[]) => digits.reduce((sum, d) => sum + 2 ** d.width, 0);
 
-const CW = 19
-const LEFT = 80
-const svgWidth = LEFT + BITS * CW + 8
-const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW
+const CW = 19;
+const LEFT = 80;
+const svgWidth = LEFT + BITS * CW + 8;
+const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
 </script>
 
 <template>
@@ -56,7 +56,18 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW
     <svg :viewBox="`0 0 ${svgWidth} 168`" :width="svgWidth" role="img" aria-label="Digit plan over 32 key bits">
       <text x="0" y="24" font-size="11">varying</text>
       <text x="0" y="36" font-size="9" opacity="0.6">click a bit</text>
-      <g v-for="bit in BITS" :key="bit" style="cursor: pointer" @click="toggle(bit - 1)">
+      <!-- biome-ignore lint/a11y/useSemanticElements: SVG has no `<button>`; the group takes its role. -->
+      <g
+        v-for="bit in BITS"
+        :key="bit"
+        role="button"
+        tabindex="0"
+        :aria-label="`Toggle bit ${bit - 1}`"
+        :aria-pressed="isSet(bit - 1)"
+        style="cursor: pointer"
+        @click="toggle(bit - 1)"
+        @keydown.enter.space.prevent="toggle(bit - 1)"
+      >
         <rect
           :x="xOf(bit - 1) + 1"
           y="12"

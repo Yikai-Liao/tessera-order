@@ -1,7 +1,6 @@
 # 0004: Run continuous benchmarks on Bencher Bare Metal
 
-Date: 2026-11-06. Status: accepted. The alert rule in the last decision bullet is superseded by
-[0013](0013-compare-with-the-previous-main-sample.md).
+Date: 2026-11-06. Status: accepted. The alert rule in the last decision bullet is superseded by [0029](0029-compare-with-the-previous-main-sample.md).
 
 ## Context
 

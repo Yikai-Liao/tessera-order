@@ -29,7 +29,7 @@ An LSD radix sort is stable and runs in linear time, but it needs a second buffe
 - **Adaptive.** Sorted, reverse-sorted, nearly sorted and heavily repeated inputs take shortcuts, and constant key bits are skipped.
 - **Any record type.** No `Copy`, `Clone`, `Default` or `Ord` needed. Records are moved, never duplicated, even if the key function misbehaves or panics.
 - **Wide keys.** Integers up to 128 bits, `f32` and `f64` in `total_cmp` order, and `Reverse<K>`.
-- **No dependencies.** Pure Rust. `std` is optional: without it the crate is `no_std` and needs `alloc`.
+- **No required dependencies.** Pure Rust; the optional `portable-simd` feature adds `fearless_simd`. `std` is optional: without it the crate is `no_std` and needs `alloc`.
 
 ## Quick start
 
@@ -40,9 +40,7 @@ An LSD radix sort is stable and runs in linear time, but it needs a second buffe
 tessera-sort = "0.1"
 ```
 
-In a `no_std` program, disable the default `std` feature. The crate then uses
-`core` and `alloc`, so a global allocator must exist. A key-function panic during
-block partitioning aborts, even when the host enables unwinding:
+In a `no_std` program, disable the default `std` feature. The crate then uses `core` and `alloc`, so a global allocator must exist. A key-function panic during block partitioning aborts, even when the host enables unwinding:
 
 ```toml
 [dependencies]
@@ -104,7 +102,7 @@ A Python binding is planned as well; see the [roadmap](ROADMAP.md).
 | Ordering, key functions, floats, panics and memory bounds | [`conformance/semantics.md`](conformance/semantics.md) |
 | How the algorithm works, with interactive figures | [Algorithm explanation](https://yikai-liao.github.io/tessera-sort/explain/) |
 | How the engine works | [`docs/design/engine.md`](docs/design/engine.md) |
-| Why every record type caches bucket IDs | [Decision 0002](docs/decisions/0002-cache-bucket-ids-for-every-record.md) |
+| Why every record type caches bucket IDs | [Decision 0001b](docs/decisions/0001b-cache-bucket-ids-for-every-record.md) |
 | All documentation | [Documentation site](https://yikai-liao.github.io/tessera-sort/) · [Source index](docs/README.md) |
 
 ## Contributing

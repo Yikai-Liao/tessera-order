@@ -1,6 +1,6 @@
 # Versions and releases
 
-Each language package is versioned and released on its own ([decision 0003](docs/decisions/0003-independent-package-versions.md)). No package has been released yet; the versions below are examples.
+Each language package is versioned and released on its own ([decision 0001c](docs/decisions/0001c-independent-package-versions.md)). No package has been released yet; the versions below are examples.
 
 | Object | Identifier | Identifies |
 |---|---|---|
@@ -25,14 +25,14 @@ Each language package is versioned and released on its own ([decision 0003](docs
 
 Cargo treats `0.3` to `0.4` as incompatible. The size of a performance change never decides the increment.
 
-Public contracts are stability; float, NaN and signed-zero order; supported key and record types; record preservation after a panic or exception; and documented auxiliary-space bounds. Replacing the kernel behind an unstable interface is compatible only if that interface already left equal-key order unspecified and every other guarantee holds. The changelog names the kernel change.
+Public contracts are stability; float, NaN and signed-zero order; supported key and record types; record preservation after a panic or exception; and documented auxiliary-space bounds. Replacing the kernel behind an unstable interface is compatible only if that interface already left equal-key order unspecified and every other guarantee holds. The release notes name the kernel change.
 
 ## Release checklist
 
 1. Run the language's correctness, recovery, platform and package checks, and the performance checks in [`docs/development/benchmarking.md`](docs/development/benchmarking.md).
-2. Update `CHANGELOG.md` and the README capability table.
+2. Write the release notes, and update the README capability table. Collect the pull requests merged since the package's previous tag that affect the package, and the decision records they added. Check shared semantics and root configuration as well as the package directory. List what users can observe, grouped as breaking changes with their migration, additions, fixes and measured performance changes; leave out `ci`, `build`, `docs`, `refactor`, `test` and `chore` changes unless users see them. Link each entry to its pull request or decision record. The repository keeps no changelog file, because every pull request editing one file conflicts with every other ([decision 0032](docs/decisions/0032-parallel-pull-requests.md)).
 3. Before the first publication, tell Robert Clausecker that the project builds on his block partition.
-4. Push the tag. Never move a published tag or replace a published version; fix a bad release with the next version.
+4. Push the tag. The release workflow publishes the package and creates a draft GitHub release; paste the notes into it and publish it. Never move a published tag or replace a published version; fix a bad release with the next version.
 
 Benchmark manifests record the implementation (for example `tessera-rust`), package version, full commit, actual kernel, toolchain and build flags. Cross-language results state whether they compare one commit or each language's latest release. Uncommitted code also needs source hashes or a patch, because a commit alone does not identify it.
 

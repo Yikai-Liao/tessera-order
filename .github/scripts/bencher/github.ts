@@ -32,7 +32,8 @@ export async function resolveSource({ github, context, core }: ActionArguments) 
   const repo = context.repo;
   const fullName = `${repo.owner}/${repo.repo}`;
   const { data: workflow } = await github.rest.actions.getWorkflow({
-    ...repo, workflow_id: run.workflow_id,
+    ...repo,
+    workflow_id: run.workflow_id,
   });
   if (workflow.path !== ".github/workflows/bench-build.yml") {
     throw new Error("Unexpected source workflow");
@@ -53,13 +54,14 @@ export async function resolveSource({ github, context, core }: ActionArguments) 
 
   // Fork workflow_run events can omit pull_requests; resolve the current head
   // and target repository through GitHub's commit association instead.
-  const pulls = await github.paginate(
-    github.rest.repos.listPullRequestsAssociatedWithCommit,
-    { ...repo, commit_sha: run.head_sha, per_page: 100 },
-  );
-  const matching = pulls.filter(pr =>
-    pr.state === "open" && pr.head.sha === run.head_sha &&
-    pr.base.repo.full_name === fullName
+  const pulls = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+    ...repo,
+    commit_sha: run.head_sha,
+    per_page: 100,
+  });
+  const matching = pulls.filter(
+    (pr) =>
+      pr.state === "open" && pr.head.sha === run.head_sha && pr.base.repo.full_name === fullName,
   );
   if (matching.length === 0) {
     core.notice("PR closed or superseded; no benchmark will be submitted.");
@@ -77,9 +79,17 @@ export async function resolveSource({ github, context, core }: ActionArguments) 
   core.setOutput("eligible", "true");
 }
 
-export async function startReport({ github, context, core, hash, variant }: ActionArguments & { hash: string; variant: Variant }) {
+export async function startReport({
+  github,
+  context,
+  core,
+  hash,
+  variant,
+}: ActionArguments & { hash: string; variant: Variant }) {
   const { data } = await github.rest.checks.create({
-    ...context.repo, name: `Benchmarks (rust, ${variant.name})`, head_sha: hash,
+    ...context.repo,
+    name: `Benchmarks (rust, ${variant.name})`,
+    head_sha: hash,
     status: "in_progress",
     details_url: workflowUrl(context),
   });
@@ -105,9 +115,11 @@ interface Comment {
 }
 
 function ownComment(comment: Comment, language: string) {
-  return comment.user?.login === "github-actions[bot]" &&
+  return (
+    comment.user?.login === "github-actions[bot]" &&
     (comment.body?.includes(`<!-- ${MARKER} language=${language} `) ||
-      comment.body?.includes("Bencher Report</a></h2>"));
+      comment.body?.includes("Bencher Report</a></h2>"))
+  );
 }
 
 interface CommentOptions {
@@ -120,26 +132,43 @@ interface CommentOptions {
   core: Pick<ActionsCore, "notice">;
 }
 
-export async function publishComment({ github, repo, number, language, hash, body, core }: CommentOptions) {
+export async function publishComment({
+  github,
+  repo,
+  number,
+  language,
+  hash,
+  body,
+  core,
+}: CommentOptions) {
   const { data: pr } = await github.rest.pulls.get({ ...repo, pull_number: number });
   if (pr.state !== "open" || pr.head.sha !== hash) {
-    core.notice(`PR #${number} moved past ${hash.slice(0, 7)}; the report stays in the job summary.`);
+    core.notice(
+      `PR #${number} moved past ${hash.slice(0, 7)}; the report stays in the job summary.`,
+    );
     return;
   }
-  const comments = (await github.paginate(github.rest.issues.listComments,
-    { ...repo, issue_number: number, per_page: 100 })).filter(c => ownComment(c, language));
+  const comments = (
+    await github.paginate(github.rest.issues.listComments, {
+      ...repo,
+      issue_number: number,
+      per_page: 100,
+    })
+  ).filter((c) => ownComment(c, language));
   const tag = marker(language, hash);
   const full = `${tag}\n${body}`;
-  const same = comments.find(c => c.body?.startsWith(tag));
+  const same = comments.find((c) => c.body?.startsWith(tag));
   if (same) {
     await github.rest.issues.updateComment({ ...repo, comment_id: same.id, body: full });
     const { node } = await github.graphql<{ node: { isMinimized: boolean } }>(
       "query($id: ID!) { node(id: $id) { ... on IssueComment { isMinimized } } }",
-      { id: same.node_id });
+      { id: same.node_id },
+    );
     if (node.isMinimized) {
       await github.graphql(
         "mutation($id: ID!) { unminimizeComment(input: {subjectId: $id}) { clientMutationId } }",
-        { id: same.node_id });
+        { id: same.node_id },
+      );
     }
   } else {
     await github.rest.issues.createComment({ ...repo, issue_number: number, body: full });
@@ -148,6 +177,7 @@ export async function publishComment({ github, repo, number, language, hash, bod
     if (c === same) continue;
     await github.graphql(
       "mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { clientMutationId } }",
-      { id: c.node_id });
+      { id: c.node_id },
+    );
   }
 }

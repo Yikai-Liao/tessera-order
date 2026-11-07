@@ -19,7 +19,7 @@ A counting pass reads each key twice: once for the histogram and once for the sc
 
 `stable_sort_by_key` therefore **caches bucket IDs**: during the histogram it stores each record's bucket as a `u16`, and the scatter reads that value instead of calling the key function again. The bucket ranges are disjoint and their sizes match the stored IDs, so every output slot is written exactly once, whatever the key function does. The block partition calls the key function once per record and pass, so it has nothing to cache.
 
-`stable_sort` sorts the keys themselves with Tessera's own encoders, which are deterministic and cannot panic, so it recomputes keys and stores nothing ([decision 0002](../decisions/0002-cache-bucket-ids-for-every-record.md)).
+`stable_sort` sorts the keys themselves with Tessera's own encoders, which are deterministic and cannot panic, so it recomputes keys and stores nothing ([decision 0001b](../decisions/0001b-cache-bucket-ids-for-every-record.md)).
 
 An inconsistent key function can therefore produce an unsorted result, but never a lost, duplicated or uninitialized record.
 
@@ -33,7 +33,7 @@ With the default `std` feature, a panic in the key function is caught, every rec
 
 Afterwards the slice holds every record exactly once, in an unspecified order. The [workspace](../guide/workspace.md) stays usable.
 
-Without `std`, the crate cannot catch a panic. If the key function panics while records are spread over blocks, unwinding would run destructors over an incomplete block table, which could free a record twice. An abort-on-unwind guard turns such a panic into an abort instead. Panics elsewhere unwind normally with every record in place ([decision 0006](../decisions/0006-no-std-unwind-guard.md)).
+Without `std`, the crate cannot catch a panic. If the key function panics while records are spread over blocks, unwinding would run destructors over an incomplete block table, which could free a record twice. An abort-on-unwind guard turns such a panic into an abort instead. Panics elsewhere unwind normally with every record in place ([decision 0005b](../decisions/0005b-no-std-unwind-guard.md)).
 
 ## Where this is tested
 

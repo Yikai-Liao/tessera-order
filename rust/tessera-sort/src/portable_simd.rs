@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
+
 //! Vector scans for the `portable-simd` feature.
 //!
 //! Kernels are written once against `fearless_simd`'s [`Simd`] trait;
@@ -26,30 +27,31 @@ const SIMD_MIN: usize = 64;
 const PEEL: usize = 4;
 
 /// A key type whose slice can be scanned with `fearless_simd` vectors.
-pub(crate) trait SimdKey: Copy + crate::RadixKey {
+pub(crate) trait SimdKey: crate::RadixKey {
     /// Offset of the first descending adjacent pair in `values`.
     fn scan_with<S: Simd>(simd: S, values: &[Self]) -> Option<usize>;
 }
 
-/// Finishes an insertion sort without swap accounting.
-pub(crate) fn finish_insertion<K: SimdKey>(arr: &mut [K]) {
-    // Every remaining slice is below the vector scan's minimum too.
-    if arr.len() < SIMD_MIN {
-        ByKey(|value: &K| *value).finish_insertion(arr);
+/// Sorts `keys` stably by insertion, without a swap limit.
+pub(crate) fn finish_insertion<K: SimdKey>(keys: &mut [K]) {
+    // Every slice the scan sees is a suffix of `keys`, so a short pass never
+    // reaches the vector kernel and skips dispatch.
+    if keys.len() < SIMD_MIN {
+        ByKey(|key: &K| *key).finish_insertion(keys);
         return;
     }
-    dispatch!(Level::new(), simd => crate::engine::finish_insertion(arr, &mut VectorKeys(simd)));
+    dispatch!(Level::new(), simd => crate::engine::finish_insertion(keys, &mut VectorKeys(simd)));
 }
 
-/// Inserts within a swap budget, dispatched once.
+/// Sorts `keys` stably by insertion within `budget` swaps, dispatched once.
 ///
 /// Returns the number of swaps, or `None` when the budget is exhausted; in
-/// that case `arr` is a stable permutation of its input.
-pub(crate) fn insertion_sort<K: SimdKey>(arr: &mut [K], budget: usize) -> Option<usize> {
-    if arr.len() < SIMD_MIN {
-        return ByKey(|value: &K| *value).insertion_sort(arr, budget);
+/// that case `keys` is a stable permutation of its input.
+pub(crate) fn insertion_sort<K: SimdKey>(keys: &mut [K], budget: usize) -> Option<usize> {
+    if keys.len() < SIMD_MIN {
+        return ByKey(|key: &K| *key).insertion_sort(keys, budget);
     }
-    dispatch!(Level::new(), simd => crate::engine::insertion_loop(arr, budget, &mut VectorKeys(simd)))
+    dispatch!(Level::new(), simd => crate::engine::insertion_loop(keys, budget, &mut VectorKeys(simd)))
 }
 
 /// Direct extraction with a backend already selected for this insertion pass.
@@ -124,7 +126,7 @@ pub(crate) fn first_inversion<K: SimdKey>(values: &[K]) -> Option<usize> {
 #[inline(always)]
 fn first_inversion_with<S: Simd, K: SimdKey>(simd: S, values: &[K]) -> Option<usize> {
     if values.len() < SIMD_MIN {
-        return scan_encoded(values);
+        return crate::scan::scalar(values);
     }
     let pairs = values.len() - 1;
     let peel = PEEL.min(pairs);
@@ -139,21 +141,6 @@ fn first_inversion_with<S: Simd, K: SimdKey>(simd: S, values: &[K]) -> Option<us
         previous = current;
     }
     K::scan_with(simd, &values[peel..]).map(|offset| offset + peel)
-}
-
-/// Scalar scan in encoded order, for keys without a vector kernel.
-#[inline]
-fn scan_encoded<T: crate::RadixKey + Copy>(values: &[T]) -> Option<usize> {
-    let mut values = values.iter();
-    let mut previous = values.next()?.encode();
-    for (index, value) in values.enumerate() {
-        let current = value.encode();
-        if previous > current {
-            return Some(index);
-        }
-        previous = current;
-    }
-    None
 }
 
 /// Offset of the first descending adjacent pair of integers.
@@ -252,7 +239,7 @@ macro_rules! wide_key {
         impl SimdKey for $ty {
             #[inline(always)]
             fn scan_with<S: Simd>(_simd: S, values: &[Self]) -> Option<usize> {
-                scan_encoded(values)
+                crate::scan::scalar(values)
             }
         }
     )*};

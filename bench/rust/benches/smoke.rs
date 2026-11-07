@@ -62,6 +62,9 @@ fn suite(c: &mut Criterion) {
     keys::<f64>(c, "sorted99", MID, false);
     rows::<u64>(c, "random", MID, true);
     rows::<u64>(c, "d16", MID, false);
+    // A 128-byte record: its byte size, not its key, sets the tile capacity
+    // and the cursor-table cap for records wider than a machine word.
+    records(c, "random", MID, true);
 
     // The size at which most engine decisions were measured.
     for distribution in ["random", "zipf2", "skew99", "two_values", "sorted99"] {
@@ -117,6 +120,43 @@ fn rows<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bo
     if workspace {
         let mut ws = Workspace::new();
         let prepared = |v: &mut [Row<K>]| ws.stable_sort_by_key(v, |r| r.key);
+        measure(c, &id, "workspace", &input, &expected, same, prepared);
+    }
+}
+
+/// A record of 128 bytes: a word key and a payload that carries the record's
+/// original index.
+#[derive(Clone, Copy)]
+struct Wide {
+    key: u64,
+    payload: [u8; 120],
+}
+
+impl Wide {
+    fn new(key: u64, index: usize) -> Self {
+        let mut payload = [0u8; 120];
+        payload[..8].copy_from_slice(&(index as u64).to_le_bytes());
+        Self { key, payload }
+    }
+}
+
+/// Times records much wider than their key, so record size rather than key
+/// size decides the tile capacity and the block size.
+fn records(c: &mut Criterion, distribution: &str, len: usize, workspace: bool) {
+    let input: Vec<Wide> = generate::<u64>(distribution, len)
+        .into_iter()
+        .enumerate()
+        .map(|(index, key)| Wide::new(key, index))
+        .collect();
+    let mut expected = input.clone();
+    expected.sort_by_key(|record| record.key);
+    let same = |a: &Wide, b: &Wide| a.key == b.key && a.payload == b.payload;
+    let id = format!("rust/rec128_u64/{distribution}/{len}/s1");
+    let api = |v: &mut [Wide]| tessera_sort::stable_sort_by_key(v, |r| r.key);
+    measure(c, &id, "api", &input, &expected, same, api);
+    if workspace {
+        let mut ws = Workspace::new();
+        let prepared = |v: &mut [Wide]| ws.stable_sort_by_key(v, |r| r.key);
         measure(c, &id, "workspace", &input, &expected, same, prepared);
     }
 }

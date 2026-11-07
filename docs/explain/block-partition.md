@@ -16,7 +16,7 @@ The extra memory is 2R scratch blocks and the table: O(√n) when b is chosen we
 
 ## Step by step
 
-The figure runs the algorithm on a small input: R = 4 buckets on the tens digit, blocks of 3 records. It is a TypeScript model of `Sorter::new`, `scatter`, `finish_pass` and `compact_with` with the same index arithmetic, tested against a reference stable sort on 4,248 configurations. Every frame holds each record exactly once.
+The figure runs the algorithm on a small input: R = 4 buckets on the tens digit, blocks of 3 records. It is a TypeScript model of `Partition::new`, `scatter`, `finish_pass` and `compact_with` with the same index arithmetic, tested against a reference stable sort on 4,248 configurations. Every frame holds each record exactly once.
 
 <BlockPartitionDemo />
 
@@ -109,7 +109,7 @@ Move n and watch the minimum: at small n the 1,024-byte floor decides b, and the
 
 ## Invariants
 
-These hold between passes in `block.rs`, where debug builds check the first two in `Sorter::validate`. The model also checks that every intermediate frame holds each record exactly once.
+These hold between passes in `block.rs`, where debug builds check the first two in `Partition::validate`. The model also checks that every intermediate frame holds each record exactly once.
 
 1. The block table is a permutation of the physical blocks.
 2. The active range of the table, read in order with each partial block's length, holds every record exactly once.

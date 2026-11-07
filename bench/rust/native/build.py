@@ -2,16 +2,16 @@
 
 """Build pinned native sorts without network access or host-specific tuning."""
 
-from concurrent.futures import ThreadPoolExecutor
-import importlib.util
 import hashlib
+import importlib.util
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tomllib
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 VENDOR = ROOT.parents[1] / "vendor"
@@ -33,9 +33,7 @@ def compile_source(task: tuple[Path, str, list[str], Path]) -> Path:
     source, compiler, flags, obj = task
     command = [compiler, *BASE, *flags, "-c", str(source), "-o", str(obj)]
     digest = hashlib.sha256(
-        json.dumps(
-            [command, SOURCE_SIGNATURE, COMPILERS[compiler]], sort_keys=True
-        ).encode()
+        json.dumps([command, SOURCE_SIGNATURE, COMPILERS[compiler]], sort_keys=True).encode()
     )
     digest.update(source.read_bytes())
     digest.update((ROOT / "layout.h").read_bytes())
@@ -60,21 +58,17 @@ def main() -> None:
         if not stamp.exists():
             raise ValueError(f"{name}: run python3 bench/fetch.py")
         state = json.loads(stamp.read_text())
-        if any(state[k] != v for k, v in source.items()) or state[
-            "tree_sha256"
-        ] != fetch.tree_hash(path):
+        if any(state[k] != v for k, v in source.items()) or state["tree_sha256"] != fetch.tree_hash(
+            path
+        ):
             raise ValueError(f"{name}: source tree differs; run python3 bench/fetch.py")
     global SOURCE_SIGNATURE
     SOURCE_SIGNATURE = json.dumps(sources, sort_keys=True)
     for compiler in {CC, CXX}:
-        COMPILERS[compiler] = subprocess.check_output(
-            [compiler, "--version"], text=True
-        )
+        COMPILERS[compiler] = subprocess.check_output([compiler, "--version"], text=True)
     for variable in ["CFLAGS", "CXXFLAGS", "LDFLAGS"]:
         if os.environ.get(variable):
-            raise ValueError(
-                f"{variable} must be unset; native comparison uses fixed flags"
-            )
+            raise ValueError(f"{variable} must be unset; native comparison uses fixed flags")
     hwy = OUT / "highway"
     run(
         [
@@ -130,9 +124,7 @@ def main() -> None:
             CC,
             ["-std=c11", "-I" + str(VENDOR / name / "src"), "-I" + str(ROOT)],
         )
-    add(
-        "tessera_native", ROOT / "clausecker.c", CC, ["-I" + str(VENDOR / "clausecker")]
-    )
+    add("tessera_native", ROOT / "clausecker.c", CC, ["-I" + str(VENDOR / "clausecker")])
     add("tessera_native", VENDOR / "clausecker/radixsort_permuted.c", CC, [])
     for name in ["vqsort", "vqsort_u32a", "vqsort_u64a"]:
         add("hwy_contrib", VENDOR / f"highway/hwy/contrib/sort/{name}.cc", CXX, cpp)

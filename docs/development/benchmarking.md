@@ -133,6 +133,8 @@ For each block, a variant's ratio is its time per sort divided by the mean of th
 
 The ranking compares each variant with `slice::sort` within the same blocks, then takes the geometric mean over the ten fixed input shapes. Its three lengths are 65,536, 1M and 10M; rows rank by 10M speed. The stable and unstable grids select the fastest eligible opponent per cell and retain the A/A verdict. Scaling uses random input and absolute nanoseconds per element. Memory growth uses random `u64` and 128-byte records. Every figure has a table of plotted values.
 
+Continuous builds apply branch alignment to both feature configurations and use static linking, as described in the [continuous benchmark guide](continuous-benchmarks.md).
+
 The [port record](../design/port.md) describes separate placement controls for source A/B investigations. The release comparison measures lengths of at least 1,000 with the default target; native-CPU builds, branch alignment, workspace mode and cold-cache investigations remain separate work.
 
 ## Results and provenance

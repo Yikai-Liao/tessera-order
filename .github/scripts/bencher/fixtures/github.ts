@@ -18,7 +18,8 @@ export function mockGitHub(respond: (request: Request) => unknown) {
     };
     requests.push(request);
     return new Response(JSON.stringify(respond(request)), {
-      status: 200, headers: { "content-type": "application/json" },
+      status: 200,
+      headers: { "content-type": "application/json" },
     });
   };
   const github = getOctokit("fixture-token", {

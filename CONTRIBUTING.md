@@ -18,6 +18,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
+The documentation site and CI scripts are formatted and linted with [Biome](https://biomejs.dev/) (TypeScript, Vue, CSS, JSON) and [Ruff](https://docs.astral.sh/ruff/) (Python); CI checks both:
+
+```sh
+npm ci && npm run format
+uvx ruff@0.17.4 format && uvx ruff@0.17.4 check
+```
+
 Engine changes also need Miri, which requires nightly:
 
 ```sh
@@ -25,10 +32,7 @@ rustup +nightly component add miri
 cargo +nightly miri test -p tessera-sort
 ```
 
-CI runs the default and `--no-default-features` configurations in parallel.
-Within each configuration, [cargo-nextest](https://nexte.st/docs/integrations/miri/)
-runs each test in its own Miri process so tests can use multiple CPU cores.
-Doctests run separately with `cargo miri test --doc`. To use the same runner locally:
+CI runs the default and `--no-default-features` configurations in parallel. Within each configuration, [cargo-nextest](https://nexte.st/docs/integrations/miri/) runs each test in its own Miri process so tests can use multiple CPU cores. Doctests run separately with `cargo miri test --doc`. To use the same runner locally:
 
 ```sh
 cargo install --locked cargo-nextest --version 0.9.151
@@ -67,6 +71,38 @@ Contributions written with AI tools are welcome. They are held to the same stand
 Pull requests that show no sign of human review, such as unrelated edits, calls to APIs that do not exist, or untested code, may be closed without a detailed review.
 
 Coding agents working in this repository should read [`AGENTS.md`](AGENTS.md).
+
+## Commit messages
+
+Commit messages and pull request titles follow [Conventional Commits 1.0](https://www.conventionalcommits.org/en/v1.0.0/). Pull requests are squash-merged, so the title becomes the commit on `main`; CI checks it, and commits inside the branch should follow the same form.
+
+```
+type(scope)!: summary
+
+Body: why the change is needed, one line per paragraph.
+
+Signed-off-by: Your Name <you@example.com>
+```
+
+| Type | For |
+|---|---|
+| `feat` | A new public API or user-visible capability |
+| `fix` | A correction of wrong behavior |
+| `perf` | A performance change, with measurements per [benchmarking](docs/development/benchmarking.md) |
+| `refactor` | Code restructured without a change in behavior |
+| `docs` | Documentation, comments and the documentation site |
+| `test` | Tests only |
+| `ci` | Workflows and `.github/scripts` |
+| `build` | Cargo, npm and tool configuration, such as the MSRV, Biome or Ruff |
+| `chore` | Other maintenance, such as releases |
+| `revert` | A revert of an earlier commit |
+
+- **Scope** is optional and one of `engine`, `block`, `key`, `simd`, `site`, `bench`, `fuzz` or `deps`; language packages add their own name when they land.
+- **Summary** is an imperative English phrase that says what changed, starting in lowercase unless it begins with a name, without a final period, and at most 64 characters so that the squash commit with ` (#123)` stays within 72.
+- **Breaking changes** add `!` after the type or scope and explain the migration in a `BREAKING CHANGE:` paragraph.
+- **One type per pull request.** A change that needs two types is usually two pull requests.
+
+Branches do not need to be up to date with `main` to merge; rebase only to resolve a conflict ([decision 0032](docs/decisions/0032-parallel-pull-requests.md)).
 
 ## Sign-off (DCO)
 

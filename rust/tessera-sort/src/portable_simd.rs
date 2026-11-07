@@ -107,8 +107,15 @@ fn prefix_sum_with<S: Simd>(simd: S, counts: &mut [u16]) {
     }
 }
 
+/// Confirms ascending direct keys after an already encoded predecessor.
+pub(crate) fn confirm_ascending<K: SimdKey>(values: &[K], previous: K::Encoded) -> bool {
+    if values.len() < SIMD_MIN {
+        return crate::engine::confirm_ascending(values, &mut ByKey(|value: &K| *value), previous);
+    }
+    previous <= values[0].encode() && first_inversion(values).is_none()
+}
+
 /// Offset of the first adjacent pair that descends in key order.
-#[cfg(test)]
 pub(crate) fn first_inversion<K: SimdKey>(values: &[K]) -> Option<usize> {
     dispatch!(Level::new(), simd => first_inversion_with(simd, values))
 }
@@ -271,6 +278,12 @@ mod tests {
     use super::*;
 
     fn check_sorted_scans<K: SimdKey>(mut values: Vec<K>) {
+        if let Some(first) = values.first() {
+            assert!(confirm_ascending(&values, first.encode()));
+            if let Some(larger) = values.iter().find(|value| value.encode() > first.encode()) {
+                assert!(!confirm_ascending(&values, larger.encode()));
+            }
+        }
         for level in [Level::baseline(), Level::new()] {
             assert_eq!(
                 dispatch!(level, simd => first_inversion_with(simd, &values)),
@@ -293,6 +306,9 @@ mod tests {
                     values.len()
                 );
                 assert_eq!(K::first_inversion(&values), Some(index));
+                if !cfg!(miri) || index == 4 {
+                    assert!(!confirm_ascending(&values, values[0].encode()));
+                }
                 values.swap(index, index + 1);
             }
         }
@@ -408,6 +424,9 @@ mod tests {
 
     #[test]
     fn random_scans() {
+        assert!(confirm_ascending::<u64>(&[], 0));
+        assert!(confirm_ascending::<u64>(&[3], 3));
+        assert!(!confirm_ascending::<u64>(&[3], 4));
         for length in [0usize, 1, 2, 31, 63, 64, 65, 127, 129, 1000] {
             let mut seed = 0x9e37_79b9u64;
             let mut words: Vec<u32> = (0..length)

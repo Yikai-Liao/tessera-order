@@ -1,0 +1,74 @@
+{
+  "decision": "Negative scheduler screen; archive only; no adoption.",
+  "public_commit": "55b299b3716cd1af9e997f30b1a3c1813455d8be",
+  "source_replay": "Exact public\u2192combined\u2192draining Rust maps verified twice; public manifests unchanged.",
+  "files": [
+    {
+      "path": "DESIGN.md",
+      "bytes": 4808,
+      "sha256": "985a2c249d98357fe19f79a035b25248ad06fe7003343cb95aa65198e29cea57"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1384,
+      "sha256": "705d08b60e66eac43d9e0348dfabf8a1e1ef4f450e23c3f63ba3a84aaa8fb405"
+    },
+    {
+      "path": "PROVENANCE.json",
+      "bytes": 1266,
+      "sha256": "96fb5f2028b0f120ab762d33ead53f7d3de54fdec867d4111261e776f111d833"
+    },
+    {
+      "path": "README.md",
+      "bytes": 4255,
+      "sha256": "c9651a67de9d52f3af46b897757ef2af23c54bfbbc2b2de68580afd47eb1c8e6"
+    },
+    {
+      "path": "SCREEN.md",
+      "bytes": 2389,
+      "sha256": "d8e9d648e92bdd273b059d0d10f30633a82add7daec0845b85649216f4820e2f"
+    },
+    {
+      "path": "VALIDATION.md",
+      "bytes": 5095,
+      "sha256": "ab59f77140c971d1950f085d069b799785761d4f90316f76cb9ac73dece02a76"
+    },
+    {
+      "path": "independent-verification.json",
+      "bytes": 709,
+      "sha256": "9567569d221517156e46bc16ce10c72da8ef2ce3dd46312fefd14b5d4d2104a7"
+    },
+    {
+      "path": "patches/01-public-to-combined.patch",
+      "bytes": 104128,
+      "sha256": "2265e704ebb25e0dba1a08e8d4431d1473fce09a740ac5e67ee5fe0b2c4dda4b"
+    },
+    {
+      "path": "patches/02-combined-to-draining.patch",
+      "bytes": 45217,
+      "sha256": "09c5c2b6768ef1825281a163f9defed261fb02454d21f54e208539e99339570b"
+    },
+    {
+      "path": "privacy-check.json",
+      "bytes": 2499,
+      "sha256": "2d2385523f5740edc93845292e5ee5663a59e311cc0b47cc7648834b85a0407f"
+    },
+    {
+      "path": "source-map.json",
+      "bytes": 9365,
+      "sha256": "e6915ec1cf67f03927877e233826e228c5c56d2388e5182c798b36fdbf4052a9"
+    },
+    {
+      "path": "verify-result.json",
+      "bytes": 824,
+      "sha256": "c9fa3ec9b6161e96f313157265d7bc42bbc6523f9a4e90588120e1bf73044f06"
+    },
+    {
+      "path": "verify.py",
+      "bytes": 3160,
+      "sha256": "f243ccabfb6709a84c068b0e4de7864795bc0b55a993a67e7a8c310b6cfc74ae"
+    }
+  ],
+  "manifest_hash_rule": "This manifest is excluded from its own file list; the outer source archive SHA256 covers it.",
+  "raw_evidence_targets_and_binaries_included": false
+}

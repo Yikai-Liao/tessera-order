@@ -96,3 +96,8 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   no accepted gain across 1,280 verified calls. Earlier root completion
   increased child work/tails; four separate non-timed calls found equal pass
   depth. Summary-only archive, with raw call timings retained externally.
+
+- [Rejected bounded-draining scheduler](draining-consumer-negative/README.md):
+  exact public-to-combined-to-draining source patches and scoped validation.
+  The two-case screen found no accepted gain; broad controls prevent claiming
+  a controlled slowdown magnitude. No runtime adoption or raw timing data.

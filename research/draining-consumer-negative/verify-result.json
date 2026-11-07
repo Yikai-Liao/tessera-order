@@ -1,0 +1,28 @@
+{
+  "public_commit": "55b299b3716cd1af9e997f30b1a3c1813455d8be",
+  "patches": {
+    "patches/01-public-to-combined.patch": "2265e704ebb25e0dba1a08e8d4431d1473fce09a740ac5e67ee5fe0b2c4dda4b",
+    "patches/02-combined-to-draining.patch": "09c5c2b6768ef1825281a163f9defed261fb02454d21f54e208539e99339570b"
+  },
+  "source_map_sha256": "e6915ec1cf67f03927877e233826e228c5c56d2388e5182c798b36fdbf4052a9",
+  "stages": [
+    {
+      "stage": "public",
+      "rust_files": 18,
+      "exact": true
+    },
+    {
+      "stage": "combined",
+      "rust_files": 25,
+      "exact": true
+    },
+    {
+      "stage": "draining",
+      "rust_files": 26,
+      "exact": true
+    }
+  ],
+  "public_manifests_unchanged": true,
+  "builds_tests_or_timing_run": false,
+  "scope": "Disposable source export only; original repository is read-only."
+}

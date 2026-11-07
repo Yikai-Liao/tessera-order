@@ -1,0 +1,1116 @@
+--- a/rust/tessera-sort/src/engine/parallel.rs
++++ b/rust/tessera-sort/src/engine/parallel.rs
+@@ -57,7 +57,8 @@
+ struct Narrow<E, const SHIFT: usize>(E);
+ impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for Narrow<E, SHIFT> {
+     fn try_parallel_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
+-        self.0.try_parallel_count_window(records, low + SHIFT, width)
++        self.0
++            .try_parallel_count_window(records, low + SHIFT, width)
+     }
+     type Value = u64;
+     #[inline]
+@@ -146,83 +147,322 @@
+         .sort_node(arr, varying);
+         return;
+     }
+-    let mut batch = Vec::new();
++    let radix = 1usize << digit.width;
++    let queue = DrainQueue::new(worker_count, radix);
++    let mut batch = Vec::with_capacity(radix);
+     let mut batch_records = 0usize;
+     let batch_bytes = std::env::var("TESSERA_PIPELINE_BATCH_BYTES")
+         .ok()
+         .and_then(|v| v.parse::<usize>().ok())
+         .unwrap_or(128 * 1024);
+-    rayon::scope(|scope| {
+-        // The sender lives inside the scope body. A producer panic therefore
+-        // disconnects the channel before scope waits for consumers to finish.
+-        #[cfg(test)]
+-        let _publishing_witness = crate::test_witness::PublishingGuard::new();
+-        #[cfg(test)]
+-        let _sender_witness = crate::test_witness::SenderGuard::new(hooks.clone());
+-        let (sender, receiver) = std::sync::mpsc::channel();
+-        let receiver = std::sync::Arc::new(std::sync::Mutex::new(receiver));
+-        let mut launched = false;
+-        block::partition_digit_parallel_with_visit(
+-            arr,
+-            digit.width,
+-            digit.shift,
+-            key.clone(),
+-            workspace.block_buffers(),
+-            worker_count,
+-            &mut |child| {
+-                let child_key = &key;
+-                batch_records += child.len();
+-                batch.push(Materialized {
+-                    pointer: child.as_mut_ptr(),
+-                    len: child.len(),
+-                });
+-                if batch_records.saturating_mul(core::mem::size_of::<T>()) >= batch_bytes {
+-                    sender.send(core::mem::take(&mut batch)).unwrap();
+-                    #[cfg(test)]
+-                    crate::test_witness::published(&hooks);
+-                    batch_records = 0;
+-                    if !launched {
+-                        // Finish potentially reentrant generic Clone code
+-                        // before publishing any consumer that waits for us.
+-                        let keys: Vec<_> = (1..worker_count).map(|_| child_key.clone()).collect();
+-                        launched = true;
++    #[cfg(test)]
++    let batch_bytes = draining_tests::batch_bytes(batch_bytes);
++    // Keep the original extractor and every caught payload outside the scope
++    // body: unwinding that body must not run their Drop before children join.
++    let mut producer_key = Some(key);
++    let mut producer_panic = None;
++    let scope_result = crate::unwind::catch(|| {
++        rayon::scope(|scope| {
++            #[cfg(test)]
++            let _publishing_witness = crate::test_witness::PublishingGuard::new();
++            #[cfg(test)]
++            let _sender_witness = crate::test_witness::SenderGuard::new(hooks.clone());
++            let mut launched = false;
++            let result = crate::unwind::catch(|| {
++                block::partition_digit_parallel_with_visit(
++                    arr,
++                    digit.width,
++                    digit.shift,
++                    producer_key.as_ref().unwrap().clone(),
++                    workspace.block_buffers(),
++                    worker_count,
++                    &mut |child| {
++                        if !queue.failed.load(std::sync::atomic::Ordering::Acquire) {
++                            batch_records += child.len();
++                            batch.push(Materialized {
++                                pointer: child.as_mut_ptr(),
++                                len: child.len(),
++                            });
++                            if batch_records.saturating_mul(core::mem::size_of::<T>())
++                                >= batch_bytes
++                            {
++                                if !launched {
++                                    // Preserve the first-threshold Clone phase. Retain
++                                    // each successful clone even if a later one panics.
++                                    for id in 0..worker_count - 1 {
++                                        let child_key = producer_key.as_ref().unwrap().clone();
++                                        queue.lock().bundles[id].as_mut().unwrap().key =
++                                            Some(child_key);
++                                    }
++                                    let mut state = queue.lock();
++                                    state.idle.extend(0..worker_count - 1);
++                                    launched = true;
++                                    drop(state);
++                                    #[cfg(test)]
++                                    crate::test_witness::publication_started();
++                                }
++                                queue.publish(&mut batch);
++                                #[cfg(test)]
++                                crate::test_witness::published(&hooks);
++                                batch_records = 0;
++                                launch_drain::<T, E, CACHED>(scope, &queue, candidate, tile_bytes);
++                            }
++                        }
+                         #[cfg(test)]
+-                        crate::test_witness::publication_started();
+-                        for mut child_key in keys {
+-                            let receiver = receiver.clone();
+-                            #[cfg(test)]
+-                            let consumer_hooks = hooks.clone();
+-                            scope.spawn(move |_| {
+-                                #[cfg(test)]
+-                                let _consumer_witness =
+-                                    crate::test_witness::PhaseGuard::consumer(consumer_hooks);
+-                                consume_queue::<T, E, CACHED>(
+-                                    &receiver,
+-                                    candidate,
+-                                    &mut child_key,
+-                                    tile_bytes,
+-                                );
+-                            });
+-                        }
++                        crate::test_witness::callback_finished(&hooks);
++                        #[cfg(test)]
++                        draining_tests::after_callback();
++                    },
++                )
++            });
++            #[cfg(test)]
++            draining_tests::root_finished();
++            #[cfg(test)]
++            crate::test_witness::publication_closed();
++            if let Err(payload) = result {
++                queue
++                    .failed
++                    .store(true, std::sync::atomic::Ordering::Release);
++                producer_panic = Some(payload);
++            } else {
++                if batch_records != 0 && !queue.failed.load(std::sync::atomic::Ordering::Acquire) {
++                    queue.publish(&mut batch);
++                    if launched {
++                        launch_drain::<T, E, CACHED>(scope, &queue, candidate, tile_bytes);
+                     }
+                 }
++                // The producer contributes its original key and one child workspace,
++                // preserving the baseline's P child resources plus root workspace.
++                let id = worker_count - 1;
++                queue.lock().bundles[id].as_mut().unwrap().key = producer_key.take();
++                drain_queue::<T, E, CACHED>(&queue, id, candidate, tile_bytes);
++            }
++        })
++    });
++    // Both root recovery and the Rayon join have completed. Only now can any
++    // consumer payload or retained extractor be dropped or resumed.
++    let mut panics = {
++        let mut state = queue.lock();
++        core::mem::take(&mut state.panics)
++    };
++    let payload = producer_panic
++        .or_else(|| scope_result.err())
++        .or_else(|| panics.iter_mut().find_map(Option::take));
++    if let Some(payload) = payload {
++        crate::unwind::resume(payload);
++    }
++    let complete = {
++        let state = queue.lock();
++        state.batches.is_empty()
++            && state.buckets.is_empty()
++            && state.bundles.iter().all(Option::is_some)
++            && state.idle.len()
++                == state
++                    .bundles
++                    .iter()
++                    .filter(|bundle| bundle.as_ref().is_some_and(|bundle| bundle.key.is_some()))
++                    .count()
++    };
++    assert!(
++        complete,
++        "successful drain left outstanding work or resources"
++    );
++}
++
++/// One fixed child resource, retained even when its task returns or panics.
++struct DrainBundle<T, E> {
++    key: Option<E>,
++    workspace: Workspace<T>,
++    buckets: Vec<Materialized<T>>,
++}
++
++/// Metadata and idle-resource transitions share a lock, never user callbacks.
++struct DrainState<T, E> {
++    buckets: std::collections::VecDeque<Materialized<T>>,
++    batches: std::collections::VecDeque<usize>,
++    bundles: Vec<Option<DrainBundle<T, E>>>,
++    idle: Vec<usize>,
++    panics: Vec<Option<crate::unwind::Payload>>,
++}
++
++/// A bounded, drain-to-empty queue; no task waits for future publication.
++struct DrainQueue<T, E> {
++    state: std::sync::Mutex<DrainState<T, E>>,
++    failed: std::sync::atomic::AtomicBool,
++    #[cfg(test)]
++    published: std::sync::atomic::AtomicUsize,
++    #[cfg(test)]
++    consumed: std::sync::atomic::AtomicUsize,
++}
++
++impl<T, E> DrainQueue<T, E> {
++    fn new(count: usize, radix: usize) -> Self {
++        Self {
++            state: std::sync::Mutex::new(DrainState {
++                buckets: std::collections::VecDeque::with_capacity(radix),
++                batches: std::collections::VecDeque::with_capacity(radix),
++                bundles: (0..count)
++                    .map(|_| {
++                        Some(DrainBundle {
++                            key: None,
++                            workspace: Workspace::new(),
++                            buckets: Vec::with_capacity(radix),
++                        })
++                    })
++                    .collect(),
++                idle: Vec::with_capacity(count),
++                panics: (0..count).map(|_| None).collect(),
++            }),
++            failed: std::sync::atomic::AtomicBool::new(false),
++            #[cfg(test)]
++            published: std::sync::atomic::AtomicUsize::new(0),
++            #[cfg(test)]
++            consumed: std::sync::atomic::AtomicUsize::new(0),
++        }
++    }
++
++    fn lock(&self) -> DrainLock<'_, T, E> {
++        let state = self
++            .state
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner);
++        #[cfg(test)]
++        {
++            DrainLock {
++                state,
++                _witness: crate::test_witness::QueueGuard::new(),
++            }
++        }
++        #[cfg(not(test))]
++        {
++            state
++        }
++    }
++
++    fn publish(&self, buckets: &mut Vec<Materialized<T>>) {
++        let mut state = self.lock();
++        if !self.failed.load(std::sync::atomic::Ordering::Acquire) {
++            #[cfg(test)]
++            self.published
++                .fetch_add(buckets.len(), std::sync::atomic::Ordering::Relaxed);
++            state.batches.push_back(buckets.len());
++            state.buckets.extend(buckets.drain(..));
++        }
++    }
++}
++
++#[cfg(not(test))]
++type DrainLock<'a, T, E> = std::sync::MutexGuard<'a, DrainState<T, E>>;
++
++/// Keep the witness alive until the actual metadata lock has been released.
++#[cfg(test)]
++struct DrainLock<'a, T, E> {
++    state: std::sync::MutexGuard<'a, DrainState<T, E>>,
++    _witness: crate::test_witness::QueueGuard,
++}
++#[cfg(test)]
++impl<T, E> core::ops::Deref for DrainLock<'_, T, E> {
++    type Target = DrainState<T, E>;
++    fn deref(&self) -> &Self::Target {
++        &self.state
++    }
++}
++#[cfg(test)]
++impl<T, E> core::ops::DerefMut for DrainLock<'_, T, E> {
++    fn deref_mut(&mut self) -> &mut Self::Target {
++        &mut self.state
++    }
++}
++
++/// Reserve only an ID: a scheduler unwind cannot drop a captured user key.
++fn launch_drain<'scope, T: Send + 'scope, E: Extract<T> + Send + 'scope, const CACHED: bool>(
++    scope: &rayon::Scope<'scope>,
++    queue: &'scope DrainQueue<T, E>,
++    candidate: u128,
++    tile_bytes: usize,
++) {
++    let id = {
++        let mut state = queue.lock();
++        if queue.failed.load(std::sync::atomic::Ordering::Acquire) || state.batches.is_empty() {
++            None
++        } else {
++            state.idle.pop()
++        }
++    };
++    if let Some(id) = id {
++        #[cfg(test)]
++        let hooks = crate::test_witness::current();
++        scope.spawn(move |_| {
++            #[cfg(test)]
++            let _consumer_witness = crate::test_witness::PhaseGuard::consumer(hooks);
++            drain_queue::<T, E, CACHED>(queue, id, candidate, tile_bytes);
++        });
++    }
++}
++
++/// Process whole published batches, atomically returning a resource at empty.
++fn drain_queue<T, E: Extract<T>, const CACHED: bool>(
++    queue: &DrainQueue<T, E>,
++    id: usize,
++    candidate: u128,
++    tile_bytes: usize,
++) {
++    let mut bundle = queue.lock().bundles[id].take();
++    let result = crate::unwind::catch(|| {
++        loop {
++            {
++                let mut state = queue.lock();
++                let next = if queue.failed.load(std::sync::atomic::Ordering::Acquire) {
++                    None
++                } else {
++                    state.batches.pop_front()
++                };
++                let Some(count) = next else {
++                    // Publication either sees this idle resource or precedes this
++                    // empty check, in which case this worker takes its batch.
++                    state.bundles[id] = bundle.take();
++                    state.idle.push(id);
++                    return;
++                };
++                let resource = bundle.as_mut().unwrap();
++                for _ in 0..count {
++                    resource.buckets.push(state.buckets.pop_front().unwrap());
++                }
++            }
++            let resource = bundle.as_mut().unwrap();
++            for source in resource.buckets.drain(..) {
++                // A failing peer stops future buckets; an in-flight child finishes
++                // or recovers through the unchanged serial ownership guards.
++                if queue.failed.load(std::sync::atomic::Ordering::Acquire) {
++                    break;
++                }
+                 #[cfg(test)]
+-                crate::test_witness::callback_finished(&hooks);
+-            },
+-        );
+-        if batch_records != 0 {
+-            sender.send(core::mem::take(&mut batch)).unwrap();
+-        }
+-        // Disconnect before this producer joins the consumers. No job blocks
+-        // on the availability of a particular worker or holds a queue lock
+-        // across a user key call, including reentrant Rayon operations.
+-        drop(sender);
+-        #[cfg(test)]
+-        crate::test_witness::publication_closed();
+-        consume_queue::<T, E, CACHED>(&receiver, candidate, &mut key, tile_bytes);
++                queue
++                    .consumed
++                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++                consume_buckets::<T, E, CACHED>(
++                    core::iter::once(source),
++                    candidate,
++                    resource.key.as_mut().unwrap(),
++                    &mut resource.workspace,
++                    tile_bytes,
++                );
++            }
++        }
+     });
+-}
+-
++    if let Err(payload) = result {
++        let mut state = queue.lock();
++        queue
++            .failed
++            .store(true, std::sync::atomic::Ordering::Release);
++        state.panics[id] = Some(payload);
++        state.bundles[id] = bundle.take();
++        // Failed resources are retained, never relaunched or awaited.
++    }
++}
++
++// Frozen fixed-consumer control used only by its original test.
++#[cfg(test)]
+ fn consume_queue<T, E: Extract<T>, const CACHED: bool>(
+     receiver: &std::sync::Mutex<std::sync::mpsc::Receiver<Vec<Materialized<T>>>>,
+     candidate: u128,
+@@ -252,7 +492,7 @@
+ }
+ 
+ fn consume_buckets<T, E: Extract<T>, const CACHED: bool>(
+-    buckets: Vec<Materialized<T>>,
++    buckets: impl IntoIterator<Item = Materialized<T>>,
+     candidate: u128,
+     key: &mut E,
+     workspace: &mut Workspace<T>,
+@@ -539,3 +779,6 @@
+ 
+ #[cfg(test)]
+ mod current_main_tests;
++
++#[cfg(test)]
++mod draining_tests;
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/parallel/draining_tests.rs
+@@ -0,0 +1,695 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Scheduler-specific witnesses, independent of fixed-consumer rendezvous.
++
++use super::*;
++use std::sync::Arc;
++use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
++
++/// Counts extractor work independently of scheduler metadata accounting.
++#[derive(Clone)]
++struct CountKeys(Arc<AtomicUsize>);
++impl Extract<u64> for CountKeys {
++    type Value = u64;
++    fn key(&mut self, record: &u64) -> u64 {
++        crate::test_witness::assert_user_allowed();
++        self.0.fetch_add(1, SeqCst);
++        *record
++    }
++}
++
++#[test]
++#[cfg(not(miri))]
++fn empty_publish_race_drains() {
++    for workers in [2, 3, 4] {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(workers)
++            .build()
++            .unwrap()
++            .install(|| {
++                let calls = Arc::new(AtomicUsize::new(0));
++                let queue = DrainQueue::new(workers, 256);
++                for id in 0..workers {
++                    queue.lock().bundles[id].as_mut().unwrap().key = Some(CountKeys(calls.clone()));
++                    queue.lock().idle.push(id);
++                }
++                let mut values = vec![0u64; 512];
++                let mut batch = Vec::with_capacity(256);
++                rayon::scope(|scope| {
++                    for (index, child) in values.chunks_mut(2).enumerate() {
++                        child.copy_from_slice(&[1, 0]);
++                        batch.push(Materialized {
++                            pointer: child.as_mut_ptr(),
++                            len: child.len(),
++                        });
++                        queue.publish(&mut batch);
++                        launch_drain::<_, _, false>(scope, &queue, u128::MAX, TILE_BYTES);
++                        // Force many empty/refill opportunities, without any
++                        // barrier requiring a particular thread to make progress.
++                        if index % 2 == 0 {
++                            rayon::yield_now();
++                        }
++                    }
++                });
++                let state = queue.lock();
++                assert!(state.batches.is_empty());
++                assert!(state.buckets.is_empty());
++                assert_eq!(state.bundles.len(), workers);
++                assert_eq!(state.idle.len(), workers);
++                assert!(state.bundles.iter().all(Option::is_some));
++                assert!(state.panics.iter().all(Option::is_none));
++                drop(state);
++                assert_eq!(queue.published.load(SeqCst), 256);
++                assert_eq!(queue.consumed.load(SeqCst), 256);
++                assert!(calls.load(SeqCst) > 0);
++                assert!(values.chunks(2).all(|child| child == [0, 1]));
++            });
++    }
++}
++
++#[test]
++#[cfg(not(miri))]
++fn nested_keys_keep_bundle_bound() {
++    struct ReentrantKey {
++        entered: bool,
++        active: Arc<AtomicUsize>,
++        maximum: Arc<AtomicUsize>,
++    }
++    impl Extract<u64> for ReentrantKey {
++        type Value = u64;
++        fn key(&mut self, record: &u64) -> u64 {
++            crate::test_witness::assert_user_allowed();
++            if !self.entered {
++                self.entered = true;
++                let active = self.active.fetch_add(1, SeqCst) + 1;
++                self.maximum.fetch_max(active, SeqCst);
++                // This bundle remains charged while its task is suspended in
++                // real Rayon work and a nested public parallel sort.
++                rayon::join(
++                    || {
++                        let mut inner: Vec<_> = (0..131_073u64)
++                            .map(|i| i.wrapping_mul(0x9e3779b97f4a7c15))
++                            .collect();
++                        crate::par_stable_sort(&mut inner);
++                        assert!(inner.is_sorted());
++                    },
++                    || {
++                        rayon::yield_now();
++                    },
++                );
++                self.active.fetch_sub(1, SeqCst);
++            }
++            *record
++        }
++    }
++    for workers in [2, 3, 4] {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(workers)
++            .build()
++            .unwrap()
++            .install(|| {
++                let active = Arc::new(AtomicUsize::new(0));
++                let maximum = Arc::new(AtomicUsize::new(0));
++                let queue = DrainQueue::new(workers, 256);
++                for id in 0..workers {
++                    queue.lock().bundles[id].as_mut().unwrap().key = Some(ReentrantKey {
++                        entered: false,
++                        active: active.clone(),
++                        maximum: maximum.clone(),
++                    });
++                    queue.lock().idle.push(id);
++                }
++                let mut values: Vec<_> = (0..65_536u64).map(|i| (i * 73) % 1024).collect();
++                let mut expected = values.clone();
++                for child in expected.chunks_mut(2048) {
++                    child.sort();
++                }
++                let mut batch = Vec::with_capacity(256);
++                rayon::scope(|scope| {
++                    for child in values.chunks_mut(2048) {
++                        batch.push(Materialized {
++                            pointer: child.as_mut_ptr(),
++                            len: child.len(),
++                        });
++                        queue.publish(&mut batch);
++                        launch_drain::<_, _, false>(scope, &queue, u128::MAX, TILE_BYTES);
++                    }
++                });
++                assert_eq!(values, expected);
++                assert_eq!(active.load(SeqCst), 0);
++                assert!((1..=workers).contains(&maximum.load(SeqCst)));
++                let state = queue.lock();
++                assert_eq!(state.bundles.len(), workers);
++                assert_eq!(state.idle.len(), workers);
++                assert!(state.batches.is_empty());
++                assert!(state.panics.iter().all(Option::is_none));
++            });
++    }
++}
++
++#[test]
++#[cfg(not(miri))]
++fn public_owned_and_exclusive_stable() {
++    use std::cell::Cell;
++    for workers in [2, 3, 4] {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(workers)
++            .build()
++            .unwrap()
++            .install(|| {
++                let mut owned: Vec<_> = (0..65_537usize)
++                    .map(|i| {
++                        (
++                            ((i.wrapping_mul(7919) % 4096) as u64),
++                            i.to_string(),
++                            Cell::new(i),
++                        )
++                    })
++                    .collect();
++                let mut expected: Vec<_> = owned.iter().map(|r| (r.0, r.2.get())).collect();
++                expected.sort_by_key(|r| r.0);
++                crate::par_stable_sort_by_key(&mut owned, |r| {
++                    crate::test_witness::assert_user_allowed();
++                    r.0
++                });
++                assert_eq!(
++                    owned.iter().map(|r| (r.0, r.2.get())).collect::<Vec<_>>(),
++                    expected
++                );
++                assert!(owned.iter().all(|r| r.1 == r.2.get().to_string()));
++
++                let mut cells: Vec<_> = (0..131_073usize).map(Cell::new).collect();
++                let mut exclusive: Vec<_> = cells
++                    .iter_mut()
++                    .map(|cell| ((cell.get().wrapping_mul(7919) % 4096) as u64, cell))
++                    .collect();
++                let mut expected: Vec<_> = exclusive.iter().map(|r| (r.0, r.1.get())).collect();
++                expected.sort_by_key(|r| r.0);
++                crate::par_stable_sort_by_key(&mut exclusive, |r| {
++                    crate::test_witness::assert_user_allowed();
++                    r.0
++                });
++                assert_eq!(
++                    exclusive
++                        .iter()
++                        .map(|r| (r.0, r.1.get()))
++                        .collect::<Vec<_>>(),
++                    expected
++                );
++            });
++    }
++}
++
++#[test]
++#[cfg(not(miri))]
++fn moved_panic_retains_payload() {
++    use std::sync::atomic::AtomicBool;
++    struct Payload {
++        joined: Arc<AtomicBool>,
++        dropped: Arc<AtomicUsize>,
++    }
++    impl Drop for Payload {
++        fn drop(&mut self) {
++            assert!(self.joined.load(SeqCst), "payload dropped before join");
++            self.dropped.fetch_add(1, SeqCst);
++        }
++    }
++    struct FailingKey {
++        joined: Arc<AtomicBool>,
++        dropped: Arc<AtomicUsize>,
++        fired: Arc<AtomicBool>,
++    }
++    impl Extract<(u64, String)> for FailingKey {
++        type Value = u64;
++        fn key(&mut self, record: &(u64, String)) -> u64 {
++            crate::test_witness::assert_user_allowed();
++            if crate::test_witness::has_moved() && !self.fired.swap(true, SeqCst) {
++                std::panic::panic_any(Payload {
++                    joined: self.joined.clone(),
++                    dropped: self.dropped.clone(),
++                });
++            }
++            record.0
++        }
++    }
++    impl Drop for FailingKey {
++        fn drop(&mut self) {
++            assert!(self.joined.load(SeqCst), "key dropped before join");
++        }
++    }
++    for workers in [2, 3, 4] {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(workers)
++            .build()
++            .unwrap()
++            .install(|| {
++                let joined = Arc::new(AtomicBool::new(false));
++                let dropped = Arc::new(AtomicUsize::new(0));
++                let fired = Arc::new(AtomicBool::new(false));
++                let queue = DrainQueue::new(workers, 256);
++                for id in 0..workers {
++                    queue.lock().bundles[id].as_mut().unwrap().key = Some(FailingKey {
++                        joined: joined.clone(),
++                        dropped: dropped.clone(),
++                        fired: fired.clone(),
++                    });
++                    queue.lock().idle.push(id);
++                }
++                let mut values: Vec<_> = (0..65_537u64)
++                    .map(|i| (i.wrapping_mul(0x9e3779b97f4a7c15), i.to_string()))
++                    .collect();
++                let mut expected = values.clone();
++                expected.sort_by_key(|row| row.0);
++                let mut batch = vec![Materialized {
++                    pointer: values.as_mut_ptr(),
++                    len: values.len(),
++                }];
++                rayon::scope(|scope| {
++                    queue.publish(&mut batch);
++                    launch_drain::<_, _, true>(scope, &queue, u128::MAX, TILE_BYTES);
++                });
++                // This fixture proves child guard recovery and scheduler retention;
++                // simultaneous root failure needs a separate public-entry witness.
++                joined.store(true, SeqCst);
++                assert!(fired.load(SeqCst), "fixture did not reach moved-key panic");
++                assert!(queue.failed.load(SeqCst));
++                assert_eq!(dropped.load(SeqCst), 0);
++                values.sort_by_key(|row| row.0);
++                assert_eq!(values, expected);
++                assert_eq!(
++                    queue
++                        .lock()
++                        .panics
++                        .iter()
++                        .filter(|slot| slot.is_some())
++                        .count(),
++                    1
++                );
++                drop(queue);
++                assert_eq!(dropped.load(SeqCst), 1);
++            });
++    }
++}
++
++// Per-producer test controls do not alter production thresholds or kernels.
++thread_local! {
++    static PROBE: std::cell::RefCell<Option<Arc<Probe>>> = const { std::cell::RefCell::new(None) };
++}
++#[derive(Default)]
++struct Probe {
++    batch_bytes: Option<usize>,
++    root_finished: std::sync::atomic::AtomicBool,
++    callback: Option<Box<dyn Fn() + Send + Sync>>,
++}
++fn with_probe<R>(probe: Arc<Probe>, run: impl FnOnce() -> R) -> R {
++    struct Reset(Option<Arc<Probe>>);
++    impl Drop for Reset {
++        fn drop(&mut self) {
++            PROBE.with(|slot| {
++                slot.replace(self.0.take());
++            });
++        }
++    }
++    let _reset = Reset(PROBE.with(|slot| slot.replace(Some(probe))));
++    run()
++}
++pub(super) fn batch_bytes(default: usize) -> usize {
++    PROBE.with(|slot| {
++        slot.borrow()
++            .as_ref()
++            .and_then(|probe| probe.batch_bytes)
++            .unwrap_or(default)
++    })
++}
++pub(super) fn after_callback() {
++    let probe = PROBE.with(|slot| slot.borrow().clone());
++    if let Some(probe) = probe {
++        if let Some(callback) = &probe.callback {
++            callback();
++        }
++    }
++}
++pub(super) fn root_finished() {
++    PROBE.with(|slot| {
++        if let Some(probe) = slot.borrow().as_ref() {
++            probe.root_finished.store(true, SeqCst);
++        }
++    });
++}
++
++#[test]
++#[cfg(not(miri))]
++fn threshold_clone_phase_preserved() {
++    struct CloningKey {
++        clones: Arc<AtomicUsize>,
++        panic_at: usize,
++        reenter_at: usize,
++        reentered: Arc<AtomicUsize>,
++        root_clones: usize,
++        consumer_copy: bool,
++        probe: Arc<Probe>,
++        hooks: Arc<crate::test_witness::Hooks>,
++        consumer_drops: Arc<AtomicUsize>,
++    }
++    impl Drop for CloningKey {
++        fn drop(&mut self) {
++            if self.consumer_copy {
++                crate::test_witness::assert_user_allowed();
++                assert!(self.probe.root_finished.load(SeqCst));
++                assert_eq!(
++                    self.hooks.consumers_started.load(SeqCst),
++                    self.hooks.consumers_done.load(SeqCst)
++                );
++                self.consumer_drops.fetch_add(1, SeqCst);
++            }
++        }
++    }
++    impl Clone for CloningKey {
++        fn clone(&self) -> Self {
++            crate::test_witness::assert_user_allowed();
++            let count = self.clones.fetch_add(1, SeqCst) + 1;
++            if count == self.reenter_at {
++                rayon::join(
++                    || {
++                        let mut inner: Vec<_> = (0..131_073u64)
++                            .map(|i| i.wrapping_mul(0x9e3779b97f4a7c15))
++                            .collect();
++                        crate::par_stable_sort(&mut inner);
++                        assert!(inner.is_sorted());
++                    },
++                    || (),
++                );
++                self.reentered.fetch_add(1, SeqCst);
++            }
++            if count == self.panic_at {
++                panic!("first-threshold clone panic");
++            }
++            Self {
++                clones: self.clones.clone(),
++                panic_at: self.panic_at,
++                reenter_at: self.reenter_at,
++                reentered: self.reentered.clone(),
++                root_clones: self.root_clones,
++                consumer_copy: count > self.root_clones,
++                probe: self.probe.clone(),
++                hooks: self.hooks.clone(),
++                consumer_drops: self.consumer_drops.clone(),
++            }
++        }
++    }
++    impl Extract<u64> for CloningKey {
++        type Value = u64;
++        fn key(&mut self, record: &u64) -> u64 {
++            crate::test_witness::assert_user_allowed();
++            *record
++        }
++    }
++    for workers in [2, 3, 4] {
++        for mode in 0..4 {
++            // P2 has only one child clone, so no later child clone can fail.
++            if mode == 3 && workers == 2 {
++                continue;
++            }
++            rayon::ThreadPoolBuilder::new()
++                .num_threads(workers)
++                .build()
++                .unwrap()
++                .install(|| {
++                    let hooks = Arc::new(crate::test_witness::Hooks::default());
++                    let probe = Arc::new(Probe {
++                        batch_bytes: if mode == 0 { Some(usize::MAX) } else { None },
++                        ..Probe::default()
++                    });
++                    let clones = Arc::new(AtomicUsize::new(0));
++                    let reentered = Arc::new(AtomicUsize::new(0));
++                    let consumer_drops = Arc::new(AtomicUsize::new(0));
++                    let mut values: Vec<_> = (0..131_073u64)
++                        .map(|i| i.wrapping_mul(0x9e3779b97f4a7c15))
++                        .collect();
++                    let mut expected = values.clone();
++                    expected.sort();
++                    let result = crate::unwind::catch(|| {
++                        with_probe(probe.clone(), || {
++                            crate::test_witness::with_hooks(hooks.clone(), || {
++                                sort::<_, _, false>(
++                                    &mut values,
++                                    CloningKey {
++                                        clones: clones.clone(),
++                                        panic_at: match mode {
++                                            2 => workers + 2,
++                                            3 => workers + 3,
++                                            _ => usize::MAX,
++                                        },
++                                        reenter_at: if mode == 1 {
++                                            workers + 2
++                                        } else {
++                                            usize::MAX
++                                        },
++                                        reentered: reentered.clone(),
++                                        root_clones: workers + 1,
++                                        consumer_copy: false,
++                                        probe: probe.clone(),
++                                        hooks: hooks.clone(),
++                                        consumer_drops: consumer_drops.clone(),
++                                    },
++                                )
++                            });
++                        })
++                    });
++                    assert_eq!(result.is_err(), mode >= 2);
++                    assert!(probe.root_finished.load(SeqCst));
++                    assert_eq!(hooks.root_geometry.lock().unwrap()[0].3, workers);
++                    if mode == 0 {
++                        assert_eq!(clones.load(SeqCst), workers + 1);
++                        assert_eq!(hooks.consumers_started.load(SeqCst), 0);
++                    } else if mode == 1 {
++                        assert_eq!(clones.load(SeqCst), workers * 2);
++                        assert_eq!(reentered.load(SeqCst), 1);
++                        assert!(hooks.consumers_started.load(SeqCst) > 0);
++                    } else {
++                        assert_eq!(clones.load(SeqCst), workers + mode);
++                        assert_eq!(hooks.consumers_started.load(SeqCst), 0);
++                    }
++                    assert_eq!(
++                        consumer_drops.load(SeqCst),
++                        match mode {
++                            1 => workers - 1,
++                            3 => 1,
++                            _ => 0,
++                        }
++                    );
++                    if mode >= 2 {
++                        values.sort();
++                    }
++                    assert_eq!(values, expected);
++                });
++        }
++    }
++}
++
++#[test]
++#[cfg(not(miri))]
++fn simultaneous_payloads_wait_for_join() {
++    use std::sync::atomic::AtomicBool;
++    struct Payload {
++        probe: Arc<Probe>,
++        hooks: Arc<crate::test_witness::Hooks>,
++        drops: Arc<AtomicUsize>,
++    }
++    impl Drop for Payload {
++        fn drop(&mut self) {
++            crate::test_witness::assert_user_allowed();
++            assert!(self.probe.root_finished.load(SeqCst));
++            assert_eq!(
++                self.hooks.consumers_started.load(SeqCst),
++                self.hooks.consumers_done.load(SeqCst)
++            );
++            self.drops.fetch_add(1, SeqCst);
++        }
++    }
++    for workers in [2, 3, 4] {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(workers)
++            .build()
++            .unwrap()
++            .install(|| {
++                let hooks = Arc::new(crate::test_witness::Hooks::default());
++                let child_failed =
++                    Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
++                let producer_failed = Arc::new(AtomicBool::new(false));
++                let drops = Arc::new(AtomicUsize::new(0));
++                let probe = Arc::new_cyclic(|weak: &std::sync::Weak<Probe>| {
++                    let weak = weak.clone();
++                    let hooks = hooks.clone();
++                    let child_failed = child_failed.clone();
++                    let producer_failed = producer_failed.clone();
++                    let drops = drops.clone();
++                    Probe {
++                        callback: Some(Box::new(move || {
++                            if hooks.publication_count.load(SeqCst) == 0
++                                || producer_failed.load(SeqCst)
++                            {
++                                return;
++                            }
++                            let (lock, ready) = &*child_failed;
++                            let (guard, timeout) = ready
++                                .wait_timeout_while(
++                                    lock.lock().unwrap(),
++                                    std::time::Duration::from_secs(10),
++                                    |failed| !*failed,
++                                )
++                                .unwrap();
++                            assert!(!timeout.timed_out(), "child did not reach moved-key panic");
++                            drop(guard);
++                            producer_failed.store(true, SeqCst);
++                            std::panic::panic_any(Payload {
++                                probe: weak.upgrade().unwrap(),
++                                hooks: hooks.clone(),
++                                drops: drops.clone(),
++                            });
++                        })),
++                        ..Probe::default()
++                    }
++                });
++                let mut values: Vec<_> = (0..262_145u64)
++                    .map(|i| (i.wrapping_mul(0x9e3779b97f4a7c15), i.to_string()))
++                    .collect();
++                let mut expected = values.clone();
++                expected.sort_by_key(|row| row.0);
++                let result = crate::unwind::catch(|| {
++                    with_probe(probe.clone(), || {
++                        crate::test_witness::with_hooks(hooks.clone(), || {
++                            crate::par_stable_sort_by_key(&mut values, |row| {
++                                crate::test_witness::assert_user_allowed();
++                                if crate::test_witness::phase()
++                                    == crate::test_witness::Phase::Consumer
++                                    && crate::test_witness::has_moved()
++                                {
++                                    let (lock, ready) = &*child_failed;
++                                    let mut failed = lock.lock().unwrap();
++                                    if !*failed {
++                                        *failed = true;
++                                        ready.notify_all();
++                                        drop(failed);
++                                        std::panic::panic_any(Payload {
++                                            probe: probe.clone(),
++                                            hooks: hooks.clone(),
++                                            drops: drops.clone(),
++                                        });
++                                    }
++                                }
++                                row.0
++                            })
++                        });
++                    })
++                });
++                assert!(result.is_err());
++                assert!(producer_failed.load(SeqCst));
++                assert!(*child_failed.0.lock().unwrap());
++                drop(result);
++                assert_eq!(drops.load(SeqCst), 2);
++                values.sort_by_key(|row| row.0);
++                assert_eq!(values, expected);
++            });
++    }
++}
++
++#[test]
++fn scoped_drain_reuses_exclusive_buckets() {
++    use std::cell::Cell;
++    struct CellKey;
++    impl Extract<(u64, &mut Cell<usize>)> for CellKey {
++        type Value = u64;
++        fn key(&mut self, record: &(u64, &mut Cell<usize>)) -> u64 {
++            crate::test_witness::assert_user_allowed();
++            record.0
++        }
++    }
++    let mut cells: Vec<_> = (0..128usize).map(Cell::new).collect();
++    let mut records: Vec<_> = cells
++        .iter_mut()
++        .map(|cell| ((cell.get() * 73 % 7) as u64, cell))
++        .collect();
++    let mut expected: Vec<_> = records.iter().map(|row| (row.0, row.1.get())).collect();
++    for child in expected.chunks_mut(8) {
++        child.sort_by_key(|row| row.0);
++    }
++    let queue = DrainQueue::new(2, 16);
++    for id in 0..2 {
++        queue.lock().bundles[id].as_mut().unwrap().key = Some(CellKey);
++        queue.lock().idle.push(id);
++    }
++    let mut batch = Vec::with_capacity(16);
++    for child in records.chunks_mut(8) {
++        batch.push(Materialized {
++            pointer: child.as_mut_ptr(),
++            len: child.len(),
++        });
++        queue.publish(&mut batch);
++        let id = queue.lock().idle.pop().unwrap();
++        // The scheduling adapter alone differs from Rayon. The same state,
++        // exact-pointer conversion, sort, empty-return and resource reuse run.
++        std::thread::scope(|scope| {
++            let queue = &queue;
++            scope
++                .spawn(move || drain_queue::<_, _, true>(queue, id, u128::MAX, TILE_BYTES))
++                .join()
++                .unwrap();
++        });
++        assert_eq!(queue.lock().idle.len(), 2);
++    }
++    assert_eq!(queue.published.load(SeqCst), 16);
++    assert_eq!(queue.consumed.load(SeqCst), 16);
++    assert_eq!(
++        records
++            .iter()
++            .map(|row| (row.0, row.1.get()))
++            .collect::<Vec<_>>(),
++        expected
++    );
++}
++
++#[test]
++fn scoped_drain_retains_panic() {
++    use std::sync::atomic::AtomicBool;
++    struct Payload(Arc<AtomicBool>, Arc<AtomicUsize>);
++    impl Drop for Payload {
++        fn drop(&mut self) {
++            crate::test_witness::assert_user_allowed();
++            assert!(self.0.load(SeqCst));
++            self.1.fetch_add(1, SeqCst);
++        }
++    }
++    struct Key(Arc<AtomicBool>, Arc<AtomicUsize>);
++    impl Extract<(u64, String)> for Key {
++        type Value = u64;
++        fn key(&mut self, _: &(u64, String)) -> u64 {
++            crate::test_witness::assert_user_allowed();
++            std::panic::panic_any(Payload(self.0.clone(), self.1.clone()));
++        }
++    }
++    let joined = Arc::new(AtomicBool::new(false));
++    let drops = Arc::new(AtomicUsize::new(0));
++    let queue = DrainQueue::new(1, 2);
++    queue.lock().bundles[0].as_mut().unwrap().key = Some(Key(joined.clone(), drops.clone()));
++    let mut records: Vec<_> = (0..19u64).map(|id| (id * 73 % 7, id.to_string())).collect();
++    let expected = records.clone();
++    let mut batch = vec![Materialized {
++        pointer: records.as_mut_ptr(),
++        len: records.len(),
++    }];
++    queue.publish(&mut batch);
++    std::thread::scope(|scope| {
++        let queue = &queue;
++        scope
++            .spawn(move || drain_queue::<_, _, true>(queue, 0, u128::MAX, TILE_BYTES))
++            .join()
++            .unwrap();
++    });
++    joined.store(true, SeqCst);
++    assert!(queue.failed.load(SeqCst));
++    assert_eq!(drops.load(SeqCst), 0);
++    assert_eq!(records, expected);
++    drop(queue);
++    assert_eq!(drops.load(SeqCst), 1);
++}

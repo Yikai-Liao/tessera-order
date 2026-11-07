@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "method": "Independent read-only public-commit replay plus direct comparison with original combined and draining source directories under shared FD9.",
+  "exact_rust_file_counts": [
+    18,
+    25,
+    26
+  ],
+  "public_manifests_and_lock_unchanged": true,
+  "privacy": "Text only; no machine paths, raw traces/CSV, executables or later diagnostic clones.",
+  "disclosures_checked": [
+    "Negative screen and no adoption",
+    "Static/dynamic validation limits",
+    "Inherited research controls retained",
+    "Initial tested executable loss, hash/log remaining, final replacement retained"
+  ],
+  "builds_tests_or_timing_run": false,
+  "packet_modified_by_independent_check": false
+}

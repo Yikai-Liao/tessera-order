@@ -1,0 +1,2883 @@
+--- a/rust/tessera-sort/src/block.rs
++++ b/rust/tessera-sort/src/block.rs
+@@ -53,6 +53,11 @@
+ /// digit width (the Tessera engine) bound it by this constant.
+ pub(crate) const MAX_RADIX_BITS: usize = 12;
+ 
++#[cfg(feature = "rayon")]
++mod parallel;
++#[cfg(feature = "rayon")]
++pub(crate) use parallel::partition_digit_parallel_with_visit;
++
+ /// Logical input and output block cursors for the current pass.
+ struct ScatterPosition {
+     input: usize,
+@@ -391,6 +396,9 @@
+     scratch_blocks: usize,
+     block_count: usize,
+     scratch: Vec<MaybeUninit<T>>,
++    // Preserve each shard allocation during native-root adoption.
++    #[cfg(feature = "rayon")]
++    scratch_segments: Vec<Vec<MaybeUninit<T>>>,
+     input_borrow: PhantomData<&'a mut [T]>,
+ }
+ 
+@@ -433,6 +441,8 @@
+             scratch_blocks,
+             block_count,
+             scratch,
++            #[cfg(feature = "rayon")]
++            scratch_segments: Vec::new(),
+             input_borrow: PhantomData,
+         }
+     }
+@@ -443,6 +453,14 @@
+         // allocations, which stay alive and are never resized during sorting.
+         unsafe {
+             if physical < self.scratch_blocks {
++                #[cfg(feature = "rayon")]
++                if !self.scratch_segments.is_empty() {
++                    let segment_blocks = self.scratch_blocks / self.scratch_segments.len();
++                    return self.scratch_segments[physical / segment_blocks]
++                        .as_mut_ptr()
++                        .cast::<T>()
++                        .add((physical % segment_blocks) * self.block_size);
++                }
+                 self.scratch
+                     .as_mut_ptr()
+                     .cast::<T>()
+@@ -855,6 +873,8 @@
+                 write(offset);
+             }
+             position.input += 1;
++            #[cfg(all(test, feature = "rayon"))]
++            crate::test_witness::moved();
+             begin = 0;
+         }
+     }
+--- /dev/null
++++ b/rust/tessera-sort/src/block/parallel.rs
+@@ -0,0 +1,632 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Experimental root scatter into independently owned contiguous block shards.
++
++use super::*;
++use rayon::prelude::*;
++
++mod compact;
++
++struct Shard<'a, 'w, T, E> {
++    sorter: Partition<'a, 'w, T>,
++    key: E,
++    panic: Option<unwind::Payload>,
++    first_block: usize,
++}
++
++#[derive(Clone, Copy)]
++struct Config {
++    shards: usize,
++    block_size: Option<usize>,
++    parallel: bool,
++}
++
++// SAFETY: each shard exclusively borrows a disjoint input slice and Buffers.
++// Its pointers address only those allocations. No shared references to its
++// records cross threads, and all records are restored by Partition on unwind.
++unsafe impl<T: Send, E: Send> Send for Shard<'_, '_, T, E> {}
++
++impl<T, E: Extract<T>> Shard<'_, '_, T, E> {
++    fn scatter(mut self, width: usize, shift: usize) -> Self {
++        #[cfg(test)]
++        let _phase = crate::test_witness::PhaseGuard::root();
++        let shift = E::Value::from_usize(shift);
++        let mask = E::Value::from_usize((1usize << width) - 1) << shift;
++        let key = &mut self.key;
++        let (panic, _) = self.sorter.step_with_ends(
++            |record| ((key.key(record) & mask) >> shift).to_usize(),
++            false,
++        );
++        self.panic = panic;
++        self
++    }
++}
++
++pub(crate) fn partition_digit_parallel_with_visit<T: Send, E: Extract<T> + Clone + Send>(
++    arr: &mut [T],
++    radix: usize,
++    shift: usize,
++    key: E,
++    buffers: &mut Buffers<T>,
++    requested_shards: usize,
++    visit: Visit<'_, T>,
++) -> Vec<usize> {
++    partition_impl_with_visit(
++        arr,
++        radix,
++        shift,
++        key,
++        buffers,
++        Config {
++            shards: requested_shards,
++            block_size: None,
++            parallel: true,
++        },
++        Some(visit),
++    )
++}
++
++#[cfg(test)]
++fn partition_impl<T: Send, E: Extract<T> + Clone + Send>(
++    arr: &mut [T],
++    radix: usize,
++    shift: usize,
++    key: E,
++    buffers: &mut Buffers<T>,
++    config: Config,
++) -> Vec<usize> {
++    partition_impl_with_visit(arr, radix, shift, key, buffers, config, None)
++}
++
++fn partition_impl_with_visit<T: Send, E: Extract<T> + Clone + Send>(
++    arr: &mut [T],
++    radix: usize,
++    shift: usize,
++    key: E,
++    buffers: &mut Buffers<T>,
++    config: Config,
++    mut visit: Option<Visit<'_, T>>,
++) -> Vec<usize> {
++    assert!((1..=MAX_RADIX_BITS).contains(&radix));
++    assert!(shift < E::Value::BITS);
++    assert!(core::mem::size_of::<T>() != 0);
++    assert!(arr.len() >= 2);
++    let bucket_count = 1usize << radix;
++    let shards = config.shards.max(1).min(arr.len());
++    // This isolated prototype temporarily holds local and global directories
++    // together during adoption, hence 20 rather than 10 bytes per input block.
++    let record_bytes = core::mem::size_of::<T>();
++    let balanced = ((20.0 * arr.len() as f64)
++        / (2.0 * shards as f64 * bucket_count as f64 * record_bytes as f64))
++        .sqrt()
++        .ceil() as usize;
++    let block_size = config.block_size.unwrap_or_else(|| {
++        balanced
++            .max(BLOCK_BYTES_FLOOR / record_bytes)
++            .max(BLOCK_RECORDS_FLOOR)
++            .max(1)
++    });
++    let full_blocks = arr.len() / block_size;
++    let shards = shards.min(full_blocks.max(1));
++    #[cfg(test)]
++    if let Some(hooks) = crate::test_witness::current() {
++        hooks
++            .root_geometry
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .push((arr.len(), bucket_count, block_size, shards));
++    }
++    if shards == 1 && config.block_size.is_none() {
++        let mut key = key;
++        return partition_digit_with_ends(arr, radix, shift, &mut key, buffers, &mut |child, _| {
++            if let Some(callback) = visit.as_deref_mut() {
++                callback(child);
++            }
++        });
++    }
++    let width = radix.min(E::Value::BITS - shift);
++    let input_len = arr.len();
++    let input = arr.as_mut_ptr();
++    let mut local_buffers: Vec<_> = (0..shards).map(|_| Buffers::new()).collect();
++    let mut tasks = Vec::with_capacity(shards);
++    let mut first_block = 0;
++    for (index, local) in local_buffers.iter_mut().enumerate() {
++        let blocks = full_blocks / shards + usize::from(index < full_blocks % shards);
++        let len = if index + 1 == shards {
++            input_len - first_block * block_size
++        } else {
++            blocks * block_size
++        };
++        // SAFETY: cumulative full-block quotas cover disjoint consecutive
++        // ranges, with only the final shard including the input tail. Each
++        // range is initialized here and stays exclusively owned by its guard.
++        // Derive all shard borrows from this same raw ancestor: reborrowing
++        // `arr` via split_at_mut would invalidate the raw pointer retained for
++        // global compaction after these shard guards have been retired.
++        let part =
++            unsafe { core::slice::from_raw_parts_mut(input.add(first_block * block_size), len) };
++        tasks.push(Shard {
++            sorter: Partition::new(part, bucket_count, block_size, local),
++            key: key.clone(),
++            panic: None,
++            first_block,
++        });
++        first_block += blocks;
++    }
++    let mut tasks: Vec<_> = if config.parallel {
++        tasks
++            .into_par_iter()
++            .map(|shard| shard.scatter(width, shift))
++            .collect()
++    } else {
++        // The same ownership/adoption path can run under Miri without Rayon.
++        tasks
++            .into_iter()
++            .map(|shard| shard.scatter(width, shift))
++            .collect()
++    };
++    if let Some(payload) = tasks.iter_mut().find_map(|task| task.panic.take()) {
++        // All jobs have joined. Every guard still owns only its original
++        // shard, so unwinding restores all slices without invoking keys again.
++        unwind::resume(payload);
++    }
++
++    let head = shards.checked_mul(bucket_count).expect("head overflow");
++    let scratch_blocks = head.checked_mul(2).expect("scratch overflow");
++    let block_count = full_blocks
++        .checked_add(scratch_blocks)
++        .expect("block overflow");
++    assert!(block_count <= u32::MAX as usize);
++    let allocated: usize = tasks
++        .iter()
++        .map(|task| task.sorter.active_blocks_end - bucket_count)
++        .sum();
++    let active_end = head + allocated;
++    assert!(active_end <= block_count);
++
++    // Until the final non-panicking transfer below, every local guard owns its
++    // shard and can recover it if allocation or directory construction fails.
++    let mut order = alloc::vec![0u32; block_count];
++    let next_order = alloc::vec![0u32; block_count];
++    let bucket_ids = alloc::vec![0u16; block_count];
++    let mut partials = Vec::with_capacity(head);
++    let mut ends = Vec::with_capacity(bucket_count);
++    let mut output = head;
++    let mut records = 0;
++    let translate = |shard_index: usize, task: &Shard<'_, '_, T, E>, physical: u32| {
++        let physical = physical as usize;
++        if physical < 2 * bucket_count {
++            shard_index * 2 * bucket_count + physical
++        } else {
++            scratch_blocks + task.first_block + physical - 2 * bucket_count
++        }
++    };
++    for bucket in 0..bucket_count {
++        // Bucket-major, then ORIGINAL shard order. Completion order is never
++        // used, so equal keys retain their original cross-shard order.
++        for (index, task) in tasks.iter().enumerate() {
++            let start = if bucket == 0 {
++                bucket_count
++            } else {
++                task.sorter.buffers.counts[bucket - 1]
++            };
++            let end = task.sorter.buffers.counts[bucket];
++            let partial = task.sorter.partial_blocks[bucket];
++            assert_eq!(partial.order_index, end - 1);
++            for logical in start..end {
++                order[output] = translate(index, task, task.sorter.block_order[logical]) as u32;
++                output += 1;
++            }
++            partials.push(PartialBlock {
++                order_index: output - 1,
++                len: partial.len,
++            });
++            records += (end - start - 1) * block_size + partial.len;
++        }
++        ends.push(records);
++    }
++    assert_eq!(records, input_len);
++    assert_eq!(output, active_end);
++    let mut free = 0;
++    for (index, task) in tasks.iter().enumerate() {
++        for logical in
++            (0..bucket_count).chain(task.sorter.active_blocks_end..task.sorter.block_order.len())
++        {
++            if free == head {
++                free = active_end;
++            }
++            order[free] = translate(index, task, task.sorter.block_order[logical]) as u32;
++            free += 1;
++        }
++    }
++    if free == head {
++        free = active_end;
++    }
++    assert_eq!(free, block_count);
++    let mut global = Partition {
++        buffers,
++        blocks: BlockStorage {
++            input,
++            input_len,
++            block_size,
++            scratch_blocks,
++            block_count,
++            scratch: Vec::new(),
++            scratch_segments: Vec::with_capacity(shards),
++            input_borrow: PhantomData,
++        },
++        // For compaction this field means the free prefix length, not the
++        // number of semantic radix buckets. No scatter runs on this guard.
++        bucket_count: head,
++        block_order: order,
++        next_block_order: next_order,
++        bucket_ids,
++        partial_blocks: partials,
++        active_blocks_end: active_end,
++        input_materialized: true,
++    };
++
++    // Ownership transfer has no allocations, bounds checks, or user calls:
++    // scratch_segments has capacity for exactly tasks.len() allocations.
++    // Each moved Vec owns only MaybeUninit cells, so stale copies never drop T.
++    // The global directory already names each live prefix exactly once.
++    for task in &mut tasks {
++        global
++            .blocks
++            .scratch_segments
++            .push(core::mem::take(&mut task.sorter.blocks.scratch));
++        task.sorter.input_materialized = true;
++    }
++    global.input_materialized = false;
++    drop(tasks);
++    drop(local_buffers);
++    #[cfg(debug_assertions)]
++    global.validate();
++    if cfg!(miri) || std::env::var_os("TESSERA_COMPACT_SERIAL").is_none() {
++        compact::permute_blocks(&mut global, shards, config.parallel);
++    }
++    let panic = global.compact_with(&ends, visit);
++    if let Some(payload) = panic {
++        unwind::resume(payload);
++    }
++    ends
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::key::ByKey;
++    use std::panic::{AssertUnwindSafe, catch_unwind};
++    use std::sync::{
++        Arc,
++        atomic::{AtomicUsize, Ordering},
++    };
++
++    #[test]
++    fn combined_deferred_owned_after_permutation() {
++        let mut rows: Vec<_> = (0..293u64)
++            .map(|i| ((i * 73) % 64, alloc::format!("row {i}")))
++            .collect();
++        let mut expected = rows.clone();
++        expected.sort_by_key(|row| row.0);
++        let mut pending: Option<(*mut (u64, alloc::string::String), usize)> = None;
++        let mut buffers = Buffers::new();
++        partition_impl_with_visit(
++            &mut rows,
++            2,
++            4,
++            ByKey(|row: &(u64, alloc::string::String)| row.0),
++            &mut buffers,
++            config(3, 7),
++            Some(&mut |child| {
++                if let Some((pointer, len)) = pending.take() {
++                    // SAFETY: this is an earlier materialized disjoint bucket.
++                    unsafe { core::slice::from_raw_parts_mut(pointer, len) }
++                        .sort_by_key(|row| row.0);
++                }
++                pending = Some((child.as_mut_ptr(), child.len()));
++            }),
++        );
++        if let Some((pointer, len)) = pending {
++            // SAFETY: the final bucket remains uniquely owned until consumed.
++            unsafe { core::slice::from_raw_parts_mut(pointer, len) }.sort_by_key(|row| row.0);
++        }
++        assert_eq!(rows, expected);
++    }
++
++    #[test]
++    fn combined_callback_panic_finishes_materialization() {
++        let mut rows: Vec<_> = (0..293u64)
++            .map(|i| ((i * 73) % 64, alloc::format!("row {i}")))
++            .collect();
++        let mut expected = rows.clone();
++        expected.sort();
++        let mut buffers = Buffers::new();
++        let result = catch_unwind(AssertUnwindSafe(|| {
++            partition_impl_with_visit(
++                &mut rows,
++                2,
++                4,
++                ByKey(|row: &(u64, alloc::string::String)| row.0),
++                &mut buffers,
++                config(3, 7),
++                Some(&mut |_| panic!("callback panic")),
++            );
++        }));
++        assert!(result.is_err());
++        rows.sort();
++        assert_eq!(rows, expected);
++    }
++
++    fn config(shards: usize, block_size: usize) -> Config {
++        Config {
++            shards,
++            block_size: Some(block_size),
++            parallel: !cfg!(miri),
++        }
++    }
++
++    #[test]
++    fn native_scatter_stable_partial_boundaries() {
++        let lengths: Vec<_> = if cfg!(miri) {
++            vec![2, 7, 19, 33]
++        } else {
++            (2..90).collect()
++        };
++        let sizes: Vec<_> = if cfg!(miri) {
++            vec![1, 5]
++        } else {
++            vec![1, 2, 3, 5, 8, 32]
++        };
++        for len in lengths {
++            for &block_size in &sizes {
++                for shards in [1, 2, 4] {
++                    for radix in [1, 3] {
++                        let mut rows: Vec<_> = (0..len)
++                            .map(|id| (((id * 37 + 11) % 256) as u64, id))
++                            .collect();
++                        let mut expected = rows.clone();
++                        let mask = (1u64 << radix) - 1;
++                        expected.sort_by_key(|row| row.0 & mask);
++                        let ends = partition_impl(
++                            &mut rows,
++                            radix,
++                            0,
++                            ByKey(|row: &(u64, usize)| row.0),
++                            &mut Buffers::new(),
++                            config(shards, block_size),
++                        );
++                        assert_eq!(
++                            rows, expected,
++                            "n={len}, b={block_size}, P={shards}, radix={radix}"
++                        );
++                        for (bucket, end) in ends.into_iter().enumerate() {
++                            assert_eq!(
++                                end,
++                                rows.iter()
++                                    .filter(|row| row.0 & mask <= bucket as u64)
++                                    .count()
++                            );
++                        }
++                    }
++                }
++            }
++        }
++    }
++
++    struct Owned {
++        key: u64,
++        id: usize,
++        text: String,
++        drops: Arc<Vec<AtomicUsize>>,
++    }
++
++    impl Drop for Owned {
++        fn drop(&mut self) {
++            assert_eq!(self.text, self.id.to_string());
++            self.drops[self.id].fetch_add(1, Ordering::SeqCst);
++        }
++    }
++
++    #[test]
++    fn native_scatter_owned_panic_restores_each_shard() {
++        let len = if cfg!(miri) { 19 } else { 97 };
++        for fail in (0..len).chain([usize::MAX]) {
++            let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++            let mut rows: Vec<_> = (0..len)
++                .map(|id| Owned {
++                    key: ((id * 37 + 11) % 16) as u64,
++                    id,
++                    text: id.to_string(),
++                    drops: drops.clone(),
++                })
++                .collect();
++            let result = catch_unwind(AssertUnwindSafe(|| {
++                partition_impl(
++                    &mut rows,
++                    3,
++                    0,
++                    ByKey(|row: &Owned| {
++                        assert_ne!(row.id, fail, "injected key panic");
++                        row.key
++                    }),
++                    &mut Buffers::new(),
++                    config(4, 5),
++                );
++            }));
++            assert_eq!(result.is_err(), fail != usize::MAX);
++            let mut ids: Vec<_> = rows.iter().map(|row| row.id).collect();
++            ids.sort_unstable();
++            assert_eq!(ids, (0..len).collect::<Vec<_>>());
++            assert!(drops.iter().all(|count| count.load(Ordering::SeqCst) == 0));
++            drop(rows);
++            assert!(drops.iter().all(|count| count.load(Ordering::SeqCst) == 1));
++        }
++    }
++
++    #[test]
++    fn native_scatter_exclusive_borrows_and_inconsistent_keys() {
++        let len = if cfg!(miri) { 23 } else { 113 };
++        for inconsistent in [false, true] {
++            let mut backing: Vec<_> = (0..len).collect();
++            let mut records: Vec<_> = backing.iter_mut().enumerate().collect();
++            let calls = AtomicUsize::new(0);
++            partition_impl(
++                &mut records,
++                3,
++                0,
++                ByKey(|row: &(usize, &mut usize)| {
++                    let call = calls.fetch_add(1, Ordering::Relaxed);
++                    (if inconsistent {
++                        call ^ row.0
++                    } else {
++                        row.0 * 37
++                    }) as u64
++                }),
++                &mut Buffers::new(),
++                config(4, 5),
++            );
++            let mut ids = Vec::new();
++            for (id, record) in records {
++                assert_eq!(id, *record);
++                *record += 1;
++                ids.push(id);
++            }
++            ids.sort_unstable();
++            assert_eq!(ids, (0..len).collect::<Vec<_>>());
++            assert_eq!(backing, (1..=len).collect::<Vec<_>>());
++        }
++    }
++
++    #[test]
++    #[cfg(not(miri))]
++    fn native_scatter_root_uses_multiple_workers() {
++        let pool = rayon::ThreadPoolBuilder::new()
++            .num_threads(4)
++            .build()
++            .unwrap();
++        let mut rows: Vec<_> = (0..131_072)
++            .map(|id| ((id as u64).wrapping_mul(0x9e3779b97f4a7c15), id))
++            .collect();
++        let mut expected = rows.clone();
++        expected.sort_by_key(|row| row.0 & 255);
++        let workers = AtomicUsize::new(0);
++        pool.install(|| {
++            partition_impl(
++                &mut rows,
++                8,
++                0,
++                ByKey(|row: &(u64, usize)| {
++                    workers.fetch_or(
++                        1usize << rayon::current_thread_index().unwrap(),
++                        Ordering::Relaxed,
++                    );
++                    row.0
++                }),
++                &mut Buffers::new(),
++                Config {
++                    shards: 4,
++                    block_size: None,
++                    parallel: true,
++                },
++            );
++        });
++        assert!(workers.load(Ordering::Relaxed).count_ones() >= 2);
++        assert_eq!(rows, expected);
++    }
++    #[test]
++    fn combined_deferred_exclusive_after_permutation() {
++        let len = if cfg!(miri) { 53 } else { 293 };
++        let mut backing: Vec<_> = (0..len).collect();
++        let mut rows: Vec<_> = backing
++            .iter_mut()
++            .enumerate()
++            .map(|(id, r)| (((id * 73) % 64) as u64, id, r))
++            .collect();
++        let mut expected: Vec<_> = rows.iter().map(|r| (r.0, r.1)).collect();
++        expected.sort_by_key(|r| r.0);
++        let mut pending: Option<(*mut (u64, usize, &mut usize), usize)> = None;
++        let mut callbacks = 0;
++        partition_impl_with_visit(
++            &mut rows,
++            2,
++            4,
++            ByKey(|r: &(u64, usize, &mut usize)| r.0),
++            &mut Buffers::new(),
++            config(3, 7),
++            Some(&mut |child| {
++                callbacks += 1;
++                if let Some((pointer, len)) = pending.take() {
++                    // SAFETY: this is a previous, retired, disjoint bucket;
++                    // the current callback cannot overwrite or borrow it.
++                    let previous = unsafe { core::slice::from_raw_parts_mut(pointer, len) };
++                    previous.sort_by_key(|r| r.0);
++                }
++                pending = Some((child.as_mut_ptr(), child.len()));
++            }),
++        );
++        if let Some((pointer, len)) = pending {
++            // SAFETY: this final retired interval remains exclusively owned.
++            unsafe { core::slice::from_raw_parts_mut(pointer, len) }.sort_by_key(|r| r.0);
++        }
++        assert!(callbacks >= 2);
++        assert_eq!(
++            rows.iter().map(|r| (r.0, r.1)).collect::<Vec<_>>(),
++            expected
++        );
++        for (_, id, r) in rows {
++            assert_eq!(*r, id);
++            *r += 1;
++        }
++        assert_eq!(backing, (1..=len).collect::<Vec<_>>());
++    }
++
++    #[test]
++    fn combined_delayed_callback_panic_exclusive_after_prior_consumption() {
++        let len = if cfg!(miri) { 53 } else { 293 };
++        let mut backing: Vec<_> = (0..len).collect();
++        let mut rows: Vec<_> = backing
++            .iter_mut()
++            .enumerate()
++            .map(|(id, r)| (((id * 73) % 64) as u64, id, r))
++            .collect();
++        let mut pending: Option<(*mut (u64, usize, &mut usize), usize)> = None;
++        let mut callbacks = 0;
++        let mut consumed = 0;
++        let result = catch_unwind(AssertUnwindSafe(|| {
++            partition_impl_with_visit(
++                &mut rows,
++                2,
++                4,
++                ByKey(|r: &(u64, usize, &mut usize)| r.0),
++                &mut Buffers::new(),
++                config(3, 7),
++                Some(&mut |child| {
++                    callbacks += 1;
++                    if let Some((pointer, len)) = pending.take() {
++                        // SAFETY: the earlier retired bucket is disjoint and
++                        // cannot be accessed by the remaining producer work.
++                        let previous = unsafe { core::slice::from_raw_parts_mut(pointer, len) };
++                        previous.sort_by_key(|r| r.0);
++                        consumed += len;
++                        panic!("second callback after previous exclusive bucket consumed");
++                    }
++                    pending = Some((child.as_mut_ptr(), child.len()));
++                }),
++            );
++        }));
++        assert!(result.is_err());
++        assert_eq!(callbacks, 2);
++        assert!(consumed > 0);
++        assert!(pending.is_none());
++        let mut ids = Vec::new();
++        for (_, id, r) in rows {
++            assert_eq!(*r, id);
++            *r += 1;
++            ids.push(id);
++        }
++        ids.sort_unstable();
++        assert_eq!(ids, (0..len).collect::<Vec<_>>());
++        assert_eq!(backing, (1..=len).collect::<Vec<_>>());
++    }
++}
+--- /dev/null
++++ b/rust/tessera-sort/src/block/parallel/compact.rs
+@@ -0,0 +1,356 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Experimental parallel block permutation followed by the existing squeeze.
++//!
++//! Long permutation cycles are split into segments. Their boundary blocks are
++//! snapshotted before writes, so segments are independent even within one cycle.
++//! Short cycles share a worker-local temporary. No initialized references to T
++//! are formed: partial blocks contain uninitialized padding.
++
++use super::*;
++
++struct Addresses<T>(Vec<*mut T>);
++
++// SAFETY: the immutable table only stores addresses. The movement plan assigns
++// each physical destination to exactly one job; sources in other jobs are
++// snapshotted before execution. T is transferred, never concurrently borrowed.
++unsafe impl<T: Send> Sync for Addresses<T> {}
++
++impl<T> Addresses<T> {
++    fn at(&self, physical: u32) -> *mut T {
++        // SAFETY: all IDs were validated while building cycles, before movement.
++        unsafe { *self.0.get_unchecked(physical as usize) }
++    }
++}
++
++struct Piece {
++    blocks: Vec<u32>,
++    // None means a complete short cycle using the worker-local temporary.
++    final_snapshot: Option<usize>,
++}
++
++struct Worker<T> {
++    pieces: Vec<Piece>,
++    temp: Vec<MaybeUninit<T>>,
++    load: usize,
++    completed: usize,
++}
++
++struct Snapshots<T>(Vec<MaybeUninit<T>>);
++
++// SAFETY: during execution snapshots are read exclusively as raw bytes, once
++// for each non-overlapping destination. No shared references to T are formed.
++unsafe impl<T: Send> Sync for Snapshots<T> {}
++
++impl<T> Snapshots<T> {
++    fn at(&self, offset: usize) -> *const T {
++        // SAFETY: construction reserves a complete block at each stored offset.
++        unsafe { self.0.as_ptr().add(offset).cast() }
++    }
++}
++
++fn cells<T>(len: usize) -> Vec<MaybeUninit<T>> {
++    let mut result = Vec::with_capacity(len);
++    result.resize_with(len, MaybeUninit::uninit);
++    result
++}
++
++pub(super) fn permute_blocks<T: Send>(
++    sorter: &mut Partition<'_, '_, T>,
++    workers: usize,
++    parallel: bool,
++) {
++    permute_with_fault(sorter, workers, parallel, None);
++}
++
++fn permute_with_fault<T: Send>(
++    sorter: &mut Partition<'_, '_, T>,
++    workers: usize,
++    parallel: bool,
++    fail_after: Option<usize>,
++) {
++    let report = !cfg!(miri) && std::env::var_os("TESSERA_COMPACT_STATS").is_some();
++    let count = sorter.block_order.len();
++    let head = sorter.bucket_count;
++    let block_size = sorter.blocks.block_size;
++    let workers = workers.max(1).min(count);
++    // Each split cycle has at least cap blocks. There are at most count/cap
++    // such cycles and at most 2*count/cap segment boundaries, hence <= 8Q
++    // temporary boundary blocks, plus Q worker blocks. Metadata is O(count).
++    let cap = count.div_ceil(workers.saturating_mul(4)).max(2);
++    let mut visited = alloc::vec![false; count];
++    let mut jobs: Vec<_> = (0..workers)
++        .map(|_| Worker {
++            pieces: Vec::new(),
++            temp: cells(block_size),
++            load: 0,
++            completed: 0,
++        })
++        .collect();
++    let mut boundaries = Vec::new();
++    let mut cycle_count = 0;
++    let mut largest_cycle = 0;
++    let mut put = |piece: Piece| {
++        let worker = jobs.iter_mut().min_by_key(|worker| worker.load).unwrap();
++        worker.load += piece.blocks.len();
++        worker.pieces.push(piece);
++    };
++    for start in 0..count {
++        if visited[start] {
++            continue;
++        }
++        let mut cycle = Vec::new();
++        let mut physical = start;
++        while !visited[physical] {
++            visited[physical] = true;
++            cycle.push(physical as u32);
++            // Target physical ID for logical i is (i + head) mod count.
++            let logical = if physical >= head {
++                physical - head
++            } else {
++                count - (head - physical)
++            };
++            physical = sorter.block_order[logical] as usize;
++        }
++        assert_eq!(physical, start);
++        cycle_count += 1;
++        largest_cycle = largest_cycle.max(cycle.len());
++        if cycle.len() <= 1 {
++            continue;
++        }
++        if cycle.len() <= cap {
++            put(Piece {
++                blocks: cycle,
++                final_snapshot: None,
++            });
++        } else {
++            let base = boundaries.len();
++            let pieces = cycle.len().div_ceil(cap);
++            for chunk in cycle.chunks(cap) {
++                boundaries.push(chunk[0]);
++            }
++            for (index, chunk) in cycle.chunks(cap).enumerate() {
++                put(Piece {
++                    blocks: chunk.to_vec(),
++                    final_snapshot: Some((base + (index + 1) % pieces) * block_size),
++                });
++            }
++        }
++    }
++    if report {
++        eprintln!(
++            "compact cycles: blocks={count} cycles={cycle_count} largest={largest_cycle} cap={cap} boundaries={} worker_loads={:?}",
++            boundaries.len(),
++            jobs.iter().map(|job| job.load).collect::<Vec<_>>()
++        );
++    }
++    let mut snapshots = Snapshots(cells(boundaries.len().checked_mul(block_size).unwrap()));
++    // Calling block_ptr repeatedly must not create fresh overlapping T borrows.
++    // It returns pointers from the original input ancestor or Vec allocations.
++    let addresses = Addresses((0..count).map(|id| sorter.blocks.block_ptr(id)).collect());
++    if parallel {
++        let _ = rayon::current_num_threads();
++    }
++    for (index, physical) in boundaries.into_iter().enumerate() {
++        // SAFETY: full physical blocks and disjoint snapshot blocks are valid
++        // allocations of B cells. Raw copies preserve uninitialized padding.
++        unsafe {
++            ptr::copy_nonoverlapping(
++                addresses.at(physical),
++                snapshots.0.as_mut_ptr().add(index * block_size).cast(),
++                block_size,
++            );
++        }
++    }
++    let used_workers = std::sync::atomic::AtomicUsize::new(0);
++    let completed_pieces = std::sync::atomic::AtomicUsize::new(0);
++    let run = |job: &mut Worker<T>| {
++        if report {
++            if let Some(index) = rayon::current_thread_index() {
++                if index < usize::BITS as usize {
++                    used_workers.fetch_or(1usize << index, std::sync::atomic::Ordering::Relaxed);
++                }
++            }
++        }
++        while job.completed < job.pieces.len() {
++            // SAFETY: completed is checked above and every planned piece is nonempty.
++            let piece = unsafe { job.pieces.get_unchecked(job.completed) };
++            // SAFETY: every piece comes from a nonempty cycle chunk.
++            let first = unsafe { *piece.blocks.get_unchecked(0) };
++            let final_source = if let Some(offset) = piece.final_snapshot {
++                snapshots.at(offset)
++            } else {
++                // SAFETY: the short cycle is wholly owned by this worker and
++                // its temporary is disjoint from every physical block.
++                unsafe {
++                    ptr::copy_nonoverlapping(
++                        addresses.at(first),
++                        job.temp.as_mut_ptr().cast(),
++                        block_size,
++                    );
++                }
++                job.temp.as_ptr().cast()
++            };
++            for pair in piece.blocks.windows(2) {
++                // SAFETY: distinct cycle nodes identify disjoint full blocks;
++                // no other worker reads or writes either node except boundary
++                // sources, which were copied before this phase.
++                unsafe {
++                    ptr::copy_nonoverlapping(
++                        addresses.at(*pair.get_unchecked(1)),
++                        addresses.at(*pair.get_unchecked(0)),
++                        block_size,
++                    );
++                }
++            }
++            // SAFETY: the final source is either this worker's temporary or a
++            // pre-staged boundary. It is disjoint from the final destination.
++            unsafe {
++                ptr::copy_nonoverlapping(
++                    final_source,
++                    addresses.at(*piece.blocks.get_unchecked(piece.blocks.len() - 1)),
++                    block_size,
++                );
++            }
++            job.completed += 1;
++            // Injection is strictly between pieces, after ownership reaches a
++            // recoverable boundary. The monotonically increasing count makes
++            // it one-shot, including during serial completion after unwind.
++            if let Some(fail_after) = fail_after {
++                let completed = completed_pieces.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++                assert_ne!(
++                    completed, fail_after,
++                    "injected scheduling panic between pieces"
++                );
++            }
++        }
++    };
++    // The movement kernel has no allocation, user callbacks, or panicking
++    // operations. A scheduler panic can only leave whole pieces pending. Rayon
++    // joins existing jobs before returning; finish pending work serially using
++    // preallocated state, then restore the input before resuming the panic.
++    let result = unwind::catch(|| {
++        if parallel {
++            jobs.par_iter_mut().for_each(run);
++        } else {
++            jobs.iter_mut().for_each(&run);
++        }
++    });
++    if result.is_err() {
++        jobs.iter_mut().for_each(run);
++    }
++    for (logical, physical) in sorter.block_order.iter_mut().enumerate() {
++        *physical = if logical >= count - head {
++            logical - (count - head)
++        } else {
++            logical + head
++        } as u32;
++    }
++    if report {
++        eprintln!(
++            "compact executing workers: {}",
++            used_workers
++                .load(std::sync::atomic::Ordering::Relaxed)
++                .count_ones()
++        );
++    }
++    if let Err(payload) = result {
++        sorter.compact();
++        unwind::resume(payload);
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::sync::{
++        Arc,
++        atomic::{AtomicUsize, Ordering},
++    };
++
++    struct Owned {
++        key: usize,
++        id: usize,
++        text: String,
++        drops: Arc<Vec<AtomicUsize>>,
++    }
++    impl Drop for Owned {
++        fn drop(&mut self) {
++            assert_eq!(self.text, self.id.to_string());
++            self.drops[self.id].fetch_add(1, Ordering::Relaxed);
++        }
++    }
++
++    #[test]
++    fn compact_short_split_and_one_block_tail_cycles() {
++        // F=9, H=2 gives 13 physical blocks and cap=2 for Q=4.
++        // A seven-node cycle splits 2+2+2+1; the next two nodes
++        // form a short cycle. The final live block has padding.
++        let mut rows: Vec<_> = (0..29).collect();
++        let mut expected = Vec::new();
++        for block in [1, 2, 3, 4, 5, 6, 0, 8, 7] {
++            expected.extend(block * 3..block * 3 + 3);
++        }
++        expected.extend(27..29);
++        {
++            let mut buffers = Buffers::new();
++            let mut sorter = Partition::new(&mut rows, 2, 3, &mut buffers);
++            sorter.block_order[2..9].rotate_left(1);
++            sorter.block_order.swap(9, 10);
++            permute_blocks(&mut sorter, 4, !cfg!(miri));
++            sorter.compact();
++        }
++        assert_eq!(rows, expected);
++    }
++
++    #[test]
++    fn compact_between_piece_panic_owned_and_exclusive() {
++        let n = if cfg!(miri) { 23 } else { 113 };
++        for fail in [None, Some(0), Some(1)] {
++            let drops = Arc::new((0..n).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++            let mut rows: Vec<_> = (0..n)
++                .map(|id| Owned {
++                    key: id * 37 % 4,
++                    id,
++                    text: id.to_string(),
++                    drops: drops.clone(),
++                })
++                .collect();
++            let result = unwind::catch(|| {
++                let mut buffers = Buffers::new();
++                let mut sorter = Partition::new(&mut rows, 4, 3, &mut buffers);
++                assert!(sorter.step_with_ends(|row| row.key, false).0.is_none());
++                permute_with_fault(&mut sorter, 4, !cfg!(miri), fail);
++                sorter.compact();
++            });
++            assert_eq!(result.is_err(), fail.is_some());
++            let mut expected: Vec<_> = (0..n).collect();
++            expected.sort_by_key(|id| id * 37 % 4);
++            assert_eq!(rows.iter().map(|r| r.id).collect::<Vec<_>>(), expected);
++            assert!(drops.iter().all(|d| d.load(Ordering::Relaxed) == 0));
++            drop(rows);
++            assert!(drops.iter().all(|d| d.load(Ordering::Relaxed) == 1));
++
++            let mut backing: Vec<_> = (0..n).collect();
++            let mut refs: Vec<_> = backing.iter_mut().collect();
++            let result = unwind::catch(|| {
++                let mut buffers = Buffers::new();
++                let mut sorter = Partition::new(&mut refs, 4, 3, &mut buffers);
++                assert!(
++                    sorter
++                        .step_with_ends(|row| **row * 37 % 4, false)
++                        .0
++                        .is_none()
++                );
++                permute_with_fault(&mut sorter, 4, !cfg!(miri), fail);
++                sorter.compact();
++            });
++            assert_eq!(result.is_err(), fail.is_some());
++            assert_eq!(refs.iter().map(|r| **r).collect::<Vec<_>>(), expected);
++            for record in refs {
++                *record += 1;
++            }
++            assert_eq!(backing, (1..=n).collect::<Vec<_>>());
++        }
++    }
++}
+--- a/rust/tessera-sort/src/engine.rs
++++ b/rust/tessera-sort/src/engine.rs
+@@ -1132,6 +1132,8 @@
+                 extractor,
+             );
+             core::mem::swap(&mut self.source, destination);
++            #[cfg(all(test, feature = "rayon"))]
++            crate::test_witness::moved();
+             largest
+         }
+     }
+@@ -1424,3 +1426,6 @@
+ 
+ #[cfg(all(test, feature = "rayon"))]
+ pub(crate) mod count_window_witness;
++
++#[cfg(test)]
++mod current_main_tests;
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/current_main_tests.rs
+@@ -0,0 +1,147 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Attribute the shared narrow-window route to Direct, never `ByKey` payloads.
++
++use super::*;
++use crate::RadixKey;
++use crate::key::ByKey;
++use alloc::sync::Arc;
++use core::cmp::Reverse;
++use core::sync::atomic::{AtomicUsize, Ordering::Relaxed};
++
++#[derive(Clone)]
++pub(super) struct Counted<E> {
++    inner: E,
++    attempts: Arc<AtomicUsize>,
++    pub(super) fills: Arc<AtomicUsize>,
++}
++
++impl<T, E: Extract<T>> Extract<T> for Counted<E> {
++    type Value = E::Value;
++
++    fn key(&mut self, record: &T) -> Self::Value {
++        self.inner.key(record)
++    }
++
++    fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
++        self.attempts.fetch_add(1, Relaxed);
++        let filled = self.inner.try_count_window(records, low, width);
++        self.fills.fetch_add(usize::from(filled), Relaxed);
++        filled
++    }
++}
++
++pub(super) fn counted<E>(inner: E) -> Counted<E> {
++    Counted {
++        inner,
++        attempts: Arc::new(AtomicUsize::new(0)),
++        fills: Arc::new(AtomicUsize::new(0)),
++    }
++}
++
++fn check_window<K: RadixKey>(input: Vec<K>, low: usize, width: usize) {
++    let mask = ((1u128 << width) - 1) << low;
++    let fixed = input[0].encode().to_u128() & !mask;
++    assert!(
++        input
++            .iter()
++            .all(|value| value.encode().to_u128() & !mask == fixed)
++    );
++    let mut expected: Vec<_> = input.iter().map(|value| value.encode()).collect();
++    expected.sort();
++    let mut actual = input.clone();
++    assert!(Direct.try_count_window(&mut actual, low, width));
++    assert!(actual.iter().map(|value| value.encode()).eq(expected));
++
++    // A fresh engine call must actually use the hook, not just return the
++    // correct output by taking a tile or an ordered-input early return.
++    let mut actual = input.clone();
++    let mut trace = counted(Direct);
++    sort_with_tile_bytes::<_, _, false>(&mut actual, &mut trace, None, 64);
++    assert_eq!(trace.fills.load(Relaxed), 1);
++    assert!(actual.windows(2).all(|w| w[0].encode() <= w[1].encode()));
++
++    let mut rows: Vec<_> = input
++        .into_iter()
++        .enumerate()
++        .map(|(id, key)| (key, id))
++        .collect();
++    let mut wanted = rows.clone();
++    wanted.sort_by_key(|row| row.0.encode());
++    let mut trace = counted(ByKey(|row: &(K, usize)| row.0));
++    sort_with_tile_bytes::<_, _, true>(&mut rows, &mut trace, None, 64);
++    assert!(trace.attempts.load(Relaxed) > 0);
++    assert_eq!(trace.fills.load(Relaxed), 0);
++    assert!(
++        rows.iter()
++            .map(|row| (row.0.encode(), row.1))
++            .eq(wanted.iter().map(|row| (row.0.encode(), row.1)))
++    );
++}
++
++#[test]
++fn narrow_count_all_integer_widths_and_reverse() {
++    let len = if cfg!(miri) { 129 } else { 1025 };
++    macro_rules! check {
++        ($($ty:ty),*) => {$(
++            let bits = core::mem::size_of::<$ty>() * 8;
++            for (low, width) in [(0, 3), (bits / 2, 4), (bits - 8, 8)] {
++                let mask = ((1u128 << width) - 1) << low;
++                let base = 0x9a31_65f0_c07b_12e4_a97c_d4e5_83f6_b2d1u128 & !mask;
++                let input: Vec<$ty> = (0..len)
++                    .map(|id| (base | (((id as u128).wrapping_mul(181) << low) & mask)) as $ty)
++                    .collect();
++                check_window(input.clone(), low, width);
++                check_window(input.into_iter().map(Reverse).collect(), low, width);
++            }
++        )*};
++    }
++    check!(
++        u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
++    );
++}
++
++#[test]
++fn narrow_count_float_bits_preserve_nan_payloads_and_signs() {
++    let len = if cfg!(miri) { 129 } else { 1025 };
++    // Keep the sign fixed: flipping it would complement every encoded bit and
++    // violate the small-window precondition. These groups cover each sign,
++    // NaN payloads, infinities, zeros/subnormals and exponent-only variation.
++    for sign in [0u32, 1 << 31] {
++        for (base, low) in [(0x7fc0_0000, 0), (0x7f80_0000, 0), (0, 0), (0, 23)] {
++            let input: Vec<_> = (0..len)
++                .map(|id| {
++                    f32::from_bits(sign | base | (((id as u32).wrapping_mul(181) & 255) << low))
++                })
++                .collect();
++            check_window(input.clone(), low, 8);
++            check_window(input.into_iter().map(Reverse).collect(), low, 8);
++        }
++    }
++    for sign in [0u64, 1 << 63] {
++        for (base, low) in [
++            (0x7ff8_0000_0000_0000, 0),
++            (0x7ff0_0000_0000_0000, 0),
++            (0, 0),
++            (0, 52),
++        ] {
++            let input: Vec<_> = (0..len)
++                .map(|id| {
++                    f64::from_bits(sign | base | (((id as u64).wrapping_mul(181) & 255) << low))
++                })
++                .collect();
++            check_window(input.clone(), low, 8);
++            check_window(input.into_iter().map(Reverse).collect(), low, 8);
++        }
++    }
++}
++
++#[test]
++fn narrow_count_declines_invalid_width_without_touching_records() {
++    for width in [0, 9, 64] {
++        let mut values = [3u64, 1, 2];
++        assert!(!Direct.try_count_window(&mut values, 0, width));
++        assert_eq!(values, [3, 1, 2]);
++    }
++    assert!(Direct.try_count_window(&mut [] as &mut [u128], 64, 8));
++}
+--- a/rust/tessera-sort/src/engine/parallel.rs
++++ b/rust/tessera-sort/src/engine/parallel.rs
+@@ -57,124 +57,18 @@
+ struct Narrow<E, const SHIFT: usize>(E);
+ impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for Narrow<E, SHIFT> {
+     fn try_parallel_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
+-        self.0
+-            .try_parallel_count_window(records, low + SHIFT, width)
++        self.0.try_parallel_count_window(records, low + SHIFT, width)
+     }
+     type Value = u64;
+     #[inline]
+     fn key(&mut self, record: &T) -> u64 {
+         (self.0.key(record).to_u128() >> SHIFT) as u64
+     }
+-}
+-
+-/// One bucket pointer with the provenance of its own materialized slice.
+-struct Bucket<T> {
+-    start: *mut T,
+-    records: usize,
+-}
+-
+-/// Adjacent materialized buckets scheduled together without merging borrows.
+-///
+-/// Each callback creates an exclusive slice borrow for only one bucket. Its
+-/// pointer cannot be extended to cover the next bucket, even if their numeric
+-/// addresses are adjacent. Retain each pointer until its child sort completes.
+-struct Job<T> {
+-    records: usize,
+-    buckets: Vec<Bucket<T>>,
+-}
+-
+-// SAFETY: each stored pointer exclusively owns its materialized bucket. The
+-// partition transfers disjoint buckets once and no longer accesses them.
+-unsafe impl<T: Send> Send for Job<T> {}
+-
+-impl<T: Send> Job<T> {
+-    fn new() -> Self {
+-        Job {
+-            records: 0,
+-            buckets: Vec::new(),
+-        }
+-    }
+-
+-    /// Extends the batch by one adjacent bucket, keeping its individual borrow.
+-    fn push(&mut self, bucket: *mut T, records: usize, record_bytes: usize) -> bool {
+-        if let Some(previous) = self.buckets.last() {
+-            // SAFETY: the one-past pointer stays within this bucket's allocation
+-            // and is only compared numerically, never dereferenced.
+-            let adjacent = unsafe { std::ptr::eq(previous.start.add(previous.records), bucket) };
+-            if !adjacent {
+-                return false;
+-            }
+-        }
+-        self.records += records;
+-        self.buckets.push(Bucket {
+-            start: bucket,
+-            records,
+-        });
+-        debug_assert_eq!(record_bytes, core::mem::size_of::<T>());
+-        true
+-    }
+-
+-    fn bytes(&self) -> usize {
+-        self.records.saturating_mul(core::mem::size_of::<T>())
+-    }
+-
+-    fn run<E: Extract<T> + Clone + Send, const CACHED: bool>(
+-        &mut self,
+-        mut key: E,
+-        candidate: u128,
+-        tile_bytes: usize,
+-        pool: &Pool<T>,
+-    ) {
+-        let mut workspace = pool.take();
+-        for bucket in &self.buckets {
+-            // SAFETY: this exact pointer and length came from one exclusive
+-            // materialized slice, not a neighboring bucket's narrower borrow.
+-            // Jobs are disjoint and compaction no longer accesses this bucket.
+-            let child = unsafe { core::slice::from_raw_parts_mut(bucket.start, bucket.records) };
+-            if child.len() > 1 {
+-                let varying = scan_varying_bits(child, candidate, &mut key);
+-                Sorter::<T, E, CACHED> {
+-                    workspace: &mut workspace,
+-                    extractor: &mut key,
+-                    tile_bytes,
+-                }
+-                .sort_node(child, varying);
+-            }
+-        }
+-        pool.give(workspace);
+-    }
+-}
+-
+-/// Recycled per-task workspaces.
+-///
+-/// A task needs its own tile and block scratch. Allocating one per run would
+-/// cost a 64 KiB allocation per 32K records. Completed jobs return their scratch
+-/// for reuse. Reentrant key functions can suspend multiple jobs on one worker,
+-/// so the number of simultaneously borrowed workspaces is not worker-bounded.
+-struct Pool<T> {
+-    free: std::sync::Mutex<Vec<Workspace<T>>>,
+-}
+-
+-impl<T> Pool<T> {
+-    fn new() -> Self {
+-        Pool {
+-            free: std::sync::Mutex::new(Vec::new()),
+-        }
+-    }
+-
+-    fn take(&self) -> Workspace<T> {
+-        self.free
+-            .lock()
+-            .unwrap_or_else(|poison| poison.into_inner())
+-            .pop()
+-            .unwrap_or_default()
+-    }
+-
+-    fn give(&self, workspace: Workspace<T>) {
+-        self.free
+-            .lock()
+-            .unwrap_or_else(|poison| poison.into_inner())
+-            .push(workspace);
++
++    fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
++        // Narrowing is selected only when the other half is constant, so this
++        // translated window still covers every varying encoded-key bit.
++        self.0.try_count_window(records, low + SHIFT, width)
+     }
+ }
+ 
+@@ -184,6 +78,9 @@
+     varying: u128,
+     tile_bytes: usize,
+ ) {
++    let bytes = arr.len().saturating_mul(core::mem::size_of::<T>());
++    #[cfg(test)]
++    let hooks = crate::test_witness::current();
+     let mut workspace = Workspace::new();
+     let low = varying.trailing_zeros() as usize;
+     let top = bit_len(varying);
+@@ -193,14 +90,32 @@
+     sample_keys(arr, &mut keys, &mut key);
+     let equal = sample_mode(&mut keys);
+     let bit = KeyValue::<T, E>::from_usize(1) << KeyValue::<T, E>::from_usize(top - 1);
+-    // prepare_sort scanned all keys: bits outside this window are constant.
++    // Match the current public narrow Direct gate; full-random and ByKey
++    // roots under this profile do not enter it.
+     if top - low <= SPLIT_BITS && key.try_parallel_count_window(arr, low, top - low) {
+         return;
+     }
+-    if top - low <= SPLIT_BITS
+-        || equal.is_some()
+-        || outlier_run(arr, &keys, bit, &mut key).is_some()
+-    {
++    if top - low <= SPLIT_BITS {
++        // The full adaptive scan established `varying`, so this window covers
++        // every key difference. Direct keys can use the shared counting fill;
++        // payload-bearing ByKey records decline and keep the native partition.
++        if key.try_count_window(arr, low, top - low) {
++            return;
++        }
++        #[cfg(test)]
++        crate::test_witness::single_route(&hooks);
++        block::partition_digit_parallel_with_visit(
++            arr,
++            top - low,
++            low,
++            key,
++            workspace.block_buffers(),
++            rayon::current_num_threads().min((bytes / MIN_TASK_BYTES).max(1)),
++            &mut |_| {},
++        );
++        return;
++    }
++    if equal.is_some() || outlier_run(arr, &keys, bit, &mut key).is_some() {
+         Sorter::<T, E, CACHED> {
+             workspace: &mut workspace,
+             extractor: &mut key,
+@@ -210,91 +125,175 @@
+         return;
+     }
+     let digit = choose_split_digit(arr, top, tile_bytes, &mut key);
++    let digit = if let Some(cap) = std::env::var("TESSERA_PIPELINE_ROOT_BITS")
++        .ok()
++        .and_then(|value| value.parse::<usize>().ok())
++    {
++        top_window(varying, cap.clamp(1, digit.width)).0
++    } else {
++        digit
++    };
+     let candidate = varying & !digit.mask::<E::Value>().to_u128();
+-    if candidate == 0 {
+-        // The selected digit covers every varying bit, so its partition
+-        // finishes the root. There are no unfinished children to schedule.
+-        block::partition_digit(
++    // Prototype: child work starts as soon as compact has retired its source
++    // blocks. Jobs only own materialized, pairwise disjoint bucket intervals.
++    let worker_count = rayon::current_num_threads().min((bytes / MIN_TASK_BYTES).max(1));
++    if worker_count < 2 {
++        Sorter::<T, E, CACHED> {
++            workspace: &mut workspace,
++            extractor: &mut key,
++            tile_bytes,
++        }
++        .sort_node(arr, varying);
++        return;
++    }
++    let mut batch = Vec::new();
++    let mut batch_records = 0usize;
++    let batch_bytes = std::env::var("TESSERA_PIPELINE_BATCH_BYTES")
++        .ok()
++        .and_then(|v| v.parse::<usize>().ok())
++        .unwrap_or(128 * 1024);
++    rayon::scope(|scope| {
++        // The sender lives inside the scope body. A producer panic therefore
++        // disconnects the channel before scope waits for consumers to finish.
++        #[cfg(test)]
++        let _publishing_witness = crate::test_witness::PublishingGuard::new();
++        #[cfg(test)]
++        let _sender_witness = crate::test_witness::SenderGuard::new(hooks.clone());
++        let (sender, receiver) = std::sync::mpsc::channel();
++        let receiver = std::sync::Arc::new(std::sync::Mutex::new(receiver));
++        let mut launched = false;
++        block::partition_digit_parallel_with_visit(
+             arr,
+             digit.width,
+             digit.shift,
+-            &mut key,
++            key.clone(),
+             workspace.block_buffers(),
++            worker_count,
++            &mut |child| {
++                let child_key = &key;
++                batch_records += child.len();
++                batch.push(Materialized {
++                    pointer: child.as_mut_ptr(),
++                    len: child.len(),
++                });
++                if batch_records.saturating_mul(core::mem::size_of::<T>()) >= batch_bytes {
++                    sender.send(core::mem::take(&mut batch)).unwrap();
++                    #[cfg(test)]
++                    crate::test_witness::published(&hooks);
++                    batch_records = 0;
++                    if !launched {
++                        // Finish potentially reentrant generic Clone code
++                        // before publishing any consumer that waits for us.
++                        let keys: Vec<_> = (1..worker_count).map(|_| child_key.clone()).collect();
++                        launched = true;
++                        #[cfg(test)]
++                        crate::test_witness::publication_started();
++                        for mut child_key in keys {
++                            let receiver = receiver.clone();
++                            #[cfg(test)]
++                            let consumer_hooks = hooks.clone();
++                            scope.spawn(move |_| {
++                                #[cfg(test)]
++                                let _consumer_witness =
++                                    crate::test_witness::PhaseGuard::consumer(consumer_hooks);
++                                consume_queue::<T, E, CACHED>(
++                                    &receiver,
++                                    candidate,
++                                    &mut child_key,
++                                    tile_bytes,
++                                );
++                            });
++                        }
++                    }
++                }
++                #[cfg(test)]
++                crate::test_witness::callback_finished(&hooks);
++            },
+         );
+-        return;
+-    }
+-    // The compaction is the longest serial phase of a parallel call, and the
+-    // children are the only parallel work that does not depend on all of it:
+-    // it hands out each bucket as soon as it is materialized. Sorting a run of
+-    // materialized buckets inside that callback overlaps the two, which is
+-    // worth about a third of the root on large inputs. Runs are cut at
+-    // MIN_TASK_BYTES so a task still amortises its scratch and scheduling.
+-    let pool = Pool::new();
+-    let record_bytes = core::mem::size_of::<T>();
+-    rayon::scope(|scope| {
+-        let mut pending: Option<Job<T>> = None;
+-        {
+-            let mut visit = |bucket: &mut [T], visit_key: &mut E| {
+-                let start = bucket.as_mut_ptr();
+-                let records = bucket.len();
+-                let mut job = pending.take().unwrap_or_else(Job::new);
+-                if !job.push(start, records, record_bytes) {
+-                    // The compaction materializes buckets in increasing
+-                    // addresses, so a gap means the previous run is complete.
+-                    spawn_job::<T, E, CACHED>(
+-                        scope,
+-                        job,
+-                        candidate,
+-                        visit_key.clone(),
+-                        tile_bytes,
+-                        &pool,
+-                    );
+-                    job = Job::new();
+-                    assert!(job.push(start, records, record_bytes));
+-                }
+-                if job.bytes() >= MIN_TASK_BYTES {
+-                    spawn_job::<T, E, CACHED>(
+-                        scope,
+-                        job,
+-                        candidate,
+-                        visit_key.clone(),
+-                        tile_bytes,
+-                        &pool,
+-                    );
+-                } else {
+-                    pending = Some(job);
+-                }
+-            };
+-            block::partition_digit_with_ends(
+-                arr,
+-                digit.width,
+-                digit.shift,
+-                &mut key,
+-                workspace.block_buffers(),
+-                &mut visit,
+-            );
+-        }
+-        if let Some(job) = pending {
+-            spawn_job::<T, E, CACHED>(scope, job, candidate, key.clone(), tile_bytes, &pool);
+-        }
++        if batch_records != 0 {
++            sender.send(core::mem::take(&mut batch)).unwrap();
++        }
++        // Disconnect before this producer joins the consumers. No job blocks
++        // on the availability of a particular worker or holds a queue lock
++        // across a user key call, including reentrant Rayon operations.
++        drop(sender);
++        #[cfg(test)]
++        crate::test_witness::publication_closed();
++        consume_queue::<T, E, CACHED>(&receiver, candidate, &mut key, tile_bytes);
+     });
+ }
+ 
+-/// Queues one materialized run of buckets on the parallel workers.
+-fn spawn_job<
+-    'scope,
+-    T: Send + 'scope,
+-    E: Extract<T> + Clone + Send + 'scope,
+-    const CACHED: bool,
+->(
+-    scope: &rayon::Scope<'scope>,
+-    mut job: Job<T>,
++fn consume_queue<T, E: Extract<T>, const CACHED: bool>(
++    receiver: &std::sync::Mutex<std::sync::mpsc::Receiver<Vec<Materialized<T>>>>,
+     candidate: u128,
+-    key: E,
++    key: &mut E,
+     tile_bytes: usize,
+-    pool: &'scope Pool<T>,
+ ) {
+-    scope.spawn(move |_| job.run::<E, CACHED>(key, candidate, tile_bytes, pool));
++    let mut workspace = Workspace::new();
++    loop {
++        #[cfg(test)]
++        let queue_witness = crate::test_witness::QueueGuard::new();
++        let next = receiver
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .try_recv();
++        #[cfg(test)]
++        drop(queue_witness);
++        match next {
++            Ok(buckets) => {
++                consume_buckets::<T, E, CACHED>(buckets, candidate, key, &mut workspace, tile_bytes)
++            }
++            Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
++            Err(std::sync::mpsc::TryRecvError::Empty) => {
++                std::thread::yield_now();
++            }
++        }
++    }
++}
++
++fn consume_buckets<T, E: Extract<T>, const CACHED: bool>(
++    buckets: Vec<Materialized<T>>,
++    candidate: u128,
++    key: &mut E,
++    workspace: &mut Workspace<T>,
++    tile_bytes: usize,
++) {
++    for source in buckets {
++        // SAFETY: compact retired these records before publishing the task;
++        // tasks cover disjoint buckets and scope joins before the input borrow
++        // ends. No task aliases root scratch or another job's workspace.
++        let child = unsafe { source.slice() };
++        #[cfg(test)]
++        crate::test_witness::new_bucket();
++        if child.len() > 1 {
++            let varying = scan_varying_bits(child, candidate, key);
++            Sorter::<T, E, CACHED> {
++                workspace,
++                extractor: key,
++                tile_bytes,
++            }
++            .sort_node(child, varying);
++        }
++    }
++}
++
++struct Materialized<T> {
++    pointer: *mut T,
++    len: usize,
++}
++
++// SAFETY: ownership of a materialized disjoint interval is transferred once
++// into its scoped job. T only needs Send; no shared T references are created.
++unsafe impl<T: Send> Send for Materialized<T> {}
++
++impl<T> Materialized<T> {
++    /// # Safety
++    /// The interval must be fully initialized, uniquely owned by this task,
++    /// and remain allocated for the lifetime selected by the scoped caller.
++    unsafe fn slice<'a>(self) -> &'a mut [T] {
++        // SAFETY: the scoped caller guarantees this interval's unique ownership.
++        unsafe { core::slice::from_raw_parts_mut(self.pointer, self.len) }
++    }
+ }
+ 
+ /// Keeps the serial adaptive checks without changing the sequential entry point.
+@@ -345,6 +344,198 @@
+ }
+ 
+ #[cfg(test)]
+-mod bucket_borrow_tests;
++mod tests {
++    use super::*;
++
++    #[test]
++    fn delayed_pipeline_consumption_preserves_owned_borrows() {
++        let mut values: Vec<_> = (0..293u64)
++            .map(|i| ((i * 73) % 64, alloc::format!("value {i}")))
++            .collect();
++        let mut expected = values.clone();
++        expected.sort_by_key(|row| row.0);
++        let mut pending = Vec::new();
++        let mut root = Workspace::new();
++        let mut worker = Workspace::new();
++        let mut key = crate::key::ByKey(|row: &(u64, alloc::string::String)| row.0);
++        block::partition_digit_with_ends(
++            &mut values,
++            2,
++            4,
++            &mut key,
++            root.block_buffers(),
++            &mut |child, key| {
++                consume_buckets::<_, _, true>(
++                    core::mem::take(&mut pending),
++                    15,
++                    key,
++                    &mut worker,
++                    TILE_BYTES,
++                );
++                pending.push(Materialized {
++                    pointer: child.as_mut_ptr(),
++                    len: child.len(),
++                });
++            },
++        );
++        consume_buckets::<_, _, true>(pending, 15, &mut key, &mut worker, TILE_BYTES);
++        assert_eq!(values, expected);
++    }
++    #[test]
++    fn delayed_pipeline_consumption_preserves_exclusive_records() {
++        let mut payloads: Vec<_> = (0..293u64).collect();
++        let mut values: Vec<_> = payloads
++            .iter_mut()
++            .map(|payload| (((*payload * 73) % 64), payload))
++            .collect();
++        let mut expected: Vec<_> = values.iter().map(|row| (row.0, *row.1)).collect();
++        expected.sort_by_key(|row| row.0);
++        let mut pending = Vec::new();
++        let mut root = Workspace::new();
++        let mut worker = Workspace::new();
++        let mut key = crate::key::ByKey(|row: &(u64, &mut u64)| row.0);
++        block::partition_digit_with_ends(
++            &mut values,
++            2,
++            4,
++            &mut key,
++            root.block_buffers(),
++            &mut |child, key| {
++                consume_buckets::<_, _, true>(
++                    core::mem::take(&mut pending),
++                    15,
++                    key,
++                    &mut worker,
++                    TILE_BYTES,
++                );
++                pending.push(Materialized {
++                    pointer: child.as_mut_ptr(),
++                    len: child.len(),
++                });
++            },
++        );
++        consume_buckets::<_, _, true>(pending, 15, &mut key, &mut worker, TILE_BYTES);
++        let actual: Vec<_> = values.iter().map(|row| (row.0, *row.1)).collect();
++        assert_eq!(actual, expected);
++    }
++
++    #[test]
++    #[cfg(not(miri))]
++    fn reentrant_rayon_keys_do_not_hold_worker_locks() {
++        let mut values: Vec<_> = (0..131_073u64)
++            .map(|i| i.wrapping_mul(0x9e3779b97f4a7c15))
++            .collect();
++        let mut expected = values.clone();
++        expected.sort();
++        let calls = std::sync::atomic::AtomicUsize::new(0);
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(4)
++            .build()
++            .unwrap()
++            .install(|| {
++                crate::par_stable_sort_by_key(&mut values, |key| {
++                    let call = calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++                    if call % 1024 == 0 {
++                        rayon::join(|| (), || ());
++                    }
++                    *key
++                });
++            });
++        assert_eq!(values, expected);
++    }
++
++    #[test]
++    #[cfg(not(miri))]
++    fn producer_clone_panic_preserves_records() {
++        struct PanickingClone(std::sync::Arc<std::sync::atomic::AtomicUsize>);
++        impl Clone for PanickingClone {
++            fn clone(&self) -> Self {
++                if self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 1 {
++                    panic!("producer clone panic");
++                }
++                Self(self.0.clone())
++            }
++        }
++        impl Extract<u64> for PanickingClone {
++            type Value = u64;
++            fn key(&mut self, record: &u64) -> u64 {
++                *record
++            }
++        }
++        let mut values: Vec<_> = (0..131_073u64)
++            .map(|i| i.wrapping_mul(0x9e3779b97f4a7c15))
++            .collect();
++        let mut expected = values.clone();
++        expected.sort();
++        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++            rayon::ThreadPoolBuilder::new()
++                .num_threads(4)
++                .build()
++                .unwrap()
++                .install(|| {
++                    sort::<_, _, false>(
++                        &mut values,
++                        PanickingClone(std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0))),
++                    );
++                });
++        }));
++        assert!(result.is_err());
++        values.sort();
++        assert_eq!(values, expected);
++    }
++    #[test]
++    #[cfg(not(miri))]
++    fn producer_unwind_disconnects_started_consumers() {
++        let mut values: Vec<_> = (0..1021u64)
++            .map(|i| i.wrapping_mul(0x9e3779b97f4a7c15))
++            .collect();
++        let mut expected = values.clone();
++        expected.sort();
++        let started = std::sync::atomic::AtomicBool::new(false);
++        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++            rayon::ThreadPoolBuilder::new()
++                .num_threads(2)
++                .build()
++                .unwrap()
++                .install(|| {
++                    rayon::scope(|scope| {
++                        let (sender, receiver) = std::sync::mpsc::channel();
++                        let receiver = std::sync::Arc::new(std::sync::Mutex::new(receiver));
++                        sender
++                            .send(alloc::vec![Materialized {
++                                pointer: values.as_mut_ptr(),
++                                len: values.len(),
++                            }])
++                            .unwrap();
++                        let started_ref = &started;
++                        scope.spawn(move |_| {
++                            started_ref.store(true, std::sync::atomic::Ordering::Release);
++                            consume_queue::<_, _, false>(
++                                &receiver,
++                                u128::MAX,
++                                &mut crate::key::Direct,
++                                TILE_BYTES,
++                            );
++                        });
++                        while !started.load(std::sync::atomic::Ordering::Acquire) {
++                            std::thread::yield_now();
++                        }
++                        panic!("producer after worker start");
++                    });
++                });
++        }));
++        assert!(result.is_err());
++        assert!(started.load(std::sync::atomic::Ordering::Acquire));
++        values.sort();
++        assert_eq!(values, expected);
++    }
++}
++
++#[cfg(all(test, not(miri)))]
++mod safety_gap_tests;
++
++#[cfg(all(test, not(miri)))]
++mod progress_tests;
++
+ #[cfg(test)]
+-mod sparse_root_tests;
++mod current_main_tests;
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/parallel/current_main_tests.rs
+@@ -0,0 +1,177 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Verify the owned parallel half-key adapter forwards the shared count hook.
++
++use super::*;
++#[cfg(not(miri))]
++use crate::engine::current_main_tests::counted;
++use crate::key::ByKey;
++#[cfg(not(miri))]
++use core::sync::atomic::Ordering::Relaxed;
++
++#[test]
++fn owned_narrow_forwards_direct_count_and_by_key_declines() {
++    for shift in [0usize, 64] {
++        let base = 0x19b2_34c5_d6e7_f809_a1b2_c3d4_e5f6_0000u128 & !(255u128 << shift);
++        let input: Vec<_> = (0..129)
++            .map(|id| base | (((id as u128 * 181) & 255) << shift))
++            .collect();
++        let mut expected = input.clone();
++        expected.sort();
++        let mut actual = input.clone();
++        if shift == 0 {
++            assert!(Narrow::<_, 0>(Direct).try_count_window(&mut actual, 0, 8));
++        } else {
++            assert!(Narrow::<_, 64>(Direct).try_count_window(&mut actual, 0, 8));
++        }
++        assert_eq!(actual, expected);
++        let mut actual = input.clone();
++        let key = ByKey(|record: &u128| *record);
++        let filled = if shift == 0 {
++            Narrow::<_, 0>(key).try_count_window(&mut actual, 0, 8)
++        } else {
++            Narrow::<_, 64>(key).try_count_window(&mut actual, 0, 8)
++        };
++        assert!(!filled);
++        assert_eq!(actual, input);
++    }
++}
++
++#[cfg(not(miri))]
++#[test]
++fn parallel_single_digit_root_counts_direct_and_partitions_by_key() {
++    for threads in [2, 3, 4] {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(threads)
++            .build()
++            .unwrap()
++            .install(|| {
++                for low in [0usize, 57, 64, 120] {
++                    let width = if low == 57 { 7 } else { 8 };
++                    let mask = ((1u128 << width) - 1) << low;
++                    let base = 0x19b2_34c5_d6e7_f809_a1b2_c3d4_e5f6_0000u128 & !mask;
++                    let input: Vec<_> = (0..65_537)
++                        .map(|id| base | (((id as u128 * 181) << low) & mask))
++                        .collect();
++                    let mut expected = input.clone();
++                    expected.sort();
++                    let trace = counted(Direct);
++                    let fills = trace.fills.clone();
++                    let mut actual = input.clone();
++                    sort::<_, _, false>(&mut actual, trace);
++                    assert_eq!(actual, expected);
++                    assert_eq!(fills.load(Relaxed), 1, "threads={threads} low={low}");
++
++                    let mut rows: Vec<_> = input
++                        .into_iter()
++                        .enumerate()
++                        .map(|(id, key)| (key, id))
++                        .collect();
++                    let mut wanted = rows.clone();
++                    wanted.sort_by_key(|row| row.0);
++                    let trace = counted(ByKey(|row: &(u128, usize)| row.0));
++                    let fills = trace.fills.clone();
++                    sort::<_, _, true>(&mut rows, trace);
++                    assert_eq!(fills.load(Relaxed), 0);
++                    assert_eq!(rows, wanted);
++                }
++            });
++    }
++}
++
++#[cfg(not(miri))]
++#[test]
++fn parallel_narrow_half_children_keep_direct_count_hook() {
++    rayon::ThreadPoolBuilder::new()
++        .num_threads(4)
++        .build()
++        .unwrap()
++        .install(|| {
++            for shift in [0usize, 64] {
++                // Two varying bytes separated by a gap force a root partition with
++                // narrow-window children large enough to exceed a tile. The default
++                // eight-bit root leaves about 8192 records per child, above 4096.
++                let base =
++                    0x0123_4567_89ab_cdef_1122_3344_5566_7788u128 & !(0xff00_00ffu128 << shift);
++                let input: Vec<_> = (0..2_097_153)
++                    .map(|id| {
++                        let mixed = (id as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
++                        base | (((u128::from(mixed) & 255)
++                            | ((u128::from(mixed >> 32) & 255) << 24))
++                            << shift)
++                    })
++                    .collect();
++                let mut expected = input.clone();
++                expected.sort();
++                let trace = counted(Direct);
++                let fills = trace.fills.clone();
++                let mut actual = input;
++                sort::<_, _, false>(&mut actual, trace);
++                assert_eq!(actual, expected);
++                assert!(
++                    fills.load(Relaxed) > 1,
++                    "child counting was not reached at half {shift}"
++                );
++            }
++        });
++}
++
++#[cfg(not(miri))]
++#[test]
++#[ignore = "untimed 10M root geometry diagnostic, run explicitly"]
++fn root_geometry_at_10m_matches_frozen_native_policy() {
++    use crate::test_witness::{self, Hooks};
++    use std::sync::Arc;
++    const LEN: usize = 10_000_000;
++    let mut state = 1u64;
++    let input: Vec<_> = (0..LEN)
++        .map(|_| {
++            state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
++            let mut value = state;
++            value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
++            value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
++            value ^ (value >> 31)
++        })
++        .collect();
++    let pool = rayon::ThreadPoolBuilder::new()
++        .num_threads(8)
++        .build()
++        .unwrap();
++    for record_bytes in [8usize, 16] {
++        let hooks = Arc::new(Hooks::default());
++        pool.install(|| {
++            test_witness::with_hooks(hooks.clone(), || {
++                if record_bytes == 8 {
++                    let mut actual = input.clone();
++                    let mut expected = input.clone();
++                    expected.sort();
++                    crate::par_stable_sort(&mut actual);
++                    assert_eq!(actual, expected);
++                } else {
++                    let mut actual: Vec<_> = input
++                        .iter()
++                        .copied()
++                        .enumerate()
++                        .map(|(id, key)| (key, id))
++                        .collect();
++                    let mut expected = actual.clone();
++                    expected.sort_by_key(|row| row.0);
++                    crate::par_stable_sort_by_key(&mut actual, |row| row.0);
++                    assert_eq!(actual, expected);
++                }
++            })
++        });
++        let geometry = hooks.root_geometry.lock().unwrap();
++        assert_eq!(geometry.len(), 1);
++        let (len, radix, block_size, shards) = geometry[0];
++        assert_eq!((len, radix, shards), (LEN, 256, 8));
++        let previous = ((20.0 * LEN as f64) / (2.0 * 8.0 * 256.0 * record_bytes as f64))
++            .sqrt()
++            .ceil() as usize;
++        let previous = previous.max(1024 / record_bytes).max(32).max(1);
++        assert_eq!(block_size, previous);
++        println!(
++            "root_geometry n={len} record_bytes={record_bytes} workers=8 radix={radix} block_size={block_size} shards={shards} frozen_formula={previous}"
++        );
++    }
++}
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/parallel/progress_tests.rs
+@@ -0,0 +1,272 @@
++// SPDX-License-Identifier: BSD-2-Clause
++//! Bounded tests for cooperating nested Rayon work, not arbitrary user blocking.
++use crate::test_witness::{self, Hooks, Phase};
++use std::cell::Cell;
++use std::panic::{AssertUnwindSafe, catch_unwind};
++use std::sync::{
++    Arc,
++    atomic::{AtomicUsize, Ordering::SeqCst},
++};
++use std::time::{Duration, Instant};
++
++pub(crate) fn bounded(name: &str, run: impl FnOnce()) {
++    if std::env::var("TESSERA_PROGRESS_CHILD").as_deref() == Ok(name) {
++        run();
++        return;
++    }
++    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
++        .args(["--exact", name, "--nocapture", "--test-threads=1"])
++        .env("TESSERA_PROGRESS_CHILD", name)
++        .spawn()
++        .unwrap();
++    let deadline = Instant::now() + Duration::from_secs(35);
++    loop {
++        if let Some(status) = child.try_wait().unwrap() {
++            assert!(status.success(), "bounded child failed: {status}");
++            return;
++        }
++        if Instant::now() > deadline {
++            child.kill().unwrap();
++            let _ = child.wait();
++            panic!("nested public sort exceeded 35-second subprocess deadline: {name}");
++        }
++        std::thread::sleep(Duration::from_millis(10));
++    }
++}
++fn key(id: usize) -> u64 {
++    (id as u64).wrapping_mul(0x9e3779b97f4a7c15)
++}
++struct Nested {
++    hooks: Arc<Hooks>,
++    workers: AtomicUsize,
++    claimed: AtomicUsize,
++    active: AtomicUsize,
++    peak: AtomicUsize,
++    completed: AtomicUsize,
++}
++impl Nested {
++    fn new(target: usize) -> Self {
++        Self {
++            hooks: Arc::new(Hooks::progress(target)),
++            workers: AtomicUsize::new(0),
++            claimed: AtomicUsize::new(0),
++            active: AtomicUsize::new(0),
++            peak: AtomicUsize::new(0),
++            completed: AtomicUsize::new(0),
++        }
++    }
++    fn invoke(&self, fail: bool) {
++        test_witness::assert_user_allowed();
++        if test_witness::phase() != Phase::Consumer {
++            return;
++        }
++        let worker = rayon::current_thread_index().unwrap();
++        if self.workers.fetch_or(1 << worker, SeqCst) & (1 << worker) != 0 {
++            return;
++        }
++        if self.claimed.fetch_add(1, SeqCst) >= self.hooks.progress_target {
++            return;
++        }
++        let active = self.active.fetch_add(1, SeqCst) + 1;
++        self.peak.fetch_max(active, SeqCst);
++        self.hooks.progress_arrive();
++        // Isolate the nested invocation's instrumentation from the outer test's
++        // rendezvous. These public calls still use the same fixed Rayon pool.
++        test_witness::with_hooks(Arc::new(Hooks::default()), || {
++            let mut direct: Vec<_> = (0..131_073).map(key).collect();
++            crate::par_stable_sort(&mut direct);
++            assert!(direct.windows(2).all(|w| w[0] <= w[1]));
++            let (left, right) = rayon::join(
++                || {
++                    let mut rows: Vec<_> = (0..65_537).map(|id| (key(id), id)).collect();
++                    crate::par_stable_sort_by_key(&mut rows, |r| {
++                        test_witness::assert_user_allowed();
++                        r.0
++                    });
++                    assert!(rows.windows(2).all(|w| w[0].0 <= w[1].0));
++                    rows.len()
++                },
++                || {
++                    let (a, b) = rayon::join(|| 17, || 25);
++                    a + b
++                },
++            );
++            assert_eq!(left, 65_537);
++            assert_eq!(right, 42);
++        });
++        self.completed.fetch_add(1, SeqCst);
++        self.active.fetch_sub(1, SeqCst);
++        if fail {
++            rayon::join(|| panic!("nested join key panic"), || ());
++        }
++    }
++    fn verify(&self) {
++        assert!(self.workers.load(SeqCst).count_ones() as usize >= self.hooks.progress_target);
++        assert_eq!(self.completed.load(SeqCst), self.hooks.progress_target);
++        assert_eq!(self.active.load(SeqCst), 0);
++        assert!(self.peak.load(SeqCst) >= self.hooks.progress_target);
++        assert_eq!(
++            self.hooks.consumers_started.load(SeqCst),
++            self.hooks.consumers_done.load(SeqCst)
++        );
++        assert!(self.hooks.sender_closed.load(SeqCst) > 0);
++    }
++}
++struct Owned {
++    key: u64,
++    id: usize,
++    text: String,
++    visits: Cell<usize>,
++    drops: Arc<Vec<AtomicUsize>>,
++}
++impl Drop for Owned {
++    fn drop(&mut self) {
++        assert_eq!(self.text, self.id.to_string());
++        assert_eq!(self.drops[self.id].fetch_add(1, SeqCst), 0);
++    }
++}
++fn owned(threads: usize, fail: bool) {
++    let n = 131_073;
++    let drops = Arc::new((0..n).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++    let mut rows: Vec<_> = (0..n)
++        .map(|id| Owned {
++            key: key(id),
++            id,
++            text: id.to_string(),
++            visits: Cell::new(0),
++            drops: drops.clone(),
++        })
++        .collect();
++    let nested = Nested::new((threads - 1).min(2));
++    let pool = rayon::ThreadPoolBuilder::new()
++        .num_threads(threads)
++        .build()
++        .unwrap();
++    let outcome = catch_unwind(AssertUnwindSafe(|| {
++        pool.install(|| {
++            test_witness::with_hooks(nested.hooks.clone(), || {
++                crate::par_stable_sort_by_key(&mut rows, |r| {
++                    nested.invoke(fail);
++                    r.visits.set(r.visits.get() + 1);
++                    r.key
++                });
++            })
++        })
++    }));
++    assert_eq!(outcome.is_err(), fail);
++    nested.verify();
++    let mut ids: Vec<_> = rows
++        .iter()
++        .map(|r| {
++            assert_eq!(r.text, r.id.to_string());
++            r.id
++        })
++        .collect();
++    ids.sort_unstable();
++    assert_eq!(ids, (0..n).collect::<Vec<_>>());
++    if !fail {
++        assert!(
++            rows.windows(2)
++                .all(|w| (w[0].key, w[0].id) <= (w[1].key, w[1].id))
++        );
++    }
++    assert!(drops.iter().all(|x| x.load(SeqCst) == 0));
++    drop(rows);
++    assert!(drops.iter().all(|x| x.load(SeqCst) == 1));
++}
++fn exclusive(threads: usize) {
++    let n = 131_073;
++    let mut backing: Vec<_> = (0..n).collect();
++    let mut rows: Vec<_> = backing
++        .iter_mut()
++        .enumerate()
++        .map(|(id, r)| (key(id), id, r))
++        .collect();
++    let nested = Nested::new((threads - 1).min(2));
++    rayon::ThreadPoolBuilder::new()
++        .num_threads(threads)
++        .build()
++        .unwrap()
++        .install(|| {
++            test_witness::with_hooks(nested.hooks.clone(), || {
++                crate::par_stable_sort_by_key(&mut rows, |r| {
++                    nested.invoke(false);
++                    r.0
++                });
++            })
++        });
++    nested.verify();
++    assert!(
++        rows.windows(2)
++            .all(|w| (w[0].0, w[0].1) <= (w[1].0, w[1].1))
++    );
++    for (_, id, r) in rows {
++        assert_eq!(*r, id);
++        *r += 1;
++    }
++    assert_eq!(backing, (1..=n).collect::<Vec<_>>());
++}
++#[test]
++fn nested_public_sorts_and_joins_owned_cell() {
++    bounded(
++        "engine::parallel::progress_tests::nested_public_sorts_and_joins_owned_cell",
++        || owned(4, false),
++    );
++}
++#[test]
++fn nested_public_sorts_and_joins_exclusive() {
++    bounded(
++        "engine::parallel::progress_tests::nested_public_sorts_and_joins_exclusive",
++        || exclusive(4),
++    );
++}
++#[test]
++fn nested_join_panics_restore_owned_cell() {
++    bounded(
++        "engine::parallel::progress_tests::nested_join_panics_restore_owned_cell",
++        || owned(4, true),
++    );
++}
++
++#[test]
++fn nested_public_sorts_and_joins_owned_cell_p2() {
++    bounded(
++        "engine::parallel::progress_tests::nested_public_sorts_and_joins_owned_cell_p2",
++        || owned(2, false),
++    );
++}
++#[test]
++fn nested_public_sorts_and_joins_owned_cell_p3() {
++    bounded(
++        "engine::parallel::progress_tests::nested_public_sorts_and_joins_owned_cell_p3",
++        || owned(3, false),
++    );
++}
++#[test]
++fn nested_public_sorts_and_joins_exclusive_p2() {
++    bounded(
++        "engine::parallel::progress_tests::nested_public_sorts_and_joins_exclusive_p2",
++        || exclusive(2),
++    );
++}
++#[test]
++fn nested_public_sorts_and_joins_exclusive_p3() {
++    bounded(
++        "engine::parallel::progress_tests::nested_public_sorts_and_joins_exclusive_p3",
++        || exclusive(3),
++    );
++}
++#[test]
++fn nested_join_panics_restore_owned_cell_p2() {
++    bounded(
++        "engine::parallel::progress_tests::nested_join_panics_restore_owned_cell_p2",
++        || owned(2, true),
++    );
++}
++#[test]
++fn nested_join_panics_restore_owned_cell_p3() {
++    bounded(
++        "engine::parallel::progress_tests::nested_join_panics_restore_owned_cell_p3",
++        || owned(3, true),
++    );
++}
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/parallel/safety_gap_tests.rs
+@@ -0,0 +1,246 @@
++// SPDX-License-Identifier: BSD-2-Clause
++//! Deterministic native tests of actual producer/consumer and narrow routes.
++use crate::test_witness::{self, Hooks};
++use std::cell::Cell;
++use std::panic::{AssertUnwindSafe, catch_unwind};
++use std::sync::{
++    Arc,
++    atomic::{AtomicUsize, Ordering::SeqCst},
++};
++struct OwnedCell {
++    key: u64,
++    id: usize,
++    text: String,
++    visits: Cell<usize>,
++    drops: Arc<Vec<AtomicUsize>>,
++}
++impl Drop for OwnedCell {
++    fn drop(&mut self) {
++        assert_eq!(self.text, self.id.to_string());
++        assert_eq!(
++            self.drops[self.id].fetch_add(1, SeqCst),
++            0,
++            "duplicate record drop"
++        );
++    }
++}
++fn value(id: usize, narrow: bool) -> u64 {
++    if narrow {
++        ((id * 37 + 11) % 16) as u64
++    } else {
++        (id as u64).wrapping_mul(0x9e3779b97f4a7c15)
++    }
++}
++fn joined(h: &Hooks) {
++    assert!(
++        h.publication.load(SeqCst) > 0,
++        "actual batch publication not witnessed"
++    );
++    assert!(
++        h.consumers_started.load(SeqCst) > 0,
++        "spawned consumers not witnessed"
++    );
++    assert_eq!(
++        h.consumers_started.load(SeqCst),
++        h.consumers_done.load(SeqCst),
++        "scope returned with active consumer"
++    );
++    assert!(
++        h.sender_closed.load(SeqCst) > 0,
++        "sender destruction not witnessed"
++    );
++}
++fn check_late(h: &Hooks) {
++    joined(h);
++    let published = h.publication.load(SeqCst);
++    let first_key = h.consumer_first_key.load(SeqCst);
++    let moved = h.consumer_first_move.load(SeqCst);
++    let panic = h.callback_panic.load(SeqCst);
++    assert!(published > 0 && published < first_key && first_key < moved && moved < panic);
++    assert!(panic < h.sender_closed.load(SeqCst));
++    assert!(h.callbacks_after_publication.load(SeqCst) >= 2);
++}
++#[cfg(not(miri))]
++fn owned_case(narrow: bool, late: bool, key_panic: bool) {
++    let len = 65_537;
++    let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
++    let mut rows: Vec<_> = (0..len)
++        .map(|id| OwnedCell {
++            key: value(id, narrow),
++            id,
++            text: id.to_string(),
++            visits: Cell::new(0),
++            drops: drops.clone(),
++        })
++        .collect();
++    let h = Arc::new(Hooks::new(late, key_panic && !narrow));
++    let result = catch_unwind(AssertUnwindSafe(|| {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(4)
++            .build()
++            .unwrap()
++            .install(|| {
++                test_witness::with_hooks(h.clone(), || {
++                    crate::par_stable_sort_by_key(&mut rows, |r| {
++                        h.key(key_panic && !narrow, key_panic && narrow);
++                        r.visits.set(r.visits.get() + 1);
++                        r.key
++                    })
++                });
++            });
++    }));
++    assert_eq!(result.is_err(), late || key_panic);
++    let mut ids: Vec<_> = rows
++        .iter()
++        .map(|r| {
++            assert_eq!(r.text, r.id.to_string());
++            r.id
++        })
++        .collect();
++    ids.sort_unstable();
++    assert_eq!(ids, (0..len).collect::<Vec<_>>());
++    assert!(drops.iter().all(|n| n.load(SeqCst) == 0));
++    if narrow {
++        assert!(h.single_route.load(SeqCst));
++        assert!(h.root_calls.load(SeqCst) > 0);
++        assert_eq!(h.consumer_calls.load(SeqCst), 0);
++        assert_eq!(h.consumers_started.load(SeqCst), 0);
++        assert_eq!(h.root_key_panic.load(SeqCst), key_panic);
++    } else if late {
++        check_late(&h);
++    } else {
++        joined(&h);
++        if key_panic {
++            assert!(h.consumer_first_move.load(SeqCst) > 0);
++            assert!(h.consumer_key_panic.load(SeqCst) > h.consumer_first_move.load(SeqCst));
++            assert!(!h.root_key_panic.load(SeqCst));
++        }
++    }
++    if !late && !key_panic {
++        let actual: Vec<_> = rows.iter().map(|r| (r.key, r.id)).collect();
++        let mut expected: Vec<_> = (0..len).map(|id| (value(id, narrow), id)).collect();
++        expected.sort_by_key(|r| r.0);
++        assert_eq!(actual, expected);
++    }
++    drop(rows);
++    assert!(drops.iter().all(|n| n.load(SeqCst) == 1));
++}
++#[cfg(not(miri))]
++fn exclusive_case(narrow: bool, late: bool, key_panic: bool) {
++    let len = 65_537;
++    let mut backing: Vec<_> = (0..len).collect();
++    let mut rows: Vec<_> = backing
++        .iter_mut()
++        .enumerate()
++        .map(|(id, r)| (value(id, narrow), id, r))
++        .collect();
++    let h = Arc::new(Hooks::new(late, key_panic && !narrow));
++    let result = catch_unwind(AssertUnwindSafe(|| {
++        rayon::ThreadPoolBuilder::new()
++            .num_threads(4)
++            .build()
++            .unwrap()
++            .install(|| {
++                test_witness::with_hooks(h.clone(), || {
++                    crate::par_stable_sort_by_key(&mut rows, |r| {
++                        h.key(key_panic && !narrow, key_panic && narrow);
++                        r.0
++                    })
++                });
++            });
++    }));
++    assert_eq!(result.is_err(), late || key_panic);
++    if narrow {
++        assert!(h.single_route.load(SeqCst));
++        assert_eq!(h.consumers_started.load(SeqCst), 0);
++        assert_eq!(h.root_key_panic.load(SeqCst), key_panic);
++    } else if late {
++        check_late(&h);
++    } else {
++        joined(&h);
++        if key_panic {
++            assert!(h.consumer_key_panic.load(SeqCst) > h.consumer_first_move.load(SeqCst));
++            assert!(h.consumer_first_move.load(SeqCst) > 0);
++        }
++    }
++    let actual: Vec<_> = rows.iter().map(|r| (r.0, r.1)).collect();
++    if !late && !key_panic {
++        let mut expected: Vec<_> = (0..len).map(|id| (value(id, narrow), id)).collect();
++        expected.sort_by_key(|r| r.0);
++        assert_eq!(actual, expected);
++    }
++    let mut ids = Vec::new();
++    for (_, id, r) in rows {
++        assert_eq!(*r, id);
++        *r += 1;
++        ids.push(id);
++    }
++    ids.sort_unstable();
++    assert_eq!(ids, (0..len).collect::<Vec<_>>());
++    assert_eq!(backing, (1..=len).collect::<Vec<_>>());
++}
++#[test]
++#[cfg(not(miri))]
++fn delayed_callback_panic_owned_cell_published_consumer_moved() {
++    owned_case(false, true, false);
++}
++#[test]
++#[cfg(not(miri))]
++fn child_key_panic_owned_cell_after_consumer_move() {
++    owned_case(false, false, true);
++}
++#[test]
++#[cfg(not(miri))]
++fn combined_owned_cell_success() {
++    owned_case(false, false, false);
++}
++#[test]
++#[cfg(not(miri))]
++fn delayed_callback_panic_exclusive_published_consumer_moved() {
++    exclusive_case(false, true, false);
++}
++#[test]
++#[cfg(not(miri))]
++fn child_key_panic_exclusive_after_consumer_move() {
++    exclusive_case(false, false, true);
++}
++#[test]
++#[cfg(not(miri))]
++fn combined_exclusive_success() {
++    exclusive_case(false, false, false);
++}
++#[test]
++#[cfg(not(miri))]
++fn single_digit_owned_cell_success() {
++    owned_case(true, false, false);
++}
++#[test]
++#[cfg(not(miri))]
++fn single_digit_owned_cell_root_panic_after_moves() {
++    owned_case(true, false, true);
++}
++#[test]
++#[cfg(not(miri))]
++fn single_digit_exclusive_success() {
++    exclusive_case(true, false, false);
++}
++#[test]
++#[cfg(not(miri))]
++fn single_digit_exclusive_root_panic_after_moves() {
++    exclusive_case(true, false, true);
++}
++
++#[test]
++fn simultaneous_producer_consumer_panic_owned_cell() {
++    super::progress_tests::bounded(
++        "engine::parallel::safety_gap_tests::simultaneous_producer_consumer_panic_owned_cell",
++        || owned_case(false, true, true),
++    );
++}
++#[test]
++fn simultaneous_producer_consumer_panic_exclusive() {
++    super::progress_tests::bounded(
++        "engine::parallel::safety_gap_tests::simultaneous_producer_consumer_panic_exclusive",
++        || exclusive_case(false, true, true),
++    );
++}
+--- a/rust/tessera-sort/src/lib.rs
++++ b/rust/tessera-sort/src/lib.rs
+@@ -252,3 +252,6 @@
+     }
+     engine::par_sort::<T, _, true>(values, key::ByKey(&key));
+ }
++
++#[cfg(all(test, feature = "rayon"))]
++mod test_witness;
+--- /dev/null
++++ b/rust/tessera-sort/src/test_witness.rs
+@@ -0,0 +1,317 @@
++// SPDX-License-Identifier: BSD-2-Clause
++//! Test-only phase witnesses. The frozen algorithms are unchanged.
++use std::cell::{Cell, RefCell};
++use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
++use std::sync::{Arc, Condvar, Mutex};
++use std::time::Duration;
++#[derive(Clone, Copy, PartialEq, Eq, Debug)]
++pub(crate) enum Phase {
++    None,
++    Root,
++    Consumer,
++}
++thread_local! {
++    static PHASE: Cell<Phase> = const { Cell::new(Phase::None) };
++    static MOVED: Cell<bool> = const { Cell::new(false) };
++    static HOOKS: RefCell<Option<Arc<Hooks>>> = const { RefCell::new(None) };
++}
++#[derive(Default)]
++pub(crate) struct Hooks {
++    pub late_callback_panic: bool,
++    pub wait_for_child_panic: bool,
++    pub progress_target: usize,
++    pub progress_started: AtomicUsize,
++    pub publication_count: AtomicUsize,
++    pub sequence: AtomicUsize,
++    pub publication: AtomicUsize,
++    pub callbacks_after_publication: AtomicUsize,
++    pub callback_panic: AtomicUsize,
++    pub consumer_first_key: AtomicUsize,
++    pub consumer_first_move: AtomicUsize,
++    pub consumer_key_panic: AtomicUsize,
++    pub sender_closed: AtomicUsize,
++    pub consumer_finished: AtomicUsize,
++    pub consumers_started: AtomicUsize,
++    pub consumers_done: AtomicUsize,
++    pub single_route: AtomicBool,
++    pub root_geometry: Mutex<Vec<(usize, usize, usize, usize)>>,
++    pub root_key_panic: AtomicBool,
++    pub root_calls: AtomicUsize,
++    pub consumer_calls: AtomicUsize,
++    signal: Mutex<()>,
++    ready: Condvar,
++}
++impl Hooks {
++    pub(crate) fn new(late_callback_panic: bool, wait_for_child_panic: bool) -> Self {
++        Self {
++            late_callback_panic,
++            wait_for_child_panic,
++            ..Self::default()
++        }
++    }
++    fn tick(&self) -> usize {
++        self.sequence.fetch_add(1, SeqCst) + 1
++    }
++    fn once(&self, target: &AtomicUsize) {
++        if target.load(SeqCst) == 0 {
++            let _ = target.compare_exchange(0, self.tick(), SeqCst, SeqCst);
++        }
++    }
++    pub(crate) fn key(&self, fail_consumer: bool, fail_root: bool) {
++        match phase() {
++            Phase::Consumer => {
++                self.consumer_calls.fetch_add(1, SeqCst);
++                self.once(&self.consumer_first_key);
++                if has_moved()
++                    && fail_consumer
++                    && self
++                        .consumer_key_panic
++                        .compare_exchange(0, self.tick(), SeqCst, SeqCst)
++                        .is_ok()
++                {
++                    {
++                        let _lock = self
++                            .signal
++                            .lock()
++                            .unwrap_or_else(std::sync::PoisonError::into_inner);
++                        self.ready.notify_all();
++                    }
++                    panic!("phase-gated consumer key panic after live record moves");
++                }
++            }
++            Phase::Root => {
++                self.root_calls.fetch_add(1, SeqCst);
++                if has_moved() && fail_root && !self.root_key_panic.swap(true, SeqCst) {
++                    panic!("phase-gated root key panic after completed scatter block");
++                }
++            }
++            Phase::None => {}
++        }
++    }
++}
++pub(crate) fn current() -> Option<Arc<Hooks>> {
++    HOOKS.with(|h| h.borrow().clone())
++}
++pub(crate) fn phase() -> Phase {
++    PHASE.get()
++}
++pub(crate) fn has_moved() -> bool {
++    MOVED.get()
++}
++pub(crate) fn with_hooks<R>(hooks: Arc<Hooks>, run: impl FnOnce() -> R) -> R {
++    let previous = HOOKS.with(|h| h.replace(Some(hooks)));
++    struct Reset(Option<Arc<Hooks>>);
++    impl Drop for Reset {
++        fn drop(&mut self) {
++            HOOKS.with(|h| h.replace(self.0.take()));
++        }
++    }
++    let _reset = Reset(previous);
++    run()
++}
++pub(crate) struct PhaseGuard {
++    phase: Phase,
++    moved: bool,
++    hooks: Option<Arc<Hooks>>,
++    consumer: bool,
++}
++impl PhaseGuard {
++    pub(crate) fn root() -> Self {
++        Self::enter(Phase::Root, current(), false)
++    }
++    pub(crate) fn consumer(hooks: Option<Arc<Hooks>>) -> Self {
++        Self::enter(Phase::Consumer, hooks, true)
++    }
++    fn enter(phase: Phase, hooks: Option<Arc<Hooks>>, consumer: bool) -> Self {
++        if consumer {
++            if let Some(h) = &hooks {
++                h.consumers_started.fetch_add(1, SeqCst);
++            }
++        }
++        let old_phase = PHASE.replace(phase);
++        let old_moved = MOVED.replace(false);
++        let old_hooks = HOOKS.with(|h| h.replace(hooks));
++        Self {
++            phase: old_phase,
++            moved: old_moved,
++            hooks: old_hooks,
++            consumer,
++        }
++    }
++}
++impl Drop for PhaseGuard {
++    fn drop(&mut self) {
++        if self.consumer {
++            if let Some(h) = current() {
++                h.consumers_done.fetch_add(1, SeqCst);
++                h.consumer_finished.store(h.tick(), SeqCst);
++            }
++        }
++        PHASE.set(self.phase);
++        MOVED.set(self.moved);
++        HOOKS.with(|h| h.replace(self.hooks.take()));
++    }
++}
++pub(crate) fn moved() {
++    MOVED.set(true);
++    if phase() == Phase::Consumer {
++        if let Some(h) = current() {
++            if h.consumer_first_move.load(SeqCst) == 0 {
++                let _lock = h
++                    .signal
++                    .lock()
++                    .unwrap_or_else(std::sync::PoisonError::into_inner);
++                h.once(&h.consumer_first_move);
++                h.ready.notify_all();
++            }
++        }
++    }
++}
++pub(crate) fn published(h: &Option<Arc<Hooks>>) {
++    if let Some(h) = h {
++        h.once(&h.publication);
++        h.publication_count.fetch_add(1, SeqCst);
++    }
++}
++pub(crate) fn callback_finished(h: &Option<Arc<Hooks>>) {
++    let Some(h) = h else { return };
++    if h.progress_target > 0 && h.publication_count.load(SeqCst) >= h.progress_target {
++        let lock = h
++            .signal
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner);
++        let (_lock, timeout) = h
++            .ready
++            .wait_timeout_while(lock, Duration::from_secs(20), |_| {
++                h.progress_started.load(SeqCst) < h.progress_target
++            })
++            .unwrap();
++        assert!(
++            !timeout.timed_out(),
++            "distinct consumers did not reach progress rendezvous"
++        );
++    }
++    if (!h.late_callback_panic && !h.wait_for_child_panic) || h.publication.load(SeqCst) == 0 {
++        return;
++    }
++    if h.callbacks_after_publication.fetch_add(1, SeqCst) == 0 {
++        return;
++    }
++    // The second callback after publication is an intentional test rendezvous.
++    // Root scatter/permutation have joined. Consumers have independent work,
++    // no producer or receiver lock is held, and this is an OS wait, not a Rayon
++    // yield that could recursively enter a receiver waiting for this sender.
++    let lock = h
++        .signal
++        .lock()
++        .unwrap_or_else(std::sync::PoisonError::into_inner);
++    let (_lock, timeout) = h
++        .ready
++        .wait_timeout_while(lock, Duration::from_secs(20), |_| {
++            if h.wait_for_child_panic {
++                h.consumer_key_panic.load(SeqCst) == 0
++            } else {
++                h.consumer_first_move.load(SeqCst) == 0
++            }
++        })
++        .unwrap();
++    assert!(
++        !timeout.timed_out(),
++        "consumer failed to reach move witness within bounded test rendezvous"
++    );
++    assert!(h.consumer_first_key.load(SeqCst) > 0);
++    if h.late_callback_panic {
++        h.callback_panic.store(h.tick(), SeqCst);
++        panic!("delayed producer callback panic after published child moved records");
++    }
++}
++pub(crate) fn single_route(h: &Option<Arc<Hooks>>) {
++    if let Some(h) = h {
++        h.single_route.store(true, SeqCst);
++    }
++}
++pub(crate) struct SenderGuard(Option<Arc<Hooks>>);
++impl SenderGuard {
++    pub(crate) fn new(h: Option<Arc<Hooks>>) -> Self {
++        Self(h)
++    }
++}
++impl Drop for SenderGuard {
++    fn drop(&mut self) {
++        if let Some(h) = &self.0 {
++            h.sender_closed.store(h.tick(), SeqCst);
++        }
++    }
++}
++
++pub(crate) fn new_bucket() {
++    if phase() == Phase::Consumer {
++        MOVED.set(false);
++    }
++}
++
++thread_local! {
++    static PUBLISHING: Cell<bool> = const { Cell::new(false) };
++    static QUEUE_LOCKED: Cell<bool> = const { Cell::new(false) };
++}
++pub(crate) struct PublishingGuard(bool);
++impl PublishingGuard {
++    pub(crate) fn new() -> Self {
++        Self(PUBLISHING.replace(false))
++    }
++}
++impl Drop for PublishingGuard {
++    fn drop(&mut self) {
++        PUBLISHING.set(self.0);
++    }
++}
++pub(crate) fn publication_started() {
++    PUBLISHING.set(true);
++}
++pub(crate) fn publication_closed() {
++    PUBLISHING.set(false);
++}
++pub(crate) struct QueueGuard(bool);
++impl QueueGuard {
++    pub(crate) fn new() -> Self {
++        Self(QUEUE_LOCKED.replace(true))
++    }
++}
++impl Drop for QueueGuard {
++    fn drop(&mut self) {
++        QUEUE_LOCKED.set(self.0);
++    }
++}
++pub(crate) fn assert_user_allowed() {
++    assert!(
++        !PUBLISHING.get(),
++        "producer invoked user key while published consumers can wait"
++    );
++    assert!(!QUEUE_LOCKED.get(), "user key invoked under receiver lock");
++}
++impl Hooks {
++    pub(crate) fn progress(target: usize) -> Self {
++        Self {
++            progress_target: target,
++            ..Self::default()
++        }
++    }
++    pub(crate) fn progress_arrive(&self) {
++        let lock = self
++            .signal
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner);
++        self.progress_started.fetch_add(1, SeqCst);
++        self.ready.notify_all();
++        let (_lock, timeout) = self
++            .ready
++            .wait_timeout_while(lock, Duration::from_secs(20), |_| {
++                self.progress_started.load(SeqCst) < self.progress_target
++            })
++            .unwrap();
++        assert!(
++            !timeout.timed_out(),
++            "nested consumers did not meet at progress rendezvous"
++        );
++    }
++}

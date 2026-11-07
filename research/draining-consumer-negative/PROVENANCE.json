@@ -1,0 +1,15 @@
+{
+  "public_commit": "55b299b3716cd1af9e997f30b1a3c1813455d8be",
+  "combined_initial_freeze_sha256": "bf3b2ea730f98fca2dfaf75f3baba732f7f5d67eaea8bafdbae17c684fe11bae",
+  "candidate_validation_manifest_sha256": "9e8d216d024977fcba1987649db2c9cbd7265547bec898a62ff5044824be43f1",
+  "candidate_parallel_rs_sha256": "f3541749732fa21f3ee6066c79ad10e3de707163e8f4a237aca8ff893effd5a7",
+  "candidate_tests_sha256": "3ee358da43db29469cca9df47005f349560267307ec70e2ab0f35fcc48a3bbc4",
+  "screen_pre_run_freeze_sha256": "9db92e9a735b489485314e30526115b40c9263fdd7dcd95cf02dde450102bda1",
+  "screen_executable_sha256": "543c6d3aee5c52cd8ee938b9e5f9e905158df1dbb969113b5061de5bae8fab3b",
+  "screen_report_sha256": "9d5fc8b7be195e2f80bb955b24ac1dc0b00d65fb027e09e04e9b9d52f890fa80",
+  "screen_result_manifest_sha256": "74ec12df25bca7c7934a7280a06588f1b3249cc297a305882b88b251aceb67cf",
+  "final_safety_executable_sha256": "03c3231621fce2afc7f3305de72fe560e018689066bc68b142cec2cf3fda16f2",
+  "discarded_interim_executable_sha256": "d833df1d61874e52daa1988a044790cd3397c0c6d7d4a317d151d80c681844bb",
+  "decision": "No accepted scheduler gain; stop candidate; no adoption.",
+  "evidence_location": "Original evidence is retained separately, not embedded in this source packet."
+}

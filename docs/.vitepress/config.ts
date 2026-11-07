@@ -179,6 +179,7 @@ function developmentSidebar() {
       items: [
         { text: 'Engine design', link: '/design/engine' },
         { text: 'Port from the prototype', link: '/design/port' },
+        { text: 'Comparison benchmarks', link: '/design/comparison-benchmarks' },
       ],
     },
     {
@@ -197,7 +198,6 @@ function developmentSidebar() {
         { text: 'Roadmap', link: '/ROADMAP' },
         { text: 'Changelog', link: '/CHANGELOG' },
         { text: 'Python binding proposal', link: '/proposals/python-binding' },
-        { text: 'Comparison benchmarks proposal', link: '/proposals/comparison-benchmarks' },
       ],
     },
     {

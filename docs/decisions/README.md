@@ -17,3 +17,4 @@ Each file records one decision that shapes the project: the context, the decisio
 | [0011](0011-benchmark-feature-configurations.md) | Track default and Portable SIMD benchmarks independently | 2026-11-07 |
 | [0012](0012-count-narrow-direct-windows.md) | Count narrow windows of direct keys instead of partitioning them | 2026-11-15 |
 | [0013](0013-compare-with-the-previous-main-sample.md) | Alert on a fixed percentage from the previous main sample | 2026-11-07 |
+| [0014](0014-local-comparison-benchmarks.md) | Measure release comparisons locally with an offline report | 2026-11-07 |

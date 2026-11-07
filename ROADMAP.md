@@ -17,9 +17,8 @@ The first crates.io release. It provides the stable sort only.
 | Deliverable | Done when |
 |---|---|
 | Continuous benchmarks on Bencher Bare Metal ([setup](docs/development/continuous-benchmarks.md#setup)) | `main` has a seeded baseline and PRs receive reports |
-| Benchmark runner in `bench/rust` with `list`, `validate`, `measure` and `memory` ([protocol](docs/development/benchmarking.md)) | The harness self-tests and `validate --suite smoke` pass in CI |
-| Input generator specification and golden hashes in `conformance/vectors/` | The runner verifies every `core` input hash at startup |
-| First `core` report, `default` and `native` builds, on the Stable toolchain | The report regenerates from raw data; it becomes the regression baseline |
+| Comparison runner, Rust and native competitors, memory measurement and offline report ([protocol](docs/development/benchmarking.md)) | Harness self-tests, native smoke validation and report tests pass in CI |
+| First release comparison, default and Portable SIMD builds, on Stable | The complete local session regenerates from its raw directory; README and Performance page show the figures; the release attaches the archive |
 | Release | Robert Clausecker has been told before publication; `rust/v0.1.0` follows [`RELEASING.md`](RELEASING.md) |
 
 Open questions for this milestone:
@@ -33,8 +32,14 @@ An independent track that binds the Rust crate and does not wait for C++. See th
 
 ## C++
 
-1. **C++ runner.** The same case specification and JSONL output as the Rust runner, with the standard library and pinned third-party sorts as baselines. Done when its generator matches the golden hashes.
+1. **C++ runner.** Measure the C++ implementation with the shared input specification and native-buffer timing. Add cross-language golden hashes in `conformance/vectors/` and verify them in both generators.
 2. **C++17 header-only implementation** for trivially copyable records, with CMake install and a consumer test. Done when it passes the shared vectors and has a direct comparison with Rust.
+
+## Benchmark investigations
+
+- Extend the comparison to workspace and cold-cache modes, additional seeds and threshold cases when an investigation needs them.
+- Add native-CPU and branch-aligned placement controls for source A/B studies.
+- Add hosted comparison groups using the existing Bencher queue after the local release report; retain complete per-type length groups for absolute scaling.
 
 ## Integrations
 

@@ -34,6 +34,8 @@ jobs:
       - run: npm ci
       - run: npm run scripts:typecheck
       - run: npm run scripts:test
+      - run: npm run bench:typecheck
+      - run: npm run bench:test
       - id: changes
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}

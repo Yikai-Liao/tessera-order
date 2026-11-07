@@ -1,132 +1,165 @@
 # Benchmarking
 
-This document defines how Tessera is measured. The runner described here is not built yet; until it is, published numbers come from the research prototype and say so. A separate [continuous benchmark suite](continuous-benchmarks.md) runs on Bencher Bare Metal for regression triage; it uses this document's case IDs but not its timing and statistics.
+The comparison runner in `bench/rust` measures sorting algorithms on one machine. It answers four questions: how Tessera compares with the standard stable sort, with other stable sorts, with unstable sorts when equal keys are indistinguishable, and how much extra memory each sort uses. The [continuous suite](continuous-benchmarks.md) tracks regressions on Bencher; release comparisons use the paired measurements described here.
 
-## Purposes
+## Run a comparison
 
-| Purpose | Question | Tool |
-|---|---|---|
-| Port acceptance (once) | Does the ported crate match the research prototype? | The research repository's `radix_ab` harness, with the crate added as a variant in the same binary |
-| Regression A/B | Is a change faster or slower than the previous version? | The Rust runner, with both versions in one process |
-| Release report | Where is Tessera faster or slower than other sorts? | The Rust runner on the fixed `core` suite |
+The Rust competitors need Cargo's stable toolchain. Native competitors additionally need Linux x86-64 with glibc, Python 3.12 or later, C and C++17 compilers, CMake, and GNU binutils. Fetching sources is a separate step; building and measuring use the verified local sources without network access. The report requires Node.js 24 and `npm ci`.
 
-## Runner
+```sh
+python3 bench/fetch.py
+cargo build --release -p tessera-bench --features compare,compare-native \
+  --target-dir target/compare-default
+target/compare-default/release/compare list
+target/compare-default/release/compare validate --suite smoke
+target/compare-default/release/compare validate --suite release
 
-`bench/rust` is an unpublished binary crate with three commands:
-
-| Command | Action |
-|---|---|
-| `list` | Lists variants and their capabilities: stability, supported tasks, workspace support |
-| `validate --suite S` | Checks order, permutation and, for stable variants, the order of equal keys, for every case and variant |
-| `measure --suite S --out DIR` | Times the suite and writes `samples.jsonl` and `manifest.json` |
-
-Cases are selected by exact `case_id`, `type/distribution/length/seed`, for example `u64/random/4096/s1` or `row_u64/zipf2/65536/s1`, never by pattern matching. Distribution names: `random`, `d256` and `d16` (uniform over 256 and 16 values), `zipf1.1` and `zipf2`, `skew50` and `skew99` (one dominant value), `two_values`, `sparse8` (eight full-width keys), `sorted`, `reverse`, `sorted95` and `sorted99`, `sorted_tail` (sorted with an appended run of large keys), `runs`, `equal`.
-
-Variants include the working-tree crate, a baseline release linked under a renamed dependency (`tessera_base = { package = "tessera-sort", git = "...", tag = "rust/v0.1.0" }`), `slice::sort_by_key`, `slice::sort_unstable_by_key`, and other radix sorts from crates.io, such as `radsort` and `rdst`, where they support the task. If Cargo rejects the same package from a path and a git source, the two versions are built as separate binaries and a driver script alternates them.
-
-## Inputs
-
-Inputs are generated from `(distribution, length, seed)` by a generator specified precisely enough to be reimplemented in other languages:
-
-- the random source is SplitMix64;
-- distributions use integer arithmetic only, so no result depends on a math library;
-- float inputs are built from bit patterns and include `±0`, `±inf`, NaNs with several payloads, and subnormals;
-- `skewP` draws from ten values spread over the whole key, `v_k = k · ⌊M / 10⌋` for `k = 0, …, 9`, where `M` is the largest value of the unsigned type of the key's width (for `f64`, `v_k = k · 2^1020`). For each key, if `next() mod 100 < P` the key is `v_0`; otherwise it is `v_(1 + next() mod 9)`, from a second draw;
-- `two_values` uses the same `v_k`: each key is `v_0` if `next() >> 63` is 0 and `v_9` otherwise;
-- `sparse8` first draws eight keys over the type's whole bit range; each record then takes key number `next() mod 8`;
-- `sorted_tail` with `t = ⌊n / 128⌋` holds `0, 1, …, n − t − 1`, followed by `t` keys drawn over the whole bit range with the top bit set (for `f64`, the bits `0x7ff0…0 | next() >> 12`: `+inf` and positive NaNs);
-- `runs` draws `n` keys over the whole bit range, then cuts them into consecutive runs of `16 + next() mod 2048` keys (the last one shorter). Each run is sorted, then reversed if `next() >> 63` is 1;
-- `conformance/vectors/` stores the SHA-256 of every `core` input, and runners verify it at startup.
-
-Inputs are generated in memory and never committed.
-
-## Tasks
-
-A result table only compares implementations performing the same task. An implementation that cannot perform a task is listed as unsupported.
-
-| Task | Types |
-|---|---|
-| `keys` | `u32`, `u64`, `u128`, `i64`, `f64` |
-| `rows` | `{u32 key, u32 row}`, `{u64 key, u32 row}`, `{f64 key, u32 row}` |
-| `records` | `{u64 key, u64 payload}` (16 bytes), `{u64 key, [u8; 120]}` (128 bytes) |
-| `owned` | `{u64 key, String}` |
-
-Payloads carry the record's original index so that permutation and stability can be checked.
-
-## Suites
-
-| Suite | Contents | Use |
-|---|---|---|
-| `smoke` | A few types, distributions and lengths | Every change and CI; currently implemented as the [continuous suite](continuous-benchmarks.md) |
-| `core` | All tasks × all core distributions × all core lengths | Releases and regression A/B |
-| `extended` | More seeds, float edge cases, compound keys, wide records, cold-cache mode | Investigations |
-
-Core distributions: random, uniform over 256 values, uniform over 16 values, Zipf (s = 1.1 and 2.0), one value at 50 % and 99 % (`skew50`, `skew99`), sorted, reverse, 95 % and 99 % sorted, runs, all equal.
-
-Core lengths: 8, 16, 32, 64, 256, 1K, 4K, 16K, 64K, 256K, 1M, 10M, plus points around engine thresholds (the insertion limit and the tile capacity for each record size), computed from the crate's constants.
-
-## Timing
-
-Each sample follows one procedure:
-
-1. Outside the timed region, restore every buffer in the batch to the original input.
-2. Start the clock.
-3. Sort the batch of independent buffers.
-4. Stop the clock and record the batch's nanoseconds and number of sorts.
-5. Outside the timed region, check each buffer's output hash (keys and original indices) against a reference computed with a stable standard-library sort.
-
-- The batch size is chosen from a minimum sample duration and a cap on prepared memory; both are recorded. The provisional defaults are 5 ms and 256 MiB.
-- Variants run in a random order within each block. A block runs every variant once; a run has 9 blocks by default.
-- The baseline appears twice in each block, which gives an A/A noise range.
-- The allocation mode is a separate dimension: `api` calls the free functions and includes scratch allocation; `workspace` uses a prepared workspace. Variants without a workspace only appear in `api` tables.
-- Cold-cache measurements are a separate mode in the `extended` suite: before each sort, the runner walks a buffer twice the size of the last-level cache.
-
-## Statistics
-
-- The main statistic is the median over blocks of `variant / mean(baseline A1, baseline A2)`, reported with the A/A ratio `A2 / A1`.
-- A result is reported as faster or slower only if the median lies outside the A/A range and at least 8 of 9 blocks agree on the direction. Otherwise it is reported as within noise.
-- Comparisons across builds or source copies also include a placement control, a second copy of the same source, whose deviation counts as noise like the A/A range. On the development machine, placement alone has moved results by up to 41% at n ≤ 128 and up to 1.9× on ordered inputs ([port record](../design/port.md#rebuild-and-branch-alignment-check)).
-- Reports also give nanoseconds per element, recomputed from batch time and element count.
-
-## Raw data
-
-`samples.jsonl` holds one sample per line:
-
-```json
-{"schema":1,"run_id":"2026-11-20-a","case_id":"u64/random/4096/s1","task":"keys",
- "variant":"tessera","kernel":"tessera-stable","alloc_mode":"api","block":2,"slot":3,
- "batch":64,"elements":262144,"elapsed_ns":1523840,"verified":true}
+taskset -c 2 target/compare-default/release/compare run \
+  --suite release --out bench/results/release
+npm run bench:report -- bench/results/release
 ```
 
-`manifest.json` records each variant's `implementation`, `package_version`, full `git_commit`, actual `kernel` and, for uncommitted code, source hashes; the runner source and binary hashes, `rustc -vV`, `RUSTFLAGS`, LTO, CPU model and pinning, kernel version, the case plan and the input hash check.
+Choose a CPU allowed by the machine's affinity policy. The recommended conditions are an idle machine, the performance governor, turbo and SMT disabled, and a run pinned to one logical CPU. The runner records these conditions and leaves host configuration to the operator.
 
-Reports are regenerated from raw data. The report script fails on missing or duplicate samples, unverified samples, manifest mismatches and input hash mismatches. Release results are attached to GitHub releases as compressed archives; the repository keeps the generated report.
+`compare run` first invokes the sibling `memory` executable for any missing cases. Memory can also be measured separately:
 
-## Build profiles
+```sh
+taskset -c 2 target/compare-default/release/memory \
+  --suite release --out bench/results/release
+```
 
-| Profile | Flags | Role |
+`--group TYPE/SHAPE` selects one complete group, for example `--group u64/random`. Repeating a run skips completed groups and replaces any interrupted group. An interrupted final JSONL write is discarded on resume. A change to the executable, build provenance, suite or host fingerprint requires a new output directory. Groups measured in separate directories can be reported together when their host fingerprints and build manifests agree:
+
+```sh
+npm run bench:report -- bench/results/part-1 bench/results/part-2
+```
+
+The report requires the complete suite. `--partial` generates a report of the completed groups during development. Results go into the first directory's `report/`, with Markdown, five SVG figures where the required cases are present, and machine-readable summaries. `bmf.json` in that directory can be uploaded with the Bencher CLI. The report reads only the result directories.
+
+For a Rust-only comparison, omit `compare-native` and the fetch step. `list` derives supported types from the same adapters used by `validate`, timing and memory measurement.
+
+## Portable SIMD
+
+Build the Portable SIMD executable separately so the default executable remains available:
+
+```sh
+cargo build --release -p tessera-bench --features compare,portable-simd \
+  --target-dir target/compare-simd
+target/compare-simd/release/compare validate --suite smoke
+taskset -c 2 target/compare-simd/release/compare run \
+  --suite release --out bench/results/release
+npm run bench:report -- bench/results/release
+```
+
+This executable measures Tessera twice and `slice::sort` on the same cases. Competitors are measured in the default build. Each build has its own A/A control; `slice::sort` anchors the ranking to the same scale. The report records the absolute anchor drift between processes and flags differences above 5%. Both builds belong to the same session and use the same source revision, toolchain and target flags.
+
+## Cases and suites
+
+Case IDs are `type/distribution/length/s1`. A group contains all lengths of one type and distribution. The release suite contains 220 primary cases and 40 supplementary `row_u32` cases for Clausecker's original implementation. `smoke` uses the same types and distributions at length 1,000, for 70 validation cases. The existing Criterion smoke suite retains its own regression cases and IDs.
+
+| Type | Task | Representation |
 |---|---|---|
-| `default` | `cargo build --release` | Main report: what crate users get |
-| `native` | `-C target-cpu=native`, fat LTO | Additional column |
-| `branch-aligned` | `default` plus `-C llvm-args=-x86-branches-within-32B-boundaries` (x86-64 only) | A/B comparisons on CPUs with Intel's JCC erratum (Skylake-derived cores); not a report column |
+| `u32`, `u64` | keys | Unsigned integers |
+| `f64` | keys | Arbitrary float bits, ordered by `total_cmp` |
+| `row_u64` | rows | `{u64 key, u32 row}`, C layout, 16 bytes |
+| `record128` | records | `{u64 key, [u8; 120]}`, C layout, 128 bytes |
+| `owned` | owned records | `{u64 key, String}`, 16-character payload |
+| `row_u32` | supplementary rows | `{u32 key, u32 row}`, C layout, 8 bytes |
 
-On the development machine, the `branch-aligned` profile removed placement swings of up to 1.9× on ordered inputs, but not the swings at n ≤ 128, so the placement control stays required. It changes absolute times by up to −30% and +69%, so `default` remains what reports show.
+Payloads encode the original index. Wide-record payloads also fill every remaining byte deterministically. Verification checks complete payloads, not just keys and indices.
 
-## Memory
+| Shape | Distributions |
+|---|---|
+| Random | `random` |
+| Few distinct values | `d256`, `d16` |
+| Frequency skew | `zipf1.1`, `zipf2`, `skew99` |
+| Presorted | `sorted`, `reverse`, `sorted99` |
+| Merged runs | `runs` |
 
-Memory is measured in a separate run with a counting allocator: allocation count, requested bytes, peak extra bytes and `Workspace::retained_bytes()`. Fixed stack storage is documented from the crate's constants. Unmeasured quantities are reported as unmeasured, never estimated from process RSS.
+Lengths are 1,000, 65,536, 1,000,000 and 10,000,000. `record128` and `owned` stop at 1,000,000. Memory is measured for every supported variant through 1,000,000 and for all `u64` cases at 10,000,000. Tessera's peak is also measured for the remaining 10M cases to provide `glidesort-sqrt` with its buffer size.
 
-## Harness self-tests
+### Input generation
 
-- A deliberately wrong variant that also mutates its input proves that every variant, block and buffer receives the original input, and that validation catches the error.
-- A round trip through `samples.jsonl` and the report script proves that durations, units and sort counts survive.
+`case.rs` owns the seed-one generator used by all three executables and Criterion. Tests pin the little-endian input hashes from the preceding smoke implementation for `u32`, `u64`, `u128` and `f64` at two lengths for each existing distribution.
 
-## C++ runner
+The random source is SplitMix64, starting at state 1. Each draw adds `0x9e3779b97f4a7c15`, then applies the xor-shift/multiply finalizer with shifts 30, 27, 31 and multipliers `0xbf58476d1ce4e5b9`, `0x94d049bb133111eb`, using wrapping 64-bit arithmetic. `u32` takes the low 32 bits; `u64` takes the draw; `u128` concatenates two draws, high word first; `f64` interprets the draw as bits.
 
-The C++ runner implements the same input specification and writes the same `samples.jsonl` format. It has its own timing loop rather than Google Benchmark's summaries, and fetches its baselines (`std::sort`, `std::stable_sort`, IPS²Ra, IPS⁴o, VQSort, x86-simd-sort, Fluxsort, Dovetail) at pinned commits. Cross-language comparisons never time per-call FFI: each runner sorts and times whole batches inside its own language.
+- `random` draws each key over its full bit range.
+- `dD` takes `next mod D`, for D = 16 or 256.
+- Zipf inputs select ranks `k − 1`, for k = 1…n, from cumulative integer weights. `zipf2` uses `floor(2^62 / k²)`. `zipf1.1` uses `floor(2^48 / (k · floor(256 · k^(1/10))))`; the tenth root is computed by integer binary search. A draw selects `floor(next · total / 2^64)` and the first cumulative weight greater than it. The fixed-point root makes `zipf1.1` a reproducible approximation to the exponent 1.1.
+- `skew99` uses ten spread values: `v_k = k · floor(MAX / 10)` for integers and `k · 2^1020` for floats. A first draw selects `v_0` with 99% probability; otherwise a second selects `v_(1 + next mod 9)`.
+- `sorted` is 0…n−1; `reverse` reverses it. `sorted99` starts sorted and swaps adjacent elements at a spacing of `max(2, floor(n / max(1, floor(n / 100))))`.
+- `runs` draws random keys, then sorts consecutive runs of `16 + next mod 2048` keys, the final run shorter. Each run reverses if the next draw's high bit is set.
 
-## Baselines across releases
+The regression-only `equal`, `two_values`, `sparse8` and `sorted_tail` inputs retain their definitions and hashes. Float validation additionally checks signed zeros, infinities, subnormals and NaNs of both signs with distinct payloads.
 
-Baseline releases are referenced by their language tag, for example `rust/v0.1.0` (see [`RELEASING.md`](../../RELEASING.md)). A cross-language report states whether it compares one repository commit or each language's latest release, and names the kernel each interface actually ran.
+## Implementations
 
-The one-time port acceptance used the research repository's harness, which stays outside this repository; its results are in the [port record](../design/port.md).
+Rust competitors are optional dependencies behind `compare`, pinned to exact versions. Native sources are pinned by repository, commit, archive SHA-256 and license in `native/sources.toml`; `fetch.py` verifies the archives and the build verifies the extracted trees. Third-party sources stay in ignored `bench/vendor/`.
+
+| Variant | Entry point | Stable | Supported tasks |
+|---|---|---|---|
+| `tessera` | `stable_sort`, `stable_sort_by_key` | yes | all |
+| `std-stable` | standard stable sort, float total order | yes | all |
+| `radsort` 0.1.1 | `sort_by_key` | yes | all, including owned records |
+| `voracious` 1.2.0 | `voracious_stable_sort` | yes | `u32`, `u64` keys |
+| `glidesort` 0.1.2 | `sort_by` | yes | all |
+| `glidesort-sqrt` | `sort_with_buffer_by` | yes | all; buffer limited to Tessera's measured peak |
+| `std-unstable` | standard unstable sort, float total order | no | all |
+| `rdst` 0.20.14 | `radix_sort_unstable`, default features disabled | no | keys, rows, wide records |
+| `clausecker` | `radixsort_permuted.c` | yes | `row_u32` |
+| `fluxsort` | typed upstream instantiations | yes | keys, rows, wide records |
+| `ips2ra` | sequential `ips2ra::sort` | no | keys, rows, wide records |
+| `ips4o` | sequential `ips4o::sort` | no | keys, rows, wide records |
+| `vqsort` | Highway `VQSort` with runtime dispatch | no | `u32`, `u64` keys |
+| `x86simdsort` | `qsort` with runtime dispatch | no | `u32`, `u64` keys |
+| `crumsort` | typed upstream instantiations | no | keys, rows, wide records |
+
+Voracious 1.2.0's record path fails the stable-reference check on duplicate keys, and its float path uses partial comparison for small inputs. Those tasks are unsupported by this adapter. VQSort and x86-simd-sort's floating-point interfaces do not provide the required NaN payload and signed-zero total order; their pair interfaces use layouts different from the row tasks.
+
+The native comparison sorts compare keys inside C or C++. Each FFI call sorts a complete buffer. The batch clock stays in Rust, and no per-element callback or binding conversion is timed. Record sizes, alignments and payload offsets are checked across the boundary. Native code uses `-O3 -DNDEBUG -march=x86-64 -mtune=generic`; x86-simd-sort's separate dispatch objects use their upstream fixed ISA targets. IPS²Ra and IPS⁴o are built without the parallel-library configuration. The runner checks the process thread count after each sort sample. The report names the SIMD dispatch targets.
+
+On keys, stable and unstable sorts perform the same observable task. On records, unstable results are labelled separately: they answer an unstable-record task and do not enter the stable ranking or stable grid.
+
+## Timing and statistics
+
+For every sample, the runner restores independent buffers outside the timed region, clocks only the batch of sort calls, then verifies every output outside the clock. Stable variants must match the standard stable reference exactly. Unstable records must be ordered, contain each original index once, and preserve every record's payload.
+
+Calibration chooses a batch from one verified warm-up sort, a minimum sample duration (5 ms by default) and a prepared-buffer cap (256 MiB). At least one buffer is used, including when that buffer exceeds the cap. `--sample-ms N` and `--memory-mib N` set these values; both are recorded. The input and stable reference are generated once per case and shared immutably. One variant's prepared buffers are resident at a time. Scratch allocation occurs inside the timed sort call.
+
+Each case has nine blocks. Each block shuffles all supported variants and two Tessera calls into a deterministic random order. The second Tessera sample is named `tessera-aa`.
+
+For each block, a variant's ratio is its time per sort divided by the mean of the two Tessera times per sort. The report gives the median ratio, per-block minimum and maximum, and median nanoseconds per element. A variant is called faster or slower only when at least eight blocks agree on that direction and its median is outside the A/A range. A/A is reported separately as A2 / A1, never as another variant's bounds.
+
+The ranking compares each variant with `slice::sort` within the same blocks, then takes the geometric mean over the ten fixed input shapes. Its three lengths are 65,536, 1M and 10M; rows rank by 10M speed. The stable and unstable grids select the fastest eligible opponent per cell and retain the A/A verdict. Scaling uses random input and absolute nanoseconds per element. Memory growth uses random `u64` and 128-byte records. Every figure has a table of plotted values.
+
+The [port record](../design/port.md) describes separate placement controls for source A/B investigations. The release comparison measures lengths of at least 1,000 with the default target; native-CPU builds, branch alignment, workspace mode and cold-cache investigations remain separate work.
+
+## Results and provenance
+
+```text
+DIR/
+  manifest.json                   default timing build and complete case plan
+  manifest-portable-simd.json     optional SIMD timing build
+  memory-manifest-BUILD.json      memory executable's build provenance
+  host.json                       machine fingerprint
+  blocks.jsonl                    verified samples and group observations
+  memory.jsonl                    verified peak extra allocation sizes
+  bmf.json                        report-generated Bencher summaries
+  report/
+    index.md                      environment, capabilities, figures and tables
+    summaries.json                per-case ratios, bounds, verdicts and times
+    *.svg                         figures
+```
+
+Manifests record the source revision and dirty state, source and executable SHA-256, `rustc -vV`, Cargo lockfile, features, target, profile, optimization level and encoded Rust flags. Native manifests add compiler versions, source pins, licenses and translation-unit flags. A group's start and end observations record load, frequency, temperature and memory pressure separately from the host fingerprint.
+
+The memory and timing executable must agree on source, toolchain, target, features and native build. The report rejects incompatible manifests or hosts, unknown or unverified samples, duplicate samples or slots, missing blocks, incomplete groups, and missing required memory samples. Observations may vary; the report flags load, frequency or temperature deviations from the session median.
+
+## Memory accounting
+
+The separate memory executable measures a single sort after its input and reference have been allocated. Rust-only builds count requested bytes through a global allocator. Native builds count allocator usable sizes, including allocator rounding, through wrapped `malloc`, `calloc`, `realloc`, `free`, `aligned_alloc` and `posix_memalign`. C++ allocation operators are overridden in this executable because dynamic libstdc++'s internal calls are not intercepted by linker wrapping alone. A self-test checks both Rust and native allocations for double counting.
+
+The count excludes input buffers and owned payloads; fixed stack storage is unmeasured. `glidesort-sqrt` allocates its buffer during the sort call, using the whole number of records that fits in Tessera's measured peak for that case. Its own internal fixed stack scratch remains part of glidesort's implementation.
+
+Release archives include the complete results directory. Published performance claims come from that archive; synthetic chart fixtures are layout tests. The first release-candidate comparison and publication remain on the [roadmap](../../ROADMAP.md).

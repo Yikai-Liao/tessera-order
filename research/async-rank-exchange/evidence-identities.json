@@ -1,0 +1,14 @@
+{
+  "complete_numeric_summary_sha256": "e14d8c476c55de023d9f3dc3e44c195a3aee8820efdd6b0fe5d6738a41b570e3",
+  "validated_source_manifest_sha256": "5e4f07c90a93463ad9c4f16f4e50755d675e5fc1ca210e9a56d8309c74dd9d02",
+  "counts": {
+    "timing_samples": 96,
+    "full_reference_timing_calls": 150,
+    "separate_heap_calls": 12
+  },
+  "scope": "Published source and sanitized summary; no raw observations, binaries, private environment or execution wrapper.",
+  "original_screen_summary_sha256": "90fc8a97ce441d2b4eac0d9dc3b2f850994842b07aaf7117b39a96de16f98baf",
+  "published_screen_summary_sha256": "6396562e4848fcfb11be892c3e2bf02cb1766fd8abcc2d9cb5930ea8ac45e816",
+  "publication_edit": "Editorial spacing and decision wording clarified to exclude acceptance expansion or tuning; frozen original is unchanged.",
+  "final_private_inventory_sha256": "3553ea0f84b8c40ab725bf21392d6270154fd92d734ccd975919057c2f5743b0"
+}

@@ -146,3 +146,9 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   two separate 40-call diagnostics place most instrumented restoration in
   move/join rather than planning. Perturbation remains; neither a speed
   acceptance nor hardware attribution, and no runtime change.
+
+- [Async rank-exchange research](async-rank-exchange/README.md):
+  reviewable Copy-only source, prerequisite replay and scoped safety evidence;
+  96 samples and 150 full-reference calls establish no accepted native-relative
+  benefit. Conservative heap limits and broad controls remain explicit.
+  No runtime adoption or acceptance-test expansion.

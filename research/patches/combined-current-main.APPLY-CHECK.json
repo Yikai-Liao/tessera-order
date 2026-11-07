@@ -1,0 +1,13 @@
+{
+  "base_commit": "0bc80b49d5efd5bd8b62165b170015e5803226b7",
+  "patch_sha256": "0d375cfb6f962fb6032c2a962833d9d003d15951403e220b69a84e0b1e0f6b7d",
+  "forward_check": "passed",
+  "forward_apply": "passed",
+  "all_manifest_files_match_after_apply": 25,
+  "reverse_check": "passed",
+  "reverse_apply": "passed",
+  "full_archive_tree_restored": true,
+  "original_archive_files": 137,
+  "patched_archive_files": 148,
+  "scope": "Source-only apply/reverse verification, no build or timing."
+}

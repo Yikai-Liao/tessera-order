@@ -1,0 +1,43 @@
+{
+  "base": "0bc80b49d5efd5bd8b62165b170015e5803226b7",
+  "candidate_identity": "305068d9d6f4b1d0621c18426eee4945c8b45514f4b89037a276ed60fef37d70",
+  "public_comparison_reference": "d6f303b74a0f19b6ae3c14a781539e3c39b9c4c0",
+  "purpose": "Preserve the validated research combined scheduler on frozen current-main kernels as a reproducible comparison control.",
+  "not_claimed": [
+    "Performance improvement",
+    "Replacement of the public parallel entry",
+    "New algorithm",
+    "New heap measurement",
+    "Miri validation of real Rayon execution",
+    "Rust1.85 portable-simd support"
+  ],
+  "preserved_native_design": [
+    "Parallel native root scatter",
+    "Parallel whole-block permutation",
+    "Original serial squeeze",
+    "Fixed std-yield consumers",
+    "Original native scratch-balanced root block formula"
+  ],
+  "excluded_experiments": [
+    "Source-only map elision G",
+    "Sleep-based waiting",
+    "Deferred child launch",
+    "Halo squeeze",
+    "Indirect leaves",
+    "New Regions/block prototype"
+  ],
+  "explicit_adapter_differences": [
+    "The research owned Narrow extractor delegates try_count_window(low + SHIFT). Published d6f303b does not.",
+    "The research single-digit Direct root tries the shared counting hook before native scatter; ByKey declines."
+  ],
+  "metadata_overlay": [
+    "Workspace contains rust/tessera-sort only, not bench/rust.",
+    "Package is tessera-combined-current-main; library remains tessera_sort.",
+    "Cargo.lock is the private crate-only resolution."
+  ],
+  "feature_controls": {
+    "simd_on": "rayon,portable-simd on the same compiler/target settings for all compared controls",
+    "simd_off": "rayon, with portable-simd disabled",
+    "required_environment": "Clear every TESSERA_* variable before correctness or comparison work."
+  }
+}

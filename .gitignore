@@ -15,3 +15,9 @@ perf.data*
 
 # Python tooling caches
 __pycache__/
+
+# Documentation site
+/node_modules/
+/docs/.vitepress/dist/
+/docs/.vitepress/cache/
+docs/.vitepress/.temp/

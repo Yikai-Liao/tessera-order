@@ -7,9 +7,17 @@ from pathlib import Path
 import subprocess
 
 
+# The documentation site's tooling; `docs.yml` builds it, and no language
+# depends on it. Its Markdown pages stay shared documentation.
+DOCS_SITE = ("docs/.vitepress/", "docs/public/")
+DOCS_SITE_FILES = {"package.json", "package-lock.json", ".github/workflows/docs.yml"}
+
+
 def select(paths):
     rust = cpp = python = False
     for path in paths:
+        if path.startswith(DOCS_SITE) or path in DOCS_SITE_FILES:
+            continue
         if path.startswith(("rust/", "bench/rust/")) or path in {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml"}:
             rust = True
             # The binding embeds the Rust core; validate that dependency too.

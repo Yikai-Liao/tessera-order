@@ -1,0 +1,211 @@
+/* SPDX-License-Identifier: BSD-2-Clause */
+
+/* Brand: the blue in the middle of the logo's ramp, darkened for text contrast. */
+:root {
+  --vp-c-brand-1: #2f63c9;
+  --vp-c-brand-2: #3d72d8;
+  --vp-c-brand-3: #4a80e6;
+  --vp-c-brand-soft: rgba(92, 164, 248, 0.16);
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #2dd4bf 0%, #5ca4f8 35%, #b482f8 65%, #f98f54 100%);
+  --vp-home-hero-image-background-image: linear-gradient(135deg, #2dd4bf55 0%, #b482f855 60%, #f98f5555 100%);
+  --vp-home-hero-image-filter: blur(56px);
+
+  --tsr-ink: #0b0b0b;
+  --tsr-muted: #6b6a66;
+  --tsr-line: #d8d7d2;
+  --tsr-panel: #fafaf8;
+  --tsr-stale: #ecebe7;
+  --tsr-focus: #e34948;
+}
+
+.dark {
+  --vp-c-brand-1: #7aa9fa;
+  --vp-c-brand-2: #5c94f2;
+  --vp-c-brand-3: #4a80e6;
+  --tsr-muted: #a3a29b;
+  --tsr-line: #3a3a37;
+  --tsr-panel: #1e1e1d;
+  --tsr-stale: #2a2a28;
+  --tsr-focus: #ff7a79;
+}
+
+/* Explanation pages give the diagrams the full content width. */
+.tsr-figure {
+  margin: 24px 0;
+  padding: 16px;
+  border: 1px solid var(--tsr-line);
+  border-radius: 12px;
+  background: var(--tsr-panel);
+  overflow-x: auto;
+}
+
+.tsr-figure svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  font-family: var(--vp-font-family-mono);
+}
+
+.tsr-figure svg text {
+  fill: var(--vp-c-text-1);
+}
+
+.tsr-figure .tsr-caption {
+  min-height: 3em;
+  margin: 12px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--vp-c-text-1);
+}
+
+.tsr-figure .tsr-note {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--vp-c-text-2);
+}
+
+.tsr-figure .tsr-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--vp-c-text-2);
+}
+
+.tsr-legend .swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border-radius: 3px;
+  vertical-align: -1px;
+}
+
+/* Animated cells: position and colour change smoothly between frames. */
+.tsr-cell rect {
+  transition: fill 0.25s ease, opacity 0.25s ease, stroke 0.15s ease;
+}
+
+.tsr-cell text {
+  transition: opacity 0.25s ease;
+}
+
+.tsr-move {
+  transition: transform 0.35s ease;
+}
+
+/* Step controls */
+.tsr-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.tsr-controls:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+
+.tsr-controls button,
+.tsr-controls select,
+.tsr-input select,
+.tsr-input input[type='text'],
+.tsr-input input[type='number'],
+.tsr-input textarea {
+  padding: 3px 9px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
+  font-size: 13px;
+}
+
+.tsr-controls button:hover {
+  border-color: var(--vp-c-brand-1);
+}
+
+.tsr-controls .tsr-play {
+  min-width: 84px;
+  font-weight: 600;
+}
+
+.tsr-scrub {
+  flex: 1 1 140px;
+  accent-color: var(--vp-c-brand-1);
+}
+
+.tsr-count {
+  min-width: 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--vp-c-text-2);
+}
+
+.tsr-marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.tsr-controls .tsr-mark {
+  padding: 1px 10px;
+  border-radius: 999px;
+  color: var(--vp-c-text-2);
+}
+
+.tsr-controls .tsr-mark.active {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+
+/* Form rows of the interactive figures */
+.tsr-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.tsr-input label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tsr-input input[type='range'] {
+  accent-color: var(--vp-c-brand-1);
+}
+
+.tsr-input textarea {
+  width: 100%;
+  font-family: var(--vp-font-family-mono);
+}
+
+.tsr-table {
+  font-family: var(--vp-font-family-mono);
+  font-size: 13px;
+}
+
+.tsr-bits {
+  font-family: var(--vp-font-family-mono);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  white-space: pre;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tsr-cell rect,
+  .tsr-cell text,
+  .tsr-move {
+    transition: none;
+  }
+}

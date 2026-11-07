@@ -1,139 +1,153 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { blockName, simulate, type Cell, type Frame, type Loc, type Phase } from '../sim/blockPartition'
-import { bucketColor, recordLabel } from '../palette'
-import { useStepper } from '../useStepper'
-import StepControls from './StepControls.vue'
+import { computed, ref } from "vue";
+import { bucketColor, recordLabel } from "../palette";
+import {
+  blockName,
+  type Cell,
+  type Frame,
+  type Loc,
+  type Phase,
+  simulate,
+} from "../sim/blockPartition";
+import { useStepper } from "../useStepper";
+import StepControls from "./StepControls.vue";
 
-const BUCKETS = 4
-const classify = (key: number) => Math.floor(key / 10)
+const BUCKETS = 4;
+const classify = (key: number) => Math.floor(key / 10);
 
-const blockSize = ref(3)
-const length = ref(19)
-const seed = ref(7)
+const blockSize = ref(3);
+const length = ref(19);
+const seed = ref(7);
 
 function makeKeys(n: number, s: number): number[] {
-  let state = s * 2654435761
-  const next = () => ((state = (state * 1103515245 + 12345) >>> 0) / 2 ** 32)
+  let state = s * 2654435761;
+  const next = () => {
+    state = (state * 1103515245 + 12345) >>> 0;
+    return state / 2 ** 32;
+  };
   // Skewed bucket sizes make the bucket blocks fill at different rates.
   return Array.from({ length: n }, () => {
-    const r = next()
-    const bucket = r < 0.4 ? 1 : r < 0.6 ? 0 : r < 0.85 ? 3 : 2
-    return bucket * 10 + Math.floor(next() * 10)
-  })
+    const r = next();
+    const bucket = r < 0.4 ? 1 : r < 0.6 ? 0 : r < 0.85 ? 3 : 2;
+    return bucket * 10 + Math.floor(next() * 10);
+  });
 }
 
-const keys = computed(() => makeKeys(length.value, seed.value))
-const result = computed(() => simulate({ keys: keys.value, buckets: BUCKETS, blockSize: blockSize.value, classify }))
-const frames = computed(() => result.value.frames)
-const stepper = useStepper(computed(() => frames.value.length))
-const frame = computed<Frame>(() => frames.value[Math.min(stepper.index.value, frames.value.length - 1)])
+const keys = computed(() => makeKeys(length.value, seed.value));
+const result = computed(() =>
+  simulate({ keys: keys.value, buckets: BUCKETS, blockSize: blockSize.value, classify }),
+);
+const frames = computed(() => result.value.frames);
+const stepper = useStepper(computed(() => frames.value.length));
+const frame = computed<Frame>(
+  () => frames.value[Math.min(stepper.index.value, frames.value.length - 1)],
+);
 
 const phaseLabels: Record<Phase, string> = {
-  setup: '1 · Set up blocks',
-  scatter: '2 · Scatter by digit',
-  finish: '3 · Rebuild block order',
-  compact: '4 · Compact into input',
-  done: '5 · Done',
-}
+  setup: "1 · Set up blocks",
+  scatter: "2 · Scatter by digit",
+  finish: "3 · Rebuild block order",
+  compact: "4 · Compact into input",
+  done: "5 · Done",
+};
 const marks = computed(() => {
-  const seen = new Set<Phase>()
-  const out: { at: number; label: string }[] = []
+  const seen = new Set<Phase>();
+  const out: { at: number; label: string }[] = [];
   frames.value.forEach((f, at) => {
     if (!seen.has(f.phase)) {
-      seen.add(f.phase)
-      out.push({ at, label: phaseLabels[f.phase] })
+      seen.add(f.phase);
+      out.push({ at, label: phaseLabels[f.phase] });
     }
-  })
-  return out
-})
+  });
+  return out;
+});
 
 // Geometry
-const CW = 24
-const CH = 34
-const GAP = 10
-const LEFT = 92
-const blockWidth = computed(() => blockSize.value * CW)
-const blockStride = computed(() => blockWidth.value + GAP)
-const ROW_SCRATCH_A = 30
-const ROW_SCRATCH_B = 110
-const ROW_INPUT = 200
-const ROW_ORDER = 300
+const CW = 24;
+const CH = 34;
+const GAP = 10;
+const LEFT = 92;
+const blockWidth = computed(() => blockSize.value * CW);
+const blockStride = computed(() => blockWidth.value + GAP);
+const ROW_SCRATCH_A = 30;
+const ROW_SCRATCH_B = 110;
+const ROW_INPUT = 200;
+const ROW_ORDER = 300;
 
-const scratchBlocks = computed(() => result.value.scratchBlocks)
-const fullBlocks = computed(() => result.value.fullBlocks)
-const tailLen = computed(() => length.value % blockSize.value)
+const scratchBlocks = computed(() => result.value.scratchBlocks);
+const fullBlocks = computed(() => result.value.fullBlocks);
+const tailLen = computed(() => length.value % blockSize.value);
 
 interface BlockBox {
-  physical: number
-  x: number
-  y: number
+  physical: number;
+  x: number;
+  y: number;
 }
 const blocks = computed<BlockBox[]>(() => {
-  const out: BlockBox[] = []
+  const out: BlockBox[] = [];
   for (let p = 0; p < scratchBlocks.value; p++) {
-    const row = p < BUCKETS ? ROW_SCRATCH_A : ROW_SCRATCH_B
-    out.push({ physical: p, x: LEFT + (p % BUCKETS) * blockStride.value, y: row })
+    const row = p < BUCKETS ? ROW_SCRATCH_A : ROW_SCRATCH_B;
+    out.push({ physical: p, x: LEFT + (p % BUCKETS) * blockStride.value, y: row });
   }
   for (let i = 0; i < fullBlocks.value; i++) {
-    out.push({ physical: scratchBlocks.value + i, x: LEFT + i * blockStride.value, y: ROW_INPUT })
+    out.push({ physical: scratchBlocks.value + i, x: LEFT + i * blockStride.value, y: ROW_INPUT });
   }
-  return out
-})
-const tailX = computed(() => LEFT + fullBlocks.value * blockStride.value)
+  return out;
+});
+const tailX = computed(() => LEFT + fullBlocks.value * blockStride.value);
 
 function cellPosition(loc: Loc): { x: number; y: number } {
-  const b = blockSize.value
-  if (loc.region === 'scratch') {
-    const p = Math.floor(loc.index / b)
-    const box = blocks.value[p]
-    return { x: box.x + (loc.index % b) * CW, y: box.y }
+  const b = blockSize.value;
+  if (loc.region === "scratch") {
+    const p = Math.floor(loc.index / b);
+    const box = blocks.value[p];
+    return { x: box.x + (loc.index % b) * CW, y: box.y };
   }
-  const block = Math.floor(loc.index / b)
-  return { x: LEFT + block * blockStride.value + (loc.index % b) * CW, y: ROW_INPUT }
+  const block = Math.floor(loc.index / b);
+  return { x: LEFT + block * blockStride.value + (loc.index % b) * CW, y: ROW_INPUT };
 }
 
 const width = computed(() => {
-  const inputRight = tailX.value + tailLen.value * CW
-  const scratchRight = LEFT + BUCKETS * blockStride.value
-  const orderRight = 16 + result.value.blockCount * 46
-  return Math.max(inputRight, scratchRight, orderRight) + 16
-})
+  const inputRight = tailX.value + tailLen.value * CW;
+  const scratchRight = LEFT + BUCKETS * blockStride.value;
+  const orderRight = 16 + result.value.blockCount * 46;
+  return Math.max(inputRight, scratchRight, orderRight) + 16;
+});
 
 const positions = computed(() => {
-  const pos: number[] = []
-  frame.value.order.forEach((physical, logical) => (pos[physical] = logical))
-  return pos
-})
+  const pos: number[] = [];
+  for (const [logical, physical] of frame.value.order.entries()) pos[physical] = logical;
+  return pos;
+});
 
 function role(physical: number): { text: string; color?: string } {
-  const f = frame.value
-  const writer = f.writers?.findIndex((w) => w.physical === physical) ?? -1
-  if (writer >= 0) return { text: `→ bucket ${writer}`, color: bucketColor(writer, BUCKETS) }
-  const logical = positions.value[physical]
-  if (f.phase === 'compact' || f.phase === 'done') return { text: '' }
-  if (logical < BUCKETS || logical >= f.activeEnd) return { text: 'free' }
-  return { text: '' }
+  const f = frame.value;
+  const writer = f.writers?.findIndex((w) => w.physical === physical) ?? -1;
+  if (writer >= 0) return { text: `→ bucket ${writer}`, color: bucketColor(writer, BUCKETS) };
+  const logical = positions.value[physical];
+  if (f.phase === "compact" || f.phase === "done") return { text: "" };
+  if (logical < BUCKETS || logical >= f.activeEnd) return { text: "free" };
+  return { text: "" };
 }
 
-const sameLoc = (a: Loc | null, b: Loc) => !!a && a.region === b.region && a.index === b.index
+const sameLoc = (a: Loc | null, b: Loc) => !!a && a.region === b.region && a.index === b.index;
 
 interface DrawnCell {
-  key: string
-  x: number
-  y: number
-  cell: Cell
-  read: boolean
-  wrote: boolean
+  key: string;
+  x: number;
+  y: number;
+  cell: Cell;
+  read: boolean;
+  wrote: boolean;
 }
 const drawnCells = computed<DrawnCell[]>(() => {
-  const f = frame.value
-  const out: DrawnCell[] = []
-  const add = (region: 'scratch' | 'input', cells: Cell[]) =>
+  const f = frame.value;
+  const out: DrawnCell[] = [];
+  const add = (region: "scratch" | "input", cells: Cell[]) =>
     cells.forEach((cell, index) => {
-      const loc = { region, index }
-      const { x, y } = cellPosition(loc)
+      const loc = { region, index };
+      const { x, y } = cellPosition(loc);
       out.push({
         key: `${region}${index}`,
         x,
@@ -141,17 +155,17 @@ const drawnCells = computed<DrawnCell[]>(() => {
         cell,
         read: sameLoc(f.read, loc),
         wrote: f.wrote.some((w) => sameLoc(w, loc)),
-      })
-    })
-  add('scratch', f.scratch)
-  add('input', f.input)
-  return out
-})
+      });
+    });
+  add("scratch", f.scratch);
+  add("input", f.input);
+  return out;
+});
 
 function cellFill(cell: Cell): string {
-  if (cell.live && cell.rec) return bucketColor(cell.rec.bucket, BUCKETS)
-  if (cell.rec) return 'var(--tsr-stale)'
-  return 'transparent'
+  if (cell.live && cell.rec) return bucketColor(cell.rec.bucket, BUCKETS);
+  if (cell.rec) return "var(--tsr-stale)";
+  return "transparent";
 }
 
 const orderChips = computed(() =>
@@ -162,10 +176,10 @@ const orderChips = computed(() =>
     bucket: frame.value.bucketIds[logical],
     active: logical >= BUCKETS && logical < frame.value.activeEnd,
   })),
-)
+);
 
 function reshuffle() {
-  seed.value = (seed.value * 31 + 17) % 9973
+  seed.value = (seed.value * 31 + 17) % 9973;
 }
 </script>
 

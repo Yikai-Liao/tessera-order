@@ -1,28 +1,34 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { planDigits } from '../sim/digits'
+import { computed, ref } from "vue";
+import { planDigits } from "../sim/digits";
 
 // `varying_key_bits` in block.rs: a bit varies if it is set in the union of
 // all keys but not in their intersection.
-const text = ref('0x1A40, 0x1A48, 0x1B40, 0x1A4C, 0x1B44')
-const BITS = 16
+const text = ref("0x1A40, 0x1A48, 0x1B40, 0x1A4C, 0x1B44");
+const BITS = 16;
 
 const keys = computed(() =>
   text.value
-    .split(',')
+    .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
     .map((s) => Number(s))
     .filter((v) => Number.isInteger(v) && v >= 0 && v < 2 ** BITS),
-)
-const union = computed(() => keys.value.reduce((a, k) => a | k, 0))
-const intersection = computed(() => keys.value.reduce((a, k) => a & k, 2 ** BITS - 1))
-const varying = computed(() => (keys.value.length ? union.value ^ intersection.value : 0))
-const count = computed(() => varying.value.toString(2).split('').filter((c) => c === '1').length)
-const passes = computed(() => planDigits(BigInt(varying.value), 8, BITS).length)
-const bitsOf = (v: number) => v.toString(2).padStart(BITS, '0').split('')
-const isVarying = (i: number) => ((varying.value >> (BITS - 1 - i)) & 1) === 1
+);
+const union = computed(() => keys.value.reduce((a, k) => a | k, 0));
+const intersection = computed(() => keys.value.reduce((a, k) => a & k, 2 ** BITS - 1));
+const varying = computed(() => (keys.value.length ? union.value ^ intersection.value : 0));
+const count = computed(
+  () =>
+    varying.value
+      .toString(2)
+      .split("")
+      .filter((c) => c === "1").length,
+);
+const passes = computed(() => planDigits(BigInt(varying.value), 8, BITS).length);
+const bitsOf = (v: number) => v.toString(2).padStart(BITS, "0").split("");
+const isVarying = (i: number) => ((varying.value >> (BITS - 1 - i)) & 1) === 1;
 </script>
 
 <template>

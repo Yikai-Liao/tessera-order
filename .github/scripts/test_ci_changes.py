@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
-from pathlib import Path
 import re
 import unittest
+from pathlib import Path
+
 from ci_changes import select
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,27 +25,45 @@ class LanguageSelection(unittest.TestCase):
                 self.assertEqual(select(paths), expected)
 
     def test_shared_changes_validate_both(self):
-        for path in ["conformance/semantics.md", "conformance/vectors/a.json",
-                     "bench/report/report.py", "LICENSE",
-                     ".github/workflows/release.yml", ".github/workflows/rust-ci.yml"]:
+        for path in [
+            "conformance/semantics.md",
+            "conformance/vectors/a.json",
+            "bench/report/report.py",
+            "LICENSE",
+            ".github/workflows/release.yml",
+            ".github/workflows/rust-ci.yml",
+        ]:
             with self.subTest(path=path):
                 self.assertEqual(select([path]), {"rust": True, "cpp": True, "python": True})
 
     def test_docs_site_tooling_selects_no_language(self):
-        for path in ["docs/.vitepress/config.ts", "docs/.vitepress/theme/sim/digits.ts",
-                     "docs/public/logo.svg", "package.json", "package-lock.json",
-                     ".github/workflows/docs.yml"]:
+        for path in [
+            "docs/.vitepress/config.ts",
+            "docs/.vitepress/theme/sim/digits.ts",
+            "docs/public/logo.svg",
+            "package.json",
+            "package-lock.json",
+            ".github/workflows/docs.yml",
+        ]:
             with self.subTest(path=path):
                 self.assertEqual(select([path]), {"rust": False, "cpp": False, "python": False})
 
     def test_prose_selects_no_language(self):
-        for path in ["README.md", "CHANGELOG.md", "ROADMAP.md", "docs/explain/keys.md",
-                     "docs/decisions/0001-single-bsd-2-clause-license.md", "bench/README.md",
-                     "assets/logo.svg"]:
+        for path in [
+            "README.md",
+            "CHANGELOG.md",
+            "ROADMAP.md",
+            "docs/explain/keys.md",
+            "docs/decisions/0001-single-bsd-2-clause-license.md",
+            "bench/README.md",
+            "assets/logo.svg",
+        ]:
             with self.subTest(path=path):
                 self.assertEqual(select([path]), {"rust": False, "cpp": False, "python": False})
         # Markdown inside a language directory belongs to that language.
-        self.assertEqual(select(["rust/tessera-sort/README.md"]), {"rust": True, "cpp": False, "python": True})
+        self.assertEqual(
+            select(["rust/tessera-sort/README.md"]), {"rust": True, "cpp": False, "python": True}
+        )
 
     def test_ci_scripts_select_no_language(self):
         for path in [".github/scripts/ci_changes.py", ".github/scripts/check-dco.sh"]:
@@ -64,8 +83,9 @@ class LanguageSelection(unittest.TestCase):
                     self.assertTrue(select([path])["rust"])
 
     def test_changes_accumulate_across_languages(self):
-        self.assertEqual(select(["rust/a.rs", "cpp/b.hpp"]),
-                         {"rust": True, "cpp": True, "python": True})
+        self.assertEqual(
+            select(["rust/a.rs", "cpp/b.hpp"]), {"rust": True, "cpp": True, "python": True}
+        )
 
 
 if __name__ == "__main__":

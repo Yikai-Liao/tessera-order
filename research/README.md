@@ -80,3 +80,9 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   cases. All C/A cells remain inconclusive; u128/d256 is slower than original
   serial, not established as count-hook regression. Zero retained heap in all
   30 observations. The frozen report precedes the separate runtime integration.
+
+- [Rejected direct-interval metadata probe](direct-interval-negative/README.md):
+  the frozen greedy policy exhausted 395 spill slots after 99,923/10M final
+  writes. Its complete auxiliary lower bound exceeds the frozen byte cap.
+  This rejects the tested policy/representation, not all low-space interval
+  algorithms; no record mover, sorting benchmark or runtime change.

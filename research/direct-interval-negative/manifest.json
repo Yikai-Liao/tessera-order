@@ -1,0 +1,113 @@
+{
+  "declared_64bit_metadata_bytes": "38V + 16E + 4(F+2PR) + 8K + 12R + 16P + 484",
+  "external_full_graph_result": {
+    "filename": "native-row16-n10m-w8-result.json",
+    "included": false,
+    "reason": "Large diagnostic graph/events excluded from source checkpoint",
+    "sha256": "c8878f84bc21abf1ccc2e735d5f5f771fb7893474023f537c6986bd04dd23f81"
+  },
+  "external_input": {
+    "filename": "adopted-row16-n10m-w8.tsv",
+    "hook": "native adopted before permute_blocks",
+    "record_values_included": false,
+    "sha256": "13766d5c1e52266dea18a93624eae49d1a6d40cb48b62b9499c111b3345b3dfe",
+    "source_manifest_sha256": "4f2f2a14cbc4a1c6c449d856f87409dda43050903e8bb7568ad2e671f365acd7"
+  },
+  "files": {
+    "CAPTURE.md": {
+      "bytes": 4514,
+      "sha256": "87b24764a9ee99ef082eefab95d744e92e43f071e85beb1fa977794248dd2c59"
+    },
+    "DESIGN.md": {
+      "bytes": 19384,
+      "sha256": "f6404c84f18f963aa5408717370265b704dc9050ce9c65fbc3420a493c102570"
+    },
+    "README.md": {
+      "bytes": 3335,
+      "sha256": "84edff2a6b182d8aafbd264f8dd7f1c85e4a2bcd05a3f114238af3a8d02ce946"
+    },
+    "RESULT.md": {
+      "bytes": 7912,
+      "sha256": "78a8c10fb89bd59d3f4d36bd1bd0d9a03ff4efc70aeb40d22ce8feb334ff23ab"
+    },
+    "evidence/checkpoint-replay.log": {
+      "bytes": 1062,
+      "sha256": "dc573e1bc626bd5e92c7a7f883c3a03fa7691a7629f2e3906f0f9c869fedd0fb"
+    },
+    "evidence/initial-unit-tests.log": {
+      "bytes": 1540,
+      "sha256": "42c3405e677bf3263d1ae700b3e06a14dbe6feeae2cf20be240d468e9eb4925a"
+    },
+    "evidence/native-capacity-ledger.tsv": {
+      "bytes": 925,
+      "sha256": "47d1affa3cde3b06cc8535d9534277fc80afaf56bc96c44a13ff7ee589fcb6f1"
+    },
+    "evidence/native-row16-n10m-w8-run.log": {
+      "bytes": 8079,
+      "sha256": "1d6e16c4d17a0c09634944c597ef24cd8f9b2b8d8277eb13ad4dae204fe4ab01"
+    },
+    "evidence/summary.json": {
+      "bytes": 3652,
+      "sha256": "4800f65dcdf813c3c74a57a6568f23478cd3117571264d472e80d0fe5725abcb"
+    },
+    "replay.sh": {
+      "bytes": 1228,
+      "sha256": "258d4cb52814c2424e3157e8964c74ee77d39fe48d0fba73cc54e33aeffd96d3"
+    },
+    "src/probe.py": {
+      "bytes": 18908,
+      "sha256": "bf8a2f81e294b77dd731bf268302ad4195e4af308691879b051d32ad41b5aeeb"
+    },
+    "src/run_native_capture.py": {
+      "bytes": 6115,
+      "sha256": "2a49470c4209de7eaae4981fae51fa73fa1f2211b95eee5bf0d17781b9249b1e"
+    },
+    "src/test_probe.py": {
+      "bytes": 4826,
+      "sha256": "16a81fbeed6d26cc6b2a3e0c8771024c8df76d254ee2454370a79cf258995d80"
+    }
+  },
+  "format": "direct-interval-negative-checkpoint-v1",
+  "frozen_policy": "Drain complete ready frontiers; when blocked evacuate the live original source with maximum incoming dependency count, tie by final stable rank.",
+  "frozen_spill_slots": "floor(P * ceil(sqrt(n)) / B)",
+  "frozen_total_aux_bytes": "32 * P * ceil(sqrt(n)) * sizeof(T)",
+  "license": "BSD-2-Clause",
+  "lock_evidence": {
+    "acquired_utc": "2026-11-07T17:39:30Z",
+    "device": 27,
+    "inode": 1578019,
+    "mode": "shared",
+    "released_utc": "2026-11-07T17:39:34Z"
+  },
+  "no_record_mover_or_sort_benchmark": true,
+  "omissions": [
+    "native full TSV retained separately",
+    "large raw graph/event arrays",
+    "Python cache",
+    "targets",
+    "raw addresses",
+    "machine-specific absolute paths",
+    "record payloads"
+  ],
+  "source_history": [
+    {
+      "description": "Unrun draft used min(existing root record scratch, 16 P ceil sqrt(n)). It was replaced before all tests and native probes; no result selected the new cap.",
+      "executed": false,
+      "id": "initial_unrun_cap16_draft",
+      "probe_sha256": "9636bdae12e3afc451c82f0eb37a0e82d982825458c630b75c2bd390ee5914bf"
+    },
+    {
+      "description": "Ten unit tests only, before adding an explicit scratch-only total-memory lower-bound output.",
+      "executed": true,
+      "id": "frozen_cap1_total32_first_unit_tests",
+      "probe_sha256": "eafeb360b61f9297c368955304b509492380dc641397456d72584b34ad7752b8"
+    },
+    {
+      "description": "Same frozen victim ordering and caps; ten tests plus first real Row16 graph. No policy/cap changes after result.",
+      "executed": true,
+      "id": "frozen_cap1_total32_native_probe",
+      "probe_sha256": "bf8a2f81e294b77dd731bf268302ad4195e4af308691879b051d32ad41b5aeeb"
+    }
+  ],
+  "status": "rejected_fixed_greedy_policy_and_declared_layout; not_a_general_interval_lower_bound"
+}

@@ -12,7 +12,7 @@ The fast path must retain the stable behavior for descending inputs with ties an
 
 ## Decision
 
-Have `confirm_order` return `StrictDescending` only when every adjacent key is strictly descending. Route that result to a whole-slice reversal and return. Keep `reverse_stably` for all other confirmed descending inputs, including those with equal keys.
+Have `confirm_order` mark a descending result as strict only when every adjacent key is strictly descending. Route that result to a whole-slice reversal and return. Keep `reverse_stably` for all other confirmed descending inputs, including those with equal keys.
 
 Do not add a size threshold: strict descent is established by the existing confirmation scan, and the direct reversal is the simplest correct path. On strictly descending data, the check uses one greater-than comparison per pair; equality checks are reached only when a pair is not strictly descending.
 

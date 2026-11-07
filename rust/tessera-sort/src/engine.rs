@@ -391,11 +391,11 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
     let sampled = probe_order(records, extractor);
     match sampled {
         Order::Ascending => return,
-        Order::StrictDescending => {
+        Order::Descending { strict: true } => {
             records.reverse();
             return;
         }
-        Order::Descending => {
+        Order::Descending { strict: false } => {
             reverse_stably(records, extractor);
             return;
         }
@@ -417,7 +417,11 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
     if sampled == Order::Flat {
         match confirm_order(records, extractor) {
             Order::Ascending => return,
-            Order::Descending => {
+            Order::Descending { strict: true } => {
+                records.reverse();
+                return;
+            }
+            Order::Descending { strict: false } => {
                 reverse_stably(records, extractor);
                 return;
             }
@@ -505,12 +509,13 @@ fn insertion_probe<T, E: Extract<T>>(
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Order {
     Ascending,
-    Descending,
-    /// Every adjacent key is strictly descending.
-    StrictDescending,
+    /// Keys descend; `strict` is false when an adjacent pair ties.
+    Descending {
+        strict: bool,
+    },
     /// Every sampled pair was equal; gaps may still contain differing keys.
     Flat,
     Unsorted,
@@ -568,13 +573,7 @@ fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
                 None
             }
         })
-        .map_or(Order::Unsorted, |(_, strict)| {
-            if strict {
-                Order::StrictDescending
-            } else {
-                Order::Descending
-            }
-        })
+        .map_or(Order::Unsorted, |(_, strict)| Order::Descending { strict })
     }
 }
 
@@ -1192,13 +1191,13 @@ mod tests {
                     record.0
                 }),
             );
-            assert!(
-                order
-                    == if descending {
-                        Order::Descending
-                    } else {
-                        Order::Ascending
-                    }
+            assert_eq!(
+                order,
+                if descending {
+                    Order::Descending { strict: false }
+                } else {
+                    Order::Ascending
+                }
             );
             assert_eq!(
                 visited,
@@ -1214,14 +1213,15 @@ mod tests {
         expected.reverse();
 
         let mut probe_calls = 0;
-        assert!(
+        assert_eq!(
             probe_order(
                 &records,
                 &mut ByKey(|record: &(u64, u64)| {
                     probe_calls += 1;
                     record.0
                 }),
-            ) == Order::StrictDescending
+            ),
+            Order::Descending { strict: true }
         );
 
         let mut calls = 0;

@@ -39,6 +39,8 @@ export interface Manifest {
   profile: string;
   opt_level: string;
   debug: string;
+  cc?: string;
+  cxx?: string;
   dispatch?: Record<string, string>;
   [measurementId: string]: unknown;
 }

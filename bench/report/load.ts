@@ -65,6 +65,10 @@ function parseManifest(value: unknown): Manifest {
     "debug",
   ])
     assertString(value[name]);
+  if (value.native_build !== undefined) {
+    assertString(value.cc);
+    assertString(value.cxx);
+  }
   if (!Array.isArray(value.cases) || !Array.isArray(value.variants))
     throw new Error("missing case or variant plan");
   const names = new Set<string>();
@@ -233,6 +237,8 @@ export async function loadRun(directories: string[], partial = false): Promise<D
         "debug",
         "features",
         "cargo_encoded_rustflags",
+        "cc",
+        "cxx",
         "native_build",
         "native_sources",
       ]) {

@@ -231,6 +231,8 @@ fn verify_memory_build(options: &Options) -> Result<()> {
         "debug",
         "features",
         "cargo_encoded_rustflags",
+        "cc",
+        "cxx",
         "native_build",
         "native_sources",
     ] {
@@ -433,7 +435,7 @@ fn measure_memory(options: &Options, cases: &[Case]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn memory_build_requires_matching_compiler_settings() {
+    fn memory_build_checks_configuration() {
         let output_dir = std::env::temp_dir().join(format!(
             "tessera-memory-build-{}-{}",
             std::process::id(),
@@ -456,7 +458,7 @@ mod tests {
                 .unwrap();
         std::fs::write(&path, serde_json::to_vec(&timing).unwrap()).unwrap();
         super::verify_memory_build(&options).unwrap();
-        for field in ["opt_level", "debug"] {
+        for field in ["opt_level", "debug", "cc", "cxx"] {
             let mut memory = timing.clone();
             memory[field] = serde_json::json!("different");
             std::fs::write(&path, serde_json::to_vec(&memory).unwrap()).unwrap();

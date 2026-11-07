@@ -2,7 +2,17 @@
 
 #include "layout.h"
 #include <cstring>
+#ifdef __clang__
+#pragma clang diagnostic push
+#if __has_warning("-Wmissing-template-arg-list-after-template-kw")
+// Pinned IPS2Ra spells a deduced member-template call as `template classify(...)`.
+#pragma clang diagnostic ignored "-Wmissing-template-arg-list-after-template-kw"
+#endif
+#endif
 #include <ips2ra.hpp>
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 #include <ips4o.hpp>
 #include <type_traits>
 

@@ -131,6 +131,10 @@ function renderProvenance(dataset: Dataset) {
   for (const [build, manifest] of dataset.manifests) {
     out += `### ${build}\n\nCommit \`${manifest.commit}\` (${manifest.dirty ? "modified tree" : "clean tree"}), target \`${manifest.target}\`, profile \`${manifest.profile}\`, optimization level \`${manifest.opt_level}\`, debug \`${manifest.debug}\`. Source SHA-256: \`${manifest.source_sha256}\`. Executable SHA-256: \`${manifest.binary_sha256}\`.\n\n`;
     out += `\`\`\`text\n${manifest.rustc}\n\`\`\`\n\n`;
+    for (const compiler of ["cc", "cxx"] as const) {
+      if (manifest[compiler])
+        out += `${compiler}:\n\n\`\`\`text\n${manifest[compiler]}\n\`\`\`\n\n`;
+    }
     out += `Features: ${manifest.features.map(formatCell).join(", ")}. Rust flags: \`${formatCell(manifest.cargo_encoded_rustflags).replaceAll("\u001f", " ")}\`.\n\n`;
     if (manifest.dispatch)
       out += `${renderTable(["SIMD sort", "Dispatch target"], Object.entries(manifest.dispatch))}\n`;

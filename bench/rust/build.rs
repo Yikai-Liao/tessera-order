@@ -104,7 +104,7 @@ fn main() {
             &fs::read(Path::new(&out).join("native-build.json")).unwrap(),
         )
         .unwrap();
-        for (key, variable, fallback) in [("cc", "CC", "cc"), ("cxx", "CXX", "c++")] {
+        for (key, variable, fallback) in [("cc", "CC", "clang"), ("cxx", "CXX", "clang++")] {
             let compiler = env::var(variable).unwrap_or_else(|_| fallback.into());
             value[key] = json!(read_command_output(&compiler, &["--version"]));
         }

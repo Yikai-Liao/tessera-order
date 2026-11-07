@@ -214,6 +214,43 @@ test("optimization and debug settings must agree across timing, memory and SIMD"
   }
 });
 
+test("native compiler versions match", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tessera-native-compilers-"));
+  try {
+    const dataset = await writeFixture(dir, true);
+    const native = {
+      ...dataset.manifests.get("default")!,
+      cc: "gcc 12",
+      cxx: "g++ 12",
+      native_build: { cc: "cc", cxx: "c++" },
+    };
+    const timingPath = join(dir, "manifest.json");
+    const memoryPath = join(dir, "memory-manifest-default.json");
+    await writeFile(timingPath, JSON.stringify(native));
+    await writeFile(memoryPath, JSON.stringify(native));
+    await loadRun([dir]);
+    for (const [field, version] of [
+      ["cc", "gcc 14"],
+      ["cxx", "g++ 14"],
+    ]) {
+      await writeFile(memoryPath, JSON.stringify({ ...native, [field]: version }));
+      await assert.rejects(
+        loadRun([dir]),
+        new RegExp(`memory provenance differs: default/${field}`),
+      );
+      const incomplete: Record<string, unknown> = { ...native };
+      delete incomplete[field];
+      await writeFile(timingPath, JSON.stringify(incomplete));
+      await writeFile(memoryPath, JSON.stringify(incomplete));
+      await assert.rejects(loadRun([dir]), /expected a nonempty string/);
+      await writeFile(timingPath, JSON.stringify(native));
+      await writeFile(memoryPath, JSON.stringify(native));
+    }
+  } finally {
+    await rm(dir, { recursive: true });
+  }
+});
+
 test("SIMD shares the anchor", () => {
   const dataset = createFixture(true);
   validateRun(dataset);

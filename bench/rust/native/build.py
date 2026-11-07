@@ -16,8 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 VENDOR = ROOT.parents[1] / "vendor"
 OUT = Path(sys.argv[1]).resolve()
-CC = os.environ.get("CC", "cc")
-CXX = os.environ.get("CXX", "c++")
+CC = os.environ.get("CC", "clang")
+CXX = os.environ.get("CXX", "clang++")
 SOURCE_SIGNATURE = ""
 COMPILERS = {}
 BASE = ["-O3", "-DNDEBUG", "-fPIC", "-march=x86-64", "-mtune=generic"]

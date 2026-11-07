@@ -63,13 +63,118 @@ impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for Narrow<E, SHIFT> {
     }
 }
 
+/// A run of adjacent, fully materialized buckets handed to one task.
+///
+/// The compaction materializes buckets in increasing address order, so
+/// consecutive buckets of a run are contiguous and a run is one slice. The run
+/// owns that slice from the moment the compaction drops it: the copy never
+/// writes a materialized bucket again and never reads one as a copy source.
+struct Job<T> {
+    start: *mut T,
+    records: usize,
+    /// Ends of the buckets inside the run, relative to `start` and increasing.
+    bounds: Vec<usize>,
+}
+
+// SAFETY: a job owns its run exclusively. Runs come from disjoint bucket
+// ranges, and the compaction hands a bucket over only once.
+unsafe impl<T: Send> Send for Job<T> {}
+
+impl<T: Send> Job<T> {
+    fn new(start: *mut T) -> Self {
+        Job {
+            start,
+            records: 0,
+            bounds: Vec::new(),
+        }
+    }
+
+    /// Extends the run by one materialized bucket, if it is adjacent.
+    fn push(&mut self, bucket: *mut T, records: usize, record_bytes: usize) -> bool {
+        // SAFETY: pointer arithmetic only; the comparison is between addresses.
+        let adjacent = unsafe { std::ptr::eq(self.start.add(self.records), bucket) };
+        if !adjacent {
+            return false;
+        }
+        self.records += records;
+        self.bounds.push(self.records);
+        if core::mem::size_of::<T>() != 0 {
+            debug_assert_eq!(record_bytes, core::mem::size_of::<T>());
+        }
+        true
+    }
+
+    fn bytes(&self) -> usize {
+        self.records.saturating_mul(core::mem::size_of::<T>())
+    }
+
+    fn run<E: Extract<T> + Clone + Send, const CACHED: bool>(
+        &mut self,
+        mut key: E,
+        candidate: u128,
+        tile_bytes: usize,
+        pool: &Pool<T>,
+    ) {
+        let mut workspace = pool.take();
+        let mut start = 0;
+        for &end in &self.bounds {
+            // SAFETY: the bounds are monotonic and no larger than the run, and
+            // the run is exclusively owned by this job. The slices are
+            // disjoint, so no other task aliases these records.
+            let child =
+                unsafe { core::slice::from_raw_parts_mut(self.start.add(start), end - start) };
+            if child.len() > 1 {
+                let varying = scan_varying_bits(child, candidate, &mut key);
+                Sorter::<T, E, CACHED> {
+                    workspace: &mut workspace,
+                    key: &mut key,
+                    tile_bytes,
+                }
+                .sort_node(child, varying);
+            }
+            start = end;
+        }
+        pool.give(workspace);
+    }
+}
+
+/// Recycled per-task workspaces.
+///
+/// A task needs its own tile and block scratch. Allocating one per run would
+/// cost a 64 KiB allocation per 32K records; the pool keeps one per worker.
+struct Pool<T> {
+    free: std::sync::Mutex<Vec<Workspace<T>>>,
+}
+
+impl<T> Pool<T> {
+    fn new() -> Self {
+        Pool {
+            free: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn take(&self) -> Workspace<T> {
+        self.free
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .pop()
+            .unwrap_or_default()
+    }
+
+    fn give(&self, workspace: Workspace<T>) {
+        self.free
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .push(workspace);
+    }
+}
+
 fn sort_prepared<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
     arr: &mut [T],
     mut key: E,
     varying: u128,
     tile_bytes: usize,
 ) {
-    let bytes = arr.len().saturating_mul(core::mem::size_of::<T>());
     let mut workspace = Workspace::new();
     let low = varying.trailing_zeros() as usize;
     let top = bit_len(varying);
@@ -93,94 +198,81 @@ fn sort_prepared<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
     }
     let digit = choose_split_digit(arr, top, tile_bytes, &mut key);
     let candidate = varying & !digit.mask::<E::Value>().to_u128();
-    let ends = block::partition_digit_with_ends(
-        arr,
-        digit.width,
-        digit.shift,
-        &mut key,
-        workspace.block_buffers(),
-        &mut |_, _| {},
-    );
-    // Partitioning has restored every live record before any task starts.
-    // Moving workspaces is safe; their cached pointers are never dereferenced
-    // between partition calls. There is one workspace per bounded worker, not
-    // one per bucket or Rayon job.
-    let workers = rayon::current_num_threads()
-        .min((bytes / MIN_TASK_BYTES).max(1))
-        .min(ends.len());
-    let mut workspaces: Vec<_> = (1..workers).map(|_| Workspace::new()).collect();
-    workspaces.push(workspace);
-    finish_buckets::<T, E, CACHED>(arr, &ends, 0, candidate, key, &mut workspaces, tile_bytes);
+    if candidate == 0 {
+        return;
+    }
+    // The compaction is the longest serial phase of a parallel call, and the
+    // children are the only parallel work that does not depend on all of it:
+    // it hands out each bucket as soon as it is materialized. Sorting a run of
+    // materialized buckets inside that callback overlaps the two, which is
+    // worth about a third of the root on large inputs. Runs are cut at
+    // MIN_TASK_BYTES so a task still amortises its scratch and scheduling.
+    let pool = Pool::new();
+    let record_bytes = core::mem::size_of::<T>();
+    rayon::scope(|scope| {
+        let mut pending: Option<Job<T>> = None;
+        {
+            let mut visit = |bucket: &mut [T], visit_key: &mut E| {
+                let start = bucket.as_mut_ptr();
+                let records = bucket.len();
+                let mut job = pending.take().unwrap_or_else(|| Job::new(start));
+                if !job.push(start, records, record_bytes) {
+                    // The compaction materializes buckets in increasing
+                    // addresses, so a gap means the previous run is complete.
+                    spawn_job::<T, E, CACHED>(
+                        scope,
+                        job,
+                        candidate,
+                        visit_key.clone(),
+                        tile_bytes,
+                        &pool,
+                    );
+                    job = Job::new(start);
+                    assert!(job.push(start, records, record_bytes));
+                }
+                if job.bytes() >= MIN_TASK_BYTES {
+                    spawn_job::<T, E, CACHED>(
+                        scope,
+                        job,
+                        candidate,
+                        visit_key.clone(),
+                        tile_bytes,
+                        &pool,
+                    );
+                } else {
+                    pending = Some(job);
+                }
+            };
+            block::partition_digit_with_ends(
+                arr,
+                digit.width,
+                digit.shift,
+                &mut key,
+                workspace.block_buffers(),
+                &mut visit,
+            );
+        }
+        if let Some(job) = pending {
+            spawn_job::<T, E, CACHED>(scope, job, candidate, key.clone(), tile_bytes, &pool);
+        }
+    });
 }
 
-fn finish_buckets<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
-    arr: &mut [T],
-    ends: &[usize],
-    offset: usize,
+/// Queues one materialized run of buckets on the parallel workers.
+fn spawn_job<
+    'scope,
+    T: Send + 'scope,
+    E: Extract<T> + Clone + Send + 'scope,
+    const CACHED: bool,
+>(
+    scope: &rayon::Scope<'scope>,
+    mut job: Job<T>,
     candidate: u128,
-    mut key: E,
-    workspaces: &mut [Workspace<T>],
+    key: E,
     tile_bytes: usize,
+    pool: &'scope Pool<T>,
 ) {
-    if arr.len() < 2 || candidate == 0 {
-        return;
-    }
-    if workspaces.len() == 1 || ends.len() == 1 {
-        let mut start = 0;
-        for &end in ends {
-            let end = end - offset;
-            let child = &mut arr[start..end];
-            if child.len() > 1 {
-                let varying = scan_varying_bits(child, candidate, &mut key);
-                Sorter::<T, E, CACHED> {
-                    workspace: &mut workspaces[0],
-                    key: &mut key,
-                    tile_bytes,
-                }
-                .sort_node(child, varying);
-            }
-            start = end;
-        }
-        return;
-    }
-    // Split only at a bucket boundary. Equal-key records can therefore never
-    // cross tasks, and slice splitting proves that tasks cannot alias records.
-    let middle = offset + arr.len() / 2;
-    let split = ends
-        .partition_point(|&end| end < middle)
-        .clamp(1, ends.len() - 1);
-    let boundary = ends[split - 1];
-    let records = arr.len();
-    let (left, right) = arr.split_at_mut(boundary - offset);
-    let left_workers = (((workspaces.len() as u128 * left.len() as u128) / records as u128)
-        as usize)
-        .clamp(1, workspaces.len() - 1);
-    let (left_workspaces, right_workspaces) = workspaces.split_at_mut(left_workers);
-    let left_key = key.clone();
-    rayon::join(
-        || {
-            finish_buckets::<T, E, CACHED>(
-                left,
-                &ends[..split],
-                offset,
-                candidate,
-                left_key,
-                left_workspaces,
-                tile_bytes,
-            )
-        },
-        || {
-            finish_buckets::<T, E, CACHED>(
-                right,
-                &ends[split..],
-                boundary,
-                candidate,
-                key,
-                right_workspaces,
-                tile_bytes,
-            )
-        },
-    );
+    scope.spawn(move |_| job.run::<E, CACHED>(key, candidate, tile_bytes, pool));
 }
 
 /// Keeps the serial adaptive checks without changing the sequential entry point.

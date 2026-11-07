@@ -87,8 +87,10 @@ was not modified. No staging compile, commit, push or promotion was performed.
 
 ## Promotion status
 
-The shared repository remains on its existing production child-only Rayon
-path. Cargo default features remain std-only. This patch is unapplied there.
+The archived base `b1d36ce` uses the production child-only Rayon path. The
+subsequent public overlap commit `6c657de` is a separate implementation, not
+promotion of this patch. Cargo default features remain std-only. This patch
+remains unapplied to the public API.
 Applying it would change the Rayon implementation to the strong combined path,
 so it must not be described as already promoted. The four-case, three-block
 pilot is inconclusive against oldbest and SIMD-off controls. It does not provide

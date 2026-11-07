@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 // A step-by-step model of one stable block partition pass and its compaction,
-// following `rust/tessera-sort/src/block.rs`: `Sorter::new`, `begin_pass`,
+// following `rust/tessera-sort/src/block.rs`: `Partition::new`, `begin_pass`,
 // `scatter`, `finish_pass` and `compact_with`. It moves record identities
 // instead of bytes and records a frame after every observable step, so the
 // explanation pages can replay the algorithm. Index arithmetic matches the

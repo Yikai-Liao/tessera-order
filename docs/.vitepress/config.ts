@@ -199,6 +199,7 @@ function developmentSidebar() {
         { text: 'Roadmap', link: '/ROADMAP' },
         { text: 'Changelog', link: '/CHANGELOG' },
         { text: 'Python binding proposal', link: '/proposals/python-binding' },
+        { text: 'Comparison benchmarks proposal', link: '/proposals/comparison-benchmarks' },
       ],
     },
     {

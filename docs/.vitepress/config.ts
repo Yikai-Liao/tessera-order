@@ -200,6 +200,7 @@ function developmentSidebar() {
         { text: "Contributing", link: "/CONTRIBUTING" },
         { text: "Benchmark protocol", link: "/development/benchmarking" },
         { text: "Continuous benchmarks", link: "/development/continuous-benchmarks" },
+        { text: "Continuous integration", link: "/development/ci" },
         { text: "Documentation site", link: "/development/docs-site" },
         { text: "Releasing", link: "/RELEASING" },
       ],

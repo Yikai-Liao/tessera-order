@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: BSD-2-Clause
+name: Rust test cell
+description: >-
+  Build and test the workspace with one toolchain. The pull request cells and
+  the main-only cells both call this action, so the command list has one home.
+
+inputs:
+  toolchain:
+    description: Toolchain to install and test with, either "stable" or the MSRV.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Lints are enforced on stable only: older compilers report false positives,
+    # such as `unreachable_pub` on 1.85, so the MSRV only has to build and pass
+    # the tests.
+    - name: Set RUSTFLAGS
+      shell: bash
+      env:
+        FLAGS: ${{ inputs.toolchain == 'stable' && '-D warnings' || '' }}
+      run: echo "RUSTFLAGS=$FLAGS" >> "$GITHUB_ENV"
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.toolchain }}
+    - uses: Swatinem/rust-cache@v2
+    # `--lib --tests` rather than `--all-targets`: the only extra target is the
+    # Criterion benchmark, which no test asserts on and which bench-build.yml
+    # compiles on the stable Linux runner for every change that touches Rust.
+    - shell: bash
+      run: cargo test --workspace --lib --tests
+    # Benchmark dependencies would otherwise enable the crate's std feature.
+    - shell: bash
+      run: cargo test -p tessera-sort --lib --tests --no-default-features
+    - shell: bash
+      run: cargo test --workspace --doc
+    # Portable SIMD needs Rust 1.89, so only stable compiles it. The backend is
+    # chosen by ISA, not by operating system, so on main the x86-64 and AArch64
+    # Linux runners already interpret what macOS and Windows would repeat; those
+    # platforms only have to compile the feature, which is the part a platform
+    # change can break.
+    - shell: bash
+      if: inputs.toolchain == 'stable' && runner.os == 'Linux'
+      run: cargo test --workspace --lib --tests --features tessera-sort/portable-simd
+    - shell: bash
+      if: inputs.toolchain == 'stable' && runner.os == 'Linux'
+      run: cargo test --workspace --doc --features tessera-sort/portable-simd
+    - shell: bash
+      if: inputs.toolchain == 'stable' && runner.os != 'Linux'
+      run: cargo build --workspace --lib --features tessera-sort/portable-simd

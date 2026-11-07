@@ -81,7 +81,7 @@ The crate therefore has nothing to fix. The final link of each program decides w
 
 ### Strictly descending inputs
 
-The order probe now distinguishes strictly descending keys from descending keys with ties. Strictly descending records need one slice reversal; tied keys still use `reverse_stably` to restore their input order. This removes the equal-run scan for the strict case without changing the stable-sort contract.
+The order probe now distinguishes strictly descending keys from descending keys with ties. Strictly descending records need one slice reversal; tied keys still use `reverse_stably` to restore their input order. This removes the equal-run scan for the strict case without changing the stable-sort contract. The implementation and paired measurements are recorded in [decision 0041](../decisions/0041-strict-descending-fast-path.md).
 
 The release comparison runner measured 22 reverse cases in one release binary: the candidate, its `tessera-aa` control, two separately linked copies of baseline `b973f09`, and a second candidate copy. Each case used nine shuffled blocks, input restoration outside the clock and stable-reference verification. The run was pinned to CPU 2 on a Ryzen 7 8845H; the report records host conditions and per-case A/A ranges. Ratios below are baseline-copy time divided by the candidate A/A mean, so values above 1 favor the change.
 

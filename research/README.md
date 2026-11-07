@@ -91,3 +91,8 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   640 reference-checked sorts; current public and native combined controls,
   with broad tails and tracer perturbation. Root end fractions are not serial
   fractions. Focused library/Miri scope only; no new optimization accepted.
+
+- [R16 versus R256 causal control](generic-root-r16-control/README.md):
+  no accepted gain across 1,280 verified calls. Earlier root completion
+  increased child work/tails; four separate non-timed calls found equal pass
+  depth. Summary-only archive, with raw call timings retained externally.

@@ -1,0 +1,402 @@
+[
+  {
+    "record": "u64",
+    "config": "default",
+    "input": {
+      "kind": "verified_input",
+      "record": "u64",
+      "config": "default",
+      "n": 10000000,
+      "workers": 8,
+      "seed": 1,
+      "key_fnv1a64": "c2333e730de5dd2c",
+      "verified": true,
+      "timing_sample": false
+    },
+    "geometry": {
+      "root_applied_digit_bits": 8,
+      "root_applied_digit_shift": 56,
+      "root_radix": 256,
+      "root_workers": 8,
+      "root_setup_begin": 10000000,
+      "root_block_records": 128,
+      "root_bucket_count": 256,
+      "root_full_blocks": 78125,
+      "root_partial_count": 2048
+    },
+    "work": {
+      "nodes": {
+        "calls": 256,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 256,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "blocks": {
+        "calls": 256,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 256,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "tiles": {
+        "calls": 4096,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 4096,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "tile_partitions": {
+        "calls": 4096,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 4096,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "lsd_passes": {
+        "calls": 0,
+        "records": 0,
+        "depths": [],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "msd_passes": {
+        "calls": 4096,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 4096,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      }
+    }
+  },
+  {
+    "record": "u64",
+    "config": "r16",
+    "input": {
+      "kind": "verified_input",
+      "record": "u64",
+      "config": "r16",
+      "n": 10000000,
+      "workers": 8,
+      "seed": 1,
+      "key_fnv1a64": "c2333e730de5dd2c",
+      "verified": true,
+      "timing_sample": false
+    },
+    "geometry": {
+      "root_applied_digit_bits": 4,
+      "root_applied_digit_shift": 60,
+      "root_radix": 16,
+      "root_workers": 8,
+      "root_setup_begin": 10000000,
+      "root_block_records": 313,
+      "root_bucket_count": 16,
+      "root_full_blocks": 31948,
+      "root_partial_count": 128
+    },
+    "work": {
+      "nodes": {
+        "calls": 16,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 16,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "blocks": {
+        "calls": 16,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 16,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "tiles": {
+        "calls": 4096,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 4096,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "tile_partitions": {
+        "calls": 4096,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 4096,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "lsd_passes": {
+        "calls": 0,
+        "records": 0,
+        "depths": [],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "msd_passes": {
+        "calls": 4096,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 4096,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      }
+    }
+  },
+  {
+    "record": "row16",
+    "config": "default",
+    "input": {
+      "kind": "verified_input",
+      "record": "row16",
+      "config": "default",
+      "n": 10000000,
+      "workers": 8,
+      "seed": 1,
+      "key_fnv1a64": "c2333e730de5dd2c",
+      "verified": true,
+      "timing_sample": false
+    },
+    "geometry": {
+      "root_applied_digit_bits": 8,
+      "root_applied_digit_shift": 56,
+      "root_radix": 256,
+      "root_workers": 8,
+      "root_setup_begin": 10000000,
+      "root_block_records": 64,
+      "root_bucket_count": 256,
+      "root_full_blocks": 156250,
+      "root_partial_count": 2048
+    },
+    "work": {
+      "nodes": {
+        "calls": 256,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 256,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "blocks": {
+        "calls": 256,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 256,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "tiles": {
+        "calls": 8192,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 8192,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "tile_partitions": {
+        "calls": 8192,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 8192,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "lsd_passes": {
+        "calls": 0,
+        "records": 0,
+        "depths": [],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "msd_passes": {
+        "calls": 8192,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 8192,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      }
+    }
+  },
+  {
+    "record": "row16",
+    "config": "r16",
+    "input": {
+      "kind": "verified_input",
+      "record": "row16",
+      "config": "r16",
+      "n": 10000000,
+      "workers": 8,
+      "seed": 1,
+      "key_fnv1a64": "c2333e730de5dd2c",
+      "verified": true,
+      "timing_sample": false
+    },
+    "geometry": {
+      "root_applied_digit_bits": 4,
+      "root_applied_digit_shift": 60,
+      "root_radix": 16,
+      "root_workers": 8,
+      "root_setup_begin": 10000000,
+      "root_block_records": 221,
+      "root_bucket_count": 16,
+      "root_full_blocks": 45248,
+      "root_partial_count": 128
+    },
+    "work": {
+      "nodes": {
+        "calls": 16,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 16,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "blocks": {
+        "calls": 16,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 16,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "tiles": {
+        "calls": 4096,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 4096,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "tile_partitions": {
+        "calls": 4096,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 4096,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "lsd_passes": {
+        "calls": 0,
+        "records": 0,
+        "depths": [],
+        "max_depth": 0,
+        "overflow_calls": 0
+      },
+      "msd_passes": {
+        "calls": 4096,
+        "records": 10000000,
+        "depths": [
+          {
+            "depth": 0,
+            "calls": 4096,
+            "records": 10000000
+          }
+        ],
+        "max_depth": 0,
+        "overflow_calls": 0
+      }
+    }
+  }
+]

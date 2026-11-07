@@ -1,0 +1,21 @@
+{
+  "scope": "Derived summary-only publication; not a standalone reproducible packet. Original tar retained externally without modification. No runtime changes.",
+  "original_tar_sha256": "d2ae7331ab1984e7c9e8fccd32e4c6c3696d19096681f529fa40c82f312bd0ad",
+  "original_manifest_sha256": "30d4e875a7295535ea64d9c08d4640da98d6b89d0bdee61d0b2f9a1e28182678",
+  "pre_run_identity": "11296c9d5e7318a982ce115ff660138aa6c94fb801cc3b7fc0d8d3b43ba74aeb",
+  "work_audit_identity": "522d3300856fe3c69d1e220bd21f568e7848e856a72ddb7a5697456378e6e7ac",
+  "final_results_identity": "fc50533c8d0baff315050850c52defbbc5db1123288a46d523418ca170edb8b9",
+  "omitted": {
+    "control-values.csv": {
+      "sha256": "0f73ebca6c2bc309361f4d1bf8cd1699965fc5be60a5a7d6febfa16968eae01d",
+      "reason": "432 measured aggregates and individual call timings are raw observations; repository policy excludes raw data."
+    }
+  },
+  "files": {
+    "PROTOCOL.md": "44f4e545e5a822e9bc4bbc49cbe142bb76b179d057422dd6fcad91048be4f57b",
+    "README.md": "1e6450eba04514c48e327ea8e9f12f50b37bbedb284c9f81347ffa9600f61a0d",
+    "WORK-AUDIT.md": "2f119a312b20acf6455da4fba6c6033e87c0ab0aebb86cb6da6027f1b3d387da",
+    "schedule.json": "23ce07d8e725ea71fc2d3d8baf4bdf8e85f28b97ad5c739b50599c4e743ae807",
+    "work-audit.json": "29824dd0d4f29af3f698b149b494d40bbeb898c276c1383ffd7eda2f8ba415fb"
+  }
+}

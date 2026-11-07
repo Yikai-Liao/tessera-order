@@ -1,0 +1,7 @@
+# Publication scope
+
+This is a summary-only negative causal checkpoint, not a standalone reproducible packet or runtime adoption. The original report, protocol, schedule and non-timed work audit are preserved byte-for-byte. Raw control aggregates and individual call timers are excluded; their external artifact hash is recorded in MANIFEST.json. References to retained raw samples or full trace summaries in the report refer to external evidence, not included files.
+
+R16 has no accepted full-call improvement. Earlier root completion shifts work into longer child tails. Four separate non-timed full-reference calls verify equal partition/pass depth; no cache, bandwidth or extra-pass cause is established. The 1,280 timing-screen calls exclude those four follow-up calls. Dynamic safety coverage remains the [focused native library and serial-Miri scope](../generic-current-profile/VALIDATION-SCOPE.md), not a full integration-suite or actual-Rayon-Miri claim.
+
+Publication checks verified all six original packet file hashes, all 179 pre-run manifest entries, all 111 final-result entries, 432 external measured aggregates and their constituent sums, and the four non-timed work cases. The combined paired ratios use the per-pair mean of C1 and C2 before taking R16/default, then the median across nine pairs. They reproduce 1.029720 for u64 and 0.980354 for Row16; placement medians are 1.026741 and 0.993334. No builds or sorts were rerun for publication.

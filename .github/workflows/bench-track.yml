@@ -38,6 +38,21 @@ jobs:
           script: |
             const resolve = require('./.github/scripts/bencher_context.cjs');
             await resolve({ github, context, core });
+      - name: Start the report check
+        id: check
+        if: steps.source.outputs.eligible == 'true'
+        uses: actions/github-script@v9
+        env:
+          HASH: ${{ steps.source.outputs.hash }}
+        with:
+          # Shows the head as being measured while the Bencher job runs.
+          script: |
+            const { data } = await github.rest.checks.create({
+              ...context.repo, name: "Benchmarks (rust)", head_sha: process.env.HASH,
+              status: "in_progress",
+              details_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+            core.setOutput("id", String(data.id));
       - uses: actions/download-artifact@v4
         if: steps.source.outputs.eligible == 'true'
         with:
@@ -69,11 +84,11 @@ jobs:
         with:
           version: 0.6.16
       - name: Measure on Bencher Bare Metal
+        id: measure
         if: steps.source.outputs.eligible == 'true'
         env:
           BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
           BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
-          GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ steps.source.outputs.branch }}
           HASH: ${{ steps.source.outputs.hash }}
           BASE: ${{ steps.source.outputs.base }}
@@ -93,11 +108,41 @@ jobs:
               --thresholds-reset)
           fi
           # Waiting for the remote job holds the concurrency slot until it ends.
-          # Free jobs stop at 5 minutes; the suite takes about 45 s locally.
+          # Free jobs stop at 5 minutes; the suite takes about 130 s locally.
           bencher run --project "$BENCHER_PROJECT" --key "$BENCHER_API_KEY" \
             --branch "$BRANCH" --hash "$HASH" \
             --testbed intel-v1 --spec intel-v1 \
             --image "$IMAGE" --job-timeout 240 \
-            --adapter rust_criterion \
-            --github-actions "$GH_TOKEN" --ci-id rust \
-            "${args[@]}" --exec -- /bench --bench
+            --adapter rust_criterion --format json --quiet \
+            "${args[@]}" --exec -- /bench --bench > "$RUNNER_TEMP/bencher-report.json"
+      # bencher_report.cjs writes the check, the job summary and the PR comment
+      # instead of `bencher run --github-actions`, whose comment needs a login
+      # for its links and stays at the PR's first report.
+      - name: Publish report
+        id: report
+        if: always() && steps.check.outputs.id
+        uses: actions/github-script@v9
+        env:
+          HASH: ${{ steps.source.outputs.hash }}
+          PR_NUMBER: ${{ steps.source.outputs.number }}
+          BASE: ${{ steps.source.outputs.base }}
+          CHECK_ID: ${{ steps.check.outputs.id }}
+          OUTCOME: ${{ steps.measure.outcome }}
+        with:
+          script: |
+            const publish = require('./.github/scripts/bencher_report.cjs');
+            const env = process.env;
+            await publish({ github, context, core, inputs: {
+              language: "rust", hash: env.HASH, number: env.PR_NUMBER,
+              baseRef: env.BASE || "main", checkId: env.CHECK_ID,
+              // A skipped step means an earlier one failed.
+              outcome: env.OUTCOME === "skipped" ? "failure" : env.OUTCOME,
+              reportPath: `${env.RUNNER_TEMP}/bencher-report.json`,
+            } });
+      - name: Upload benchmark chart
+        if: always() && steps.report.outputs.chart == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-chart-rust
+          path: ${{ runner.temp }}/benchmark-chart.svg
+          if-no-files-found: error

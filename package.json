@@ -4,6 +4,8 @@
   "description": "Documentation site and CI tooling for Tessera",
   "type": "module",
   "scripts": {
+    "lint": "biome ci .",
+    "format": "biome check --write .",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",

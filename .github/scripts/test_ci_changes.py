@@ -66,7 +66,12 @@ class LanguageSelection(unittest.TestCase):
         )
 
     def test_ci_scripts_select_no_language(self):
-        for path in [".github/scripts/ci_changes.py", ".github/scripts/check-dco.sh"]:
+        for path in [
+            ".github/scripts/ci_changes.py",
+            ".github/scripts/check-dco.sh",
+            "biome.json",
+            "ruff.toml",
+        ]:
             with self.subTest(path=path):
                 self.assertEqual(select([path]), {"rust": False, "cpp": False, "python": False})
 

@@ -19,12 +19,15 @@ SHARED_PROSE_DIRS = ("conformance/",)
 # The `changes` job tests these scripts and dco.yml runs the sign-off check on
 # every pull request, so no language build needs to rerun for them.
 CI_SCRIPTS = (".github/scripts/",)
+# The `changes` job runs Biome and Ruff over the whole repository, and no
+# language build reads their settings.
+LINT_CONFIG = {"biome.json", "ruff.toml"}
 
 
 def select(paths):
     rust = cpp = python = False
     for path in paths:
-        if path.startswith(DOCS_SITE + CI_SCRIPTS) or path in DOCS_SITE_FILES:
+        if path.startswith(DOCS_SITE + CI_SCRIPTS) or path in DOCS_SITE_FILES | LINT_CONFIG:
             continue
         if path.startswith(("rust/", "bench/rust/")) or path in {
             "Cargo.toml",
@@ -77,10 +80,7 @@ def main():
     paths = None
     if args.base and set(args.base) != {"0"}:
         paths = changed_paths(args.base, args.head)
-    if paths is None:
-        result = {"rust": True, "cpp": True, "python": True}
-    else:
-        result = select(paths)
+    result = {"rust": True, "cpp": True, "python": True} if paths is None else select(paths)
     result["cpp_present"] = Path("cpp/CMakeLists.txt").is_file()
     result["python_present"] = all(
         Path(p).is_file() for p in ("python/pyproject.toml", "python/Cargo.toml")

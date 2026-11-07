@@ -1,0 +1,32 @@
+{
+  "combined_patch": {
+    "commit": "5d06e2cc25704901b1a6838ef53416c0da39fe98",
+    "path": "research/draining-consumer-negative/patches/01-public-to-combined.patch",
+    "sha256": "2265e704ebb25e0dba1a08e8d4431d1473fce09a740ac5e67ee5fe0b2c4dda4b"
+  },
+  "decision": "Archive only; no accepted masked advantage, no runtime adoption.",
+  "excluded": "Binaries, raw samples/logs, benchmark/count drivers, machine-specific wrappers and environment values.",
+  "native_validation": {
+    "commit": "7428f82491d27607e7d94b641badf2fa63a7414e",
+    "map_path": "research/native-entry-validation/source-map.json",
+    "map_sha256": "db396db4ced84d13ee215ed4a482ecbd39dc7f059f3f43454409f235e14f7eee",
+    "patch_path": "research/native-entry-validation/patches/validation-tests.patch",
+    "patch_sha256": "a33582bb8d61411ac9b86628037503f9f51bdca817eb03938d510cf5b26de961"
+  },
+  "original_combined_profile_identity": "bf3b2ea730f98fca2dfaf75f3baba732f7f5d67eaea8bafdbae17c684fe11bae",
+  "public_commit": "55b299b3716cd1af9e997f30b1a3c1813455d8be",
+  "region_root": {
+    "commit": "36781cb78238a54bc2558b2cf1834b12b2a32a72",
+    "directory": "research/region-blocks/src",
+    "files": {
+      "broker.rs": "726ff3c6b7c77323c65bb14f373fe810415edce6af3a891827f7882e5066ca95",
+      "lib.rs": "10a741b151ecf3e017bd8e5000207a964497a013f3e26a7685567872b5a6002a",
+      "path_restore.rs": "0e69c254cf4c3fe2c5d10b2f7bea6b3bcf11db84457e6e69e33237d9d3c2acb0",
+      "probe.rs": "13786d33a53d2c8328c57c50465b002cbefc1362eb851681eb35390214ce08fd",
+      "restore.rs": "45be99f7e0315a7385ff7d036d579cdc9f63903be231fc3564d704eecaf0cb5b"
+    }
+  },
+  "spdx": "BSD-2-Clause",
+  "upstream_main_already_merged": "b973f09baa4fad9b6140fd54748a98ece25d6742",
+  "validated_control_source_manifest_sha256": "00c9e7a791d3148843dda806d7a37139d73d8a93d8cf3b0fa8b3291a68d0bcd8"
+}

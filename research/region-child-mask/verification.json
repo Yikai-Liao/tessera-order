@@ -1,0 +1,14 @@
+{
+  "builds_tests_sorts_or_timings_run": false,
+  "combined_rust_files": 25,
+  "control_source_files": 34,
+  "native_validation_source_files": 37,
+  "no_new_unsafe": true,
+  "passed": true,
+  "public_entry_bytes_preserved": true,
+  "public_metadata_preserved": true,
+  "root_transport_preserved": true,
+  "same_1025_prefix_scanner": true,
+  "source_export_requested": false,
+  "strict_in_memory_patch_replay": true
+}

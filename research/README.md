@@ -136,3 +136,8 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   216 verified calls and 27 retained traces did not reproduce the earlier
   sustained slowdown. Tracer perturbation and isolated tails remain;
   no established cause, performance win or adoption decision.
+
+- [Fixed-root child-mask research](region-child-mask/README.md):
+  exact source/test patches preserve root transport and the public scanner.
+  Initial scan keys fell from 10M to 262,400, but 703 verified full sorts
+  established no accepted net gain. Archive only; no runtime adoption.

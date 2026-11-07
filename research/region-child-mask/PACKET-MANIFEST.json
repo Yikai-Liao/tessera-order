@@ -1,0 +1,20 @@
+{
+  "files": {
+    "LICENSE": "705d08b60e66eac43d9e0348dfabf8a1e1ef4f450e23c3f63ba3a84aaa8fb405",
+    "README.md": "38d49c07be6f933452221ffec9f364b5febd3d6e65c7b036a8e0be0dd74b4a66",
+    "RESULT.md": "163bf5fa5660cd7c3adb0d17831ed8cda42414da309a6385a75a4a9b82125fc9",
+    "SPACE.md": "fcddc7f7f11a6f47dadd8cdde17e9e60bd7a56dceb0a0da3ddbfe07c3377e6fa",
+    "checks/correctness.rs": "74e14b9f33f2fe2adeef6d643864fa3335fbfed7659ac5b9a46437cc7b57a3c0",
+    "checks/fixtures.rs": "fec00a77bb68f5d3012dc584ef44979136b793ce3339564038152965343e3fc6",
+    "measurements.json": "c7e4ac36d6bc98fc4413e514170c826429437baa30533f7c0edf5445b384e9b1",
+    "patches/01-child-entry.patch": "8476902bdf21ab3d0088e265cc70525f31b548cee1d96a5da08741bf5cfb0302",
+    "patches/02-root-dispatch.patch": "d7ccbbd4493ce4220f43488cebf9f7af2b5eef771f52d910a1d1d67002d98978",
+    "privacy-check.json": "0c132574bab505cf9a082eee87829b5b32fa13e9cc4890dfd13c68be3916a6eb",
+    "provenance.json": "364e4757a8cacad46b4b024dc688986d3afc93c386a9acf70af996d2fbd24625",
+    "source-map.json": "458fdb08d5dda9616010c2f4dde0e446094cbace3df39282dd09495f72ddb736",
+    "support/make_diagnostic_source.py": "5c4c1f227c0eb5dc3ca842b8a3dd15d40c927a76c106febc2097a3811f5eb1be",
+    "verification.json": "5d616a59e1a2893d3e86dfa5e46d72823774715c888980a472de62e2aead395d",
+    "verify.py": "463c69bca5cc2ec63a1c2556953c3c6dc9affa7a5078a1869fc166e22c5e4678"
+  },
+  "spdx": "BSD-2-Clause"
+}

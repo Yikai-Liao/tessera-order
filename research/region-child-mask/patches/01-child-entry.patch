@@ -1,0 +1,442 @@
+--- a/rust/tessera-sort/src/lib.rs
++++ b/rust/tessera-sort/src/lib.rs
+@@ -255,3 +255,7 @@
+ 
+ #[cfg(all(test, feature = "rayon"))]
+ mod test_witness;
++
++/// Sealed research-only child-entry controls.
++#[doc(hidden)]
++pub mod child_mask;
+--- a/rust/tessera-sort/src/engine.rs
++++ b/rust/tessera-sort/src/engine.rs
+@@ -1429,3 +1429,6 @@
+ 
+ #[cfg(test)]
+ mod current_main_tests;
++
++// Research-only helper; the original engine above is byte-preserved.
++include!("child_mask_entry.rs");
+--- /dev/null
++++ b/rust/tessera-sort/src/child_mask.rs
+@@ -0,0 +1,112 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Sealed controls for u64, Row16 and Row128; not a generic sorting API.
++//!
++//! The caller must supply a candidate containing every varying input bit. The
++//! aligned root supplies u64::MAX with its fixed high root digit removed. These
++//! functions do not establish Owned-record, inconsistent-key or panic guarantees.
++
++use crate::{
++    Workspace, engine,
++    key::{ByKey, Direct},
++};
++
++/// Child-entry controls sharing the same current leaf implementation.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum ChildMode {
++    /// Calls the original, unmodified Workspace public entry.
++    Public,
++    /// Calls the duplicate preparation with the full u64 saturation mask.
++    Full,
++    /// Calls the same duplicate preparation with the root-excluded mask.
++    Masked,
++}
++
++/// Fixed-key record with an original-position payload for stability checks.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++#[repr(C)]
++pub struct Row16 {
++    /// Intrinsic unsigned key.
++    pub key: u64,
++    /// Original position.
++    pub id: u64,
++}
++
++/// Wide Copy record with a stable ID and payload checked by full equality.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++#[repr(C)]
++pub struct Row128 {
++    /// Intrinsic unsigned key.
++    pub key: u64,
++    /// Original position.
++    pub id: u64,
++    /// Payload that must follow its record unchanged.
++    pub payload: [u64; 14],
++}
++
++/// Sorts a valid materialized u64 root child with Direct/CACHED=false.
++pub fn sort_u64(
++    workspace: &mut Workspace<u64>,
++    values: &mut [u64],
++    mode: ChildMode,
++    candidate: u128,
++) {
++    #[cfg(feature = "child-scan-diagnostics")]
++    let _report = diagnostics::begin_child(values, |key| *key, mode, candidate);
++    match mode {
++        ChildMode::Public => workspace.stable_sort(values),
++        ChildMode::Full | ChildMode::Masked => engine::sort_root_child::<_, _, false>(
++            values,
++            &mut Direct,
++            Some(workspace),
++            crate::thresholds::TILE_BYTES,
++            (mode == ChildMode::Masked).then_some(candidate),
++        ),
++    }
++}
++
++/// Sorts a valid materialized Row16 root child with ByKey/CACHED=true.
++pub fn sort_row16(
++    workspace: &mut Workspace<Row16>,
++    values: &mut [Row16],
++    mode: ChildMode,
++    candidate: u128,
++) {
++    #[cfg(feature = "child-scan-diagnostics")]
++    let _report = diagnostics::begin_child(values, |record| record.key, mode, candidate);
++    match mode {
++        ChildMode::Public => workspace.stable_sort_by_key(values, |record| record.key),
++        ChildMode::Full | ChildMode::Masked => engine::sort_root_child::<_, _, true>(
++            values,
++            &mut ByKey(|record: &Row16| record.key),
++            Some(workspace),
++            crate::thresholds::TILE_BYTES,
++            (mode == ChildMode::Masked).then_some(candidate),
++        ),
++    }
++}
++
++/// Sorts a valid materialized Row128 root child with ByKey/CACHED=true.
++pub fn sort_row128(
++    workspace: &mut Workspace<Row128>,
++    values: &mut [Row128],
++    mode: ChildMode,
++    candidate: u128,
++) {
++    #[cfg(feature = "child-scan-diagnostics")]
++    let _report = diagnostics::begin_child(values, |record| record.key, mode, candidate);
++    match mode {
++        ChildMode::Public => workspace.stable_sort_by_key(values, |record| record.key),
++        ChildMode::Full | ChildMode::Masked => engine::sort_root_child::<_, _, true>(
++            values,
++            &mut ByKey(|record: &Row128| record.key),
++            Some(workspace),
++            crate::thresholds::TILE_BYTES,
++            (mode == ChildMode::Masked).then_some(candidate),
++        ),
++    }
++}
++
++/// Non-timing witnesses; entirely absent without child-scan-diagnostics.
++#[cfg(feature = "child-scan-diagnostics")]
++pub mod diagnostics;
+--- /dev/null
++++ b/rust/tessera-sort/src/child_mask_entry.rs
+@@ -0,0 +1,168 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++/// Public preparation copied without changing its order, probes, or node policy.
++pub(crate) fn sort_root_child<T, E: Extract<T>, const CACHED: bool>(
++    records: &mut [T],
++    extractor: &mut E,
++    mut workspace: Option<&mut Workspace<T>>,
++    tile_bytes: usize,
++    candidate: Option<u128>,
++) {
++    let record_bytes = core::mem::size_of::<T>();
++    if records.len() < 2 || record_bytes == 0 {
++        return;
++    }
++    let tile_bytes = tile_bytes
++        .max(record_bytes)
++        .min(MAX_TILE_RECORDS.saturating_mul(record_bytes));
++    let sampled = probe_order(records, extractor);
++    match sampled {
++        Order::Ascending => return,
++        Order::Descending => {
++            reverse_stably(records, extractor);
++            return;
++        }
++        Order::Unsorted => {
++            let probe_len = (tile_bytes / record_bytes).max(2).min(records.len());
++            let probe = workspace
++                .as_deref_mut()
++                .map(|workspace| &mut workspace.probe);
++            if insertion_probe(records, extractor, probe_len, probe) {
++                return;
++            }
++        }
++        Order::Flat => {}
++    }
++    let varying = child_mask_scan(records, candidate, extractor);
++    if varying == 0 {
++        return;
++    }
++    if sampled == Order::Flat {
++        match confirm_order(records, extractor) {
++            Order::Ascending => return,
++            Order::Descending => {
++                reverse_stably(records, extractor);
++                return;
++            }
++            _ => {}
++        }
++    }
++    // Free calls allocate scratch only now, so ordered and constant inputs
++    // never allocate.
++    let mut owned_workspace;
++    let workspace = match workspace {
++        Some(workspace) => workspace,
++        None => {
++            owned_workspace = Workspace::new();
++            &mut owned_workspace
++        }
++    };
++    if E::Value::BITS > 64 {
++        if varying >> 64 == 0 {
++            Sorter::<T, _, CACHED> {
++                workspace,
++                extractor: &mut KeyHalf::<_, 0>(extractor),
++                tile_bytes,
++            }
++            .sort_node(records, varying);
++            return;
++        }
++        if varying & ((1u128 << 64) - 1) == 0 {
++            Sorter::<T, _, CACHED> {
++                workspace,
++                extractor: &mut KeyHalf::<_, 64>(extractor),
++                tile_bytes,
++            }
++            .sort_node(records, varying >> 64);
++            return;
++        }
++    }
++    Sorter::<T, E, CACHED> {
++        workspace,
++        extractor,
++        tile_bytes,
++    }
++    .sort_node(records, varying);
++}
++
++/// Public scanner copied with only the saturation-mask value parameterized.
++fn child_mask_scan_body<T, E: Extract<T>>(
++    records: &[T],
++    candidate: Option<u128>,
++    extractor: &mut E,
++) -> u128 {
++    // The C reference scatters every digit, even digits that are constant in
++    // every key. The union and intersection of all keys find those digits
++    // without a histogram. A bit varies if it is set in the union but not in
++    // the intersection.
++    let mut union = extractor.key(&records[0]);
++    let mut intersection = union;
++    let full_mask = candidate.unwrap_or(u128::MAX >> (128 - E::Value::BITS));
++    // Wide random keys vary in every bit within the first few records, so
++    // stop after a 1,025-record prefix if they already do. Otherwise finish
++    // with one uninterrupted, vectorizable scan.
++    let boundary = records.len().min(1025);
++    for item in &records[1..boundary] {
++        let key = extractor.key(item);
++        union |= key;
++        intersection = intersection & key;
++    }
++    if union.to_u128() ^ intersection.to_u128() != full_mask {
++        for item in &records[boundary..] {
++            let key = extractor.key(item);
++            union |= key;
++            intersection = intersection & key;
++        }
++    }
++    union.to_u128() ^ intersection.to_u128()
++}
++
++/// Selects diagnostic extraction without affecting a non-diagnostic build.
++fn child_mask_scan<T, E: Extract<T>>(
++    records: &[T],
++    candidate: Option<u128>,
++    extractor: &mut E,
++) -> u128 {
++    #[cfg(not(feature = "child-scan-diagnostics"))]
++    {
++        child_mask_scan_body(records, candidate, extractor)
++    }
++    #[cfg(feature = "child-scan-diagnostics")]
++    {
++        child_mask_count_scan(records, extractor, |records, extractor| {
++            child_mask_scan_body(records, candidate, extractor)
++        })
++    }
++}
++
++/// Counts only the initial scan's real key calls, never recursive scans or probes.
++#[cfg(feature = "child-scan-diagnostics")]
++fn child_mask_count_scan<T, E: Extract<T>>(
++    records: &[T],
++    extractor: &mut E,
++    scan: impl FnOnce(&[T], &mut ChildMaskCounter<'_, E>) -> u128,
++) -> u128 {
++    let mut counted = ChildMaskCounter {
++        extractor,
++        examined: 0,
++    };
++    let varying = scan(records, &mut counted);
++    crate::child_mask::diagnostics::record_scan(counted.examined, varying);
++    varying
++}
++
++/// Wraps only a variation scanner, whose sole extractor operation is `key`.
++#[cfg(feature = "child-scan-diagnostics")]
++struct ChildMaskCounter<'a, E> {
++    extractor: &'a mut E,
++    examined: usize,
++}
++
++#[cfg(feature = "child-scan-diagnostics")]
++impl<T, E: Extract<T>> Extract<T> for ChildMaskCounter<'_, E> {
++    type Value = E::Value;
++    fn key(&mut self, record: &T) -> Self::Value {
++        self.examined += 1;
++        self.extractor.key(record)
++    }
++}
+--- /dev/null
++++ b/rust/tessera-sort/src/child_mask/diagnostics.rs
+@@ -0,0 +1,134 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Per-child evidence with local scan counters, not per-key shared atomics.
++
++use super::ChildMode;
++use std::{cell::RefCell, sync::Mutex};
++
++/// Evidence for one actual child invocation, including preparation early exits.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct ChildReport {
++    pub mode: ChildMode,
++    pub len: usize,
++    pub candidate: u128,
++    pub fixed_bits: u128,
++    pub actual_varying: u128,
++    pub sampled_order: Option<&'static str>,
++    pub insertion_probe_len: Option<usize>,
++    pub insertion_capture_keys: usize,
++    pub insertion_finished: Option<bool>,
++    pub scan_keys: Option<usize>,
++    pub scan_early_return: bool,
++    pub scan_varying: Option<u128>,
++    pub node_entered: bool,
++}
++
++std::thread_local! {
++    static CURRENT: RefCell<Option<ChildReport>> = const { RefCell::new(None) };
++}
++static FINISHED: Mutex<Vec<ChildReport>> = Mutex::new(Vec::new());
++
++/// Publishes one completed invocation; this is not a panic-recovery claim.
++pub(crate) struct ChildGuard;
++impl Drop for ChildGuard {
++    fn drop(&mut self) {
++        let report = CURRENT.with(|slot| slot.borrow_mut().take().unwrap());
++        FINISHED.lock().unwrap().push(report);
++    }
++}
++
++/// Validates the root-mask premise against every input key outside measured work.
++pub(crate) fn begin_child<T>(
++    records: &[T],
++    key: impl Fn(&T) -> u64,
++    mode: ChildMode,
++    candidate: u128,
++) -> ChildGuard {
++    assert_eq!(candidate >> 64, 0);
++    let (mut union, mut intersection) = (0u64, u64::MAX);
++    for record in records {
++        let value = key(record);
++        union |= value;
++        intersection &= value;
++    }
++    let actual_varying = if records.is_empty() {
++        0
++    } else {
++        (union ^ intersection) as u128
++    };
++    assert_eq!(
++        actual_varying & !candidate,
++        0,
++        "candidate excludes a varying bit"
++    );
++    let report = ChildReport {
++        mode,
++        len: records.len(),
++        candidate,
++        fixed_bits: records
++            .first()
++            .map_or(0, |record| key(record) as u128 & !candidate),
++        actual_varying,
++        sampled_order: None,
++        insertion_probe_len: None,
++        insertion_capture_keys: 0,
++        insertion_finished: None,
++        scan_keys: None,
++        scan_early_return: false,
++        scan_varying: None,
++        node_entered: false,
++    };
++    CURRENT.with(|slot| assert!(slot.borrow_mut().replace(report).is_none()));
++    ChildGuard
++}
++
++/// Notes the public order probe's actual result.
++pub(crate) fn record_order(order: &'static str) {
++    update(|report| report.sampled_order = Some(order));
++}
++
++/// Notes actual insertion preparation and whether it finished the child.
++pub(crate) fn record_insertion(probe_len: usize, len: usize, finished: bool) {
++    update(|report| {
++        report.insertion_probe_len = Some(probe_len);
++        report.insertion_capture_keys = if probe_len < len { probe_len } else { 0 };
++        report.insertion_finished = Some(finished);
++    });
++}
++
++/// Records actual key calls made by the initial variation scanner only.
++pub(crate) fn record_scan(examined: usize, varying: u128) {
++    update(|report| {
++        assert!(
++            report.scan_keys.is_none(),
++            "initial child scan occurred twice"
++        );
++        assert!(examined <= report.len);
++        assert_eq!(
++            varying, report.actual_varying,
++            "candidate scan lost variation"
++        );
++        report.scan_keys = Some(examined);
++        report.scan_early_return = examined < report.len;
++        report.scan_varying = Some(varying);
++    });
++}
++
++/// Marks the actual downstream node entry after all public preparation.
++pub(crate) fn record_node() {
++    update(|report| report.node_entered = true);
++}
++
++/// Applies a stage update when this invocation is one of the research children.
++fn update(change: impl FnOnce(&mut ChildReport)) {
++    CURRENT.with(|slot| {
++        if let Some(report) = slot.borrow_mut().as_mut() {
++            change(report);
++        }
++    });
++}
++
++/// Takes completed reports after all root jobs have joined.
++pub fn take_reports() -> Vec<ChildReport> {
++    core::mem::take(&mut *FINISHED.lock().unwrap())
++}

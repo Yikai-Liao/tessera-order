@@ -1,0 +1,128 @@
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -18,6 +18,8 @@
+ pub mod probe;
+ mod restore;
+ 
++pub use tessera::child_mask::{ChildMode, Row16, Row128};
++
+ mod sealed {
+     pub trait Sealed {}
+     impl Sealed for u64 {}
+@@ -30,6 +32,13 @@
+     fn key(self) -> u64;
+     /// Sorts a materialized child using the matching existing serial API.
+     fn sort_child(workspace: &mut tessera::Workspace<Self>, values: &mut [Self]);
++    /// Sorts through one of the sealed same-core research entries.
++    fn sort_child_control(
++        workspace: &mut tessera::Workspace<Self>,
++        values: &mut [Self],
++        mode: ChildMode,
++        candidate: u128,
++    );
+ }
+ impl Record for u64 {
+     #[inline]
+@@ -39,13 +48,14 @@
+     fn sort_child(workspace: &mut tessera::Workspace<Self>, values: &mut [Self]) {
+         workspace.stable_sort(values);
+     }
+-}
+-/// Fixed-key record with an original-position payload for stability checks.
+-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+-#[repr(C)]
+-pub struct Row16 {
+-    pub key: u64,
+-    pub id: u64,
++    fn sort_child_control(
++        workspace: &mut tessera::Workspace<Self>,
++        values: &mut [Self],
++        mode: ChildMode,
++        candidate: u128,
++    ) {
++        tessera::child_mask::sort_u64(workspace, values, mode, candidate);
++    }
+ }
+ impl Record for Row16 {
+     #[inline]
+@@ -55,14 +65,14 @@
+     fn sort_child(workspace: &mut tessera::Workspace<Self>, values: &mut [Self]) {
+         workspace.stable_sort_by_key(values, |record| record.key);
+     }
+-}
+-/// Wide Copy record with a stable ID and payload checked by full equality.
+-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+-#[repr(C)]
+-pub struct Row128 {
+-    pub key: u64,
+-    pub id: u64,
+-    pub payload: [u64; 14],
++    fn sort_child_control(
++        workspace: &mut tessera::Workspace<Self>,
++        values: &mut [Self],
++        mode: ChildMode,
++        candidate: u128,
++    ) {
++        tessera::child_mask::sort_row16(workspace, values, mode, candidate);
++    }
+ }
+ impl Record for Row128 {
+     fn key(self) -> u64 {
+@@ -70,6 +80,14 @@
+     }
+     fn sort_child(workspace: &mut tessera::Workspace<Self>, values: &mut [Self]) {
+         workspace.stable_sort_by_key(values, |record| record.key);
++    }
++    fn sort_child_control(
++        workspace: &mut tessera::Workspace<Self>,
++        values: &mut [Self],
++        mode: ChildMode,
++        candidate: u128,
++    ) {
++        tessera::child_mask::sort_row128(workspace, values, mode, candidate);
+     }
+ }
+ /// Experimental root controls. Production routing is deliberately not implied.
+@@ -1039,3 +1057,42 @@
+         assert_eq!(values, expected);
+     }
+ }
++
++/// Runs identical root transport and fixed child groups with a selected child entry.
++pub fn sort_with_mode<T: Record>(arr: &mut [T], config: Config, mode: ChildMode) -> Stats {
++    assert!((1..=12).contains(&config.radix_bits));
++    assert_eq!(config.shift, 64 - config.radix_bits);
++    let (ends, mut stats) = partition(arr, config);
++    let start = Instant::now();
++    let mut rest = arr;
++    let mut previous = 0;
++    let mut buckets = Vec::with_capacity(ends.len());
++    for end in ends {
++        let (bucket, tail) = rest.split_at_mut(end - previous);
++        buckets.push(bucket);
++        rest = tail;
++        previous = end;
++    }
++    // Fixed-P groups reuse one existing serial workspace per executing job.
++    // The public serial API still performs child preparation, unlike the frozen
++    // combined engine's internal prepared-node entry point.
++    let chunk = buckets.len().div_ceil(stats.shards.max(1)).max(1);
++    let run = |group: &mut [&mut [T]]| {
++        let mut workspace = tessera::Workspace::new();
++        for bucket in group {
++            T::sort_child_control(
++                &mut workspace,
++                bucket,
++                mode,
++                (u64::MAX >> config.radix_bits) as u128,
++            );
++        }
++    };
++    if config.parallel {
++        buckets.par_chunks_mut(chunk).for_each(run);
++    } else {
++        run(&mut buckets);
++    }
++    stats.children = start.elapsed();
++    stats
++}

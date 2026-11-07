@@ -1,0 +1,9 @@
+{
+  "machine_path_or_environment_value_matches": 0,
+  "passed": true,
+  "public_source_license_retained": true,
+  "raw_samples_binaries_or_benchmark_drivers_included": false,
+  "scope": "Static scan plus manual review of included files.",
+  "secret_like_assignment_matches": 0,
+  "spdx": "BSD-2-Clause"
+}

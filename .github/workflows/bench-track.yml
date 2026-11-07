@@ -53,14 +53,14 @@ jobs:
               await startReport({ github, context, core, hash: process.env.HASH, variant });
             }
             core.setOutput('variants', JSON.stringify(VARIANTS));
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: steps.source.outputs.eligible == 'true'
         with:
           name: bench-rust-default
           path: artifact/default
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: steps.source.outputs.eligible == 'true'
         with:
           name: bench-rust

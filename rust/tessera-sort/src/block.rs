@@ -164,6 +164,59 @@ fn balanced_block_size_integer(len: usize, record_bytes: usize, radix: usize) ->
 /// Called on a bucket as soon as its records are contiguous in the input.
 type Visit<'a, T> = &'a mut dyn FnMut(&mut [T]);
 
+/// Called on a bucket whose records were staged in a scratch buffer instead of
+/// being copied into the input slice: the staged records in logical order, and
+/// the destination in the input slice the finished bucket must occupy.
+type StagedVisit<'a, T> = &'a mut dyn FnMut(&mut [T], &mut [T]);
+
+/// Called on a staged bucket while the extractor is still available.
+type KeyStagedVisit<'a, T, E> = &'a mut dyn FnMut(&mut [T], &mut [T], &mut E);
+
+/// Where a tile-sized bucket is staged and what finishes it.
+pub(crate) struct Staging<'a, T, E> {
+    pub(crate) ptr: *mut T,
+    pub(crate) capacity: usize,
+    pub(crate) visit: KeyStagedVisit<'a, T, E>,
+}
+
+/// Destination of the records at a record offset: the staging buffer while the
+/// current bucket fits it, the input slice otherwise.
+struct Destinations<T> {
+    staging: *mut T,
+    capacity: usize,
+    bucket: usize,
+}
+
+impl<T> Destinations<T> {
+    /// Staging offset for the records that start at the given record offset, or
+    /// no staging when the bucket has to go to the input slice.
+    fn staged_offset(&mut self, ends: &[usize], start: usize) -> Option<usize> {
+        if self.staging.is_null() {
+            return None;
+        }
+        while self.bucket < ends.len() && ends[self.bucket] <= start {
+            self.bucket += 1;
+        }
+        let begin = if self.bucket == 0 {
+            0
+        } else {
+            ends[self.bucket - 1]
+        };
+        let end = *ends.get(self.bucket)?;
+        (end - begin <= self.capacity).then_some(start - begin)
+    }
+}
+
+/// What a digit partition reports and consumes while it materializes buckets.
+struct Hooks<'a, T, E> {
+    /// Whether the caller needs the cumulative record end of every bucket.
+    ends: bool,
+    /// Finishes a bucket that was copied into the input slice.
+    visit: Option<KeyVisit<'a, T, E>>,
+    /// Finishes a bucket that fits the staging buffer straight from there.
+    staging: Option<Staging<'a, T, E>>,
+}
+
 pub(crate) fn partition_digit<T, E: Extract<T>>(
     arr: &mut [T],
     radix: usize,
@@ -171,7 +224,7 @@ pub(crate) fn partition_digit<T, E: Extract<T>>(
     key: &mut E,
     buffers: &mut Buffers<T>,
 ) {
-    partition_digit_inner(arr, radix, shift, key, buffers, None);
+    partition_digit_inner(arr, radix, shift, key, buffers, None, None);
 }
 
 pub(crate) fn partition_digit_with_ends<T, E: Extract<T>>(
@@ -182,18 +235,40 @@ pub(crate) fn partition_digit_with_ends<T, E: Extract<T>>(
     buffers: &mut Buffers<T>,
     visit: &mut dyn FnMut(&mut [T], &mut E),
 ) -> Vec<usize> {
-    partition_digit_inner(arr, radix, shift, key, buffers, Some(visit))
+    partition_digit_inner(arr, radix, shift, key, buffers, Some(visit), None)
 }
 
 type KeyVisit<'a, T, E> = &'a mut dyn FnMut(&mut [T], &mut E);
 
-fn partition_digit_inner<T, E: Extract<T>>(
+/// Partitions by digit like [`partition_digit_with_ends`], but a bucket that fits
+/// the staging buffer is copied there and handed to the visitor together with
+/// its destination, so a leaf can scatter straight into place. Every other
+/// bucket is materialized in the input slice as usual.
+///
+/// # Safety
+///
+/// The staging pointer must name a writable, aligned region of capacity slots
+/// in an allocation that is disjoint from both the input slice and the block
+/// scratch, valid for the whole call.
+pub(crate) unsafe fn partition_digit_staged<T, E: Extract<T>>(
     arr: &mut [T],
     radix: usize,
     shift: usize,
     key: &mut E,
     buffers: &mut Buffers<T>,
-    visit: Option<KeyVisit<'_, T, E>>,
+    staging: Staging<'_, T, E>,
+) -> Vec<usize> {
+    partition_digit_inner(arr, radix, shift, key, buffers, None, Some(staging))
+}
+
+fn partition_digit_inner<'a, T, E: Extract<T>>(
+    arr: &mut [T],
+    radix: usize,
+    shift: usize,
+    key: &mut E,
+    buffers: &mut Buffers<T>,
+    visit: Option<KeyVisit<'a, T, E>>,
+    staging: Option<Staging<'a, T, E>>,
 ) -> Vec<usize> {
     let record_bytes = core::mem::size_of::<T>();
     if arr.len() < 2 || record_bytes == 0 {
@@ -211,8 +286,11 @@ fn partition_digit_inner<T, E: Extract<T>>(
         key,
         buffers,
         move |key, record| ((key.key(record) & mask) >> shift).to_usize(),
-        visit.is_some(),
-        visit,
+        Hooks {
+            ends: visit.is_some() || staging.is_some(),
+            visit,
+            staging,
+        },
     )
 }
 
@@ -234,8 +312,11 @@ pub(crate) fn partition_by<T, E: Extract<T>>(
         key,
         buffers,
         move |key, record| classify(key, record).min(buckets - 1),
-        true,
-        None,
+        Hooks {
+            ends: true,
+            visit: None,
+            staging: None,
+        },
     )
 }
 
@@ -245,9 +326,17 @@ fn partition_pass<T, E: Extract<T>>(
     key: &mut E,
     buffers: &mut Buffers<T>,
     mut classify: impl FnMut(&mut E, &T) -> usize,
-    want_ends: bool,
-    visit: Option<KeyVisit<'_, T, E>>,
+    hooks: Hooks<'_, T, E>,
 ) -> Vec<usize> {
+    let Hooks {
+        ends: want_ends,
+        visit,
+        staging,
+    } = hooks;
+    let (staging_ptr, staging_cap, mut staged_visit) = match staging {
+        Some(staging) => (staging.ptr, staging.capacity, Some(staging.visit)),
+        None => (core::ptr::null_mut(), 0, None),
+    };
     let radix = buckets.trailing_zeros() as usize;
     let block_size = default_block_size(arr.len(), core::mem::size_of::<T>(), radix);
     let mut sorter = Sorter::new(arr, buckets, block_size, buffers);
@@ -259,11 +348,14 @@ fn partition_pass<T, E: Extract<T>>(
     }
     // Classification has finished borrowing the extractor before any tile
     // callback starts; both phases use the same FnMut state in sequence.
-    let panic = if let Some(visit) = visit {
+    let panic = if let Some(staged) = staged_visit.as_mut() {
+        let mut callback = |source: &mut [T], dest: &mut [T]| staged(source, dest, key);
+        sorter.compact_with(&ends, None, staging_ptr, staging_cap, Some(&mut callback))
+    } else if let Some(visit) = visit {
         let mut callback = |child: &mut [T]| visit(child, key);
-        sorter.compact_with(&ends, Some(&mut callback))
+        sorter.compact_with(&ends, Some(&mut callback), core::ptr::null_mut(), 0, None)
     } else {
-        sorter.compact_with(&ends, None)
+        sorter.compact_with(&ends, None, core::ptr::null_mut(), 0, None)
     };
     if let Some(payload) = panic {
         unwind::resume(payload);
@@ -804,7 +896,7 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
     }
 
     fn compact(&mut self) {
-        let _ = self.compact_with(&[], None);
+        let _ = self.compact_with(&[], None, core::ptr::null_mut(), 0, None);
     }
 
     /// Materializes the active sequence into input. When bucket ends are given,
@@ -817,6 +909,9 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
         &mut self,
         ends: &[usize],
         mut visit: Option<Visit<'_, T>>,
+        staging: *mut T,
+        staging_cap: usize,
+        mut staged_visit: Option<StagedVisit<'_, T>>,
     ) -> Option<PanicPayload> {
         // Sorting is finished. Reuse the output buffer as the inverse map:
         // physical block ID -> position in block_order.
@@ -829,28 +924,53 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
         let mut begin = 0;
         let mut callback_panic = None;
         let mut visit_due = |written: usize| {
-            let Some(callback) = visit.take() else {
+            if visit.is_none() && staged_visit.is_none() {
                 return;
-            };
+            }
             while let Some((&end, tail)) = remaining.split_first() {
                 if end > written {
                     break;
                 }
                 if end > begin {
-                    // SAFETY: this bucket is fully materialized and no longer a
-                    // copy source; its input slice does not overlap scratch.
-                    let bucket = unsafe {
-                        core::slice::from_raw_parts_mut(input_ptr.add(begin), end - begin)
-                    };
-                    if let Err(payload) = unwind::catch(|| callback(bucket)) {
-                        callback_panic = Some(payload);
-                        return;
+                    let len = end - begin;
+                    if !staging.is_null() && len <= staging_cap {
+                        if let Some(callback) = staged_visit.as_mut() {
+                            // SAFETY: the staging buffer holds this bucket's
+                            // records in logical order and does not overlap the
+                            // input slice. The destination range was evacuated
+                            // before it was handed over, so it may be written.
+                            unsafe {
+                                let source = core::slice::from_raw_parts_mut(staging, len);
+                                let dest =
+                                    core::slice::from_raw_parts_mut(input_ptr.add(begin), len);
+                                if let Err(payload) = unwind::catch(|| callback(source, dest)) {
+                                    callback_panic = Some(payload);
+                                    return;
+                                }
+                            }
+                        }
+                    } else if let Some(callback) = visit.take() {
+                        // SAFETY: this bucket is fully materialized and no
+                        // longer a copy source; its input slice does not overlap
+                        // scratch.
+                        let bucket = unsafe {
+                            core::slice::from_raw_parts_mut(input_ptr.add(begin), end - begin)
+                        };
+                        if let Err(payload) = unwind::catch(|| callback(bucket)) {
+                            callback_panic = Some(payload);
+                            return;
+                        }
+                        visit = Some(callback);
                     }
                 }
                 begin = end;
                 remaining = tail;
             }
-            visit = Some(callback);
+        };
+        let mut destinations = Destinations {
+            staging,
+            capacity: staging_cap,
+            bucket: 0,
         };
         let mut start = 0;
         let mut partial = 0;
@@ -889,9 +1009,13 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
             // Any still-live destination block was evacuated above; earlier
             // physical destinations are already consumed.
             // SAFETY: length valid source elements are moved into the next
-            // logical output interval. ptr::copy permits overlap as memmove.
+            // logical output interval, either in the input slice or in the
+            // staging buffer. ptr::copy permits overlap as memmove.
             unsafe {
-                ptr::copy(from, self.blocks.input.add(start), length);
+                match destinations.staged_offset(ends, start) {
+                    Some(offset) => ptr::copy(from, staging.add(offset), length),
+                    None => ptr::copy(from, self.blocks.input.add(start), length),
+                }
             }
             self.block_order[input] = destination as u32;
             self.block_order[output] = source as u32;
@@ -913,7 +1037,10 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
             // SAFETY: the remaining live prefix fits the checked output range;
             // ptr::copy permits overlap and preserves padding bytes.
             unsafe {
-                ptr::copy(from, self.blocks.input.add(start), length);
+                match destinations.staged_offset(ends, start) {
+                    Some(offset) => ptr::copy(from, staging.add(offset), length),
+                    None => ptr::copy(from, self.blocks.input.add(start), length),
+                }
             }
             start += length;
             visit_due(start);
@@ -1031,7 +1158,11 @@ mod tests {
             // extractor, which must not run a second time.
             assert_eq!(calls, at, "key called after it panicked");
             assert_eq!(ends, expected, "recovered ends at panic {at}");
-            assert!(sorter.compact_with(&ends, None).is_none());
+            assert!(
+                sorter
+                    .compact_with(&ends, None, core::ptr::null_mut(), 0, None)
+                    .is_none()
+            );
             // Drop also compacts, so the check must run before the sorter does.
             assert!(sorter.input_materialized, "compaction did not finish");
             panic
@@ -1132,7 +1263,13 @@ mod tests {
                             std::panic::panic_any(0x71u32);
                         }
                     };
-                    let payload = sorter.compact_with(&ends, Some(&mut callback));
+                    let payload = sorter.compact_with(
+                        &ends,
+                        Some(&mut callback),
+                        core::ptr::null_mut(),
+                        0,
+                        None,
+                    );
                     // Drop also compacts, so the check must run before it does.
                     assert!(sorter.input_materialized, "compaction did not finish");
                     payload

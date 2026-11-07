@@ -39,8 +39,11 @@
 //! that needs O(√n) records of scratch for a fixed record size and key width.
 //! Each tile is then sorted in a scratch buffer of at most 64 KiB of records,
 //! plus up to two bytes per record of cached bucket IDs for
-//! [`stable_sort_by_key`]. Each tile-local MSD level also keeps a cursor table
-//! of up to 32 KiB on the stack, with at most 22 levels for 128-bit keys.
+//! [`stable_sort_by_key`]. A tile-sized bucket of keys sorted directly is
+//! staged in a second buffer of at most 64 KiB, so its records reach their
+//! final positions without a compaction copy. Each tile-local MSD level also
+//! keeps a cursor table of up to 32 KiB on the stack, with at most 22 levels
+//! for 128-bit keys.
 //!
 //! The free functions allocate this scratch during each call. A [`Workspace`]
 //! keeps it between calls.

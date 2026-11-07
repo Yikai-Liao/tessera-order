@@ -216,6 +216,13 @@ const SMALL_WINDOW_BUCKETS: usize = 1 << SMALL_WINDOW_BITS;
 /// `KeyHalf` narrows another extractor to one 64-bit half of a 128-bit key.
 pub(crate) trait Extract<T> {
     type Value: Unsigned;
+
+    /// Whether records are their own keys and encoding cannot panic.
+    ///
+    /// A direct encoder lets a leaf scatter its records from block storage
+    /// straight into their final position: no user key function runs while the
+    /// leaf is finished, and equal keys imply identical records.
+    const DIRECT: bool = false;
     fn key(&mut self, record: &T) -> Self::Value;
 
     /// Finishes a slice whose keys all fall in one small window of the encoded
@@ -293,6 +300,7 @@ pub(crate) struct Direct;
 
 impl<K: RadixKey> Extract<K> for Direct {
     type Value = K::Encoded;
+    const DIRECT: bool = true;
 
     fn try_count_window(&mut self, records: &mut [K], low: usize, width: usize) -> bool {
         if width == 0 || width > SMALL_WINDOW_BITS {

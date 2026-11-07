@@ -662,16 +662,12 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
 
 /// Chooses the widest cursor table that fits beside the tile, capped by
 /// record count to avoid clearing mostly empty buckets on wide records.
-fn tile_digit_bits<T>(records: usize, record_bytes: usize) -> usize {
+fn tile_digit_bits(records: usize, record_bytes: usize) -> usize {
     let tile_bytes = records.saturating_mul(record_bytes);
     // The widest table that still fits: `2 * 2^width` bytes of cursors.
     let widest = (tile_bytes / 2).max(1).ilog2() as usize;
-    // Limit empty-bucket work to at most eight times the record count, or four
-    // when a record is wider than a machine word: a wider record leaves fewer
-    // records per tile for the same table, so a table sized like the record
-    // count would spend the tile on buckets that stay empty. 16-byte records,
-    // 10M keys, random: 7.8% faster at four (9 of 9 rounds, A/A spread 1.8%);
-    // 128-byte records are unchanged, where the byte cap already decides.
+    // Empty-bucket work stays within 8 record counts, or 4 for records wider
+    // than 8 bytes: 16-byte records, 10M records measured 6.5% faster at 4.
     let slack = if core::mem::size_of::<T>() > 8 { 2 } else { 3 };
     let by_records = records.max(1).ilog2() as usize + slack;
     widest
@@ -715,6 +711,37 @@ fn choose_split_digit<T, E: Extract<T>>(
         shift: top - width,
         width,
     }
+}
+
+/// The digit of a single MSD level that finishes a tile, or None when the flat
+/// plan needs fewer passes. A level plus its finish cannot undercut two flat
+/// passes, so shorter plans skip the occupancy sample.
+fn tile_plan<T, E: Extract<T>>(arr: &[T], varying: u128, key: &mut E) -> Option<Digit> {
+    let len = arr.len();
+    // One partition finishes the tile, so it takes the widest table rather than a
+    // pass-plan window; a narrower digit leaves more to insertion.
+    let table_width = tile_digit_bits(len, core::mem::size_of::<T>());
+    let mut digits = [Digit { shift: 0, width: 0 }; MAX_DIGITS];
+    let passes = plan_digits(varying, table_width, &mut digits);
+    if passes <= MSD_FINISH_PASSES + 1 {
+        return None;
+    }
+    let (digit, _) = top_window(varying, table_width);
+    let distinct = sample_distinct_digits(arr, digit, key).max(1);
+    let fanout = if distinct >= DIGIT_SAMPLE_LEN.min(len) {
+        1usize << digit.width
+    } else {
+        distinct
+    };
+    // Estimate the descent until the largest child fits insertion; each level is
+    // one counting pass and the finish is one more.
+    let mut largest = len;
+    let mut depth = 0;
+    while largest > INSERTION_MAX && depth < passes {
+        depth += 1;
+        largest /= fanout;
+    }
+    (depth.max(1) + MSD_FINISH_PASSES < passes).then_some(digit)
 }
 
 impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
@@ -780,25 +807,75 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         let candidate = varying & !digit.mask::<E::Value>().to_u128();
         let tile_bytes = self.tile_bytes;
         let mut block_buffers = self.workspace.block.take().unwrap_or_default();
-        let mut visit = |child: &mut [T], key: &mut E| {
-            if child.len().saturating_mul(record_bytes) <= tile_bytes {
-                let varying = scan_varying_bits(child, candidate, key);
-                Sorter::<T, E, CACHED> {
-                    workspace: self.workspace,
-                    key,
-                    tile_bytes,
+        let ends = if E::DIRECT {
+            // A direct encoder is panic-free and a record is its own key, so a
+            // leaf bucket can be staged and scattered into its final position
+            // without a compaction copy.
+            let capacity = (tile_bytes / record_bytes).clamp(1, MAX_TILE_RECORDS);
+            let mut staging = core::mem::take(&mut self.workspace.staging);
+            staging.resize_with(staging.len().max(capacity), MaybeUninit::uninit);
+            let staging_ptr = staging.as_mut_ptr().cast::<T>();
+            let mut visit = |source: &mut [T], dest: &mut [T], key: &mut E| {
+                if source.len().saturating_mul(record_bytes) <= tile_bytes {
+                    let varying = scan_varying_bits(source, candidate, key);
+                    Sorter::<T, E, CACHED> {
+                        workspace: self.workspace,
+                        key,
+                        tile_bytes,
+                    }
+                    .sort_leaf_into(source, dest, varying);
+                } else {
+                    // SAFETY: source and dest are separate buffers of equal
+                    // length, so the copy neither overlaps nor reads padding.
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(
+                            source.as_ptr(),
+                            dest.as_mut_ptr(),
+                            source.len(),
+                        );
+                    }
                 }
-                .sort_tile(child, varying);
-            }
+            };
+            // SAFETY: the staging buffer is a separate allocation of capacity
+            // records and outlives the call, which hands it only buckets that
+            // fit.
+            let ends = unsafe {
+                block::partition_digit_staged(
+                    arr,
+                    digit.width,
+                    digit.shift,
+                    self.key,
+                    &mut block_buffers,
+                    block::Staging {
+                        ptr: staging_ptr,
+                        capacity,
+                        visit: &mut visit,
+                    },
+                )
+            };
+            self.workspace.staging = staging;
+            ends
+        } else {
+            let mut visit = |child: &mut [T], key: &mut E| {
+                if child.len().saturating_mul(record_bytes) <= tile_bytes {
+                    let varying = scan_varying_bits(child, candidate, key);
+                    Sorter::<T, E, CACHED> {
+                        workspace: self.workspace,
+                        key,
+                        tile_bytes,
+                    }
+                    .sort_tile(child, varying);
+                }
+            };
+            block::partition_digit_with_ends(
+                arr,
+                digit.width,
+                digit.shift,
+                self.key,
+                &mut block_buffers,
+                &mut visit,
+            )
         };
-        let ends = block::partition_digit_with_ends(
-            arr,
-            digit.width,
-            digit.shift,
-            self.key,
-            &mut block_buffers,
-            &mut visit,
-        );
         self.workspace.block = Some(block_buffers);
         let mut start = 0;
         for &end in &ends {
@@ -816,6 +893,73 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             .as_mut()
             .expect("partition buffers restored")
             .recycle_ends(ends);
+    }
+
+    /// Sorts a staged leaf from its staging buffer into its final position.
+    ///
+    /// A single MSD level scatters straight into the destination; every other
+    /// plan copies first and reuses the in-place tile sort.
+    fn sort_leaf_into(&mut self, source: &mut [T], dest: &mut [T], varying: u128) {
+        let len = source.len();
+        debug_assert_eq!(len, dest.len());
+        if len > INSERTION_MAX && varying != 0 {
+            if let Some(digit) = tile_plan(source, varying, self.key) {
+                self.partition_tile_into(source, dest, digit, varying);
+                return;
+            }
+        }
+        // SAFETY: source and dest are separate buffers of the same length.
+        unsafe {
+            core::ptr::copy_nonoverlapping(source.as_ptr(), dest.as_mut_ptr(), len);
+        }
+        self.sort_tile(dest, varying);
+    }
+
+    /// Runs one counting pass from the source into the destination, then
+    /// finishes the destination by insertion or by descending into its buckets.
+    fn partition_tile_into(
+        &mut self,
+        source: &mut [T],
+        dest: &mut [T],
+        digit: Digit,
+        varying: u128,
+    ) {
+        let len = source.len();
+        let mut counts = MaybeUninit::<[u16; MAX_DIGIT_BUCKETS]>::uninit();
+        let counts_ptr = counts.as_mut_ptr().cast::<u16>();
+        // SAFETY: source and dest are disjoint buffers of len slots, the cursor
+        // table has MAX_DIGIT_BUCKETS entries, and a direct encoder is
+        // deterministic and panic-free in both the histogram and the scatter.
+        let largest = unsafe {
+            counting_pass::<T, E, false>(
+                source.as_mut_ptr(),
+                dest.as_mut_ptr(),
+                len,
+                digit,
+                counts_ptr,
+                core::ptr::null_mut(),
+                self.key,
+            )
+        };
+        if largest as usize <= INSERTION_MAX {
+            insertion_sort(dest, self.key);
+            return;
+        }
+        let candidate = varying & !digit.mask::<E::Value>().to_u128();
+        // SAFETY: a completed pass initialized exactly this cursor prefix.
+        let ends = unsafe { core::slice::from_raw_parts(counts_ptr, 1usize << digit.width) };
+        let mut start = 0;
+        for &end in ends {
+            let end = end as usize;
+            debug_assert!(start <= end && end <= len);
+            if end - start > INSERTION_MAX {
+                let varying = scan_varying_bits(&dest[start..end], candidate, self.key);
+                self.sort_tile(&mut dest[start..end], varying);
+            } else if end > start + 1 {
+                insertion_sort(&mut dest[start..end], self.key);
+            }
+            start = end;
+        }
     }
 
     /// Partitions below, equal to, and above a sampled key. The equal band is done.
@@ -972,46 +1116,14 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             insertion_sort(arr, self.key);
             return;
         }
-        // Widest counting table this tile can afford; LSD spreads it over passes.
-        let table_width = tile_digit_bits::<T>(len, core::mem::size_of::<T>());
+        if let Some(digit) = tile_plan(arr, varying, self.key) {
+            self.partition_tile(arr, digit, varying);
+            return;
+        }
+        // Flat plan: one counting pass per digit window, lowest window last.
+        let table_width = tile_digit_bits(len, core::mem::size_of::<T>());
         let mut digits = [Digit { shift: 0, width: 0 }; MAX_DIGITS];
         let passes = plan_digits(varying, table_width, &mut digits);
-        // Compare an MSD descent against the flat plan in passes over the tile.
-        // A level plus its finish cannot undercut two flat passes, so shorter
-        // plans skip the occupancy sample.
-        if passes > MSD_FINISH_PASSES + 1 {
-            // One partition finishes the tile, so it takes the widest table rather
-            // than a pass-plan window; a narrower digit leaves more to insertion.
-            let (digit, _) = top_window(varying, table_width);
-            // The tile is non-empty, so its sample is non-empty too. Repeats in
-            // the sample cap the split; a sample with no repeats at all is limited
-            // by its length, not by the keys, so the digit's buckets apply.
-            // `max(1)` is redundant in value but not in codegen: it tells the
-            // optimizer the divisor below is non-zero, and removing it measured
-            // as a slower `sort_tile` (an extra zero check and different register
-            // allocation).
-            let distinct = sample_distinct_digits(arr, digit, self.key).max(1);
-            let fanout = if distinct >= DIGIT_SAMPLE_LEN.min(len) {
-                1usize << digit.width
-            } else {
-                distinct
-            };
-            // Estimate the descent until the largest child fits insertion; each
-            // level is one counting pass and the finish is one more.
-            let mut largest = len;
-            let mut depth = 0;
-            while largest > INSERTION_MAX && depth < passes {
-                depth += 1;
-                largest /= fanout;
-            }
-            // The tile holds more than INSERTION_MAX records, so the loop ran.
-            // As above, `max(1)` is kept for the optimizer, not for the value.
-            let level_cost = depth.max(1) + MSD_FINISH_PASSES;
-            if level_cost < passes {
-                self.partition_tile(arr, digit, varying);
-                return;
-            }
-        }
         let cache = CACHED;
         let buckets = if cache {
             1 << digits[..passes]
@@ -1247,6 +1359,46 @@ mod tests {
             0x3fff,
         );
         assert_eq!(records, expected);
+    }
+
+    #[test]
+    fn staged_leaf_matches_the_in_place_leaf() {
+        // A tile far below the input size forces the block partition, whose
+        // buckets are then leaves: direct keys take the staged path, records
+        // keep the in-place one.
+        let tile_bytes = if cfg!(miri) { 256 } else { 1024 };
+        let len = if cfg!(miri) { 300 } else { 8193 };
+        let mut rng = 0x2545_f491_4f6c_dd1du64;
+        let keys: Vec<u64> = (0..len)
+            .map(|_| {
+                rng ^= rng << 13;
+                rng ^= rng >> 7;
+                rng ^= rng << 17;
+                rng
+            })
+            .collect();
+        let mut expected = keys.clone();
+        expected.sort_unstable();
+
+        let mut values = keys.clone();
+        sort_with_tile_bytes::<u64, _, false>(
+            &mut values,
+            &mut Direct,
+            Some(&mut Workspace::new()),
+            tile_bytes,
+        );
+        assert_eq!(values, expected);
+
+        let mut records: Vec<(u64, u64)> = keys.iter().copied().zip(0..).collect();
+        let mut want = records.clone();
+        want.sort_by_key(|record| record.0);
+        sort_with_tile_bytes::<(u64, u64), _, true>(
+            &mut records,
+            &mut ByKey(|record: &(u64, u64)| record.0),
+            Some(&mut Workspace::new()),
+            tile_bytes,
+        );
+        assert_eq!(records, want);
     }
 
     #[test]

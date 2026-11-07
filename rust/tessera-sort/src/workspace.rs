@@ -43,6 +43,9 @@ use core::mem::MaybeUninit;
 /// ```
 pub struct Workspace<T> {
     pub(crate) tile: Vec<MaybeUninit<T>>,
+    /// Leaf staging: a bucket is copied here from block storage and then
+    /// scattered straight into its final position.
+    pub(crate) staging: Vec<MaybeUninit<T>>,
     pub(crate) probe: Vec<MaybeUninit<u128>>,
     pub(crate) block: Option<block::Buffers<T>>,
 }
@@ -52,6 +55,7 @@ impl<T> Workspace<T> {
     pub fn new() -> Self {
         Self {
             tile: Vec::new(),
+            staging: Vec::new(),
             probe: Vec::new(),
             block: None,
         }
@@ -91,6 +95,7 @@ impl<T> Workspace<T> {
     /// partition metadata. Stack storage is not included.
     pub fn retained_bytes(&self) -> usize {
         self.tile.capacity() * core::mem::size_of::<T>()
+            + self.staging.capacity() * core::mem::size_of::<T>()
             + self.probe.capacity() * core::mem::size_of::<u128>()
             + self
                 .block

@@ -1,0 +1,261 @@
+{
+  "scope": "Independent post-run enforcement of fixed n,seed,fingerprint,blocks,W,type and sort counts; supplements rather than changes frozen analyze.py.",
+  "checks": [
+    {
+      "path": "tessera-generic-current-profile/evidence/final-u64-w4-control.jsonl",
+      "header": {
+        "kind": "input",
+        "record": "u64",
+        "n": 10000000,
+        "workers": 4,
+        "seed": 1,
+        "blocks": 9,
+        "warmup_blocks": 1,
+        "mode": "control",
+        "key_fnv1a64": "c2333e730de5dd2c"
+      },
+      "sorts": 120,
+      "sha256": "001200cc13e1a70f8cfc1bac6cd2c2043575a0e7d57c29ec0b555583df9aa22e",
+      "labels": [
+        "C1",
+        "C2",
+        "CL",
+        "P1",
+        "P2",
+        "PL",
+        "SC1",
+        "SC2",
+        "SCL",
+        "SP1",
+        "SP2",
+        "SPL"
+      ],
+      "all_block_label_pairs_verified": true
+    },
+    {
+      "path": "tessera-generic-current-profile/evidence/final-row16-w4-control.jsonl",
+      "header": {
+        "kind": "input",
+        "record": "row16",
+        "n": 10000000,
+        "workers": 4,
+        "seed": 1,
+        "blocks": 9,
+        "warmup_blocks": 1,
+        "mode": "control",
+        "key_fnv1a64": "c2333e730de5dd2c"
+      },
+      "sorts": 120,
+      "sha256": "85403c303f8b953cb2c4ffb71c2db4bf8e82c7ee7d2ba09cbef3337eac3741ae",
+      "labels": [
+        "C1",
+        "C2",
+        "CL",
+        "P1",
+        "P2",
+        "PL",
+        "SC1",
+        "SC2",
+        "SCL",
+        "SP1",
+        "SP2",
+        "SPL"
+      ],
+      "all_block_label_pairs_verified": true
+    },
+    {
+      "path": "tessera-generic-current-profile/evidence/final-u64-w8-control.jsonl",
+      "header": {
+        "kind": "input",
+        "record": "u64",
+        "n": 10000000,
+        "workers": 8,
+        "seed": 1,
+        "blocks": 9,
+        "warmup_blocks": 1,
+        "mode": "control",
+        "key_fnv1a64": "c2333e730de5dd2c"
+      },
+      "sorts": 120,
+      "sha256": "0115aa3ab6116366420e2d8dd386c87752133ceb7a78f76f285b66fb8f039f4a",
+      "labels": [
+        "C1",
+        "C2",
+        "CL",
+        "P1",
+        "P2",
+        "PL",
+        "SC1",
+        "SC2",
+        "SCL",
+        "SP1",
+        "SP2",
+        "SPL"
+      ],
+      "all_block_label_pairs_verified": true
+    },
+    {
+      "path": "tessera-generic-current-profile/evidence/final-row16-w8-control.jsonl",
+      "header": {
+        "kind": "input",
+        "record": "row16",
+        "n": 10000000,
+        "workers": 8,
+        "seed": 1,
+        "blocks": 9,
+        "warmup_blocks": 1,
+        "mode": "control",
+        "key_fnv1a64": "c2333e730de5dd2c"
+      },
+      "sorts": 120,
+      "sha256": "3fc96f9f80694b56834e38f551b3bf12d0583a7ebddffe85f786e69a3a1986a5",
+      "labels": [
+        "C1",
+        "C2",
+        "CL",
+        "P1",
+        "P2",
+        "PL",
+        "SC1",
+        "SC2",
+        "SCL",
+        "SP1",
+        "SP2",
+        "SPL"
+      ],
+      "all_block_label_pairs_verified": true
+    },
+    {
+      "path": "tessera-generic-current-profile/evidence/final-u64-w4-trace.jsonl",
+      "header": {
+        "kind": "input",
+        "record": "u64",
+        "n": 10000000,
+        "workers": 4,
+        "seed": 1,
+        "blocks": 3,
+        "warmup_blocks": 1,
+        "mode": "trace",
+        "key_fnv1a64": "c2333e730de5dd2c"
+      },
+      "sorts": 40,
+      "sha256": "79ae4d08e9960ca390c9159fdfd03145663ccbb955d85be50383952f9e2aed6d",
+      "labels": [
+        "C1",
+        "C2",
+        "CL",
+        "Coff",
+        "Ct",
+        "P1",
+        "P2",
+        "PL",
+        "Poff",
+        "Pt"
+      ],
+      "all_block_label_pairs_verified": true
+    },
+    {
+      "path": "tessera-generic-current-profile/evidence/final-row16-w4-trace.jsonl",
+      "header": {
+        "kind": "input",
+        "record": "row16",
+        "n": 10000000,
+        "workers": 4,
+        "seed": 1,
+        "blocks": 3,
+        "warmup_blocks": 1,
+        "mode": "trace",
+        "key_fnv1a64": "c2333e730de5dd2c"
+      },
+      "sorts": 40,
+      "sha256": "5d3183ac5c5fcf7316cb334cfd1a7613daefadea123d4f76917e759ae34bef97",
+      "labels": [
+        "C1",
+        "C2",
+        "CL",
+        "Coff",
+        "Ct",
+        "P1",
+        "P2",
+        "PL",
+        "Poff",
+        "Pt"
+      ],
+      "all_block_label_pairs_verified": true
+    },
+    {
+      "path": "tessera-generic-current-profile/evidence/final-u64-w8-trace.jsonl",
+      "header": {
+        "kind": "input",
+        "record": "u64",
+        "n": 10000000,
+        "workers": 8,
+        "seed": 1,
+        "blocks": 3,
+        "warmup_blocks": 1,
+        "mode": "trace",
+        "key_fnv1a64": "c2333e730de5dd2c"
+      },
+      "sorts": 40,
+      "sha256": "d69c6583d2d83fc9cdb1072aa05173e09006aa91113b2efe6e9d8ac471209547",
+      "labels": [
+        "C1",
+        "C2",
+        "CL",
+        "Coff",
+        "Ct",
+        "P1",
+        "P2",
+        "PL",
+        "Poff",
+        "Pt"
+      ],
+      "all_block_label_pairs_verified": true
+    },
+    {
+      "path": "tessera-generic-current-profile/evidence/final-row16-w8-trace.jsonl",
+      "header": {
+        "kind": "input",
+        "record": "row16",
+        "n": 10000000,
+        "workers": 8,
+        "seed": 1,
+        "blocks": 3,
+        "warmup_blocks": 1,
+        "mode": "trace",
+        "key_fnv1a64": "c2333e730de5dd2c"
+      },
+      "sorts": 40,
+      "sha256": "13759dad80b892dafff6cf9ce64533e977947fa40d35f3f3a7bcb6f138867d93",
+      "labels": [
+        "C1",
+        "C2",
+        "CL",
+        "Coff",
+        "Ct",
+        "P1",
+        "P2",
+        "PL",
+        "Poff",
+        "Pt"
+      ],
+      "all_block_label_pairs_verified": true
+    }
+  ],
+  "phase": "Supplemental AFTER-run audit; not a pre-run parser guarantee.",
+  "row_layout": {
+    "source": "harness/src/main.rs, frozen sha in final manifest",
+    "repr": "C",
+    "fields": [
+      "key:u64",
+      "index:u64"
+    ],
+    "size_bytes": 16,
+    "size_asserted_every_invocation": true,
+    "reference_compares_original_index": true
+  },
+  "route_proof": {
+    "scope": "All32 traced calls (two designs \u00d7fourcells \u00d7fourwarmup/measuredblocks) show generic root scatter and256 materialized/finished children. The parallel count path returns before those events; therefore the root count entry was not used in these traced calls. Uninstrumented calls have the identical deterministic inputs and matched control source but no separate route counter. No per-record counter was added.",
+    "not_a_counter_measurement": true
+  }
+}

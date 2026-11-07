@@ -1,0 +1,31 @@
+{
+  "recorded_at": "2026-11-07T17:50:17.541716+00:00",
+  "phase": "supplemental AFTER-run execution provenance, not a pre-run freeze",
+  "files": {
+    "tessera-generic-current-profile/execute-approved.sh": "14d5bf267f841ead6cc5f9bbdafa42b064c995f081204fe44d4dbe84ad42f967",
+    "tessera-generic-current-profile/freeze.py": "acf96ae5a899719b3780eeefd8a9f8ea5fd491a9f1bb9a8d233d04f30492ff7d",
+    "tessera-public-overlap-screen/env.sh": "d6cb5ee50f8ae13a2fc7eb761c05277a2c93acea45421d41158b50b381625fe4"
+  },
+  "comparison": {
+    "modes": [
+      "control",
+      "trace"
+    ],
+    "measured_blocks": {
+      "control": 9,
+      "trace": 3
+    },
+    "workers": [
+      4,
+      8
+    ],
+    "types": [
+      "u64",
+      "row16"
+    ],
+    "n": 10000000,
+    "same_harness_binary": true,
+    "same_cli_arguments_as_frozen_run": true,
+    "delta": "Wrapper records and clears environment, validates exact lock identity, explicitly unlocks before RELEASE, performs strict validation only under lock and defers summary analysis until afterwards."
+  }
+}

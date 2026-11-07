@@ -86,3 +86,8 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   writes. Its complete auxiliary lower bound exceeds the frozen byte cap.
   This rejects the tested policy/representation, not all low-space interval
   algorithms; no record mover, sorting benchmark or runtime change.
+
+- [Current generic-root diagnostic profile](generic-current-profile/README.md):
+  640 reference-checked sorts; current public and native combined controls,
+  with broad tails and tracer perturbation. Root end fractions are not serial
+  fractions. Focused library/Miri scope only; no new optimization accepted.

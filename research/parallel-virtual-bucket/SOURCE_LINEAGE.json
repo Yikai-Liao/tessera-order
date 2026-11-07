@@ -1,0 +1,30 @@
+{
+  "origin": "tessera-parallel-virtual-prototype",
+  "status": "Validated Copy-only parallel-child research kernel. No speed claim. Not enabled in the production crate.",
+  "files": {
+    "Cargo.toml": {
+      "origin_sha256": "40c89c772dad7de0795c03bca96577b10bcc26a08d896a4289b844f3f88d34ba",
+      "packaged_sha256": "40c89c772dad7de0795c03bca96577b10bcc26a08d896a4289b844f3f88d34ba"
+    },
+    "Cargo.lock": {
+      "origin_sha256": "835e561284775bfa75d54fe6b8003947ad5e4877744bd40e3c122482f8930fd7",
+      "packaged_sha256": "835e561284775bfa75d54fe6b8003947ad5e4877744bd40e3c122482f8930fd7"
+    },
+    "src/lib.rs": {
+      "origin_sha256": "652136e7b60e2e7a33c00c62891c5c5765fb9d55205614cfb4352cd0f08fbba3",
+      "packaged_sha256": "652136e7b60e2e7a33c00c62891c5c5765fb9d55205614cfb4352cd0f08fbba3"
+    },
+    "src/local.rs": {
+      "origin_sha256": "a457f5fc5c0ccd475b191d7752f0244937794d74ef0a8daa5b660e06c9c5132b",
+      "packaged_sha256": "a457f5fc5c0ccd475b191d7752f0244937794d74ef0a8daa5b660e06c9c5132b"
+    },
+    "src/parallel.rs": {
+      "origin_sha256": "cafe983c861181631001f0ba8fc9cf36c890203e159f6961b481d9364b7245a1",
+      "packaged_sha256": "cafe983c861181631001f0ba8fc9cf36c890203e159f6961b481d9364b7245a1"
+    },
+    "tests/stability.rs": {
+      "origin_sha256": "fad3b1b867d9f9ac44ccd994fc8615f5164d15c45019ec62151a3178d6af2edf",
+      "packaged_sha256": "fad3b1b867d9f9ac44ccd994fc8615f5164d15c45019ec62151a3178d6af2edf"
+    }
+  }
+}

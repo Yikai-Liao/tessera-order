@@ -1,0 +1,146 @@
+{
+  "tool_versions": {
+    "stable": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "msrv": "rustc 1.85.1 (4eb161250 2025-03-15)",
+    "miri_compiler": "rustc 1.101.0-nightly (c980177d8 2026-11-06)"
+  },
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "MIRIFLAGS": "-Zmiri-strict-provenance -Zmiri-symbolic-alignment-check"
+  },
+  "production_library_features": [
+    "default",
+    "portable-simd",
+    "rayon",
+    "std"
+  ],
+  "production_research_feature": false,
+  "gates": [
+    {
+      "variant": "baseline",
+      "gate": "production-release",
+      "command": "cargo +stable test --offline --locked -j1 --release --features rayon,portable-simd --all-targets -- --test-threads=1",
+      "exit_code": 0,
+      "result": {
+        "unit_passed": 63,
+        "integration_passed": 23,
+        "ignored_existing_geometry_diagnostic": 1
+      },
+      "producer_log_sha256": "590ef69688f847de3c27d438c5681c70f3e31905c822f4eff33d51b0da38e79b"
+    },
+    {
+      "variant": "baseline",
+      "gate": "default-backend-release",
+      "command": "cargo +stable test --offline --locked -j1 --release --features rayon --lib -- --test-threads=1",
+      "exit_code": 0,
+      "result": {
+        "passed": 58,
+        "ignored_existing_geometry_diagnostic": 1
+      },
+      "producer_log_sha256": "fd6d796b39dea67bc4e08ab257171630812d17973a758c061963715a8f722013"
+    },
+    {
+      "variant": "baseline",
+      "gate": "clippy",
+      "command": "cargo +stable clippy --offline --locked -j1 --all-features --all-targets -- -D warnings",
+      "exit_code": 0,
+      "result": {
+        "passed": true
+      },
+      "producer_log_sha256": "59135645c65b04cc112d2fd0bc0962d4c792b4d97a0f6ce32714d2b3427593e6"
+    },
+    {
+      "variant": "baseline",
+      "gate": "no-std",
+      "command": "cargo +stable test --offline --locked -j1 --no-default-features --lib -- --test-threads=1",
+      "exit_code": 0,
+      "result": {
+        "passed": 15
+      },
+      "producer_log_sha256": "10d8f98df5e87e2c96db6084aaa1f1acb4534dd11f9723f7853b1bdbabd748d7"
+    },
+    {
+      "variant": "baseline",
+      "gate": "msrv-check",
+      "command": "cargo +1.85 check --offline --locked -j1 --tests --features rayon",
+      "exit_code": 0,
+      "result": {
+        "compiled": true,
+        "known_unchanged_Unsigned_unreachable_pub_warning": true
+      },
+      "producer_log_sha256": "415a24cb57c84a8c98a1e82584e88bd4e8b7a74991b635140ee16c68770d8fb0"
+    },
+    {
+      "variant": "candidate",
+      "gate": "production-release",
+      "command": "cargo +stable test --offline --locked -j1 --release --features rayon,portable-simd --all-targets -- --test-threads=1",
+      "exit_code": 0,
+      "result": {
+        "unit_passed": 71,
+        "integration_passed": 23,
+        "ignored_existing_geometry_diagnostic": 1
+      },
+      "producer_log_sha256": "c0d2a89195d596ffe9b9adca02514bf52a6088be8475401a982c0e2fdc778779"
+    },
+    {
+      "variant": "candidate",
+      "gate": "default-backend-release",
+      "command": "cargo +stable test --offline --locked -j1 --release --features rayon --lib -- --test-threads=1",
+      "exit_code": 0,
+      "result": {
+        "passed": 66,
+        "ignored_existing_geometry_diagnostic": 1
+      },
+      "producer_log_sha256": "a74c231913cd24d52ca1c8888e9bf9ebed2060207e2e381add78dc554a5d87e8"
+    },
+    {
+      "variant": "candidate",
+      "gate": "clippy",
+      "command": "cargo +stable clippy --offline --locked -j1 --all-features --all-targets -- -D warnings",
+      "exit_code": 0,
+      "result": {
+        "passed": true
+      },
+      "producer_log_sha256": "e23afb4764a5907e7cf8a58a7b121d833cd2d81b09a25d61329c93d94a448bb9"
+    },
+    {
+      "variant": "candidate",
+      "gate": "no-std",
+      "command": "cargo +stable test --offline --locked -j1 --no-default-features --lib -- --test-threads=1",
+      "exit_code": 0,
+      "result": {
+        "passed": 15
+      },
+      "producer_log_sha256": "a4e5213ef107288d3a9f65c7db15625f2e05244904f895c13099ac69e773b791"
+    },
+    {
+      "variant": "candidate",
+      "gate": "msrv-check",
+      "command": "cargo +1.85 check --offline --locked -j1 --tests --features rayon",
+      "exit_code": 0,
+      "result": {
+        "compiled": true,
+        "known_unchanged_Unsigned_unreachable_pub_warning": true
+      },
+      "producer_log_sha256": "a31c795caa787b4e8ee103506f7e3895eb4b38970d38e12607fcfe8dd84c5de8"
+    },
+    {
+      "variant": "candidate",
+      "gate": "research-scope",
+      "command": "cargo +stable test --offline --locked -j1 --release --features rayon,portable-simd,count-window-research --lib count_window_research -- --test-threads=1",
+      "exit_code": 0,
+      "passed": 2,
+      "producer_log_sha256": "68f76ee91b4b0544544b7ccbc7ea4e18ffe110ad4130891455c779b134b64c0d"
+    },
+    {
+      "variant": "candidate",
+      "gate": "wide-tile-miri",
+      "command": "cargo +nightly miri test --offline --locked -j1 --lib e1_tilecap_tests -- --test-threads=1",
+      "exit_code": 0,
+      "passed": 2,
+      "producer_log_sha256": "6acfcdfec4960a55475012593229b33a9dd84a920abb7c01b90f398e1b125411"
+    }
+  ],
+  "new_normalized_package_build_during_packaging": false,
+  "performance_conclusion": null
+}

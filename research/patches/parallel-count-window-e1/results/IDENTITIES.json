@@ -1,0 +1,59 @@
+{
+  "baseline": {
+    "identity_sha256": "ab73401745af53e114015e4ba6cc6a87ef91a5cfe3a1daa73036049189050e2a",
+    "identity_algorithm": "SHA256 of UTF-8 json.dumps(files,sort_keys=True,separators=(comma,colon))",
+    "upstream_runtime_commit": "e1d25297685cecb205d18114e898a39878e3fd83",
+    "status": "All required safety gates passed; immutable source ready for separately authorized diagnostics and timing. No benchmark run by source owner."
+  },
+  "candidate": {
+    "identity_sha256": "8f300a35a875c8949d80fc306ed2ec24ddc9fbe6747663d4768369610b641b35",
+    "identity_algorithm": "SHA256 of UTF-8 json.dumps(files,sort_keys=True,separators=(comma,colon))",
+    "upstream_runtime_commit": "e1d25297685cecb205d18114e898a39878e3fd83",
+    "status": "All required safety gates passed; immutable source ready for separately authorized diagnostics and timing. No benchmark run by source owner."
+  },
+  "public": {
+    "upstream_commit": "3653c3607b9f567e2f03ceb6fdd131e18eaee519",
+    "identity_sha256": "0372d06a6b5ce1d9db9d064634ce620375e6ae7be9e9b2946324d290e3a89e12"
+  },
+  "binary_sha256": {
+    "target/release/tessera-parallel-count-window-e1-screen": "995de431328552b0e3f2d2622d7cb2cd8f7ff8ed1748f3a82b87e30adda67900",
+    "target/release/full-memory": "c0dfbc8d0cd42a4dda356ac8298f90050375d8eb074c02bd5d47fcbfa8302412",
+    "target/release/sentinel": "8643a2bb1cca5cca40c8dbc4c3f0a5fee555b527c1c5a5cc5d3de56947a3326a"
+  },
+  "driver_file_sha256": {
+    "Cargo.lock": "c1831c3499c2ad15928306c2929cb53e962cfd92c32df628e5d8ee51e9db1caa",
+    "Cargo.toml": "a8663058e705e689457019e4536398d90037627b8ffb445e97654821ad19eb97",
+    "PROTOCOL.md": "f72a4afb2d50959b8cf427e72dbb34c329e09cfd1fb0709cc0f293d36e68cdd0",
+    "analyze_case.py": "71e56cbf21f5b6cb81fcc8dbd78b5d7632b9b996e5c76733c36e5def32c900d4",
+    "build.sh": "9cdad403429cd649630cdd0989cfa594190e1ff88e1348b34c1002d815391cd3",
+    "build_diagnostics.sh": "6e0bc80ffa8f4d3cb1ca88f9381e994e3d0b842f94a579a75d12f3d0c65bde6e",
+    "common.sh": "398f3bc497db8d8a3285383454353fcd3c1f3eab0aad6318cd3a3caff76ac797",
+    "controller.py": "565d5bc647243a796ab29e4bfd9378ecdecd915b1bc8d716840a3f786e9c82d5",
+    "controller_sentinel.py": "12ad81ae8da476c0308f924d916e51d3fb11d57db297f839efaa3ad291e3a1df",
+    "final_build.sh": "db27a8c7dd43cef2066a94cd0a8a2ffa0c80901105292b727a973a6a5e030b99",
+    "freeze_driver.py": "64a9b53a727e543e0a40844ac4bc90bae645b66942da09fcf08b6a08042fa208",
+    "measure_case.sh": "7a5ce7bd800a34f65775381ec1c030fbf007e466aab536362ca3f83991f12743",
+    "measure_sentinel.sh": "d3e67e5140164895b3f5775019c89b47f5be0cb63f0bead47d38b5cd7896086e",
+    "prepare.py": "422f373d5053ccf624bc703ba1dd27fe68e33d675890b8188137680763615cce",
+    "prepare_diagnostics.py": "a3b1f68de91189539f9415168816c89458b56a8fb26b2fb4810d03cb246ce3a2",
+    "src/bin/full-memory.rs": "17c18d08beafd8808e2c794bde8858183913ef1a027367d404b6f2a4956e75a6",
+    "src/bin/sentinel.rs": "e4dc714601ad432e1d9637b80109f04eb230fc56da63567e978b06ad2c8e708e",
+    "src/data.rs": "64c8f2ca9086571465c2ad0ab2e7f7391e5bb1a7b378c3600ef4a8b68860c6df",
+    "src/main.rs": "bf659a554e41c23f7ffbc7413535abbc82f84942eea7a7f4ef71df6f7c9441ee",
+    "src/records.rs": "204f9aae3eb691f80981fe8a5cb0c172bae5066bef684f43cd52cbb8b29c0562",
+    "src/sentinel_data.rs": "2798b745eb9298b1378e2c6dd9fd9f49b9bb7519284cf503eec82442b0d5b630",
+    "validate.sh": "0c6ad2813ae1a758822ff05e62a442b5aadd830ddeaa7f07ef94b2cb00184e7a",
+    "validate_tier_memory.sh": "a6b9161be688f330a5ffa5055bd5c7bbc447d13863cd82da64432d56972d68b1",
+    "verify_build.py": "6174671a05c2ac5fed21e2ce1a635588a835477b89754e42df34810f4b491817",
+    "verify_sources.py": "eeba7f60445dc2c6065c8a833d0b5d7c3ace551165693c0c88cdf261317032f0",
+    "verify_validation.py": "60c739bac593c6931da0fb23dc8c767ef342218c3c1319d02486dc1ba71852a8"
+  },
+  "scope": {
+    "sentinel_samples": 63,
+    "tier1_samples": 1548,
+    "total_individual_sorts": 7360,
+    "tier2": "Not run",
+    "last_exclusive_release_utc": "2026-11-07T14:47:45Z"
+  },
+  "decision": "At W8, feature-OFF C clears full controls versus same-core A in 3/4 cases and immutable public U in 4/4. No supported regression, but several lower-worker cells and width1 sentinel remain inconclusive. No general production acceptance."
+}

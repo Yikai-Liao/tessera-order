@@ -1,0 +1,20 @@
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -60,7 +60,7 @@
+ ]
+ 
+ [[package]]
+-name = "tessera-combined-current-main"
++name = "tessera-sort"
+ version = "0.0.0"
+ dependencies = [
+  "fearless_simd",
+--- a/rust/tessera-sort/Cargo.toml
++++ b/rust/tessera-sort/Cargo.toml
+@@ -1,5 +1,5 @@
+ [package]
+-name = "tessera-combined-current-main"
++name = "tessera-sort"
+ # Unreleased. Publication waits for the benchmark runner and release report.
+ version = "0.0.0"
+ publish = false

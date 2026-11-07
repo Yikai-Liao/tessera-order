@@ -1,0 +1,118 @@
+--- a/rust/tessera-sort/src/engine.rs
++++ b/rust/tessera-sort/src/engine.rs
+@@ -1372,3 +1372,6 @@
+ 
+ #[cfg(test)]
+ mod current_main_tests;
++
++#[cfg(test)]
++mod e1_tilecap_tests;
+--- /dev/null
++++ b/rust/tessera-sort/src/engine/e1_tilecap_tests.rs
+@@ -0,0 +1,106 @@
++// SPDX-License-Identifier: BSD-2-Clause
++
++//! Narrow checks for the imported wide-record tile cap; no parallel execution.
++
++use super::*;
++use crate::key::ByKey;
++
++#[test]
++fn e1_wide_tile_digit_boundaries() {
++    for records in [
++        0usize,
++        1,
++        31,
++        32,
++        63,
++        64,
++        65,
++        127,
++        128,
++        129,
++        255,
++        256,
++        257,
++        511,
++        512,
++        513,
++        4095,
++        4096,
++        4097,
++        usize::MAX,
++    ] {
++        let expected = (records.max(1).ilog2() as usize + 2).clamp(6, 14);
++        for bytes in [8, 9, 16, 24, 128] {
++            assert_eq!(
++                tile_digit_bits(records, bytes),
++                expected,
++                "n={records} bytes={bytes}"
++            );
++        }
++        // The <=8-byte branch retains its previous rule.
++        for bytes in [1, 2, 4] {
++            let widest = (records.saturating_mul(bytes) / 2).max(1).ilog2() as usize;
++            let old_record_cap = records.max(1).ilog2() as usize + 3;
++            assert_eq!(
++                tile_digit_bits(records, bytes),
++                widest.min(old_record_cap).clamp(6, 14)
++            );
++        }
++    }
++    assert_eq!(tile_digit_bits(63, 16), 7);
++    assert_eq!(tile_digit_bits(64, 16), 8);
++    assert_eq!(tile_digit_bits(65, 16), 8);
++}
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++struct Row<const PAD: usize> {
++    key: u64,
++    id: u64,
++    payload: [u8; PAD],
++}
++
++fn roundtrip<const PAD: usize>() {
++    let lengths: &[usize] = if cfg!(miri) {
++        &[63, 64, 65]
++    } else {
++        &[63, 64, 65, 127, 128, 129, 511, 512, 513]
++    };
++    let bytes = core::mem::size_of::<Row<PAD>>();
++    assert_eq!(bytes, 16 + PAD);
++    for &len in lengths {
++        let input: Vec<_> = (0..len)
++            .map(|i| Row {
++                key: ((i % 23) as u64)
++                    .wrapping_mul(0x9e37_79b9_7f4a_7c15)
++                    .rotate_left(17),
++                id: i as u64,
++                payload: [i as u8; PAD],
++            })
++            .collect();
++        let mut expected = input.clone();
++        expected.sort_by_key(|row| row.key);
++        let varying = input
++            .iter()
++            .fold(0u128, |bits, row| bits | u128::from(row.key ^ input[0].key));
++        let mut actual = input.clone();
++        let mut workspace = Workspace::new();
++        let mut key = ByKey(|row: &Row<PAD>| row.key);
++        Sorter::<_, _, true> {
++            workspace: &mut workspace,
++            key: &mut key,
++            tile_bytes: len * bytes,
++        }
++        .sort_tile(&mut actual, varying);
++        assert_eq!(actual, expected);
++        // Exercise node/tile routing across a separate fixed 64-record budget.
++        let mut actual = input;
++        sort_with_tile_bytes::<_, _, true>(&mut actual, &mut key, Some(&mut workspace), 64 * bytes);
++        assert_eq!(actual, expected);
++    }
++}
++
++#[test]
++fn e1_wide_owned_tile_roundtrip() {
++    roundtrip::<0>();
++    roundtrip::<112>();
++}

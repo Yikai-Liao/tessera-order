@@ -10,12 +10,12 @@ Each file records one decision that shapes the project: the context, the decisio
 | [0004](0004-continuous-benchmarks-on-bencher.md) | Run continuous benchmarks on Bencher Bare Metal | 2026-11-06 |
 | [0005](0005-no-std-with-alloc.md) | Support no-std with alloc behind a default-on std feature | 2026-11-06 |
 | [0006](0006-no-std-unwind-guard.md) | Guard record movement against unwinding without std | 2026-11-07 |
-| [0007](0007-optional-simd-backend.md) | Add an optional fearless_simd backend for the inversion scan | 2026-11-07 |
+| [0007](0007-optional-simd-backend.md) | Optional fearless_simd backend for the inversion scan | 2026-11-07 |
 | [0008](0008-insertion-finishing-entry-point.md) | Give insertion finishing a unit-returning entry point | 2026-11-07 |
-| [0009](0009-benchmark-report-images-and-history.md) | Publish immutable benchmark images and compare PR history with main | 2026-11-07 |
+| [0009](0009-benchmark-report-images-and-history.md) | Publish immutable report images and compare PR history with main | 2026-11-07 |
 | [0010](0010-vector-ascending-confirmation.md) | Reuse the vector scan for ascending-order confirmation | 2026-11-07 |
 | [0011](0011-benchmark-feature-configurations.md) | Track default and Portable SIMD benchmarks independently | 2026-11-07 |
-| [0012](0012-count-narrow-direct-windows.md) | Count narrow windows of direct keys instead of partitioning them | 2026-11-15 |
+| [0012](0012-count-narrow-direct-windows.md) | Count narrow windows of direct keys instead of partitioning them | 2026-11-07 |
 | [0013](0013-compare-with-the-previous-main-sample.md) | Alert on a fixed percentage from the previous main sample | 2026-11-07 |
 | [0014](0014-scalar-default-insertion-finishing.md) | Use scalar extraction for default insertion finishing | 2026-11-07 |
 | [0015](0015-align-continuous-benchmark-branches.md) | Align branches in continuous benchmark builds | 2026-11-07 |

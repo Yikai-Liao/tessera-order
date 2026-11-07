@@ -8,10 +8,14 @@ All notable changes to this project are documented in this file. The format foll
 
 - Rust crate `tessera-sort`, ported to Stable Rust from the research prototype at `sort-research-rs` commit `6c0877f`: `stable_sort`, `stable_sort_by_key`, the sealed `RadixKey` trait (primitive integers, `f32`, `f64`, `Reverse<K>`) and `Workspace<T>`.
 - Tests for ordering, thresholds, panicking and inconsistent key functions (including a scatter panic and a panic in a compaction callback of the block partition), owned and `&mut` records, and workspace allocation; CI runs them with Miri, AddressSanitizer and the MSRV.
+- `portable-simd` feature: optional `fearless_simd` scans for insertion and ascending-order confirmation, and vector prefix sums, with run-time instruction-set selection on x86 ([decision 0007](docs/decisions/0007-optional-simd-backend.md)).
 - `no_std` support through a default-on `std` feature: `default-features = false` builds on `core` and `alloc`, with an unwind guard that aborts on key-function panics during block partitioning ([decision 0005](docs/decisions/0005-no-std-with-alloc.md), [decision 0006](docs/decisions/0006-no-std-unwind-guard.md)).
 - Port record with the acceptance measurements against the prototype (`docs/design/port.md`), roadmap, decision records and the Python binding proposal.
+- A `cargo-fuzz` target that checks order, stability and record preservation.
+- Continuous Criterion benchmarks on Bencher Bare Metal, with reports on pull requests ([decision 0004](docs/decisions/0004-continuous-benchmarks-on-bencher.md)).
+- A VitePress documentation site with an algorithm explanation and interactive figures.
 - Per-language CI and release workflows, selected by changed paths; C++ and Python stay inactive until their projects exist. Release rules in `RELEASING.md`.
-- `rustfmt.toml` and workspace lints for documentation and unsafe code.
+- `rustfmt.toml` and workspace lints for documentation and unsafe code; Biome and Ruff for the documentation site and CI scripts.
 - Repository structure, ordering semantics, design, benchmarking and workspace documentation.
 - Contribution policy: DCO sign-off checked in CI, AI-assisted contribution rules, code of conduct, and instructions for coding agents.
 

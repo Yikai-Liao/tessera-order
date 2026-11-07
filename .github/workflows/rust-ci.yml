@@ -64,16 +64,44 @@ jobs:
       - run: cargo clippy -p tessera-sort --no-default-features --all-targets
 
   miri:
+    name: miri (${{ matrix.features }})
     runs-on: ubuntu-latest
+    env:
+      MIRI_SYSROOT: ${{ github.workspace }}/.miri-sysroot
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - features: std
+            args: ""
+          - features: no-std
+            args: --no-default-features
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
+        id: toolchain
         with:
-          components: miri
+          components: miri, rust-src
       - uses: Swatinem/rust-cache@v2
+      # The sysroot depends on the compiler, not on the crate's feature set.
+      # An exact key prevents reusing it across nightly compiler versions.
+      - uses: actions/cache@v5
+        id: miri-cache
+        with:
+          path: ${{ env.MIRI_SYSROOT }}
+          key: miri-sysroot-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cachekey }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.151
+      # Miri's freshness check hashes rust-src mtimes, which change on fresh
+      # installs. MIRI_SYSROOT lets tests use the exact compiler-keyed cache
+      # directly instead of rebuilding it after a successful restore.
       - run: cargo miri setup
-      - run: cargo miri test -p tessera-sort
-      - run: cargo miri test -p tessera-sort --no-default-features
+        if: steps.miri-cache.outputs.cache-hit != 'true'
+      # Each test gets its own interpreter so the runner's cores can be used.
+      - run: cargo miri nextest run -p tessera-sort ${{ matrix.args }}
+      # Nextest does not run doctests.
+      - run: cargo miri test -p tessera-sort --doc ${{ matrix.args }}
 
   asan:
     runs-on: ubuntu-latest

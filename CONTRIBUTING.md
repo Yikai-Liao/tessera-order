@@ -25,6 +25,19 @@ rustup +nightly component add miri
 cargo +nightly miri test -p tessera-sort
 ```
 
+CI runs the default and `--no-default-features` configurations in parallel.
+Within each configuration, [cargo-nextest](https://nexte.st/docs/integrations/miri/)
+runs each test in its own Miri process so tests can use multiple CPU cores.
+Doctests run separately with `cargo miri test --doc`. To use the same runner locally:
+
+```sh
+cargo install --locked cargo-nextest --version 0.9.151
+cargo +nightly miri nextest run -p tessera-sort
+cargo +nightly miri test -p tessera-sort --doc
+cargo +nightly miri nextest run -p tessera-sort --no-default-features
+cargo +nightly miri test -p tessera-sort --doc --no-default-features
+```
+
 ## Unsafe code
 
 The engine moves records through uninitialized scratch memory. Every `unsafe` block states the invariant it relies on in a `SAFETY:` comment. A change that adds or alters unsafe code must explain why the invariant still holds, and must keep the tests for panicking key functions, non-`Copy` records and records holding `&mut` references passing.

@@ -1,0 +1,231 @@
+{
+  "schema": 1,
+  "decision": "no demonstrated gain; no adoption",
+  "experiment_scope": "prefix microkernel only; no end-to-end timing",
+  "source_commit": "0bc80b49d5efd5bd8b62165b170015e5803226b7",
+  "toolchain": "rustc 1.99.1",
+  "fearless_simd": "1.2.0",
+  "cpu": "AMD EPYC 9V74",
+  "detected_and_selected_dispatch": "Avx512",
+  "caller_cpu": 0,
+  "protocol": {
+    "warmup_blocks": 1,
+    "measured_blocks": 9,
+    "labels": [
+      "a1",
+      "a2",
+      "b1",
+      "b2",
+      "placement"
+    ],
+    "minimum_sample_ns": 25000000,
+    "controls": [
+      "a2/a1",
+      "b2/b1",
+      "placement/mean(a1,a2)"
+    ],
+    "acceptance": "Median candidate/original outside every control observation and reciprocal, plus at least 8/9 blocks in that direction.",
+    "input_resets_and_full_reference_checks": "outside timing",
+    "outlier_filtering": "none"
+  },
+  "cells": {
+    "u32-random": {
+      "median_candidate_over_original": 0.9717550754042852,
+      "blocks_below_one": 6,
+      "control_envelope": [
+        0.8736688440262117,
+        1.1445984446367623
+      ],
+      "conclusion": "within controls",
+      "corpus": {
+        "tables": 256,
+        "length_counts": {
+          "4096": 128,
+          "8192": 128
+        },
+        "slots": 1572864,
+        "total_min": 7953,
+        "total_max": 8418,
+        "nonzero_min": 3488,
+        "nonzero_max": 5289,
+        "sha256": "0695d3a109f4370299b7dcb33f947e6f0d57ec172bfae70d948132a81fe867db",
+        "bytes": 3147784
+      },
+      "unfiltered_tails": {
+        "measured_samples": 45,
+        "warmup_samples": 5,
+        "measured_batches": 5185,
+        "min_batch_ns": 188565,
+        "max_batch_ns": 2305285,
+        "min_sample_ns": 25000712,
+        "max_sample_ns": 26014679,
+        "sha256": "7837ce2741d309445354952891e2617a9dcb9bc1c9ef6688ec4b125095e274e6"
+      },
+      "control_ranges": {
+        "a2/a1": {
+          "median": 0.9942624500283381,
+          "min": 0.9264842033718845,
+          "max": 1.0380922425633108
+        },
+        "b2/b1": {
+          "median": 1.0137359323242656,
+          "min": 0.9164630856149075,
+          "max": 1.1445984446367623
+        },
+        "placement/a": {
+          "median": 1.0304241485913825,
+          "min": 0.9595778604503046,
+          "max": 1.085399510608813
+        }
+      }
+    },
+    "u32-sorted99": {
+      "median_candidate_over_original": 0.9440192767635253,
+      "blocks_below_one": 8,
+      "control_envelope": [
+        0.874743554460378,
+        1.1431921903293036
+      ],
+      "conclusion": "within controls",
+      "corpus": {
+        "tables": 128,
+        "length_counts": {
+          "8192": 128
+        },
+        "slots": 1048576,
+        "total_min": 8192,
+        "total_max": 8192,
+        "nonzero_min": 8192,
+        "nonzero_max": 8192,
+        "sha256": "430736c0400a05c9ae7e9c9320a96c6b4754a4c5b2a3febe25918e0267f5fc56",
+        "bytes": 2098184
+      },
+      "unfiltered_tails": {
+        "measured_samples": 45,
+        "warmup_samples": 5,
+        "measured_batches": 7996,
+        "min_batch_ns": 126201,
+        "max_batch_ns": 3321420,
+        "min_sample_ns": 25000974,
+        "max_sample_ns": 25919690,
+        "sha256": "f45ff14d7ba41755335524768994cc4e3f5c88cfa6922d4ffe32319d51ebe416"
+      },
+      "control_ranges": {
+        "a2/a1": {
+          "median": 0.9803508697370954,
+          "min": 0.9080363887449913,
+          "max": 1.0735253499430881
+        },
+        "b2/b1": {
+          "median": 1.038120884412715,
+          "min": 0.9888512217015409,
+          "max": 1.1431921903293036
+        },
+        "placement/a": {
+          "median": 0.977676689706094,
+          "min": 0.9401432879443093,
+          "max": 1.0217931841059265
+        }
+      }
+    },
+    "u64-random": {
+      "median_candidate_over_original": 0.9555386946989868,
+      "blocks_below_one": 9,
+      "control_envelope": [
+        0.8872351482101106,
+        1.1270969167727167
+      ],
+      "conclusion": "within controls",
+      "corpus": {
+        "tables": 256,
+        "length_counts": {
+          "8192": 133,
+          "16384": 123
+        },
+        "slots": 3104768,
+        "total_min": 3872,
+        "total_max": 4261,
+        "nonzero_min": 3098,
+        "nonzero_max": 3760,
+        "sha256": "afa1dd83291275ddb1d9178fb3e21dca389958605f4d3fed4c06681bc3d7bb34",
+        "bytes": 6211592
+      },
+      "unfiltered_tails": {
+        "measured_samples": 45,
+        "warmup_samples": 5,
+        "measured_batches": 2697,
+        "min_batch_ns": 376860,
+        "max_batch_ns": 3310895,
+        "min_sample_ns": 25019353,
+        "max_sample_ns": 25389252,
+        "sha256": "f3237f05bd1811beddbcbe892133ae9b7caf0838c447cbed776ac78705a5ef86"
+      },
+      "control_ranges": {
+        "a2/a1": {
+          "median": 0.9918596912354989,
+          "min": 0.9391984346905562,
+          "max": 1.1270969167727167
+        },
+        "b2/b1": {
+          "median": 0.9929037466789595,
+          "min": 0.9136567249996078,
+          "max": 1.09145623428805
+        },
+        "placement/a": {
+          "median": 0.9905344103166355,
+          "min": 0.9105600841506184,
+          "max": 1.0582216679178276
+        }
+      }
+    },
+    "u64-sorted99": {
+      "median_candidate_over_original": 0.9463708551407838,
+      "blocks_below_one": 8,
+      "control_envelope": [
+        0.5310412948364343,
+        1.8830927269187407
+      ],
+      "conclusion": "within controls",
+      "corpus": {
+        "tables": 256,
+        "length_counts": {
+          "4096": 256
+        },
+        "slots": 1048576,
+        "total_min": 4096,
+        "total_max": 4096,
+        "nonzero_min": 4096,
+        "nonzero_max": 4096,
+        "sha256": "69a989ab13254f2575c131ba1682b768163a1a4c0715e17cf1d829a9bcb212b0",
+        "bytes": 2099208
+      },
+      "unfiltered_tails": {
+        "measured_samples": 45,
+        "warmup_samples": 5,
+        "measured_batches": 6033,
+        "min_batch_ns": 125950,
+        "max_batch_ns": 1221026,
+        "min_sample_ns": 25001026,
+        "max_sample_ns": 25395137,
+        "sha256": "b192becfdadd2c9cfca84a4e905264c898acdea4db31e701b81c9e58bc049481"
+      },
+      "control_ranges": {
+        "a2/a1": {
+          "median": 0.9856729329032929,
+          "min": 0.5310412948364343,
+          "max": 1.0696415628182916
+        },
+        "b2/b1": {
+          "median": 1.0000026323600488,
+          "min": 0.9476625662809914,
+          "max": 1.4359286618642197
+        },
+        "placement/a": {
+          "median": 1.0024232418126149,
+          "min": 0.8137147350471076,
+          "max": 1.2420814196284724
+        }
+      }
+    }
+  }
+}

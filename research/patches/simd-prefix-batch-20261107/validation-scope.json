@@ -1,0 +1,36 @@
+{
+  "required_gates_passed": true,
+  "source_freeze_sha256": "4d5220d8e757f7cfcbba0365c361939c8ab583ffbd49b1ab7e4882213189be32",
+  "production_change": "portable_simd.rs prefix_sum_with only; new tests in prefix_batch_tests.rs",
+  "release_workspace_all_targets_all_features": "passed, including 18 unit / 6 conformance / 3 recovery / 1 workspace tests and smoke checks",
+  "release_doctests_all_features": "4 passed",
+  "release_clippy_all_features": "passed with -D warnings",
+  "default_release_tests": "passed",
+  "no_std_release_tests_and_clippy": "passed",
+  "rustdoc_all_features": "passed with -D warnings",
+  "rust_1_85_default_tests_and_no_std_check": "passed; unchanged key.rs unreachable_pub warning",
+  "focused_miri": {
+    "command": "cargo +nightly miri test --offline -j1 -p tessera-sort --features portable-simd,fearless_simd/force_support_fallback --lib prefix_batch",
+    "miriflags": "-Zmiri-strict-provenance",
+    "tests_passed": 3,
+    "interpreter_seconds": 739.83,
+    "status": "passed"
+  },
+  "optional_broad_miri": {
+    "command": "cargo +nightly miri test --offline -j1 -p tessera-sort",
+    "status": "incomplete; explicitly interrupted after confirming the active command",
+    "exit_code": 130,
+    "unit_tests_passed": 10,
+    "unit_interpreter_seconds": 177.68,
+    "conformance_completed": [
+      "float_total_order_and_reverse"
+    ],
+    "conformance_active_at_interrupt": "integer_encodings",
+    "remaining_suites": "not completed",
+    "confirmed_exited_before_utc": "2026-11-07T12:26:56Z"
+  },
+  "validation_log_sha256": "02df1502ebaab0d9661de12364963e57080d8a5838407a4972cda7f6b2ee9588",
+  "scope_note": "Focused scalar-fallback Miri passed for the new prefix code. Engine/block/key production sources are unchanged. No full Miri pass is claimed.",
+  "archive_stage": "No new compilation, test suite, performance run or algorithm change. Only independent patch apply/hash/reverse checks.",
+  "maturity": "Validated experimental source; no demonstrated performance gain; no adoption."
+}

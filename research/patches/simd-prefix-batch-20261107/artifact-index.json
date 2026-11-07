@@ -1,0 +1,198 @@
+{
+  "schema": 1,
+  "external_evidence_root": "tessera-simd-prefix-batch/",
+  "availability": "Preserved local experiment evidence; these paths are not repository files or public download URLs.",
+  "retention": "Complete raw samples and all batch tails remain outside this packet. No outlier was removed.",
+  "artifacts": [
+    {
+      "path": "REPORT.md",
+      "sha256": "a1af569834f5baaa211c0498b1239b73f247eb3263594db2c5cbb9c8184b3326",
+      "bytes": 13637
+    },
+    {
+      "path": "candidate/rust/tessera-sort/src/portable_simd.rs",
+      "sha256": "6e37fff0b0fb8345f7f4c5bf6b8c0cc261f6d5e2b201c6b8aff1a2d00bf9cea5",
+      "bytes": 19290
+    },
+    {
+      "path": "candidate/rust/tessera-sort/src/prefix_batch_tests.rs",
+      "sha256": "4da34d4615f52bdb221bc273fc44f91540c64075ecc7ff09ccd3a0d953fc8d08",
+      "bytes": 4142
+    },
+    {
+      "path": "capture-driver/target/release/prefix-table-capture",
+      "sha256": "210957f1acf58b42cf7bcc52fecb7f971edb54a39c42682607d857150b60faf3",
+      "bytes": 644352
+    },
+    {
+      "path": "evidence/PROTOCOL.md",
+      "sha256": "fc713bf4bdf24c94bcecb82a32ea732dfabdba5e760179620c98a6f0f7582ebd",
+      "bytes": 4015
+    },
+    {
+      "path": "evidence/assembly-summary.json",
+      "sha256": "7e46182c632e18da610cedc227f293323829e51949ec62b195fee296f0c65155",
+      "bytes": 2149
+    },
+    {
+      "path": "evidence/baseline-exact-main.s",
+      "sha256": "0bb926ef2056e2f26a40bb0d4954f939b6ec328b10f6bce1b78cad13bf46d252",
+      "bytes": 29901
+    },
+    {
+      "path": "evidence/candidate-kernel.s",
+      "sha256": "1d213fa2bae341c5193c54a11921e38ccb005327d80c3c0eaf66111b0926c53a",
+      "bytes": 24307
+    },
+    {
+      "path": "evidence/candidate-v1.s",
+      "sha256": "f141b2c0160bff0b232fe0aa9e1d17113067ec38737c153f67721172d59d8d18",
+      "bytes": 36938
+    },
+    {
+      "path": "evidence/capture.log",
+      "sha256": "ff58ae771483b6020551d79435273359178e71653d70f6e09f98c14c2b325727",
+      "bytes": 7394
+    },
+    {
+      "path": "evidence/corpus-summary.json",
+      "sha256": "088823576c41c990fce808d318395a4efcb8486c3a2d9548a0429671a3c77f23",
+      "bytes": 1290
+    },
+    {
+      "path": "evidence/corpus/u32-random.bin",
+      "sha256": "0695d3a109f4370299b7dcb33f947e6f0d57ec172bfae70d948132a81fe867db",
+      "bytes": 3147784
+    },
+    {
+      "path": "evidence/corpus/u32-sorted99.bin",
+      "sha256": "430736c0400a05c9ae7e9c9320a96c6b4754a4c5b2a3febe25918e0267f5fc56",
+      "bytes": 2098184
+    },
+    {
+      "path": "evidence/corpus/u64-random.bin",
+      "sha256": "afa1dd83291275ddb1d9178fb3e21dca389958605f4d3fed4c06681bc3d7bb34",
+      "bytes": 6211592
+    },
+    {
+      "path": "evidence/corpus/u64-sorted99.bin",
+      "sha256": "69a989ab13254f2575c131ba1682b768163a1a4c0715e17cf1d829a9bcb212b0",
+      "bytes": 2099208
+    },
+    {
+      "path": "evidence/export-provenance.json",
+      "sha256": "d7916d3432a9213833782eff6d3497f1219269f0ae2a95a3b3c43d1a5444e237",
+      "bytes": 580
+    },
+    {
+      "path": "evidence/freeze-v1.json",
+      "sha256": "4d5220d8e757f7cfcbba0365c361939c8ab583ffbd49b1ab7e4882213189be32",
+      "bytes": 50947
+    },
+    {
+      "path": "evidence/kernel-summary.json",
+      "sha256": "85c33ffcc1165022651c3d366a1b7279a62675c4074b250d18bbfa7f67064957",
+      "bytes": 8087
+    },
+    {
+      "path": "evidence/kernel-timing-attempt1.log",
+      "sha256": "26ef98e04930b22debc8ad2596b7ca1f1efad48f37a9a95980c64760b360dbb3",
+      "bytes": 319
+    },
+    {
+      "path": "evidence/kernel-timing.log",
+      "sha256": "ed224d17c9f89b7a53146aa8b80d9d2021f3d81792feda24e8ed636701b4fe88",
+      "bytes": 8461
+    },
+    {
+      "path": "evidence/launch-v3.sha256",
+      "sha256": "c71f6c4b84abdef94179e4dc63b3586b7c022c8ff2892da7b41b371ce5284776",
+      "bytes": 182
+    },
+    {
+      "path": "evidence/original-kernel.s",
+      "sha256": "2ac34dd449b2b70148c4b1845d4d5c752d2bab7db58f805c27e5d111cecd3b79",
+      "bytes": 17232
+    },
+    {
+      "path": "evidence/parse-kernel.py",
+      "sha256": "652d2eb92b162030dea7712ca9b4f05685e190cc412ce9a4c6df87177203f455",
+      "bytes": 5696
+    },
+    {
+      "path": "evidence/placement-kernel.s",
+      "sha256": "92aa072b10f71c42c1f66d540f7e3fecac9be135d373fb3c8b09e549638fa048",
+      "bytes": 17270
+    },
+    {
+      "path": "evidence/preflight.log",
+      "sha256": "d0e66c7ecd15e424d1ea44a60a34ae7b76b1b9fa4bf223df2bc1be388616e66c",
+      "bytes": 264
+    },
+    {
+      "path": "evidence/raw-summary.json",
+      "sha256": "0d1d28371f9edc4550d78f0af79ae9219b8c9e72d218d3307330dbc3a5d62a89",
+      "bytes": 1231
+    },
+    {
+      "path": "evidence/run/manifest.json",
+      "sha256": "d26d483bcaeca7ba4ca19e61c96ad58c42657388a749d34250dc9e5bfc97ef82",
+      "bytes": 1450
+    },
+    {
+      "path": "evidence/run/manifest.txt",
+      "sha256": "0f3dac72ee189514b062933358fcc1a6c21d6387cc306ee49d667dd331a9d456",
+      "bytes": 13895
+    },
+    {
+      "path": "evidence/run/u32-random.jsonl",
+      "sha256": "7837ce2741d309445354952891e2617a9dcb9bc1c9ef6688ec4b125095e274e6",
+      "bytes": 56563
+    },
+    {
+      "path": "evidence/run/u32-sorted99.jsonl",
+      "sha256": "f45ff14d7ba41755335524768994cc4e3f5c88cfa6922d4ffe32319d51ebe416",
+      "bytes": 81540
+    },
+    {
+      "path": "evidence/run/u64-random.jsonl",
+      "sha256": "f3237f05bd1811beddbcbe892133ae9b7caf0838c447cbed776ac78705a5ef86",
+      "bytes": 34285
+    },
+    {
+      "path": "evidence/run/u64-sorted99.jsonl",
+      "sha256": "b192becfdadd2c9cfca84a4e905264c898acdea4db31e701b81c9e58bc049481",
+      "bytes": 64611
+    },
+    {
+      "path": "evidence/validation-status.json",
+      "sha256": "7f2a68598ccf095943eb5b78cadda4dd978fdf7fd0aa361d8dbe2a33263d8efa",
+      "bytes": 1806
+    },
+    {
+      "path": "evidence/validation.log",
+      "sha256": "02df1502ebaab0d9661de12364963e57080d8a5838407a4972cda7f6b2ee9588",
+      "bytes": 19486
+    },
+    {
+      "path": "kernel-driver/src/main.rs",
+      "sha256": "5e4c47072acf45ba56a733d5887736338ec3968b00b3f427c93e12ef9182c7b7",
+      "bytes": 6452
+    },
+    {
+      "path": "kernel-driver/target/release/prefix-kernel-driver",
+      "sha256": "8ec5bd7eedc2602be8b95c5475573c0a4aef0f50b7a61b3a94b1322282fc340f",
+      "bytes": 503544
+    },
+    {
+      "path": "original/rust/tessera-sort/src/portable_simd.rs",
+      "sha256": "50cd42bddc699cd9e52ef7996ccb3cee7a087efe3100d2390d6f16d044eab3de",
+      "bytes": 17418
+    },
+    {
+      "path": "time-kernel-v3.sh",
+      "sha256": "b24f3661b7e730f2f15c4ec9c1c704c998b4566decf546f8c1e694fd207aa31e",
+      "bytes": 2757
+    }
+  ]
+}

@@ -1,0 +1,189 @@
+diff --git a/rust/tessera-sort/src/portable_simd.rs b/rust/tessera-sort/src/portable_simd.rs
+--- a/rust/tessera-sort/src/portable_simd.rs
++++ b/rust/tessera-sort/src/portable_simd.rs
+@@ -89,7 +89,40 @@
+     let shift2 = u8x16::<S>::from_slice(simd, &SHIFT2);
+     let shift4 = u8x16::<S>::from_slice(simd, &SHIFT4);
+     let mut carry = 0u16;
+-    let mut chunks = counts.chunks_exact_mut(8);
++    let mut batches = counts.chunks_exact_mut(32);
++    for batch in &mut batches {
++        // Independent local scans expose four instruction chains before their
++        // totals join the scalar carry chain. Each vector remains eight lanes.
++        let mut a = u16x8::<S>::from_slice(simd, &batch[..8]);
++        let mut b = u16x8::<S>::from_slice(simd, &batch[8..16]);
++        let mut c = u16x8::<S>::from_slice(simd, &batch[16..24]);
++        let mut d = u16x8::<S>::from_slice(simd, &batch[24..]);
++        a = a + a.swizzle_dyn_precise(shift1);
++        b = b + b.swizzle_dyn_precise(shift1);
++        c = c + c.swizzle_dyn_precise(shift1);
++        d = d + d.swizzle_dyn_precise(shift1);
++        a = a + a.swizzle_dyn_precise(shift2);
++        b = b + b.swizzle_dyn_precise(shift2);
++        c = c + c.swizzle_dyn_precise(shift2);
++        d = d + d.swizzle_dyn_precise(shift2);
++        a = a + a.swizzle_dyn_precise(shift4);
++        b = b + b.swizzle_dyn_precise(shift4);
++        c = c + c.swizzle_dyn_precise(shift4);
++        d = d + d.swizzle_dyn_precise(shift4);
++        let carry_b = carry.wrapping_add(a.to_array()[7]);
++        let carry_c = carry_b.wrapping_add(b.to_array()[7]);
++        let carry_d = carry_c.wrapping_add(c.to_array()[7]);
++        (a.swizzle_dyn_precise(shift1) + u16x8::<S>::splat(simd, carry))
++            .store_slice(&mut batch[..8]);
++        (b.swizzle_dyn_precise(shift1) + u16x8::<S>::splat(simd, carry_b))
++            .store_slice(&mut batch[8..16]);
++        (c.swizzle_dyn_precise(shift1) + u16x8::<S>::splat(simd, carry_c))
++            .store_slice(&mut batch[16..24]);
++        (d.swizzle_dyn_precise(shift1) + u16x8::<S>::splat(simd, carry_d))
++            .store_slice(&mut batch[24..]);
++        carry = carry_d.wrapping_add(d.to_array()[7]);
++    }
++    let mut chunks = batches.into_remainder().chunks_exact_mut(8);
+     for chunk in &mut chunks {
+         let mut scan = u16x8::<S>::from_slice(simd, chunk);
+         scan = scan + scan.swizzle_dyn_precise(shift1);
+@@ -470,3 +503,7 @@
+         }
+     }
+ }
++
++#[cfg(test)]
++#[path = "prefix_batch_tests.rs"]
++mod prefix_batch_tests;
+diff --git a/rust/tessera-sort/src/prefix_batch_tests.rs b/rust/tessera-sort/src/prefix_batch_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/rust/tessera-sort/src/prefix_batch_tests.rs
+@@ -0,0 +1,131 @@
++// SPDX-License-Identifier: BSD-2-Clause
++//! Boundary coverage for the four-group prefix loop.
++
++use super::*;
++
++fn levels() -> Vec<Level> {
++    #[cfg(miri)]
++    {
++        vec![Level::fallback()]
++    }
++    #[cfg(not(miri))]
++    {
++        let detected = Level::new();
++        let mut levels = vec![Level::baseline()];
++        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
++        {
++            if let Some(simd) = detected.as_sse4_2() {
++                levels.push(simd.level());
++            }
++            if let Some(simd) = detected.as_avx2() {
++                levels.push(simd.level());
++            }
++            if let Some(simd) = detected.as_avx512() {
++                levels.push(simd.level());
++            }
++        }
++        #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
++        levels.push(detected);
++        levels
++    }
++}
++
++fn check(counts: &[u16], offset: usize, level: Level) {
++    let mut total = 0u32;
++    let expected: Vec<_> = counts
++        .iter()
++        .map(|&count| {
++            let start = total;
++            total += u32::from(count);
++            assert!(total <= u32::from(u16::MAX));
++            start as u16
++        })
++        .collect();
++    let mut actual = vec![0xa55a; offset + counts.len() + 3];
++    actual[offset..offset + counts.len()].copy_from_slice(counts);
++    dispatch!(level, simd => prefix_sum_with(simd, &mut actual[offset..offset + counts.len()]));
++    assert_eq!(
++        &actual[offset..offset + counts.len()],
++        expected,
++        "{level:?}, length={}, offset={offset}",
++        counts.len()
++    );
++    assert!(actual[..offset].iter().all(|&value| value == 0xa55a));
++    assert!(
++        actual[offset + counts.len()..]
++            .iter()
++            .all(|&value| value == 0xa55a)
++    );
++}
++
++#[test]
++fn prefix_batch_all_lengths() {
++    // Every supported count-table length, including all remainder combinations.
++    let max = if cfg!(miri) { 65 } else { 16_384 };
++    for level in levels() {
++        for length in 0..=max {
++            let counts: Vec<_> = (0..length)
++                .map(|index| ((index * 37 + length * 11) % 4) as u16)
++                .collect();
++            check(&counts, length % 4, level);
++        }
++    }
++}
++
++#[test]
++fn prefix_batch_boundaries() {
++    let mut lengths = vec![
++        0, 1, 2, 7, 8, 9, 15, 16, 17, 23, 24, 25, 30, 31, 32, 33, 34, 63, 64, 65, 95, 96, 97, 255,
++        256, 257,
++    ];
++    if !cfg!(miri) {
++        for power in 9..=14 {
++            lengths.extend([(1 << power) - 1, 1 << power]);
++            if power < 14 {
++                lengths.push((1 << power) + 1);
++            }
++        }
++    }
++    for level in levels() {
++        for &length in &lengths {
++            for offset in 0..4 {
++                check(&vec![0; length], offset, level);
++                check(
++                    &(0..length)
++                        .map(|index| if index % 2 == 0 { 3 } else { 0 })
++                        .collect::<Vec<_>>(),
++                    offset,
++                    level,
++                );
++                if length == 0 {
++                    continue;
++                }
++                // Dense counts sum to exactly 65535, including a nonzero final lane.
++                let counts: Vec<_> = (0..length)
++                    .map(|index| (65_535 / length + usize::from(index < 65_535 % length)) as u16)
++                    .collect();
++                check(&counts, offset, level);
++                let positions: Vec<_> = if length <= 65 {
++                    (0..length).collect()
++                } else {
++                    vec![0, 7, 8, 15, 16, 23, 24, 30, 31, 32, length / 2, length - 1]
++                };
++                for position in positions {
++                    let mut counts = vec![0; length];
++                    counts[position] = u16::MAX;
++                    check(&counts, offset, level);
++                }
++            }
++        }
++    }
++}
++
++#[test]
++fn prefix_batch_dispatch_report() {
++    let detected = Level::new();
++    let selected = dispatch!(detected, simd => simd.level());
++    eprintln!(
++        "detected={detected:?}, selected={selected:?}, tested={:?}",
++        levels()
++    );
++}

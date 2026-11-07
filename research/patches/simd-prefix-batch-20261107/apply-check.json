@@ -1,0 +1,26 @@
+{
+  "baseline_commit": "0bc80b49d5efd5bd8b62165b170015e5803226b7",
+  "baseline_tree": "e302babbd9c9bb34436bd17e079e00b97af09ceb",
+  "checks": {
+    "git_apply_check": "passed",
+    "git_apply": "passed",
+    "applied_source_hashes": "matched",
+    "unrelated_files": "unchanged",
+    "git_apply_reverse_check": "passed",
+    "git_apply_reverse": "passed",
+    "whole_export_round_trip": "identical, including symlink targets"
+  },
+  "before_tree_map_sha256": "ab11f17461bda9f1e7b8a4d30a5d3314fc8afeaac24e272b830d47a780bbd562",
+  "export_entries": 137,
+  "source_files": {
+    "rust/tessera-sort/src/portable_simd.rs": {
+      "before_sha256": "50cd42bddc699cd9e52ef7996ccb3cee7a087efe3100d2390d6f16d044eab3de",
+      "after_sha256": "6e37fff0b0fb8345f7f4c5bf6b8c0cc261f6d5e2b201c6b8aff1a2d00bf9cea5"
+    },
+    "rust/tessera-sort/src/prefix_batch_tests.rs": {
+      "before": "absent",
+      "after_sha256": "4da34d4615f52bdb221bc273fc44f91540c64075ecc7ff09ccd3a0d953fc8d08"
+    }
+  },
+  "scope": "Patch application and hash checks only. No compilation, new runtime correctness test or timing."
+}

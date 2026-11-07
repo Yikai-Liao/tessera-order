@@ -10,13 +10,13 @@ A counting pass needs an output buffer because each bucket must be **contiguous*
 - A small **block table** records the logical order of the blocks, so that reading the table front to back visits bucket 0's blocks, then bucket 1's, and so on.
 - The blocks a bucket takes are **input blocks that have already been read**. The input is consumed front to back, so freed blocks appear as fast as buckets need them.
 
-After the pass, one **compaction** walk copies the blocks into the input slice in table order. The result is the stable partition.
+After the pass, one **compaction** walk copies the blocks into the input slice in table order. The result is the stable partition. In the Rayon path, workers first permute physical blocks in place; the logical sequence is unchanged, and the existing compactor then squeezes it into the input. The root scatter itself remains serial.
 
-The extra memory is 2R scratch blocks and the table: O(√n) when b is chosen well (see [below](#choosing-the-block-size)).
+The serial partition uses 2R scratch blocks and the table: O(√n) when b is chosen well (see [below](#choosing-the-block-size)). Rayon adds O(P√n) scratch for P workers, still without an n-record buffer.
 
 ## Step by step
 
-The figure runs the algorithm on a small input: R = 4 buckets on the tens digit, blocks of 3 records. It is a TypeScript model of `Partition::new`, `scatter`, `finish_pass` and `compact_with` with the same index arithmetic, tested against a reference stable sort on 4,248 configurations. Every frame holds each record exactly once.
+The figure runs the algorithm on a small input: R = 4 buckets on the tens digit, blocks of 3 records. It is a TypeScript model of `Partition::new`, `scatter`, `finish_pass` and `compact_with` with the same index arithmetic, tested against a reference stable sort on 8,496 configurations. Every frame holds each record exactly once. Select **Parallel block permutation (Rayon)** to insert the in-place physical-block movement between table rebuild and compaction; the model checks its effect on the data and table, not its worker scheduling.
 
 <BlockPartitionDemo />
 
@@ -26,7 +26,7 @@ How to read the figure:
 - **Cells.** A coloured cell is a live record: its key, and a letter for its input position. A grey cell is a stale copy: bytes left behind after the record moved. Stale bytes are never read as a record again.
 - **Block table.** The bottom row is the table itself: logical position → physical block. A block's fill colour is the bucket that filled it.
 
-## The four phases
+## The phases
 
 ### 1. Set up
 
@@ -54,6 +54,10 @@ Each record is written into its bucket's current block in input order, so the or
 After the scatter, every record has moved once, and only the table changes. `finish_pass` reads the bucket of every filled block and writes a new table that lists bucket 0's blocks in the order they were filled, then bucket 1's, and so on. Each bucket's current block is only partly filled, so it is recorded as that bucket's partial block. Read front to back, the table now *is* the stable partition, just not contiguous in memory.
 
 The table costs 10 bytes per block position: two `u32` block orders (the current and the next one) and one `u16` bucket ID.
+
+### Rayon-only: Parallel block permutation
+
+The Rayon root path moves the completed partition's physical blocks in parallel before compaction. It splits long cycles into bounded pieces and snapshots their shared boundary blocks, so workers can move disjoint destinations. The table rotates to match the new physical layout; its logical record sequence and bucket boundaries do not change. The snapshots and one reusable block per worker add O(Pb) scratch for block size b and P workers. The serial path skips this phase.
 
 ### 4. Compact
 
@@ -87,12 +91,14 @@ $$
 b^{*} = \sqrt{\frac{10\, n}{2 R s}}, \qquad \text{memory}(b^{*}) = 2\sqrt{20\, R\, s\, n} = O(\sqrt{n}).
 $$
 
+This is the serial partition's scratch and table bound. The parallel block permutation adds O(Pbs) bytes for worker and boundary-block scratch; since b = O(√n) and record size is fixed, the parallel path uses O(P√n) auxiliary space, where P is the caller's Rayon pool width.
+
 With b = c·b\*, the total is (c + 1/c)/2 times the minimum, which grows on both sides. Minimum memory is not minimum time, though: compaction reads every block at a random address, and that read does not shrink with the block. So the formula takes **4·b\*** (rounded up), which costs 2.1 times the minimum memory, with two floors:
 
 - at least **1,024 bytes** of records per block, because compaction moves a block with one copy, and a smaller copy costs more than it saves;
 - at least **32 records** per block, because a block's bookkeeping (its table entries and one copy call) costs the same whatever the record width.
 
-Neither floor depends on n, so the bound stays O(√n). The engine computes `max(1, 4 * ceil(b*), floor(1024 / s), 32)` in `default_block_size`.
+Neither floor depends on n, so the serial partition bound stays O(√n). The engine computes `max(1, 4 * ceil(b*), floor(1024 / s), 32)` in `default_block_size`.
 
 <BlockSizeChart />
 

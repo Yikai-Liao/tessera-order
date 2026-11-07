@@ -3,9 +3,9 @@
 // following `rust/tessera-sort/src/block.rs`: `Partition::new`, `begin_pass`,
 // `scatter`, `finish_pass` and `compact_with`. It moves record identities
 // instead of bytes and records a frame after every observable step, so the
-// explanation pages can replay the algorithm. Index arithmetic matches the
-// Rust source line for line; `blockPartition.test.ts` checks that the result
-// is the stable order for every small configuration.
+// explanation pages can replay the algorithm. Serial index arithmetic follows
+// the Rust source; Rayon mode models the parallel cycle permutation's effect,
+// not its worker schedule. Tests check stable output and record conservation.
 
 export interface Rec {
   /** Position in the original input; equal buckets must keep this order. */
@@ -32,7 +32,7 @@ export interface Writer {
   next: number;
 }
 
-export type Phase = "setup" | "scatter" | "finish" | "compact" | "done";
+export type Phase = "setup" | "scatter" | "finish" | "permute" | "compact" | "done";
 
 export interface Frame {
   phase: Phase;
@@ -56,6 +56,8 @@ export interface Config {
   buckets: number;
   blockSize: number;
   classify: (key: number) => number;
+  /** Model the Rayon path's parallel physical-block permutation. */
+  parallelPermutation?: boolean;
 }
 
 export interface Result {
@@ -257,6 +259,29 @@ export function simulate(config: Config): Result {
       `lists each bucket's blocks in the order they were filled, so reading it front to back gives the ` +
       `stable result. The last block of every bucket is partial.`,
   );
+
+  if (config.parallelPermutation) {
+    // Model the cycle permutation's effect: each physical slot receives the
+    // block at logical position (slot - R) mod blockCount, then the table rotates.
+    const oldBlocks = Array.from({ length: blockCount }, (_, physical) =>
+      Array.from({ length: b }, (_, offset) => ({ ...at(blockLoc(physical, offset)) })),
+    );
+    for (let physical = 0; physical < blockCount; physical++) {
+      const logical = (physical - R + blockCount) % blockCount;
+      const source = oldBlocks[order[logical]];
+      for (let offset = 0; offset < b; offset++) {
+        const destination = at(blockLoc(physical, offset));
+        destination.rec = source[offset].rec;
+        destination.live = source[offset].live;
+      }
+    }
+    order = Array.from({ length: blockCount }, (_, logical) => (logical + R) % blockCount);
+    snap(
+      "permute",
+      "Rayon permutes the physical blocks in parallel. The logical record order is unchanged; compaction can now squeeze it into the input.",
+      { focus: Array.from({ length: blockCount }, (_, physical) => physical) },
+    );
+  }
 
   // compact_with: materialise the logical order into the input slice.
   const positions = new Array<number>(blockCount).fill(0);

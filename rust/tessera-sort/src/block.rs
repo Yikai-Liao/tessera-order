@@ -49,6 +49,9 @@ use crate::unwind;
 use alloc::vec::Vec;
 use core::{marker::PhantomData, mem::MaybeUninit, ptr};
 
+#[cfg(feature = "rayon")]
+mod parallel;
+
 /// Widest digit, in bits, that one pass accepts. Callers that choose their own
 /// digit width (the Tessera engine) bound it by this constant.
 pub(crate) const MAX_RADIX_BITS: usize = 12;
@@ -184,7 +187,7 @@ pub(crate) fn partition_digit<T, E: Extract<T>>(
     extractor: &mut E,
     buffers: &mut Buffers<T>,
 ) {
-    partition_digit_inner(records, radix, shift, extractor, buffers, None);
+    partition_digit_inner(records, radix, shift, extractor, buffers, None, |_| {});
 }
 
 /// [`partition_digit`] that also returns each bucket's cumulative end in
@@ -201,21 +204,69 @@ pub(crate) fn partition_digit_with_ends<T, E: Extract<T>>(
     buffers: &mut Buffers<T>,
     visit: &mut dyn FnMut(&mut [T], &mut E),
 ) -> Vec<usize> {
-    partition_digit_inner(records, radix, shift, extractor, buffers, Some(visit))
+    partition_digit_inner(
+        records,
+        radix,
+        shift,
+        extractor,
+        buffers,
+        Some(visit),
+        |_| {},
+    )
+}
+
+/// Partitions the root digit and permutes its full blocks in parallel.
+///
+/// The ordinary partition remains serial; only the block permutation uses the
+/// caller's current Rayon pool.
+#[cfg(feature = "rayon")]
+pub(crate) fn partition_digit_with_ends_parallel<T: Send, E: Extract<T> + Clone + Send>(
+    records: &mut [T],
+    radix: usize,
+    shift: usize,
+    extractor: &mut E,
+    buffers: &mut Buffers<T>,
+    workers: usize,
+    visit: &mut dyn FnMut(&mut [T], &mut E),
+) -> Vec<usize> {
+    partition_digit_inner(
+        records,
+        radix,
+        shift,
+        extractor,
+        buffers,
+        Some(visit),
+        |partition| parallel::permute_blocks(partition, workers),
+    )
 }
 
 /// A [`Visit`] that also receives the extractor, which classification has
 /// finished borrowing by the time buckets are visited.
 type KeyVisit<'a, T, E> = &'a mut dyn FnMut(&mut [T], &mut E);
 
-fn partition_digit_inner<T, E: Extract<T>>(
+fn new_partition<'a, 'w, T>(
+    records: &'a mut [T],
+    buckets: usize,
+    buffers: &'w mut Buffers<T>,
+) -> Partition<'a, 'w, T> {
+    let radix = buckets.trailing_zeros() as usize;
+    let block_size = default_block_size(records.len(), core::mem::size_of::<T>(), radix);
+    Partition::new(records, buckets, block_size, buffers)
+}
+
+fn partition_digit_inner<T, E, F>(
     records: &mut [T],
     radix: usize,
     shift: usize,
     extractor: &mut E,
     buffers: &mut Buffers<T>,
     visit: Option<KeyVisit<'_, T, E>>,
-) -> Vec<usize> {
+    after_scatter: F,
+) -> Vec<usize>
+where
+    E: Extract<T>,
+    F: FnOnce(&mut Partition<'_, '_, T>),
+{
     let record_bytes = core::mem::size_of::<T>();
     if records.len() < 2 || record_bytes == 0 {
         return Vec::new();
@@ -226,11 +277,11 @@ fn partition_digit_inner<T, E: Extract<T>>(
     let width = radix.min(bits - shift);
     let shift = E::Value::from_usize(shift);
     let mask = E::Value::from_usize((1usize << width) - 1) << shift;
+    let mut sorter = new_partition(records, 1 << radix, buffers);
     partition_pass(
-        records,
-        1 << radix,
+        &mut sorter,
         extractor,
-        buffers,
+        after_scatter,
         move |extractor, record| ((extractor.key(record) & mask) >> shift).to_usize(),
         visit.is_some(),
         visit,
@@ -258,11 +309,11 @@ pub(crate) fn partition_by<T, E: Extract<T>>(
         return alloc::vec![0; buckets];
     }
     assert!(buckets.is_power_of_two() && (2..=1 << MAX_RADIX_BITS).contains(&buckets));
+    let mut sorter = new_partition(records, buckets, buffers);
     partition_pass(
-        records,
-        buckets,
+        &mut sorter,
         extractor,
-        buffers,
+        |_| {},
         move |extractor, record| classify(extractor, record).min(buckets - 1),
         true,
         None,
@@ -273,17 +324,13 @@ pub(crate) fn partition_by<T, E: Extract<T>>(
 ///
 /// Returns bucket ends when `want_ends` is set, and an empty vector otherwise.
 fn partition_pass<T, E: Extract<T>>(
-    records: &mut [T],
-    buckets: usize,
+    sorter: &mut Partition<'_, '_, T>,
     extractor: &mut E,
-    buffers: &mut Buffers<T>,
+    after_scatter: impl FnOnce(&mut Partition<'_, '_, T>),
     mut classify: impl FnMut(&mut E, &T) -> usize,
     want_ends: bool,
     visit: Option<KeyVisit<'_, T, E>>,
 ) -> Vec<usize> {
-    let radix = buckets.trailing_zeros() as usize;
-    let block_size = default_block_size(records.len(), core::mem::size_of::<T>(), radix);
-    let mut sorter = Partition::new(records, buckets, block_size, buffers);
     let classify_extractor = &mut *extractor;
     let (panic, ends) = sorter.step_with_ends(
         move |record| classify(classify_extractor, record),
@@ -293,6 +340,8 @@ fn partition_pass<T, E: Extract<T>>(
         sorter.compact();
         unwind::resume(payload);
     }
+    after_scatter(sorter);
+
     // Classification has finished borrowing the extractor before any tile
     // callback starts; both phases use the same FnMut state in sequence.
     let panic = if let Some(visit) = visit {

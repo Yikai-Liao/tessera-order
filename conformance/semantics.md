@@ -55,9 +55,9 @@ In Rust, the heap memory comes from `alloc`, so a `no_std` build needs a global 
 
 ## Rust Rayon entry points
 
-The optional `rayon` feature enables `std` and exposes `par_stable_sort` and `par_stable_sort_by_key`. Both currently delegate the whole call to the serial engine, with the same ordering, stability, record preservation, panic recovery and scratch bounds. Parallel task scheduling and its memory budget are pending ([proposal](../docs/proposals/rayon-parallel-sort.md)).
+The optional `rayon` feature enables `std` and exposes `par_stable_sort` and `par_stable_sort_by_key`. Both preserve the serial APIs' ordering, stability, record preservation and panic recovery. Small inputs and one-thread pools use the serial engine; larger inputs sort complete root buckets in the caller's pool and permute root blocks in parallel. Root scatter remains serial ([proposal](../docs/proposals/rayon-parallel-sort.md)).
 
-Records require `Send` but do not require `Sync`. The by-key entry point requires `Fn + Sync` rather than `FnMut`, allowing future tasks to share a borrow of the key function; the function itself need not implement `Send` or `Clone`. Callers must allow concurrent key evaluations once scheduling is implemented. The serial APIs and `Workspace` retain their existing bounds.
+Parallel calls use O(P√n) auxiliary scratch for fixed record size and key width, where P is the width of the caller's current Rayon pool. They do not allocate an n-record buffer. Records require `Send` but do not require `Sync`. The by-key entry point requires `Fn + Sync` rather than `FnMut`; the function itself need not implement `Send` or `Clone`. Key evaluations may run concurrently and in any order. The serial APIs and `Workspace` retain their existing bounds.
 
 ## Language adapters
 

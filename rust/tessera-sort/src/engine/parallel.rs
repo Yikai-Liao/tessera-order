@@ -268,12 +268,13 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
                 pending = Some(job);
             }
         };
-        let ends = block::partition_digit_with_ends(
+        let ends = block::partition_digit_with_ends_parallel(
             records,
             digit.width,
             digit.shift,
             extractor,
             workspace.block_buffers(),
+            rayon::current_num_threads(),
             &mut visit,
         );
         drop(visit);

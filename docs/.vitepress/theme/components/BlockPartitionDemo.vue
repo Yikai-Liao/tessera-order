@@ -19,6 +19,7 @@ const classify = (key: number) => Math.floor(key / 10);
 const blockSize = ref(3);
 const length = ref(19);
 const seed = ref(7);
+const parallelPermutation = ref(false);
 
 function makeKeys(n: number, s: number): number[] {
   let state = s * 2654435761;
@@ -36,7 +37,13 @@ function makeKeys(n: number, s: number): number[] {
 
 const keys = computed(() => makeKeys(length.value, seed.value));
 const result = computed(() =>
-  simulate({ keys: keys.value, buckets: BUCKETS, blockSize: blockSize.value, classify }),
+  simulate({
+    keys: keys.value,
+    buckets: BUCKETS,
+    blockSize: blockSize.value,
+    classify,
+    parallelPermutation: parallelPermutation.value,
+  }),
 );
 const frames = computed(() => result.value.frames);
 const stepper = useStepper(computed(() => frames.value.length));
@@ -45,11 +52,12 @@ const frame = computed<Frame>(
 );
 
 const phaseLabels: Record<Phase, string> = {
-  setup: "1 · Set up blocks",
-  scatter: "2 · Scatter by digit",
-  finish: "3 · Rebuild block order",
-  compact: "4 · Compact into input",
-  done: "5 · Done",
+  setup: "Set up blocks",
+  scatter: "Scatter by digit",
+  finish: "Rebuild block order",
+  permute: "Parallel block permutation",
+  compact: "Compact into input",
+  done: "Done",
 };
 const marks = computed(() => {
   const seen = new Set<Phase>();
@@ -201,6 +209,10 @@ function reshuffle() {
           <option :value="3">3</option>
           <option :value="4">4</option>
         </select>
+      </label>
+      <label>
+        <input v-model="parallelPermutation" type="checkbox" />
+        Parallel block permutation (Rayon)
       </label>
       <button type="button" class="tsr-controls-button" @click="reshuffle">New input</button>
       <span class="tsr-note">Digit = tens place, R = 4 buckets. Letters give each record's input position.</span>

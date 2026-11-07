@@ -3,9 +3,9 @@
 //! Rayon entry points for stable sorting.
 //!
 //! The parallel engine uses the existing serial probes and node/tile sorting.
-//! It partitions the root serially, then sorts each complete bucket in Rayon's
-//! current pool while root compaction continues. Small inputs and one-thread
-//! pools use the serial engine.
+//! It partitions the root serially, permutes its blocks in Rayon's current pool,
+//! then sorts each complete bucket while root compaction continues. Small
+//! inputs and one-thread pools use the serial engine.
 
 use crate::key::{ByKey, Direct};
 use crate::{RadixKey, engine};
@@ -19,9 +19,11 @@ use crate::{RadixKey, engine};
 ///
 /// # Memory
 ///
-/// Scratch remains O(√n) for fixed record size and key width. The root's
-/// partition scratch stays live during compaction; at most 256 child jobs can
-/// retain workspaces, bounded by the root digit's eight-bit fan-out.
+/// Scratch is O(P√n) for fixed record size and key width, where P is the
+/// current pool's thread count. The root partition scratch remains live through
+/// permutation and compaction; permutation scratch is released before bucket
+/// sorting continues during compaction. Active child workspaces are bounded by
+/// P workers and the root digit's eight-bit fan-out. No n-record buffer is allocated.
 ///
 /// # Examples
 ///
@@ -58,9 +60,11 @@ pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
 ///
 /// # Memory
 ///
-/// Scratch remains O(√n) for fixed record size and key width. Root partition
-/// scratch stays live while child jobs run; the eight-bit root digit bounds
-/// the pool to at most 256 job workspaces.
+/// Scratch is O(P√n) for fixed record size and key width, where P is the
+/// current pool's thread count. Root partition scratch remains live through
+/// permutation and compaction; permutation scratch is released before child
+/// jobs run. Active workspaces are bounded by P workers and the eight-bit root
+/// digit. No n-record buffer is allocated.
 ///
 /// # Examples
 ///

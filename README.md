@@ -68,7 +68,7 @@ assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 
 Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 
-The optional `rayon` feature adds `par_stable_sort` and `par_stable_sort_by_key`, requiring `Send` records and a shared `Fn + Sync` key function. These entry points currently use the serial engine; task scheduling is pending. See the [Rayon proposal](docs/proposals/rayon-parallel-sort.md) for the implementation plan.
+The optional `rayon` feature adds `par_stable_sort` and `par_stable_sort_by_key`, requiring `Send` records and a shared `Fn + Sync` key function. Large inputs sort complete root buckets in the caller's pool and permute root blocks in parallel; root scatter remains serial. See the [Rayon proposal](docs/proposals/rayon-parallel-sort.md) for current status and remaining work.
 
 ## Performance
 

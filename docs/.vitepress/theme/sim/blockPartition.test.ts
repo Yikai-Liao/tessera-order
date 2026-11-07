@@ -15,24 +15,36 @@ for (const R of [2, 4, 8]) {
       for (let trial = 0; trial < 4; trial++) {
         const keys = Array.from({ length: n }, () => Math.floor(random() * R * 10));
         const classify = (key: number) => Math.floor(key / 10);
-        const { output, frames } = simulate({ keys, buckets: R, blockSize: b, classify });
         const expected = keys
           .map((key, id) => ({ key, id, bucket: classify(key) }))
           .sort((x, y) => x.bucket - y.bucket || x.id - y.id);
-        const got = output.map((r) => r.id).join();
         const want = expected.map((r) => r.id).join();
-        if (got !== want) throw new Error(`R=${R} b=${b} n=${n}: ${got} != ${want}`);
-        for (const frame of frames) {
-          const live = [...frame.scratch, ...frame.input]
-            .filter((c) => c.live)
-            .map((c) => c.rec!.id);
-          if (new Set(live).size !== n || live.length !== n) {
+        for (const parallelPermutation of [false, true]) {
+          const { output, frames } = simulate({
+            keys,
+            buckets: R,
+            blockSize: b,
+            classify,
+            parallelPermutation,
+          });
+          const got = output.map((r) => r.id).join();
+          if (got !== want) {
             throw new Error(
-              `R=${R} b=${b} n=${n}: frame "${frame.caption}" holds ${live.length} live records`,
+              `R=${R} b=${b} n=${n} parallel=${parallelPermutation}: ${got} != ${want}`,
             );
           }
+          for (const frame of frames) {
+            const live = [...frame.scratch, ...frame.input]
+              .filter((c) => c.live)
+              .map((c) => c.rec!.id);
+            if (new Set(live).size !== n || live.length !== n) {
+              throw new Error(
+                `R=${R} b=${b} n=${n}: frame "${frame.caption}" holds ${live.length} live records`,
+              );
+            }
+          }
+          cases++;
         }
-        cases++;
       }
     }
   }

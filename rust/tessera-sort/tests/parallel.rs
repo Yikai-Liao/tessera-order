@@ -116,7 +116,7 @@ fn large_sort_uses_workers_and_recovers_task_panics() {
                 let call = calls.fetch_add(1, Ordering::Relaxed);
                 let current = std::thread::current().id();
                 if call == 0 {
-                    *origin.lock().unwrap() = Some(current.clone());
+                    *origin.lock().unwrap() = Some(current);
                 } else if call > LEN
                     && origin
                         .lock()

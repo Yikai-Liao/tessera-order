@@ -1,4 +1,4 @@
-# 0014: Align branches in continuous benchmark builds
+# 0015: Align branches in continuous benchmark builds
 
 Date: 2026-11-07. Status: accepted. Amends the shared build flags and history
 transition of [0011](0011-benchmark-feature-configurations.md).

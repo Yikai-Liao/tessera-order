@@ -3,7 +3,7 @@
 Date: 2026-11-07. Status: accepted.
 
 The shared build flags and history transition are amended by
-[decision 0014](0014-align-continuous-benchmark-branches.md).
+[decision 0015](0015-align-continuous-benchmark-branches.md).
 
 ## Context
 

@@ -2,6 +2,9 @@
 
 Date: 2026-11-07. Status: accepted.
 
+The default insertion-finishing scan is amended by
+[decision 0014](0014-scalar-default-insertion-finishing.md).
+
 ## Context
 
 The insertion pass looks for the next adjacent pair whose keys descend, then

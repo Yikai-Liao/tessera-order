@@ -1,0 +1,17 @@
+Independent snapshot: git archive 60873c86558456aca496ca8c4e084007415b58b1, no .git directory.
+COMMAND: git apply --check --whitespace=error-all combined-rayon.patch
+APPLY_CHECK_EXIT=0
+COMMAND: git apply --whitespace=error-all combined-rayon.patch
+APPLY_EXIT=0
+rust/tessera-sort/src/block/parallel/compact.rs: OK
+rust/tessera-sort/src/block/parallel.rs: OK
+rust/tessera-sort/src/block.rs: OK
+rust/tessera-sort/src/engine/parallel/progress_tests.rs: OK
+rust/tessera-sort/src/engine/parallel/safety_gap_tests.rs: OK
+rust/tessera-sort/src/engine/parallel.rs: OK
+rust/tessera-sort/src/engine.rs: OK
+rust/tessera-sort/src/lib.rs: OK
+rust/tessera-sort/src/test_witness.rs: OK
+rust/tessera-sort/tests/parallel.rs: OK
+APPLIED_SOURCE_HASH_CHECK_EXIT=0
+REVERSE_CHECK_EXIT=0

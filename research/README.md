@@ -6,6 +6,9 @@ are not workspace members, are not published, and do not change Tessera's defaul
 engine or optional public Rayon implementation. Read each checkpoint's scope,
 ownership proof, validation record, and limitations before using it.
 
+- `patches/combined-rayon.patch`: native root scatter, parallel block movement,
+  pipelined child sorting and the consumer-wait fix, against the documented v3
+  base. It is archived for review, not applied to the default crate.
 - `owned-rank/`: stable block-recycling merge with owned `T: Send` records and
   u64 keys. It preserves records after normal key panics but is a narrower
   research API, not the full public RadixKey contract.

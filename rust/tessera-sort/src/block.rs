@@ -207,14 +207,12 @@ impl<T> Destinations<T> {
     }
 }
 
-/// What a digit partition reports and consumes while it materializes buckets.
-struct Hooks<'a, T, E> {
-    /// Whether the caller needs the cumulative record end of every bucket.
-    ends: bool,
-    /// Finishes a bucket that was copied into the input slice.
-    visit: Option<KeyVisit<'a, T, E>>,
-    /// Finishes a bucket that fits the staging buffer straight from there.
-    staging: Option<Staging<'a, T, E>>,
+/// A staged bucket run during compaction: where staged buckets go, and what
+/// finishes them. Unlike Staging, the visitor no longer needs the key.
+struct StagedRun<'a, T> {
+    visit: StagedVisit<'a, T>,
+    ptr: *mut T,
+    capacity: usize,
 }
 
 pub(crate) fn partition_digit<T, E: Extract<T>>(
@@ -280,18 +278,23 @@ fn partition_digit_inner<'a, T, E: Extract<T>>(
     let width = radix.min(bits - shift);
     let shift = E::Value::from_usize(shift);
     let mask = E::Value::from_usize((1usize << width) - 1) << shift;
-    partition_pass(
-        arr,
-        1 << radix,
-        key,
-        buffers,
-        move |key, record| ((key.key(record) & mask) >> shift).to_usize(),
-        Hooks {
-            ends: visit.is_some() || staging.is_some(),
-            visit,
-            staging,
+    let classify = move |key: &mut E, record: &T| ((key.key(record) & mask) >> shift).to_usize();
+    match staging {
+        // SAFETY: the caller of partition_digit_staged guarantees the staging
+        // region, and this is its only caller.
+        Some(staging) => unsafe {
+            partition_staged(arr, 1 << radix, key, buffers, classify, staging)
         },
-    )
+        None => partition_pass(
+            arr,
+            1 << radix,
+            key,
+            buffers,
+            classify,
+            visit.is_some(),
+            visit,
+        ),
+    }
 }
 
 pub(crate) fn partition_by<T, E: Extract<T>>(
@@ -312,11 +315,8 @@ pub(crate) fn partition_by<T, E: Extract<T>>(
         key,
         buffers,
         move |key, record| classify(key, record).min(buckets - 1),
-        Hooks {
-            ends: true,
-            visit: None,
-            staging: None,
-        },
+        true,
+        None,
     )
 }
 
@@ -325,14 +325,51 @@ fn partition_pass<T, E: Extract<T>>(
     buckets: usize,
     key: &mut E,
     buffers: &mut Buffers<T>,
-    mut classify: impl FnMut(&mut E, &T) -> usize,
-    hooks: Hooks<'_, T, E>,
+    classify: impl FnMut(&mut E, &T) -> usize,
+    want_ends: bool,
+    visit: Option<KeyVisit<'_, T, E>>,
 ) -> Vec<usize> {
-    let Hooks {
-        ends: want_ends,
-        visit,
-        staging,
-    } = hooks;
+    partition_pass_inner(arr, buckets, key, buffers, classify, want_ends, visit, None)
+}
+
+/// Like partition_pass, but a bucket that fits the staging buffer is copied
+/// there and handed to the visitor together with its destination.
+///
+/// # Safety
+///
+/// The staging pointer must satisfy the requirement of
+/// partition_digit_staged.
+unsafe fn partition_staged<T, E: Extract<T>>(
+    arr: &mut [T],
+    buckets: usize,
+    key: &mut E,
+    buffers: &mut Buffers<T>,
+    classify: impl FnMut(&mut E, &T) -> usize,
+    staging: Staging<'_, T, E>,
+) -> Vec<usize> {
+    partition_pass_inner(
+        arr,
+        buckets,
+        key,
+        buffers,
+        classify,
+        true,
+        None,
+        Some(staging),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn partition_pass_inner<T, E: Extract<T>>(
+    arr: &mut [T],
+    buckets: usize,
+    key: &mut E,
+    buffers: &mut Buffers<T>,
+    mut classify: impl FnMut(&mut E, &T) -> usize,
+    want_ends: bool,
+    visit: Option<KeyVisit<'_, T, E>>,
+    staging: Option<Staging<'_, T, E>>,
+) -> Vec<usize> {
     let (staging_ptr, staging_cap, mut staged_visit) = match staging {
         Some(staging) => (staging.ptr, staging.capacity, Some(staging.visit)),
         None => (core::ptr::null_mut(), 0, None),
@@ -350,12 +387,19 @@ fn partition_pass<T, E: Extract<T>>(
     // callback starts; both phases use the same FnMut state in sequence.
     let panic = if let Some(staged) = staged_visit.as_mut() {
         let mut callback = |source: &mut [T], dest: &mut [T]| staged(source, dest, key);
-        sorter.compact_with(&ends, None, staging_ptr, staging_cap, Some(&mut callback))
+        sorter.compact_staged(
+            &ends,
+            StagedRun {
+                visit: &mut callback,
+                ptr: staging_ptr,
+                capacity: staging_cap,
+            },
+        )
     } else if let Some(visit) = visit {
         let mut callback = |child: &mut [T]| visit(child, key);
-        sorter.compact_with(&ends, Some(&mut callback), core::ptr::null_mut(), 0, None)
+        sorter.compact_with(&ends, Some(&mut callback))
     } else {
-        sorter.compact_with(&ends, None, core::ptr::null_mut(), 0, None)
+        sorter.compact_with(&ends, None)
     };
     if let Some(payload) = panic {
         unwind::resume(payload);
@@ -896,7 +940,7 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
     }
 
     fn compact(&mut self) {
-        let _ = self.compact_with(&[], None, core::ptr::null_mut(), 0, None);
+        let _ = self.materialize(&[], None, None);
     }
 
     /// Materializes the active sequence into input. When bucket ends are given,
@@ -908,11 +952,28 @@ impl<'a, 'w, T> Sorter<'a, 'w, T> {
     fn compact_with(
         &mut self,
         ends: &[usize],
-        mut visit: Option<Visit<'_, T>>,
-        staging: *mut T,
-        staging_cap: usize,
-        mut staged_visit: Option<StagedVisit<'_, T>>,
+        visit: Option<Visit<'_, T>>,
     ) -> Option<PanicPayload> {
+        self.materialize(ends, visit, None)
+    }
+
+    /// Materializes like compact_with, except that a bucket that fits the
+    /// staged run is finished there and scatters straight into its final
+    /// position instead of being copied into the input slice first.
+    fn compact_staged(&mut self, ends: &[usize], run: StagedRun<'_, T>) -> Option<PanicPayload> {
+        self.materialize(ends, None, Some(run))
+    }
+
+    fn materialize(
+        &mut self,
+        ends: &[usize],
+        mut visit: Option<Visit<'_, T>>,
+        staged: Option<StagedRun<'_, T>>,
+    ) -> Option<PanicPayload> {
+        let (staging, staging_cap, mut staged_visit) = match staged {
+            Some(run) => (run.ptr, run.capacity, Some(run.visit)),
+            None => (core::ptr::null_mut(), 0, None),
+        };
         // Sorting is finished. Reuse the output buffer as the inverse map:
         // physical block ID -> position in block_order.
         let mut block_positions = core::mem::take(&mut self.next_block_order);
@@ -1158,11 +1219,7 @@ mod tests {
             // extractor, which must not run a second time.
             assert_eq!(calls, at, "key called after it panicked");
             assert_eq!(ends, expected, "recovered ends at panic {at}");
-            assert!(
-                sorter
-                    .compact_with(&ends, None, core::ptr::null_mut(), 0, None)
-                    .is_none()
-            );
+            assert!(sorter.compact_with(&ends, None).is_none());
             // Drop also compacts, so the check must run before the sorter does.
             assert!(sorter.input_materialized, "compaction did not finish");
             panic
@@ -1263,13 +1320,7 @@ mod tests {
                             std::panic::panic_any(0x71u32);
                         }
                     };
-                    let payload = sorter.compact_with(
-                        &ends,
-                        Some(&mut callback),
-                        core::ptr::null_mut(),
-                        0,
-                        None,
-                    );
+                    let payload = sorter.compact_with(&ends, Some(&mut callback));
                     // Drop also compacts, so the check must run before it does.
                     assert!(sorter.input_materialized, "compaction did not finish");
                     payload

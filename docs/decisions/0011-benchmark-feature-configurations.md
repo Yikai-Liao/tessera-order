@@ -1,4 +1,4 @@
-# 0010: Track default and Portable SIMD benchmarks independently
+# 0011: Track default and Portable SIMD benchmarks independently
 
 Date: 2026-11-07. Status: accepted.
 

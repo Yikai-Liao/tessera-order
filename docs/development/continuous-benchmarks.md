@@ -13,12 +13,13 @@ Bencher Free allows one job per organization, at most 5 minutes each. Tracking j
 
 ## Cases
 
-Benchmark IDs are `<language>/<case_id>/<mode>`, with `case_id` as in the [protocol](benchmarking.md#runner), for example `rust/u64/random/65536/s1/api`. The mode names the API being timed: `api` is the stable sort with its own scratch allocation, `workspace` the same sort with a prepared workspace. Further APIs, such as an unstable or a parallel sort, get their own mode in the same executable rather than a new build; reports group cases by mode ([Reports](#builds-are-columns-cases-are-rows)). Measure a new API on a representative subset of inputs: each build's run must stay under the remote job limit below. Each case is there for an engine path ([routing](../explain/routing.md)) or a key type. The 37 benchmarks cover:
+Benchmark IDs are `<language>/<case_id>/<mode>`, with `case_id` as in the [protocol](benchmarking.md#runner), for example `rust/u64/random/65536/s1/api`. The mode names the API being timed: `api` is the stable sort with its own scratch allocation, `workspace` the same sort with a prepared workspace. Further APIs, such as an unstable or a parallel sort, get their own mode in the same executable rather than a new build; reports group cases by mode ([Reports](#builds-are-columns-cases-are-rows)). Measure a new API on a representative subset of inputs: each build's run must stay under the remote job limit below. Each case is there for an engine path ([routing](../explain/routing.md)) or a key type. The 38 benchmarks cover:
 
 - the insertion limit (`u64` only), one past it and one past the tile capacity, for `u64` keys and `{u32, u32}` rows, and one past the tile capacity for `{u64, u32}` rows. Cases this short move with code placement, so only the boundaries are kept;
 - at 65,536 `u64` keys, random and one case per route: sorted (confirmed order), reverse (stable reversal), 99% sorted (budgeted insertion), all equal (constant keys), 16 values (one block partition), Zipf (s = 2) and `skew99` (equality partition), `sorted_tail` (outlier run), and `runs`, mixed ascending and descending runs on which the insertion probe must give up;
 - `u32`, `u128` and `f64` random keys, and `{u64, u32}` rows (random, and 16 values), at 65,536;
 - 99% sorted `u32` and `f64` keys at 65,536, reaching long integer and float inversion scans;
+- sorted `f64` keys at 65,536, reaching vector ascending-order confirmation;
 - 1,000,000 records for `u64` (random, Zipf, `skew99`, `two_values`, 99% sorted), `u32`, `u128` (random, and `sparse8`, which widens the top digit) and `{u64, u32}` rows;
 - `workspace` mode beside `api` only where scratch allocation is a visible share of the time.
 
@@ -103,7 +104,7 @@ Pushes to `main` that do not change code still run, adding samples of unchanged 
 | Default | default (`std`) | `intel-v1` | `intel-v1` |
 | Portable SIMD | default + `portable-simd` | `intel-v1-portable-simd` | `intel-v1` |
 
-These retain the existing default-feature and SIMD histories because their build flags and case IDs are unchanged. After merging, run **Build benchmarks** on `main` five times to ensure both configurations have enough baseline samples. PR comparisons need a base sample in each Testbed. Do not use one configuration's results to seed the other. See [decision 0010](../decisions/0010-benchmark-feature-configurations.md).
+These retain the existing default-feature and SIMD histories because their build flags and case IDs are unchanged. After merging, run **Build benchmarks** on `main` five times to ensure both configurations have enough baseline samples. PR comparisons need a base sample in each Testbed. Do not use one configuration's results to seed the other. See [decision 0011](../decisions/0011-benchmark-feature-configurations.md).
 
 ## Adding a language
 

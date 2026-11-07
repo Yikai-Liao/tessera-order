@@ -18,6 +18,14 @@ This document describes the engine in `rust/tessera-sort`. It makes the same dec
 
 The engine samples the input to classify it as ascending, descending, flat or unsorted. An ascending input returns immediately. A descending input is reversed stably: runs of equal keys keep their internal order. An unsorted input gets a budgeted stable insertion pass. When the probe window is shorter than the input, the pass first runs on a copy of the window's keys to estimate the number of swaps, and only then touches the records. If the budget runs out, the input is left as a stable permutation of itself and the radix path continues.
 
+The full confirmation finds the first unequal key to determine direction.
+With `portable-simd`, ascending primitive keys confirm the remaining suffix
+with the existing vector inversion scan, including its boundary with the
+last key already read. Dispatch occurs once for that confirmation. User key
+functions retain one scalar evaluation per record in the original order;
+descending confirmation remains scalar. See
+[decision 0010](../decisions/0010-vector-ascending-confirmation.md).
+
 All extractors share one insertion loop. User key functions scan one record
 at a time and retain the previous encoded key. Direct extraction uses a
 blocked scan, with a scalar scan for `f64`. The optional `portable-simd`

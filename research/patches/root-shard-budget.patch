@@ -1,0 +1,317 @@
+--- a/rust/tessera-sort/src/block/parallel.rs
++++ b/rust/tessera-sort/src/block/parallel.rs
+@@ -6,6 +6,10 @@
+ use rayon::prelude::*;
+ 
+ mod compact;
++
++// Source-only experiment control. Zero retains the uncapped root schedule;
++// evidence snapshots independently test four and eight floor-sized blocks.
++const ROOT_MIN_BLOCKS_PER_BUCKET: usize = 0;
+ 
+ struct Shard<'a, 'w, T, E> {
+     sorter: Sorter<'a, 'w, T>,
+@@ -17,8 +21,54 @@
+ #[derive(Clone, Copy)]
+ struct Config {
+     shards: usize,
++    min_blocks_per_bucket: usize,
+     block_size: Option<usize>,
+     parallel: bool,
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++struct RootPlan {
++    shards: usize,
++    block_size: usize,
++    permutation_workers: usize,
++}
++
++fn root_plan(len: usize, record_bytes: usize, bucket_count: usize, config: Config) -> RootPlan {
++    let requested = config.shards.max(1).min(len);
++    let record_floor = (BLOCK_BYTES_FLOOR / record_bytes)
++        .max(BLOCK_RECORDS_FLOOR)
++        .max(1);
++    let shards = if config.block_size.is_some() || config.min_blocks_per_bucket == 0 {
++        requested
++    } else {
++        // Successive divisions equal floor(len / (floor * buckets * minimum))
++        // without constructing an overflowing product. This is an average
++        // density budget, not a promise about a skewed bucket's occupancy.
++        let budget = len / record_floor / bucket_count / config.min_blocks_per_bucket;
++        requested.min(budget.max(1))
++    };
++    // Local and global directories coexist during adoption, hence twenty
++    // rather than ten metadata bytes per input block. Rebalance after capping
++    // root shards, retaining the ordinary record floors and explicit overrides.
++    let block_size = config.block_size.unwrap_or_else(|| {
++        let balanced = ((20.0 * len as f64)
++            / (2.0 * shards as f64 * bucket_count as f64 * record_bytes as f64))
++            .sqrt()
++            .ceil() as usize;
++        balanced.max(record_floor)
++    });
++    let shards = shards.min((len / block_size).max(1));
++    RootPlan {
++        shards,
++        block_size,
++        // The root budget does not reduce block-permutation concurrency. An
++        // explicit block-size test keeps its original complete configuration.
++        permutation_workers: if config.block_size.is_some() {
++            shards
++        } else {
++            requested
++        },
++    }
+ }
+ 
+ // SAFETY: each shard exclusively borrows a disjoint input slice and Buffers.
+@@ -59,6 +109,7 @@
+         buffers,
+         Config {
+             shards: requested_shards,
++            min_blocks_per_bucket: ROOT_MIN_BLOCKS_PER_BUCKET,
+             block_size: None,
+             parallel: true,
+         },
+@@ -92,23 +143,15 @@
+     assert!(core::mem::size_of::<T>() != 0);
+     assert!(arr.len() >= 2);
+     let bucket_count = 1usize << radix;
+-    let shards = config.shards.max(1).min(arr.len());
+-    // This isolated prototype temporarily holds local and global directories
+-    // together during adoption, hence 20 rather than 10 bytes per input block.
+-    let record_bytes = core::mem::size_of::<T>();
+-    let balanced = ((20.0 * arr.len() as f64)
+-        / (2.0 * shards as f64 * bucket_count as f64 * record_bytes as f64))
+-        .sqrt()
+-        .ceil() as usize;
+-    let block_size = config.block_size.unwrap_or_else(|| {
+-        balanced
+-            .max(BLOCK_BYTES_FLOOR / record_bytes)
+-            .max(BLOCK_RECORDS_FLOOR)
+-            .max(1)
+-    });
++    let RootPlan {
++        shards,
++        block_size,
++        permutation_workers,
++    } = root_plan(arr.len(), core::mem::size_of::<T>(), bucket_count, config);
+     let full_blocks = arr.len() / block_size;
+-    let shards = shards.min(full_blocks.max(1));
+     if shards == 1 && config.block_size.is_none() {
++        #[cfg(test)]
++        let _phase = crate::test_witness::PhaseGuard::root();
+         let mut key = key;
+         return partition_digit_with_ends(arr, radix, shift, &mut key, buffers, &mut |child, _| {
+             if let Some(callback) = visit.as_deref_mut() {
+@@ -275,7 +318,7 @@
+     #[cfg(debug_assertions)]
+     global.validate();
+     if cfg!(miri) || std::env::var_os("TESSERA_COMPACT_SERIAL").is_none() {
+-        compact::permute_blocks(&mut global, shards, config.parallel);
++        compact::permute_blocks(&mut global, permutation_workers, config.parallel);
+     }
+     let panic = global.compact_with(&ends, visit);
+     if let Some(payload) = panic {
+@@ -293,6 +336,184 @@
+         Arc,
+         atomic::{AtomicUsize, Ordering},
+     };
++
++    fn budget_config(shards: usize, minimum: usize) -> Config {
++        Config {
++            shards,
++            min_blocks_per_bucket: minimum,
++            block_size: None,
++            parallel: !cfg!(miri),
++        }
++    }
++
++    #[test]
++    fn root_budget_targets_floor_density_without_reducing_permutation_workers() {
++        for (len, bytes, buckets, minimum, expected) in [
++            (1_048_576, 4, 256, 0, 8),
++            (1_048_576, 4, 256, 4, 4),
++            (1_048_576, 4, 256, 8, 2),
++            (262_144, 40, 256, 4, 8),
++            (262_144, 40, 256, 8, 4),
++            (262_144, 128, 256, 4, 8),
++            (262_144, 128, 256, 8, 4),
++            (10_000_000, 8, 256, 8, 8),
++            (10_000_000, 16, 256, 8, 8),
++            (1_048_576, 4, 16, 8, 8),
++        ] {
++            let plan = root_plan(len, bytes, buckets, budget_config(8, minimum));
++            assert_eq!(plan.shards, expected);
++            assert_eq!(plan.permutation_workers, 8);
++        }
++    }
++
++    #[test]
++    fn root_budget_rounds_down_without_overflowing_products() {
++        // A second shard needs two complete per-shard floor budgets.
++        let threshold = 2 * 256 * 256 * 8;
++        for (len, expected) in [(threshold - 1, 1), (threshold, 2), (threshold + 1, 2)] {
++            assert_eq!(root_plan(len, 4, 256, budget_config(8, 8)).shards, expected);
++        }
++        for bytes in [1, 4, 40, 128, usize::MAX] {
++            for requested in [0, 1, 8, usize::MAX] {
++                for minimum in [0, 4, 8, usize::MAX] {
++                    for len in [2, 33, usize::MAX] {
++                        let plan = root_plan(len, bytes, 256, budget_config(requested, minimum));
++                        assert!((1..=requested.max(1).min(len)).contains(&plan.shards));
++                        assert!(plan.block_size >= BLOCK_RECORDS_FLOOR);
++                        assert_eq!(plan.permutation_workers, requested.max(1).min(len));
++                        if minimum == usize::MAX {
++                            assert_eq!(plan.shards, 1);
++                        }
++                    }
++                }
++            }
++        }
++    }
++
++    #[test]
++    fn root_budget_rebalances_block_size_after_capping_shards() {
++        let uncapped = root_plan(4_194_304, 1, 2, budget_config(8, 0));
++        let capped = root_plan(4_194_304, 1, 2, budget_config(8, 1024));
++        assert_eq!(uncapped.shards, 8);
++        assert_eq!(capped.shards, 2);
++        assert!(capped.block_size > uncapped.block_size);
++        let expected = ((20.0_f64 * 4_194_304.0) / (2.0 * 2.0 * 2.0)).sqrt().ceil();
++        assert_eq!(capped.block_size, expected as usize);
++        assert_eq!(capped.permutation_workers, 8);
++    }
++
++    #[test]
++    fn root_budget_preserves_explicit_block_size_overrides() {
++        for len in [2, 17, 129, 4097] {
++            for size in [1, 5, 32, 256] {
++                let original = root_plan(len, 16, 8, config(8, size));
++                for minimum in [4, 8, usize::MAX] {
++                    let mut forced = config(8, size);
++                    forced.min_blocks_per_bucket = minimum;
++                    assert_eq!(root_plan(len, 16, 8, forced), original);
++                    assert_eq!(original.block_size, size);
++                    assert_eq!(original.permutation_workers, original.shards);
++                }
++            }
++        }
++    }
++
++    #[test]
++    fn root_budget_zero_preserves_original_shard_and_block_geometry() {
++        for len in [2, 33, 4097, 262_144, 1_048_576, 10_000_000] {
++            for bytes in [1, 4, 8, 16, 40, 128] {
++                for buckets in [2, 16, 256] {
++                    for requested in [1, 2, 4, 8] {
++                        let original_shards = requested.min(len);
++                        let original_block = (((20.0 * len as f64)
++                            / (2.0 * original_shards as f64 * buckets as f64 * bytes as f64))
++                            .sqrt()
++                            .ceil() as usize)
++                            .max(BLOCK_BYTES_FLOOR / bytes)
++                            .max(BLOCK_RECORDS_FLOOR)
++                            .max(1);
++                        let plan = root_plan(len, bytes, buckets, budget_config(requested, 0));
++                        assert_eq!(plan.block_size, original_block);
++                        assert_eq!(
++                            plan.shards,
++                            original_shards.min((len / original_block).max(1))
++                        );
++                    }
++                }
++            }
++        }
++    }
++
++    #[test]
++    fn root_budget_owned_callbacks_begin_after_all_key_calls() {
++        let len = if cfg!(miri) { 43 } else { 4097 };
++        for minimum in [0, 4, 8, usize::MAX] {
++            let published = AtomicUsize::new(0);
++            let mut rows: Vec<_> = (0..len)
++                .map(|id| {
++                    (
++                        ((id * 73 + 11) % 256) as u64,
++                        id,
++                        alloc::format!("row {id}"),
++                    )
++                })
++                .collect();
++            let mut expected = rows.clone();
++            expected.sort_by_key(|r| r.0 & 7);
++            let ends = partition_impl_with_visit(
++                &mut rows,
++                3,
++                0,
++                ByKey(|row: &(u64, usize, String)| {
++                    assert_eq!(published.load(Ordering::SeqCst), 0, "key after publication");
++                    row.0
++                }),
++                &mut Buffers::new(),
++                budget_config(8, minimum),
++                Some(&mut |child| {
++                    assert!(!child.is_empty());
++                    published.fetch_add(1, Ordering::SeqCst);
++                }),
++            );
++            assert_eq!(rows, expected);
++            assert_eq!(ends.last(), Some(&len));
++            assert!(published.load(Ordering::SeqCst) > 0);
++        }
++    }
++
++    #[test]
++    fn root_budget_serial_root_callback_panic_preserves_exclusive_records() {
++        let len = if cfg!(miri) { 43 } else { 4097 };
++        let mut backing: Vec<_> = (0..len).collect();
++        let mut rows: Vec<_> = backing.iter_mut().enumerate().collect();
++        let calls = AtomicUsize::new(0);
++        let result = catch_unwind(AssertUnwindSafe(|| {
++            partition_impl_with_visit(
++                &mut rows,
++                3,
++                0,
++                ByKey(|row: &(usize, &mut usize)| row.0.wrapping_mul(73) as u64),
++                &mut Buffers::new(),
++                budget_config(8, usize::MAX),
++                Some(&mut |_| {
++                    if calls.fetch_add(1, Ordering::SeqCst) == 1 {
++                        panic!("serial-root second materialized bucket");
++                    }
++                }),
++            );
++        }));
++        assert!(result.is_err());
++        assert_eq!(calls.load(Ordering::SeqCst), 2);
++        let mut ids = Vec::new();
++        for (id, value) in rows {
++            assert_eq!(id, *value);
++            *value += 1;
++            ids.push(id);
++        }
++        ids.sort_unstable();
++        assert_eq!(ids, (0..len).collect::<Vec<_>>());
++        assert_eq!(backing, (1..=len).collect::<Vec<_>>());
++    }
+ 
+     #[test]
+     fn combined_deferred_owned_after_permutation() {
+@@ -353,6 +574,7 @@
+     fn config(shards: usize, block_size: usize) -> Config {
+         Config {
+             shards,
++            min_blocks_per_bucket: 0,
+             block_size: Some(block_size),
+             parallel: !cfg!(miri),
+         }
+@@ -518,6 +740,7 @@
+                 &mut Buffers::new(),
+                 Config {
+                     shards: 4,
++                    min_blocks_per_bucket: 0,
+                     block_size: None,
+                     parallel: true,
+                 },

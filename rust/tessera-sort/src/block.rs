@@ -71,6 +71,13 @@ const DESCRIPTOR_BYTES_PER_POSITION: usize =
 /// enough bytes for a copy to be worth its own overhead.
 const BLOCK_BYTES_FLOOR: usize = 1024;
 
+/// Multiple of the balanced block size that the engine uses.
+///
+/// The balanced size minimises memory, not time: compaction reads a block at a
+/// random address, and that read does not get cheaper with a smaller block. A
+/// multiple amortises it, at a multiple of the minimum memory to match.
+const BLOCK_SCALE: usize = 4;
+
 /// Smallest block, counted in records.
 ///
 /// The bookkeeping of a block — its order entry, its bucket id and one copy
@@ -97,8 +104,9 @@ const BLOCK_RECORDS_FLOOR: usize = 32;
 /// bytes of auxiliary memory, and the two terms are equal at
 /// `b = sqrt(10 n / (2 R s))`. That root minimizes the sum: writing `b = c b*`
 /// turns the total into `(c + 1 / c) / 2` times the minimum, which grows in
-/// both directions. A larger block saves only the per-block work, and the floors
-/// below bound that on their own.
+/// both directions. The engine takes [`BLOCK_SCALE`] times the root to amortise
+/// the per-block work, and the floors below bound the small inputs where the
+/// root alone would buy nothing.
 ///
 /// # Memory
 ///
@@ -111,6 +119,7 @@ const BLOCK_RECORDS_FLOOR: usize = 32;
 pub(crate) fn default_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
     let floors = (BLOCK_BYTES_FLOOR / record_bytes).max(BLOCK_RECORDS_FLOOR);
     balanced_block_size(len, record_bytes, radix)
+        .saturating_mul(BLOCK_SCALE)
         .max(floors)
         .max(1)
 }

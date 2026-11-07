@@ -21,9 +21,10 @@ Benchmark IDs are `<language>/<case_id>/<mode>`, with `case_id` as in the [proto
 - 99% sorted `u32` and `f64` keys at 65,536, reaching long integer and float inversion scans;
 - sorted `f64` keys at 65,536, reaching vector ascending-order confirmation;
 - 1,000,000 records for `u64` (random, Zipf, `skew99`, `two_values`, 99% sorted), `u32`, `u128` (random, and `sparse8`, which widens the top digit) and `{u64, u32}` rows;
+- 10,000,000 `u64` records, random and Zipf, where every level goes through the block partition and the scratch working set leaves the caches;
 - `workspace` mode beside `api` only where scratch allocation is a visible share of the time.
 
-Cases at 1,000,000 records warm up for 1 s and take 40 samples over 4 s; a 1.5 s window gives them only a few hundred sorts, and their Bencher limits were the widest, ±5% to ±18%. The other cases warm up for 0.5 s and take 30 samples over 1.5 s.
+Cases at 1,000,000 records warm up for 1 s and take 40 samples over 4 s; a 1.5 s window gives them only a few hundred sorts, and their Bencher limits were the widest, ±5% to ±18%. Cases at 10,000,000 records take the same window with 20 samples, because 40 sorts of that length would need eight seconds. The other cases warm up for 0.5 s and take 30 samples over 1.5 s.
 
 Every case is checked against a stable standard-library sort before timing; for rows the check includes the original index. Each Criterion batch prepares about 2^18 elements, so the cache footprint does not depend on measured times. Input copies are made outside the timed region.
 

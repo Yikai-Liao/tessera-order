@@ -49,8 +49,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Build a static executable
         # Static glibc keeps glibc's allocator, which `api` mode measures.
+        # Branch alignment avoids costly JCC boundary cases on affected Intel CPUs.
         env:
-          RUSTFLAGS: -C target-feature=+crt-static
+          RUSTFLAGS: >-
+            -C target-feature=+crt-static
+            -C llvm-args=-x86-branches-within-32B-boundaries
         run: |
           cargo bench --locked -p tessera-bench --bench smoke \
             --features "${{ matrix.features }}" \

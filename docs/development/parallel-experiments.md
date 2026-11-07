@@ -137,6 +137,7 @@ the end-to-end accounting. See the crate README and validation record for the
 individual controls, noisy/adverse measurements, and unsupported contracts.
 
 
+
 ## Bounded halo squeeze: no adoption
 
 A generic `T: Send` follow-on to the frozen strongest combined implementation
@@ -180,3 +181,54 @@ and complete two-pilot report are archived under `research/patches/halo-squeeze.
 They apply after the historical combined patch, not directly to current main.
 Full raw evidence and the harness stay outside Git. The screen's main/SIMD
 controls remain frozen at `72c2984`, not the subsequently merged `5b13ac1`.
+
+## Bucket-completion overlap in the public API
+
+The public Rayon entry point used to finish the root compaction before any child
+task started. The compaction already calls its visit hook once per materialized
+bucket, and such a bucket is neither written again nor read again as a copy
+source, so the hook is a safe hand-off point: the crate now queues a run of
+adjacent materialized buckets on the Rayon scope as soon as the run reaches
+`MIN_TASK_BYTES`, and the workers sort those runs while the rest of the array
+is still being compacted. Runs take their workspaces from a pool that keeps at
+most one per running worker, so the space bound does not change.
+
+Measured as before (one binary, interleaved blocks, median, full output
+verification, AMD Ryzen 7 8845H: 8 cores, 16 threads, N=10M):
+
+| case | 2 workers | 4 | 8 | 16 |
+|---|---|---|---|---|
+| u64 random, before | 1.44x | 1.47x | 1.89x | 2.08x |
+| u64 random, overlapped | 1.69x | 2.67x | 2.66x | 2.59x |
+| 16-byte rows, before | 1.28x | 1.33x | 1.70x | 1.73x |
+| 16-byte rows, overlapped | 1.62x | 2.21x | 2.19x | 2.18x |
+| u32 random, before | 1.45x | 1.51x | 1.98x | 2.13x |
+| u32 random, overlapped | 1.67x | 2.41x | 2.90x | 2.81x |
+| u128 random 1M, overlapped | 1.33x | 1.76x | 1.84x | 2.00x |
+
+Absolute 16-worker time falls from 30.85 ms to 24.81 ms for u64, from 56.23 ms
+to 44.94 ms for 16-byte rows, and from 20.15 ms to 15.38 ms for u32. The
+overlapped rows were re-measured on the base that also carries the vector
+ascending-order confirmation; the earlier rows come from the base before the
+overlap. Against
+`rayon` on the same pool the parallel call now wins seven of eight cases; the
+remaining loss is the single-digit route below.
+
+The plateau at about 2.6x from four workers up is now the serial root itself:
+one scatter pass (8.96 ms at N=10M) plus one compaction pass (13.88 ms) is the
+whole critical path, and the children hide inside it. Measured ceilings for
+those two passes on the same machine are 1.75x for a scattered write pass
+(14.40 ms to 8.18 ms) and 2.0x for random block copies (9.81 ms to 4.97 ms), so
+parallelizing the compaction is the next structural step: at its ceiling the
+root falls to roughly 16 ms, which is the 4x region.
+
+### Single-digit inputs still do not parallelize
+
+Inputs whose varying key bits fit one digit (`top - low <= SPLIT_BITS`) take the
+serial equality and outlier routes before any partition happens, so
+`par_stable_sort` reports a speed ratio of about 1.00 and loses to `rayon` by
+about 15% on 10M records with 256 distinct values. Removing the serial root above
+would not change that: the whole sort is one materialization pass with no
+independent work behind it.
+
+

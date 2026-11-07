@@ -181,7 +181,7 @@ for (const variant of VARIANTS) {
     });
     assert.deepEqual(outputs, { [variant.id]: "42" });
     assert.deepEqual(mock.requests[0].body, {
-      name: `Benchmarks (rust, ${variant.id})`, head_sha: hash, status: "in_progress",
+      name: `Benchmarks (rust, ${variant.name})`, head_sha: hash, status: "in_progress",
       details_url: "https://github.com/owner/tessera/actions/runs/123",
     });
   });

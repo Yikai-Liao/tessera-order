@@ -27,11 +27,26 @@ its own baseline, thresholds, alerts and PR history. Run the executables
 as two sequential remote jobs with independent timeouts under the existing
 concurrency group. Continue to the second measurement if the first fails.
 
-Publish a separate GitHub Check for each configuration. After measuring
-both, publish one job summary and one PR comment with an overview and two
-report sections. Compute changes and geometric means within each
-configuration. Keep image paths separate by configuration and preserve
-the existing same-head comment update and superseded-head rules.
+Publish a separate GitHub Check for each configuration, named
+`Benchmarks (rust, Default)` and `Benchmarks (rust, Portable SIMD)` after
+the configuration names in the comment. After measuring both, publish one
+job summary and one PR comment. In that comment, configurations are
+columns and cases are rows: one overview table, one comparison chart and
+one PR history chart, and one table of changed cases, each with a column
+per configuration. A case is named once, and each alert states whether it
+occurs in every configuration or only in some. Compute changes and
+geometric means within each configuration; there is no mean across them.
+Preserve the existing same-head comment update and superseded-head rules.
+
+API variants of one executable, such as the stable sort with or without a
+prepared workspace, and later an unstable or parallel sort, are not
+configurations. They are the mode segment of the case ID, measured in the
+same remote run, and the report groups them as rows. Only a change to how
+the executable is built adds a configuration, and with it a column, a
+Testbed, a remote job and a check. Separate sections or chart pairs per
+configuration were rejected: they repeat every case name per build, push
+the second build's charts below the first build's tables, and multiply
+with every further build or API.
 
 ## Consequences
 

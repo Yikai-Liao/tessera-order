@@ -79,7 +79,7 @@ export async function resolveSource({ github, context, core }: ActionArguments) 
 
 export async function startReport({ github, context, core, hash, variant }: ActionArguments & { hash: string; variant: Variant }) {
   const { data } = await github.rest.checks.create({
-    ...context.repo, name: `Benchmarks (rust, ${variant.id})`, head_sha: hash,
+    ...context.repo, name: `Benchmarks (rust, ${variant.name})`, head_sha: hash,
     status: "in_progress",
     details_url: workflowUrl(context),
   });

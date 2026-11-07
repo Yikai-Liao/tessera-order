@@ -1,12 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 306" width="720" height="306" role="img" aria-labelledby="t d">
-<title id="t">Benchmark changes: 2 slower, 1 faster</title>
-<desc id="d">{u32,u32} · random · 48: run time +10.2%; u64 · random · 49: run time +3.8%; u64 · 99% sorted · 1,000,000: run time −29.1%</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 282" width="720" height="282" role="img" aria-labelledby="t d">
+<title id="t">Benchmark changes against main: Default 2 slower · 1 faster</title>
+<desc id="d">{u32,u32} · random · 48: Default +10.2% regression; u64 · random · 49: Default +3.8% regression; u64 · 99% sorted · 1,000,000: Default −29.1% improvement</desc>
 <style>
   .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
   .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
   .tag { fill: none; stroke: #c9c8c2; }
   .slower { fill: #e8622f; } .faster { fill: #4a80e6; }
   .stem-slower { stroke: #e8622f; } .stem-faster { stroke: #4a80e6; }
+  .within { fill: #fafaf8; stroke: #8d8c86; }
   text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; font-feature-settings: "tnum", "cv11"; }
   .val { font-size: 12px; } .sub { font-size: 11px; } .tiny { font-size: 10px; } .strong { font-weight: 600; }
   .hero { font-size: 28px; font-weight: 600; letter-spacing: -0.6px; font-feature-settings: "pnum"; }
@@ -16,44 +17,55 @@
     .panel { fill: #1e1e1d; stroke: #3a3a37; } .ring { stroke: #1e1e1d; }
     .ink { fill: #e8e7e3; } .muted { fill: #a3a29b; } .rule { stroke: #30302e; } .axis { stroke: #6f6e69; }
     .tag { stroke: #4a4a46; }
+    .within { fill: #1e1e1d; stroke: #6f6e69; }
   }
 </style>
-<rect class="panel" x="0.5" y="0.5" width="719" height="305" rx="12"/>
-<text class="hero faster" x="24.0" y="50.0">−5.1%</text>
-<text class="ink" x="120.0" y="36.0">run time overall</text>
-<text class="muted sub" x="120.0" y="51.0">geometric mean of 4 cases</text>
-<text class="muted sub" x="696.0" y="50.0" text-anchor="end">new</text>
-<text class="stat ink" x="669.4" y="50.0" text-anchor="end">1</text>
-<text class="muted sub" x="636.3" y="50.0" text-anchor="end">slower</text>
-<text class="stat slower" x="596.6" y="50.0" text-anchor="end">2</text>
-<text class="muted sub" x="563.5" y="50.0" text-anchor="end">faster</text>
-<text class="stat faster" x="528.4" y="50.0" text-anchor="end">1</text>
+<rect class="panel" x="0.5" y="0.5" width="719" height="281" rx="12"/>
+<text class="ink strong" x="24.0" y="36.0">Run time against main</text>
+<text class="muted sub" x="24.0" y="51.0">each build, own baseline</text>
+<text class="hero faster" x="189.0" y="50.0">−5.1%</text>
+<text class="ink strong" x="283.0" y="36.0">Default</text>
+<text class="muted sub" x="283.0" y="51.0">2 slower · 1 faster</text>
 <line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
-<line class="rule" x1="405.0" x2="405.0" y1="90" y2="262" stroke-width="1"/>
-<text class="muted tiny" x="405.0" y="278.0" text-anchor="middle">−10%</text>
-<line class="rule" x1="286.7" x2="286.7" y1="90" y2="262" stroke-width="1"/>
-<text class="muted tiny" x="286.7" y="278.0" text-anchor="middle">−20%</text>
-<line class="rule" x1="641.7" x2="641.7" y1="90" y2="262" stroke-width="1"/>
-<text class="muted tiny" x="641.7" y="278.0" text-anchor="middle">+10%</text>
-<line class="axis" x1="523.4" x2="523.4" y1="90" y2="262" stroke-width="1"/>
-<text class="muted tiny" x="523.4" y="278.0" text-anchor="middle">0</text>
-<text class="faster sub" x="515.4" y="295.0" text-anchor="end">← less time</text>
-<text class="slower sub" x="531.4" y="295.0">more time →</text>
-<text class="caps slower" x="24.0" y="102.0">SLOWER</text>
+<line class="rule" x1="462.6" x2="462.6" y1="90" y2="230" stroke-width="1"/>
+<text class="muted tiny" x="462.6" y="246.0" text-anchor="middle">−5%</text>
+<line class="rule" x1="407.5" x2="407.5" y1="90" y2="230" stroke-width="1"/>
+<text class="muted tiny" x="407.5" y="246.0" text-anchor="middle">−10%</text>
+<line class="rule" x1="352.4" x2="352.4" y1="90" y2="230" stroke-width="1"/>
+<text class="muted tiny" x="352.4" y="246.0" text-anchor="middle">−15%</text>
+<line class="rule" x1="297.3" x2="297.3" y1="90" y2="230" stroke-width="1"/>
+<text class="muted tiny" x="297.3" y="246.0" text-anchor="middle">−20%</text>
+<line class="rule" x1="242.2" x2="242.2" y1="90" y2="230" stroke-width="1"/>
+<text class="muted tiny" x="242.2" y="246.0" text-anchor="middle">−25%</text>
+<line class="rule" x1="572.8" x2="572.8" y1="90" y2="230" stroke-width="1"/>
+<text class="muted tiny" x="572.8" y="246.0" text-anchor="middle">+5%</text>
+<line class="rule" x1="627.9" x2="627.9" y1="90" y2="230" stroke-width="1"/>
+<text class="muted tiny" x="627.9" y="246.0" text-anchor="middle">+10%</text>
+<line class="axis" x1="517.7" x2="517.7" y1="90" y2="230" stroke-width="1"/>
+<text class="muted tiny" x="517.7" y="246.0" text-anchor="middle">0</text>
+<text class="caps muted" x="24.0" y="102.0">STABLE</text>
 <text class="ink" x="24.0" y="129.0">random</text>
 <text class="muted sub" x="24.0" y="144.0">{u32,u32} · 48</text>
-<line class="stem-slower" x1="523.4" x2="644.0" y1="131" y2="131" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="644.0" cy="131" r="4" stroke-width="2"/>
-<text class="val ink" x="654.0" y="135.0" text-anchor="start">+10.2%</text>
+<line class="stem-slower" x1="517.7" x2="630.0" y1="131" y2="131" stroke-width="2" stroke-linecap="round"/>
+<circle class="slower ring" cx="630.0" cy="131" r="4" stroke-width="2"/>
+<text class="val ink strong" x="696.0" y="135.0" text-anchor="end">+10.2%</text>
 <text class="ink" x="24.0" y="167.0">random</text>
 <text class="muted sub" x="24.0" y="182.0">u64 · 49</text>
-<line class="stem-slower" x1="523.4" x2="568.4" y1="169" y2="169" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="568.4" cy="169" r="4" stroke-width="2"/>
-<text class="val ink" x="578.4" y="173.0" text-anchor="start">+3.8%</text>
-<text class="caps faster" x="24.0" y="210.0">FASTER</text>
-<text class="ink strong" x="24.0" y="237.0">99% sorted</text>
-<text class="muted sub" x="24.0" y="252.0">u64 · 1,000,000</text>
-<line class="stem-faster" x1="523.4" x2="179.0" y1="239" y2="239" stroke-width="2" stroke-linecap="round"/>
-<circle class="faster ring" cx="179.0" cy="239" r="5.5" stroke-width="2"/>
-<text class="val ink strong" x="169.0" y="243.0" text-anchor="end">−29.1%</text>
+<line class="stem-slower" x1="517.7" x2="559.6" y1="169" y2="169" stroke-width="2" stroke-linecap="round"/>
+<circle class="slower ring" cx="559.6" cy="169" r="4" stroke-width="2"/>
+<text class="val ink strong" x="696.0" y="173.0" text-anchor="end">+3.8%</text>
+<text class="ink strong" x="24.0" y="205.0">99% sorted</text>
+<text class="muted sub" x="24.0" y="220.0">u64 · 1,000,000</text>
+<line class="stem-faster" x1="517.7" x2="197.0" y1="207" y2="207" stroke-width="2" stroke-linecap="round"/>
+<circle class="faster ring" cx="197.0" cy="207" r="5.5" stroke-width="2"/>
+<text class="val ink strong" x="696.0" y="211.0" text-anchor="end">−29.1%</text>
+<circle class="slower" cx="28" cy="264" r="4"/>
+<circle class="faster" cx="38" cy="264" r="4"/>
+<text class="muted sub" x="48.0" y="268.0">alert</text>
+<circle class="within" cx="91.1" cy="264" r="3.5" stroke-width="1.5"/>
+<text class="muted sub" x="101.1" y="268.0">within limits</text>
+<circle class="ink" cx="186.07" cy="264" r="5.5"/>
+<text class="muted sub" x="196.6" y="268.0">20% or more</text>
+<text class="slower sub" x="696.0" y="268.0" text-anchor="end">more time →</text>
+<text class="faster sub" x="621.7" y="268.0" text-anchor="end">← less time</text>
 </svg>

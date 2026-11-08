@@ -51,6 +51,7 @@ fn main() {
         "CFLAGS",
         "CXXFLAGS",
         "LDFLAGS",
+        "TESSERA_BENCH_CHECK_ONLY",
     ] {
         println!("cargo:rerun-if-env-changed={key}");
     }
@@ -97,7 +98,11 @@ fn main() {
     ] {
         value[key.to_lowercase()] = json!(env::var(key).unwrap_or_default());
     }
-    if env::var_os("CARGO_FEATURE_COMPARE_NATIVE").is_some() {
+    // Clippy and rustdoc check the native-facing Rust code without linking it.
+    // Keep source fetching, C/C++ compilation and linkage in executable builds.
+    if env::var_os("CARGO_FEATURE_COMPARE_NATIVE").is_some()
+        && env::var("TESSERA_BENCH_CHECK_ONLY").as_deref() != Ok("1")
+    {
         native(Path::new(&out));
         value["native_sources"] = json!(fs::read_to_string("native/sources.toml").unwrap());
         value["native_build"] = serde_json::from_slice::<Value>(

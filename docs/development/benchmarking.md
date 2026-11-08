@@ -6,6 +6,8 @@ The comparison runner in `bench/rust` measures sorting algorithms on one machine
 
 The Rust competitors need Cargo's stable toolchain. Native competitors additionally need Linux x86-64 with glibc, Python 3.12 or later, Clang with C++17 support, CMake, GNU binutils, and TBB headers (`libtbb-dev` on Debian/Ubuntu). The pinned IPS²Ra/IPS⁴o headers include TBB queue declarations even for their sequential entry points; the benchmark executables do not link TBB or OpenMP. Fetching sources is a separate step; building and measuring use the verified local sources without network access. The report requires Node.js 24 and `npm ci`.
 
+For static Rust checks without the native toolchain or fetched sources, use `TESSERA_BENCH_CHECK_ONLY=1 cargo clippy --workspace --all-targets --all-features` or `TESSERA_BENCH_CHECK_ONLY=1 cargo doc --workspace --no-deps --all-features`. This mode omits native compilation and linker inputs, not the native-facing Rust code. Leave the variable unset for builds, tests and measurements that link native competitors.
+
 Native builds default to `clang` and `clang++`. For published comparisons, prefer Clang with the same LLVM major version reported by `rustc -vV`; check it against `clang --version`. Set `CC` and `CXX` to select versioned Clang executables or another compiler. The manifests and report record the actual compiler versions, including any LLVM version difference.
 
 ```sh

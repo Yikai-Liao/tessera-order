@@ -16,6 +16,8 @@ Every job holds one of the account's concurrent job slots, and a free account ru
 | Benchmark build | one job, both configurations | the same |
 | Native comparison smoke checks and report generation | `comparison`, using Clang | the same |
 
+The Rust lint job checks all workspace features with Clippy and rustdoc, including the benchmark's native-facing Rust code. These commands do not link executables, so they set `TESSERA_BENCH_CHECK_ONLY=1` to skip the benchmark build script's native compilation and linker inputs. The lint runner needs neither fetched native sources nor native build tools. The comparison job leaves the variable unset and compiles, links and exercises the native competitors, including the sequential-linkage check. Cargo tracks changes to the variable so a check-only build cannot suppress a later executable build's native setup.
+
 The split keeps `main` at full coverage, which no pull request waits for, and keeps the pull request path short. AddressSanitizer and Miri's std suite take about 90 seconds to two minutes each; both are one runner each, so shortening them further means interpreting or testing less, not adding runners. The comparison job also builds the pinned C/C++ competitors before validating the smoke suite and generating a partial report.
 
 A cell's commands live in one composite action, [`rust-test`](../../.github/actions/rust-test/action.yml), which both the pull request cells and the extra `main` cells call. A job's `if` cannot branch on `matrix` — the matrix is expanded after the condition is evaluated — so the two sets of cells are two jobs over one action rather than one matrix with a skip per cell.

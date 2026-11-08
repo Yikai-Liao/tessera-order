@@ -7,7 +7,7 @@ import { stringify as stringifyToml } from "smol-toml";
 import { renderLocalReport } from "../bench/local/report.ts";
 import { compareLocal } from "../bench/local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
-import { checkAlgorithms, compareAlgorithms } from "../bench/release.ts";
+import { checkAlgorithms, compareAlgorithms, resumeComparison } from "../bench/release.ts";
 import { writeReport } from "../bench/report/index.ts";
 import { repositoryRoot } from "../bench/workspace.ts";
 import { resultDirectory, runTask } from "./tasks.ts";
@@ -23,6 +23,13 @@ function parseLogicalCpu(value: string) {
   if (!/^\d+$/.test(value) || process.platform !== "linux")
     throw new InvalidArgumentError("expected one logical CPU number on Linux");
   return value;
+}
+
+function parsePositiveInteger(value: string) {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < 1)
+    throw new InvalidArgumentError("expected a positive integer");
+  return number;
 }
 
 function parseCasePattern(value: string) {
@@ -119,24 +126,51 @@ export function experimentCommands(program: Command) {
       },
     );
 
-  measurement("algorithms", "Build, validate, measure and report algorithm comparisons")
+  measurement("algorithms", "Prepare, validate, measure and report a resumable comparison")
+    .option(
+      "--sample-ms <number>",
+      "minimum timed sample duration in milliseconds",
+      parsePositiveInteger,
+      5,
+    )
+    .option(
+      "--memory-mib <number>",
+      "prepared-buffer cap in MiB (at least one input)",
+      parsePositiveInteger,
+      256,
+    )
     .option("--group <type/shape>", "measure one complete group and report it as partial")
-    .action(async (options: MeasurementOptions & { group?: string }) => {
-      const plan = await loadPlan(options.plan ?? "smoke", selectAxes(options));
-      if (plan.harness !== "comparison")
-        throw new Error("Algorithm comparisons require a comparison harness plan");
-      const root = await repositoryRoot();
-      const out = resultDirectory(root, options.out);
-      await runTask(out, Boolean(program.opts().verbose), () =>
-        compareAlgorithms({
-          root,
-          out,
-          cpu: options.cpu,
-          simd: Boolean(options.simd),
-          plan,
-          group: options.group,
-        }),
-      );
+    .action(
+      async (
+        options: MeasurementOptions & { group?: string; sampleMs: number; memoryMib: number },
+      ) => {
+        const plan = await loadPlan(options.plan ?? "smoke", selectAxes(options));
+        if (plan.harness !== "comparison")
+          throw new Error("Algorithm comparisons require a comparison harness plan");
+        const root = await repositoryRoot();
+        const out = resultDirectory(root, options.out);
+        await runTask(out, Boolean(program.opts().verbose), () =>
+          compareAlgorithms({
+            root,
+            out,
+            cpu: options.cpu,
+            simd: Boolean(options.simd),
+            plan,
+            group: options.group,
+            sampleMs: options.sampleMs,
+            memoryMib: options.memoryMib,
+          }),
+        );
+      },
+    );
+
+  compare
+    .command("resume <directory>")
+    .description("Resume retained builds with the recorded selection and settings")
+    .action(async (directory: string) => {
+      const out = resolve(directory);
+      const log = `${out}.resume-${Date.now()}-${process.pid}.log`;
+      await runTask(out, Boolean(program.opts().verbose), () => resumeComparison(out), log);
     });
 
   addSelectionOptions(program.command("plan [name-or-file]"))

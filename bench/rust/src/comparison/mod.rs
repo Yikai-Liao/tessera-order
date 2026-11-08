@@ -15,7 +15,7 @@ use std::{
     collections::BTreeSet,
     error::Error,
     fs::{self, File, OpenOptions},
-    io::{BufRead, BufReader, Write},
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -136,6 +136,28 @@ impl Options {
             .collect()
     }
 }
+/// Holds a kernel lock until this worker exits, including after its Node parent dies.
+///
+/// The comparison and memory workers lock their own roles. Before touching timing
+/// journals, the comparison worker always waits for its resumable memory child.
+/// An orphaned memory child therefore blocks recovery before timing can resume.
+fn lock_worker(directory: &Path, role: &str) -> Result<File> {
+    fs::create_dir_all(directory)?;
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(directory.join(format!(".{role}-lock")))?;
+    fs2::FileExt::try_lock_exclusive(&file).map_err(|error| {
+        format!(
+            "{role} worker still active in {}: {error}",
+            directory.display()
+        )
+    })?;
+    Ok(file)
+}
+
 /// Writes new provenance or checks an existing run for compatibility.
 fn verify_or_write_json(path: &Path, value: &Value) -> Result<()> {
     if path.exists() {
@@ -237,16 +259,6 @@ fn prepare_output(options: &Options) -> Result<()> {
     }
     Ok(())
 }
-/// Reads completed allocation measurements from a results directory.
-fn read_memory_samples(path: &Path) -> Result<Vec<Value>> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    BufReader::new(File::open(path)?)
-        .lines()
-        .map(|l| Ok(serde_json::from_str(&l?)?))
-        .collect()
-}
 /// Reads complete journal lines, leaving an interrupted final write out.
 fn read_block_records(path: &Path) -> Result<Vec<Value>> {
     if !path.exists() {
@@ -262,6 +274,19 @@ fn read_block_records(path: &Path) -> Result<Vec<Value>> {
         .filter(|l| !l.is_empty())
         .map(|l| Ok(serde_json::from_slice(l)?))
         .collect()
+}
+
+/// Removes incomplete writes before resuming an append-only journal.
+fn rewrite_journal(path: &Path, records: &[Value]) -> Result<()> {
+    let temporary = path.with_extension("tmp");
+    {
+        let mut file = File::create(&temporary)?;
+        for record in records {
+            append_record(&mut file, record)?;
+        }
+    }
+    fs::rename(temporary, path)?;
+    Ok(())
 }
 
 /// Checks that scratch sizes were measured by the same source and configuration.
@@ -305,7 +330,13 @@ fn find_scratch_bytes(case: &InputCase, rows: &[Value]) -> Option<usize> {
 }
 /// Checks every supported adapter against each case's shared reference.
 fn validate_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
-    for case in cases {
+    for (index, case) in cases.iter().enumerate() {
+        eprintln!(
+            "Validating {}/{}: {} ({BUILD})",
+            index + 1,
+            cases.len(),
+            case.id()
+        );
         let input = variant::CaseInput::new(case);
         for v in options.variants() {
             if let Some(mut k) = v.prepare(&input, 32_768) {
@@ -321,28 +352,26 @@ fn validate_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
 fn measure_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
     prepare_output(options)?;
     let mem_path = options.output_dir.join("memory.jsonl");
-    let mem = read_memory_samples(&mem_path)?;
-    if cases
-        .iter()
-        .any(|case| find_scratch_bytes(case, &mem).is_none())
-    {
-        let exe = std::env::current_exe()?.with_file_name("memory");
-        let mut cmd = std::process::Command::new(exe);
-        cmd.arg("--out").arg(&options.output_dir);
-        if let Some(path) = &options.plan_path {
-            cmd.arg("--plan").arg(path);
-        } else {
-            cmd.args(["--suite", &options.suite]);
-        }
-        if let Some(g) = &options.group {
-            cmd.args(["--group", g]);
-        }
-        if !cmd.status()?.success() {
-            return Err("memory measurement failed".into());
-        }
+    // The memory worker owns completeness for every adapter, not just Tessera.
+    // It repairs an interrupted write and skips every row already committed.
+    let exe = std::env::current_exe()?.with_file_name("memory");
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("--out").arg(&options.output_dir);
+    if let Some(path) = &options.plan_path {
+        cmd.arg("--plan").arg(path);
+    } else {
+        cmd.args(["--suite", &options.suite]);
     }
+    if let Some(g) = &options.group {
+        cmd.args(["--group", g]);
+    }
+    if !cmd.status()?.success() {
+        return Err("memory measurement failed".into());
+    }
+    // Keep direct memory invocations out while timing and journals are active.
+    let _memory_lock = lock_worker(&options.output_dir, "memory")?;
     verify_memory_build(options)?;
-    let mem = read_memory_samples(&mem_path)?;
+    let mem = read_block_records(&mem_path)?;
     let path = options.output_dir.join("blocks.jsonl");
     let existing = read_block_records(&path)?;
     let completed: BTreeSet<_> = existing
@@ -357,14 +386,7 @@ fn measure_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
             r["build"] != BUILD || r["group"].as_str().is_some_and(|g| completed.contains(g))
         })
         .collect();
-    let temporary = path.with_extension("tmp");
-    {
-        let mut f = File::create(&temporary)?;
-        for r in retained {
-            append_record(&mut f, &r)?;
-        }
-    }
-    fs::rename(temporary, &path)?;
+    rewrite_journal(&path, &retained)?;
     let mut f = OpenOptions::new().create(true).append(true).open(path)?;
     let groups: BTreeSet<_> = cases.iter().map(InputCase::group).collect();
     for group in groups {
@@ -445,9 +467,18 @@ pub fn main(memory: bool) -> Result<()> {
             }
             Ok(())
         }
-        "validate" => validate_cases(&options, &cases),
-        "run" => measure_cases(&options, &cases),
-        "memory" => measure_memory(&options, &cases),
+        "validate" | "run" => {
+            let _lock = lock_worker(&options.output_dir, "comparison")?;
+            if options.command == "validate" {
+                validate_cases(&options, &cases)
+            } else {
+                measure_cases(&options, &cases)
+            }
+        }
+        "memory" => {
+            let _lock = lock_worker(&options.output_dir, "memory")?;
+            measure_memory(&options, &cases)
+        }
         _ => Err(format!("unknown command {}", options.command).into()),
     }
 }
@@ -455,8 +486,16 @@ pub fn main(memory: bool) -> Result<()> {
 fn measure_memory(options: &Options, cases: &[InputCase]) -> Result<()> {
     prepare_output(options)?;
     let path = options.output_dir.join("memory.jsonl");
-    let mut rows = read_memory_samples(&path)?;
-    for case in cases {
+    let mut rows = read_block_records(&path)?;
+    rewrite_journal(&path, &rows)?;
+    let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
+    for (index, case) in cases.iter().enumerate() {
+        eprintln!(
+            "Measuring memory {}/{}: {} ({BUILD})",
+            index + 1,
+            cases.len(),
+            case.id()
+        );
         let input = variant::CaseInput::new(case);
         for v in options.variants() {
             if case.len > 1_000_000 && case.ty != "u64" && v.name != "tessera" {
@@ -476,23 +515,94 @@ fn measure_memory(options: &Options, cases: &[InputCase]) -> Result<()> {
                 k.check()
                     .map_err(|e| format!("{} {}: {e}", case.id(), v.name))?;
                 host::check_threads()?;
-                rows.push(json!({"case_id":case.id(),"variant":v.name,"build":BUILD,"peak_extra_bytes":peak,"verified":true}));
+                let row = json!({"case_id":case.id(),"variant":v.name,"build":BUILD,"peak_extra_bytes":peak,"verified":true});
+                append_record(&mut file, &row)?;
+                rows.push(row);
             }
         }
     }
-    let temporary = path.with_extension("tmp");
-    {
-        let mut f = File::create(&temporary)?;
-        for r in rows {
-            append_record(&mut f, &r)?;
-        }
-    }
-    fs::rename(temporary, path)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        process::{Command, Stdio},
+        thread,
+        time::{Duration, Instant},
+    };
+
+    /// Runs the test binary as either an orchestrator or its independent worker.
+    fn lock_fixture_command(directory: &std::path::Path, role: &str, mode: &str) -> Command {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "comparison::tests::worker_lock_fixture",
+                "--ignored",
+            ])
+            .env("TESSERA_LOCK_DIRECTORY", directory)
+            .env("TESSERA_LOCK_ROLE", role)
+            .env("TESSERA_LOCK_MODE", mode)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        command
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture for worker lock ownership"]
+    fn worker_lock_fixture() {
+        let directory =
+            std::path::PathBuf::from(std::env::var_os("TESSERA_LOCK_DIRECTORY").unwrap());
+        let role = std::env::var("TESSERA_LOCK_ROLE").unwrap();
+        if std::env::var("TESSERA_LOCK_MODE").unwrap() == "orchestrator" {
+            let mut child = lock_fixture_command(&directory, &role, "worker")
+                .spawn()
+                .unwrap();
+            // A deadline keeps a failed parent test from leaking the fixture.
+            thread::sleep(Duration::from_secs(20));
+            let _ = child.kill();
+            let _ = child.wait();
+        } else {
+            let _lock = super::lock_worker(&directory, &role).unwrap();
+            std::fs::write(directory.join("ready"), b"ready").unwrap();
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !directory.join("release").exists() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(5));
+            }
+        }
+    }
+
+    #[test]
+    fn orphaned_workers_exclude_resumes() {
+        for role in ["comparison", "memory"] {
+            let directory =
+                std::env::temp_dir().join(format!("tessera-orphan-{}-{role}", std::process::id()));
+            std::fs::create_dir_all(&directory).unwrap();
+            let mut orchestrator = lock_fixture_command(&directory, role, "orchestrator")
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !directory.join("ready").exists() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(5));
+            }
+            let ready = directory.join("ready").exists();
+            orchestrator.kill().unwrap();
+            orchestrator.wait().unwrap();
+            assert!(ready, "worker did not acquire the lock");
+            assert!(
+                super::lock_worker(&directory, role).is_err(),
+                "orphaned {role} worker lost its lock"
+            );
+            std::fs::write(directory.join("release"), b"release").unwrap();
+            while super::lock_worker(&directory, role).is_err() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert!(super::lock_worker(&directory, role).is_ok());
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
     #[test]
     fn memory_build_checks_configuration() {
         let output_dir = std::env::temp_dir().join(format!(
@@ -539,7 +649,15 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("tessera-journal-{}.jsonl", std::process::id()));
         std::fs::write(&path, b"{\"kind\":\"observation\"}\n{\"partial\":").unwrap();
-        assert_eq!(super::read_block_records(&path).unwrap().len(), 1);
+        let records = super::read_block_records(&path).unwrap();
+        assert_eq!(records.len(), 1);
+        super::rewrite_journal(&path, &records).unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        super::append_record(&mut file, &serde_json::json!({"kind": "memory"})).unwrap();
+        assert_eq!(super::read_block_records(&path).unwrap().len(), 2);
         std::fs::write(&path, b"{broken}\n").unwrap();
         assert!(super::read_block_records(&path).is_err());
         std::fs::remove_file(path).unwrap();

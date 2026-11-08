@@ -42,9 +42,8 @@ Benchmark manifests record the implementation (for example `tessera-rust`), pack
 
 | Changed paths | Runs |
 |---|---|
-| `rust/`, `bench/rust/`, root Cargo and rustfmt files | Rust, and Python because it embeds the Rust core |
+| `rust/`, `bench/rust/`, root Cargo and rustfmt files | Rust |
 | `cpp/`, `bench/cpp/`, root CMake files | C++ |
-| `python/`, `bench/python/` | Python |
 | Markdown outside `conformance/` and the language directories, `assets/`, the documentation site's tooling, `.github/scripts/` | No language; `docs.yml` builds the site when its pages change, and the `lint` job tests the scripts |
 | Anything else (`conformance/`, vectors, license, workflows) | Every implemented language |
 
@@ -56,8 +55,7 @@ Paths are compared from the merge base, so commits that reached `main` after a b
 |---|---|---|
 | Rust | Now. Publishing needs `publish = false` removed and the `CARGO_REGISTRY_TOKEN` secret | crates.io and a GitHub release with the `.crate` file |
 | C++ | `cpp/CMakeLists.txt` exists. It must honor `BUILD_TESTING`, register tests with CTest and configure CPack with the package version | CI configures, builds and runs CTest on Linux x86-64 and AArch64, macOS and Windows; the release checks `CPACK_PACKAGE_VERSION` against the tag and attaches a TGZ package to a GitHub release |
-| Python | `python/pyproject.toml` and `python/Cargo.toml` exist | GIL-enabled wheels for CPython 3.11 and 3.13 on the same four platforms, uploaded to PyPI |
 
 Until then, CI skips the language and says so in the job summary; there is no placeholder job that passes without testing anything.
 
-The PyPI upload runs in `release.yml` itself because [PyPI does not accept a reusable workflow as a trusted publisher](https://docs.pypi.org/trusted-publishers/troubleshooting/#reusable-workflows-on-github). Before the first Python release: configure the trusted publisher, confirm the supported interpreter and ABI matrix, record the core source and toolchain in each wheel build, and add install tests for the release wheels. See the [Python binding proposal](docs/proposals/python-binding.md).
+Python CI and publication are not implemented. Add them with an actual binding, its package metadata and supported-platform tests; the [Python binding proposal](docs/proposals/python-binding.md) remains planned work.

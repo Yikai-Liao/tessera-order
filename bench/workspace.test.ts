@@ -5,7 +5,7 @@ import { lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { command } from "./process.ts";
+import { command } from "../tools/process.ts";
 import {
   buildArtifact,
   copyLibraryRevision,

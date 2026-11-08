@@ -3,8 +3,13 @@
 import { createHash } from "node:crypto";
 import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { command } from "./process.ts";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { command } from "../tools/process.ts";
+
+/** Resolve the checkout that supplies benchmark sources and configuration. */
+export function repositoryRoot() {
+  return command("git", ["rev-parse", "--show-toplevel"], { capture: true });
+}
 
 export interface Workspace {
   directory: string;
@@ -38,15 +43,13 @@ export async function copySnapshot(source: string, destination: string, root: st
     if (!(await stat(target)).isDirectory()) return;
     if (ancestors.has(target)) throw new Error(`Snapshot directory cycle: ${path}`);
     ancestors.add(target);
-    for (const name of await readdir(path))
-      if (name !== "__pycache__") await validate(join(path, name));
+    for (const name of await readdir(path)) await validate(join(path, name));
     ancestors.delete(target);
   }
   await validate(source);
   await cp(source, destination, {
     recursive: true,
     dereference: true,
-    filter: (path) => basename(path) !== "__pycache__",
   });
 }
 
@@ -156,6 +159,7 @@ export async function buildBenchmark(
   target: string,
   name: "smoke" | "compare",
   features: string[],
+  options: { targetTriple?: string; env?: NodeJS.ProcessEnv } = {},
 ) {
   return buildArtifact(
     await command(
@@ -170,9 +174,10 @@ export async function buildBenchmark(
         "--message-format=json",
         "--target-dir",
         target,
+        ...(options.targetTriple ? ["--target", options.targetTriple] : []),
         ...(features.length ? ["--features", features.join(",")] : []),
       ],
-      { cwd: tree, capture: true },
+      { cwd: tree, capture: true, env: options.env },
     ),
     name,
   );

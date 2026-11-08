@@ -183,7 +183,4 @@ export async function writeReport(directories: string[], partial = false): Promi
     ]),
   );
   await writeFile(join(directories[0], "bmf.json"), `${JSON.stringify(bmf, null, 2)}\n`);
-  console.log(
-    `Report: ${join(out, "index.md")} (${summaries.size} summaries, ${charts.length} figures)`,
-  );
 }

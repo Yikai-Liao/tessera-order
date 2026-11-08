@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+[sources.duckdb]
+repository = "https://github.com/duckdb/duckdb"
+# v1.4.0: the version described in the September 2025 sorting article.
+commit = "b8a06e4a22672e254cd0baa68a3dbed2eb51c56e"
+sha256 = "6de777312190a830d106a995137c2458d036676c1c68d7d005a0a589a75bb93e"
+license = "MIT AND BSL-1.0 AND Zlib"
+# Keep only the compiled header trees, not database code or fixture symlinks.
+paths = ["LICENSE", "third_party/vergesort", "third_party/ska_sort", "third_party/pdqsort"]
+license_files = ["LICENSE", "third_party/vergesort/LICENSE", "third_party/ska_sort/LICENSE", "third_party/pdqsort/LICENSE"]
+
+[sources.clausecker]
+repository = "https://github.com/clausecker/radsort"
+commit = "f69e816c3cd79d312cd67aea5b9cf1c338c1b371"
+sha256 = "b6cba1c788f37a77e86e23b69da68c387714ba772b99e58a0f0bc0cf4854290f"
+license = "BSD-2-Clause"
+license_files = ["COPYING"]
+
+[sources.fluxsort]
+repository = "https://github.com/scandum/fluxsort"
+commit = "93aac374c1bec5265efd3b8a593a0c2246473ea3"
+sha256 = "b33e5d5e33414993ddc04f8cd4fed84a3bf6e7b9d4acffb139f79f3f7a15709c"
+license = "Unlicense"
+license_files = ["LICENSE"]
+
+[sources.crumsort]
+repository = "https://github.com/scandum/crumsort"
+commit = "d21d7c3aa13212c234967a9aaf037690825916be"
+sha256 = "118e88b2391631e8396bbadf0068b2e371fd2a67dbef88f703726662a26f548c"
+license = "Unlicense"
+license_files = ["LICENSE"]
+
+[sources.ips2ra]
+repository = "https://github.com/ips4o/ips2ra"
+commit = "83f6b76ca308b277b2acc3a36426a3baa3c9cb73"
+sha256 = "a7857cef27a8525efbe1f517a976e324e3b4bdd48fdf9a7824ff80bf24e1ea4b"
+license = "BSD-2-Clause"
+license_files = ["LICENSE"]
+
+[sources.ips4o]
+repository = "https://github.com/ips4o/ips4o"
+commit = "08a5b926ee65cef19139057c6bde02bb5542c1cb"
+sha256 = "1c1317bf5961e029bf01c003e0997f564f298320d3c7aeae95ec3a28d4521a09"
+license = "BSD-2-Clause"
+license_files = ["LICENSE"]
+
+[sources.highway]
+repository = "https://github.com/google/highway"
+commit = "1b2eb456bc50da9d02d7514803da1d43024fd4d5"
+sha256 = "12390108b314fee7f0b66610e2848f2118bbadd28a73e81aafaa99e7fd996510"
+license = "BSD-3-Clause"
+license_files = ["LICENSE"]
+
+[sources.x86simdsort]
+repository = "https://github.com/numpy/x86-simd-sort"
+commit = "7521047beb89928cf7a1b56fec55be584c9b0916"
+sha256 = "46ba31678c2d30028517e2349c0c49182487bf1c8941da2241b276a19ae699e8"
+license = "BSD-3-Clause"
+license_files = ["LICENSE.md"]

@@ -64,7 +64,6 @@ assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 |---|---|
 | `stable_sort(&mut [K])` | Sort keys themselves |
 | `stable_sort_by_key(&mut [T], F)` | Sort any records by a key computed by `F` |
-| `Workspace<T>` | The same sorts as methods, reusing scratch memory across calls ([guide](docs/guide/workspace.md)) |
 
 Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 
@@ -72,10 +71,10 @@ The optional `rayon` feature adds `par_stable_sort` and `par_stable_sort_by_key`
 
 ## Performance
 
-Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). These continuous measurements flag changes to investigate; performance claims require the [A/B protocol](docs/development/benchmarking.md).
+Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). These continuous measurements flag changes to investigate; use the [benchmark protocol](docs/development/benchmarking.md#command-capabilities) for paired algorithm comparisons and source-change attribution.
 
 > [!NOTE]
-> TODO: performance results will be published with the benchmark runner ([roadmap](ROADMAP.md)). This README provides no performance data until then.
+> The comparison runner is implemented. The first complete release comparison and its published figures remain on the [roadmap](ROADMAP.md); this README provides no performance data until then.
 
 ## When to use something else
 
@@ -93,7 +92,6 @@ Each language package is versioned and released separately ([`RELEASING.md`](REL
 | Unstable sort | Not in 0.1 | Planned |
 | 128-bit keys | Signed and unsigned | Planned |
 | Records that own resources or hold `&mut` | Supported | Trivially copyable records only (planned) |
-| Reusable workspace | Supported | Planned |
 
 A Python binding is planned as well; see the [roadmap](ROADMAP.md).
 
@@ -104,7 +102,7 @@ A Python binding is planned as well; see the [roadmap](ROADMAP.md).
 | Ordering, key functions, floats, panics and memory bounds | [`conformance/semantics.md`](conformance/semantics.md) |
 | How the algorithm works, with interactive figures | [Algorithm explanation](https://yikai-liao.github.io/tessera-sort/explain/) |
 | How the engine works | [`docs/design/engine.md`](docs/design/engine.md) |
-| Why every record type caches bucket IDs | [Decision 0001b](docs/decisions/0001b-cache-bucket-ids-for-every-record.md) |
+| Why user key functions cache bucket IDs | [Record handling](docs/design/engine.md#record-handling) |
 | All documentation | [Documentation site](https://yikai-liao.github.io/tessera-sort/) · [Source index](docs/README.md) |
 
 ## Contributing

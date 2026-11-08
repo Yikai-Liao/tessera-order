@@ -8,11 +8,37 @@ license.workspace = true
 
 [features]
 rayon = ["tessera-sort/rayon"]
+compare = ["dep:radsort", "dep:rdst", "dep:glidesort", "dep:voracious_radix_sort", "dep:sha2", "dep:fs2"]
+compare-native = ["compare"]
+portable-simd = ["tessera-sort/portable-simd"]
+
+[dependencies]
+tessera-sort = { path = "../../rust/tessera-sort" }
+radsort = { version = "=0.1.1", optional = true }
+rdst = { version = "=0.20.14", default-features = false, optional = true }
+glidesort = { version = "=0.1.2", optional = true }
+voracious_radix_sort = { version = "=1.2.0", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = { version = "1.2", default-features = false, features = ["parse", "serde", "std"] }
+sha2 = { version = "=0.10.9", optional = true }
+fs2 = { version = "=0.4.3", optional = true }
+
+[build-dependencies]
+serde_json = "1"
+sha2 = "=0.10.9"
+
+[[bin]]
+name = "compare"
+required-features = ["compare"]
+
+[[bin]]
+name = "memory"
+required-features = ["compare"]
 
 [dev-dependencies]
-criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
-tessera-sort = { path = "../../rust/tessera-sort" }
 rayon = "1.12"
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
 
 [[bench]]
 name = "smoke"

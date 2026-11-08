@@ -4,7 +4,7 @@ Before any radix pass, Tessera checks whether the input needs one. Many real inp
 
 ## Order probe
 
-`probe_order` looks at up to 4,096 adjacent pairs spread evenly over the input, with a stride of n / 4,096, and classifies it:
+`probe_order` samples adjacent pairs with a stride of `max(1, floor(n / 4,096))` and classifies the input below. The target of 4,096 determines the stride, not a hard limit: for example, 8,191 records use stride 1 and can visit 8,190 pairs before the confirmation scan.
 
 | Sampled pairs | Class | What happens |
 |---|---|---|
@@ -12,7 +12,7 @@ Before any radix pass, Tessera checks whether the input needs one. Many real inp
 | all equal | **flat** | decide after the varying-bit scan (below) |
 | all `≤`, or all `≥` | candidate order | a full scan, `confirm_order`, checks every pair |
 
-A confirmed **ascending** input returns immediately. A confirmed **descending** input is reversed, and then each run of equal keys is reversed back (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
+A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. Any leading equal keys skipped while finding the direction rule out strict descent. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
 
 The sample rejects most unsorted inputs within a few pairs. The full scan runs only on inputs that look ordered.
 
@@ -31,7 +31,7 @@ Next, one scan computes the [varying bits](keys.md#varying-bits). If no bit vari
 
 128-bit keys whose variation fits in the low or high 64 bits continue as 64-bit keys.
 
-Only now do the free functions allocate scratch memory. Ordered and constant inputs never allocate.
+Only now do the free functions create tile/block scratch. Budgeted insertion on a larger unsorted input may already have allocated the encoded-key probe buffer. Confirmed ordered and constant inputs never allocate.
 
 ## Nodes and tiles
 

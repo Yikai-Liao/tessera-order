@@ -19,8 +19,8 @@ pub(crate) mod parallel;
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 
+use crate::block;
 use crate::key::{Direct, Extract, KeyHalf, Unsigned};
-use crate::{Workspace, block};
 
 type KeyValue<T, E> = <E as Extract<T>>::Value;
 
@@ -283,7 +283,8 @@ impl Digit {
 const MAX_DIGITS: usize = 48;
 
 /// Scans until all candidate bits have appeared in both states, or the input ends.
-/// The parent partition digit is constant within a child and excluded by the caller.
+/// Only candidate bits are returned, so even changing keys cannot restore a
+/// parent partition digit and prevent the recursion from making progress.
 fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor: &mut E) -> u128 {
     if candidate == 0 {
         return 0;
@@ -304,7 +305,7 @@ fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor
         }
         index = end;
     }
-    union.to_u128() ^ intersection.to_u128()
+    (union.to_u128() ^ intersection.to_u128()) & candidate
 }
 
 /// The window over the highest remaining bits that a pass of `width` bits
@@ -353,27 +354,41 @@ fn plan_digits(varying: u128, width: usize, digits: &mut [Digit]) -> usize {
     len
 }
 
-/// Routes nodes and finishes tiles with one extractor and one scratch workspace.
+/// Buffers shared by the nodes and tiles of one sort.
+struct Scratch<T> {
+    /// Tile records followed by cached bucket IDs beyond the cursor table.
+    tile: Vec<MaybeUninit<T>>,
+    /// Block buffers allocated when a node first needs them.
+    block: block::Buffers<T>,
+}
+
+impl<T> Scratch<T> {
+    /// Creates empty scratch without allocating.
+    fn new() -> Self {
+        Self {
+            tile: Vec::new(),
+            block: block::Buffers::new(),
+        }
+    }
+}
+
+/// Routes nodes and finishes tiles with one extractor and shared scratch.
 ///
 /// `CACHED` stores each record's bucket ID during a tile pass's histogram so
 /// the scatter never calls the key function again; it is `true` for user key
-/// functions and `false` for library-encoded keys (decision 0001b).
+/// functions and `false` for library-encoded keys.
 struct Sorter<'a, T, E, const CACHED: bool> {
-    workspace: &'a mut Workspace<T>,
+    scratch: &'a mut Scratch<T>,
     extractor: &'a mut E,
     tile_bytes: usize,
 }
 
 /// Sorts `records` stably by the keys `key` extracts.
 ///
-/// Uses `workspace` for scratch, or allocates scratch for this call once the
-/// order probe and varying-bit scan have not finished the sort.
-pub(crate) fn sort<T, E: Extract<T>, const CACHED: bool>(
-    records: &mut [T],
-    extractor: &mut E,
-    workspace: Option<&mut Workspace<T>>,
-) {
-    sort_with_tile_bytes::<T, E, CACHED>(records, extractor, workspace, TILE_BYTES);
+/// Allocates tile and block buffers only after the order probe and varying-bit
+/// scan have not finished the sort.
+pub(crate) fn sort<T, E: Extract<T>, const CACHED: bool>(records: &mut [T], extractor: &mut E) {
+    sort_with_tile_bytes::<T, E, CACHED>(records, extractor, TILE_BYTES);
 }
 
 /// [`sort`] with a tile budget of `tile_bytes`, so tests can reach node routes
@@ -381,7 +396,6 @@ pub(crate) fn sort<T, E: Extract<T>, const CACHED: bool>(
 fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
     records: &mut [T],
     extractor: &mut E,
-    mut workspace: Option<&mut Workspace<T>>,
     tile_bytes: usize,
 ) {
     let record_bytes = core::mem::size_of::<T>();
@@ -394,16 +408,17 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
     let sampled = probe_order(records, extractor);
     match sampled {
         Order::Ascending => return,
-        Order::Descending => {
-            reverse_stably(records, extractor);
+        Order::Descending { strict } => {
+            if strict {
+                reverse_strictly(records);
+            } else {
+                reverse_stably(records, extractor);
+            }
             return;
         }
         Order::Unsorted => {
             let probe_len = (tile_bytes / record_bytes).max(2).min(records.len());
-            let probe = workspace
-                .as_deref_mut()
-                .map(|workspace| &mut workspace.probe);
-            if insertion_probe(records, extractor, probe_len, probe) {
+            if insertion_probe(records, extractor, probe_len) {
                 return;
             }
         }
@@ -414,29 +429,23 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
         return;
     }
     if sampled == Order::Flat {
+        // A flat sample contains an equal adjacent pair, so confirmed descending
+        // keys here are not strict and must keep the stable reversal.
         match confirm_order(records, extractor) {
             Order::Ascending => return,
-            Order::Descending => {
+            Order::Descending { .. } => {
                 reverse_stably(records, extractor);
                 return;
             }
             _ => {}
         }
     }
-    // Free calls allocate scratch only now, so ordered and constant inputs
-    // never allocate.
-    let mut owned_workspace;
-    let workspace = match workspace {
-        Some(workspace) => workspace,
-        None => {
-            owned_workspace = Workspace::new();
-            &mut owned_workspace
-        }
-    };
+    let mut scratch = Scratch::new();
+    let scratch = &mut scratch;
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
             Sorter::<T, _, CACHED> {
-                workspace,
+                scratch,
                 extractor: &mut KeyHalf::<_, 0>(extractor),
                 tile_bytes,
             }
@@ -445,7 +454,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
         }
         if varying & ((1u128 << 64) - 1) == 0 {
             Sorter::<T, _, CACHED> {
-                workspace,
+                scratch,
                 extractor: &mut KeyHalf::<_, 64>(extractor),
                 tile_bytes,
             }
@@ -454,7 +463,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
         }
     }
     Sorter::<T, E, CACHED> {
-        workspace,
+        scratch,
         extractor,
         tile_bytes,
     }
@@ -466,8 +475,8 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
 ///
 /// An input of at most `probe_len` records gets a budget of `probe_len` swaps.
 /// A longer input first insertion-sorts the keys of its first `probe_len`
-/// records in `storage`, or in a local buffer without a workspace, and scales
-/// that window's swap count to the whole input as the budget for the records.
+/// records in a local key buffer, and scales that window's swap count to the
+/// whole input as the budget for the records.
 /// A window that needs no swaps says nothing about the rest, so the records are
 /// not touched. A pass that runs out of budget leaves `records` a stable
 /// permutation of its input.
@@ -475,28 +484,15 @@ fn insertion_probe<T, E: Extract<T>>(
     records: &mut [T],
     extractor: &mut E,
     probe_len: usize,
-    storage: Option<&mut Vec<MaybeUninit<u128>>>,
 ) -> bool {
     if probe_len == records.len() {
         return extractor.insertion_sort(records, probe_len).is_some();
     }
-    // The buffer holds keys, never records. Its `u128` elements give alignment
-    // for every encoded key width.
-    let bytes = probe_len * core::mem::size_of::<E::Value>();
-    let mut local = Vec::new();
-    let storage = storage.unwrap_or(&mut local);
-    storage.resize_with(bytes.div_ceil(16), MaybeUninit::uninit);
-    let ptr = storage.as_mut_ptr().cast::<E::Value>();
-    for (i, record) in records[..probe_len].iter().enumerate() {
-        // SAFETY: the allocation has space and alignment for `probe_len` keys.
-        unsafe {
-            ptr.add(i).write(extractor.key(record));
-        }
-    }
-    // SAFETY: every key slot was initialized above, and `storage` is not used
-    // again while `keys` is alive.
-    let keys = unsafe { core::slice::from_raw_parts_mut(ptr, probe_len) };
-    match Direct.insertion_sort(keys, probe_len) {
+    let mut keys: Vec<_> = records[..probe_len]
+        .iter()
+        .map(|record| extractor.key(record))
+        .collect();
+    match Direct.insertion_sort(&mut keys, probe_len) {
         Some(0) | None => false,
         Some(swaps) => extractor
             .insertion_sort(records, swaps * records.len() / probe_len)
@@ -507,17 +503,20 @@ fn insertion_probe<T, E: Extract<T>>(
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Order {
     Ascending,
-    Descending,
-    /// Every sampled pair was equal; gaps may still contain differing keys.
+    /// Keys descend; `strict` is false once an adjacent pair ties.
+    Descending {
+        strict: bool,
+    },
+    /// Every sampled pair had equal keys; gaps may still contain differing keys.
     Flat,
     Unsorted,
 }
 
-/// Spread-out pairs the strided gate may look at before the full order pass.
+/// Target pair count used to choose the order gate's stride.
 const ORDER_SAMPLES: usize = 4096;
 
 /// Rejects unordered input with strided adjacent pairs, then confirms order
-/// with a full scan. Equal-only samples defer confirmation to the caller.
+/// with a full scan.
 #[inline(never)]
 fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     let stride = (records.len() / ORDER_SAMPLES).max(1);
@@ -540,7 +539,7 @@ fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     confirm_order(records, extractor)
 }
 
-/// Determines direction from the first unequal key, then confirms that order.
+/// Confirms direction from the first unequal key, marking strict descent.
 fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     let first = extractor.key(&records[0]);
     let mut keys = records[1..].iter().map(|record| extractor.key(record));
@@ -556,8 +555,18 @@ fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
             Order::Unsorted
         }
     } else {
-        keys.try_fold(current, |a, b| (a >= b).then_some(b))
-            .map_or(Order::Unsorted, |_| Order::Descending)
+        // Strict descent requires the first unequal key to be the second record.
+        let strict = keys.len() == records.len() - 2;
+        keys.try_fold((current, strict), |(before, strict), after| {
+            if before > after {
+                Some((after, strict))
+            } else if before == after {
+                Some((after, false))
+            } else {
+                None
+            }
+        })
+        .map_or(Order::Unsorted, |(_, strict)| Order::Descending { strict })
     }
 }
 
@@ -575,6 +584,14 @@ pub(crate) fn confirm_ascending<T, E: Extract<T>>(
             (before <= after).then_some(after)
         })
         .is_some()
+}
+
+/// Finishes a strictly descending array: every key is distinct, so one
+/// reversal sorts it without moving equal keys past each other.
+// Keep the reversal loop out of the general sort path.
+#[inline(never)]
+fn reverse_strictly<T>(records: &mut [T]) {
+    records.reverse();
 }
 
 /// Sorts a descending array, stably, by reversing it and then reversing each
@@ -782,7 +799,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
                 SPLIT_BITS,
                 low,
                 self.extractor,
-                self.workspace.block_buffers(),
+                &mut self.scratch.block,
             );
             return;
         }
@@ -813,12 +830,12 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         // constant inside each child, so its bits are excluded from the next scan.
         let candidate = varying & !digit.mask::<E::Value>().to_u128();
         let tile_bytes = self.tile_bytes;
-        let mut block_buffers = self.workspace.block.take().unwrap_or_default();
+        let mut block_buffers = core::mem::take(&mut self.scratch.block);
         let mut visit = |child: &mut [T], extractor: &mut E| {
             if child.len().saturating_mul(record_bytes) <= tile_bytes {
                 let varying = scan_varying_bits(child, candidate, extractor);
                 Sorter::<T, E, CACHED> {
-                    workspace: self.workspace,
+                    scratch: self.scratch,
                     extractor,
                     tile_bytes,
                 }
@@ -833,7 +850,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             &mut block_buffers,
             &mut visit,
         );
-        self.workspace.block = Some(block_buffers);
+        self.scratch.block = block_buffers;
         let mut start = 0;
         for &end in &ends {
             if end > start {
@@ -845,11 +862,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             }
             start = end;
         }
-        self.workspace
-            .block
-            .as_mut()
-            .expect("partition buffers restored")
-            .recycle_ends(ends);
+        self.scratch.block.recycle_ends(ends);
     }
 
     /// Partitions below, equal to, and above a sampled key. The equal band is done.
@@ -864,7 +877,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             records,
             4,
             self.extractor,
-            self.workspace.block_buffers(),
+            &mut self.scratch.block,
             classify,
         );
         for range in [0..ends[0], ends[1]..records.len()] {
@@ -874,11 +887,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
                 self.sort_node(child, varying);
             }
         }
-        self.workspace
-            .block
-            .as_mut()
-            .expect("partition buffers restored")
-            .recycle_ends(ends);
+        self.scratch.block.recycle_ends(ends);
     }
 
     /// Moves a run of disagreeing records to the end its bit belongs to, then
@@ -925,21 +934,19 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             let required = len
                 .checked_add(extra)
                 .expect("tile scratch capacity overflow");
-            if self.workspace.tile.capacity() < required {
-                self.workspace
+            if self.scratch.tile.capacity() < required {
+                self.scratch
                     .tile
-                    .reserve_exact(required - self.workspace.tile.len());
+                    .reserve_exact(required - self.scratch.tile.len());
             }
         }
-        if self.workspace.tile.len() < len {
-            self.workspace
+        if self.scratch.tile.len() < len {
+            self.scratch
                 .tile
-                .reserve_exact(len - self.workspace.tile.len());
-            self.workspace
-                .tile
-                .resize_with(len, MaybeUninit::<T>::uninit);
+                .reserve_exact(len - self.scratch.tile.len());
+            self.scratch.tile.resize_with(len, MaybeUninit::<T>::uninit);
         }
-        let records = self.workspace.tile.as_mut_ptr().cast::<T>();
+        let records = self.scratch.tile.as_mut_ptr().cast::<T>();
         let ids = if tail {
             // SAFETY: capacity includes len records followed by 2*len+1 bytes.
             // u16 alignment needs at most one byte; the regions do not overlap.
@@ -1053,7 +1060,9 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             // The tile holds more than INSERTION_MAX records, so the loop ran.
             // As above, `max(1)` is kept for the optimizer, not for the value.
             let level_cost = depth.max(1) + MSD_FINISH_PASSES;
-            if level_cost < passes {
+            // A low-fanout sample can hide a concentrated bucket that becomes
+            // equal or insertion-sized after one split.
+            if distinct <= 2 || level_cost < passes {
                 self.partition_tile(records, digit, varying);
                 return;
             }
@@ -1175,10 +1184,11 @@ mod tests {
                     record.0
                 }),
             );
+            // Four records share a key, so descending order is never strict.
             assert!(
                 order
                     == if descending {
-                        Order::Descending
+                        Order::Descending { strict: false }
                     } else {
                         Order::Ascending
                     }
@@ -1188,6 +1198,51 @@ mod tests {
                 records.iter().map(|record| record.1).collect::<Vec<_>>()
             );
         }
+    }
+
+    #[test]
+    fn strict_reverse_skips_rescan() {
+        let mut records: Vec<_> = (0..257u64).rev().map(|key| (key, key)).collect();
+        let mut expected = records.clone();
+        expected.reverse();
+
+        let mut probe_calls = 0;
+        assert!(
+            probe_order(
+                &records,
+                &mut ByKey(|record: &(u64, u64)| {
+                    probe_calls += 1;
+                    record.0
+                }),
+            ) == Order::Descending { strict: true }
+        );
+
+        let mut calls = 0;
+        sort_with_tile_bytes::<_, _, true>(
+            &mut records,
+            &mut ByKey(|record: &(u64, u64)| {
+                calls += 1;
+                record.0
+            }),
+            TILE_BYTES,
+        );
+        assert_eq!(calls, probe_calls);
+        assert_eq!(records, expected);
+    }
+
+    #[test]
+    fn reverse_keeps_equal_order() {
+        let mut records: Vec<_> = (0..257u64).map(|id| (id / 4, id)).collect();
+        records.reverse();
+        let mut expected = records.clone();
+        expected.sort_by_key(|record| record.0);
+
+        sort_with_tile_bytes::<_, _, true>(
+            &mut records,
+            &mut ByKey(|record: &(u64, u64)| record.0),
+            TILE_BYTES,
+        );
+        assert_eq!(records, expected);
     }
 
     #[test]
@@ -1219,56 +1274,86 @@ mod tests {
                     total += 1;
                     key(x.0)
                 }),
-                None,
                 128,
             );
         }
         let steps = if cfg!(miri) { 4 } else { 64 };
-        for reuse in [false, true] {
-            for changing in [false, true] {
-                if !changing && !cfg!(feature = "std") {
-                    continue;
+        for changing in [false, true] {
+            if !changing && !cfg!(feature = "std") {
+                continue;
+            }
+            for step in 0..steps {
+                let at = 1 + step * total / steps;
+                let mut values: Vec<_> = (0..len).collect();
+                let mut records: Vec<_> = values.iter_mut().enumerate().collect();
+                let mut calls = 0;
+                let outcome = catch_unwind(AssertUnwindSafe(|| {
+                    sort_with_tile_bytes::<_, _, true>(
+                        &mut records,
+                        &mut ByKey(|x: &(usize, &mut usize)| {
+                            calls += 1;
+                            if !changing && calls == at {
+                                panic!("key failed");
+                            }
+                            if changing && calls >= at {
+                                calls as u64 % 3
+                            } else {
+                                key(x.0)
+                            }
+                        }),
+                        128,
+                    );
+                }));
+                if !changing {
+                    assert!(outcome.is_err(), "unreached panic at {at}/{total}");
+                    assert_eq!(calls, at);
                 }
-                for step in 0..steps {
-                    let at = 1 + step * total / steps;
-                    let mut values: Vec<_> = (0..len).collect();
-                    let mut records: Vec<_> = values.iter_mut().enumerate().collect();
-                    let mut workspace = Workspace::new();
-                    let mut calls = 0;
-                    let outcome = catch_unwind(AssertUnwindSafe(|| {
-                        sort_with_tile_bytes::<_, _, true>(
-                            &mut records,
-                            &mut ByKey(|x: &(usize, &mut usize)| {
-                                calls += 1;
-                                if !changing && calls == at {
-                                    panic!("key failed");
-                                }
-                                if changing && calls >= at {
-                                    calls as u64 % 3
-                                } else {
-                                    key(x.0)
-                                }
-                            }),
-                            reuse.then_some(&mut workspace),
-                            128,
-                        );
-                    }));
-                    if !changing {
-                        assert!(outcome.is_err(), "unreached panic at {at}/{total}");
-                        assert_eq!(calls, at);
-                    }
-                    records.sort_by_key(|x| x.0);
-                    for (id, (identity, value)) in records.iter_mut().enumerate() {
-                        assert_eq!(*identity, id);
-                        assert_eq!(**value, id);
-                        **value += len;
-                    }
-                    drop(records);
-                    drop(workspace);
-                    assert_eq!(values, (len..2 * len).collect::<Vec<_>>());
+                records.sort_by_key(|x| x.0);
+                for (id, (identity, value)) in records.iter_mut().enumerate() {
+                    assert_eq!(*identity, id);
+                    assert_eq!(**value, id);
+                    **value += len;
                 }
+                drop(records);
+                assert_eq!(values, (len..2 * len).collect::<Vec<_>>());
             }
         }
+    }
+
+    #[test]
+    fn variation_stays_within_candidate() {
+        assert_eq!(
+            scan_varying_bits(&[0u64, u64::MAX], 0xff, &mut Direct),
+            0xff
+        );
+    }
+
+    #[test]
+    fn changing_keys_finish_tile() {
+        let mut records: Vec<_> = (0..1000u64).collect();
+        let mut scratch = Scratch::new();
+        let mut calls = 0;
+        // Every sample and histogram puts all records in one bucket. Each child
+        // scan then reintroduces every key bit, including the partitioned digit.
+        let constant_calls = DIGIT_SAMPLE_LEN + records.len();
+        let mut extractor = ByKey(|_: &u64| {
+            assert!(calls < 12_000, "tile recursion did not make progress");
+            let phase = calls % (constant_calls + 65);
+            calls += 1;
+            if phase < constant_calls || phase % 2 == 0 {
+                0
+            } else {
+                u64::MAX
+            }
+        });
+        Sorter::<_, _, true> {
+            scratch: &mut scratch,
+            extractor: &mut extractor,
+            tile_bytes: TILE_BYTES,
+        }
+        .sort_tile(&mut records, u64::MAX as u128);
+        records.sort_unstable();
+        assert_eq!(records, (0..1000u64).collect::<Vec<_>>());
     }
 
     #[test]
@@ -1283,10 +1368,10 @@ mod tests {
             .collect();
         let mut expected = records.clone();
         expected.sort_by_key(|x| u16::from_le_bytes([x.0[0], x.0[1]]));
-        let mut workspace = Workspace::new();
+        let mut scratch = Scratch::new();
         let mut key = ByKey(|x: &Odd| u16::from_le_bytes([x.0[0], x.0[1]]));
         Sorter::<_, _, true> {
-            workspace: &mut workspace,
+            scratch: &mut scratch,
             extractor: &mut key,
             tile_bytes: TILE_BYTES,
         }
@@ -1317,12 +1402,7 @@ mod tests {
                 .collect();
             let mut expected = values.clone();
             expected.sort();
-            sort_with_tile_bytes::<u64, _, true>(
-                &mut values,
-                &mut Direct,
-                Some(&mut Workspace::new()),
-                256,
-            );
+            sort_with_tile_bytes::<u64, _, true>(&mut values, &mut Direct, 256);
             assert_eq!(values, expected, "direct low={low} width={width}");
             // A user key function keeps its payloads, so the same shape takes the
             // block partition and must reach the same order.
@@ -1334,7 +1414,6 @@ mod tests {
             sort_with_tile_bytes::<u64, _, true>(
                 &mut values,
                 &mut ByKey(|record: &u64| *record),
-                Some(&mut Workspace::new()),
                 256,
             );
             assert_eq!(values, expected, "by key low={low} width={width}");
@@ -1353,12 +1432,7 @@ mod tests {
                 .collect();
             let mut expected = values.clone();
             expected.sort();
-            sort_with_tile_bytes::<u128, _, true>(
-                &mut values,
-                &mut Direct,
-                Some(&mut Workspace::new()),
-                256,
-            );
+            sort_with_tile_bytes::<u128, _, true>(&mut values, &mut Direct, 256);
             assert_eq!(values, expected, "u128 low={low} width={width}");
         }
     }
@@ -1412,7 +1486,6 @@ mod tests {
             sort_with_tile_bytes::<_, _, true>(
                 &mut values,
                 &mut ByKey(|x: &(u64, usize)| x.0),
-                Some(&mut Workspace::new()),
                 256,
             );
             assert_eq!(values, expected);

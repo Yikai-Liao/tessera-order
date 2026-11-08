@@ -4,23 +4,33 @@ on:
   push:
     branches: [main]
     paths:
+      - "AGENTS.md"
       - "docs/**"
       - "conformance/**"
       - "ROADMAP.md"
       - "RELEASING.md"
       - "CONTRIBUTING.md"
       - "package.json"
-      - "package-lock.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "tsconfig.json"
+      - "bench/catalog.*"
+      - "bench/plot/**"
       - ".github/workflows/docs.yml"
   pull_request:
     paths:
+      - "AGENTS.md"
       - "docs/**"
       - "conformance/**"
       - "ROADMAP.md"
       - "RELEASING.md"
       - "CONTRIBUTING.md"
       - "package.json"
-      - "package-lock.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "tsconfig.json"
+      - "bench/catalog.*"
+      - "bench/plot/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -39,14 +49,15 @@ jobs:
         with:
           # `lastUpdated` reads each page's commit date.
           fetch-depth: 0
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run docs:test
-      - run: npm run docs:typecheck
-      - run: npm run docs:build
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm docs:test
+      - run: pnpm docs:typecheck
+      - run: pnpm docs:build
         env:
           # GitHub Pages serves a project site under /<repository>/.
           DOCS_BASE: /${{ github.event.repository.name }}/

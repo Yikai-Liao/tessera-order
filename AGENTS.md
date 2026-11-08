@@ -1,57 +1,64 @@
 # Instructions for coding agents
 
-For AI coding agents; humans read [`CONTRIBUTING.md`](CONTRIBUTING.md), and these rules follow it. `CLAUDE.md` links here.
+Tessera is a stable radix sort with O(√n) auxiliary memory. Keep code concise, readable and in English.
 
-Tessera is a stable radix sort with O(√n) auxiliary memory, built as a mature open-source project, not an experiment. Code is concise, readable and easy for a newcomer to follow. Documentation and comments follow each language's conventions at the standard of NumPy's reference documentation. Leave every file you touch cleaner than you found it. Everything is in English.
+## Read only for your task
 
-## Layout
+Read the matching sections below; batch known required reads in the first tool interaction and skip content already loaded. When an entry links to a section, locate its heading and use line-range reads for that section and needed subsections. Read other sections only as the task requires, rather than loading the whole document by default. Follow deeper links only when needed. A fact lookup needs its contract or reference, not a development procedure. The [human task index](docs/README.md) covers other topics.
 
-| Path | Contents |
+| Task | First read together |
 |---|---|
-| `rust/tessera-sort/` | The crate: `lib.rs` (API), `key.rs` (encoding), `engine.rs` (routing, tiles), `block.rs` (block partition) |
-| `conformance/semantics.md` | Ordering rules shared by every language |
-| `docs/` | Guides, explanation (`explain/`), design, development, decisions, proposals; [index](docs/README.md) |
-| `docs/.vitepress/` | Documentation site; TypeScript models of the engine in `theme/sim/` |
+| Check ordering, panic or memory guarantees | [Semantics](conformance/semantics.md) |
+| Change the Rust engine, keys or block partition | [Engine procedure and validation](CONTRIBUTING.md#engine-changes), [engine reference](docs/design/engine.md), [semantics](conformance/semantics.md) |
+| Change routing, thresholds, digit planning or inlining | The engine-change set above, [measurement procedure](docs/development/benchmarking.md#run-an-experiment), [source-attribution controls](docs/development/benchmarking.md#additional-source-attribution-controls), relevant [engine evidence](docs/design/port.md) |
+| Compare source revisions or sorting algorithms | [Command capabilities and procedure](docs/development/benchmarking.md#command-capabilities), then the selected command's contract on that page |
+| Regenerate a retained report | [Command capabilities](docs/development/benchmarking.md#command-capabilities); statistics and result contracts on that page only if interpreting or changing them |
+| Read current-head PR performance feedback | [PR feedback](docs/development/continuous-benchmarks.md#read-feedback-from-a-pr); normal reading needs no measurement protocol |
+| Investigate main/history performance or tracking | [Existing evidence](docs/development/continuous-benchmarks.md#read-main-and-history); tracking internals on that page when needed |
+| Change benchmark tooling or figures | [Tooling boundaries](docs/design/benchmark-tooling.md); the affected command's contract and [figure guide](docs/development/benchmark-figures.md) only when relevant |
+| Documentation or site | [Documentation rules](CONTRIBUTING.md#documentation); [site guide](docs/development/docs-site.md) for pages or models |
+| CI, release or planned APIs | [CI](docs/development/ci.md), [release](RELEASING.md) or [roadmap](ROADMAP.md), respectively |
+| Open a PR or commit | [Contributing](CONTRIBUTING.md) |
+
+## Use the benchmark CLI
+
+Use `pnpm tools` for covered tasks; do not recreate its build/run/report orchestration, timing, A/A, verification or provenance in ad-hoc scripts. Run from the repository root:
+
+| Task | Command |
+|---|---|
+| Working tree versus a commit | `pnpm tools compare commit COMMIT` |
+| Paired sorting-algorithm comparison | `pnpm tools compare algorithms` |
+| Preview inputs without measuring | `pnpm -s tools plan NAME` |
+| Regenerate retained results | `pnpm tools report DIR` |
+| Read current-head PR feedback | `pnpm -s tools status --pr NUMBER` |
+
+Replace uppercase placeholders. The [capability table](docs/development/benchmarking.md#command-capabilities) owns defaults, coverage options and evidence limits. A read-only feedback request does not authorize new measurements. Before a custom experiment, identify the concrete unsupported requirement and obtain operator agreement; prefer extending the maintained pipeline.
+
+Read main feedback with `pnpm -s tools status main`. Status is compact JSON: match `target.head`, read both `benchmarks[]` verdicts and `workflows[].state`; use `--details` for check summaries and the matching report body. A successful read is not a passing benchmark. The [CLI reference](docs/development/tooling.md) owns output and logging contracts.
+
+## Always preserve
+
+- Stable Rust, no required dependencies; MSRV is in `Cargo.toml`.
+- Never copy third-party code into the repository. Keep the BSD-2-Clause SPDX header on new files and Clausecker's notice in `block.rs`; see [license policy](CONTRIBUTING.md#license).
+- Every `unsafe` block has a `// SAFETY:` comment; every `unsafe fn` has a `# Safety` section. Preserve panic, inconsistent-key, owned-record and `&mut`-record tests.
+- Routing, thresholds, digit planning and inlining change only with measurements under the benchmark protocol, including A/A ranges. Investigate changes outside the controls. Raw measurements and research harnesses stay outside Git.
+- Use the [engine vocabulary](docs/design/engine.md#vocabulary). Names describe values and units: `records`, `keys`, `extractor`, `_bytes`, `_bits`, `_len`; not `arr`, `tmp` or `data`.
+- Rust items have a summary; public items document contracts and applicable panic, safety, memory and asserting-doctest examples. Comments explain invariants, hazards and measured choices, not editing history.
+- Update semantics with contract changes; engine explanations and `docs/.vitepress/theme/sim/` with algorithm changes. Keep current rationale in its topic, not a parallel decision record. Update the roadmap for planned work and describe user-visible changes in the PR.
+- Formatters and linters own style. Fix causes; suppress only locally with a reason. Follow Conventional Commits (64-character title limit), sign off with the configured identity, and add an `Assisted-by:` or `Co-authored-by:` trailer.
+
+## Independent review
+
+Every PR must pass an independent subagent Agentic Review before merge. Resolve accepted findings and re-review material fixes. Tests and CI do not replace review of runtime paths, trust boundaries and documentation contracts.
 
 ## Commands
 
 ```sh
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets && cargo test --workspace --doc
-npm ci && npm run format && uvx ruff@0.17.4 format && uvx ruff@0.17.4 check
-npm run docs:test && npm run docs:typecheck && npm run docs:build   # site changes
-python3 -m unittest discover -s .github/scripts -p "test_*.py"     # CI routing changes
+pnpm install --frozen-lockfile && pnpm format
+pnpm docs:test && pnpm docs:typecheck && pnpm docs:build     # site / models
+pnpm tools:test && pnpm tools:typecheck                    # benchmark tooling
 ```
 
-Run these locally. Miri, the MSRV and benchmarks run in CI on every pull request, together with one test cell per operating system; `main` also runs the remaining platforms and their MSRV ([details](docs/development/ci.md)). Push commits and read the results there.
-
-## Code
-
-- **Simple first.** Write the smallest change that reads clearly. Delete dead code and helpers or aliases that add a jump without a concept; extract a function when it names a complete stage.
-- **Stable Rust**, no required dependencies, MSRV from `Cargo.toml`.
-- **License.** New files start with an `SPDX-License-Identifier: BSD-2-Clause` comment. Never copy code from other projects, including `sort-research-rs` ([decision 0001a](docs/decisions/0001a-single-bsd-2-clause-license.md)); `block.rs` keeps Robert Clausecker's notice.
-- **Unsafe.** A `// SAFETY:` comment above every `unsafe` block, a `# Safety` section on every `unsafe fn`. Keep the panic, inconsistent-key, owned-record and `&mut`-record tests passing.
-- **Engine decisions.** Routing, thresholds, digit planning and inlining change only with measurements ([port record](docs/design/port.md)).
-- **Tools own format and lints**: rustfmt, Biome, Ruff, configured in `Cargo.toml`, `biome.json`, `ruff.toml`. Fix the cause; suppress only at the site, with the reason.
-
-## Naming
-
-- One concept, one name, across code, docs and models, from the [engine vocabulary](docs/design/engine.md): record, key, digit, bucket, node, tile, block, cursor.
-- Names say what a value is: `records`, `keys`, `extractor`, `len`; never `arr`, `tmp` or `data`. Units go in the name: `_bytes`, `_bits`, `_len`.
-- Functions are verbs; `try_` may decline, `is_`/`has_` return `bool`. Types are nouns, unique across modules.
-- Test names state the behavior in two to four words (`scatter_panic_keeps_records`); details go in a comment.
-
-## Documentation
-
-- Public Rust items: a one-line summary, a paragraph on the contract with intra-doc links, then `# Key function`, `# Panics`, `# Safety`, `# Memory`, `# Examples` as they apply, with examples as asserting doctests. Internal items get at least the summary.
-- Comments explain why — the invariant, the hazard, the measurement behind a constant with its numbers — for a reader of the current code. History belongs in `docs/design/port.md` or a decision record.
-- Markdown paragraphs are one line each.
-- Update in the same change: `docs/explain/` and `theme/sim/` for routing, thresholds, digit planning or the block partition (their text says all a figure shows); `conformance/semantics.md` for ordering, stability, panics or space bounds; a decision record, numbered by its pull request, for a settled choice; `ROADMAP.md` for planned work; the pull request description for user-visible changes, which release notes are written from.
-
-## Measurements
-
-Never call a change faster or slower without measurements per [`docs/development/benchmarking.md`](docs/development/benchmarking.md), with the A/A range. A slowdown outside the controls is investigated, not assumed to be noise. Raw data, profiles and the research harness stay out of the repository.
-
-## Commits
-
-Commits and pull request titles follow [Conventional Commits](CONTRIBUTING.md#commit-messages): `type(scope)!: summary`, at most 64 characters; CI checks the title, which becomes the squash commit. Sign off (`git commit -s`) with the configured identity and add an `Assisted-by:` or `Co-authored-by:` trailer.
+Run applicable checks locally; engine feature and Miri checks are in [contributing](CONTRIBUTING.md#validation). Miri, MSRV, platform and benchmark checks also run in CI; [CI](docs/development/ci.md) explains coverage. A green tracking workflow is not a benchmark verdict: read both current-head benchmark checks.

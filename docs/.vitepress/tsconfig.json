@@ -7,8 +7,9 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "skipLibCheck": true,
-    "types": ["node"],
+    "types": ["node", "vite/client"],
     "lib": ["ES2023", "DOM"]
   },
-  "include": ["config.ts", "theme/**/*.ts", "theme/**/*.vue"]
+  "contentMappers": [{ "package": "@vue/content-mapper", "extensions": [".vue"] }],
+  "include": ["*.ts", "theme/**/*.ts", "theme/**/*.vue"]
 }

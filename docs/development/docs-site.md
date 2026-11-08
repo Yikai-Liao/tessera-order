@@ -6,25 +6,27 @@ The documentation site is built with [VitePress](https://vitepress.dev) from the
 
 | Path | Contents |
 |---|---|
-| `docs/**/*.md` | Pages. `docs/index.md` is the home page; `docs/README.md` is the directory index for GitHub and is not a page. |
+| `docs/**/*.md` | Pages. `docs/index.md` serves as `/`; `docs/explain/index.md` serves as `/explain/`. `docs/README.md` is the repository task index, not a site page. |
 | `conformance/semantics.md`, `ROADMAP.md`, `RELEASING.md`, `CONTRIBUTING.md` | Shared documents, also rendered as pages (`sharedPages` in the config) |
 | `docs/.vitepress/config.ts` | Site configuration, navigation and link handling |
 | `docs/.vitepress/theme/components/` | Vue components used by the explanation pages |
 | `docs/.vitepress/theme/sim/` | TypeScript models of the engine that drive the figures, with their tests |
 | `docs/public/` | Static files, such as the logo (a copy of `assets/logo.svg`) |
-| `package.json`, `package-lock.json` | The site's pinned toolchain, at the repository root |
+| `package.json`, `pnpm-lock.yaml` | The site's pinned toolchain, at the repository root |
 
 ## Commands
 
-Run these from the repository root, with Node.js 24 or later. The npm project sits at the root so that pages outside `docs/`, such as `ROADMAP.md`, resolve the same dependencies.
+Run these from the repository root, with Node.js 24 or later. The pnpm project sits at the root so that pages outside `docs/`, such as `ROADMAP.md`, resolve the same dependencies.
 
 ```sh
-npm ci                   # install the pinned toolchain
-npm run docs:dev         # local server with hot reload
-npm run docs:test        # check the models against reference sorts
-npm run docs:typecheck   # type-check the config, theme and components
-npm run docs:build       # build into docs/.vitepress/dist; fails on dead links
+pnpm install --frozen-lockfile  # install the pinned toolchain
+pnpm docs:dev                   # local server with hot reload
+pnpm docs:test                  # check task links, page links and algorithm models
+pnpm docs:typecheck             # type-check the config, theme and components
+pnpm docs:build                 # build into docs/.vitepress/dist; fails on dead links
 ```
+
+The pinned TypeScript compiler and Vue content mapper check SFC scripts and templates; `--runExternalCode` enables the mapper registered in `docs/.vitepress/tsconfig.json`.
 
 Pull requests that touch the site or its pages run the same checks in `docs.yml`. Pushes to `main` also deploy the site. The repository's Pages source must be set to *GitHub Actions* once, under *Settings → Pages*.
 

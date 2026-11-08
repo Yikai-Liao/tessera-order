@@ -5,7 +5,7 @@
 //! the standard library's stable sort.
 
 use std::cmp::Reverse;
-use tessera_sort::{Workspace, stable_sort, stable_sort_by_key};
+use tessera_sort::{stable_sort, stable_sort_by_key};
 
 fn next(state: &mut u64) -> u64 {
     *state = state.wrapping_add(0x9e3779b97f4a7c15);
@@ -94,6 +94,36 @@ fn float_total_order() {
 }
 
 #[test]
+fn descending_ties_stay_stable() {
+    let lengths: &[usize] = if cfg!(miri) {
+        &[4, 49, 129]
+    } else {
+        &[4, 49, 129, 8192]
+    };
+    for &len in lengths {
+        for start in [0, len / 2, len - 2] {
+            for run_len in [2, 3] {
+                if start + run_len > len {
+                    continue;
+                }
+                let mut records: Vec<_> = (0..len).map(|id| ((len - id) as u64, id)).collect();
+                let key = records[start].0;
+                for record in &mut records[start + 1..start + run_len] {
+                    record.0 = key;
+                }
+                let mut expected = records.clone();
+                expected.sort_by_key(|record| record.0);
+                stable_sort_by_key(&mut records, |record| record.0);
+                assert_eq!(
+                    records, expected,
+                    "len={len} start={start} run_len={run_len}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn record_shapes_and_thresholds() {
     let mut state = 71;
     let lengths: &[usize] = if cfg!(miri) {
@@ -103,7 +133,6 @@ fn record_shapes_and_thresholds() {
             0, 1, 2, 8, 47, 48, 49, 128, 512, 4095, 4096, 4097, 16383, 16384, 16385, 65535, 65536,
         ]
     };
-    let mut workspace = Workspace::new();
     for &len in lengths {
         for shape in 0..9 {
             let mut values: Vec<_> = (0..len)
@@ -131,12 +160,10 @@ fn record_shapes_and_thresholds() {
                 .collect();
             let mut expected = values.clone();
             expected.sort_by_key(|x| x.0);
-            workspace.stable_sort_by_key(&mut values, |x| x.0);
+            stable_sort_by_key(&mut values, |x| x.0);
             assert_eq!(values, expected, "len={len} shape={shape}");
         }
     }
-    workspace.shrink_to_fit();
-    assert_eq!(workspace.retained_bytes(), 0);
 }
 
 #[test]
@@ -203,19 +230,4 @@ fn unusual_record_layouts() {
     }
     let mut empty = [(); 100];
     stable_sort_by_key(&mut empty, |_| 0u8);
-}
-
-#[test]
-fn workspace_is_send_and_sync() {
-    fn send_sync<T: Send + Sync>() {}
-    send_sync::<Workspace<String>>();
-    let mut workspace = Workspace::new();
-    let mut input = vec!["zzz".to_owned(), "a".to_owned(), "bb".to_owned()];
-    workspace.stable_sort_by_key(&mut input, |x| x.len());
-    std::thread::spawn(move || {
-        workspace.stable_sort_by_key(&mut input, |x| Reverse(x.len()));
-        assert_eq!(input, ["zzz", "bb", "a"]);
-    })
-    .join()
-    .unwrap();
 }

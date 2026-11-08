@@ -13,11 +13,11 @@ perf.data*
 .idea/
 .vscode/
 
-# Python tooling caches
-__pycache__/
-
 # Documentation site
 /node_modules/
 /docs/.vitepress/dist/
 /docs/.vitepress/cache/
 docs/.vitepress/.temp/
+
+# Pinned third-party benchmark sources
+/bench/vendor/

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type MarkdownRenderer } from "vitepress";
@@ -15,8 +15,7 @@ const sharedPages = new Set([
   "RELEASING.md",
   "CONTRIBUTING.md",
 ]);
-// `docs/README.md` indexes the directory for GitHub readers; the site's home
-// page and sidebar replace it.
+// The task index is for repository readers; the site has its own home page.
 const notPages = new Set(["docs/README.md"]);
 
 function isPage(path: string): boolean {
@@ -126,8 +125,7 @@ export default defineConfig({
       {
         text: "Development",
         link: "/design/engine",
-        activeMatch:
-          "^/(design|development|decisions|proposals)/|^/(CONTRIBUTING|RELEASING|ROADMAP)",
+        activeMatch: "^/(design|development|proposals)/|^/(CONTRIBUTING|RELEASING|ROADMAP)",
       },
     ],
     sidebar: {
@@ -169,29 +167,21 @@ function guideSidebar() {
       text: "User guide",
       items: [
         { text: "Getting started", link: "/guide/getting-started" },
-        { text: "Reusing scratch memory", link: "/guide/workspace" },
         { text: "Ordering semantics", link: "/conformance/semantics" },
       ],
     },
   ];
 }
 
-function firstHeading(path: string): string {
-  const heading = readFileSync(join(repoRoot, path), "utf8").match(/^# (.+)$/m);
-  return heading ? heading[1] : path;
-}
-
 function developmentSidebar() {
-  const decisions = allMarkdown
-    .filter((p) => /^docs\/decisions\/\d{4}[a-z]?-.*\.md$/.test(p))
-    .sort()
-    .map((p) => ({ text: firstHeading(p), link: `/${sitePath(p).replace(/\.md$/, "")}` }));
   return [
     {
       text: "Design",
       items: [
         { text: "Engine design", link: "/design/engine" },
         { text: "Port from the prototype", link: "/design/port" },
+        { text: "Comparison benchmarks", link: "/design/comparison-benchmarks" },
+        { text: "Benchmark tooling", link: "/design/benchmark-tooling" },
       ],
     },
     {
@@ -199,6 +189,7 @@ function developmentSidebar() {
       items: [
         { text: "Contributing", link: "/CONTRIBUTING" },
         { text: "Benchmark protocol", link: "/development/benchmarking" },
+        { text: "Benchmark figures", link: "/development/benchmark-figures" },
         { text: "Continuous benchmarks", link: "/development/continuous-benchmarks" },
         { text: "Continuous integration", link: "/development/ci" },
         { text: "Documentation site", link: "/development/docs-site" },
@@ -211,13 +202,7 @@ function developmentSidebar() {
         { text: "Roadmap", link: "/ROADMAP" },
         { text: "Python binding proposal", link: "/proposals/python-binding" },
         { text: "Rayon parallel sorting proposal", link: "/proposals/rayon-parallel-sort" },
-        { text: "Comparison benchmarks proposal", link: "/proposals/comparison-benchmarks" },
       ],
-    },
-    {
-      text: "Decision records",
-      collapsed: true,
-      items: [{ text: "Index", link: "/decisions/" }, ...decisions],
     },
   ];
 }

@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+[plan]
+schema = 1
+harness = "smoke"
+algorithms = [ "tessera" ]
+
+[[plan.include]]
+types = [ "u64", "row_u64" ]
+distributions = [ "random", "zipf2" ]
+lengths = [ 1000, 65536 ]
+
+[[plan.include]]
+types = [ "f64" ]
+distributions = [ "sorted" ]
+
+[[plan.exclude]]
+types = [ "row_u64" ]
+distributions = [ "zipf2" ]
+
+[[plan.exclude]]
+lengths = [ 1000 ]
+
+[[cases]]
+type = "u64"
+distribution = "random"
+length = 65536
+selected = true
+
+[[cases]]
+type = "u64"
+distribution = "zipf2"
+length = 65536
+selected = true
+
+[[cases]]
+type = "u64"
+distribution = "random"
+length = 1000
+selected = false
+
+[[cases]]
+type = "row_u64"
+distribution = "zipf2"
+length = 65536
+selected = false
+
+[[cases]]
+type = "row_u64"
+distribution = "random"
+length = 65536
+selected = true
+
+[[cases]]
+type = "f64"
+distribution = "sorted"
+length = 999
+selected = true
+
+[[cases]]
+type = "f64"
+distribution = "reverse"
+length = 999
+selected = false
+
+[[cases]]
+type = "u64"
+distribution = "random"
+length = 1234
+selected = false
+
+[[cases]]
+type = "u64"
+distribution = "reverse"
+length = 65536
+selected = false
+
+[[cases]]
+type = "u32"
+distribution = "random"
+length = 65536
+selected = false

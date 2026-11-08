@@ -1,11 +1,15 @@
 # Benchmarks
 
-The release runner lives here once it is built; its protocol is in [`docs/development/benchmarking.md`](../docs/development/benchmarking.md). The [continuous benchmarks](../docs/development/continuous-benchmarks.md) in `rust/benches/smoke.rs` run on every PR that changes Rust code.
+The CLI is `pnpm tools --help` (Node.js 24; install with `pnpm install --frozen-lockfile`). Choose the task before loading its documentation:
 
-```text
-bench/rust/     Rust runner (unpublished crate)
-bench/report/   report generator (Python standard library only)
-bench/cases/    suite definitions
-```
+| Task | Command | Read |
+|---|---|---|
+| Screen uncommitted code against a commit | `pnpm tools compare commit HEAD` | [Working-tree comparisons](../docs/development/benchmarking.md#working-tree-comparisons) |
+| Compare sorting algorithms | `pnpm tools compare algorithms --plan release --simd` | [Capabilities and procedure](../docs/development/benchmarking.md#command-capabilities) |
+| Preview inputs without measuring | `pnpm -s tools plan local` | [Experiment plans](../docs/development/benchmarking.md#experiment-plans) |
+| Rebuild a report without measurements | `pnpm tools report bench/results/SESSION` | [Result format](../docs/development/benchmarking.md#results-and-provenance) |
+| Read current-head PR feedback | `pnpm -s tools status --pr 123` | [Feedback checks](../docs/development/continuous-benchmarks.md#read-feedback-from-a-pr) |
+| Change tooling | — | [Ownership and source map](../docs/design/benchmark-tooling.md) |
+| Change figures | — | [Figure guide](../docs/development/benchmark-figures.md) |
 
-Third-party sort implementations are pulled as crates.io dependencies or fetched at pinned commits during the build. Their sources are not committed to this repository.
+The smoke algorithm plan is the default for `compare algorithms`; release/native coverage is explicit. Raw results and fetched sources are ignored, not committed. The [CLI reference](../docs/development/tooling.md) covers compact status, logs and CI reproduction. Checks are in [AGENTS.md](../AGENTS.md#commands); native smoke validation runs in CI.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
-import { planDigits, tileDigitBits } from "./digits.ts";
+import { chooseTileLeaf, planDigits, tileDigitBits } from "./digits.ts";
 
 const show = (v: bigint, w: number) =>
   planDigits(v, w, 128)
@@ -36,4 +36,20 @@ check(String(tileDigitBits(1024, 8)), "12");
 check(String(tileDigitBits(1024, 16)), "12");
 check(String(tileDigitBits(4096, 8)), "14");
 check(String(tileDigitBits(2048, 16)), "13");
-console.log("digit planner model ok");
+
+// A two-bucket sample predicts five MSD levels plus insertion, tying six LSD passes.
+check(chooseTileLeaf(1000, (1n << 64n) - 1n, 11, 2, 64), "msd");
+// One- and two-pass plans skip the sample, even when it reports two buckets.
+check(chooseTileLeaf(1000, (1n << 20n) - 1n, 11, 2, 64), "lsd");
+check(chooseTileLeaf(48, (1n << 64n) - 1n, 11, 2, 64), "insertion");
+check(chooseTileLeaf(8192, 0n, 14, 2, 32), "done");
+for (const [distinct, leaf] of [
+  [1, "msd"],
+  [2, "msd"],
+  [3, "lsd"],
+  [127, "lsd"],
+  [128, "msd"],
+] as const) {
+  check(chooseTileLeaf(8192, (1n << 32n) - 1n, 14, distinct, 32), leaf);
+}
+console.log("digit planner and tile routing models ok");

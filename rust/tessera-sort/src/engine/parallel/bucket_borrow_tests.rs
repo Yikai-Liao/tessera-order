@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn sort_group<T: Send, E: Extract<T> + Clone + Send>(records: &mut [T], mut extractor: E) {
-    let mut workspace = Workspace::new();
+    let mut scratch = Scratch::new();
     let pool = Pool::new();
     let mut pending: Option<Job<T>> = None;
     let mut visit = |bucket: &mut [T], _: &mut E| {
@@ -20,7 +20,7 @@ fn sort_group<T: Send, E: Extract<T> + Clone + Send>(records: &mut [T], mut extr
         1,
         2,
         &mut extractor,
-        workspace.block_buffers(),
+        &mut scratch.block,
         &mut visit,
     );
     drop(visit);
@@ -28,7 +28,7 @@ fn sort_group<T: Send, E: Extract<T> + Clone + Send>(records: &mut [T], mut extr
     let mut job = pending.expect("both output buckets are nonempty");
     assert_eq!(job.buckets.len(), 2);
     job.run::<E, true>(extractor, 3, TILE_BYTES, &pool);
-    workspace.block.as_mut().unwrap().recycle_ends(ends);
+    scratch.block.recycle_ends(ends);
 }
 
 #[test]

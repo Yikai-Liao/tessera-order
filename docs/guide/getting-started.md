@@ -12,7 +12,7 @@ Tessera sorts slices by a primitive key: an integer up to 128 bits, an `f32` or 
 tessera-sort = "0.1"
 ```
 
-The crate has no dependencies. The `std` feature is on by default. Without it, the crate uses `core` and `alloc` and needs a global allocator:
+The crate has no required dependencies; the optional `portable-simd` feature adds `fearless_simd` (see the [Cargo feature documentation](../../rust/tessera-sort/src/lib.rs)). The `std` feature is on by default. Without it, the crate uses `core` and `alloc` and needs a global allocator:
 
 ```toml
 [dependencies]
@@ -83,23 +83,6 @@ assert!(values[4].is_nan());
 ```
 
 [Keys as unsigned integers](../explain/keys.md) shows how each key type is encoded.
-
-## Sorting many slices
-
-The free functions allocate scratch memory during each call. To sort many slices, keep the scratch in a `Workspace`:
-
-```rust
-use tessera_sort::Workspace;
-
-let mut workspace = Workspace::new();
-for batch in [vec![3u32, 1, 2], vec![9, 7, 8]] {
-    let mut batch = batch;
-    workspace.stable_sort(&mut batch);
-    assert!(batch.is_sorted());
-}
-```
-
-See [Reusing scratch memory](workspace.md) for the details.
 
 ## When to use something else
 

@@ -19,7 +19,7 @@ A counting pass reads each key twice: once for the histogram and once for the sc
 
 `stable_sort_by_key` therefore **caches bucket IDs**: during the histogram it stores each record's bucket as a `u16`, and the scatter reads that value instead of calling the key function again. The bucket ranges are disjoint and their sizes match the stored IDs, so every output slot is written exactly once, whatever the key function does. The block partition calls the key function once per record and pass, so it has nothing to cache.
 
-`stable_sort` sorts the keys themselves with Tessera's own encoders, which are deterministic and cannot panic, so it recomputes keys and stores nothing ([decision 0001b](../decisions/0001b-cache-bucket-ids-for-every-record.md)).
+`stable_sort` sorts the keys themselves with Tessera's own encoders, which are deterministic and cannot panic, so it recomputes keys and stores nothing ([engine reference](../design/engine.md#record-handling)).
 
 An inconsistent key function can therefore produce an unsorted result, but never a lost, duplicated or uninitialized record.
 
@@ -31,10 +31,10 @@ With the default `std` feature, a panic in the key function is caught, every rec
 - **During a tile pass**, `RestoreTile` copies the last complete record set back into the tile if it was in scratch. The interrupted pass only wrote stale copies into the other buffer.
 - **During a compaction callback** (a tile finished while cache-hot), compaction continues without further callbacks. The panic is resumed once the input holds every record again.
 
-Afterwards the slice holds every record exactly once, in an unspecified order. The [workspace](../guide/workspace.md) stays usable.
+Afterwards the slice holds every record exactly once, in an unspecified order.
 
-Without `std`, the crate cannot catch a panic. If the key function panics while records are spread over blocks, unwinding would run destructors over an incomplete block table, which could free a record twice. An abort-on-unwind guard turns such a panic into an abort instead. Panics elsewhere unwind normally with every record in place ([decision 0005b](../decisions/0005b-no-std-unwind-guard.md)).
+Without `std`, the crate cannot catch a panic. If the key function panics while records are spread over blocks, unwinding would run destructors over an incomplete block table, which could free a record twice. An abort-on-unwind guard turns such a panic into an abort instead. Panics elsewhere unwind normally with every record in place ([engine reference](../design/engine.md#panic-safety)).
 
 ## Where this is tested
 
-The tests in [`rust/tessera-sort/tests`](../../rust/tessera-sort/tests) and the engine's unit tests cover owned records with drop tracking, `&mut` records under panicking and changing key functions, workspace reuse after a panic, over-aligned and zero-sized records, and key-function panics at many points of a sort. Miri and AddressSanitizer run them in CI.
+The tests in [`rust/tessera-sort/tests`](../../rust/tessera-sort/tests) and the engine's unit tests cover owned records with drop tracking, `&mut` records under panicking and changing key functions, over-aligned and zero-sized records, and key-function panics at many points of a sort. Miri and AddressSanitizer run them in CI.

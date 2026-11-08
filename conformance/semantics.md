@@ -1,6 +1,6 @@
 # Ordering semantics
 
-Status: implemented by the unreleased Rust crate; the planned C++ implementation follows the same rules. Shared test vectors in `conformance/vectors/` will be added with the benchmark runner; until then the Rust tests generate their own inputs.
+Status: implemented by the unreleased Rust crate; the planned C++ implementation follows the same rules. Cross-language golden vectors in `conformance/vectors/` are planned with the C++ runner on the [roadmap](../ROADMAP.md); until then the Rust tests generate their own inputs.
 
 ## Sort contracts
 
@@ -12,6 +12,8 @@ Status: implemented by the unreleased Rust crate; the planned C++ implementation
 Release 0.1 provides the stable contract only. The unstable contract is reserved for a dedicated unstable kernel in a later release.
 
 Both contracts output a permutation of the input: no record is lost, duplicated or modified, whatever the key function returns.
+
+Stability applies to every equal-key run, including one at the start of an otherwise strictly descending input. Sorting `[(3, a), (3, b), (2, c), (1, d)]` by its numeric key must produce `[(1, d), (2, c), (3, a), (3, b)]`.
 
 ## Key extraction
 
@@ -43,21 +45,15 @@ Descending order is expressed by reversing the key, not by reversing an ascendin
 
 ## Space
 
-Implementations document three quantities separately:
+Implementations document the scratch memory one call needs and fixed-size storage on the stack separately. Each Rust call owns its scratch and releases it before returning, including when a key function unwinds. Already ordered or constant inputs do not allocate.
 
-1. the scratch memory one call needs;
-2. fixed-size storage on the stack;
-3. capacity a reusable workspace retains between calls.
-
-A workspace reuses capacity only. Every call re-establishes which scratch records are live; bytes left by an earlier call are never treated as records. Sorting with a workspace produces the same result as the corresponding free function, and a workspace stays usable after a key function panics.
-
-In Rust, the heap memory comes from `alloc`, so a `no_std` build needs a global allocator. One call needs O(√n) block scratch for a fixed record size and key width, a tile of up to 64 KiB of records (at least one record), up to two bytes of cached bucket ID per tile record, and at most 65,535 encoded probe keys of up to 16 bytes. Each tile-local MSD level holds up to 32 KiB of cursors on the stack, with at most 22 levels for 128-bit keys. `Workspace::retained_bytes()` reports the retained heap capacity and `shrink_to_fit()` releases all of it.
+In Rust, the heap memory comes from `alloc`, so a `no_std` build needs a global allocator. One call needs O(√n) block scratch for a fixed record size and key width, a tile of up to 64 KiB of records (at least one record), up to two bytes of cached bucket ID per tile record, and at most 65,535 encoded probe keys of up to 16 bytes. Each tile-local MSD level holds up to 32 KiB of cursors on the stack, with at most 22 levels for 128-bit keys.
 
 ## Rust Rayon entry points
 
 The optional `rayon` feature enables `std` and exposes `par_stable_sort` and `par_stable_sort_by_key`. Small inputs and one-thread pools use the serial engine; large inputs partition the root across disjoint shards, permute blocks in parallel and sort complete root buckets in the caller's pool. Both entry points preserve ordering, stability, records and panic recovery ([proposal](../docs/proposals/rayon-parallel-sort.md)).
 
-With `P` root shards, parallel calls use O(√(nP)) auxiliary scratch for fixed record size and key width; for a fixed pool width this is O(√n). The root digit is bounded by 12 bits (4096 buckets), so per-bucket workspaces remain bounded independently of pool width. They do not allocate an n-record buffer. Records require `Send` but do not require `Sync`. The by-key entry point requires `Fn + Sync` rather than `FnMut`; key evaluations may run concurrently and in any order. The serial APIs and `Workspace` retain their existing bounds.
+With `P` root shards, parallel calls use O(√(nP)) auxiliary scratch for fixed record size and key width; for a fixed pool width this is O(√n). The root digit is bounded by 12 bits (4096 buckets), so per-bucket scratch buffers remain bounded independently of pool width. They do not allocate an n-record buffer. Records require `Send` but do not require `Sync`. The by-key entry point requires `Fn + Sync` rather than `FnMut`; key evaluations may run concurrently and in any order. The serial APIs retain their existing bounds.
 
 ## Language adapters
 

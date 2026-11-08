@@ -35,7 +35,7 @@ assert_eq!(keys, [1, 2, 3]);
 
 Ordering, stability, inconsistent-key safety and record preservation follow the [shared semantics](../../conformance/semantics.md). Key calls may overlap across tasks, and neither call order nor a particular worker assignment is promised. If a task panics, all tasks that may access the input must finish their restoration before the panic reaches the caller. Rayon [`join`](https://docs.rs/rayon/1.12.0/rayon/fn.join.html) waits for both branches even if one panics; every sorting task must also preserve its own records. Which panic wins when several tasks panic is unspecified.
 
-Do not add parallel methods to `Workspace<T>` yet. It currently owns scratch for one serial sort. Retained capacity, suspended tasks and scratch distribution need a measured design before a reusable parallel workspace becomes public.
+Keep parallel scratch internal. Retained capacity, suspended tasks and scratch distribution need a measured design before a reusable parallel workspace becomes public.
 
 ## Source boundaries and reuse
 
@@ -43,13 +43,12 @@ Do not add parallel methods to `Workspace<T>` yet. It currently owns scratch for
 |---|---|
 | `src/lib.rs` | Crate documentation, feature gates and root exports |
 | `src/parallel.rs` | Rayon entry points and serial fallback |
-| `src/engine/parallel.rs` | Root split, shard count, complete-bucket jobs and per-job workspace reuse |
+| `src/engine/parallel.rs` | Root split, shard count, complete-bucket jobs and per-job scratch reuse |
 | `src/engine.rs` | Shared order probes, routing, digit planning, node partition orchestration and tile sorting |
 | `src/key.rs` | Shared sealed encodings and `Direct` / `ByKey` extractors |
 | `src/block.rs` | Shared block partition, scratch ownership and panic restoration |
 | `src/block/parallel.rs` | Disjoint root shards, stable directory adoption and scratch transfer |
 | `src/block/parallel/compact.rs` | Parallel block-cycle permutation and bounded boundary snapshots |
-| `src/workspace.rs` | Scratch for one serial sorting operation |
 | `tests/parallel.rs` | Public Rayon API and, later, scheduling and recovery contracts |
 
 Name the entry-point module `parallel` and the feature `rayon`. Keep the module private and re-export only the two entry points. The root partition and block permutation live in `block/parallel.rs` and its `compact` submodule because they form a separate ownership stage with independent stability, panic-recovery and permutation tests; the serial partition remains in `block.rs`.
@@ -62,7 +61,7 @@ The parallel entry point shares order probes, key encodings, digit planning and 
 
 For `P` root shards, `R` buckets, `n` records and `s` bytes per record, the block size is approximately `sqrt(20 n / (2 P R s))`. The `20` accounts for local and global block directories coexisting during adoption; each shard contributes `2 R` scratch blocks of that size. Thus root scratch and directories are O(√(nP)) for fixed record size and key width, which is O(√n) when the caller's pool width is fixed. `P` never exceeds the current Rayon pool size, and no n-record output buffer is allocated.
 
-The root digit has at most twelve bits, so there are at most 4096 buckets. A job reuses one workspace across its buckets; the pool lock is held only to take or return a workspace. If `mᵢ` is the largest bucket handled by job `i`, the `mᵢ` are disjoint and `Σ√mᵢ ≤ √(4096n)`. Child scratch therefore remains O(√n) for fixed key width; root scratch dominates the pool-dependent factor. Reentrant key functions may suspend jobs, so workspace count is bounded by the fixed root fan-out, not worker count. Rayon runtime storage and thread stacks are separate. A reusable parallel workspace remains deferred until these lifetimes and reuse costs are understood.
+The root digit has at most twelve bits, so there are at most 4096 buckets. A job reuses one scratch allocation set across its buckets; the pool lock is held only to take or return scratch. If `mᵢ` is the largest bucket handled by job `i`, the `mᵢ` are disjoint and `Σ√mᵢ ≤ √(4096n)`. Child scratch therefore remains O(√n) for fixed key width; root scratch dominates the pool-dependent factor. Reentrant key functions may suspend jobs, so workspace count is bounded by the fixed root fan-out, not worker count. Rayon runtime storage and thread stacks are separate. A reusable parallel workspace remains deferred until these lifetimes and reuse costs are understood.
 
 ## Focused measurements
 

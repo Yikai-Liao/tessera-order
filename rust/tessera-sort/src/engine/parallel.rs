@@ -22,15 +22,15 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
         return;
     }
     if bytes < MIN_PARALLEL_BYTES || rayon::current_num_threads() == 1 {
-        super::sort::<T, E, CACHED>(records, extractor, None);
+        super::sort::<T, E, CACHED>(records, extractor);
         return;
     }
 
     let tile_bytes = TILE_BYTES
         .max(record_bytes)
         .min(MAX_TILE_RECORDS.saturating_mul(record_bytes));
-    let mut workspace = Workspace::new();
-    let Some(varying) = prepare(records, extractor, &mut workspace, tile_bytes) else {
+    let mut scratch = Scratch::new();
+    let Some(varying) = prepare(records, extractor, tile_bytes) else {
         return;
     };
 
@@ -38,36 +38,39 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
             let mut key = Narrow::<E, 0>(extractor.clone());
-            sort_root::<T, _, CACHED>(records, &mut key, &mut workspace, varying, tile_bytes);
+            sort_root::<T, _, CACHED>(records, &mut key, &mut scratch, varying, tile_bytes);
             return;
         }
         if varying & ((1u128 << 64) - 1) == 0 {
             let mut key = Narrow::<E, 64>(extractor.clone());
-            sort_root::<T, _, CACHED>(records, &mut key, &mut workspace, varying >> 64, tile_bytes);
+            sort_root::<T, _, CACHED>(records, &mut key, &mut scratch, varying >> 64, tile_bytes);
             return;
         }
     }
-    sort_root::<T, E, CACHED>(records, extractor, &mut workspace, varying, tile_bytes);
+    sort_root::<T, E, CACHED>(records, extractor, &mut scratch, varying, tile_bytes);
 }
 
 /// Keeps the serial engine's adaptive root checks without changing its call path.
 fn prepare<T, E: Extract<T>>(
     records: &mut [T],
     extractor: &mut E,
-    workspace: &mut Workspace<T>,
     tile_bytes: usize,
 ) -> Option<u128> {
     let record_bytes = core::mem::size_of::<T>();
     let sampled = probe_order(records, extractor);
     match sampled {
         Order::Ascending => return None,
-        Order::Descending => {
-            reverse_stably(records, extractor);
+        Order::Descending { strict } => {
+            if strict {
+                reverse_strictly(records);
+            } else {
+                reverse_stably(records, extractor);
+            }
             return None;
         }
         Order::Unsorted => {
             let probe_len = (tile_bytes / record_bytes).max(2).min(records.len());
-            if insertion_probe(records, extractor, probe_len, Some(&mut workspace.probe)) {
+            if insertion_probe(records, extractor, probe_len) {
                 return None;
             }
         }
@@ -81,7 +84,7 @@ fn prepare<T, E: Extract<T>>(
     if sampled == Order::Flat {
         match confirm_order(records, extractor) {
             Order::Ascending => return None,
-            Order::Descending => {
+            Order::Descending { .. } => {
                 reverse_stably(records, extractor);
                 return None;
             }
@@ -155,7 +158,7 @@ impl<T> Job<T> {
         tile_bytes: usize,
         pool: &Pool<T>,
     ) {
-        let mut workspace = pool.take();
+        let mut scratch = pool.take();
         for bucket in &self.buckets {
             // SAFETY: this exact pointer and length came from one exclusive
             // materialized bucket. It is disjoint from the other stored slices,
@@ -164,20 +167,20 @@ impl<T> Job<T> {
             if child.len() > 1 {
                 let varying = scan_varying_bits(child, candidate, &mut extractor);
                 Sorter::<T, E, CACHED> {
-                    workspace: &mut workspace,
+                    scratch: &mut scratch,
                     extractor: &mut extractor,
                     tile_bytes,
                 }
                 .sort_node(child, varying);
             }
         }
-        pool.give(workspace);
+        pool.give(scratch);
     }
 }
 
-/// Recycles workspaces between jobs without holding the lock during user code.
+/// Recycles scratchs between jobs without holding the lock during user code.
 struct Pool<T> {
-    free: std::sync::Mutex<Vec<Workspace<T>>>,
+    free: std::sync::Mutex<Vec<Scratch<T>>>,
 }
 
 impl<T> Pool<T> {
@@ -187,19 +190,19 @@ impl<T> Pool<T> {
         }
     }
 
-    fn take(&self) -> Workspace<T> {
+    fn take(&self) -> Scratch<T> {
         self.free
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
             .pop()
-            .unwrap_or_default()
+            .unwrap_or_else(Scratch::new)
     }
 
-    fn give(&self, workspace: Workspace<T>) {
+    fn give(&self, scratch: Scratch<T>) {
         self.free
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
-            .push(workspace);
+            .push(scratch);
     }
 }
 
@@ -207,7 +210,7 @@ impl<T> Pool<T> {
 fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
     records: &mut [T],
     extractor: &mut E,
-    workspace: &mut Workspace<T>,
+    scratch: &mut Scratch<T>,
     varying: u128,
     tile_bytes: usize,
 ) {
@@ -216,7 +219,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
     let top = bit_len(varying);
     if node_bytes <= tile_bytes || node_bytes < 4 * tile_bytes {
         Sorter::<T, E, CACHED> {
-            workspace,
+            scratch,
             extractor,
             tile_bytes,
         }
@@ -233,15 +236,11 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
             top - low,
             low,
             extractor.clone(),
-            workspace.block_buffers(),
+            &mut scratch.block,
             shards,
             &mut |_| {},
         );
-        workspace
-            .block
-            .as_mut()
-            .expect("partition buffers restored")
-            .recycle_ends(ends);
+        scratch.block.recycle_ends(ends);
         return;
     }
 
@@ -250,7 +249,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
     let bit = KeyValue::<T, E>::from_usize(1) << KeyValue::<T, E>::from_usize(top - 1);
     if sample_mode(&mut keys).is_some() || outlier_run(records, &keys, bit, extractor).is_some() {
         Sorter::<T, E, CACHED> {
-            workspace,
+            scratch,
             extractor,
             tile_bytes,
         }
@@ -266,15 +265,11 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
             digit.width,
             digit.shift,
             extractor.clone(),
-            workspace.block_buffers(),
+            &mut scratch.block,
             shards,
             &mut |_| {},
         );
-        workspace
-            .block
-            .as_mut()
-            .expect("partition buffers restored")
-            .recycle_ends(ends);
+        scratch.block.recycle_ends(ends);
         return;
     }
 
@@ -305,7 +300,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
             digit.width,
             digit.shift,
             root_extractor,
-            workspace.block_buffers(),
+            &mut scratch.block,
             shards,
             &mut visit,
         );
@@ -320,11 +315,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
                 pool_ref,
             );
         }
-        workspace
-            .block
-            .as_mut()
-            .expect("partition buffers restored")
-            .recycle_ends(ends);
+        scratch.block.recycle_ends(ends);
     });
 }
 

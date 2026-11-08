@@ -138,7 +138,7 @@ function onMove(event: PointerEvent) {
       <text :x="x(balanced) + 4" :y="M.top + 10" font-size="10" style="fill: var(--vp-c-text-2)">b* = {{ balanced }}</text>
       <circle :cx="x(chosen)" :cy="y(total(chosen))" r="5" fill="#1baf7a" stroke="var(--tsr-panel)" stroke-width="2" />
       <text :x="x(chosen) + 8" :y="y(total(chosen)) + 16" font-size="10" style="fill: var(--vp-c-text-1)">
-        used: b = {{ chosen }}{{ chosen > balanced ? ' (floor)' : '' }}
+        used: b = {{ chosen }}
       </text>
 
       <g v-if="hover !== null">

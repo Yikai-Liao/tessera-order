@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**/*.ts", "**/*.vue", "**/*.css", "**/*.json", "!package-lock.json"]
+    "includes": ["**/*.ts", "**/*.vue", "**/*.css", "**/*.json"]
   },
   "formatter": {
     "indentStyle": "space",

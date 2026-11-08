@@ -1,0 +1,81 @@
+<!-- SPDX-License-Identifier: BSD-2-Clause -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 522" width="720" height="522" role="img" aria-labelledby="t d">
+<title id="t">Tessera ranks 2nd of 7 sorts on 1,000,000 u64 keys</title>
+<desc id="d">Speed relative to slice::sort, geometric mean over the 10 baseline input patterns. Speed: Tessera, Portable SIMD 3.3×; Tessera 2.6×; radsort 2.2×; long-stable-variant-name 2×; slice::sort 1.00×; glidesort-sqrt 0.99×; vqsort 2.8×; slice::sort_unstable 2.3×</desc>
+<style>
+  .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
+  .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
+  .tag { fill: none; stroke: #c9c8c2; }
+  .slower { fill: #e8622f; } .faster { fill: #4a80e6; }
+  .stem-slower { stroke: #e8622f; } .stem-faster { stroke: #4a80e6; }
+  .within { fill: #fafaf8; stroke: #8d8c86; }
+  text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; font-feature-settings: "tnum", "cv11"; }
+  .val { font-size: 12px; } .sub { font-size: 11px; } .tiny { font-size: 10px; } .strong { font-weight: 600; }
+  .hero { font-size: 28px; font-weight: 600; letter-spacing: -0.6px; font-feature-settings: "pnum"; }
+  .stat { font-size: 18px; font-weight: 600; }
+  .caps { font-size: 10.5px; font-weight: 600; letter-spacing: 1.1px; }
+  @media (prefers-color-scheme: dark) {
+    .panel { fill: #1e1e1d; stroke: #3a3a37; } .ring { stroke: #1e1e1d; }
+    .ink { fill: #e8e7e3; } .muted { fill: #a3a29b; } .rule { stroke: #30302e; } .axis { stroke: #6f6e69; }
+    .tag { stroke: #4a4a46; }
+    .within { fill: #1e1e1d; stroke: #6f6e69; }
+  }
+</style>
+<style>
+  .tessera { fill: #4a80e6; } .radix { fill: #e8622f; } .comparison { fill: #8d8c86; }
+  .edge-tessera { stroke: #4a80e6; } .edge-radix { stroke: #e8622f; } .edge-comparison { stroke: #8d8c86; }
+</style>
+<rect class="panel" x="0.5" y="0.5" width="719" height="521" rx="12"/>
+<text class="ink stat" x="24.0" y="40.0">Tessera ranks 2nd of 7 sorts on 1,000,000 u64 keys</text>
+<text class="muted sub" x="24.0" y="60.0">Speed relative to slice::sort, geometric mean over the 10 baseline input patterns</text>
+<line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
+<line class="axis" x1="420.4" x2="420.4" y1="90" y2="452" stroke-width="1"/>
+<text class="ink tiny" x="420.4" y="470.0" text-anchor="middle">slice::sort</text>
+<line class="rule" x1="520.6" x2="520.6" y1="90" y2="452" stroke-width="1"/>
+<text class="muted tiny" x="520.6" y="470.0" text-anchor="middle">2×</text>
+<line class="rule" x1="320.2" x2="320.2" y1="90" y2="452" stroke-width="1"/>
+<text class="muted tiny" x="320.2" y="470.0" text-anchor="middle">1/2×</text>
+<line class="rule" x1="620.8" x2="620.8" y1="90" y2="452" stroke-width="1"/>
+<text class="muted tiny" x="620.8" y="470.0" text-anchor="middle">4×</text>
+<line class="rule" x1="220.0" x2="220.0" y1="90" y2="452" stroke-width="1"/>
+<text class="muted tiny" x="220.0" y="470.0" text-anchor="middle">1/4×</text>
+<text class="muted sub" x="210.0" y="486.0">← slower</text>
+<text class="muted sub" x="630.8" y="486.0" text-anchor="end">faster →</text>
+<text class="caps muted" x="696.0" y="102.0" text-anchor="end">SPEED</text>
+<text class="caps muted" x="24.0" y="102.0">STABLE SORTS</text>
+<text class="ink strong" x="24.0" y="135.0">Tessera, Portable SIMD</text>
+<circle class="ring" cx="591.2" cy="131" r="5.5" fill="none" stroke-width="4"/>
+<circle class="edge-tessera" cx="591.2" cy="131" r="5.5" fill="none" stroke-width="2"/>
+<text class="val ink strong" x="696.0" y="135.0" text-anchor="end">3.3×</text>
+<text class="ink strong" x="24.0" y="173.0">Tessera</text>
+<circle class="tessera ring" cx="558.9" cy="169" r="6.5" stroke-width="2"/>
+<text class="val ink strong" x="696.0" y="173.0" text-anchor="end">2.6×</text>
+<text class="ink" x="24.0" y="211.0">radsort</text>
+<circle class="radix ring" cx="533.3" cy="207" r="4" stroke-width="2"/>
+<text class="val muted" x="696.0" y="211.0" text-anchor="end">2.2×</text>
+<text class="ink" x="24.0" y="249.0">long-stable-variant-name</text>
+<circle class="comparison ring" cx="520.5" cy="245" r="4" stroke-width="2"/>
+<text class="val muted" x="696.0" y="249.0" text-anchor="end">2×</text>
+<text class="ink" x="24.0" y="287.0">slice::sort</text>
+<circle class="comparison ring" cx="420.4" cy="283" r="4" stroke-width="2"/>
+<text class="val muted" x="696.0" y="287.0" text-anchor="end">1.00×</text>
+<text class="ink" x="24.0" y="319.0">glidesort-sqrt</text>
+<text class="muted sub" x="24.0" y="334.0">given Tessera's memory</text>
+<circle class="comparison ring" cx="419.3" cy="321" r="4" stroke-width="2"/>
+<text class="val muted" x="696.0" y="325.0" text-anchor="end">0.99×</text>
+<text class="caps muted" x="24.0" y="362.0">UNSTABLE SORTS</text>
+<text class="ink" x="24.0" y="395.0">vqsort</text>
+<circle class="comparison ring" cx="570.6" cy="391" r="4" stroke-width="2"/>
+<text class="val muted" x="696.0" y="395.0" text-anchor="end">2.8×</text>
+<text class="ink" x="24.0" y="433.0">slice::sort_unstable</text>
+<circle class="comparison ring" cx="538.3" cy="429" r="4" stroke-width="2"/>
+<text class="val muted" x="696.0" y="433.0" text-anchor="end">2.3×</text>
+<circle class="tessera" cx="28" cy="500" r="4"/>
+<text class="muted sub" x="38.0" y="504.0">Tessera</text>
+<circle class="within edge-tessera" cx="101.69" cy="500" r="3.5" stroke-width="1.5"/>
+<text class="muted sub" x="111.7" y="504.0">Tessera, Portable SIMD</text>
+<circle class="radix" cx="259.2" cy="500" r="4"/>
+<text class="muted sub" x="269.2" y="504.0">other radix sorts</text>
+<circle class="comparison" cx="374.69" cy="500" r="4"/>
+<text class="muted sub" x="384.7" y="504.0">comparison sorts</text>
+</svg>

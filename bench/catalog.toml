@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+schema = 1
+
+algorithms = [
+  { id = "tessera", label = "Tessera", stable = true, family = "radix", adapter = "common" },
+  { id = "std-stable", label = "slice::sort", stable = true, family = "comparison", adapter = "common" },
+  { id = "radsort", label = "radsort", stable = true, family = "radix", adapter = "rust" },
+  { id = "voracious", label = "voracious", stable = true, family = "radix", adapter = "rust" },
+  { id = "glidesort", label = "glidesort", stable = true, family = "comparison", adapter = "rust" },
+  { id = "glidesort-sqrt", label = "glidesort-sqrt", stable = true, family = "comparison", adapter = "rust", detail = "given Tessera's memory", description = "comparison sort with Tessera's memory" },
+  { id = "std-unstable", label = "slice::sort_unstable", stable = false, family = "comparison", adapter = "rust" },
+  { id = "rdst", label = "rdst", stable = false, family = "radix", adapter = "rust" },
+  { id = "clausecker", label = "clausecker", stable = true, family = "radix", adapter = "native" },
+  { id = "fluxsort", label = "fluxsort", stable = true, family = "comparison", adapter = "native" },
+  { id = "ips2ra", label = "ips2ra", stable = false, family = "radix", adapter = "native" },
+  { id = "ips4o", label = "ips4o", stable = false, family = "comparison", adapter = "native" },
+  { id = "vqsort", label = "vqsort", stable = false, family = "SIMD", adapter = "native" },
+  { id = "x86simdsort", label = "x86simdsort", stable = false, family = "SIMD", adapter = "native" },
+  { id = "crumsort", label = "crumsort", stable = false, family = "comparison", adapter = "native" },
+  { id = "duckdb", label = "DuckDB 1.4.0 kernel", stable = false, family = "radix", adapter = "native", detail = "Vergesort + Ska + pdqsort", description = "single-threaded raw-key kernel; no SQL encoding or external merge" },
+]
+
+types = [
+  { id = "u32", label = "u32", detail = "4-byte key", task = "keys", bytes = 4 },
+  { id = "u64", label = "u64", detail = "8-byte key", task = "keys", bytes = 8 },
+  { id = "f64", label = "f64", detail = "total order", task = "keys", bytes = 8 },
+  { id = "row_u64", label = "{u64, u32}", detail = "16-byte row", task = "records", compact = "{u64,u32}", bytes = 16 },
+  { id = "record128", label = "128-byte record", detail = "u64 key", task = "records", bytes = 128 },
+  { id = "owned", label = "owned record", detail = "{u64, String}", task = "records", bytes = 32 },
+  { id = "row_u32", label = "{u32, u32}", detail = "8-byte row", task = "records", compact = "{u32,u32}", bytes = 8 },
+  { id = "u128", label = "u128", detail = "16-byte key", task = "keys", bytes = 16 },
+  { id = "rec128_u64", label = "rec128_u64", detail = "128-byte record", task = "records", bytes = 128 },
+]
+
+distributions = [
+  { id = "random", label = "random", group = "Uniform" },
+  { id = "d256", label = "256 values", group = "Few distinct keys" },
+  { id = "d16", label = "16 values", group = "Few distinct keys" },
+  { id = "zipf1.1", label = "Zipf 1.1", group = "Skewed" },
+  { id = "zipf2", label = "Zipf 2", group = "Skewed" },
+  { id = "skew99", label = "99% one key", group = "Skewed" },
+  { id = "sorted", label = "sorted", group = "Presorted" },
+  { id = "reverse", label = "reverse", group = "Presorted" },
+  { id = "sorted99", label = "99% sorted", group = "Presorted" },
+  { id = "runs", label = "sorted runs", compact = "runs", group = "Presorted" },
+  { id = "equal", label = "all equal", group = "Few distinct keys" },
+  { id = "d4096", label = "4,096 values", group = "Few distinct keys" },
+  { id = "sorted95", label = "95% sorted" },
+  { id = "skew50", label = "50% one key" },
+  { id = "two_values", label = "two values", group = "Few distinct keys" },
+  { id = "hot50", label = "50% one key, rest random", group = "Skewed" },
+  { id = "sparse8", label = "8 wide keys", group = "Few distinct keys" },
+  { id = "sparse_digits", label = "sparse digits", group = "Key structure" },
+  { id = "bimodal", label = "two clusters", group = "Key structure" },
+  { id = "far_swaps", label = "1% far swaps", group = "Presorted" },
+  { id = "finite_signed", label = "finite floats", group = "Finite floats" },
+  { id = "sorted_tail", label = "sorted + tail", group = "Presorted" },
+]
+
+modes = [
+  { id = "api", label = "stable" },
+  { id = "unstable", label = "unstable" },
+  { id = "par", label = "parallel" },
+  { id = "par_unstable", label = "parallel unstable" },
+]
+
+configurations = [
+  { id = "default", name = "Default", testbed = "intel-v1-hybrid-v1", features = [] },
+  { id = "portable-simd", name = "Portable SIMD", testbed = "intel-v1-portable-simd-hybrid-v1", features = ["portable-simd"] },
+]
+
+[comparison]
+types = ["u32","u64","f64","row_u64","record128","owned","row_u32"]
+shapes = ["random","d256","d16","zipf1.1","zipf2","skew99","sorted","reverse","sorted99","runs","equal","d4096","two_values","hot50","sparse8","sparse_digits","bimodal","far_swaps","finite_signed","sorted_tail"]
+# Fixed cross-type aggregates; targeted inputs are plotted separately.
+summaryShapes = ["random","d256","d16","zipf1.1","zipf2","skew99","sorted","reverse","sorted99","runs"]
+lengths = [1000,65536,1000000,10000000]
+typeGroups = [
+  { title = "Keys · against any sort", keys = true, types = ["u32","u64","f64"] },
+  { title = "Records · against stable sorts", keys = false, types = ["row_u32","row_u64","record128","owned"] },
+]
+
+[smoke]
+types = ["u32","u64","u128","f64","row_u32","row_u64","rec128_u64"]
+shapes = ["random","d256","d16","zipf1.1","zipf2","skew99","sorted","reverse","sorted99","runs","equal","d4096","two_values","hot50","sparse8","sparse_digits","bimodal","far_swaps","finite_signed","sorted_tail"]
+lengths = [1000,65536,1000000,10000000]

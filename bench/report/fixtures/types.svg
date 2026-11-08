@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 484" width="720" height="484" role="img" aria-labelledby="t d">
 <title id="t">Tessera is fastest on 5 of 7 element types, top 3 on 7</title>
-<desc id="d">1,000,000 elements; speed relative to slice::sort, geometric mean over 10 input patterns. Speed, Rank: u32 2.6×, 2nd; u64 2.6×, 2nd; f64 2.6×, 1st; {u32, u32} 2.6×, 1st; {u64, u32} 2.6×, 1st; 128-byte record 2.6×, 1st; owned record 2.6×, 1st</desc>
+<desc id="d">1,000,000 elements; speed relative to slice::sort, geometric mean over the 10 baseline input patterns. Speed, Rank: u32 2.6×, 2nd; u64 2.6×, 2nd; f64 2.6×, 1st; {u32, u32} 2.6×, 1st; {u64, u32} 2.6×, 1st; 128-byte record 2.6×, 1st; owned record 2.6×, 1st</desc>
 <style>
   .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
   .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
@@ -27,7 +27,7 @@
 </style>
 <rect class="panel" x="0.5" y="0.5" width="719" height="483" rx="12"/>
 <text class="ink stat" x="24.0" y="40.0">Tessera is fastest on 5 of 7 element types, top 3 on 7</text>
-<text class="muted sub" x="24.0" y="60.0">1,000,000 elements; speed relative to slice::sort, geometric mean over 10 input patterns</text>
+<text class="muted sub" x="24.0" y="60.0">1,000,000 elements; speed relative to slice::sort, geometric mean over the 10 baseline input patterns</text>
 <line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
 <line class="axis" x1="369.7" x2="369.7" y1="90" y2="414" stroke-width="1"/>
 <text class="ink tiny" x="369.7" y="432.0" text-anchor="middle">slice::sort</text>

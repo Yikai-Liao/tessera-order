@@ -18,6 +18,8 @@ test("catalog identities are unique and references resolve", () => {
   }
   for (const id of catalog.comparison.types) assert.notEqual(recordType(id).task, "unknown");
   for (const id of catalog.comparison.shapes) assert.ok(distribution(id).group);
+  for (const id of catalog.comparison.summaryShapes)
+    assert.ok(catalog.comparison.shapes.includes(id));
   for (const group of catalog.comparison.typeGroups)
     for (const id of group.types) assert.ok(catalog.comparison.types.includes(id));
   for (const entry of catalog.algorithms) {

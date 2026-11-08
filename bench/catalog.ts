@@ -50,6 +50,7 @@ export const catalog = z
     ),
     smoke: inventory,
     comparison: inventory.extend({
+      summaryShapes: z.array(z.string()),
       typeGroups: z.array(
         z.object({
           title: z.string(),

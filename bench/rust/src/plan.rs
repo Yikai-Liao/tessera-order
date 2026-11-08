@@ -337,8 +337,8 @@ mod tests {
             56
         );
         for (text, expected) in [
-            (include_str!("../../plans/smoke.toml"), 70),
-            (include_str!("../../plans/release.toml"), 260),
+            (include_str!("../../plans/smoke.toml"), 125),
+            (include_str!("../../plans/release.toml"), 381),
         ] {
             assert_eq!(
                 Plan::parse(text, "comparison")
@@ -347,6 +347,51 @@ mod tests {
                     .unwrap()
                     .len(),
                 expected
+            );
+        }
+    }
+
+    #[test]
+    fn smoke_covers_release_shapes() {
+        let smoke = Plan::parse(include_str!("../../plans/smoke.toml"), "comparison").unwrap();
+        let release = Plan::parse(include_str!("../../plans/release.toml"), "comparison").unwrap();
+        let pairs = |plan: &Plan| {
+            plan.inputs()
+                .unwrap()
+                .into_iter()
+                .map(|case| (case.ty, case.distribution))
+                .collect::<BTreeSet<_>>()
+        };
+        assert_eq!(pairs(&smoke), pairs(&release));
+        let cases = release.inputs().unwrap();
+        for case in &cases {
+            match case.distribution.as_str() {
+                "finite_signed" => assert_eq!(case.ty, "f64"),
+                "sparse_digits" | "bimodal" => {
+                    assert!(["u64", "row_u64", "record128", "owned"].contains(&case.ty.as_str()));
+                }
+                "sparse8" => {
+                    assert!(["u32", "u64", "row_u32", "row_u64"].contains(&case.ty.as_str()));
+                }
+                _ => {}
+            }
+        }
+        for shape in [
+            "equal",
+            "two_values",
+            "d4096",
+            "hot50",
+            "far_swaps",
+            "sorted_tail",
+            "sparse8",
+            "sparse_digits",
+            "bimodal",
+        ] {
+            assert!(
+                cases.iter().any(|case| case.ty == "u64"
+                    && case.distribution == shape
+                    && case.len == 10_000_000),
+                "{shape}"
             );
         }
     }

@@ -44,7 +44,7 @@ test("names cases in words and keeps the ID for copying", () => {
   );
   assert.equal(
     report.caseLabel("rust/row_u64/hot50/65536/s1/api"),
-    "{u64,u32} · 50% one key, rest unique · 65,536",
+    "{u64,u32} · 50% one key, rest random · 65,536",
   );
   assert.equal(
     report.caseLabel("rust/f64/finite_signed/65536/s1/api"),

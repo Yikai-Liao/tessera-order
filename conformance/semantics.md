@@ -13,6 +13,8 @@ Release 0.1 provides the stable contract only. The unstable contract is reserved
 
 Both contracts output a permutation of the input: no record is lost, duplicated or modified, whatever the key function returns.
 
+Stability applies to every equal-key run, including one at the start of an otherwise strictly descending input. Sorting `[(3, a), (3, b), (2, c), (1, d)]` by its numeric key must produce `[(1, d), (2, c), (3, a), (3, b)]`.
+
 ## Key extraction
 
 - The key function may be called any number of times per record, in any order.

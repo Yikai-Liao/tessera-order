@@ -552,7 +552,9 @@ fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
             Order::Unsorted
         }
     } else {
-        keys.try_fold((current, true), |(before, strict), after| {
+        // Strict descent requires the first unequal key to be the second record.
+        let strict = keys.len() == records.len() - 2;
+        keys.try_fold((current, strict), |(before, strict), after| {
             if before > after {
                 Some((after, strict))
             } else if before == after {

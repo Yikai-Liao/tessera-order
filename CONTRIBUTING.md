@@ -1,130 +1,92 @@
 # Contributing to Tessera
 
-Thank you for your interest. Tessera is in pre-release, and the most useful contributions right now are bug reports, benchmark results from other machines, and reports from real workloads.
-
-Everyone taking part in the project follows the [code of conduct](CODE_OF_CONDUCT.md).
-
-## Before you start
-
-For anything larger than a small fix, open an issue first. Changes to the engine affect memory safety and performance at the same time, so it helps to agree on the approach before code is written.
+Tessera is pre-release. Bug reports, real-workload experience and measurements on other machines are especially useful. Follow the [code of conduct](CODE_OF_CONDUCT.md); discuss changes larger than a small fix in an issue first.
 
 ## Development
 
-The crate builds on stable Rust; the minimum supported version is in `Cargo.toml`.
+Use stable Rust (MSRV in `Cargo.toml`), Node.js 24 and the pnpm version pinned in `package.json`. Run the applicable [local checks](AGENTS.md#commands). [CI](docs/development/ci.md) covers platform, MSRV, Miri and sanitizer checks.
+
+### Engine changes
+
+Read the [engine reference](docs/design/engine.md) and [shared semantics](conformance/semantics.md) together. Routing, thresholds, digit planning and inlining also require the [measurement procedure](docs/development/benchmarking.md#run-an-experiment), its [source-attribution controls](docs/development/benchmarking.md#additional-source-attribution-controls) and relevant [engine evidence](docs/design/port.md) before implementation.
+
+1. Identify the affected stage and invariant in the reference, source and tests. Reproduce a bug before changing its implementation.
+2. Make the smallest complete change. Follow ownership through moves, panic recovery and inconsistent keys; preserve exactly one live owner. Explain each `unsafe` block with a `// SAFETY:` invariant and document `# Safety` on every `unsafe fn`.
+3. Add focused regression coverage at the changed boundary. Preserve panic, inconsistent-key, owned-record and `&mut`-record tests; extend them where affected rather than weakening them.
+4. Update semantics for intentional contract changes. Algorithm changes also update the explanation and the models in `docs/.vitepress/theme/sim/`.
+
+### Validation
+
+Run the applicable [local checks](AGENTS.md#commands), including workspace tests and doctests. Engine changes also exercise both feature configurations and affected tests under Miri:
 
 ```sh
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all
-```
-
-TypeScript checks use the pinned official TypeScript 7.1 beta native compiler. Vue single-file components use the official `@vue/content-mapper` alpha through `contentMappers` and `--runExternalCode`; `vue-tsc` and a legacy TypeScript installation are not required. Node.js 24 executes the tooling's `.ts` files directly; VitePress owns site transformation and bundling.
-
-The documentation site and repository tooling use [Biome](https://biomejs.dev/) for TypeScript, Vue, CSS and JSON. Repository scripts run on Node.js 24; Python is not a tooling prerequisite.
-
-```sh
-pnpm install --frozen-lockfile && pnpm format
-pnpm tools:test && pnpm tools:typecheck
-```
-
-Engine changes also need Miri, which requires nightly:
-
-```sh
+cargo test -p tessera-sort --no-default-features
+cargo test -p tessera-sort --features portable-simd
 rustup +nightly component add miri
 cargo +nightly miri test -p tessera-sort
+cargo +nightly miri test -p tessera-sort --no-default-features
 ```
 
-CI runs the default and `--no-default-features` configurations in parallel. Within each configuration, [cargo-nextest](https://nexte.st/docs/integrations/miri/) runs each test in its own Miri process so tests can use multiple CPU cores. Doctests run separately with `cargo miri test --doc`. To use the same runner locally:
+Run `pnpm docs:test` when simulation models change and the [site checks](docs/development/docs-site.md#commands) when their pages change. CI owns the remaining platform, MSRV and sanitizer lanes; the [Rust workflow](.github/workflows/rust-ci.yml) is the command source for reproducing a lane. It uses cargo-nextest for test processes and runs doctests separately.
 
-```sh
-cargo install --locked cargo-nextest --version 0.9.151
-cargo +nightly miri nextest run -p tessera-sort
-cargo +nightly miri test -p tessera-sort --doc
-cargo +nightly miri nextest run -p tessera-sort --no-default-features
-cargo +nightly miri test -p tessera-sort --doc --no-default-features
-```
-
-## Unsafe code
-
-The engine moves records through uninitialized scratch memory. Every `unsafe` block states the invariant it relies on in a `SAFETY:` comment. A change that adds or alters unsafe code must explain why the invariant still holds, and must keep the tests for panicking key functions, non-`Copy` records and records holding `&mut` references passing.
+Report the invariant preserved or contract changed, regression coverage, commands actually run and anything left to CI or unavailable locally. For performance choices, include paired evidence with A/A ranges and investigate results outside the controls under the protocol below.
 
 ## Performance changes
 
-Use `pnpm tools compare commit COMMIT` for a working-tree development screen, `pnpm tools compare algorithms` for algorithm comparisons and `pnpm tools status --pr NUMBER` to read current-head continuous feedback. See the [benchmark guide](docs/development/benchmarking.md). Select coverage with `--plan NAME-OR-FILE` and CLI axis overrides; repository defaults live in `bench/plans/`. Tool dependencies use the pinned pnpm version; register display identities in `bench/catalog.toml` and reuse the [shared figure templates](docs/development/benchmark-figures.md).
-
-A claim that a change is faster or slower needs measurements that follow [`docs/development/benchmarking.md`](docs/development/benchmarking.md): paired with the previous version in one process, with the A/A range reported. Please include the raw output or a link to it.
+Use the maintained benchmark CLI and the [measurement procedure](docs/development/benchmarking.md#command-capabilities). The protocol defines paired timing, A/A ranges and the extra controls needed to attribute a source-change gain rather than compare algorithms. Include measured coverage, environment, control ranges and a results link; investigate changes outside the controls. Process-level screens and continuous alerts alone do not isolate source changes from code placement.
 
 ## Documentation
 
-Public items document their behavior completely: a one-line summary, the contract (ordering, stability, what happens to records), and `# Panics`, `# Safety`, `# Memory` and `# Examples` sections where they apply, with examples as compiled doctests. Internal comments explain why the code is the way it is: invariants, hazards and the measurements behind constants. [`docs/README.md`](docs/README.md) says where each kind of document belongs.
+Use the [task index](docs/README.md) to find the current topic. Edit an existing topic before adding a document; a new page needs a distinct contract, procedure, explanation or evidence. Delete obsolete instructions, keep current rules and non-obvious rationale together, and retain reproducible measurement conditions. Git/PR history preserves superseded decisions; do not add a parallel decision record. Markdown paragraphs occupy one line.
 
-## Semantics
+Keep a task's procedure and completion criteria in its existing topic, with the normal path before implementation details and exceptional branches. `AGENTS.md` lists the required first-read sections for agents; the [task index](docs/README.md) and site link to the same sources. Link directly to the relevant section, keep conditional references conditional, and let fact lookups skip procedures. Check representative tasks for unnecessary reading and discovery steps, not just document counts. Run the [site checks](docs/development/docs-site.md#commands) after changing pages or shared documents.
 
-Changes to ordering, stability, panic behavior or space bounds must update [`conformance/semantics.md`](conformance/semantics.md) in the same pull request.
+Rust items have a one-line summary. Public items explain their contract with intra-doc links and applicable `# Key function`, `# Panics`, `# Safety`, `# Memory` and `# Examples` sections; examples are asserting doctests. Internal comments explain invariants, hazards and measured choices. Update [shared semantics](conformance/semantics.md) with ordering, stability, panic or space changes, and explanations and simulation models with algorithm changes.
 
 ## AI-assisted contributions
 
-Contributions written with AI tools are welcome. They are held to the same standard as any other contribution, and a person is accountable for each one.
+AI assistance is welcome; a person remains accountable for the whole submission.
 
-- **You are the author.** Read and understand every line you submit. You should be able to explain the change and answer review questions yourself, without relaying them to a tool.
-- **Disclose the tools.** The pull request template asks which tools you used and for what: code, tests, documentation or review. Commit trailers such as `Assisted-by:` or `Co-authored-by:` are welcome but not required.
-- **A sign-off covers the whole change.** It certifies the [DCO](#sign-off-dco) for everything in the commit, including that generated code is not copied from code under an incompatible license.
-- **Verify, do not estimate.** Run the tests, and Miri for engine changes. Performance numbers must come from measurements, never from a tool's prediction.
-- **Reproduce before reporting.** Run the reproduction of a bug or a security issue yourself before filing it, even when a tool found it.
+- Read and understand every submitted line and be able to explain it in review.
+- Disclose tools and their role in the PR template. Tool attribution trailers are welcome; coding agents follow [their instructions](AGENTS.md).
+- Verify code with tests and engine changes with Miri. Reproduce bugs before reporting them; never estimate performance results.
+- A sign-off certifies the whole change, including generated code and license compatibility.
 
-Pull requests that show no sign of human review, such as unrelated edits, calls to APIs that do not exist, or untested code, may be closed without a detailed review.
-
-Coding agents working in this repository should read [`AGENTS.md`](AGENTS.md).
+Untested changes, nonexistent APIs or unrelated edits without evidence of human review may be closed without detailed review.
 
 ## Commit messages
 
-Commit messages and pull request titles follow [Conventional Commits 1.0](https://www.conventionalcommits.org/en/v1.0.0/). Pull requests are squash-merged, so the title becomes the commit on `main`; CI checks it, and commits inside the branch should follow the same form.
+Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/): `type(scope)!: summary`. PRs are squash-merged; CI checks the title that becomes the main commit.
 
-```
-type(scope)!: summary
-
-Body: why the change is needed, one line per paragraph.
-
-Signed-off-by: Your Name <you@example.com>
-```
-
-| Type | For |
+| Type | Change |
 |---|---|
-| `feat` | A new public API or user-visible capability |
-| `fix` | A correction of wrong behavior |
-| `perf` | A performance change, with measurements per [benchmarking](docs/development/benchmarking.md) |
-| `refactor` | Code restructured without a change in behavior |
-| `docs` | Documentation, comments and the documentation site |
+| `feat` | Public API or capability |
+| `fix` | Incorrect behavior |
+| `perf` | Measured performance change |
+| `refactor` | Structure without behavior changes |
+| `docs` | Documentation, comments or site |
 | `test` | Tests only |
-| `ci` | Workflows and `.github/scripts` |
-| `build` | Cargo, pnpm and tool configuration, such as the MSRV or Biome |
-| `chore` | Other maintenance, such as releases |
-| `revert` | A revert of an earlier commit |
+| `ci` | Workflows or CI scripts |
+| `build` | Toolchain, dependencies or configuration |
+| `chore`, `revert` | Other maintenance or a revert |
 
-- **Scope** is optional and one of `engine`, `block`, `key`, `simd`, `site`, `bench`, `fuzz` or `deps`; language packages add their own name when they land.
-- **Summary** is an imperative English phrase that says what changed, starting in lowercase unless it begins with a name, without a final period, and at most 64 characters so that the squash commit with ` (#123)` stays within 72.
-- **Breaking changes** add `!` after the type or scope and explain the migration in a `BREAKING CHANGE:` paragraph.
-- **One type per pull request.** A change that needs two types is usually two pull requests.
+Scope is optional: `engine`, `block`, `key`, `simd`, `site`, `bench`, `fuzz` or `deps`; new language packages add their name. Use one type per PR. The imperative English title starts lowercase unless it starts with a name, has no final period, and is at most 64 characters. Breaking changes add `!` and a `BREAKING CHANGE:` paragraph describing migration. Type/scope changes update both these rules and [the checker](.github/scripts/check_pr_title.ts).
 
-Branches do not need to be up to date with `main` to merge; rebase only to resolve a conflict ([decision 0032](docs/decisions/0032-parallel-pull-requests.md)).
+Branches need not be up to date with `main`; rebase only for conflicts. Describe user-visible changes in the PR: [release notes](RELEASING.md#release-checklist) are written from merged PRs, without a shared changelog.
 
 ## Sign-off (DCO)
 
-Every commit in a pull request must carry a `Signed-off-by` line that certifies the [Developer Certificate of Origin 1.1](https://developercertificate.org/): that you wrote the change or otherwise have the right to submit it under the project license.
+Every commit needs an author-matching `Signed-off-by` line certifying the [DCO 1.1](https://developercertificate.org/). Use the configured identity:
 
 ```sh
 git commit -s
-```
-
-The name and email in the sign-off must match the commit author. CI checks every commit of a pull request. Dependabot uses a different email in its standard sign-off, so its current head commit is exempt only when the authenticated Dependabot account opened or updated its same-repository pull request and GitHub verifies the commit's signature and bot attribution. All other commits, including human additions to a bot pull request, still need matching sign-offs. Verification failures grant no exception. If a human updates a Dependabot branch, ask Dependabot to rebase it rather than rewriting the bot's sign-off.
-
-To add a missing sign-off to the commits already on your branch:
-
-```sh
+# Add missing sign-offs to an existing branch:
 git rebase --signoff origin/main
 git push --force-with-lease
 ```
 
+Only the current Dependabot head can be exempt: the authenticated bot must open/update a same-repository PR, and GitHub must verify its signature and bot attribution. Other commits, including human additions to bot PRs, still need matching sign-offs. Missing provenance or API failures grant no exception. The [verification helper](.github/scripts/verify_dependabot.ts) runs from the target branch without executing PR contents. Ask Dependabot to rebase human-updated branches rather than rewriting its signature.
+
 ## License
 
-By contributing, you agree that your contributions are licensed under the [BSD 2-Clause License](LICENSE). New source files start with `// SPDX-License-Identifier: BSD-2-Clause`.
+Contributions use [BSD-2-Clause](LICENSE). New source files start with the language-appropriate `SPDX-License-Identifier: BSD-2-Clause` comment; `block.rs` retains Clausecker's complete notice. Do not copy third-party code, including Apache-2.0 harness/tests from `sort-research-rs`, into this repository. Rust competitors are dependencies; native sources are fetched at pinned revisions into ignored directories, with only our adapters committed. Benchmarks embedding upstream projects live outside this repository.

@@ -2,28 +2,60 @@
 
 The comparison runner in `bench/rust` measures sorting algorithms on one machine. It answers four questions: how Tessera compares with the standard stable sort, with other stable sorts, with unstable sorts when equal keys are indistinguishable, and how much extra memory each sort uses. The [continuous suite](continuous-benchmarks.md) tracks regressions on Bencher; release comparisons use the paired measurements described here.
 
-## Development commands
+## Command capabilities
 
-Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm install --frozen-lockfile`. The command surface is `pnpm tools --help`; the [repository CLI guide](tooling.md) covers compact agent output, retained logs and CI reproduction.
+Run `pnpm tools` from the repository root with Node.js 24, the pinned pnpm and Rust toolchains. Install JavaScript dependencies with `pnpm install --frozen-lockfile`.
 
-```sh
-# Working tree, including uncommitted source changes, versus a commit.
-pnpm tools compare commit HEAD~1
-pnpm tools compare commit main --types u64,row_u64 --distributions random,zipf2 --cpu 2
+| Task | Command | What it provides |
+|---|---|---|
+| Compare working-tree code with a commit | `pnpm tools compare commit COMMIT` | Two revision builds, nine rotating baseline/control/current process blocks, paired process-level A/A, verification, provenance and a report |
+| Compare algorithms | `pnpm tools compare algorithms` | Registered algorithms in one timing executable per configuration, nine shuffled blocks, two Tessera calls for A/A, output verification, allocation measurement and a report |
+| Full algorithm comparison | `pnpm tools compare algorithms --plan release --simd` | Release coverage, native opponents and a separate Portable SIMD build |
+| Preview or customize inputs | `pnpm -s tools plan NAME` | Validated selection without compiling or measuring |
+| Regenerate a report | `pnpm tools report DIR` | Statistics and figures from retained results, without new measurements |
+| Read current main or PR feedback | `pnpm -s tools status main` or `pnpm -s tools status --pr NUMBER` | Exact-ref workflow and benchmark states; [read-only interpretation](continuous-benchmarks.md#read-feedback-from-a-pr) |
 
-# Rust-only smoke comparison, including validation and a report.
-pnpm tools compare algorithms
+`compare commit` defaults to `HEAD` and the `local` plan; `compare algorithms` defaults to the smoke algorithm plan. Replace uppercase placeholders. The [CLI reference](tooling.md) defines output, logs and CI commands. Use [plans and axis overrides](#experiment-plans) for custom coverage. `report` reads retained results without compiling or measuring; incomplete algorithm sessions require `--partial`, while local revision reports require all nine blocks.
 
-# Full native comparison and optional Portable SIMD build.
-pnpm tools compare algorithms --plan release --simd --cpu 2
+## Run an experiment
 
-# Reports do not rebuild or rerun measurements.
-pnpm tools report bench/results/SESSION
-```
+1. State the hypothesis, baseline or algorithm opponents, relevant inputs and expected unaffected controls. Preview the selected plan and axis overrides before an expensive run:
 
-Both measurement commands accept `--out DIR` and require a new directory. Their default output is `bench/results/<timestamp>`. They snapshot the current sources and clean up their temporary worktree and build directory under `~/code/tessera-bench/`; `TESSERA_BENCH_WORK` overrides that location. Repository-internal symlinks are materialized; escaping or dangling links and directory cycles are rejected before building. Current sources may use absolute links to internal files. Baseline links must resolve inside an archive of the selected commit; absolute links into the live checkout are rejected. Results are retained. The lower-level commands below remain available for resumable algorithm sessions and custom investigations.
+   ```sh
+   pnpm -s tools plan local --types u64,row_u64 --distributions random,zipf2
+   ```
 
-### Working-tree comparisons
+   Use `local` for revision comparisons, `smoke` for a small algorithm comparison, or `release` for full coverage. Preview with the same preset and overrides you intend to measure.
+
+2. Record host and compiler conditions. Choose a CPU allowed by the host affinity policy. Prefer an idle machine, performance governor, disabled turbo/SMT and a pinned logical CPU; obtain operator approval before changing governor, turbo or SMT settings. Native opponents also need the [native prerequisites](#native-prerequisites).
+3. Run the selected command with those inputs:
+
+   ```sh
+   # Revision comparison; HEAD~1 must have a compatible API and harness.
+   pnpm tools compare commit HEAD~1 --types u64,row_u64 --distributions random,zipf2 --cpu 2
+
+   # Rust-only algorithm smoke comparison, including verification and reporting.
+   pnpm tools compare algorithms
+
+   # Full algorithm comparison, including native opponents and a second SIMD build.
+   pnpm tools compare algorithms --plan release --simd --cpu 2
+   ```
+
+   CPU 2 is an example, not a portable default. Both commands accept `--out DIR`, require a new directory and otherwise use `bench/results/<timestamp>`. Keep raw results and research harnesses outside Git. [Direct executable sessions](#direct-executable-sessions) support resuming algorithm groups and tuning sample duration or prepared-memory limits.
+
+4. Retain the resolved plan, source/build provenance, verification results and controls. Report tested coverage, environment, ratios, A/A ranges and result location. Identify partial, interrupted and unmeasured coverage explicitly. Investigate changes outside the controls, including apparently untouched cases; do not dismiss them as noise or tune source layout to one executable. The command contracts below define the scope of each result.
+
+## Additional source-attribution controls
+
+Algorithm comparisons from `compare algorithms` use the [paired timing contract](#timing-and-statistics) and report results for the measured inputs and environment. Attributing a gain to a source change rather than code placement additionally needs in-process revision comparisons and independent placement controls, as in the [engine measurements](../design/port.md). Process-level `compare commit` and continuous alerts alone do not provide that attribution evidence.
+
+`compare algorithms` compares registered implementations from the current source snapshot, not a baseline commit. `compare commit` accepts a baseline commit but builds two executables; its A/A pair repeats the baseline executable rather than an independently linked copy. The CLI does not automatically register both revisions and independent layout copies in one timing executable.
+
+Before adding a custom experiment, identify the exact unmet requirement, explain why existing plans, options or adapters cannot meet it, and obtain operator agreement. Prefer extending the maintained comparison pipeline so verification, provenance and reporting remain shared. Historical harnesses record past evidence, not the default procedure for new measurements.
+
+## Working-tree comparisons
+
+`tools compare commit` and `tools compare algorithms` accept `--out DIR` and require a new directory. Their default output is `bench/results/<timestamp>`. They snapshot the current sources and clean up their temporary worktree and build directory under `~/code/tessera-bench/`; `TESSERA_BENCH_WORK` overrides that location. Repository-internal symlinks are materialized; escaping or dangling links and directory cycles are rejected before building. Current sources may use absolute links to internal files. Baseline links must resolve inside an archive of the selected commit; absolute links into the live checkout are rejected. Results are retained. The [direct executable commands](#direct-executable-sessions) support resumable algorithm sessions and custom investigations.
 
 `compare commit [COMMIT]` defaults to `HEAD` and uses any resolvable local commit compatible with the current crate API, harness and lockfile. Both revisions are built from the current benchmark harness with one toolchain and the same features; the baseline substitutes only `rust/tessera-sort` from the named commit. Selected timed IDs must match. The `local` plan measures only `rust/u64/random/65536/s1/api`; override its axes or choose another plan explicitly, since each selected case runs 27 times across nine blocks. `--filter` optionally narrows the resulting timed IDs.
 
@@ -34,7 +66,6 @@ The output contains the resolved `plan.json`, `local.json`, `summaries.json`, `i
 Standard algorithm-report figures show fixed slices and aggregates, not every measured case. A selected-input panel is generated only when no standard panel can be drawn. Custom lengths omitted from those figures remain in Full results and `summaries.json`.
 
 The [tooling design](../design/benchmark-tooling.md) describes the module boundaries and [figure guide](benchmark-figures.md) explains the shared presentation layer.
-
 
 ## Experiment plans
 
@@ -49,9 +80,7 @@ All three workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). 
 
 `compare commit` defaults to `local`; `compare algorithms` defaults to `smoke`. The continuous executable embeds `continuous.toml` at build time, so its artifact carries the selection from the measured commit. Editing that file changes cloud coverage without editing the worker, publication workflow or case-registration code.
 
-A custom plan contains a union of products, followed by exclusions. These two files describe the same selection:
-
-::: code-group
+A custom plan contains a union of products, followed by exclusions. For example:
 
 ```toml [my-plan.toml]
 schema = 1
@@ -75,30 +104,7 @@ distributions = ["zipf2"]
 lengths = [1_000_000]
 ```
 
-```json [my-plan.json]
-{
-  "schema": 1,
-  "harness": "comparison",
-  "algorithms": ["glidesort", "radsort"],
-  "include": [
-    {
-      "types": ["u32", "u64"],
-      "distributions": ["random", "zipf2"],
-      "lengths": [65536, 1000000]
-    },
-    {
-      "types": ["row_u64"],
-      "distributions": ["d16"],
-      "lengths": [65536]
-    }
-  ],
-  "exclude": [
-    { "types": ["u32"], "distributions": ["zipf2"], "lengths": [1000000] }
-  ]
-}
-```
-
-:::
+JSON accepts the same decoded fields; use the exported schema rather than maintaining a second example.
 
 Values within an axis are alternatives; axes within a rule form a Cartesian product. `include` rules are unioned and duplicate inputs are measured once. Any matching `exclude` rule removes that combination. Omitted axes use the harness's catalog defaults when expanding inputs and match every value when excluding them. An empty choice array is invalid. Unknown fields and identities are errors, not ignored filters.
 
@@ -132,13 +138,17 @@ pnpm --silent tools plan --schema > benchmark-plan.schema.json
 
 The lower-level Rust binaries also accept `--plan FILE`; `--suite smoke|release` remains available for their built-in sessions.
 
-## Run a comparison
+## Native prerequisites
 
-The Rust competitors need Cargo's stable toolchain. Native competitors additionally need Linux x86-64 with glibc, Node.js 24, Clang with C++17 support, CMake, GNU binutils, and TBB headers (`libtbb-dev` on Debian/Ubuntu). The pinned IPS²Ra/IPS⁴o headers include TBB queue declarations even for their sequential entry points; the benchmark executables do not link TBB or OpenMP. Fetching sources is a separate step; building and measuring use the verified local sources without network access. The report requires Node.js 24 and `pnpm install --frozen-lockfile`.
+The Rust competitors need Cargo's stable toolchain. Native competitors additionally need Linux x86-64 with glibc, Node.js 24, Clang with C++17 support, CMake, GNU binutils, and TBB headers (`libtbb-dev` on Debian/Ubuntu). The pinned IPS²Ra/IPS⁴o headers include TBB queue declarations even for their sequential entry points; the benchmark executables do not link TBB or OpenMP. The CLI fetches and verifies sources before building; direct sessions use the separate fetch command below. Building and measuring use the verified local sources without network access. The report requires Node.js 24 and `pnpm install --frozen-lockfile`.
 
 For static Rust checks without the native toolchain or fetched sources, use `TESSERA_BENCH_CHECK_ONLY=1 cargo clippy --workspace --all-targets --all-features` or `TESSERA_BENCH_CHECK_ONLY=1 cargo doc --workspace --no-deps --all-features`. This mode omits native compilation and linker inputs, not the native-facing Rust code. Leave the variable unset for builds, tests and measurements that link native competitors.
 
 Native builds default to `clang` and `clang++`. For published comparisons, prefer Clang with the same LLVM major version reported by `rustc -vV`; check it against `clang --version`. Set `CC` and `CXX` to select versioned Clang executables or another compiler. The manifests and report record the actual compiler versions, including any LLVM version difference.
+
+## Direct executable sessions
+
+For normal comparisons, use `pnpm tools compare algorithms`. Use the binaries directly to resume completed groups, split a session across compatible directories, or set `--sample-ms` and `--memory-mib`. Keep default and Portable SIMD builds separate. The following commands show a native release session; omit `compare-native` and the fetch step for Rust-only opponents.
 
 ```sh
 pnpm tools native fetch
@@ -153,7 +163,7 @@ taskset -c 2 target/compare-default/release/compare run \
 pnpm tools report bench/results/release
 ```
 
-Choose a CPU allowed by the machine's affinity policy. The recommended conditions are an idle machine, the performance governor, turbo and SMT disabled, and a run pinned to one logical CPU. The runner records these conditions and leaves host configuration to the operator.
+CPU 2 is illustrative; use the [host conditions](#run-an-experiment) chosen for the experiment.
 
 `compare run` first invokes the sibling `memory` executable for any missing cases. Memory can also be measured separately:
 
@@ -168,11 +178,11 @@ taskset -c 2 target/compare-default/release/memory \
 pnpm tools report bench/results/part-1 bench/results/part-2
 ```
 
-The report requires the complete suite. `--partial` generates a report of the completed groups during development. Results go into the first directory's `report/`, with Markdown, five SVG figures where the required cases are present, and machine-readable summaries. `bmf.json` in that directory can be uploaded with the Bencher CLI. The report reads only the result directories.
+The report requires the complete suite. `--partial` generates a report of the completed groups during development. Results go into the first directory's `report/`, with Markdown, SVG figures where the required cases are present, and machine-readable summaries. `bmf.json` in that directory can be uploaded with the Bencher CLI. The report reads only the result directories.
 
-For a Rust-only comparison, omit `compare-native` and the fetch step. `list` derives supported types from the same adapters used by `validate`, timing and memory measurement.
+`list` derives supported types from the same adapters used by `validate`, timing and memory measurement.
 
-## Portable SIMD
+### Portable SIMD
 
 Build the Portable SIMD executable separately so the default executable remains available:
 
@@ -244,23 +254,7 @@ Tests pin the seed-one hashes of every distribution. Float validation additional
 
 Rust competitors are optional dependencies behind `compare`, pinned to exact versions. Native sources are pinned by repository, commit, archive SHA-256 and license in `native/sources.toml`; `bench/rust/native/fetch.ts` verifies the archives and the build verifies the extracted trees. Third-party sources stay in ignored `bench/vendor/`.
 
-| Variant | Entry point | Stable | Supported tasks |
-|---|---|---|---|
-| `tessera` | `stable_sort`, `stable_sort_by_key` | yes | all |
-| `std-stable` | standard stable sort, float total order | yes | all |
-| `radsort` 0.1.1 | `sort_by_key` | yes | all, including owned records |
-| `voracious` 1.2.0 | `voracious_stable_sort` | yes | `u32`, `u64` keys |
-| `glidesort` 0.1.2 | `sort_by` | yes | all |
-| `glidesort-sqrt` | `sort_with_buffer_by` | yes | all; buffer limited to Tessera's measured peak |
-| `std-unstable` | standard unstable sort, float total order | no | all |
-| `rdst` 0.20.14 | `radix_sort_unstable`, default features disabled | no | keys, rows, wide records |
-| `clausecker` | `radixsort_permuted.c` | yes | `row_u32` |
-| `fluxsort` | typed upstream instantiations | yes | keys, rows, wide records |
-| `ips2ra` | sequential `ips2ra::sort` | no | keys, rows, wide records |
-| `ips4o` | sequential `ips4o::sort` | no | keys, rows, wide records |
-| `vqsort` | Highway `VQSort` with runtime dispatch | no | `u32`, `u64` keys |
-| `x86simdsort` | `qsort` with runtime dispatch | no | `u32`, `u64` keys |
-| `crumsort` | typed upstream instantiations | no | keys, rows, wide records |
+The [catalog](../../bench/catalog.toml) owns variant identities, stability and display names; executable adapters in [variant.rs](../../bench/rust/src/comparison/variant.rs) own actual capabilities. Use the runner's `list` output for supported tasks rather than maintaining a second matrix here.
 
 Voracious 1.2.0's record path fails the stable-reference check on duplicate keys, and its float path uses partial comparison for small inputs. Those tasks are unsupported by this adapter. VQSort and x86-simd-sort's floating-point interfaces do not provide the required NaN payload and signed-zero total order; their pair interfaces use layouts different from the row tasks.
 
@@ -278,7 +272,7 @@ Each case has nine blocks. Each block shuffles all supported variants and two Te
 
 For each block, a variant's ratio is its time per sort divided by the mean of the two Tessera times per sort. The report gives the median ratio, per-block minimum and maximum, and median nanoseconds per element. The A/A noise range is the minimum and maximum of both Tessera times divided by their block mean, across all nine blocks. This uses the same denominator as the variant ratios and is unchanged when the two control labels are exchanged. A variant is called faster or slower only when at least eight blocks agree on that direction and its median is outside that range. For example, controls of 100 and 120 give a mean of 110 and a noise range of 100/110 to 120/110; an opponent time of 109 remains within noise. The `tessera-aa` row separately reports A2 / A1, with its own per-block bounds.
 
-Each figure states its finding as its title, says under it what is plotted, and draws one named row per item on one horizontal axis. Words appear once, in the title, column heads and axis ends; cells hold only numbers. Colour gives the kind of sort: blue for Tessera, orange for the other radix sorts and grey for comparison sorts, SIMD sorts included. When the Portable SIMD build was measured, it is a hollow blue ring in every speed figure, drawn over Tessera's dot so that equal speeds show as a ring around it. Speed is relative to `slice::sort` within the same blocks, on an axis symmetric in doublings around it; values beyond 32× point off the edge as triangles. The ranking gives each sort's speed on 1M `u64` keys as a geometric mean over the ten baseline distributions. The 1M per-type input figures draw every eligible sort on each selected distribution as a dot and give Tessera's speed and rank, including all newly added distributions. Keys admit every sort; records rank against stable sorts only. The short-input figure shows 1,000 `u64` keys. The element-type aggregate retains the ten baseline distributions at 1M, so types share the same input set; neither aggregate claims to summarize the entire expanded suite. The memory figure gives each sort's peak extra heap on 10M `u64` keys, a ring for the random shape and a dot for the worst across all selected distributions, against the input size. Tables under the figures carry Tessera's time per key and the other lengths. Every figure has a table of plotted values.
+The standard report panels show the 1M-key ranking, 1M and 1,000-key distribution comparisons, 1M element-type comparison, 1M per-type input panels and 10M-key peak heap. Ranking and cross-type geometric means use the ten common baseline distributions; per-type panels show every selected distribution at 1M, including targeted additions. Memory maxima include every selected 10M `u64` distribution. Keys admit stable and unstable opponents; record rankings admit stable opponents only. Speed panels anchor to `slice::sort` within the same blocks, with Portable SIMD shown separately. Every figure includes plotted values; [the figure guide](benchmark-figures.md) owns visual encoding and layout. Custom cases remain in full results even when no standard panel includes them.
 
 Continuous builds apply branch alignment to both feature configurations and use static linking, as described in the [continuous benchmark guide](continuous-benchmarks.md).
 

@@ -1,6 +1,6 @@
 # Comparison benchmark design
 
-The comparison is a local measurement pipeline: adapters produce verified block samples, a separate process measures allocations, and an offline TypeScript report computes every statistic and figure. Commands, inputs and measurement contracts are in [Benchmarking](../development/benchmarking.md). [Decision 0037](../decisions/0037-local-comparison-benchmarks.md) records the choice of environment.
+The comparison is a local measurement pipeline: adapters produce verified block samples, a separate process measures allocations, and an offline TypeScript report computes every statistic and figure. Commands, inputs and measurement contracts are in [Benchmarking](../development/benchmarking.md). Release sessions run on one maintainer-controlled machine: hosted job limits must not determine groups or absolute-time comparisons.
 
 ## Boundaries
 

@@ -1,16 +1,21 @@
 # Documentation
 
-These files are also published as the documentation site, built from this directory ([how the site works](development/docs-site.md)). The API reference is the crate documentation (`cargo doc --open`, or docs.rs once the crate is published). The ordering rules shared by every language are in [`conformance/semantics.md`](../conformance/semantics.md).
+Choose a task and read its topic directly. Procedures, contracts and explanations share the same sources for repository readers, agents and the public site. API contracts also live in Rust doctests (`cargo doc --open`).
 
-| Directory | For | Contents |
-|---|---|---|
-| [`guide/`](guide/) | Library users | [Getting started](guide/getting-started.md) |
-| [`explain/`](explain/index.md) | Anyone learning the algorithm | [How Tessera works](explain/index.md), in reading order, with interactive figures |
-| [`design/`](design/) | Readers of the engine source | [Engine design](design/engine.md), the [port from the research prototype](design/port.md), [comparison benchmarks](design/comparison-benchmarks.md) and [benchmark tooling](design/benchmark-tooling.md) |
-| [`development/`](development/) | Contributors | [Repository CLI](development/tooling.md), [benchmark protocol](development/benchmarking.md), [figure guide](development/benchmark-figures.md), [continuous benchmarks](development/continuous-benchmarks.md), [continuous integration](development/ci.md) and the [documentation site](development/docs-site.md) |
-| [`decisions/`](decisions/README.md) | Anyone asking why | Decision records: context, decision and consequences |
-| [`proposals/`](proposals/) | Reviewers of planned work | [Python binding](proposals/python-binding.md) |
+| Task | Start here |
+|---|---|
+| Use the library | [Getting started](guide/getting-started.md) |
+| Check ordering, panic or memory guarantees | [Shared semantics](../conformance/semantics.md) |
+| Change the engine | [Procedure and validation](../CONTRIBUTING.md#engine-changes), [engine reference](design/engine.md), [semantics](../conformance/semantics.md) |
+| Learn the algorithm | [Explanation and reading order](explain/index.md), with interactive figures |
+| Compare source revisions or algorithms | [Command capabilities and measurement procedure](development/benchmarking.md#command-capabilities); [engine evidence](design/port.md) for performance-sensitive engine decisions |
+| Regenerate or interpret a report | [Report command](development/benchmarking.md#command-capabilities), [timing](development/benchmarking.md#timing-and-statistics) and [result contracts](development/benchmarking.md#results-and-provenance) when needed |
+| Read current-head PR performance feedback | [PR feedback](development/continuous-benchmarks.md#read-feedback-from-a-pr) |
+| Investigate main/history or maintain tracking | [Existing evidence](development/continuous-benchmarks.md#read-main-and-history), tracking internals on the same page |
+| Use repository and CI commands | [CLI reference](development/tooling.md) |
+| Change benchmark tooling | [Architecture](design/benchmark-tooling.md); [comparison harness](design/comparison-benchmarks.md) or [figures](development/benchmark-figures.md) when relevant |
+| Maintain documentation | [Contribution rules](../CONTRIBUTING.md#documentation), [site guide](development/docs-site.md) |
+| Contribute, change CI or release | [Contributing](../CONTRIBUTING.md), [CI](development/ci.md), [releases](../RELEASING.md) |
+| Work on future capabilities | [Roadmap](../ROADMAP.md), [Python proposal](proposals/python-binding.md) (not implemented) |
 
-Planned work is tracked in [`ROADMAP.md`](../ROADMAP.md), and release rules are in [`RELEASING.md`](../RELEASING.md).
-
-A proposal moves out of `proposals/` when it is implemented: its user-facing part becomes a guide, its internals become a design document, and the choices it settled become decision records.
+Current rules and their rationale live together in these topics. Superseded decisions remain in Git history, not the active reading path.

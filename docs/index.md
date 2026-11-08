@@ -33,3 +33,7 @@ features:
     details: Integers up to 128 bits, f32 and f64 in total_cmp order, and Reverse for descending order that stays stable.
     link: /explain/keys
 ---
+
+<!-- SPDX-License-Identifier: BSD-2-Clause -->
+
+[Use the library](guide/getting-started.md), [learn the algorithm](explain/index.md), or [choose a development task](README.md).

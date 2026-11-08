@@ -373,7 +373,7 @@ impl<T> Scratch<T> {
 ///
 /// `CACHED` stores each record's bucket ID during a tile pass's histogram so
 /// the scatter never calls the key function again; it is `true` for user key
-/// functions and `false` for library-encoded keys (decision 0001b).
+/// functions and `false` for library-encoded keys.
 struct Sorter<'a, T, E, const CACHED: bool> {
     scratch: &'a mut Scratch<T>,
     extractor: &'a mut E,
@@ -509,7 +509,7 @@ enum Order {
     Unsorted,
 }
 
-/// Number of pairs the strided order gate samples before confirming direction.
+/// Target pair count used to choose the order gate's stride.
 const ORDER_SAMPLES: usize = 4096;
 
 /// Rejects unordered input with strided adjacent pairs, then confirms order

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type MarkdownRenderer } from "vitepress";
@@ -15,8 +15,7 @@ const sharedPages = new Set([
   "RELEASING.md",
   "CONTRIBUTING.md",
 ]);
-// `docs/README.md` indexes the directory for GitHub readers; the site's home
-// page and sidebar replace it.
+// The task index is for repository readers; the site has its own home page.
 const notPages = new Set(["docs/README.md"]);
 
 function isPage(path: string): boolean {
@@ -126,8 +125,7 @@ export default defineConfig({
       {
         text: "Development",
         link: "/design/engine",
-        activeMatch:
-          "^/(design|development|decisions|proposals)/|^/(CONTRIBUTING|RELEASING|ROADMAP)",
+        activeMatch: "^/(design|development|proposals)/|^/(CONTRIBUTING|RELEASING|ROADMAP)",
       },
     ],
     sidebar: {
@@ -175,16 +173,7 @@ function guideSidebar() {
   ];
 }
 
-function firstHeading(path: string): string {
-  const heading = readFileSync(join(repoRoot, path), "utf8").match(/^# (.+)$/m);
-  return heading ? heading[1] : path;
-}
-
 function developmentSidebar() {
-  const decisions = allMarkdown
-    .filter((p) => /^docs\/decisions\/\d{4}[a-z]?-.*\.md$/.test(p))
-    .sort()
-    .map((p) => ({ text: firstHeading(p), link: `/${sitePath(p).replace(/\.md$/, "")}` }));
   return [
     {
       text: "Design",
@@ -213,11 +202,6 @@ function developmentSidebar() {
         { text: "Roadmap", link: "/ROADMAP" },
         { text: "Python binding proposal", link: "/proposals/python-binding" },
       ],
-    },
-    {
-      text: "Decision records",
-      collapsed: true,
-      items: [{ text: "Index", link: "/decisions/" }, ...decisions],
     },
   ];
 }

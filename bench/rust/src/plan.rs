@@ -24,6 +24,9 @@ pub(crate) struct Algorithm {
     pub(crate) stable: bool,
     #[cfg(feature = "compare")]
     pub(crate) adapter: String,
+    #[cfg(feature = "compare")]
+    #[serde(default)]
+    pub(crate) threads: Option<usize>,
 }
 /// A record's identity and storage width.
 #[derive(Deserialize)]
@@ -316,6 +319,7 @@ mod tests {
         for (text, expected) in [
             (include_str!("../../plans/smoke.toml"), 125),
             (include_str!("../../plans/release.toml"), 381),
+            (include_str!("../../plans/parallel.toml"), 16),
         ] {
             assert_eq!(
                 Plan::parse(text, "comparison")

@@ -12,7 +12,19 @@ fn memory_resumes_missing_adapters() {
         std::env::temp_dir().join(format!("tessera-memory-resume-{}", std::process::id()));
     fs::create_dir_all(&directory).unwrap();
     let plan = directory.join("plan.json");
-    fs::write(&plan, r#"{"schema":1,"harness":"comparison","algorithms":["tessera","std-stable"],"include":[{"types":["u64"],"distributions":["random"],"lengths":[49]}]}"#).unwrap();
+    let mut algorithms = vec!["tessera", "std-stable"];
+    if cfg!(feature = "rayon") {
+        algorithms.extend(["tessera-par-8", "rayon-stable-8"]);
+    }
+    fs::write(
+        &plan,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": 1, "harness": "comparison", "algorithms": algorithms,
+            "include": [{"types": ["u64"], "distributions": ["random"], "lengths": [49]}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     let measure = || {
         let output = Command::new(env!("CARGO_BIN_EXE_compare"))
             .arg("run")
@@ -36,7 +48,7 @@ fn memory_resumes_missing_adapters() {
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .collect();
-    assert_eq!(rows.len(), 2);
+    assert_eq!(rows.len(), algorithms.len());
     let tessera = rows.iter().find(|row| row["variant"] == "tessera").unwrap();
     fs::write(&journal, format!("{tessera}\n{{\"partial\":")).unwrap();
     let records = |path| {
@@ -50,5 +62,41 @@ fn memory_resumes_missing_adapters() {
     measure();
     assert_eq!(fs::read_to_string(&journal).unwrap(), original);
     assert_eq!(records(directory.join("blocks.jsonl")), blocks);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(feature = "rayon")]
+#[test]
+fn parallel_adapters_validate_records() {
+    let directory =
+        std::env::temp_dir().join(format!("tessera-parallel-validate-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    let plan = directory.join("plan.json");
+    fs::write(
+        &plan,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": 1, "harness": "comparison",
+            "algorithms": ["tessera-par-8", "rayon-stable-8"],
+            "include": [{
+                "types": ["f64", "row_u64", "record128", "owned"],
+                "distributions": ["random", "d16"], "lengths": [131_073]
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_compare"))
+        .arg("validate")
+        .arg("--plan")
+        .arg(&plan)
+        .arg("--out")
+        .arg(&directory)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     fs::remove_dir_all(directory).unwrap();
 }

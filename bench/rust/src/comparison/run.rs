@@ -29,7 +29,7 @@ pub(super) fn measure_batch(k: &mut dyn Kernel, batch: usize) -> Result<u64, Str
     k.run_batch();
     let elapsed = start.elapsed().as_nanos() as u64;
     k.check()?;
-    super::host::check_threads()?;
+    super::host::check_threads(k.worker_threads())?;
     Ok(elapsed.max(1))
 }
 /// Chooses a batch from a warm-up timing and the prepared-memory limit.

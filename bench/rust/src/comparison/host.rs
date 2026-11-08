@@ -75,15 +75,17 @@ pub(super) fn observe_group(group: &str, phase: &str) -> Value {
         "temperatures_millidegrees": temperatures,
     })
 }
-/// Rejects a Linux measurement that started additional process threads.
-pub(super) fn check_threads() -> Result<(), String> {
+/// Rejects threads outside the adapter's explicitly owned worker pool.
+pub(super) fn check_threads(workers: usize) -> Result<(), String> {
     if cfg!(target_os = "linux")
         && fs::read_dir("/proc/self/task")
             .map_err(|e| e.to_string())?
             .count()
-            != 1
+            != 1 + workers
     {
-        return Err("variant started additional threads".into());
+        return Err(format!(
+            "variant thread count differs from its {workers}-worker budget"
+        ));
     }
     Ok(())
 }

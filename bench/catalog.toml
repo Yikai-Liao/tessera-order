@@ -19,6 +19,14 @@ algorithms = [
   { id = "x86simdsort", label = "x86simdsort", stable = false, family = "SIMD", adapter = "native" },
   { id = "crumsort", label = "crumsort", stable = false, family = "comparison", adapter = "native" },
   { id = "duckdb", label = "DuckDB 1.4.0 kernel", stable = false, family = "radix", adapter = "native", detail = "Vergesort + Ska + pdqsort", description = "single-threaded raw-key kernel; no SQL encoding or external merge" },
+  { id = "tessera-par-1", label = "Tessera · 1 thread", stable = true, family = "radix", adapter = "tessera-par", threads = 1 },
+  { id = "tessera-par-2", label = "Tessera · 2 threads", stable = true, family = "radix", adapter = "tessera-par", threads = 2 },
+  { id = "tessera-par-4", label = "Tessera · 4 threads", stable = true, family = "radix", adapter = "tessera-par", threads = 4 },
+  { id = "tessera-par-8", label = "Tessera · 8 threads", stable = true, family = "radix", adapter = "tessera-par", threads = 8 },
+  { id = "rayon-stable-1", label = "Rayon stable · 1 thread", stable = true, family = "comparison", adapter = "rayon-stable", threads = 1 },
+  { id = "rayon-stable-2", label = "Rayon stable · 2 threads", stable = true, family = "comparison", adapter = "rayon-stable", threads = 2 },
+  { id = "rayon-stable-4", label = "Rayon stable · 4 threads", stable = true, family = "comparison", adapter = "rayon-stable", threads = 4 },
+  { id = "rayon-stable-8", label = "Rayon stable · 8 threads", stable = true, family = "comparison", adapter = "rayon-stable", threads = 8 },
 ]
 
 types = [

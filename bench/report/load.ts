@@ -76,6 +76,7 @@ function parseManifest(value: unknown): Manifest {
     assertObject(v);
     assertString(v.name);
     if (typeof v.stable !== "boolean" || names.has(v.name)) throw new Error("invalid variant plan");
+    if (v.threads !== undefined && v.threads !== null) assertInteger(v.threads, 1);
     names.add(v.name);
   }
   const ids = new Set<string>();

@@ -121,6 +121,11 @@ async function prepareComparison(options: ReleaseOptions) {
       const features = [
         "compare",
         ...(native && !portable ? ["compare-native"] : []),
+        ...(plan.algorithms.some((id) =>
+          catalog.algorithms.some((entry) => entry.id === id && entry.threads),
+        )
+          ? ["rayon"]
+          : []),
         ...(portable ? ["portable-simd"] : []),
       ];
       const name = portable ? "portable-simd" : "default";

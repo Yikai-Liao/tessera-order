@@ -99,6 +99,8 @@ mod tests {
         let variant = Variant {
             name: "duckdb",
             stable: false,
+            adapter: "native",
+            threads: None,
         };
         // Exercise both sides of upstream small-sort and radix thresholds.
         let plan = crate::plan::Plan::parse(

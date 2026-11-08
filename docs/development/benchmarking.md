@@ -10,6 +10,7 @@ Run `pnpm tools` from the repository root with Node.js 24, the pinned pnpm and R
 |---|---|---|
 | Compare working-tree code with a commit | `pnpm tools compare commit COMMIT` | Two revision builds, nine rotating baseline/control/current process blocks, paired process-level A/A, verification, provenance and a report |
 | Compare algorithms | `pnpm tools compare algorithms` | Registered algorithms in one timing executable per configuration, nine shuffled blocks, two Tessera calls for A/A, output verification, allocation measurement and a report |
+| Local parallel comparison | `pnpm tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` | Serial controls, Tessera-8 and Rayon stable-8 in the shared paired harness; choose a CPU list appropriate to the host |
 | Full algorithm comparison | `pnpm tools compare algorithms --plan release --simd` | Release coverage, native opponents and a separate Portable SIMD build |
 | Resume an interrupted algorithm comparison | `pnpm tools compare resume DIR` | Recorded selection, settings and exact retained builds; no rebuilding |
 | Preview or customize inputs | `pnpm -s tools plan NAME` | Validated selection without compiling or measuring |
@@ -78,6 +79,7 @@ All three workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). 
 | `continuous` | `smoke` | The 50 regression inputs and 50 timed IDs documented in the [continuous guide](continuous-benchmarks.md#cases) |
 | `smoke` | `comparison` | Rust competitors, 125 inputs at 1,000 records |
 | `release` | `comparison` | Rust and native competitors, 381 inputs across four lengths |
+| `parallel` | `comparison` | Serial controls, Tessera-8 and Rayon stable-8; 16 inputs at 1M records |
 
 `compare commit` defaults to `local`; `compare algorithms` defaults to `smoke`. The continuous executable embeds `continuous.toml` at build time, so its artifact carries the selection from the measured commit. Editing that file changes cloud coverage without editing the worker, publication workflow or case-registration code.
 
@@ -113,7 +115,7 @@ The selectable case axes are `types`, `distributions` and `lengths`. Lengths are
 
 The `smoke` harness measures Tessera through its public sorting functions; its supported record representations and distributions are under `smoke` in [the catalog](../../bench/catalog.toml). The `comparison` harness measures supported algorithm/type pairs; its default types, distributions and lengths are under `comparison`. Criterion IDs end in `/api`, while comparison input IDs use `type/distribution/length/s1`. Neither harness has a mode selector. Inputs always use seed 1. A plan that selects nothing fails before timing.
 
-Algorithm comparisons retain `tessera`, `std-stable` and the separately timed Tessera A/A control, even when only additional opponents are named. Native algorithms automatically enable source acquisition and native compilation. Portable SIMD is requested with `--simd`; that additional build measures the shared Tessera and standard-library anchors, while competitors run in the default build. Unsupported adapter/type pairs are omitted from the manifest's per-input capabilities, not recorded as measurements.
+Algorithm comparisons retain `tessera`, `std-stable` and the separately timed Tessera A/A control, even when only additional opponents are named. Native algorithms automatically enable source acquisition and native compilation. Portable SIMD is requested with `--simd`; that additional build measures the shared Tessera and standard-library anchors, plus any selected parallel adapters; other competitors run in the default build. Unsupported adapter/type pairs are omitted from the manifest's per-input capabilities, not recorded as measurements.
 
 ```sh
 # Preview a resolved plan without compiling or timing.
@@ -138,6 +140,29 @@ pnpm --silent tools plan --schema > benchmark-plan.schema.json
 `--plan` accepts a preset name or a `.toml`/`.json` path relative to the current directory. `plan` prints TOML by default; `--format json` selects JSON. `--schema` always emits JSON Schema, which describes the decoded model for either format. The comma-separated CLI axes replace the corresponding axis in every inclusion rule; exclusions remain in force. `--algorithms` replaces the opponent list before required controls are added. Preview commands print the resolved selection, not a list of code-relative case IDs; the native harness expands those IDs using the measured code. Every result directory retains the normalized `plan.json`, regardless of the input encoding, and algorithm manifests retain the resolved case and capability lists. A selected subset is a complete experiment in its own right; `--group` instead runs one resumable group from that plan and marks the report partial.
 
 The lower-level Rust binaries also accept `--plan FILE`; `--suite smoke|release` remains available for their built-in sessions.
+
+## Local parallel comparisons
+
+The `parallel` plan uses the same preparation, verification, nine shuffled blocks, serial Tessera A/A pair, memory worker, retained binaries, resume and reports as other algorithm comparisons. It automatically enables the benchmark's `rayon` feature. Cloud continuous scheduling is unchanged; its single-CPU workers do not measure this plan.
+
+Start with one representative input while iterating, using one logical CPU per physical core. CPU numbering varies by host; check `lscpu -e=CPU,CORE` before choosing a mask. On the Ryzen 7 8845H development host, adjacent CPU pairs are SMT siblings:
+
+```sh
+pnpm tools plan parallel --types row_u64 --distributions random --lengths 10000000
+pnpm tools compare algorithms --plan parallel \
+  --types row_u64 --distributions random --lengths 10000000 \
+  --cpu 0,2,4,6,8,10,12,14 --out /tmp/tessera-parallel
+pnpm tools compare resume /tmp/tessera-parallel
+pnpm tools report /tmp/tessera-parallel
+```
+
+The default opponents are `tessera-par-8` and `rayon-stable-8`, plus the required serial controls. With `--simd`, the parallel adapters also run in the additional Portable SIMD build, using the same pool widths. One-, two- and four-worker versions are explicit algorithm choices, for example `--algorithms tessera-par-1,tessera-par-2,tessera-par-4,tessera-par-8`; they do not run by default. Type, distribution and length overrides work unchanged.
+
+Each parallel adapter owns a pool of the recorded width. Pool construction and worker warm-up are outside timing and allocation counting; each sort includes `ThreadPool::install` and the complete public sort call. Workers inherit the process affinity mask; they are not individually pinned. Pools join all workers before the next adapter. Linux thread checks permit only the selected pool's workers plus the caller, preserving the one-thread check for sequential opponents. Pool widths and the effective affinity/topology are retained in the manifest and host fingerprint. Enough allowed CPUs and physical cores are the operator's responsibility; oversubscribed runs are not scaling evidence.
+
+The report's ratio is variant time divided by the paired serial Tessera time; its inverse is whole-call speedup over the serial API. The A/A range controls the serial baseline, not parallel-only variability. Source-change attribution still needs the [additional controls](#additional-source-attribution-controls); this plan does not provide an independent placement control or a separate A/A pair for each parallel opponent.
+
+Peak extra heap bytes count allocations inside the sort, not pre-existing pool/runtime storage or thread stacks. The existing memory coverage limits still apply. Inputs below the parallel cutoff and one-worker Tessera pools exercise the serial fallback; small inputs check integration, not useful parallel speedup.
 
 ## Native prerequisites
 
@@ -210,7 +235,7 @@ taskset -c 2 target/compare-simd/release/compare run \
 pnpm tools report bench/results/release
 ```
 
-This executable measures Tessera twice and `slice::sort` on the same cases. Competitors are measured in the default build. Each build has its own A/A control; `slice::sort` anchors the ranking to the same scale. The report records the absolute anchor drift between processes and flags differences above 5%. Both builds belong to the same session and use the same source revision, toolchain and target flags.
+This executable measures Tessera twice and `slice::sort` on the same cases, plus selected parallel adapters when the `rayon` feature is also enabled. Other competitors are measured in the default build. Each build has its own A/A control; `slice::sort` anchors the ranking to the same scale. The report records the absolute anchor drift between processes and flags differences above 5%. Both builds belong to the same session and use the same source revision, toolchain and target flags.
 
 ## Cases and suites
 

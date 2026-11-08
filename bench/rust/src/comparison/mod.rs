@@ -108,7 +108,7 @@ impl Options {
                 && options.plan_path.is_some()
                 && !available.iter().any(|entry| entry.name == id)
             {
-                return Err(format!("algorithm {id} is unavailable; enable compare-native").into());
+                return Err(format!("algorithm {id} is unavailable; enable the required compare-native or rayon feature").into());
             }
         }
         Ok(options)
@@ -219,7 +219,9 @@ fn create_manifest(options: &Options, cases: &[InputCase]) -> Value {
         options
             .variants()
             .iter()
-            .map(|v| json!({"name":v.name,"stable":v.stable}))
+            .map(
+                |v| json!({"name":v.name,"stable":v.stable,"adapter":v.adapter,"threads":v.threads})
+            )
             .collect::<Vec<_>>()
     );
     #[cfg(feature = "compare-native")]
@@ -514,7 +516,7 @@ fn measure_memory(options: &Options, cases: &[InputCase]) -> Result<()> {
                 let peak = super::allocation::end();
                 k.check()
                     .map_err(|e| format!("{} {}: {e}", case.id(), v.name))?;
-                host::check_threads()?;
+                host::check_threads(k.worker_threads())?;
                 let row = json!({"case_id":case.id(),"variant":v.name,"build":BUILD,"peak_extra_bytes":peak,"verified":true});
                 append_record(&mut file, &row)?;
                 rows.push(row);

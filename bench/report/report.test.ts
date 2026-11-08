@@ -67,6 +67,29 @@ test("paired ratios respect noise", () => {
   );
 });
 
+test("parallel Tessera is an opponent, not an A/A control", () => {
+  const dataset = createFixture();
+  const id = "u64/random/1000/s1";
+  for (const manifest of dataset.manifests.values())
+    manifest.variants.push({ name: "tessera-par-8", stable: true, threads: 8 });
+  for (const sample of dataset.samples) {
+    if (sample.variant !== "std-stable") continue;
+    sample.variant = "tessera-par-8";
+    const baseline = dataset.samples.find(
+      (s) => s.variant === "tessera" && s.case_id === sample.case_id && s.block === sample.block,
+    )!;
+    sample.elapsed_ns = Math.round(baseline.elapsed_ns / 4);
+    sample.batch = baseline.batch;
+  }
+  const summary = summarize(dataset).get(measurementId("default", id, "tessera-par-8"))!;
+  assert.equal(summary.stable, true);
+  assert.equal(summary.verdict, "faster");
+  dataset.host.affinity = "0,2,4,6,8,10,12,14";
+  const warnings = collectWarnings(dataset);
+  assert.ok(warnings.some((warning) => warning.includes("requested physical cores")));
+  assert.ok(warnings.every((warning) => !warning.includes("recommended one logical CPU")));
+});
+
 test("A/A verdicts use the paired mean and survive swapping control labels", () => {
   const dataset = createFixture();
   const id = "u64/random/1000/s1";

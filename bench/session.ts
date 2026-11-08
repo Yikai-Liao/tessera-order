@@ -5,13 +5,14 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { z } from "zod";
+import { cpuListSchema } from "./affinity.ts";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const schema = z.strictObject({
   schema: z.literal(1),
   platform: z.string(),
   planSha256: digest,
-  cpu: z.string().regex(/^\d+$/).optional(),
+  cpu: cpuListSchema.optional(),
   group: z.string().optional(),
   sampleMs: z.number().int().positive(),
   memoryMib: z.number().int().positive(),

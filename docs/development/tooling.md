@@ -10,6 +10,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 |---|---|
 | Define or preview an experiment | `pnpm -s tools plan local` |
 | Compare uncommitted sources with a commit | `pnpm -s tools compare commit HEAD` |
+| Compare local 8-worker sorting | `pnpm tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` (choose the host's physical-core mask) |
 | Compare sorting algorithms | `pnpm -s tools compare algorithms --plan smoke` |
 | Resume a prepared algorithm comparison | `pnpm -s tools compare resume bench/results/SESSION` |
 | Reproduce the native comparison CI job | `pnpm -s tools check --native` |
@@ -25,7 +26,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Fetch and verify pinned native sources | `pnpm -s tools native fetch` |
 | Validate a release tag | `pnpm -s tools release verify --tag rust/v0.1.0` |
 
-Use a task's `--help` for its options. `plan` and both comparison tasks share the [experiment selection model](benchmarking.md#experiment-plans). `check` is a functional smoke check with a one-millisecond sample target, not a performance experiment. It runs harness tests, validates the smoke suite, measures one `u64/random` group, verifies that native programs do not link parallel runtimes when `--native` is selected, and generates a partial report.
+Use a task's `--help` for its options. Local comparisons accept a Linux CPU list or range with `--cpu`; the [parallel measurement contract](benchmarking.md#local-parallel-comparisons) explains pool timing, affinity and memory exclusions. `plan` and both comparison tasks share the [experiment selection model](benchmarking.md#experiment-plans). `check` is a functional smoke check with a one-millisecond sample target, not a performance experiment. It runs harness tests, validates the smoke suite, measures one `u64/random` group, verifies that native programs do not link parallel runtimes when `--native` is selected, and generates a partial report.
 
 ## Agent output
 

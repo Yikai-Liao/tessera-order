@@ -7,12 +7,13 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
-rayon = ["tessera-sort/rayon"]
+rayon = ["tessera-sort/rayon", "dep:rayon"]
 compare = ["dep:radsort", "dep:rdst", "dep:glidesort", "dep:voracious_radix_sort", "dep:sha2", "dep:fs2"]
 compare-native = ["compare"]
 portable-simd = ["tessera-sort/portable-simd"]
 
 [dependencies]
+rayon = { version = "1.12", optional = true }
 tessera-sort = { path = "../../rust/tessera-sort" }
 radsort = { version = "=0.1.1", optional = true }
 rdst = { version = "=0.20.14", default-features = false, optional = true }
@@ -37,17 +38,11 @@ name = "memory"
 required-features = ["compare"]
 
 [dev-dependencies]
-rayon = "1.12"
 criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
 
 [[bench]]
 name = "smoke"
 harness = false
-
-[[bench]]
-name = "parallel"
-harness = false
-required-features = ["rayon"]
 
 [lints]
 workspace = true

@@ -15,6 +15,15 @@ const fixture = decodeConfig(
   "selection.fixture.toml",
 ) as { plan: Record<string, unknown> };
 
+test("parallel iteration defaults to eight workers only", async () => {
+  assert.deepEqual((await loadPlan("parallel")).algorithms, [
+    "tessera",
+    "std-stable",
+    "tessera-par-8",
+    "rayon-stable-8",
+  ]);
+});
+
 test("the native selection fixture validates", () => {
   assert.equal(parsePlan(fixture.plan).harness, "smoke");
 });
@@ -22,7 +31,7 @@ test("the native selection fixture validates", () => {
 test("file formats share validation", async () => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-plan-"));
   try {
-    for (const preset of ["local", "continuous", "smoke", "release"]) {
+    for (const preset of ["local", "continuous", "smoke", "release", "parallel"]) {
       const expected = await loadPlan(preset);
       for (const [extension, encode] of [
         ["json", (value: unknown) => JSON.stringify(value)],
@@ -45,7 +54,7 @@ test("file formats share validation", async () => {
 });
 
 test("presets validate and overrides replace axes", async () => {
-  for (const preset of ["local", "continuous", "smoke", "release"])
+  for (const preset of ["local", "continuous", "smoke", "release", "parallel"])
     assert.ok((await loadPlan(preset)).algorithms.includes("tessera"));
   const plan = await loadPlan("local", {
     types: ["u64", "row_u64"],

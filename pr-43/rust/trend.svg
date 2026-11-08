@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 292" width="720" height="292" role="img" aria-labelledby="t d">
-<title id="t">PR benchmark history: Default +0.0% run time over 1 runs; Portable SIMD +0.0% run time over 1 runs</title>
-<desc id="d">Overall: Default +0.5%; Portable SIMD +0.7% | rust/u64/equal/65536/s1/api: Default +5.3%; Portable SIMD +4.5% | rust/u64/random/49/s1/api: Default −0.1%; Portable SIMD +7.3%</desc>
+<title id="t">PR benchmark history: Default −0.6% run time over 2 runs; Portable SIMD −0.2% run time over 2 runs</title>
+<desc id="d">Overall: Default +0.5%, −0.0%; Portable SIMD +0.7%, +0.5% | rust/u64/random/49/s1/api: Default −0.1%, +0.0%; Portable SIMD +7.3%, +0.0% | rust/u64/equal/65536/s1/api: Default +5.3%, +0.3%; Portable SIMD +4.5%, +4.6%</desc>
 <style>
   .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
   .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
@@ -27,39 +27,53 @@
 <rect class="panel" x="0.5" y="0.5" width="719" height="291" rx="12"/>
 <text class="ink strong" x="24.0" y="36.0">Run time during this PR</text>
 <text class="muted sub" x="24.0" y="51.0">first to latest run</text>
-<text class="hero ink" x="197.0" y="50.0">+0.0%</text>
+<text class="hero faster" x="197.0" y="50.0">−0.6%</text>
 <text class="ink strong" x="291.0" y="36.0">Default</text>
-<text class="muted sub" x="291.0" y="51.0">1 runs</text>
-<text class="hero ink" x="456.5" y="50.0">+0.0%</text>
+<text class="muted sub" x="291.0" y="51.0">2 runs</text>
+<text class="hero faster" x="456.5" y="50.0">−0.2%</text>
 <text class="ink strong" x="550.5" y="36.0">Portable SIMD</text>
-<text class="muted sub" x="550.5" y="51.0">1 runs</text>
+<text class="muted sub" x="550.5" y="51.0">2 runs</text>
 <line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
 <line class="rule" x1="24" x2="696" y1="138" y2="138" stroke-width="1"/>
 <text class="ink strong" x="24.0" y="107.0">Overall</text>
 <text class="muted sub" x="24.0" y="122.0">geometric mean</text>
-<line class="axis main" x1="203" x2="370.5" y1="113.8" y2="113.8" stroke-width="1"/>
-<circle class="slower ring" cx="370.5" cy="111.2" r="4" stroke-width="2"/>
-<text class="val ink strong" x="436.5" y="113.0" text-anchor="end">+0.5%</text>
-<line class="axis main" x1="462.5" x2="630.0" y1="113.8" y2="113.8" stroke-width="1"/>
-<circle class="slower ring" cx="630.0" cy="110.2" r="4" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="113.0" text-anchor="end">+0.7%</text>
-<text class="ink" x="24.0" y="165.0">all equal</text>
-<text class="muted sub" x="24.0" y="180.0">u64 · 65,536</text>
-<line class="axis main" x1="203" x2="370.5" y1="182.0" y2="182.0" stroke-width="1"/>
-<circle class="slower ring" cx="370.5" cy="158.0" r="4" stroke-width="2"/>
-<text class="val ink" x="436.5" y="171.0" text-anchor="end">+5.3%</text>
-<line class="axis main" x1="462.5" x2="630.0" y1="182.0" y2="182.0" stroke-width="1"/>
-<circle class="slower ring" cx="630.0" cy="161.4" r="4" stroke-width="2"/>
-<text class="val ink" x="696.0" y="171.0" text-anchor="end">+4.5%</text>
-<text class="ink" x="24.0" y="211.0">random</text>
-<text class="muted sub" x="24.0" y="226.0">u64 · 49</text>
-<line class="axis main" x1="203" x2="370.5" y1="227.7" y2="227.7" stroke-width="1"/>
-<circle class="faster ring" cx="370.5" cy="228.0" r="4" stroke-width="2"/>
-<text class="val ink" x="436.5" y="217.0" text-anchor="end">−0.1%</text>
-<line class="axis main" x1="462.5" x2="630.0" y1="227.7" y2="227.7" stroke-width="1"/>
-<circle class="slower ring" cx="630.0" cy="204.0" r="4" stroke-width="2"/>
-<text class="val ink" x="696.0" y="217.0" text-anchor="end">+7.3%</text>
+<line class="axis main" x1="203" x2="370.5" y1="113.7" y2="113.7" stroke-width="1"/>
+<line class="stem-slower" x1="203.0" y1="111.2" x2="361.9" y2="113.7" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-faster" x1="361.9" y1="113.7" x2="370.5" y2="113.8" stroke-width="2" stroke-linecap="round"/>
+<circle class="slower ring" cx="203.0" cy="111.2" r="2.5" stroke-width="1.5"/>
+<circle class="faster ring" cx="370.5" cy="113.8" r="4" stroke-width="2"/>
+<text class="val ink strong" x="436.5" y="113.0" text-anchor="end">−0.0%</text>
+<line class="axis main" x1="462.5" x2="630.0" y1="113.7" y2="113.7" stroke-width="1"/>
+<line class="stem-slower" x1="462.5" y1="110.2" x2="630.0" y2="111.3" stroke-width="2" stroke-linecap="round"/>
+<circle class="slower ring" cx="462.5" cy="110.2" r="2.5" stroke-width="1.5"/>
+<circle class="slower ring" cx="630.0" cy="111.3" r="4" stroke-width="2"/>
+<text class="val ink strong" x="696.0" y="113.0" text-anchor="end">+0.5%</text>
+<text class="ink" x="24.0" y="165.0">random</text>
+<text class="muted sub" x="24.0" y="180.0">u64 · 49</text>
+<line class="axis main" x1="203" x2="370.5" y1="181.7" y2="181.7" stroke-width="1"/>
+<line class="stem-faster" x1="203.0" y1="182.0" x2="321.3" y2="181.7" stroke-width="2" stroke-linecap="round"/>
+<line class="stem-slower" x1="321.3" y1="181.7" x2="370.5" y2="181.6" stroke-width="2" stroke-linecap="round"/>
+<circle class="faster ring" cx="203.0" cy="182.0" r="2.5" stroke-width="1.5"/>
+<circle class="slower ring" cx="370.5" cy="181.6" r="4" stroke-width="2"/>
+<text class="val ink" x="436.5" y="171.0" text-anchor="end">+0.0%</text>
+<line class="axis main" x1="462.5" x2="630.0" y1="181.7" y2="181.7" stroke-width="1"/>
+<line class="stem-slower" x1="462.5" y1="158.0" x2="630.0" y2="181.7" stroke-width="2" stroke-linecap="round"/>
+<circle class="slower ring" cx="462.5" cy="158.0" r="2.5" stroke-width="1.5"/>
+<circle class="on-main ring" cx="630.0" cy="181.7" r="4" stroke-width="2"/>
+<text class="val ink" x="696.0" y="171.0" text-anchor="end">+0.0%</text>
+<text class="ink" x="24.0" y="211.0">all equal</text>
+<text class="muted sub" x="24.0" y="226.0">u64 · 65,536</text>
+<line class="axis main" x1="203" x2="370.5" y1="228.0" y2="228.0" stroke-width="1"/>
+<line class="stem-slower" x1="203.0" y1="204.0" x2="370.5" y2="226.8" stroke-width="2" stroke-linecap="round"/>
+<circle class="slower ring" cx="203.0" cy="204.0" r="2.5" stroke-width="1.5"/>
+<circle class="slower ring" cx="370.5" cy="226.8" r="4" stroke-width="2"/>
+<text class="val ink" x="436.5" y="217.0" text-anchor="end">+0.3%</text>
+<line class="axis main" x1="462.5" x2="630.0" y1="228.0" y2="228.0" stroke-width="1"/>
+<line class="stem-slower" x1="462.5" y1="207.4" x2="630.0" y2="207.1" stroke-width="2" stroke-linecap="round"/>
+<circle class="slower ring" cx="462.5" cy="207.4" r="2.5" stroke-width="1.5"/>
+<circle class="slower ring" cx="630.0" cy="207.1" r="4" stroke-width="2"/>
+<text class="val ink" x="696.0" y="217.0" text-anchor="end">+4.6%</text>
 <line class="axis main" x1="24" x2="38" y1="266" y2="266" stroke-width="1"/>
-<text class="muted sub" x="44.0" y="270.0">main b973f09 · runs d1d47d3 → d1d47d3</text>
+<text class="muted sub" x="44.0" y="270.0">main b973f09 · runs d1d47d3 → 27cc089</text>
 <text class="muted sub" x="696.0" y="270.0" text-anchor="end">value: latest run against main · one scale per row</text>
 </svg>

@@ -29,9 +29,6 @@ fn hash_tree(path: &Path, digest: &mut Sha256) {
             .collect();
         entries.sort();
         for entry in entries {
-            if entry.file_name().unwrap() == "__pycache__" {
-                continue;
-            }
             hash_tree(&entry, digest);
         }
     } else {
@@ -131,11 +128,11 @@ fn native(out: &Path) {
     );
     assert!(
         Path::new("../vendor/highway/.tessera-source.json").exists(),
-        "run python3 bench/fetch.py before building compare-native"
+        "run pnpm tools native fetch before building compare-native"
     );
     println!("cargo:rerun-if-changed=../vendor");
-    let status = Command::new("python3")
-        .args(["native/build.py"])
+    let status = Command::new("node")
+        .args(["native/build.ts"])
         .arg(out)
         .status()
         .unwrap();

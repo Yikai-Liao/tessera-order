@@ -106,26 +106,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang libtbb-dev
-      - run: python3 bench/fetch.py
-      - run: cargo test -p tessera-bench --features compare,compare-native --lib --bin memory
-      - run: cargo build --release -p tessera-bench --features compare,compare-native
-      - name: Check sequential native linkage
-        run: |
-          python3 - <<'PY'
-          import subprocess
-          for executable in ["target/release/compare", "target/release/memory"]:
-              libraries = subprocess.check_output(["ldd", executable], text=True)
-              assert not any(name in libraries for name in ["libtbb", "libgomp", "libomp"]), libraries
-          PY
-      - run: target/release/compare validate --suite smoke
-      - run: target/release/compare run --suite smoke --group u64/random --sample-ms 1 --out bench/results/ci
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm bench report bench/results/ci --partial
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm tools check --native --out bench/results/ci
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: comparison-check-log
+          path: bench/results/ci.log
+          if-no-files-found: ignore
 
   miri:
     name: miri (${{ matrix.features }})

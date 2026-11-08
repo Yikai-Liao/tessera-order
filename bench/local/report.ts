@@ -67,5 +67,4 @@ ${JSON.stringify({ ...run, blocks: undefined }, null, 2)}
   await writeFile(join(directory, "local.svg"), svg);
   await writeFile(join(directory, "index.md"), markdown);
   await writeFile(join(directory, "summaries.json"), `${JSON.stringify(summaries, null, 2)}\n`);
-  console.log(`Report: ${join(directory, "index.md")}`);
 }

@@ -1,10 +1,10 @@
 # Continuous integration
 
-[`ci.yml`](../../.github/workflows/ci.yml) decides which language checks a change needs, runs the repository-wide checks, and folds every result into the one required check, `ci-ok`. A language's checks are a reusable workflow that `ci.yml` calls only when its paths changed; [`ci_changes.py`](../../.github/scripts/ci_changes.py) holds the rules and its tests.
+[`ci.yml`](../../.github/workflows/ci.yml) decides which language checks a change needs, runs the repository-wide checks, and folds every result into the one required check, `ci-ok`. A language's checks are a reusable workflow that `ci.yml` calls only when its paths changed; [`ci_changes.ts`](../../.github/scripts/ci_changes.ts) holds the rules and its tests.
 
 ## Lanes
 
-Every job holds one of the account's concurrent job slots, and a free account runs 20 at once. A pull request that touches Rust peaked at 21 jobs before the split below and peaks at 16 now, counting every workflow it triggers: 13 from `CI`, one benchmark build, `DCO` and `PR title`. A language fits into a fixed number of lanes, not one per operating system and compiler version, because the full matrices Rust, C++ and Python already declare would need 28 test cells, plus the lint, Miri and sanitizer jobs each of them adds.
+Every job holds one of the account's concurrent job slots, and a free account runs 20 at once. A pull request that touches Rust peaked at 21 jobs before the split below and peaks at 16 now, counting every workflow it triggers: 13 from `CI`, one benchmark build, `DCO` and `PR title`. A language fits into a fixed number of lanes, not one per operating system and compiler version. Rust is implemented; future language workflows should be added with their implementations rather than carrying inactive release machinery.
 
 | Check | Pull request | `main` |
 |---|---|---|
@@ -24,11 +24,11 @@ A cell's commands live in one composite action, [`rust-test`](../../.github/acti
 
 ## Adding a language
 
-- Add a reusable workflow and a job in `ci.yml` that calls it, gated by `ci_changes.py` so changes outside the language skip it.
+- Add a reusable workflow and a job in `ci.yml` that calls it, gated by `ci_changes.ts` so changes outside the language skip it.
 - Give it one test cell per instruction set, not one per operating system. Put the cells every pull request runs in one job and the rest in a second job gated by `if: github.event_name != 'pull_request'`, both calling one composite action; [`rust-ci.yml`](../../.github/workflows/rust-ci.yml) and [its test action](../../.github/actions/rust-test/action.yml) show the pattern.
 - Keep the pull request matrix at four cells or fewer. If it cannot shrink, cap it with `strategy: max-parallel` so the workflow queues its own cells instead of holding every slot.
 - Report the language's checks into `ci-ok`; it is the only required check.
 
 ## Reproducing locally
 
-The commands are in [`AGENTS.md`](../../AGENTS.md#commands). Run them before pushing: a pull request runs Miri, the MSRV, the benchmarks and one test cell per operating system, and `main` also runs the remaining platform and MSRV cells.
+The [repository CLI guide](tooling.md) maps CI tasks to local commands. Use `pnpm -s tools check --native` for the comparison job, `pnpm -s tools continuous build --out bench/results/artifacts` for continuous artifacts, and `pnpm -s tools status main` or `pnpm -s tools status --pr NUMBER` for compact current-commit feedback. Routing, title and DCO policy is shared between CLI commands and dependency-free TypeScript bootstrap adapters; DCO still runs only the trusted base checkout. The remaining language checks are in [`AGENTS.md`](../../AGENTS.md#commands). Run them before pushing: a pull request runs Miri, the MSRV, the benchmarks and one test cell per operating system, and `main` also runs the remaining platform and MSRV cells.

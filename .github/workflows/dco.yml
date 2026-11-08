@@ -15,6 +15,9 @@ jobs:
           fetch-depth: 0
           # Check with the target branch's script, not PR-controlled code.
           ref: ${{ github.event.pull_request.base.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - name: Check Signed-off-by on every commit
         env:
           # Read-only access verifies individual Dependabot commits; it does

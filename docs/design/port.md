@@ -4,6 +4,45 @@ This page retains measured evidence behind engine choices, not current developme
 
 The engine in `rust/tessera-sort` is a Stable Rust port of the research prototype in `sort-research-rs` at commit `6c0877f0491dc3b8fc052aa529bce44bf8a53fa8`. The crate is unreleased (`0.0.0`, `publish = false`).
 
+## Eight-core parallel completion
+
+These are local whole-call algorithm comparisons, not isolated source-change or placement-controlled claims. The portable bounded-finishing implementation and its fallback are described in the [engine reference](engine.md#parallel-root-completion).
+
+The host was an AMD Ryzen 7 8845H with eight physical cores. Runs used CPUs `0,2,4,6,8,10,12,14`, one SMT sibling per core; SMT remained enabled, the governor was `powersave`, and boost remained on. The compiler was Arch Rust 1.99.1, LLVM 23.1.3, `x86_64-unknown-linux-gnu`, release profile, default target flags and benchmark features `compare,rayon`. No machine power settings were changed.
+
+The maintained command was:
+
+```sh
+pnpm tools compare algorithms --plan parallel \
+  --types u32,row_u32,u64,row_u64 \
+  --distributions random,d256,zipf2,sorted,reverse \
+  --lengths 1000000,10000000 --cpu 0,2,4,6,8,10,12,14 \
+  --out /tmp/tessera-goal-lab/delivery-matrix
+```
+
+It completed 40 inputs, nine shuffled blocks per input, serial Tessera A/A, the eight-worker Tessera adapter, standard stable sort and Rayon stable-8. Every timed output was verified. Peak allocation was measured separately; the memory worker now includes selected Tessera parallel adapters at large non-`u64` types as well. Reports and raw journals stay outside Git at the path above. The measured library source hash was `d1f7097916fbf360a80771f6e6bb691cb08b75f8b4cdc142e43eef89fdd6c3bc`; the timing executable hash was `57b1d4c6dcabee8cd8c3cddc7fbfbae681e96f08d1e7afbf8bb182fe42a08d4d`.
+
+Speedups below are reciprocals of paired median time ratios against the mean of the serial A/A pair, not ratios of independent medians. Ranges span the nine blocks. Peak heap excludes input preparation, verification, the warmed pool and thread stacks.
+
+| 10M input | Eight-worker speedup | Block range | Serial A/A envelope | Parallel peak heap |
+|---|---:|---:|---:|---:|
+| Random `u32` | 6.01× | 4.86–6.62× | 0.981–1.019 | 12,076,304 bytes |
+| Random 8-byte `{u32, u32}` | 4.58× | 4.32–4.77× | 0.987–1.013 | 18,909,498 bytes |
+| `d256` `u32` | 1.97× | 1.59–2.15× | 0.995–1.005 | 65,536 bytes |
+| `d256` 8-byte `{u32, u32}` | 1.83× | 1.79–1.89× | 0.976–1.024 | 15,757,602 bytes |
+| Random `u64` | 3.80× | 3.59–4.12× | 0.996–1.004 | 18,275,618 bytes |
+| Random 16-byte `{u64, u32}` | 2.95× | 2.79–3.17× | 0.994–1.006 | 29,635,068 bytes |
+
+The fivefold example is demonstrated for random `u32`, not for both primary record representations. At 10M, Zipf2 measured 0.96–1.00× across these four types. Sorted inputs measured 0.42–0.89× and reverse inputs 0.87–0.94×; those adaptive paths did not allocate heap and did not use bounded completion. They are real limitations, not a universal scaling claim.
+
+An earlier executable without parallel small-window counting (`final-matrix`) measured sorted `row_u32` at 1.41×, whereas the later `narrow-matrix` and delivery builds measured 0.43× and 0.42×. This exceeds the controls. Inspection confirms the sorted path still returns from the shared order probe before partitioning or counting, and its measured peak remains zero; both the serial and parallel absolute scan times changed between executables. The source of that cross-build shift is unresolved: no placement-controlled experiment was performed, so it is not dismissed as noise or attributed to the new counting algorithm.
+
+Additional retained comparisons cover 4M, 8M and 16M random primary inputs (`size-scaling`): `u32` measured 4.09×, 6.23× and 5.56×; 8-byte records measured 4.76×, 4.56× and 4.09×. Their A/A envelopes were 0.945–1.055, 0.991–1.009 and 0.996–1.004 for keys, and 0.974–1.026, 0.992–1.008 and 0.991–1.009 for records. The 16M record case retained 26,005,472 bytes of peak sort heap. The independent `delivery-general-valid` run completed 15 additional 1M inputs across floats, 128-byte records and owned records with random, repeated, skewed, sorted and reverse keys. The comparison harness does not support `u128`; correctness of both narrowed 128-bit halves is tested through the public API instead.
+
+Blocks at two and eight times the balanced size were also screened (`scale-two`, `scale-eight`). Random 8-byte records measured 4.22× and 4.35×, with serial A/A envelopes 0.981–1.019 and 0.986–1.014. The eight-times layout used 28,207,372 bytes of peak heap on that input. These separate-executable screens did not justify replacing the four-times layout; they do not isolate a causal block-size effect.
+
+Remaining work includes improving record scaling beyond 5×, understanding the ordered-path build sensitivity, wide-record and skew scaling, and independent source/placement controls. No result here establishes a speedup on other machines or a gain attributable to one isolated source edit.
+
 ## What changed
 
 The initial port keeps the research pipeline: order probe, budgeted insertion, variation scan, root narrowing for 128-bit keys, node routing, digit planning, tile leaves and stable reversal of equal-key runs. A measured follow-up recognizes strictly descending keys during order confirmation and reverses them directly; descending inputs with equal keys keep the stable reversal.

@@ -264,7 +264,7 @@ The ten baseline distributions remain `random`, `d16`, `d256`, `zipf1.1`, `zipf2
 
 All nine new integer distributions also run on `u64` at 10,000,000. These are formal comparison inputs, plotted individually in the 1M per-type panels. The type restrictions preserve the generators' meaning: narrowing `bimodal` to `u32` would discard its cluster bit, and converting integer masks to floats changes their encoded digit structure. All generators and their existing input hashes are unchanged.
 
-Memory is measured for every supported variant through 1,000,000 and for all `u64` cases at 10,000,000. Tessera's peak is also measured for the remaining 10M cases to provide `glidesort-sqrt` with its buffer size.
+Memory is measured for every supported variant through 1,000,000 and for all `u64` cases at 10,000,000. Serial Tessera's peak is also measured for the remaining larger cases to provide `glidesort-sqrt` with its buffer size. Selected `tessera-par-*` adapters measure every selected length and type, including large `u32` keys and records; other adapters retain the limits above.
 
 ### Input generation
 

@@ -231,6 +231,18 @@ pub(crate) trait Extract<T> {
         false
     }
 
+    /// Finishes a small key window using parallel counting where supported.
+    ///
+    /// Has the same window and interchangeability contract as
+    /// [`Self::try_count_window`]. Record extractors retain the serial fallback.
+    #[cfg(feature = "rayon")]
+    fn try_count_window_parallel(&mut self, records: &mut [T], low: usize, width: usize) -> bool
+    where
+        T: Send,
+    {
+        self.try_count_window(records, low, width)
+    }
+
     /// Returns whether `previous` and the keys of `records` are in ascending
     /// order. `previous` is the already encoded key of the preceding record.
     fn confirm_ascending(&mut self, records: &[T], previous: Self::Value) -> bool
@@ -296,6 +308,65 @@ pub(crate) struct Direct;
 
 impl<K: RadixKey> Extract<K> for Direct {
     type Value = K::Encoded;
+
+    #[cfg(feature = "rayon")]
+    fn try_count_window_parallel(&mut self, records: &mut [K], low: usize, width: usize) -> bool
+    where
+        K: Send,
+    {
+        use rayon::prelude::*;
+
+        if width == 0 || width > SMALL_WINDOW_BITS {
+            return false;
+        }
+        if records.is_empty() {
+            return true;
+        }
+        let buckets = 1usize << width;
+        let shard_len = records.len().div_ceil(rayon::current_num_threads());
+        // Mutable shards need only Send, including when a sealed key type is
+        // not known to be Sync through the RadixKey trait.
+        let partials: Vec<_> = records
+            .par_chunks_mut(shard_len)
+            .map(|records| {
+                let mask = Self::Value::from_usize(buckets - 1);
+                let shift = Self::Value::from_usize(low);
+                let mut counts = [0usize; SMALL_WINDOW_BUCKETS];
+                let mut representatives = [records[0]; SMALL_WINDOW_BUCKETS];
+                for record in records {
+                    let bucket = ((record.encode() >> shift) & mask).to_usize();
+                    if counts[bucket] == 0 {
+                        representatives[bucket] = *record;
+                    }
+                    counts[bucket] += 1;
+                }
+                (counts, representatives)
+            })
+            .collect();
+        let mut counts = [0usize; SMALL_WINDOW_BUCKETS];
+        let mut representatives = [records[0]; SMALL_WINDOW_BUCKETS];
+        for (local_counts, local_representatives) in partials {
+            for bucket in 0..buckets {
+                if local_counts[bucket] != 0 {
+                    representatives[bucket] = local_representatives[bucket];
+                    counts[bucket] += local_counts[bucket];
+                }
+            }
+        }
+        // Equal sealed encodings imply identical record bits. Filling these
+        // disjoint runs therefore preserves both the records and stability.
+        let mut remaining = records;
+        let mut runs = Vec::with_capacity(buckets);
+        for bucket in 0..buckets {
+            let (run, rest) = remaining.split_at_mut(counts[bucket]);
+            remaining = rest;
+            if !run.is_empty() {
+                runs.push((run, representatives[bucket]));
+            }
+        }
+        runs.into_par_iter().for_each(|(run, key)| run.fill(key));
+        true
+    }
 
     fn try_count_window(&mut self, records: &mut [K], low: usize, width: usize) -> bool {
         if width == 0 || width > SMALL_WINDOW_BITS {
@@ -375,5 +446,14 @@ impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for KeyHalf<'_, E, SHIFT> 
         // constant, so the window moves up with the half and still covers every
         // difference in the underlying key.
         self.0.try_count_window(records, low + SHIFT, width)
+    }
+
+    #[cfg(feature = "rayon")]
+    fn try_count_window_parallel(&mut self, records: &mut [T], low: usize, width: usize) -> bool
+    where
+        T: Send,
+    {
+        self.0
+            .try_count_window_parallel(records, low + SHIFT, width)
     }
 }

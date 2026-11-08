@@ -51,9 +51,9 @@ In Rust, the heap memory comes from `alloc`, so a `no_std` build needs a global 
 
 ## Rust Rayon entry points
 
-The optional `rayon` feature enables `std` and exposes `par_stable_sort` and `par_stable_sort_by_key`. Small inputs and one-thread pools use the serial engine; large inputs partition the root across disjoint shards, permute blocks in parallel and sort complete root buckets in the caller's pool. Both entry points preserve ordering, stability, records and panic recovery ([proposal](../docs/proposals/rayon-parallel-sort.md)).
+The optional `rayon` feature enables `std` and exposes `par_stable_sort` and `par_stable_sort_by_key`. Small inputs and one-thread pools use the serial engine; large inputs partition the root across disjoint shards and sort root buckets in the caller's pool. Bounded buckets may sort in private staging before final writes; other layouts retain block permutation and compaction. Both entry points preserve ordering, stability, records and panic recovery ([proposal](../docs/proposals/rayon-parallel-sort.md)).
 
-With `P` root shards, parallel calls use O(√(nP)) auxiliary scratch for fixed record size and key width; for a fixed pool width this is O(√n). The root digit is bounded by 12 bits (4096 buckets), so per-bucket scratch buffers remain bounded independently of pool width. They do not allocate an n-record buffer. Records require `Send` but do not require `Sync`. The by-key entry point requires `Fn + Sync` rather than `FnMut`; key evaluations may run concurrently and in any order. The serial APIs retain their existing bounds.
+With pool width `P`, parallel calls use O(P√n) auxiliary space for fixed record size and key width. Root scratch uses O(√(nP)); bounded staging adds O(R√n) for root fan-out `R ≤ 4096`, including buckets suspended by reentrant callbacks. Direct-key counting adds O(PR) histogram storage. No contiguous n-record output buffer is allocated, though aggregate suspended staging can approach the input size at eligible finite lengths. Records require `Send` but do not require `Sync`. The by-key entry point requires `Fn + Sync` rather than `FnMut`; key evaluations may run concurrently and in any order. The serial APIs retain their existing bounds.
 
 ## Language adapters
 

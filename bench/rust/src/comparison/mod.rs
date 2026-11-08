@@ -500,7 +500,11 @@ fn measure_memory(options: &Options, cases: &[InputCase]) -> Result<()> {
         );
         let input = variant::CaseInput::new(case);
         for v in options.variants() {
-            if case.len > 1_000_000 && case.ty != "u64" && v.name != "tessera" {
+            if case.len > 1_000_000
+                && case.ty != "u64"
+                && v.name != "tessera"
+                && v.adapter != "tessera-par"
+            {
                 continue;
             }
             if rows

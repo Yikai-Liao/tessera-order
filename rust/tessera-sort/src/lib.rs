@@ -63,8 +63,8 @@
 //!
 //! `rayon` is off by default and enables `par_stable_sort` and
 //! `par_stable_sort_by_key`. Large inputs partition the root across disjoint
-//! shards, adopt them in input order and permute blocks in parallel. Complete
-//! buckets are sorted in Rayon's current pool while compaction proceeds; small
+//! shards and adopt them in input order. Bounded buckets sort before their
+//! final writes; other layouts sort buckets while compaction proceeds. Small
 //! inputs and one-thread pools use the serial engine. The feature requires
 //! `std`, `Send` records and a shared (`Fn + Sync`) key function. It also
 //! enables `std` when default features are disabled.

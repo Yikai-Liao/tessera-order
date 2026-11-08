@@ -12,7 +12,7 @@ const MIN_PARALLEL_BYTES: usize = 1 << 20;
 const MIN_TASK_BYTES: usize = 256 * 1024;
 
 /// Sorts large inputs by handing complete root buckets to Rayon's current pool.
-pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
+pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: bool>(
     records: &mut [T],
     extractor: &mut E,
 ) {
@@ -108,6 +108,14 @@ impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for Narrow<E, SHIFT> {
     fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
         self.0.try_count_window(records, low + SHIFT, width)
     }
+
+    fn try_count_window_parallel(&mut self, records: &mut [T], low: usize, width: usize) -> bool
+    where
+        T: Send,
+    {
+        self.0
+            .try_count_window_parallel(records, low + SHIFT, width)
+    }
 }
 
 /// One bucket pointer with the provenance of its own materialized slice.
@@ -178,7 +186,7 @@ impl<T> Job<T> {
     }
 }
 
-/// Recycles scratchs between jobs without holding the lock during user code.
+/// Recycles scratch between jobs without holding the lock during user code.
 struct Pool<T> {
     free: std::sync::Mutex<Vec<Scratch<T>>>,
 }
@@ -207,7 +215,7 @@ impl<T> Pool<T> {
 }
 
 /// Partitions the root and sorts each bucket as soon as compaction releases it.
-fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
+fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: bool>(
     records: &mut [T],
     extractor: &mut E,
     scratch: &mut Scratch<T>,
@@ -228,17 +236,22 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
     }
     let shards = rayon::current_num_threads().min((node_bytes / MIN_TASK_BYTES).max(1));
     if top - low <= SPLIT_BITS {
-        if extractor.try_count_window(records, low, top - low) {
+        if extractor.try_count_window_parallel(records, low, top - low) {
             return;
         }
-        let ends = block::partition_digit_parallel_with_visit(
+        let limit = bucket_limit::<T>(records.len(), top - low);
+        let ends = block::partition_digit_parallel_with_finish(
             records,
             top - low,
             low,
             extractor.clone(),
             &mut scratch.block,
             shards,
-            &mut |_| {},
+            block::BucketFinish {
+                limit,
+                sort: &|_| {},
+                visit: &mut |_| {},
+            },
         );
         scratch.block.recycle_ends(ends);
         return;
@@ -295,14 +308,34 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
                 pending = Some(job);
             }
         };
-        let ends = block::partition_digit_parallel_with_visit(
+        let finish = |child: &mut [T]| {
+            let mut key = child_extractor.clone();
+            let mut scratch = pool_ref.take();
+            let varying = scan_varying_bits(child, candidate, &mut key);
+            let tile_bytes = tile_bytes
+                .max(child.len().saturating_mul(core::mem::size_of::<T>()))
+                .min(MAX_TILE_RECORDS.saturating_mul(core::mem::size_of::<T>()));
+            Sorter::<T, E, CACHED> {
+                scratch: &mut scratch,
+                extractor: &mut key,
+                tile_bytes,
+            }
+            .sort_node(child, varying);
+            pool_ref.give(scratch);
+        };
+        let limit = bucket_limit::<T>(records.len(), digit.width);
+        let ends = block::partition_digit_parallel_with_finish(
             records,
             digit.width,
             digit.shift,
             root_extractor,
             &mut scratch.block,
             shards,
-            &mut visit,
+            block::BucketFinish {
+                limit,
+                sort: &finish,
+                visit: &mut visit,
+            },
         );
         drop(visit);
         if let Some(job) = pending {
@@ -317,6 +350,20 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
         }
         scratch.block.recycle_ends(ends);
     });
+}
+
+/// Bounds staging to square-root space and declines infeasible root layouts.
+///
+/// The 1M/10M paired screens keep the existing small-input route. The cap
+/// admits balanced 10M roots with 256 buckets while bounding suspended
+/// staging; it deliberately declines larger or concentrated buckets.
+fn bucket_limit<T>(len: usize, width: usize) -> usize {
+    let limit = len.isqrt().saturating_mul(16);
+    if len < (1 << 21) || core::mem::size_of::<T>() > 16 || limit.saturating_mul(1 << width) < len {
+        0
+    } else {
+        limit
+    }
 }
 
 /// Queues a group of complete buckets on the current Rayon scope.

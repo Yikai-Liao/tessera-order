@@ -36,6 +36,59 @@ fn keys_keep_total_order() {
 }
 
 #[test]
+#[cfg(not(miri))]
+fn counted_keys_keep_bits() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    let len = 1usize << 18;
+    pool.install(|| {
+        for shift in [0, 64] {
+            let mut keys: Vec<_> = (0..len)
+                .map(|id| (0x1234u128 << (64 - shift)) | (((id * 7919) & 255) as u128) << shift)
+                .collect();
+            let mut expected = keys.clone();
+            expected.sort();
+            par_stable_sort(&mut keys);
+            assert_eq!(keys, expected);
+        }
+        let mut keys: Vec<_> = (0..len)
+            .map(|id| (((id * 7919) & 255) as i32 - 512) << 16)
+            .collect();
+        let mut expected = keys.clone();
+        expected.sort();
+        par_stable_sort(&mut keys);
+        assert_eq!(keys, expected);
+
+        // Distinct NaN payloads, for both signs, must survive run filling.
+        for sign in [0, 1u64 << 63] {
+            let mut keys: Vec<_> = (0..len)
+                .map(|id| f64::from_bits(sign | 0x7ff8_0000_0000_0000 | ((id * 7919) & 255) as u64))
+                .collect();
+            let mut reverse: Vec<_> = keys.iter().copied().map(Reverse).collect();
+            let mut reversed_expected = reverse.clone();
+            reversed_expected.sort_by(|a, b| b.0.total_cmp(&a.0));
+            par_stable_sort(&mut reverse);
+            assert!(
+                reverse
+                    .iter()
+                    .zip(&reversed_expected)
+                    .all(|(a, b)| a.0.to_bits() == b.0.to_bits())
+            );
+            let mut expected = keys.clone();
+            expected.sort_by(f64::total_cmp);
+            par_stable_sort(&mut keys);
+            assert!(
+                keys.iter()
+                    .zip(&expected)
+                    .all(|(a, b)| a.to_bits() == b.to_bits())
+            );
+        }
+    });
+}
+
+#[test]
 fn send_only_records_sort() {
     // Cell makes the records Send but not Sync. A captured MutexGuard makes
     // the key function Sync but not Send; only a shared borrow must cross tasks.
@@ -50,6 +103,55 @@ fn send_only_records_sort() {
     par_stable_sort_by_key(&mut rows, key);
     let names = rows.each_ref().map(|row| row.1.as_str());
     assert_eq!(names, ["first", "last", "middle"]);
+}
+
+#[test]
+#[cfg(not(miri))]
+fn bounded_callback_can_reenter() {
+    // This crosses bounded finishing's production cutoff with Send-only
+    // records, a Sync-but-not-Send callback, and nested Rayon work from a
+    // private staged bucket rather than the original input or root tail.
+    let len = (1usize << 21) + 37;
+    let mut rows: Vec<_> = (0..len as u32)
+        .map(|id| (id.wrapping_mul(7919) % 8192, Cell::new(id)))
+        .collect();
+    let begin = rows.as_ptr() as usize;
+    let end = begin + rows.len() * core::mem::size_of_val(&rows[0]);
+    let entered = AtomicBool::new(false);
+    let offset = Mutex::new(0u32);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    pool.install(|| {
+        let guard = offset.lock().unwrap();
+        let entered = &entered;
+        par_stable_sort_by_key(&mut rows, move |row| {
+            let address = core::ptr::from_ref(row) as usize;
+            if !(begin..end).contains(&address)
+                && row.1.get() < len as u32 - 1024
+                && !entered.swap(true, Ordering::Relaxed)
+            {
+                let (left, right) =
+                    rayon::join(|| (0..1024u64).sum::<u64>(), || (0..1024u64).sum::<u64>());
+                assert_eq!(left, right);
+            }
+            row.0 + *guard
+        });
+    });
+    assert!(entered.load(Ordering::Relaxed));
+    let mut seen = vec![false; len];
+    for row in &rows {
+        let id = row.1.get() as usize;
+        assert!(!core::mem::replace(&mut seen[id], true));
+        assert_eq!(row.0, (id as u32).wrapping_mul(7919) % 8192);
+    }
+    for pair in rows.windows(2) {
+        assert!(pair[0].0 <= pair[1].0);
+        if pair[0].0 == pair[1].0 {
+            assert!(pair[0].1.get() < pair[1].1.get());
+        }
+    }
 }
 
 #[test]

@@ -6,6 +6,23 @@ use super::*;
 use rayon::prelude::*;
 
 mod compact;
+mod finish;
+
+/// Finishes one privately staged bucket without retaining its record borrow.
+type BucketSort<'a, T> = &'a (dyn Fn(&mut [T]) + Sync);
+
+/// Bounded finishing with the existing materialized-bucket fallback.
+pub(crate) struct BucketFinish<'a, T> {
+    pub limit: usize,
+    pub sort: BucketSort<'a, T>,
+    pub visit: Visit<'a, T>,
+}
+
+/// Sorting callback and size cap; absent for fallback-only partitions.
+struct BoundedFinish<'a, T> {
+    limit: usize,
+    sort: BucketSort<'a, T>,
+}
 
 struct Shard<'a, 'w, T, E> {
     sorter: Partition<'a, 'w, T>,
@@ -14,11 +31,11 @@ struct Shard<'a, 'w, T, E> {
     first_block: usize,
 }
 
-#[derive(Clone, Copy)]
-struct Config {
+struct Config<'a, T> {
     shards: usize,
     block_size: Option<usize>,
     parallel: bool,
+    finish: Option<BoundedFinish<'a, T>>,
 }
 
 // SAFETY: each shard exclusively borrows a disjoint input slice and Buffers.
@@ -32,7 +49,7 @@ impl<T, E: Extract<T>> Shard<'_, '_, T, E> {
         let mask = E::Value::from_usize((1usize << width) - 1) << shift;
         let key = &mut self.key;
         let (panic, _) = self.sorter.step_with_ends(
-            |record| ((key.key(record) & mask) >> shift).to_usize(),
+            move |record| ((key.key(record) & mask) >> shift).to_usize(),
             false,
         );
         self.panic = panic;
@@ -59,8 +76,38 @@ pub(crate) fn partition_digit_parallel_with_visit<T: Send, E: Extract<T> + Clone
             shards: requested_shards,
             block_size: None,
             parallel: true,
+            finish: None,
         },
         Some(visit),
+    )
+}
+
+/// Partitions the root with an optional bounded pre-materialization finisher.
+pub(crate) fn partition_digit_parallel_with_finish<T: Send, E: Extract<T> + Clone + Send>(
+    records: &mut [T],
+    width: usize,
+    shift: usize,
+    key: E,
+    buffers: &mut Buffers<T>,
+    shards: usize,
+    finish: BucketFinish<'_, T>,
+) -> Vec<usize> {
+    partition_impl_with_visit(
+        records,
+        width,
+        shift,
+        key,
+        buffers,
+        Config {
+            shards,
+            block_size: None,
+            parallel: true,
+            finish: Some(BoundedFinish {
+                limit: finish.limit,
+                sort: finish.sort,
+            }),
+        },
+        Some(finish.visit),
     )
 }
 
@@ -71,7 +118,7 @@ fn partition_impl<T: Send, E: Extract<T> + Clone + Send>(
     shift: usize,
     key: E,
     buffers: &mut Buffers<T>,
-    config: Config,
+    config: Config<'_, T>,
 ) -> Vec<usize> {
     partition_impl_with_visit(arr, radix, shift, key, buffers, config, None)
 }
@@ -82,7 +129,7 @@ fn partition_impl_with_visit<T: Send, E: Extract<T> + Clone + Send>(
     shift: usize,
     key: E,
     buffers: &mut Buffers<T>,
-    config: Config,
+    config: Config<'_, T>,
     mut visit: Option<Visit<'_, T>>,
 ) -> Vec<usize> {
     assert!((1..=MAX_RADIX_BITS).contains(&radix));
@@ -99,7 +146,16 @@ fn partition_impl_with_visit<T: Send, E: Extract<T> + Clone + Send>(
         .sqrt()
         .ceil() as usize;
     let block_size = config.block_size.unwrap_or_else(|| {
-        balanced
+        let scale = if config
+            .finish
+            .as_ref()
+            .is_some_and(|finish| finish.limit > 0)
+        {
+            4
+        } else {
+            1
+        };
+        (scale * balanced)
             .max(BLOCK_BYTES_FLOOR / record_bytes)
             .max(BLOCK_RECORDS_FLOOR)
             .max(1)
@@ -273,6 +329,18 @@ fn partition_impl_with_visit<T: Send, E: Extract<T> + Clone + Send>(
     drop(local_buffers);
     #[cfg(debug_assertions)]
     global.validate();
+    if let Some(finisher) = config.finish {
+        if finish::try_finish(
+            &mut global,
+            &ends,
+            shards,
+            config.parallel,
+            finisher.limit,
+            finisher.sort,
+        ) {
+            return ends;
+        }
+    }
     if cfg!(miri) || std::env::var_os("TESSERA_COMPACT_SERIAL").is_none() {
         compact::permute_blocks(&mut global, shards, config.parallel);
     }
@@ -288,8 +356,10 @@ mod tests {
     use super::*;
     use crate::key::ByKey;
     use std::panic::{AssertUnwindSafe, catch_unwind};
+    #[cfg(not(miri))]
+    use std::sync::Barrier;
     use std::sync::{
-        Arc, Barrier,
+        Arc,
         atomic::{AtomicUsize, Ordering},
     };
 
@@ -349,11 +419,12 @@ mod tests {
         assert_eq!(rows, expected);
     }
 
-    fn config(shards: usize, block_size: usize) -> Config {
+    fn config<'a, T>(shards: usize, block_size: usize) -> Config<'a, T> {
         Config {
             shards,
             block_size: Some(block_size),
             parallel: !cfg!(miri),
+            finish: None,
         }
     }
 
@@ -524,6 +595,7 @@ mod tests {
                     shards: 4,
                     block_size: None,
                     parallel: true,
+                    finish: None,
                 },
             );
         });

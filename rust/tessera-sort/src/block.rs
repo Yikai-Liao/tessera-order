@@ -56,7 +56,9 @@ pub(crate) const MAX_RADIX_BITS: usize = 12;
 #[cfg(feature = "rayon")]
 mod parallel;
 #[cfg(feature = "rayon")]
-pub(crate) use parallel::partition_digit_parallel_with_visit;
+pub(crate) use parallel::{
+    BucketFinish, partition_digit_parallel_with_finish, partition_digit_parallel_with_visit,
+};
 
 /// Logical input and output block cursors for the current pass.
 struct ScatterPosition {

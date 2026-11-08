@@ -22,14 +22,15 @@ An independent track that binds the Rust crate and does not wait for C++. See th
 
 ## Rayon parallel sorting
 
-An independent Rust track, described in the [Rayon proposal](docs/proposals/rayon-parallel-sort.md). The optional `rayon` feature scatters root shards and sorts completed buckets in the caller's pool. Local paired measurements use the shared `parallel` benchmark plan; controlled broad acceptance and further scaling work remain open.
+An independent Rust track, described in the [Rayon proposal](docs/proposals/rayon-parallel-sort.md). The optional `rayon` feature scatters root shards and sorts completed buckets in the caller's pool. Bounded root buckets now sort before final-band writes, and narrow direct-key windows count in parallel. Local paired measurements use the shared `parallel` plan; the [eight-core results](docs/design/port.md#eight-core-parallel-completion) include cases above 5× but not universal fivefold scaling.
 
 | Deliverable | Done when |
 |---|---|
 | API and module scaffold | Feature-gated entry points preserve serial semantics and work inside caller-owned Rayon pools |
 | Concurrent bucket sorting | Disjoint root buckets run as Rayon tasks through shared engine stages, with bounded scratch and a serial fallback |
 | Parallel root scatter | Stable classification and scatter run in parallel without an n-record buffer, with panic recovery and documented memory bounds |
-| Acceptance | Panic, inconsistent-key, owned-record and exclusive-borrow tests pass; controlled A/A reports cover whole-call scaling and memory use |
+| Portable bounded completion | Sort eligible buckets in O(√n)-bounded staging; protect unread sources before final writes and retain the materialized fallback |
+| Broader acceptance | Extend measured whole-call scaling and memory coverage to other hosts, wide records and expensive extraction, with source-attribution controls for causal claims |
 
 ## C++
 

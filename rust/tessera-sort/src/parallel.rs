@@ -3,8 +3,9 @@
 //! Rayon entry points for stable sorting.
 //!
 //! The parallel engine shares the serial probes and node/tile sorting.
-//! Large inputs partition the root across disjoint shards, permute root blocks
-//! in parallel, then sort each materialized bucket while compaction continues.
+//! Large inputs partition the root across disjoint shards. Bounded buckets
+//! sort in staging and write directly to final bands; other layouts retain
+//! parallel block permutation and overlapping materialized-bucket sorting.
 //! Small inputs and one-thread pools use the serial engine.
 
 use crate::key::{ByKey, Direct};
@@ -19,11 +20,12 @@ use crate::{RadixKey, engine};
 ///
 /// # Memory
 ///
-/// For `P` root shards, scratch is O(√(nP)) for fixed record size and key
-/// width; a fixed pool width therefore keeps it O(√n). The root digit is at
-/// most 12 bits, so at most 4096 child jobs can retain workspaces. If job `i`
-/// holds `mᵢ` records, their disjoint inputs give
-/// `Σ√mᵢ ≤ √(4096n)`; child workspaces remain O(√n).
+/// For pool width `P`, auxiliary space is O(P√n) for fixed record size and
+/// key width. Root scratch and directories use O(√(nP)); bounded bucket
+/// staging adds O(R√n), where the fixed root fan-out `R` is at most 4096.
+/// Reentrant callbacks may suspend more staged buckets than there are workers.
+/// Direct counting uses O(PR) histogram storage. No contiguous n-record output
+/// buffer is allocated. Rayon runtime storage and thread stacks are separate.
 ///
 /// # Examples
 ///
@@ -60,9 +62,9 @@ pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
 ///
 /// # Memory
 ///
-/// For `P` root shards, scratch is O(√(nP)) for fixed record size and key
-/// width; with a fixed pool width this is O(√n). The root digit is at most 12
-/// bits, bounding child workspace fan-out independently of the pool width.
+/// Uses the same O(P√n) auxiliary-space bound as [`par_stable_sort`] for
+/// pool width `P` and fixed record size and key width. Reentrant callbacks can
+/// retain staging for up to the fixed root fan-out, not just `P` buckets.
 ///
 /// # Examples
 ///

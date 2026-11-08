@@ -66,6 +66,18 @@ The table is kept up to date as blocks move, and an inverse table (physical bloc
 
 A bucket is contiguous in the input as soon as its last record has been copied. The engine passes a callback that **finishes each tile-sized bucket right then**, while its records are still in cache.
 
+## Parallel roots: sort before the final write
+
+The optional Rayon path scatters disjoint input shards independently. Its directory reads bucket 0 from the first shard, then bucket 0 from the second, and so on before bucket 1. This preserves original input order inside every bucket regardless of which worker finishes first.
+
+A bounded root bucket need not become contiguous in the input before sorting. A worker gathers its source prefixes in directory order into private staging, releasing those physical blocks for reuse. It sorts the staged records, then writes their final input band. Before overwriting any full input block, it checks the block's owner: an unread source moves to a free block and its logical location is updated. A finalized block cannot hold an unread source; adjacent buckets may then write disjoint fragments of it. The input tail holds no unread source after scatter.
+
+Free blocks are shared through registered per-bucket caches and a reserve. A completed or suspended worker cannot hide its unused free blocks. Source relocation locks physical owners in increasing ID order, and no metadata lock spans a user key callback. If a callback panics, its serial sorter restores the staged bucket; all staged and unread buckets finish their writes before the panic propagates.
+
+This route requires at least 2²¹ records of at most 16 bytes, and every bucket must fit `16 * floor(sqrt(n))` records. Otherwise the original block permutation and compaction path remains. Staging is bounded per bucket; reentrant callbacks can suspend up to the fixed root fan-out rather than only the worker count. The conservative total space bound is O(P√n) for pool width P and fixed key width.
+
+The tested [parallel finishing model](../.vitepress/theme/sim/parallelFinish.ts) adopts scattered frames from the serial model and replays staging, source relocation and final-band writes in different bucket orders. It checks stable output and record conservation, including schedules with suspended staged buckets. It models serial linearizations, not mutex scheduling, panic recovery or Rust pointer provenance; those are covered by the Rust tests. The [engine reference](../design/engine.md#parallel-root-completion) gives the routing and progress argument.
+
 ## Why 2R scratch blocks
 
 - **R blocks** give every bucket an empty block before the first input block has been read. Nothing has been freed yet at that point.

@@ -58,6 +58,30 @@ A tile is finished by one of three leaves:
 
 The leaf and the digit widths are chosen by a cost model that counts passes and charges for bucket tables. For plans longer than two passes, a sample of at most two distinct top-digit buckets selects MSD directly; otherwise an MSD level is charged as one counting pass plus one pass for the insertion finish that ends the descent. Child variation scans return only bits in the remaining candidate mask, so even an inconsistent key function cannot restore a processed digit and prevent recursion from making progress.
 
+## Parallel root completion
+
+With the optional `rayon` feature, inputs below 1 MiB and one-thread pools use the serial engine. Larger roots retain the order probes and digit planner, then scatter disjoint shards in the current pool. The shard count is at most the pool width and approximately one per 256 KiB of input. Directory adoption concatenates each bucket's prefixes in original shard order and retains shard scratch as separate allocations.
+
+The materialized route permutes full blocks in parallel and compacts them. A bucket is passed to a scoped sorting job only after compaction retires its range as both destination and copy source. Adjacent buckets remain distinct borrows even if their addresses touch. Jobs group at least 256 KiB of records when possible and reuse serial scratch.
+
+### Bounded staging
+
+For at least 2²¹ records of at most 16 bytes, offer bounded finishing with limit `L = 16 * floor(sqrt(n))`. Disable it if `L * R < n`, and decline after scatter if any actual bucket exceeds L. Eligible layouts use four times the balanced root block size `ceil(sqrt(20n / (2PRs)))`, with the existing 1,024-byte and 32-record floors. The multiplier amortizes per-source ownership work; the [measurements](port.md#eight-core-parallel-completion) cover the whole call, not an isolated causal attribution of this parameter.
+
+A bounded bucket gathers all its prefixes into private `MaybeUninit<T>` staging in stable directory order. Each prefix is protected by its physical-owner mutex until the copy transfers ownership. Its source block is then free, and the staging slice becomes the unique live owner. The shared serial sorter finishes that slice, using a tile budget as large as the bucket but at most 65,535 records.
+
+Before writing a final band, a worker protects every full input block it touches. A block holds either a logical source, no source, or finalized fragments. An unread source moves to a free block under both physical-owner locks, acquired in increasing ID order; its atomic logical location is published before the locks release. Gather validates the owner after loading that location and retries if relocation won the race. A finalized block holds no unread source, so adjacent final bands can write disjoint fragments without overlapping record access. The input tail has no partition source.
+
+Every bucket's free cache is registered before jobs begin and survives until all jobs and recovery finish. Writers try their own cache, the reserve and peer caches; peer locks use nonblocking acquisition. They wait without physical-owner locks, and no cache or owner lock spans user code. If there are P shards and R buckets, adoption starts with at least PR free blocks. A bucket gathering k source prefixes frees k blocks and touches at most k + 1 destination blocks, so at least PR − R genuinely free blocks remain. Production bounded finishing has at least two shards, leaving at least R. A waiting bucket has no local candidate; at most R − 1 other buckets can each hold one unpublished or checked-out candidate. Usable blocks therefore remain discoverable or held only by callback-free work that can publish progress.
+
+A key panic is caught per staged bucket after the serial sorter restores its record set. That bucket still writes its band; jobs join and recovery materializes every remaining bucket without further key calls before resuming a panic. Successful bands are not written twice. Stale staging and source bytes are never treated as live records.
+
+Staging is released after each completed band. Ordinary scheduling retains only active buffers, but reentrant key callbacks can suspend up to R staged buckets. Root scratch uses O(√(nP)) space and staging adds O(R√n); R is fixed by the twelve-bit root cap. Together with bounded histogram storage, the conservative public bound is O(P√n), not a promise of P simultaneous buffers.
+
+### Narrow direct keys
+
+When all remaining variation spans at most eight bits, direct keys use parallel local histograms. Each worker reads a disjoint mutable shard, retaining counts and one representative per bucket; the parent combines counts and sends disjoint runs and their copied representatives to filling tasks. Only `Send` is required. Equal sealed encodings mean identical record bits, so run filling preserves the exact multiset, including NaN payloads. User-key records decline this shortcut because equal keys do not identify their payloads. Narrowed 128-bit extractors delegate with the original bit offset. Histograms use O(PR) space; no n-record cache is built.
+
 ## Insertion and scans
 
 Every insertion pass, whether a budgeted probe or the finish of a tile or bucket, runs one loop, `insertion_loop`: it scans for the first adjacent pair whose keys descend, moves the later record left, and resumes the scan after it. A probe returns its swap count and may stop at its budget. A finishing pass, `finish_insertion`, has no budget and returns `()`, so the unused count is discarded inside the inlined loop rather than returned across a target-feature boundary.

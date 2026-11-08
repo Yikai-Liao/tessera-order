@@ -97,6 +97,10 @@ Both baseline copies are slower than the candidate outside its A/A range in 21 o
 
 Strictness travels in the order classification, so the probe keeps the machine code it had before the change, and whole-slice reversal stays in a non-inlined helper. A paired A/B with both implementations in one binary confirmed the `u64` reverse speedup at every length and measured what an out-parameter had added to the constant-key case; see [decision 0041](../decisions/0041-strict-descending-fast-path.md). The continuous suite has no A/A control and alternated between no alert and alerts on different short cases in reruns, so it serves only as a regression screen.
 
+### Low-fanout tiles
+
+Plans longer than two LSD passes now select MSD when the top-digit sample contains at most two distinct buckets. Child variation scans are restricted to the remaining candidate mask so changing key functions cannot restore a processed digit. [Decision 0040](../decisions/0040-low-fanout-tile-msd.md) records the short-skew measurements, the bounded-recursion regression test and the binary-placement investigation of the continuous suite's short-input alert.
+
 ## Not yet done
 
 - A crates.io release. See [RELEASING.md](../../RELEASING.md).

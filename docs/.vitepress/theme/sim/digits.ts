@@ -59,3 +59,34 @@ export function tileDigitBits(records: number, recordBytes: number): number {
   const byRecords = Math.floor(Math.log2(Math.max(1, records))) + slack;
   return Math.min(14, Math.max(6, Math.min(widest, byRecords)));
 }
+
+export type TileLeaf = "done" | "insertion" | "msd" | "lsd";
+
+/** Mirrors `sort_tile`'s leaf choice for one sampled top-digit fan-out. */
+export function chooseTileLeaf(
+  records: number,
+  varying: bigint,
+  tableWidth: number,
+  sampledDistinct: number,
+  bits: number,
+): TileLeaf {
+  if (records < 2 || varying === 0n) return "done";
+  if (records <= 48) return "insertion";
+
+  const passes = planDigits(varying, tableWidth, bits).length;
+  if (passes <= 2) return "lsd";
+
+  const sampleLen = Math.min(128, records);
+  const distinct = Math.max(1, Math.min(sampledDistinct, sampleLen));
+  if (distinct <= 2) return "msd";
+
+  const { digit } = topWindow(varying, tableWidth, bits);
+  const fanout = distinct >= sampleLen ? 2 ** digit.width : distinct;
+  let largest = records;
+  let depth = 0;
+  while (largest > 48 && depth < passes) {
+    depth++;
+    largest = Math.floor(largest / fanout);
+  }
+  return Math.max(depth, 1) + 1 < passes ? "msd" : "lsd";
+}

@@ -280,7 +280,8 @@ impl Digit {
 const MAX_DIGITS: usize = 48;
 
 /// Scans until all candidate bits have appeared in both states, or the input ends.
-/// The parent partition digit is constant within a child and excluded by the caller.
+/// Only candidate bits are returned, so even changing keys cannot restore a
+/// parent partition digit and prevent the recursion from making progress.
 fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor: &mut E) -> u128 {
     if candidate == 0 {
         return 0;
@@ -301,7 +302,7 @@ fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor
         }
         index = end;
     }
-    union.to_u128() ^ intersection.to_u128()
+    (union.to_u128() ^ intersection.to_u128()) & candidate
 }
 
 /// The window over the highest remaining bits that a pass of `width` bits
@@ -1075,7 +1076,9 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             // The tile holds more than INSERTION_MAX records, so the loop ran.
             // As above, `max(1)` is kept for the optimizer, not for the value.
             let level_cost = depth.max(1) + MSD_FINISH_PASSES;
-            if level_cost < passes {
+            // A low-fanout sample can hide a concentrated bucket that becomes
+            // equal or insertion-sized after one split.
+            if distinct <= 2 || level_cost < passes {
                 self.partition_tile(records, digit, varying);
                 return;
             }
@@ -1339,6 +1342,42 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn variation_stays_within_candidate() {
+        assert_eq!(
+            scan_varying_bits(&[0u64, u64::MAX], 0xff, &mut Direct),
+            0xff
+        );
+    }
+
+    #[test]
+    fn changing_keys_finish_tile() {
+        let mut records: Vec<_> = (0..1000u64).collect();
+        let mut workspace = Workspace::new();
+        let mut calls = 0;
+        // Every sample and histogram puts all records in one bucket. Each child
+        // scan then reintroduces every key bit, including the partitioned digit.
+        let constant_calls = DIGIT_SAMPLE_LEN + records.len();
+        let mut extractor = ByKey(|_: &u64| {
+            assert!(calls < 12_000, "tile recursion did not make progress");
+            let phase = calls % (constant_calls + 65);
+            calls += 1;
+            if phase < constant_calls || phase % 2 == 0 {
+                0
+            } else {
+                u64::MAX
+            }
+        });
+        Sorter::<_, _, true> {
+            workspace: &mut workspace,
+            extractor: &mut extractor,
+            tile_bytes: TILE_BYTES,
+        }
+        .sort_tile(&mut records, u64::MAX as u128);
+        records.sort_unstable();
+        assert_eq!(records, (0..1000u64).collect::<Vec<_>>());
     }
 
     #[test]

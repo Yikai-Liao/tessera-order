@@ -31,6 +31,8 @@ interface RenderOptions {
   configuration?: string;
   runUrl: string;
   baseRef?: string;
+  // Why the promised comparison is absent although the cases were measured.
+  unavailable?: string;
   chartRef?: string | null;
   trendRef?: string | null;
   trendUnavailable?: boolean;
@@ -49,6 +51,8 @@ interface FailureOptions {
 export interface ConfigurationResult extends Configuration {
   outcome: string;
   reason?: string;
+  // Why the promised comparison is absent; the cases were still measured.
+  unavailable?: string;
 }
 
 function plural(n: number, word: string) {
@@ -57,7 +61,10 @@ function plural(n: number, word: string) {
 
 // The headline leads with what the reader must act on, then what to
 // celebrate. It is also the check title in the PR's check list.
-export function headline(s: ReportSummary) {
+export function headline(s: ReportSummary, unavailable = false) {
+  // Cases without a baseline are expected only where the suite grew; a
+  // missing comparison for every case is a failed promise, not a new suite.
+  if (unavailable) return "no comparable baseline";
   const parts = [];
   if (s.regressions) parts.push(`${s.regressions} slower`);
   if (s.improvements) parts.push(`${s.improvements} faster`);
@@ -66,6 +73,11 @@ export function headline(s: ReportSummary) {
   if (!s.regressions && !s.improvements)
     parts.push(s.compared ? "no significant change" : "no baseline");
   return parts.join(", ");
+}
+
+// A failed promise, in the place a reader looks for the verdict.
+function unavailableBox(reason: string) {
+  return `> [!WARNING]\n> **No comparable baseline:** ${reason}. The cases below were measured but not compared.  `;
 }
 
 function caseLine(r: Row) {
@@ -108,7 +120,7 @@ function overall(s: ReportSummary, baseRef: string) {
 }
 
 // Public perf pages need no login, unlike the console links in Bencher's own
-// comment. A PR page plots the PR head beside its start point on main.
+// comment. A PR page plots the PR head beside its start point.
 function perfUrl(s: ReportSummary, benchmarks: string[], base = `${BENCHER}/perf/${s.project}`) {
   const query = new URLSearchParams({
     branches: s.history.map((source) => source.branch).join(","),
@@ -205,23 +217,35 @@ function fullTable(rows: Row[]) {
 // One configuration on its own: the check of that configuration, which a
 // reader opens from the check list without the PR comment around it.
 export function render(s: ReportSummary, options: RenderOptions) {
-  const { language, configuration, baseRef = "main", chartRef, trendRef, runUrl } = options;
+  const {
+    language,
+    configuration,
+    baseRef = "main",
+    unavailable: noBaseline,
+    chartRef,
+    trendRef,
+    runUrl,
+  } = options;
   const slower = s.rows.filter((r) => r.verdict === "regression");
   const faster = s.rows.filter((r) => r.verdict === "improvement");
   const out = [
-    `### Benchmarks · ${[language, configuration, headline(s)].filter(Boolean).join(" · ")}`,
+    `### Benchmarks · ${[language, configuration, headline(s, Boolean(noBaseline))].filter(Boolean).join(" · ")}`,
   ];
   const boxes = callouts(s);
   if (boxes) out.push("", boxes);
+  if (noBaseline) out.push("", unavailableBox(noBaseline));
   // The charts hold every configuration; the check's own column is named in
   // their header.
-  if (chartRef) out.push("", `![Changes against main](${chartRef})`);
+  if (chartRef) out.push("", `![Changes against ${baseRef}](${chartRef})`);
   if (trendRef) out.push("", `![PR benchmark history](${trendRef})`);
   const summaryLine = overall(s, baseRef);
   if (summaryLine) out.push("", summaryLine);
   if (slower.length) out.push("", "#### Slower", "", alertTable(slower, s));
   if (faster.length) out.push("", "#### Faster", "", alertTable(faster, s));
-  if (s.missing) out.push("", `<sub>${plural(s.missing, "new case")} without a baseline.</sub>`);
+  // Measured but uncompared cases are not new cases; the warning says what is
+  // missing instead.
+  if (s.missing && !noBaseline)
+    out.push("", `<sub>${plural(s.missing, "new case")} without a baseline.</sub>`);
   out.push(
     "",
     `<details><summary>All ${s.rows.length} cases</summary>`,
@@ -438,10 +462,15 @@ export function renderCombined(configurations: ConfigurationResult[], options: C
         "",
         `**${c.name}** was not measured: ${c.reason ?? "the measurement failed"}. See the [workflow run](${runUrl}).`,
       );
+    else if (c.unavailable)
+      out.push(
+        "",
+        `**${c.name}** was measured but not compared: ${c.unavailable}. See the [workflow run](${runUrl}).`,
+      );
   }
   const boxes = [caution(measured, rows), speedups(measured, rows)].filter(Boolean);
   if (boxes.length) out.push("", boxes.join("\n\n"));
-  if (chartRef) out.push("", `![Changes against main](${chartRef})`);
+  if (chartRef) out.push("", `![Changes against ${baseRef}](${chartRef})`);
   if (trendRef) out.push("", `![PR benchmark history](${trendRef})`);
   if (rows.length) {
     out.push(
@@ -453,7 +482,7 @@ export function renderCombined(configurations: ConfigurationResult[], options: C
       "</details>",
     );
   }
-  const fresh = measured.filter((c) => c.summary!.missing);
+  const fresh = measured.filter((c) => c.summary!.missing && !c.unavailable);
   if (fresh.length) {
     const same =
       fresh.length === measured.length &&

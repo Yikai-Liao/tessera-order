@@ -27,6 +27,59 @@ interface ActionArguments {
   core: Pick<ActionsCore, "notice" | "setOutput">;
 }
 
+// The branch every push to the default branch records samples under. The
+// pipeline assumes it throughout: only `main` updates the baseline, and the
+// tracker's own workflow runs default-branch code.
+const DEFAULT_BRANCH = "main";
+
+interface Baseline {
+  // Bencher branch holding the samples to compare against.
+  startPoint: string;
+  // The exact commit those samples must come from.
+  hash: string;
+}
+
+interface PullRequest {
+  number: number;
+  state: string;
+  head: { sha: string; ref: string; repo: { full_name: string } };
+  base: { sha: string; ref: string; repo: { full_name: string } };
+}
+
+// A stacked PR's base branch is the head of its parent PR. Bencher stores a
+// PR's samples under `pr-<number>`, never under the branch name, so a child
+// must name the parent's number or Bencher silently records no comparison.
+async function baselineFor(
+  { github, context, core }: ActionArguments,
+  pr: PullRequest,
+): Promise<Baseline | string> {
+  const repo = context.repo;
+  if (pr.base.ref === DEFAULT_BRANCH) return { startPoint: DEFAULT_BRANCH, hash: pr.base.sha };
+  const { data: candidates } = await github.rest.pulls.list({
+    ...repo,
+    state: "all",
+    head: `${repo.owner}:${pr.base.ref}`,
+    per_page: 100,
+  });
+  const fullName = `${repo.owner}/${repo.repo}`;
+  const parents = candidates.filter(
+    (candidate) => candidate.head.repo.full_name === fullName && candidate.head.ref === pr.base.ref,
+  );
+  const open = parents.filter((candidate) => candidate.state === "open");
+  // Several PRs from one branch are ambiguous; one open PR wins over a closed
+  // one because it is the stack a reviewer sees.
+  const parent =
+    open.length === 1 ? open[0] : open.length === 0 && parents.length === 1 ? parents[0] : null;
+  if (!parent) {
+    const reason = parents.length
+      ? `several pull requests use ${pr.base.ref} as their head`
+      : `the base branch ${pr.base.ref} has no pull request`;
+    core.notice(`No baseline for the benchmark: ${reason}.`);
+    return reason;
+  }
+  return { startPoint: `pr-${parent.number}`, hash: pr.base.sha };
+}
+
 export async function resolveSource({ github, context, core }: ActionArguments) {
   const run = context.payload.workflow_run as SourceRun;
   const repo = context.repo;
@@ -73,10 +126,18 @@ export async function resolveSource({ github, context, core }: ActionArguments) 
   const pr = matching[0];
   core.setOutput("branch", `pr-${pr.number}`);
   core.setOutput("hash", pr.head.sha);
+  // The GitHub base ref is what the report shows; the start point is the
+  // Bencher branch that holds the samples.
   core.setOutput("base", pr.base.ref);
-  core.setOutput("base_hash", pr.base.sha);
   core.setOutput("number", String(pr.number));
   core.setOutput("eligible", "true");
+  const baseline = await baselineFor({ github, context, core }, pr);
+  if (typeof baseline === "string") {
+    core.setOutput("baseline_reason", baseline);
+  } else {
+    core.setOutput("start_point", baseline.startPoint);
+    core.setOutput("base_hash", baseline.hash);
+  }
 }
 
 export async function startReport({

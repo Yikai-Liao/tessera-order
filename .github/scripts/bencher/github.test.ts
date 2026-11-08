@@ -20,11 +20,14 @@ function sourceFixture(
   event = "pull_request",
   pulls = [structuredClone(pull)],
   workflowPath = ".github/workflows/bench-build.yml",
+  // Pull requests whose head is the base branch of a stacked PR.
+  parents?: unknown[],
 ) {
   const outputs: Record<string, string> = {};
   const mock = mockGitHub((request) => {
     if (request.path.endsWith("/actions/workflows/123")) return { path: workflowPath };
     if (request.path.endsWith(`/commits/${hash}/pulls`)) return pulls;
+    if (request.path.endsWith("/pulls") && parents) return parents;
     throw new Error(`Unexpected request: ${request.path}`);
   });
   return {
@@ -61,11 +64,70 @@ test("fork named main uses PR identity, never the baseline", async () => {
     branch: "pr-7",
     hash,
     base: "main",
+    start_point: "main",
     base_hash: "b".repeat(40),
     number: "7",
     eligible: "true",
   });
 });
+
+const stacked = {
+  ...structuredClone(pull),
+  base: { sha: "b".repeat(40), ref: "perf/reverse-fast-path", repo: { full_name: fullName } },
+};
+
+function parent(number: number, state = "open", repo = fullName) {
+  return {
+    number,
+    state,
+    head: { sha: "c".repeat(40), ref: "perf/reverse-fast-path", repo: { full_name: repo } },
+    base: { sha: "d".repeat(40), ref: "main", repo: { full_name: fullName } },
+  };
+}
+
+test("a stacked PR compares with its parent's samples at the base commit", async () => {
+  const fixture = sourceFixture("pull_request", [stacked], undefined, [parent(41)]);
+  await resolveSource(fixture);
+  assert.deepEqual(fixture.outputs, {
+    branch: "pr-7",
+    hash,
+    base: "perf/reverse-fast-path",
+    start_point: "pr-41",
+    base_hash: "b".repeat(40),
+    number: "7",
+    eligible: "true",
+  });
+});
+
+test("a merged parent keeps the branch name and the Bencher branch", async () => {
+  const fixture = sourceFixture("pull_request", [stacked], undefined, [parent(41, "closed")]);
+  await resolveSource(fixture);
+  assert.equal(fixture.outputs.start_point, "pr-41");
+  assert.equal(fixture.outputs.base, "perf/reverse-fast-path");
+});
+
+test("a stacked PR without a parent names why it has no baseline", async () => {
+  const fixture = sourceFixture("pull_request", [stacked], undefined, []);
+  await resolveSource(fixture);
+  assert.equal(fixture.outputs.start_point, undefined);
+  assert.equal(fixture.outputs.base_hash, undefined);
+  assert.equal(
+    fixture.outputs.baseline_reason,
+    "the base branch perf/reverse-fast-path has no pull request",
+  );
+});
+
+for (const [name, parents] of [
+  ["several pull requests", [parent(41), parent(42)]],
+  ["a pull request from a fork", [parent(41, "open", "fork/tessera")]],
+] as const) {
+  test(`a stacked base branch with ${name} has no baseline`, async () => {
+    const fixture = sourceFixture("pull_request", [stacked], undefined, [...parents]);
+    await resolveSource(fixture);
+    assert.equal(fixture.outputs.start_point, undefined);
+    assert.ok(fixture.outputs.baseline_reason);
+  });
+}
 
 for (const event of ["push", "workflow_dispatch"]) {
   test(`${event} on main updates the baseline`, async () => {

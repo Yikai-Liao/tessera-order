@@ -6,8 +6,9 @@ const API = "https://api.bencher.dev/v0/projects";
 const PAGE_SIZE = 100;
 // The smallest peak-to-trough swing within a PR that earns a trend row. It is
 // a display choice, not a statistical test, and is separate from the
-// comparison chart's rule: that one judges the final change against main, so
-// a regression later fixed in the same PR disappears there and must stay here.
+// comparison chart's rule: that one judges the final change against the base,
+// so a regression later fixed in the same PR disappears there and must stay
+// here.
 export const MIN_SWING = 0.05;
 
 export interface TrendSeries {
@@ -16,7 +17,7 @@ export interface TrendSeries {
   baseValue: number;
   firstValue: number;
   lastValue: number;
-  // Change against main's baseline, one per PR run.
+  // Change against the comparison baseline, one per PR run.
   changes: number[];
 }
 
@@ -30,11 +31,11 @@ export interface TrendSummary {
   project: string;
   branch: string;
   testbed: string;
-  // The main commit the latest report compared against.
+  // The base commit the latest report compared against.
   base: string | null;
   sharedCases: number;
   runs: Measurement[];
-  // Geometric mean of the changes against main, one per PR run.
+  // Geometric mean of the changes against the base, one per PR run.
   overall: number[];
   focus: TrendSeries[];
   // Every shared case, so a case selected in one configuration can still be
@@ -120,13 +121,14 @@ function comparableRuns(reports: BencherReport[], current: BencherReport, langua
   );
 }
 
-// Every run is compared with main's baseline from the latest report, which
-// Bencher computes from main's own history at the PR's current start point.
-// One fixed reference keeps rebases and force pushes out of the calculation:
-// an earlier run on an older base still shows how far that code was from the
-// main a reviewer would merge into. Cases new in the PR have no baseline and
-// stay in the table only. The cohort is also fixed across runs, so a case
-// added to or removed from the suite cannot move the overall line.
+// Every run is compared with the baseline from the latest report, which
+// Bencher computes from the start point's own history: `main`, or the parent
+// PR of a stacked one. One fixed reference keeps rebases and force pushes out
+// of the calculation: an earlier run on an older base still shows how far that
+// code was from the base a reviewer would merge into. Cases new in the PR have
+// no baseline and stay in the table only. The cohort is also fixed across
+// runs, so a case added to or removed from the suite cannot move the overall
+// line.
 export function summarizeTrend(
   reports: BencherReport[],
   current: BencherReport,

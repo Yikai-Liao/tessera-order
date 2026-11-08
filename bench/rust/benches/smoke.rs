@@ -17,6 +17,8 @@ use tessera_sort::thresholds::{INSERTION_MAX, TILE_BYTES};
 /// is the same for every length and does not depend on measured timings.
 const BATCH_ELEMENTS: usize = 1 << 18;
 
+/// Length below one tile where ordered inputs take the order-probe routes.
+const SHORT: usize = 1_000;
 /// Length spanning several tiles in the continuous suite.
 const MID: usize = 65_536;
 /// Length used for measured engine decisions.
@@ -35,6 +37,14 @@ fn suite(c: &mut Criterion) {
         rows::<u32>(c, "random", len, false);
     }
     rows::<u64>(c, "random", TILE_BYTES / 16 + 1, true);
+
+    // Below one tile, an ordered input is confirmed or reversed before any
+    // tile routing, so this pair isolates the order probe and the reversal
+    // from the routes the cases above measure. Both are a screen only: code
+    // placement moves short cases, and an alert needs the protocol's controls.
+    for distribution in ["sorted", "reverse"] {
+        keys::<u64>(c, distribution, SHORT, false);
+    }
 
     // Eight tiles: one block-partition level and every root and node route.
     keys::<u64>(c, "random", MID, true);

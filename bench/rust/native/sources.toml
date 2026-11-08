@@ -5,7 +5,7 @@ repository = "https://github.com/duckdb/duckdb"
 # v1.4.0: the version described in the September 2025 sorting article.
 commit = "b8a06e4a22672e254cd0baa68a3dbed2eb51c56e"
 sha256 = "6de777312190a830d106a995137c2458d036676c1c68d7d005a0a589a75bb93e"
-license = "MIT AND BSL-1.0"
+license = "MIT AND BSL-1.0 AND Zlib"
 # Keep only the compiled header trees, not database code or fixture symlinks.
 paths = ["LICENSE", "third_party/vergesort", "third_party/ska_sort", "third_party/pdqsort"]
 license_files = ["LICENSE", "third_party/vergesort/LICENSE", "third_party/ska_sort/LICENSE", "third_party/pdqsort/LICENSE"]

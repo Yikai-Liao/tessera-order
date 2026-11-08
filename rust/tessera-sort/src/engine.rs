@@ -1059,6 +1059,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             // as a slower `sort_tile` (an extra zero check and different register
             // allocation).
             let distinct = sample_distinct_digits(records, digit, self.extractor).max(1);
+            let low_fanout = distinct <= 2;
             let fanout = if distinct >= DIGIT_SAMPLE_LEN.min(len) {
                 1usize << digit.width
             } else {
@@ -1075,7 +1076,9 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             // The tile holds more than INSERTION_MAX records, so the loop ran.
             // As above, `max(1)` is kept for the optimizer, not for the value.
             let level_cost = depth.max(1) + MSD_FINISH_PASSES;
-            if level_cost < passes {
+            // A low-fanout sample can hide a concentrated bucket that becomes
+            // equal or insertion-sized after one split.
+            if low_fanout || level_cost < passes {
                 self.partition_tile(records, digit, varying);
                 return;
             }

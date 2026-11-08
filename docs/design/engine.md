@@ -56,7 +56,7 @@ A tile is finished by one of three leaves:
 - **Tile-local MSD partition**, recursing into buckets with a cursor table on the stack.
 - **LSD counting passes** over a scratch buffer, with digit widths between 6 and 14 bits.
 
-The leaf and the digit widths are chosen by a cost model that counts passes and charges for bucket tables. An MSD level is charged as one counting pass plus one pass for the insertion finish that ends the descent.
+The leaf and the digit widths are chosen by a cost model that counts passes and charges for bucket tables. For plans longer than two passes, a sample of at most two distinct top-digit buckets selects MSD directly; otherwise an MSD level is charged as one counting pass plus one pass for the insertion finish that ends the descent.
 
 ## Insertion and scans
 

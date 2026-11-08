@@ -131,13 +131,13 @@ function counts(summary: Configuration["summary"]) {
 
 // The cases alerted in any configuration, as a dot plot with one column per
 // configuration on one shared scale. Every column is compared with its own
-// configuration's main baseline. A coloured dot on a stem is an alert, blue
-// for less time and orange for more; a hollow grey dot is the same case
-// within its limits in that configuration, so a change confined to one build
-// is visible at a glance. The pair passes the colour-vision checks on the
-// light and dark surfaces, and the media query swaps only the neutrals, so
-// one file serves both themes.
-export function chartSvg(configurations: Configuration[]) {
+// configuration's baseline, `main` unless a stacked PR names its parent.
+// A coloured dot on a stem is an alert, blue for less time and orange for
+// more; a hollow grey dot is the same case within its limits in that
+// configuration, so a change confined to one build is visible at a glance.
+// The pair passes the colour-vision checks on the light and dark surfaces,
+// and the media query swaps only the neutrals, so one file serves both themes.
+export function chartSvg(configurations: Configuration[], base = "main") {
   const changed = changedRows(configurations);
   if (!changed.length) return null;
   // Folding every faster row would leave an axis with nothing on it, so small
@@ -156,7 +156,7 @@ export function chartSvg(configurations: Configuration[]) {
   const names = shown.map((row) => nameCell(row, majorRow(row)));
   // The header's two lines share the name column, so they count toward its width.
   const title: NameCell = {
-    input: "Run time against main",
+    input: `Run time against ${base}`,
     tag: "",
     sub: "each build, own baseline",
     strong: true,
@@ -203,7 +203,7 @@ export function chartSvg(configurations: Configuration[]) {
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="t d">`,
   );
   out.push(
-    `<title id="t">Benchmark changes against main: ${escapeXml(configurations.map((c) => `${c.name} ${counts(c.summary) || "not measured"}`).join("; "))}</title>`,
+    `<title id="t">Benchmark changes against ${escapeXml(base)}: ${escapeXml(configurations.map((c) => `${c.name} ${counts(c.summary) || "not measured"}`).join("; "))}</title>`,
   );
   out.push(
     `<desc id="d">${escapeXml(

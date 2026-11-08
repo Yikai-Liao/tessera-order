@@ -99,15 +99,23 @@ jobs:
           BRANCH: ${{ steps.source.outputs.branch }}
           HASH: ${{ steps.source.outputs.hash }}
           BASE: ${{ steps.source.outputs.base }}
+          START_POINT: ${{ steps.source.outputs.start_point }}
           BASE_HASH: ${{ steps.source.outputs.base_hash }}
           PR_NUMBER: ${{ steps.source.outputs.number }}
           IMAGE: ${{ steps.image.outputs.reference }}
           VARIANTS_JSON: ${{ steps.check.outputs.variants }}
         run: |
-          if [ -n "$PR_NUMBER" ]; then
-            # Compare against the target branch at the PR's base commit.
-            args=(--start-point "$BASE" --start-point-hash "$BASE_HASH"
+          if [ -n "$START_POINT" ]; then
+            # Compare against the parent PR's samples at this PR's base commit.
+            # A stacked PR's base branch is a GitHub branch name, which Bencher
+            # never stores; the parent's `pr-<number>` is the Bencher branch.
+            args=(--start-point "$START_POINT" --start-point-hash "$BASE_HASH"
               --start-point-clone-thresholds --start-point-reset)
+          elif [ -n "$PR_NUMBER" ]; then
+            # The tracker could not name a start point. Measure anyway; the
+            # report fails the check with the reason instead of passing
+            # without a comparison.
+            args=()
           else
             # Five percent around the previous main sample. A statistical test
             # over a window of main samples mixes code from before and after
@@ -139,6 +147,9 @@ jobs:
           HASH: ${{ steps.source.outputs.hash }}
           PR_NUMBER: ${{ steps.source.outputs.number }}
           BASE: ${{ steps.source.outputs.base }}
+          START_POINT: ${{ steps.source.outputs.start_point }}
+          BASE_HASH: ${{ steps.source.outputs.base_hash }}
+          BASELINE_REASON: ${{ steps.source.outputs.baseline_reason }}
           CHECK_DEFAULT: ${{ steps.check.outputs.default }}
           CHECK_SIMD: ${{ steps.check.outputs['portable-simd'] }}
           OUTCOME_DEFAULT: ${{ steps.measure.outputs.default }}
@@ -152,6 +163,8 @@ jobs:
             await publishReport({ github, context, core, inputs: {
               language: "rust", hash: env.HASH, number: env.PR_NUMBER,
               baseRef: env.BASE || "main",
+              startPoint: env.START_POINT, baseHash: env.BASE_HASH,
+              baselineReason: env.BASELINE_REASON,
               variants: VARIANTS.map(variant => ({
                 variant,
                 checkId: variant.id === 'default' ? env.CHECK_DEFAULT : env.CHECK_SIMD,

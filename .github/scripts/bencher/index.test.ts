@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { chartSvg } from "./chart.ts";
 import { mockGitHub } from "./fixtures/github.ts";
-import { fixture, hash } from "./fixtures/report.ts";
+import { baseHash, fixture, hash } from "./fixtures/report.ts";
 import { publishReport } from "./index.ts";
 import { summarize } from "./report.ts";
 import { VARIANTS, type Variant } from "./variants.ts";
@@ -59,6 +59,9 @@ function publication(t: TestContext, outcome = "success", imageFailure = false) 
       language: "rust",
       hash,
       number: "7",
+      baseRef: "main",
+      startPoint: "main",
+      baseHash,
       variants: [{ variant: VARIANTS[0] as Variant, outcome, reportPath, checkId: "42" }],
     },
   };
@@ -108,6 +111,98 @@ test("embeds both published charts in the summary, check and PR comment", async 
       (request) => request.method === "POST" && request.path.endsWith("/issues/7/comments"),
     ),
   );
+});
+
+// A report whose cases were all measured against nothing: Bencher records
+// no start point when it cannot resolve one.
+function withoutBaseline(input: ReturnType<typeof fixture>) {
+  for (const result of input.results[0]) {
+    for (const measure of result.measures) {
+      measure.boundary = null;
+      measure.threshold = undefined;
+    }
+  }
+  input.alerts = [];
+  return input;
+}
+
+test("fails a PR check when no case has a baseline", async (t) => {
+  const action = publication(t);
+  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(withoutBaseline(fixture())));
+  await publishReport(action);
+  const check = action.requests.find((request) => request.path.endsWith("/check-runs/42"))!;
+  assert.equal(check.body.conclusion, "failure");
+  const output = check.body.output as { title: string; summary: string };
+  assert.equal(output.title, "no comparable baseline");
+  const summary = output.summary;
+  assert.match(summary, /> \[!WARNING\]\n> \*\*No comparable baseline:\*\*/);
+  assert.match(summary, /no case has a baseline at `main` bbbbbbb/);
+  // The numbers stay; only their comparison is missing.
+  assert.match(summary, /All 5 cases/);
+  assert.doesNotMatch(summary, /new case/);
+});
+
+test("fails a PR check when Bencher recorded no start point", async (t) => {
+  const action = publication(t);
+  const input = withoutBaseline(fixture());
+  input.branch.head.start_point = null;
+  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(input));
+  await publishReport(action);
+  const check = action.requests.find((request) => request.path.endsWith("/check-runs/42"))!;
+  assert.equal(check.body.conclusion, "failure");
+  assert.match(
+    (check.body.output as { summary: string }).summary,
+    /Bencher recorded no start point/,
+  );
+});
+
+test("fails a PR check that compared against another commit", async (t) => {
+  const action = publication(t);
+  const input = fixture();
+  input.branch.head.start_point!.version!.hash = "c".repeat(40);
+  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(input));
+  await publishReport(action);
+  const check = action.requests.find((request) => request.path.endsWith("/check-runs/42"))!;
+  assert.equal(check.body.conclusion, "failure");
+  assert.match(
+    (check.body.output as { summary: string }).summary,
+    /compares against ccccccc instead of `main` bbbbbbb/,
+  );
+});
+
+test("fails a PR check when the start point has no commit", async (t) => {
+  const action = publication(t);
+  const input = fixture();
+  input.branch.head.start_point!.version = null;
+  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(input));
+  await publishReport(action);
+  const check = action.requests.find((request) => request.path.endsWith("/check-runs/42"))!;
+  assert.equal(check.body.conclusion, "failure");
+  assert.match(
+    (check.body.output as { summary: string }).summary,
+    /compares against unknown instead of `main` bbbbbbb/,
+  );
+});
+
+test("fails a PR check when the measured commit has no hash", async (t) => {
+  const action = publication(t);
+  const input = fixture();
+  input.branch.head.version = null;
+  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(input));
+  await publishReport(action);
+  assert.equal(action.requests[0].body.conclusion, "failure");
+  assert.match(String(action.summaries[0]), /does not match the expected configuration and commit/);
+});
+
+test("passes a main run that has nothing to compare", async (t) => {
+  const action = publication(t);
+  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(withoutBaseline(fixture())));
+  await publishReport({ ...action, inputs: { ...action.inputs, number: undefined } });
+  const check = action.requests.find((request) => request.path.endsWith("/check-runs/42"))!;
+  assert.equal(check.body.conclusion, "success");
+  const output = check.body.output as { title: string; summary: string };
+  assert.equal(output.title, "5 new, no baseline");
+  assert.doesNotMatch(output.summary, /No comparable baseline/);
 });
 
 test("passes a check when all active alerts are improvements", async (t) => {

@@ -27,11 +27,12 @@ const swing = (changes: number[]) => (1 + Math.max(...changes)) / (1 + Math.min(
 // The PR history, drawn with the comparison chart's columns (chart.ts): one
 // column per configuration, one row for each configuration's overall change
 // and one per case that history.ts selected in any configuration. Each
-// cell's dashed grey axis is main; its line is blue while the PR takes less
-// time than main and orange while it takes more, so colour changes only
-// where a line crosses main, not with rerun noise. A row's cells share one
+// cell's dashed grey axis is the comparison base, `main` unless a stacked
+// PR names its parent; its line is blue while the PR takes less time than
+// the base and orange while it takes more, so colour changes only where a
+// line crosses the base, not with rerun noise. A row's cells share one
 // vertical scale, so the same swing has the same height in every build.
-export function trendSvg(configurations: ConfigurationTrend[]) {
+export function trendSvg(configurations: ConfigurationTrend[], base = "main") {
   const measured = configurations.filter((c) => c.trend);
   if (!measured.length) return null;
   const byName = configurations.map(
@@ -237,13 +238,13 @@ export function trendSvg(configurations: ConfigurationTrend[]) {
       measured.map((c) => `${short(c.trend!.runs[0].hash)} → ${short(c.trend!.runs.at(-1)!.hash)}`),
     ),
   ];
-  const mainLabel = `main ${bases.join(", ")} · runs ${ranges.join(", ")}`;
-  t("muted sub", PAD + 20, legendY, mainLabel);
+  const baseLabel = `${base} ${bases.join(", ")} · runs ${ranges.join(", ")}`;
+  t("muted sub", PAD + 20, legendY, baseLabel);
   t(
     "muted sub",
     W - PAD,
     legendY,
-    "value: latest run against main · one scale per row",
+    `value: latest run against ${base} · one scale per row`,
     ' text-anchor="end"',
   );
   out.push("</svg>");

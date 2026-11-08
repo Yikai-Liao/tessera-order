@@ -3,6 +3,18 @@ name: Track benchmarks
 # Privileged: runs trusted default-branch code after a build. It packages the
 # untrusted executable without running it and submits it to Bencher.
 on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        type: choice
+        default: default
+        options: [default, portable-simd]
+      rounds:
+        type: number
+        default: 3
+      batches:
+        type: string
+        default: "0 1 2 3"
   workflow_run:
     workflows: [Build benchmarks]
     types: [completed]
@@ -12,7 +24,7 @@ permissions:
 
 jobs:
   rust:
-    if: github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     environment: benchmark
     timeout-minutes: 30
@@ -173,3 +185,101 @@ jobs:
                 reportPath: `${env.RUNNER_TEMP}/bencher-${variant.id}.json`,
               })),
             } });
+
+  experiment:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/experiment/bencher-timing-concurrency'
+    runs-on: ubuntu-24.04
+    environment: benchmark
+    timeout-minutes: 90
+    concurrency:
+      group: bencher-bare-metal
+      queue: max
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build the unchanged timing executable once
+        env:
+          RUSTFLAGS: >-
+            -C target-feature=+crt-static
+            -C llvm-args=-x86-branches-within-32B-boundaries
+          VARIANT: ${{ inputs.variant }}
+        run: |
+          df -h / /tmp
+          args=()
+          if [ "$VARIANT" = portable-simd ]; then
+            args=(--features tessera-sort/portable-simd)
+          fi
+          cargo bench --locked -p tessera-bench --bench smoke "${args[@]}" \
+            --target x86_64-unknown-linux-gnu --no-run --message-format=json \
+            | jq -r 'select(.reason == "compiler-artifact" and .target.name == "smoke")
+                     | .executable // empty' > executable.txt
+          test "$(wc -l < executable.txt)" -eq 1
+          mkdir -p experiment-image results
+          cp "$(cat executable.txt)" experiment-image/bench
+          cp bench/experiments/concurrency.py experiment-image/experiment.py
+          ldd experiment-image/bench | grep -q 'statically linked'
+          sha256sum experiment-image/bench
+      - name: Push a self-contained experiment image
+        id: image
+        env:
+          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
+          BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
+        run: |
+          image="registry.bencher.dev/$BENCHER_PROJECT:concurrency-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          printf 'FROM python:3.13-slim-bookworm\nCOPY bench /bench\nCOPY experiment.py /experiment.py\n' \
+            | docker build --platform linux/amd64 -t "$image" -f - experiment-image
+          printf '%s' "$BENCHER_API_KEY" | docker login registry.bencher.dev \
+            --username "$BENCHER_PROJECT" --password-stdin
+          docker push "$image"
+          echo "reference=$(docker inspect --format '{{index .RepoDigests 0}}' "$image")" >> "$GITHUB_OUTPUT"
+          docker logout registry.bencher.dev
+      - uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d
+        with:
+          version: 0.6.16
+      - name: Run bracketed one/two/four-worker trials
+        env:
+          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
+          BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
+          IMAGE: ${{ steps.image.outputs.reference }}
+          VARIANT: ${{ inputs.variant }}
+          ROUNDS: ${{ inputs.rounds }}
+          BATCHES: ${{ inputs.batches }}
+        run: |
+          python3 - <<'PY'
+          import os
+          assert os.environ["ROUNDS"] in ("1", "2", "3", "4", "5")
+          batches = os.environ["BATCHES"].split()
+          assert batches and len(batches) == len(set(batches))
+          assert all(batch in ("0", "1", "2", "3") for batch in batches)
+          PY
+          for ((round=0; round<ROUNDS; round++)); do
+            for batch in $BATCHES; do
+              file="results/$VARIANT-r$round-b$batch"
+              bencher run --project "$BENCHER_PROJECT" --key "$BENCHER_API_KEY" \
+                --branch "experiment-concurrency-$GITHUB_RUN_ID" --hash "$GITHUB_SHA" \
+                --testbed "experiment-concurrency-$VARIANT" --spec intel-v1 \
+                --image "$IMAGE" --job-timeout 270 \
+                --adapter json --format json --quiet --exec -- \
+                /usr/local/bin/python3 /experiment.py --binary /bench \
+                --batch "$batch" --round "$round" > "$file.report.json"
+              job=$(jq -er '.job' "$file.report.json")
+              curl --fail --silent --show-error \
+                -H "Authorization: Bearer $BENCHER_API_KEY" \
+                "https://api.bencher.dev/v0/projects/$BENCHER_PROJECT/jobs/$job" \
+                > "$file.job.json"
+              python3 bench/experiments/collect.py "$file.job.json" "$file.raw.json"
+            done
+          done
+      - name: Summarize the experiment
+        if: always()
+        run: |
+          python3 bench/experiments/analyze.py results | tee results/summary.md
+          cat results/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: concurrency-${{ inputs.variant }}
+          path: results/
+          retention-days: 14

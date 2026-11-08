@@ -1,82 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 282" width="720" height="282" role="img" aria-labelledby="t d">
-<title id="t">Benchmark changes against main: Default 2 faster; Portable SIMD 1 slower · 2 faster</title>
-<desc id="d">u64 · 99% sorted · 1,000,000: Default +0.3%, Portable SIMD +6.2% regression; u64 · 99% one key · 1,000: Default −64.4% improvement, Portable SIMD −67.4% improvement; {u64,u32} · 99% one key · 1,000: Default −66.6% improvement, Portable SIMD −65.2% improvement</desc>
-<style>
-  .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
-  .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
-  .tag { fill: none; stroke: #c9c8c2; }
-  .slower { fill: #e8622f; } .faster { fill: #4a80e6; }
-  .stem-slower { stroke: #e8622f; } .stem-faster { stroke: #4a80e6; }
-  .within { fill: #fafaf8; stroke: #8d8c86; }
-  text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; font-feature-settings: "tnum", "cv11"; }
-  .val { font-size: 12px; } .sub { font-size: 11px; } .tiny { font-size: 10px; } .strong { font-weight: 600; }
-  .hero { font-size: 28px; font-weight: 600; letter-spacing: -0.6px; font-feature-settings: "pnum"; }
-  .stat { font-size: 18px; font-weight: 600; }
-  .caps { font-size: 10.5px; font-weight: 600; letter-spacing: 1.1px; }
-  @media (prefers-color-scheme: dark) {
-    .panel { fill: #1e1e1d; stroke: #3a3a37; } .ring { stroke: #1e1e1d; }
-    .ink { fill: #e8e7e3; } .muted { fill: #a3a29b; } .rule { stroke: #30302e; } .axis { stroke: #6f6e69; }
-    .tag { stroke: #4a4a46; }
-    .within { fill: #1e1e1d; stroke: #6f6e69; }
-  }
-</style>
-<rect class="panel" x="0.5" y="0.5" width="719" height="281" rx="12"/>
-<text class="ink strong" x="24.0" y="36.0">Run time against main</text>
-<text class="muted sub" x="24.0" y="51.0">each build, own baseline</text>
-<text class="hero faster" x="189.0" y="50.0">−3.9%</text>
-<text class="ink strong" x="283.0" y="36.0">Default</text>
-<text class="muted sub" x="283.0" y="51.0">2 faster</text>
-<text class="hero faster" x="452.5" y="50.0">−3.5%</text>
-<text class="ink strong" x="546.5" y="36.0">Portable SIMD</text>
-<text class="muted sub" x="546.5" y="51.0">1 slower · 2 faster</text>
-<line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
-<line class="rule" x1="306.2" x2="306.2" y1="90" y2="230" stroke-width="1"/>
-<text class="muted tiny" x="306.2" y="246.0" text-anchor="middle">−20%</text>
-<line class="rule" x1="260.1" x2="260.1" y1="90" y2="230" stroke-width="1"/>
-<text class="muted tiny" x="260.1" y="246.0" text-anchor="middle">−40%</text>
-<line class="rule" x1="214.0" x2="214.0" y1="90" y2="230" stroke-width="1"/>
-<text class="muted tiny" x="214.0" y="246.0" text-anchor="middle">−60%</text>
-<line class="axis" x1="352.3" x2="352.3" y1="90" y2="230" stroke-width="1"/>
-<text class="muted tiny" x="352.3" y="246.0" text-anchor="middle">0</text>
-<line class="rule" x1="569.7" x2="569.7" y1="90" y2="230" stroke-width="1"/>
-<text class="muted tiny" x="569.7" y="246.0" text-anchor="middle">−20%</text>
-<line class="rule" x1="523.6" x2="523.6" y1="90" y2="230" stroke-width="1"/>
-<text class="muted tiny" x="523.6" y="246.0" text-anchor="middle">−40%</text>
-<line class="rule" x1="477.5" x2="477.5" y1="90" y2="230" stroke-width="1"/>
-<text class="muted tiny" x="477.5" y="246.0" text-anchor="middle">−60%</text>
-<line class="axis" x1="615.8" x2="615.8" y1="90" y2="230" stroke-width="1"/>
-<text class="muted tiny" x="615.8" y="246.0" text-anchor="middle">0</text>
-<text class="caps muted" x="24.0" y="102.0">STABLE</text>
-<text class="ink" x="24.0" y="129.0">99% sorted</text>
-<text class="muted sub" x="24.0" y="144.0">u64 · 1,000,000</text>
-<circle class="within" cx="352.9" cy="131" r="3.5" stroke-width="1.5"/>
-<text class="val muted" x="432.5" y="135.0" text-anchor="end">+0.3%</text>
-<line class="stem-slower" x1="615.8" x2="630.0" y1="131" y2="131" stroke-width="2" stroke-linecap="round"/>
-<circle class="slower ring" cx="630.0" cy="131" r="4" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="135.0" text-anchor="end">+6.2%</text>
-<text class="ink strong" x="24.0" y="167.0">99% one key</text>
-<text class="muted sub" x="24.0" y="182.0">u64 · 1,000</text>
-<line class="stem-faster" x1="352.3" x2="204.0" y1="169" y2="169" stroke-width="2" stroke-linecap="round"/>
-<circle class="faster ring" cx="204.0" cy="169" r="5.5" stroke-width="2"/>
-<text class="val ink strong" x="432.5" y="173.0" text-anchor="end">−64.4%</text>
-<line class="stem-faster" x1="615.8" x2="460.5" y1="169" y2="169" stroke-width="2" stroke-linecap="round"/>
-<circle class="faster ring" cx="460.5" cy="169" r="5.5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="173.0" text-anchor="end">−67.4%</text>
-<text class="ink strong" x="24.0" y="205.0">99% one key</text>
-<text class="muted sub" x="24.0" y="220.0">{u64,u32} · 1,000</text>
-<line class="stem-faster" x1="352.3" x2="198.8" y1="207" y2="207" stroke-width="2" stroke-linecap="round"/>
-<circle class="faster ring" cx="198.8" cy="207" r="5.5" stroke-width="2"/>
-<text class="val ink strong" x="432.5" y="211.0" text-anchor="end">−66.6%</text>
-<line class="stem-faster" x1="615.8" x2="465.6" y1="207" y2="207" stroke-width="2" stroke-linecap="round"/>
-<circle class="faster ring" cx="465.6" cy="207" r="5.5" stroke-width="2"/>
-<text class="val ink strong" x="696.0" y="211.0" text-anchor="end">−65.2%</text>
-<circle class="slower" cx="28" cy="264" r="4"/>
-<circle class="faster" cx="38" cy="264" r="4"/>
-<text class="muted sub" x="48.0" y="268.0">alert</text>
-<circle class="within" cx="91.1" cy="264" r="3.5" stroke-width="1.5"/>
-<text class="muted sub" x="101.1" y="268.0">within limits</text>
-<circle class="ink" cx="186.07" cy="264" r="5.5"/>
-<text class="muted sub" x="196.6" y="268.0">20% or more</text>
-<text class="slower sub" x="696.0" y="268.0" text-anchor="end">more time →</text>
-<text class="faster sub" x="621.7" y="268.0" text-anchor="end">← less time</text>
-</svg>
+<svg aria-labelledby="t d" role="img" xmlns="http://www.w3.org/2000/svg" style="font-family:Inter, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Helvetica, Arial, sans-serif;font-size:13px;background:none" viewBox="0 0 720 396" height="396" width="720" text-anchor="middle" font-size="10" font-family="system-ui, sans-serif" fill="currentColor" class="benchmark-figure"><style>:where(.benchmark-figure) {
+  --plot-background: white;
+  display: block;
+  height: auto;
+  height: intrinsic;
+  max-width: 100%;
+}
+:where(.benchmark-figure text),
+:where(.benchmark-figure tspan) {
+  white-space: pre;
+}</style><g stroke="var(--border)" fill="var(--panel)" aria-label="rect"><rect rx="12" height="395" width="719" y="0.5" x="0.5" /></g><title id="t">Benchmark changes against main: Default 1 slower · 2 faster; Portable SIMD 1 slower · 3 faster</title><desc id="d">u64 · random · 48: Default +9.3% regression, Portable SIMD −1.3%; f64 · 99% sorted · 65,536: Default +3.8%, Portable SIMD +6.9% regression; u64 · 99% sorted · 65,536: Default −0.7%, Portable SIMD −13.6% improvement; u64 · two clusters · 1,000,000: Default −6.7% improvement, Portable SIMD −7.0% improvement; {u64,u32} · random · 1,000,000: Default −6.2% improvement, Portable SIMD +0.1%; u64 · 16 values · 65,536: Default −1.0%, Portable SIMD −5.7% improvement</desc><style>
+    .benchmark-figure { --panel: #fafaf8; --border: #d8d7d2; --ink: #0b0b0b; --muted: #6b6a66; --rule: #e6e5e0; --axis: #8d8c86; --tag: #c9c8c2; font-feature-settings: "tnum", "cv11"; }
+    .benchmark-figure [font-size="10.5"] { letter-spacing: 1.1px; }
+    .benchmark-figure [font-size="28"] { font-feature-settings: "pnum"; letter-spacing: -.6px; }
+    @media (prefers-color-scheme: dark) { .benchmark-figure { --panel: #1e1e1d; --border: #3a3a37; --ink: #e8e7e3; --muted: #a3a29b; --rule: #30302e; --axis: #6f6e69; --tag: #4a4a46; } }
+  </style><g stroke="var(--rule)" aria-hidden="true" aria-label="x-grid"><line y2="344" y1="90" x2="225.4609706189877" x1="225.4609706189877" /><line y2="344" y1="90" x2="298.9491889194436" x1="298.9491889194436" /></g><g stroke="var(--axis)" aria-label="rule"><line y2="344" y1="90" x2="298.9491889194436" x1="298.9491889194436" /></g><g transform="translate(0,9)" font-variant="tabular-nums" font-size="10" fill="var(--muted)" aria-label="x-axis tick label"><text transform="translate(225.4609706189877,344)" y="0.71em">−10%</text><text transform="translate(298.9491889194436,344)" y="0.71em">0</text></g><g stroke-linecap="round" stroke-width="2" aria-label="rule"><line stroke="#e8622f" y2="131" y1="131" x2="367.5" x1="298.9491889194436" /><line stroke="#4a80e6" y2="245" y1="245" x2="249.82435506846798" x1="298.9491889194436" /><line stroke="#4a80e6" y2="283" y1="283" x2="253.4136934424592" x1="298.9491889194436" /></g><g stroke-width="1.5" stroke="var(--axis)" fill="var(--panel)" aria-label="dot"><circle r="3.5" cy="169" cx="327.02653249768815" /><circle r="3.5" cy="207" cx="293.4456410199104" /><circle r="3.5" cy="321" cx="291.8778717222621" /></g><g stroke-width="2" stroke="var(--panel)" aria-label="dot"><circle fill="#e8622f" r="4" cy="131" cx="367.5" /><circle fill="#4a80e6" r="4" cy="245" cx="249.82435506846798" /><circle fill="#4a80e6" r="4" cy="283" cx="253.4136934424592" /></g><g stroke="var(--rule)" aria-hidden="true" aria-label="x-grid"><line y2="344" y1="90" x2="487.9609706189877" x1="487.9609706189877" /><line y2="344" y1="90" x2="561.4491889194435" x1="561.4491889194435" /></g><g stroke="var(--axis)" aria-label="rule"><line y2="344" y1="90" x2="561.4491889194435" x1="561.4491889194435" /></g><g transform="translate(0,9)" font-variant="tabular-nums" font-size="10" fill="var(--muted)" aria-label="x-axis tick label"><text transform="translate(487.9609706189877,344)" y="0.71em">−10%</text><text transform="translate(561.4491889194435,344)" y="0.71em">0</text></g><g stroke-linecap="round" stroke-width="2" aria-label="rule"><line stroke="#e8622f" y2="169" y1="169" x2="612.0392841498124" x1="561.4491889194435" /><line stroke="#4a80e6" y2="207" y1="207" x2="461.5" x1="561.4491889194435" /><line stroke="#4a80e6" y2="245" y1="245" x2="509.92558042042344" x1="561.4491889194435" /><line stroke="#4a80e6" y2="321" y1="321" x2="519.9216355103765" x1="561.4491889194435" /></g><g stroke-width="1.5" stroke="var(--axis)" fill="var(--panel)" aria-label="dot"><circle r="3.5" cy="131" cx="551.6505696405807" /><circle r="3.5" cy="283" cx="562.5010868375034" /></g><g stroke-width="2" stroke="var(--panel)" aria-label="dot"><circle fill="#e8622f" r="4" cy="169" cx="612.0392841498124" /><circle fill="#4a80e6" r="4" cy="207" cx="461.5" /><circle fill="#4a80e6" r="4" cy="245" cx="509.92558042042344" /><circle fill="#4a80e6" r="4" cy="321" cx="519.9216355103765" /></g><g font-weight="600" font-size="13" text-anchor="start" fill="var(--ink)" aria-label="text"><text transform="translate(24,36)">Run time against main</text></g><g font-weight="400" font-size="11" text-anchor="start" fill="var(--muted)" aria-label="text"><text transform="translate(24,51)">each build, own baseline</text></g><g stroke="var(--rule)" aria-label="rule"><line y2="76" y1="76" x2="696" x1="24" /></g><g font-weight="600" font-size="28" text-anchor="start" fill="#4a80e6" aria-label="text"><text transform="translate(191,50)">−0.1%</text></g><g font-weight="600" font-size="13" text-anchor="start" fill="var(--ink)" aria-label="text"><text transform="translate(279.72,36)">Default</text></g><g font-weight="400" font-size="11" text-anchor="start" fill="var(--muted)" aria-label="text"><text transform="translate(279.72,51)">1 slower · 2 faster</text></g><g font-weight="600" font-size="28" text-anchor="start" fill="#4a80e6" aria-label="text"><text transform="translate(453.5,50)">−0.6%</text></g><g font-weight="600" font-size="13" text-anchor="start" fill="var(--ink)" aria-label="text"><text transform="translate(546.7,36)">Portable SIMD</text></g><g font-weight="400" font-size="11" text-anchor="start" fill="var(--muted)" aria-label="text"><text transform="translate(546.7,51)">1 slower · 3 faster</text></g><g font-weight="600" font-size="10.5" text-anchor="start" fill="var(--muted)" aria-label="text"><text transform="translate(24,102)">STABLE</text></g><g font-weight="400" font-size="13" text-anchor="start" fill="var(--ink)" aria-label="text"><text transform="translate(24,129)">random</text></g><g font-weight="400" font-size="11" text-anchor="start" fill="var(--muted)" aria-label="text"><text transform="translate(24,144)">u64 · 48</text></g><g font-weight="600" font-size="12" text-anchor="end" fill="var(--ink)" aria-label="text"><text transform="translate(433.5,135)">+9.3%</text></g><g font-weight="400" font-size="12" text-anchor="end" fill="var(--muted)" aria-label="text"><text transform="translate(696,135)">−1.3%</text></g><g font-weight="400" font-size="13" text-anchor="start" fill="var(--ink)" aria-label="text"><text transform="translate(24,167)">99% sorted</text></g><g font-weight="400" font-size="11" text-anchor="start" fill="var(--muted)" aria-label="text"><text transform="translate(24,182)">f64 · 65,536</text></g><g font-weight="400" font-size="12" text-anchor="end" fill="var(--muted)" aria-label="text"><text transform="translate(433.5,173)">+3.8%</text></g><g font-weight="600" font-size="12" text-anchor="end" fill="var(--ink)" aria-label="text"><text transform="translate(696,173)">+6.9%</text></g><g font-weight="400" font-size="13" text-anchor="start" fill="var(--ink)" aria-label="text"><text transform="translate(24,205)">99% sorted</text></g><g font-weight="400" font-size="11" text-anchor="start" fill="var(--muted)" aria-label="text"><text transform="translate(24,220)">u64 · 65,536</text></g><g font-weight="400" font-size="12" text-anchor="end" fill="var(--muted)" aria-label="text"><text transform="translate(433.5,211)">−0.7%</text></g><g font-weight="600" font-size="12" text-anchor="end" fill="var(--ink)" aria-label="text"><text transform="translate(696,211)">−13.6%</text></g><g font-weight="400" font-size="13" text-anchor="start" fill="var(--ink)" aria-label="text"><text transform="translate(24,243)">two clusters</text></g><g font-weight="400" font-size="11" text-anchor="start" fill="var(--muted)" aria-label="text"><text transform="translate(24,258)">u64 · 1,000,000</text></g><g font-weight="600" font-size="12" text-anchor="end" fill="var(--ink)" aria-label="text"><text transform="translate(433.5,249)">−6.7%</text></g><g font-weight="600" font-size="12" text-anchor="end" fill="var(--ink)" aria-label="text"><text transform="translate(696,249)">−7.0%</text></g><g font-weight="400" font-size="13" text-anchor="start" fill="var(--ink)" aria-label="text"><text transform="translate(24,281)">random</text></g><g font-weight="400" font-size="11" text-anchor="start" fill="var(--muted)" aria-label="text"><text transform="translate(24,296)">{u64,u32} · 1,000,000</text></g><g font-weight="600" font-size="12" text-anchor="end" fill="var(--ink)" aria-label="text"><text transform="translate(433.5,287)">−6.2%</text></g><g font-weight="400" font-size="12" text-anchor="end" fill="var(--muted)" aria-label="text"><text transform="translate(696,287)">+0.1%</text></g><g font-weight="400" font-size="13" text-anchor="start" fill="var(--ink)" aria-label="text"><text transform="translate(24,319)">16 values</text></g><g font-weight="400" font-size="11" text-anchor="start" fill="var(--muted)" aria-label="text"><text transform="translate(24,334)">u64 · 65,536</text></g><g font-weight="400" font-size="12" text-anchor="end" fill="var(--muted)" aria-label="text"><text transform="translate(433.5,325)">−1.0%</text></g><g font-weight="600" font-size="12" text-anchor="end" fill="var(--ink)" aria-label="text"><text transform="translate(696,325)">−5.7%</text></g><g fill="#e8622f" aria-label="dot"><circle r="4" cy="378" cx="28" /></g><g fill="#4a80e6" aria-label="dot"><circle r="4" cy="378" cx="38" /></g><g font-weight="400" font-size="11" text-anchor="start" fill="var(--muted)" aria-label="text"><text transform="translate(48,382)">alert</text></g><g stroke-width="1.5" stroke="var(--axis)" fill="var(--panel)" aria-label="dot"><circle r="3.5" cy="378" cx="90" /></g><g font-weight="400" font-size="11" text-anchor="start" fill="var(--muted)" aria-label="text"><text transform="translate(100,382)">within limits</text></g><g fill="var(--ink)" aria-label="dot"><circle r="5.5" cy="378" cx="182" /></g><g font-weight="400" font-size="11" text-anchor="start" fill="var(--muted)" aria-label="text"><text transform="translate(193,382)">20% or more</text></g><g font-weight="400" font-size="11" text-anchor="end" fill="#e8622f" aria-label="text"><text transform="translate(696,382)">more time →</text></g><g font-weight="400" font-size="11" text-anchor="end" fill="#4a80e6" aria-label="text"><text transform="translate(611,382)">← less time</text></g></svg>

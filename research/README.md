@@ -172,3 +172,9 @@ profiles, and harnesses remain outside this repository. Each crate has a separat
   exact one-expression source patch, scoped safety evidence and 64 verified
   screen calls. No accepted gain; wide Row16 label asymmetry and emitted
   code changes prevent single-branch attribution or runtime adoption.
+
+- [PRELIMINARY current-core owned-rank direction and space](owned-rank/current-core-direction/SUMMARY.md):
+  164 verified timing calls and 16 separate requested-heap captures. Owned
+  remains a direction lead with noisy native controls; Copy is mixed. Exact
+  unchanged source binding and scoped validation only; no accepted gain,
+  parameter rescue or runtime adoption.

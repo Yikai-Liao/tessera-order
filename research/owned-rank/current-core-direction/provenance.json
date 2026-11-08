@@ -1,0 +1,27 @@
+{
+  "license": "BSD-2-Clause",
+  "status": "PRELIMINARY; no acceptance or runtime adoption",
+  "kernel_sha256": {
+    "lib.rs": "0aa2a8f8566facee65301fab0e80b1c15acf0e8cc5fdc18b3005507ea3d8a6e9",
+    "aligned.rs": "677de24dc558c408d7c3e4dd76f27f58d37d2ad9726c835225e0d639b9e780ed",
+    "parallel_restore.rs": "b48d9d6d38b4be63f37b2ee9a930ef74e56427d386dd6a8dbfe495a8ff56651e"
+  },
+  "native_input_sha256": {
+    "libcrossbeam_deque-3dc832c237a8f156.rlib": "b425fdedcfcd97c8d71a54bea3617a567a0f3ccf879bd6aca378fb289928cb1d",
+    "libcrossbeam_epoch-e6e776959b0552fa.rlib": "c94456be53c52e8d9e1ba11b86e78f5c61ab0bd596e764c08eeb0e27cdd4a7e8",
+    "libcrossbeam_utils-d347ad423d0a1960.rlib": "75fa55e90914f1926fa0c9a57802edad11466820b8de17ed2b2718208b09fbec",
+    "libeither-2dbcf0b8ad6f9676.rlib": "83bee5a2051ff0d13830b2f8e0c46b0a20c28add7d86d3c18619f5946bbc569c",
+    "libfearless_simd-8f5b7fa59d01c2d9.rlib": "09dc23000ff66eb3b3a828b5c857c71f8ed3b6fe80646888c120ceff6b92db64",
+    "libgeneric_combined-43ac9c85aa7b0eb1.rlib": "127fd3f9945585f9015f5468f3b2c866f7995227007bf1abf7f7293ce0c9f7b4",
+    "librayon-1811e04b281edb8d.rlib": "bc086c3e00f46824a222923094618b8279ed535bf6c52f3742de0849ed7258f1",
+    "librayon_core-a2245c1ec44824ba.rlib": "ef1cae0f073e732ad4c7377ea689fc71eca91c3c6f841ec3b087317218d36604"
+  },
+  "evidence_seal_sha256": {
+    "timing": "b61eac7a8de2d8116468b0bbcf6011a51ef3bbb7e17b32527829464a4a8245bf",
+    "heap": "96e477d3bdb3e0cea756d3427700c6e6039ef6771077066d4b559ace3730de12"
+  },
+  "timing_binary_sha256": "4bf7c6c29550e99be188b0c45d121d145b39508ffbcadd91275399c1622edd87",
+  "scalar_miri_metadata_sha256": {
+    "libcurrent_owned_serial_miri.rmeta": "9bbf56cb35c18ae54420f8c8a77368be1634f5b66eefb812d9cc14c12431bb12"
+  }
+}

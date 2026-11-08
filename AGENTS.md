@@ -4,22 +4,35 @@ Tessera is a stable radix sort with O(√n) auxiliary memory. Keep code concise,
 
 ## Read only for your task
 
-Choose the matching task below. Batch its skill and required documents in the first tool interaction; do not read a skill just to discover already-listed paths. Skip anything already loaded. Reading needs no index build or CLI setup.
-
-For a fact lookup, open the relevant document directly and skip the workflow skill. For multi-step work, use the named skill; links to deeper references are conditional, not a request to read every linked file. Hosts without skill discovery can read `SKILL.md` as ordinary Markdown. The [human task index](docs/README.md) covers the remaining topics.
+Read the matching sections below; batch known required files in the first tool interaction and skip content already loaded. Follow deeper links only when the task needs them. A fact lookup needs its contract or reference, not a development procedure. The [human task index](docs/README.md) covers other topics.
 
 | Task | First read together |
 |---|---|
 | Check ordering, panic or memory guarantees | [Semantics](conformance/semantics.md) |
-| Change the Rust engine, keys or block partition | [Engine skill](.agents/skills/tessera-engine/SKILL.md), [engine reference](docs/design/engine.md), [semantics](conformance/semantics.md) |
-| Measure a change or investigate a performance alert | [Measurement skill](.agents/skills/tessera-measure/SKILL.md), [protocol](docs/development/benchmarking.md); include relevant [engine evidence](docs/design/port.md) for routing, thresholds, digit planning or inlining |
-| Read existing PR performance feedback | [Read-only feedback skill](.agents/skills/tessera-pr-performance/SKILL.md); no other document required for the normal path |
-| Benchmark tooling or figures | [Tooling boundaries](docs/design/benchmark-tooling.md); include [figure guide](docs/development/benchmark-figures.md) for rendering changes |
-| Documentation or site | [Documentation rules](CONTRIBUTING.md#documentation); include [site guide](docs/development/docs-site.md) for pages or models |
+| Change the Rust engine, keys or block partition | [Engine procedure and validation](CONTRIBUTING.md#engine-changes), [engine reference](docs/design/engine.md), [semantics](conformance/semantics.md) |
+| Change routing, thresholds, digit planning or inlining | The engine-change set above, [measurement procedure](docs/development/benchmarking.md#run-an-experiment), [source-attribution controls](docs/development/benchmarking.md#additional-source-attribution-controls), relevant [engine evidence](docs/design/port.md) |
+| Compare source revisions or sorting algorithms | [Command capabilities and procedure](docs/development/benchmarking.md#command-capabilities), then the selected command's contract on that page |
+| Regenerate a retained report | [Command capabilities](docs/development/benchmarking.md#command-capabilities); statistics and result contracts on that page only if interpreting or changing them |
+| Read current-head PR performance feedback | [PR feedback](docs/development/continuous-benchmarks.md#read-feedback-from-a-pr); normal reading needs no measurement protocol |
+| Investigate main/history performance or tracking | [Existing evidence](docs/development/continuous-benchmarks.md#read-main-and-history); tracking internals on that page when needed |
+| Change benchmark tooling or figures | [Tooling boundaries](docs/design/benchmark-tooling.md); the affected command's contract and [figure guide](docs/development/benchmark-figures.md) only when relevant |
+| Documentation or site | [Documentation rules](CONTRIBUTING.md#documentation); [site guide](docs/development/docs-site.md) for pages or models |
 | CI, release or planned APIs | [CI](docs/development/ci.md), [release](RELEASING.md) or [roadmap](ROADMAP.md), respectively |
 | Open a PR or commit | [Contributing](CONTRIBUTING.md) |
 
-Engine routing, thresholds, digit planning and inlining changes also need the measurement skill, protocol and relevant evidence in that first batch.
+## Use the benchmark CLI
+
+Use `pnpm bench` for covered tasks; do not recreate its build/run/report orchestration, timing, A/A, verification or provenance in ad-hoc scripts. Run from the repository root:
+
+| Task | Command |
+|---|---|
+| Working tree versus a commit | `pnpm bench compare COMMIT` |
+| Paired sorting-algorithm comparison | `pnpm bench run` |
+| Preview inputs without measuring | `pnpm --silent bench plan NAME` |
+| Regenerate retained results | `pnpm bench report DIR` |
+| Read current-head PR feedback | `pnpm --silent bench pr NUMBER --json` |
+
+Replace uppercase placeholders. The [capability table](docs/development/benchmarking.md#command-capabilities) owns defaults, coverage options and evidence limits. A read-only feedback request does not authorize new measurements. Before a custom experiment, identify the concrete unsupported requirement and obtain operator agreement; prefer extending the maintained pipeline.
 
 ## Always preserve
 
@@ -45,4 +58,4 @@ python3 -m unittest discover -s bench/continuous -p "test_*.py"
 python3 -m unittest discover -s .github/scripts -p "test_*.py"
 ```
 
-Run applicable checks locally. Miri, MSRV, platform and benchmark checks also run in CI; [CI](docs/development/ci.md) explains coverage. A green tracking workflow is not a benchmark verdict: read both current-head benchmark checks.
+Run applicable checks locally; engine feature and Miri checks are in [contributing](CONTRIBUTING.md#validation). Miri, MSRV, platform and benchmark checks also run in CI; [CI](docs/development/ci.md) explains coverage. A green tracking workflow is not a benchmark verdict: read both current-head benchmark checks.

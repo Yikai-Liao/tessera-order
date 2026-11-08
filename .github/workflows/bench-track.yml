@@ -130,8 +130,7 @@ jobs:
           else
             # Five percent around the previous main sample. A statistical test
             # over a window of main samples mixes code from before and after
-            # each optimization, so its limits widen into the next one
-            # (decision 0029).
+            # each optimization, so its limits widen into the next one.
             args=(--threshold-measure latency --threshold-test percentage
               --threshold-min-sample-size 1 --threshold-max-sample-size 1
               --threshold-upper-boundary 0.05 --threshold-lower-boundary 0.05

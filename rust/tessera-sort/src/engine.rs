@@ -355,7 +355,7 @@ fn plan_digits(varying: u128, width: usize, digits: &mut [Digit]) -> usize {
 ///
 /// `CACHED` stores each record's bucket ID during a tile pass's histogram so
 /// the scatter never calls the key function again; it is `true` for user key
-/// functions and `false` for library-encoded keys (decision 0001b).
+/// functions and `false` for library-encoded keys.
 struct Sorter<'a, T, E, const CACHED: bool> {
     workspace: &'a mut Workspace<T>,
     extractor: &'a mut E,
@@ -427,8 +427,8 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
             _ => {}
         }
     }
-    // Free calls allocate scratch only now, so ordered and constant inputs
-    // never allocate.
+    // Create tile/block storage only after the root fast paths. A large
+    // unsorted input may already have allocated encoded probe keys.
     let mut owned_workspace;
     let workspace = match workspace {
         Some(workspace) => workspace,
@@ -520,7 +520,7 @@ enum Order {
     Unsorted,
 }
 
-/// Number of pairs the strided order gate samples before confirming direction.
+/// Target pair count used to choose the order gate's stride.
 const ORDER_SAMPLES: usize = 4096;
 
 /// Rejects unordered input with strided adjacent pairs, then confirms order

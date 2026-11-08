@@ -5,7 +5,7 @@ The CLI is `pnpm bench --help` (Node.js 24; install with `pnpm install --frozen-
 | Task | Command | Read |
 |---|---|---|
 | Screen uncommitted code against a commit | `pnpm bench compare HEAD` | [Working-tree comparisons](../docs/development/benchmarking.md#working-tree-comparisons) |
-| Measure algorithms for a release | `pnpm bench run --plan release --simd --cpu 2` | [Protocol](../docs/development/benchmarking.md) |
+| Compare sorting algorithms | `pnpm bench run --plan release --simd` | [Capabilities and procedure](../docs/development/benchmarking.md#command-capabilities) |
 | Preview inputs without measuring | `pnpm --silent bench plan local` | [Experiment plans](../docs/development/benchmarking.md#experiment-plans) |
 | Rebuild a report without measurements | `pnpm bench report bench/results/SESSION` | [Result format](../docs/development/benchmarking.md#results-and-provenance) |
 | Read current-head PR feedback | `pnpm --silent bench pr 123 --json` | [Feedback checks](../docs/development/continuous-benchmarks.md#read-feedback-from-a-pr) |

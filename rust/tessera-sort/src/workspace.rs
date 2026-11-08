@@ -10,9 +10,11 @@ use core::mem::MaybeUninit;
 /// Scratch memory kept between sorts of `T` records.
 ///
 /// The free functions allocate scratch during each call and free it before
-/// returning. A workspace keeps that capacity instead, so after the first sort
-/// only a larger input allocates again. Its methods behave exactly like the
-/// free functions of the same name and produce the same results.
+/// returning. A workspace keeps that capacity instead and allocates again
+/// when a later call needs more scratch. Required capacity depends on input
+/// length, distribution, key width and the sorting path, not length alone.
+/// Its methods behave exactly like the free functions of the same name and
+/// produce the same results.
 ///
 /// A workspace keeps capacity, never records: each call starts from empty
 /// scratch, and a workspace stays usable after a key function panics. Sorting

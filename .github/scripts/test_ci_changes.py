@@ -41,7 +41,6 @@ class LanguageSelection(unittest.TestCase):
             "docs/.vitepress/config.ts",
             "docs/.vitepress/theme/sim/digits.ts",
             "docs/public/logo.svg",
-            "docs/development/[workflow].paths.ts",
             "package.json",
             "pnpm-lock.yaml",
             ".github/workflows/docs.yml",
@@ -56,9 +55,6 @@ class LanguageSelection(unittest.TestCase):
             "RELEASING.md",
             "ROADMAP.md",
             "docs/explain/keys.md",
-            ".agents/skills/tessera-engine/SKILL.md",
-            ".agents/skills/tessera-measure/SKILL.md",
-            ".agents/skills/tessera-pr-performance/SKILL.md",
             "bench/README.md",
             "assets/logo.svg",
         ]:

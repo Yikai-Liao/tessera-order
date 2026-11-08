@@ -6,27 +6,40 @@ Tessera is pre-release. Bug reports, real-workload experience and measurements o
 
 Use stable Rust (MSRV in `Cargo.toml`), Node.js 24 and the pnpm version pinned in `package.json`. Run the applicable [local checks](AGENTS.md#commands). [CI](docs/development/ci.md) covers platform, MSRV, Miri and sanitizer checks.
 
-Engine changes must preserve panic, inconsistent-key, owned-record and `&mut`-record tests. Every `unsafe` block explains its invariant in a `// SAFETY:` comment; every `unsafe fn` documents `# Safety`. For local Miri:
+### Engine changes
+
+Read the [engine reference](docs/design/engine.md) and [shared semantics](conformance/semantics.md) together. Routing, thresholds, digit planning and inlining also require the [measurement procedure](docs/development/benchmarking.md#run-an-experiment), its [source-attribution controls](docs/development/benchmarking.md#additional-source-attribution-controls) and relevant [engine evidence](docs/design/port.md) before implementation.
+
+1. Identify the affected stage and invariant in the reference, source and tests. Reproduce a bug before changing its implementation.
+2. Make the smallest complete change. Follow ownership through moves, panic recovery and inconsistent keys; preserve exactly one live owner. Explain each `unsafe` block with a `// SAFETY:` invariant and document `# Safety` on every `unsafe fn`.
+3. Add focused regression coverage at the changed boundary. Preserve panic, inconsistent-key, owned-record and `&mut`-record tests; extend them where affected rather than weakening them.
+4. Update semantics for intentional contract changes. Algorithm changes also update the explanation and the models in `docs/.vitepress/theme/sim/`.
+
+### Validation
+
+Run the applicable [local checks](AGENTS.md#commands), including workspace tests and doctests. Engine changes also exercise both feature configurations and affected tests under Miri:
 
 ```sh
+cargo test -p tessera-sort --no-default-features
+cargo test -p tessera-sort --features portable-simd
 rustup +nightly component add miri
 cargo +nightly miri test -p tessera-sort
 cargo +nightly miri test -p tessera-sort --no-default-features
 ```
 
-CI uses cargo-nextest to parallelize test processes and runs doctests separately; its pinned commands are in the [Rust workflow](.github/workflows/rust-ci.yml).
+Run `pnpm docs:test` when simulation models change and the [site checks](docs/development/docs-site.md#commands) when their pages change. CI owns the remaining platform, MSRV and sanitizer lanes; the [Rust workflow](.github/workflows/rust-ci.yml) is the command source for reproducing a lane. It uses cargo-nextest for test processes and runs doctests separately.
+
+Report the invariant preserved or contract changed, regression coverage, commands actually run and anything left to CI or unavailable locally. For performance choices, include paired evidence with A/A ranges and investigate results outside the controls under the protocol below.
 
 ## Performance changes
 
-Use `pnpm bench compare COMMIT` for dirty-tree development screens, `pnpm bench run` for algorithm comparisons and `pnpm bench pr NUMBER --json` for current-head feedback. Read the [benchmark protocol](docs/development/benchmarking.md) before changing routing, thresholds, digit planning or inlining. Performance claims need paired measurements, A/A ranges and placement controls; process-level screens and continuous alerts alone do not establish a speedup. Include results or a link, and investigate changes outside the controls.
+Use the maintained benchmark CLI and the [measurement procedure](docs/development/benchmarking.md#command-capabilities). The protocol defines paired timing, A/A ranges and the extra controls needed to attribute a source-change gain rather than compare algorithms. Include measured coverage, environment, control ranges and a results link; investigate changes outside the controls. Process-level screens and continuous alerts alone do not isolate source changes from code placement.
 
 ## Documentation
 
 Use the [task index](docs/README.md) to find the current topic. Edit an existing topic before adding a document; a new page needs a distinct contract, procedure, explanation or evidence. Delete obsolete instructions, keep current rules and non-obvious rationale together, and retain reproducible measurement conditions. Git/PR history preserves superseded decisions; do not add a parallel decision record. Markdown paragraphs occupy one line.
 
-Multi-step agent workflows live in [`.agents/skills/`](.agents/skills/), each with a task-selecting `name` and `description` in `SKILL.md`. A skill owns executable steps and completion criteria; shared contracts, design and evidence remain in their documents. Link those files directly rather than through another index, and list known mandatory reads in `AGENTS.md` so they can be loaded in one batch. Do not require a skill for a simple fact lookup. The site renders skill sources as human-readable workflow pages; never maintain a second copy of the procedure.
-
-Add a skill when a task has a distinct trigger, useful multi-step procedure and completion criterion. Split workflows when their descriptions let an agent avoid loading an unrelated branch; keep shared steps together when they are normally needed in one task. Do not create a skill per document or a generic repository skill that only forwards to other files. Check descriptions, first-read paths and unnecessary reads on representative tasks, not just document counts. Run the [site checks](docs/development/docs-site.md#commands) after changing shared workflows or pages.
+Keep a task's procedure and completion criteria in its existing topic, with the normal path before implementation details and exceptional branches. `AGENTS.md` lists the required first-read sections for agents; the [task index](docs/README.md) and site link to the same sources. Link directly to the relevant section, keep conditional references conditional, and let fact lookups skip procedures. Check representative tasks for unnecessary reading and discovery steps, not just document counts. Run the [site checks](docs/development/docs-site.md#commands) after changing pages or shared documents.
 
 Rust items have a one-line summary. Public items explain their contract with intra-doc links and applicable `# Key function`, `# Panics`, `# Safety`, `# Memory` and `# Examples` sections; examples are asserting doctests. Internal comments explain invariants, hazards and measured choices. Update [shared semantics](conformance/semantics.md) with ordering, stability, panic or space changes, and explanations and simulation models with algorithm changes.
 

@@ -14,7 +14,6 @@ DOCS_SITE_FILES = {
     "pnpm-lock.yaml",
     "tsconfig.json",
     ".github/workflows/docs.yml",
-    "docs/development/[workflow].paths.ts",
 }
 # No language build reads Markdown outside its own directory or images under
 # `assets/`; the crate's README symlink is packaged, but `cargo package` only

@@ -67,6 +67,22 @@ fn measure(f: impl FnOnce()) -> (usize, isize) {
 }
 
 #[test]
+fn ordered_warmup_does_not_reserve_scratch_for_same_length_unsorted_input() {
+    let mut input: Vec<u64> = (0..20000).collect();
+    let mut workspace = Workspace::new();
+    assert_eq!(measure(|| workspace.stable_sort(&mut input)), (0, 0));
+    assert_eq!(workspace.retained_bytes(), 0);
+
+    for value in &mut input {
+        *value = value.wrapping_mul(0x9e3779b97f4a7c15);
+    }
+    let (allocations, bytes) = measure(|| workspace.stable_sort(&mut input));
+    assert!(input.is_sorted());
+    assert!(allocations > 0);
+    assert_eq!(workspace.retained_bytes() as isize, bytes);
+}
+
+#[test]
 fn warm_workspace_reuses_buffers() {
     let mut input: Vec<_> = (0..20000u64)
         .map(|id| (id.wrapping_mul(0x9e3779b97f4a7c15), id))

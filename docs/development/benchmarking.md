@@ -2,11 +2,60 @@
 
 The comparison runner in `bench/rust` measures sorting algorithms on one machine. It answers four questions: how Tessera compares with the standard stable sort, with other stable sorts, with unstable sorts when equal keys are indistinguishable, and how much extra memory each sort uses. The [continuous suite](continuous-benchmarks.md) tracks regressions on Bencher; release comparisons use the paired measurements described here.
 
-Use [the measurement workflow](../../.agents/skills/tessera-measure/SKILL.md) to choose and run a command. This page owns experiment selection semantics, prerequisites, timing, verification and reporting contracts.
+## Command capabilities
+
+Run `pnpm bench` from the repository root with Node.js 24, the pinned pnpm and Rust toolchains. Install JavaScript dependencies with `pnpm install --frozen-lockfile`.
+
+| Task | Command | What it provides |
+|---|---|---|
+| Compare working-tree code with a commit | `pnpm bench compare COMMIT` | Two revision builds, nine rotating baseline/control/current process blocks, paired process-level A/A, verification, provenance and a report |
+| Compare algorithms | `pnpm bench run` | Registered algorithms in one timing executable per configuration, nine shuffled blocks, two Tessera calls for A/A, output verification, allocation measurement and a report |
+| Full algorithm comparison | `pnpm bench run --plan release --simd` | Release coverage, native opponents and a separate Portable SIMD build |
+| Preview or customize inputs | `pnpm --silent bench plan NAME` | Validated selection without compiling or measuring |
+| Regenerate a report | `pnpm bench report DIR` | Statistics and figures from retained results, without new measurements |
+| Read PR feedback | `pnpm --silent bench pr NUMBER --json` | Current-head checks and matching comment; [read-only interpretation](continuous-benchmarks.md#read-feedback-from-a-pr) |
+
+`compare` defaults to `HEAD` and the `local` plan; `run` defaults to the smoke algorithm plan. Replace uppercase placeholders. Use [plans and axis overrides](#experiment-plans) for custom coverage. `report` reads retained results without compiling or measuring; incomplete algorithm sessions require `--partial`, while local revision reports require all nine blocks.
+
+## Run an experiment
+
+1. State the hypothesis, baseline or algorithm opponents, relevant inputs and expected unaffected controls. Preview the selected plan and axis overrides before an expensive run:
+
+   ```sh
+   pnpm --silent bench plan local --types u64,row_u64 --distributions random,zipf2
+   ```
+
+   Use `local` for revision comparisons, `smoke` for a small algorithm comparison, or `release` for full coverage. Preview with the same preset and overrides you intend to measure.
+
+2. Record host and compiler conditions. Choose a CPU allowed by the host affinity policy. Prefer an idle machine, performance governor, disabled turbo/SMT and a pinned logical CPU; obtain operator approval before changing governor, turbo or SMT settings. Native opponents also need the [native prerequisites](#native-prerequisites).
+3. Run the selected command with those inputs:
+
+   ```sh
+   # Revision comparison; HEAD~1 must have a compatible API and harness.
+   pnpm bench compare HEAD~1 --types u64,row_u64 --distributions random,zipf2 --cpu 2
+
+   # Rust-only algorithm smoke comparison, including verification and reporting.
+   pnpm bench run
+
+   # Full algorithm comparison, including native opponents and a second SIMD build.
+   pnpm bench run --plan release --simd --cpu 2
+   ```
+
+   CPU 2 is an example, not a portable default. Both commands accept `--out DIR`, require a new directory and otherwise use `bench/results/<timestamp>`. Keep raw results and research harnesses outside Git. [Direct executable sessions](#direct-executable-sessions) support resuming algorithm groups and tuning sample duration or prepared-memory limits.
+
+4. Retain the resolved plan, source/build provenance, verification results and controls. Report tested coverage, environment, ratios, A/A ranges and result location. Identify partial, interrupted and unmeasured coverage explicitly. Investigate changes outside the controls, including apparently untouched cases; do not dismiss them as noise or tune source layout to one executable. The command contracts below define the scope of each result.
+
+## Additional source-attribution controls
+
+Algorithm comparisons from `run` use the [paired timing contract](#timing-and-statistics) and report results for the measured inputs and environment. Attributing a gain to a source change rather than code placement additionally needs in-process revision comparisons and independent placement controls, as in the [engine measurements](../design/port.md). Process-level `compare` and continuous alerts alone do not provide that attribution evidence.
+
+`run` compares registered implementations from the current source snapshot, not a baseline commit. `compare` accepts a baseline commit but builds two executables; its A/A pair repeats the baseline executable rather than an independently linked copy. The CLI does not automatically register both revisions and independent layout copies in one timing executable.
+
+Before adding a custom experiment, identify the exact unmet requirement, explain why existing plans, options or adapters cannot meet it, and obtain operator agreement. Prefer extending the maintained comparison pipeline so verification, provenance and reporting remain shared. Historical harnesses record past evidence, not the default procedure for new measurements.
 
 ## Working-tree comparisons
 
-`bench compare` and `bench run` accept `--out DIR` and require a new directory. Their default output is `bench/results/<timestamp>`. They snapshot the current sources and clean up their temporary worktree and build directory under `~/code/tessera-bench/`; `TESSERA_BENCH_WORK` overrides that location. Repository-internal symlinks are materialized; escaping or dangling links and directory cycles are rejected before building. Current sources may use absolute links to internal files. Baseline links must resolve inside an archive of the selected commit; absolute links into the live checkout are rejected. Results are retained. The lower-level commands below remain available for resumable algorithm sessions and custom investigations.
+`bench compare` and `bench run` accept `--out DIR` and require a new directory. Their default output is `bench/results/<timestamp>`. They snapshot the current sources and clean up their temporary worktree and build directory under `~/code/tessera-bench/`; `TESSERA_BENCH_WORK` overrides that location. Repository-internal symlinks are materialized; escaping or dangling links and directory cycles are rejected before building. Current sources may use absolute links to internal files. Baseline links must resolve inside an archive of the selected commit; absolute links into the live checkout are rejected. Results are retained. The [direct executable commands](#direct-executable-sessions) support resumable algorithm sessions and custom investigations.
 
 `compare [COMMIT]` defaults to `HEAD` and uses any resolvable local commit compatible with the current crate API, harness and lockfile. Both revisions are built from the current benchmark harness with one toolchain and the same features; the baseline substitutes only `rust/tessera-sort` from the named commit. Selected timed IDs must match. The `local` plan measures only `rust/u64/random/65536/s1/api`; override its axes or choose another plan explicitly, since each selected case runs 27 times across nine blocks. `--filter` optionally narrows the resulting timed IDs.
 
@@ -78,7 +127,7 @@ pnpm bench compare HEAD~1 --plan my-plan.toml
 pnpm --silent bench plan local --format json > my-plan.json
 
 # Override algorithms and inputs for one horizontal comparison.
-pnpm bench run --plan smoke --algorithms glidesort,radsort \\
+pnpm bench run --plan smoke --algorithms glidesort,radsort \
   --types u64 --distributions random,zipf2 --lengths 1234,65536
 
 # Export the validation schema for editors or external tooling.
@@ -89,13 +138,17 @@ pnpm --silent bench plan --schema > benchmark-plan.schema.json
 
 `release` remains an alias for `run`. The lower-level Rust binaries also accept `--plan FILE`; `--suite smoke|release` remains available for their built-in sessions.
 
-## Run a comparison
+## Native prerequisites
 
-The Rust competitors need Cargo's stable toolchain. Native competitors additionally need Linux x86-64 with glibc, Python 3.12 or later, Clang with C++17 support, CMake, GNU binutils, and TBB headers (`libtbb-dev` on Debian/Ubuntu). The pinned IPS²Ra/IPS⁴o headers include TBB queue declarations even for their sequential entry points; the benchmark executables do not link TBB or OpenMP. Fetching sources is a separate step; building and measuring use the verified local sources without network access. The report requires Node.js 24 and `pnpm install --frozen-lockfile`.
+The Rust competitors need Cargo's stable toolchain. Native competitors additionally need Linux x86-64 with glibc, Python 3.12 or later, Clang with C++17 support, CMake, GNU binutils, and TBB headers (`libtbb-dev` on Debian/Ubuntu). The pinned IPS²Ra/IPS⁴o headers include TBB queue declarations even for their sequential entry points; the benchmark executables do not link TBB or OpenMP. The CLI fetches and verifies sources before building; direct sessions use the separate fetch command below. Building and measuring use the verified local sources without network access. The report requires Node.js 24 and `pnpm install --frozen-lockfile`.
 
 For static Rust checks without the native toolchain or fetched sources, use `TESSERA_BENCH_CHECK_ONLY=1 cargo clippy --workspace --all-targets --all-features` or `TESSERA_BENCH_CHECK_ONLY=1 cargo doc --workspace --no-deps --all-features`. This mode omits native compilation and linker inputs, not the native-facing Rust code. Leave the variable unset for builds, tests and measurements that link native competitors.
 
 Native builds default to `clang` and `clang++`. For published comparisons, prefer Clang with the same LLVM major version reported by `rustc -vV`; check it against `clang --version`. Set `CC` and `CXX` to select versioned Clang executables or another compiler. The manifests and report record the actual compiler versions, including any LLVM version difference.
+
+## Direct executable sessions
+
+For normal comparisons, use `pnpm bench run`. Use the binaries directly to resume completed groups, split a session across compatible directories, or set `--sample-ms` and `--memory-mib`. Keep default and Portable SIMD builds separate. The following commands show a native release session; omit `compare-native` and the fetch step for Rust-only opponents.
 
 ```sh
 python3 bench/fetch.py
@@ -110,7 +163,7 @@ taskset -c 2 target/compare-default/release/compare run \
 pnpm bench report bench/results/release
 ```
 
-Choose a CPU allowed by the machine's affinity policy. The recommended conditions are an idle machine, the performance governor, turbo and SMT disabled, and a run pinned to one logical CPU. The runner records these conditions and leaves host configuration to the operator.
+CPU 2 is illustrative; use the [host conditions](#run-an-experiment) chosen for the experiment.
 
 `compare run` first invokes the sibling `memory` executable for any missing cases. Memory can also be measured separately:
 
@@ -127,9 +180,9 @@ pnpm bench report bench/results/part-1 bench/results/part-2
 
 The report requires the complete suite. `--partial` generates a report of the completed groups during development. Results go into the first directory's `report/`, with Markdown, five SVG figures where the required cases are present, and machine-readable summaries. `bmf.json` in that directory can be uploaded with the Bencher CLI. The report reads only the result directories.
 
-For a Rust-only comparison, omit `compare-native` and the fetch step. `list` derives supported types from the same adapters used by `validate`, timing and memory measurement.
+`list` derives supported types from the same adapters used by `validate`, timing and memory measurement.
 
-## Portable SIMD
+### Portable SIMD
 
 Build the Portable SIMD executable separately so the default executable remains available:
 

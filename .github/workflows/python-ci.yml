@@ -13,6 +13,7 @@ jobs:
     name: Python (${{ matrix.os }}, ${{ matrix.python }}, NumPy ${{ matrix.numpy }})
     runs-on: ${{ matrix.os }}
     strategy:
+      max-parallel: 4
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]

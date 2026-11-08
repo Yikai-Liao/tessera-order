@@ -1,6 +1,6 @@
 # Rust engine port
 
-This page retains measured evidence behind engine choices, not current development instructions. The initial-port results and follow-ups below describe their recorded revisions and environments; they are not current-head validation.
+This page retains measured evidence behind engine choices, not current development instructions. The initial-port results and follow-ups below describe their recorded revisions and environments; they are not current-head validation. Use the [benchmark protocol](../development/benchmarking.md#command-capabilities) for new measurements.
 
 The engine in `rust/tessera-sort` is a Stable Rust port of the research prototype in `sort-research-rs` at commit `6c0877f0491dc3b8fc052aa529bce44bf8a53fa8`. The crate is unreleased (`0.0.0`, `publish = false`).
 
@@ -18,7 +18,7 @@ The port changes how the engine is reached, not what it decides:
 | Wide-key narrowing casts the record slice | Narrowing wraps the extractor (`KeyHalf`) |
 | Scratch owned by each call | Optional `Workspace<T>` keeps capacity between calls |
 
-Free functions create their scratch only after the root fast paths, so ordered and constant inputs do not allocate. Block metadata is created only when a node needs a block partition.
+Free functions create tile/block scratch only after the root fast paths, so confirmed ordered and constant inputs do not allocate. Budgeted insertion on a larger unsorted input can allocate an encoded-key probe buffer before the varying-bit scan. Block metadata is created only when a node needs a block partition.
 
 ## Correctness
 
@@ -79,7 +79,7 @@ The measured-build column comes from the full matrix (1 × 9), except the `u128`
 
 On these five cases, branch alignment brought the port and the cached prototype to 0.92–1.06, close to the identical prototype copy (0.92–1.01). It did not help at n ≤ 128, where the identical copy still ranged from 1.00 to 1.41. Branch alignment is also not a free speedup: across the small cases it changed the prototype's own time by −30% to +69% (`u32` random, n = 48: 20.9 to 14.5 ns per element; `u32` Zipf 1.3, n = 48: 14.5 to 24.5).
 
-The crate therefore has nothing to fix. The final link of each program decides where a function lands, and Stable Rust has no attribute for function or branch alignment, so a source change that helps one binary can hurt another. Benchmarks control for placement instead ([build profiles](../development/benchmarking.md#build-profiles)).
+The crate therefore has nothing to fix. The final link of each program decides where a function lands, and Stable Rust has no attribute for function or branch alignment, so a source change that helps one binary can hurt another. Benchmarks control for placement instead ([source-attribution controls](../development/benchmarking.md#additional-source-attribution-controls)).
 
 ### Strictly descending inputs
 
@@ -117,7 +117,7 @@ Two Rust tests check that scanned variation stays within the candidate and that 
 
 ### Exploratory SIMD constraints
 
-The optional backend experiments used AVX2, seven interleaved rounds of separate binaries summarized by per-round minimum times, and a separate A/A run. They did not implement the nine-block paired timing, duplicate baseline and output-hash checks required by the [benchmark protocol](../development/benchmarking.md); these observations preserve design constraints, not formal speedup or regression claims.
+The optional backend experiments used AVX2, seven interleaved rounds of separate binaries summarized by per-round minimum times, and a separate A/A run. They did not use the [protocol](../development/benchmarking.md#timing-and-statistics)'s nine-block paired timing or independently placed baseline copies, and did not record output-hash checks. These observations preserve design constraints, not established speedup or regression claims.
 
 - Dispatch belongs around the insertion pass. Dispatching per scan cost more than it saved on random input, where inversions were usually in the first few pairs. A kernel outside its target-feature inlining context measured 3.5× slower on sorted `u64` and 7× slower on sorted `f64`.
 - Materializing user keys on an 8,192-record near-sorted tile measured 1.4–1.6× slower than scalar callbacks: it added a key array and a second swap per move without reducing the default scan's one extraction per record. The tile finish therefore keeps callbacks; expensive extractors would need separate evidence.

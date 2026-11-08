@@ -1,10 +1,33 @@
 # Continuous benchmarks
 
-Rust changes and pushes to `main` run Default and Portable SIMD Criterion suites on [Bencher Bare Metal](https://bencher.dev/docs/explanation/images/). They flag changes to investigate; without in-process A/A and placement controls they cannot establish performance claims. Use the [full protocol](benchmarking.md) for those.
+Rust changes and pushes to `main` run Default and Portable SIMD Criterion suites on [Bencher Bare Metal](https://bencher.dev/docs/explanation/images/). These measurements flag changes to investigate; they do not isolate source changes from code-placement effects. The [local measurement protocol](benchmarking.md#command-capabilities) provides paired experiments and defines their evidence limits.
 
 ## Read feedback from a PR
 
-Use [the read-only feedback workflow](../../.agents/skills/tessera-pr-performance/SKILL.md) for commands, verdicts and missing-feedback handling. No build or measurement is required. This page describes tracking internals and configuration.
+Run from the repository root with Node.js 24, the pinned pnpm dependencies and authenticated `gh`:
+
+```sh
+gh auth status
+pnpm --silent bench pr 123 --json
+```
+
+Replace `123` with the PR number. If dependencies are absent, install them with `pnpm install --frozen-lockfile`; if authentication is missing, ask the operator to authenticate. The command reads existing feedback without building, measuring or changing remote state. A read-only feedback request does not authorize a new experiment.
+
+1. Match the returned `head` to the PR's current commit. Read `checks[].conclusion`, `checks[].output.summary` and the matching `comment`; stale-head feedback is not the current result.
+2. Check **both** `Benchmarks (rust, Default)` and `Benchmarks (rust, Portable SIMD)`. A green `Track benchmarks` workflow does not imply those checks passed. Distinguish a measured alert, a failed measurement and a missing comparable baseline.
+3. A missing comment or pending check means feedback is not ready, not clean. If checks are absent, inspect the linked `Build benchmarks` run, then `Track benchmarks`. For baseline or queueing problems, use [Pipeline](#pipeline), [Testbeds](#within-job-scheduling) and [Alerts](#alerts) below.
+4. For stacked PRs, verify the comparison uses the parent at the resolved base commit, not the whole stack against `main`.
+5. Read each build summary and its alerted cases. Negative latency changes mean less run time. A failed or unmeasured build is not the clean opposite of a measured alert.
+
+Report the head, each build verdict, relevant cases and baseline, and any pending, missing or failed evidence. Stop here for a feedback request. An alert that needs a new experiment follows the [measurement procedure](benchmarking.md#run-an-experiment) after authorization.
+
+## Read main and history
+
+Use the [public dashboard](https://bencher.dev/perf/yikai-liao-s-project) and the corresponding `Track benchmarks` job summaries to inspect existing `main` results. Check the commit, build/Testbed and baseline: `main` compares with its previous sample; its first sample has no comparison. [Alerts](#alerts) defines missing-baseline and PR start-point rules.
+
+For PR trends, use the report's [history](#pr-history): all points compare against the latest report's baseline over a fixed common case set, separately for each build. Coverage changes and aggregate means are not source-change attribution. The CLI's `pr` command reads the current PR head, not arbitrary `main` commits or history.
+
+Read the sections below when changing tracking, investigating missing feedback or interpreting report details. Tracker changes need the [tooling source map](../design/benchmark-tooling.md); deployment and baseline seeding in [Setup](#setup) are remote changes, not part of reading existing evidence.
 
 ## Pipeline
 

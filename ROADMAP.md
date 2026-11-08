@@ -4,11 +4,10 @@ This page tracks unfinished work and its acceptance conditions. Current behavior
 
 ## Rust 0.1
 
-The first crates.io release. It provides the stable sort only.
+The first crates.io release. It provides the stable sort only. Use the implemented [comparison runner](docs/development/benchmarking.md#command-capabilities) for the remaining release measurements.
 
 | Deliverable | Done when |
 |---|---|
-| Comparison runner, Rust and native competitors, memory measurement and offline report ([protocol](docs/development/benchmarking.md)) | Harness self-tests, native smoke validation and report tests pass in CI |
 | First release comparison, default and Portable SIMD builds, on Stable | The complete local session regenerates from its raw directory; README and Performance page show the figures; the release attaches the archive |
 | Release | Robert Clausecker has been told before publication; `rust/v0.1.0` follows [`RELEASING.md`](RELEASING.md) |
 

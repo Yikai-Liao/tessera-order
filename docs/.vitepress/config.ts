@@ -3,7 +3,6 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type MarkdownRenderer } from "vitepress";
-import { workflowPages, workflowSource } from "../development/[workflow].paths.ts";
 
 // The site renders the Markdown files of the repository in place, so the
 // same files read correctly on GitHub, in an editor, and on the site. Pages
@@ -15,7 +14,6 @@ const sharedPages = new Map([
   ["ROADMAP.md", "ROADMAP.md"],
   ["RELEASING.md", "RELEASING.md"],
   ["CONTRIBUTING.md", "CONTRIBUTING.md"],
-  ...workflowPages,
 ]);
 // The task index is for repository readers; the site has its own home page.
 const notPages = new Set(["docs/README.md"]);
@@ -51,10 +49,9 @@ function markdownFiles(dir: string, out: string[] = []): string[] {
 }
 
 const allMarkdown = markdownFiles(repoRoot);
-const rewrites = Object.fromEntries([
-  ...allMarkdown.filter((p) => isPage(p) && sitePath(p) !== p).map((p) => [p, sitePath(p)]),
-  ...[...workflowPages.values()].map((page) => [`docs/${page}`, page]),
-]);
+const rewrites = Object.fromEntries(
+  allMarkdown.filter((p) => isPage(p) && sitePath(p) !== p).map((p) => [p, sitePath(p)]),
+);
 
 /**
  * Turns relative links into what each reader needs: a page link becomes an
@@ -63,11 +60,8 @@ const rewrites = Object.fromEntries([
  */
 function repositoryLinks(md: MarkdownRenderer) {
   md.core.ruler.push("tessera_repository_links", (state) => {
-    const page: string | undefined = state.env.path;
-    const original: string | undefined = state.env.realPath ?? page;
-    if (!original) return;
-    const workflow = page && workflowSource(relative(repoRoot, page).split(sep).join("/"));
-    const source = workflow ? join(repoRoot, workflow) : original;
+    const source: string | undefined = state.env.realPath ?? state.env.path;
+    if (!source) return;
     const visit = (tokens: typeof state.tokens) => {
       for (const token of tokens) {
         if (token.children) visit(token.children);
@@ -109,11 +103,6 @@ export default defineConfig({
   rewrites,
   cleanUrls: true,
   lastUpdated: true,
-  transformPageData(page) {
-    const source = workflowSource(page.relativePath);
-    // The dynamic template is not the workflow's edit target or update timestamp.
-    if (source) return { filePath: source, lastUpdated: undefined };
-  },
   head: [
     [
       "link",
@@ -202,9 +191,6 @@ function developmentSidebar() {
       text: "Development",
       items: [
         { text: "Contributing", link: "/CONTRIBUTING" },
-        { text: "Change the engine", link: "/development/change-engine" },
-        { text: "Measure a change", link: "/development/measure-change" },
-        { text: "PR performance feedback", link: "/development/pr-performance" },
         { text: "Benchmark protocol", link: "/development/benchmarking" },
         { text: "Benchmark figures", link: "/development/benchmark-figures" },
         { text: "Continuous benchmarks", link: "/development/continuous-benchmarks" },

@@ -351,7 +351,7 @@ macro_rules! copy_adapter {
             "rdst" => Some(prepare_kernel(input, false, |v| v.radix_sort_unstable())),
             #[cfg(feature = "compare-native")]
             "clausecker" | "fluxsort" | "ips2ra" | "ips4o" | "vqsort" | "x86simdsort"
-            | "crumsort" => $crate::comparison::native::prepare(v, input, $ty),
+            | "crumsort" | "duckdb" => $crate::comparison::native::prepare(v, input, $ty),
             _ => try_prepare_common(v, input, $scratch_bytes),
         }
     }};

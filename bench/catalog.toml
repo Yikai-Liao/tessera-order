@@ -18,6 +18,7 @@ algorithms = [
   { id = "vqsort", label = "vqsort", stable = false, family = "SIMD", adapter = "native" },
   { id = "x86simdsort", label = "x86simdsort", stable = false, family = "SIMD", adapter = "native" },
   { id = "crumsort", label = "crumsort", stable = false, family = "comparison", adapter = "native" },
+  { id = "duckdb", label = "DuckDB 1.4.0 kernel", stable = false, family = "radix", adapter = "native", detail = "Vergesort + Ska + pdqsort", description = "single-threaded raw-key kernel; no SQL encoding or external merge" },
 ]
 
 types = [

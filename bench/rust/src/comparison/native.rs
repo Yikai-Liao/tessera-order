@@ -38,6 +38,7 @@ pub(super) fn prepare<T: BenchmarkRecord>(
         "vqsort",
         "x86simdsort",
         "crumsort",
+        "duckdb",
     ]
     .iter()
     .position(|&n| n == v.name)?;
@@ -48,6 +49,7 @@ pub(super) fn prepare<T: BenchmarkRecord>(
         unsafe { sort(values.as_mut_ptr().cast(), values.len()) };
     }))
 }
+
 /// Records the SIMD targets selected on the measuring host.
 pub(super) fn read_dispatch_targets() -> Value {
     // SAFETY: Both functions return non-null static NUL-terminated strings.
@@ -84,8 +86,52 @@ pub(super) fn check_layouts() {
 }
 #[cfg(test)]
 mod tests {
+    use super::super::variant::CaseInput;
+    use super::*;
+
     #[test]
     fn record_layouts_match() {
-        super::check_layouts();
+        check_layouts();
+    }
+
+    #[test]
+    fn duckdb_sorts_boundaries() {
+        let variant = Variant {
+            name: "duckdb",
+            stable: false,
+        };
+        // Exercise both sides of upstream small-sort and radix thresholds.
+        let plan = crate::plan::Plan::parse(
+            r#"
+            schema = 1
+            harness = "comparison"
+            algorithms = ["duckdb"]
+            [[include]]
+            lengths = [1, 2, 23, 24, 127, 128, 129, 1023, 1024, 1025, 8192]
+        "#,
+            "comparison",
+        )
+        .unwrap();
+        let mut cases = plan.inputs().unwrap();
+        // The public plan requires positive lengths; the FFI also accepts empty input.
+        cases.extend(crate::plan::catalog().comparison.types.iter().map(|ty| {
+            crate::plan::InputCase {
+                ty: ty.clone(),
+                distribution: "random".into(),
+                len: 0,
+            }
+        }));
+        for case in cases {
+            let input = CaseInput::new(&case);
+            if let Some(mut kernel) = variant.prepare(&input, 0) {
+                kernel.restore(1);
+                kernel.run_batch();
+                kernel
+                    .check()
+                    .unwrap_or_else(|error| panic!("{}: {error}", case.id()));
+            } else {
+                assert!(matches!(case.ty.as_str(), "f64" | "owned"));
+            }
+        }
     }
 }

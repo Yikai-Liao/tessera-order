@@ -2,12 +2,18 @@
 
 #include "layout.h"
 #include <cstddef>
+#include <iterator>
 using Sort = void (*)(void *, size_t);
 #define DECLARE(ALG, TYPE) extern "C" void bench_##ALG##_##TYPE(void *, size_t);
 #define ALL(ALG)                                                               \
   DECLARE(ALG, u32)                                                            \
   DECLARE(ALG, u64) DECLARE(ALG, f64) DECLARE(ALG, row32) DECLARE(ALG, row64)  \
       DECLARE(ALG, record)
+DECLARE(duckdb, u32)
+DECLARE(duckdb, u64)
+DECLARE(duckdb, row32)
+DECLARE(duckdb, row64)
+DECLARE(duckdb, record)
 ALL(ips2ra)
 ALL(ips4o) ALL(fluxsort) ALL(crumsort) DECLARE(vqsort, u32) DECLARE(vqsort, u64)
     DECLARE(x86simdsort, u32)
@@ -17,7 +23,7 @@ ALL(ips4o) ALL(fluxsort) ALL(crumsort) DECLARE(vqsort, u32) DECLARE(vqsort, u64)
   {bench_##ALG##_u32,   bench_##ALG##_u64,   bench_##ALG##_f64,                \
    bench_##ALG##_row32, bench_##ALG##_row64, bench_##ALG##_record}
 extern "C" Sort bench_kernel(unsigned algorithm, unsigned type) noexcept {
-  static const Sort table[7][6] = {
+  static const Sort table[][6] = {
       {nullptr, nullptr, nullptr, bench_clausecker_row32, nullptr, nullptr},
       ROW(fluxsort),
       ROW(ips2ra),
@@ -25,8 +31,12 @@ extern "C" Sort bench_kernel(unsigned algorithm, unsigned type) noexcept {
       {bench_vqsort_u32, bench_vqsort_u64, nullptr, nullptr, nullptr, nullptr},
       {bench_x86simdsort_u32, bench_x86simdsort_u64, nullptr, nullptr, nullptr,
        nullptr},
-      ROW(crumsort)};
-  return algorithm < 7 && type < 6 ? table[algorithm][type] : nullptr;
+      ROW(crumsort),
+      {bench_duckdb_u32, bench_duckdb_u64, nullptr, bench_duckdb_row32,
+       bench_duckdb_row64, bench_duckdb_record}};
+  return algorithm < std::size(table) && type < std::size(table[0])
+             ? table[algorithm][type]
+             : nullptr;
 }
 extern "C" size_t bench_layout(unsigned type, unsigned field) noexcept {
   const size_t table[3][3] = {

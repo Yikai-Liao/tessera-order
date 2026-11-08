@@ -60,6 +60,8 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
         "--lib",
         "--bin",
         "memory",
+        "--test",
+        "comparison",
         "--target-dir",
         target,
       ],

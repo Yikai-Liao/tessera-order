@@ -26,10 +26,22 @@ export async function checkDco(
   return missing;
 }
 
+/** Report missing sign-offs with one shared exit policy and actionable CI diagnostics. */
+export async function runDcoCheck(base: string, head: string) {
+  const missing = await checkDco(base, head);
+  console.log(JSON.stringify({ missing }));
+  for (const { sha, email } of missing)
+    console.error(`::error::${sha}: no Signed-off-by for the author <${email}>`);
+  if (missing.length) {
+    console.error(
+      "Sign off each commit with 'git commit -s'. See CONTRIBUTING.md, Sign-off (DCO).",
+    );
+    process.exitCode = 1;
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const [base, head] = process.argv.slice(2);
   if (!base || !head) throw new Error("Usage: check-dco.ts BASE HEAD");
-  const missing = await checkDco(base, head);
-  console.log(JSON.stringify({ missing }));
-  if (missing.length) process.exitCode = 1;
+  await runDcoCheck(base, head);
 }

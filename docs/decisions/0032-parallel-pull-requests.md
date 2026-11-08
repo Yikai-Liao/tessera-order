@@ -1,5 +1,7 @@
 # 0032: Keep parallel pull requests free of shared bookkeeping
 
+Tooling update: [decision 0050](0050-agent-first-typescript-tooling.md) replaces the historical Python title checker below with `.github/scripts/check_pr_title.ts`.
+
 Date: 2026-11-07. Status: accepted.
 
 ## Context

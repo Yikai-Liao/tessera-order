@@ -27,7 +27,7 @@ jobs:
       - name: Check tag against package version
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: pnpm tools release verify rust --tag "$RELEASE_TAG"
+        run: pnpm tools release verify --tag "$RELEASE_TAG"
       - run: cargo publish --locked -p tessera-sort --dry-run
       - run: cargo publish --locked -p tessera-sort
         env:

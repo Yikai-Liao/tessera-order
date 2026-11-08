@@ -4,7 +4,7 @@
 
 ## Lanes
 
-Every job holds one of the account's concurrent job slots, and a free account runs 20 at once. A pull request that touches Rust peaked at 21 jobs before the split below and peaks at 16 now, counting every workflow it triggers: 13 from `CI`, one benchmark build, `DCO` and `PR title`. A language fits into a fixed number of lanes, not one per operating system and compiler version, because the full matrices Rust, C++ and Python already declare would need 28 test cells, plus the lint, Miri and sanitizer jobs each of them adds.
+Every job holds one of the account's concurrent job slots, and a free account runs 20 at once. A pull request that touches Rust peaked at 21 jobs before the split below and peaks at 16 now, counting every workflow it triggers: 13 from `CI`, one benchmark build, `DCO` and `PR title`. A language fits into a fixed number of lanes, not one per operating system and compiler version. Rust is implemented; future language workflows should be added with their implementations rather than carrying inactive release machinery.
 
 | Check | Pull request | `main` |
 |---|---|---|

@@ -22,8 +22,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Validate a PR title | `pnpm -s tools ci title 'fix(bench): validate source snapshots'` |
 | Check every commit's DCO sign-off | `pnpm -s tools ci dco main HEAD` |
 | Fetch and verify pinned native sources | `pnpm -s tools native fetch` |
-| Validate a release tag | `pnpm -s tools release verify rust --tag rust/v0.1.0` |
-| Collect wheels without overwriting conflicts | `pnpm -s tools release collect-wheels wheel-artifacts --out dist` |
+| Validate a release tag | `pnpm -s tools release verify --tag rust/v0.1.0` |
 
 Use a task's `--help` for its options. `plan` and both comparison tasks share the [experiment selection model](benchmarking.md#experiment-plans). `check` is a functional smoke check with a one-millisecond sample target, not a performance experiment. It runs harness tests, validates the smoke suite, measures one `u64/random` group, verifies that native programs do not link parallel runtimes when `--native` is selected, and generates a partial report.
 
@@ -95,10 +94,6 @@ The command owns thresholds, Testbed identities, timeouts and per-build outcomes
 | Track benchmarks | `continuous submit`, trusted report modules | Resolve the triggering event, publish the image, hold the queue slot, publish checks |
 | Change routing | `ci changes` | Supply the event's base/head and collect Actions outputs |
 | PR title and DCO | `ci title`, `ci dco` | Supply the title and trusted checkout; fetch fork objects without running them |
-| Release | `release verify`, `release collect-wheels` | Registry authentication and actual publication |
+| Release | `release verify` | Registry authentication and actual publication |
 
 Routing, title and DCO have dependency-free TypeScript bootstrap entry points under `.github/scripts/`. The first must run before language jobs; DCO must execute the base commit's trusted code without installing or running PR code. These adapters call the same functions as the CLI; they do not maintain separate policy. The shell DCO launcher exists only to enter that trusted checker. Rust feature tests, Miri and sanitizer commands stay in their existing workflows and composite action; they are not benchmark protocols.
-
-## Migration
-
-The old `pnpm bench` entry point and its `run`, `release` and `pr` commands have been removed. Use `pnpm tools compare commit`, `pnpm tools compare algorithms`, `pnpm tools status --pr NUMBER` and `pnpm tools report`. JSON is the default status format, so there is no `--json` flag. Repository scripts and the cloud supervisor now use TypeScript; Ruff and the Python tooling scripts have been removed. Python remains necessary only for building and testing a future Python binding, not for repository tooling.

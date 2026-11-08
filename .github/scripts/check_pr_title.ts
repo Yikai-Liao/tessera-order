@@ -22,8 +22,16 @@ export function titleErrors(title: string): string[] {
   return errors;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const errors = titleErrors(process.env.PR_TITLE ?? "");
+/** Report title failures for both CI annotations and machine-readable CLI output. */
+export function runTitleCheck(title: string) {
+  const errors = titleErrors(title);
   console.log(JSON.stringify({ errors }));
-  if (errors.length) process.exitCode = 1;
+  for (const error of errors) console.error(`::error::${error}`);
+  if (errors.length) {
+    console.error("Use the commit-message conventions in CONTRIBUTING.md.");
+    process.exitCode = 1;
+  }
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
+  runTitleCheck(process.env.PR_TITLE ?? "");

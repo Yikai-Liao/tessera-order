@@ -5,52 +5,52 @@ import { readFile } from "node:fs/promises";
 export const BOT_EMAIL = "49699333+dependabot[bot]@users.noreply.github.com";
 
 /** Treat malformed API and event values as absent, never as authenticated identity. */
-function object(value: unknown): Record<string, unknown> {
+function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 }
 
-function bot(value: unknown) {
-  const account = object(value);
+function isDependabotBot(value: unknown) {
+  const account = asRecord(value);
   return account.id === 49699333 && account.login === "dependabot[bot]" && account.type === "Bot";
 }
 
 /** Require an authenticated bot update of this exact same-repository PR head. */
 export function isDependabotUpdate(value: unknown, sha: string, repository: string) {
-  const event = object(value);
-  const pull = object(event.pull_request);
-  const source = object(event.repository);
-  const head = object(pull.head);
-  const base = object(pull.base);
+  const event = asRecord(value);
+  const pull = asRecord(event.pull_request);
+  const source = asRecord(event.repository);
+  const head = asRecord(pull.head);
+  const base = asRecord(pull.base);
   return (
     ["opened", "synchronize"].includes(String(event.action)) &&
     (event.action !== "synchronize" || event.after === sha) &&
-    bot(event.sender) &&
-    bot(pull.user) &&
+    isDependabotBot(event.sender) &&
+    isDependabotBot(pull.user) &&
     source.full_name === repository &&
     typeof source.id === "number" &&
     Number.isSafeInteger(source.id) &&
     source.id > 0 &&
-    object(head.repo).id === source.id &&
-    object(base.repo).id === source.id &&
+    asRecord(head.repo).id === source.id &&
+    asRecord(base.repo).id === source.id &&
     head.sha === sha
   );
 }
 
 /** Require GitHub attribution and a valid signature on the exact commit. */
 export function isVerifiedDependabot(value: unknown, sha: string) {
-  const commit = object(value);
-  const metadata = object(commit.commit);
-  const committer = object(commit.committer);
-  const verification = object(metadata.verification);
+  const commit = asRecord(value);
+  const metadata = asRecord(commit.commit);
+  const committer = asRecord(commit.committer);
+  const verification = asRecord(metadata.verification);
   return (
     commit.sha === sha &&
-    bot(commit.author) &&
+    isDependabotBot(commit.author) &&
     committer.id === 19864447 &&
     committer.login === "web-flow" &&
-    object(metadata.author).email === BOT_EMAIL &&
-    object(metadata.committer).email === "noreply@github.com" &&
+    asRecord(metadata.author).email === BOT_EMAIL &&
+    asRecord(metadata.committer).email === "noreply@github.com" &&
     verification.verified === true &&
     verification.reason === "valid"
   );

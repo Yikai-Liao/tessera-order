@@ -22,12 +22,16 @@ export async function nativeSources() {
   ).sources;
 }
 
-/** Hash lexical POSIX file names and content digests, matching existing source stamps. */
+/** Hash POSIX paths in component order, preserving existing Python source stamps. */
 export async function treeHash(root: string) {
-  const files: string[] = [];
+  const digest = createHash("sha256");
   const boundary = await realpath(root);
   async function visit(directory: string) {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
+    // Sorted components match pathlib ordering; sorting whole paths does not.
+    const entries = (await readdir(directory, { withFileTypes: true })).sort((a, b) =>
+      Buffer.compare(Buffer.from(a.name), Buffer.from(b.name)),
+    );
+    for (const entry of entries) {
       const path = resolve(directory, entry.name);
       if (entry.isDirectory()) await visit(path);
       else if (entry.name !== ".tessera-source.json") {
@@ -35,22 +39,19 @@ export async function treeHash(root: string) {
         const name = relative(boundary, target);
         if (isAbsolute(name) || name.split(sep)[0] === "..")
           throw new Error(`Native source link escapes its tree: ${path}`);
-        if ((await stat(path)).isFile()) files.push(relative(root, path).split(sep).join("/"));
+        if ((await stat(path)).isFile())
+          digest
+            .update(relative(root, path).split(sep).join("/"))
+            .update("\0")
+            .update(
+              createHash("sha256")
+                .update(await readFile(path))
+                .digest(),
+            );
       }
     }
   }
   await visit(root);
-  const digest = createHash("sha256");
-  for (const name of files.sort()) {
-    digest
-      .update(name)
-      .update("\0")
-      .update(
-        createHash("sha256")
-          .update(await readFile(resolve(root, name)))
-          .digest(),
-      );
-  }
   return digest.digest("hex");
 }
 

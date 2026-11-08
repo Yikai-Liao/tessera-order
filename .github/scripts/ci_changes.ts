@@ -8,7 +8,7 @@ import { parseArgs } from "node:util";
 
 /** Select language checks from changed paths; unknown shared files fail open. */
 export function select(paths: string[]) {
-  const selected = { rust: false, cpp: false, python: false };
+  const selected = { rust: false, cpp: false };
   for (const path of paths) {
     if (
       ["docs/.vitepress/", "docs/public/", ".github/scripts/"].some((dir) =>
@@ -28,9 +28,7 @@ export function select(paths: string[]) {
       ["rust/", "bench/rust/"].some((dir) => path.startsWith(dir)) ||
       ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml"].includes(path)
     ) {
-      selected.rust = selected.python = true;
-    } else if (["python/", "bench/python/"].some((dir) => path.startsWith(dir))) {
-      selected.python = true;
+      selected.rust = true;
     } else if (
       ["cpp/", "bench/cpp/"].some((dir) => path.startsWith(dir)) ||
       ["CMakeLists.txt", "CMakePresets.json"].includes(path)
@@ -41,7 +39,7 @@ export function select(paths: string[]) {
       (path.endsWith(".md") && !path.startsWith("conformance/"))
     )
       continue;
-    else selected.rust = selected.cpp = selected.python = true;
+    else selected.rust = selected.cpp = true;
   }
   return selected;
 }
@@ -76,12 +74,10 @@ export async function routeChanges(base: string | undefined, head = "HEAD", out?
       return false;
     }
   };
-  const selected = paths === null ? { rust: true, cpp: true, python: true } : select(paths);
+  const selected = paths === null ? { rust: true, cpp: true } : select(paths);
   const result = {
     ...selected,
     cpp_present: await present("cpp/CMakeLists.txt"),
-    python_present:
-      (await present("python/pyproject.toml")) && (await present("python/Cargo.toml")),
   };
   if (out)
     await appendFile(

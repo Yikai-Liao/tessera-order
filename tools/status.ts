@@ -118,7 +118,7 @@ function trackerIds(checks: Check[], repo: string) {
   return [...ids];
 }
 
-function needsAttention(item: Step) {
+function hasUnfinishedOrFailedResult(item: Step) {
   return item.conclusion
     ? !["success", "skipped", "neutral"].includes(item.conclusion)
     : item.status !== "completed";
@@ -198,7 +198,7 @@ export async function readStatus(
         run.conclusion === "success" || run.conclusion === "skipped"
           ? []
           : await api.pages<{ jobs: Job[] }>(`actions/runs/${run.id}/jobs?per_page=100`);
-      return { run, jobs: pages.flatMap((page) => page.jobs).filter(needsAttention) };
+      return { run, jobs: pages.flatMap((page) => page.jobs).filter(hasUnfinishedOrFailedResult) };
     }),
   );
   const current = commentPages
@@ -225,7 +225,7 @@ export async function readStatus(
           .filter(
             (step) =>
               step.status === "in_progress" ||
-              (step.status === "completed" && needsAttention(step)),
+              (step.status === "completed" && hasUnfinishedOrFailedResult(step)),
           )
           .map((step) => ({
             name: step.name,

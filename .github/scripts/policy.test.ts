@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { glob, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, matchesGlob, relative, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { titleErrors } from "./check_pr_title.ts";
@@ -80,10 +80,9 @@ test("language routing preserves independent and shared paths", () => {
     ["rustfmt.toml"],
     ["bench/rust/main.rs"],
   ])
-    assert.deepEqual(select(paths), { rust: true, cpp: false, python: true });
+    assert.deepEqual(select(paths), { rust: true, cpp: false });
   for (const path of ["cpp/include/sort.hpp", "CMakeLists.txt"])
-    assert.deepEqual(select([path]), { rust: false, cpp: true, python: false });
-  assert.deepEqual(select(["python/src/lib.rs"]), { rust: false, cpp: false, python: true });
+    assert.deepEqual(select([path]), { rust: false, cpp: true });
   for (const path of [
     "conformance/semantics.md",
     "conformance/vectors/a.json",
@@ -93,7 +92,7 @@ test("language routing preserves independent and shared paths", () => {
     ".github/workflows/release.yml",
     ".github/workflows/rust-ci.yml",
   ])
-    assert.deepEqual(select([path]), { rust: true, cpp: true, python: true });
+    assert.deepEqual(select([path]), { rust: true, cpp: true });
   for (const path of [
     "docs/.vitepress/config.ts",
     "docs/public/logo.svg",
@@ -111,14 +110,13 @@ test("language routing preserves independent and shared paths", () => {
     ".github/scripts/check-dco.sh",
     "biome.json",
   ])
-    assert.deepEqual(select([path]), { rust: false, cpp: false, python: false });
-  assert.deepEqual(select([]), { rust: false, cpp: false, python: false });
+    assert.deepEqual(select([path]), { rust: false, cpp: false });
+  assert.deepEqual(select([]), { rust: false, cpp: false });
   assert.deepEqual(select(["rust/tessera-sort/README.md"]), {
     rust: true,
     cpp: false,
-    python: true,
   });
-  assert.deepEqual(select(["rust/a.rs", "cpp/b.hpp"]), { rust: true, cpp: true, python: true });
+  assert.deepEqual(select(["rust/a.rs", "cpp/b.hpp"]), { rust: true, cpp: true });
   assert.equal(changedPaths(undefined, "HEAD"), null);
   assert.equal(changedPaths("0".repeat(40), "HEAD"), null);
   assert.equal(changedPaths("missing-base-ref", "HEAD"), null);
@@ -294,6 +292,20 @@ test("DCO enforces each commit independently of a later sign-off or bot exceptio
     assert.deepEqual(await checkDco(base, "HEAD", async () => true), []);
     git("commit", "--allow-empty", "-qm", "unsigned human");
     assert.equal((await checkDco(base, "HEAD", async () => true)).length, 1);
+    for (const args of [
+      [resolve(before, ".github/scripts/check-dco.ts"), base, "HEAD"],
+      [resolve(before, "tools/index.ts"), "ci", "dco", base, "HEAD"],
+    ]) {
+      const result = spawnSync(process.execPath, args, {
+        cwd: root,
+        encoding: "utf8",
+        env: { ...process.env, GITHUB_EVENT_NAME: "" },
+      });
+      assert.equal(result.status, 1);
+      assert.equal(JSON.parse(result.stdout).missing.length, 2);
+      assert.match(result.stderr, /::error::.*no Signed-off-by/);
+      assert.match(result.stderr, /git commit -s.*CONTRIBUTING.md/);
+    }
     git(
       "commit",
       "--allow-empty",
@@ -313,4 +325,58 @@ test("DCO enforces each commit independently of a later sign-off or bot exceptio
   } finally {
     process.chdir(before);
   }
+});
+
+test("title entry points retain JSON and actionable failure annotations", () => {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+  for (const args of [
+    [join(root, ".github/scripts/check_pr_title.ts")],
+    [join(root, "tools/index.ts"), "ci", "title"],
+  ]) {
+    const result = spawnSync(process.execPath, args, {
+      encoding: "utf8",
+      env: { ...process.env, PR_TITLE: "invalid title" },
+    });
+    assert.equal(result.status, 1);
+    assert.ok(JSON.parse(result.stdout).errors.length > 0);
+    assert.match(result.stderr, /::error::/);
+    assert.match(result.stderr, /CONTRIBUTING.md/);
+  }
+});
+
+test("benchmark triggers include runtime inputs without scheduling presentation changes", async () => {
+  const source = await readFile(new URL("../workflows/bench-build.yml", import.meta.url), "utf8");
+  const paths = source.split("    paths:\n")[1].split("  push:")[0];
+  const patterns = [...paths.matchAll(/ {6}- "([^"\n]+)"/g)].map((match) => match[1]);
+  const triggers = (path: string) =>
+    patterns.reduce(
+      (selected, pattern) =>
+        matchesGlob(path, pattern.replace(/^!/, "")) ? !pattern.startsWith("!") : selected,
+      false,
+    );
+  for (const path of [
+    "rust/tessera-sort/src/lib.rs",
+    "bench/rust/benches/smoke.rs",
+    "bench/plans/continuous.toml",
+    "bench/catalog.toml",
+    "bench/workspace.ts",
+    "tools/process.ts",
+    "tools/continuous.ts",
+    "bench/continuous/worker.ts",
+    "Cargo.lock",
+    ".cargo/config.toml",
+  ])
+    assert.ok(triggers(path), path);
+  for (const path of [
+    "bench/README.md",
+    "rust/tessera-sort/README.md",
+    "bench/rust/README.md",
+    "bench/plot/rows.ts",
+    "bench/continuous/chart.ts",
+    "tools/status.ts",
+    "package.json",
+    "pnpm-lock.yaml",
+    ".github/scripts/release.ts",
+  ])
+    assert.equal(triggers(path), false, path);
 });

@@ -22,8 +22,6 @@ jobs:
       rust: ${{ steps.changes.outputs.rust }}
       cpp: ${{ steps.changes.outputs.cpp }}
       cpp_present: ${{ steps.changes.outputs.cpp_present }}
-      python: ${{ steps.changes.outputs.python }}
-      python_present: ${{ steps.changes.outputs.python_present }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -40,9 +38,6 @@ jobs:
         if: steps.changes.outputs.cpp == 'true' && steps.changes.outputs.cpp_present != 'true'
         run: echo 'C++ is planned; checks activate when cpp/CMakeLists.txt is added.' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Explain deferred Python checks
-        if: steps.changes.outputs.python == 'true' && steps.changes.outputs.python_present != 'true'
-        run: echo 'Python is planned; checks activate when its pyproject.toml and Cargo.toml are added.' >> "$GITHUB_STEP_SUMMARY"
 
   # Formatting and lints for TypeScript, Vue, CSS, JSON and the CI
   # scripts. These checks cover the whole repository on every
@@ -72,17 +67,12 @@ jobs:
     if: needs.changes.outputs.cpp == 'true' && needs.changes.outputs.cpp_present == 'true'
     uses: ./.github/workflows/cpp-ci.yml
 
-  python:
-    needs: changes
-    if: needs.changes.outputs.python == 'true' && needs.changes.outputs.python_present == 'true'
-    uses: ./.github/workflows/python-ci.yml
-
   # The single required check for branch protection. Language jobs are skipped
   # when their paths did not change, so it passes on success or skip and fails
   # on any failure or cancellation.
   ci-ok:
     if: always()
-    needs: [changes, lint, rust, cpp, python]
+    needs: [changes, lint, rust, cpp]
     runs-on: ubuntu-latest
     steps:
       - env:

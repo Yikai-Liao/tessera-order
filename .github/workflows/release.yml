@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['rust/v*', 'cpp/v*', 'python/v*']
+    tags: ['rust/v*', 'cpp/v*']
 
 permissions:
   contents: read
@@ -25,33 +25,3 @@ jobs:
     uses: ./.github/workflows/cpp-release.yml
     permissions:
       contents: write
-
-  python:
-    if: startsWith(github.ref_name, 'python/v')
-    uses: ./.github/workflows/python-release.yml
-    permissions:
-      contents: read
-
-  # PyPI Trusted Publishing must run in a non-reusable workflow. Keep only
-  # this Python publication job here; language validation/builds stay reusable.
-  python-publish:
-    needs: python
-    if: startsWith(github.ref_name, 'python/v')
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: python-wheels-*
-          path: wheel-artifacts
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Collect wheels without overwriting different builds
-        run: pnpm tools release collect-wheels wheel-artifacts --out dist
-      - uses: pypa/gh-action-pypi-publish@release/v1

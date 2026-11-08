@@ -19,13 +19,13 @@ interface MeasurementOptions extends SelectionOptions {
   simd?: boolean;
 }
 
-function logicalCpu(value: string) {
+function parseLogicalCpu(value: string) {
   if (!/^\d+$/.test(value) || process.platform !== "linux")
     throw new InvalidArgumentError("expected one logical CPU number on Linux");
   return value;
 }
 
-function casePattern(value: string) {
+function parseCasePattern(value: string) {
   try {
     new RegExp(value);
   } catch {
@@ -34,35 +34,35 @@ function casePattern(value: string) {
   return value;
 }
 
-function list(value: string) {
+function parseList(value: string) {
   const values = value.split(",").map((item) => item.trim());
   if (values.some((item) => !item))
     throw new InvalidArgumentError("expected comma-separated values");
   return values;
 }
 
-function lengths(value: string) {
-  const values = list(value).map(Number);
+function parseLengths(value: string) {
+  const values = parseList(value).map(Number);
   if (values.some((item) => !Number.isSafeInteger(item) || item < 1))
     throw new InvalidArgumentError("expected positive integer lengths");
   return values;
 }
 
-function selection(command: Command) {
+function addSelectionOptions(command: Command) {
   return command
     .option("--plan <name-or-file>", "JSON/TOML plan or local/continuous/smoke/release preset")
     .option(
       "--algorithms <ids>",
       "comma-separated algorithms (required controls are retained)",
-      list,
+      parseList,
     )
-    .option("--types <ids>", "comma-separated record types", list)
-    .option("--distributions <ids>", "comma-separated input distributions", list)
-    .option("--lengths <numbers>", "comma-separated positive record counts", lengths)
-    .option("--modes <ids>", "comma-separated API modes", list);
+    .option("--types <ids>", "comma-separated record types", parseList)
+    .option("--distributions <ids>", "comma-separated input distributions", parseList)
+    .option("--lengths <numbers>", "comma-separated positive record counts", parseLengths)
+    .option("--modes <ids>", "comma-separated API modes", parseList);
 }
 
-function selectors(options: MeasurementOptions): SelectionOptions {
+function selectAxes(options: MeasurementOptions): SelectionOptions {
   return Object.fromEntries(
     ["algorithms", "types", "distributions", "lengths", "modes"]
       .filter((key) => options[key as keyof MeasurementOptions] !== undefined)
@@ -91,17 +91,17 @@ async function report(directories: string[], partial = false) {
 export function experimentCommands(program: Command) {
   const compare = program.command("compare").description("Compare source revisions or algorithms");
   const measurement = (name: string, description: string) =>
-    selection(compare.command(name))
+    addSelectionOptions(compare.command(name))
       .description(description)
       .option("--out <directory>", "new result directory (default: bench/results/<timestamp>)")
-      .option("--cpu <number>", "pin measurement to one logical CPU (Linux)", logicalCpu)
+      .option("--cpu <number>", "pin measurement to one logical CPU (Linux)", parseLogicalCpu)
       .option("--simd", "include Portable SIMD");
 
   measurement("commit [revision]", "Compare the working tree with a commit (default: HEAD)")
-    .option("--filter <regex>", "additional case ID pattern", casePattern)
+    .option("--filter <regex>", "additional case ID pattern", parseCasePattern)
     .action(
       async (baseline: string | undefined, options: MeasurementOptions & { filter?: string }) => {
-        const plan = await loadPlan(options.plan ?? "local", selectors(options));
+        const plan = await loadPlan(options.plan ?? "local", selectAxes(options));
         if (plan.harness !== "smoke")
           throw new Error("Commit comparisons require a smoke harness plan");
         const root = await repositoryRoot();
@@ -123,7 +123,7 @@ export function experimentCommands(program: Command) {
   measurement("algorithms", "Build, validate, measure and report algorithm comparisons")
     .option("--group <type/shape>", "measure one complete group and report it as partial")
     .action(async (options: MeasurementOptions & { group?: string }) => {
-      const plan = await loadPlan(options.plan ?? "smoke", selectors(options));
+      const plan = await loadPlan(options.plan ?? "smoke", selectAxes(options));
       if (plan.harness !== "comparison")
         throw new Error("Algorithm comparisons require a comparison harness plan");
       const root = await repositoryRoot();
@@ -140,7 +140,7 @@ export function experimentCommands(program: Command) {
       );
     });
 
-  selection(program.command("plan [name-or-file]"))
+  addSelectionOptions(program.command("plan [name-or-file]"))
     .description("Print a resolved plan without compiling or measuring")
     .addOption(
       new Option("--format <format>", "output encoding").choices(["json", "toml"]).default("toml"),
@@ -155,7 +155,7 @@ export function experimentCommands(program: Command) {
           console.log(JSON.stringify(planSchema()));
           return;
         }
-        const plan = await loadPlan(options.plan ?? name ?? "local", selectors(options));
+        const plan = await loadPlan(options.plan ?? name ?? "local", selectAxes(options));
         console.log(
           options.format === "toml" ? stringifyToml(plan).trimEnd() : JSON.stringify(plan),
         );

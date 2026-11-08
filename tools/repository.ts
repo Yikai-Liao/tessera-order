@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { resolve } from "node:path";
 import type { Command } from "commander";
-import { titleErrors } from "../.github/scripts/check_pr_title.ts";
-import { checkDco } from "../.github/scripts/check-dco.ts";
+import { runTitleCheck } from "../.github/scripts/check_pr_title.ts";
+import { runDcoCheck } from "../.github/scripts/check-dco.ts";
 import { routeChanges } from "../.github/scripts/ci_changes.ts";
-import { collectWheels, verifyRelease } from "../.github/scripts/release.ts";
+import { verifyRustRelease } from "../.github/scripts/release.ts";
 import { fetchNative } from "../bench/rust/native/fetch.ts";
 import { repositoryRoot } from "../bench/workspace.ts";
 
@@ -22,16 +21,12 @@ export function repositoryCommands(program: Command) {
   ci.command("title [title]")
     .description("Validate a squash title (default: PR_TITLE)")
     .action((title?: string) => {
-      const errors = titleErrors(title ?? process.env.PR_TITLE ?? "");
-      console.log(JSON.stringify({ errors }));
-      if (errors.length) process.exitCode = 1;
+      runTitleCheck(title ?? process.env.PR_TITLE ?? "");
     });
   ci.command("dco <base> <head>")
     .description("Check sign-offs; authenticated Dependabot exceptions fail closed")
     .action(async (base: string, head: string) => {
-      const missing = await checkDco(base, head);
-      console.log(JSON.stringify({ missing }));
-      if (missing.length) process.exitCode = 1;
+      await runDcoCheck(base, head);
     });
 
   program
@@ -45,17 +40,9 @@ export function repositoryCommands(program: Command) {
     .command("release")
     .description("Validate release inputs without publishing");
   release
-    .command("verify <language>")
+    .command("verify")
     .requiredOption("--tag <tag>", "release tag")
-    .action(async (language: string, options: { tag: string }) =>
-      console.log(
-        JSON.stringify(await verifyRelease(language, options.tag, await repositoryRoot())),
-      ),
-    );
-  release
-    .command("collect-wheels <source>")
-    .requiredOption("--out <directory>", "new wheel directory")
-    .action(async (source: string, options: { out: string }) =>
-      console.log(JSON.stringify(await collectWheels(resolve(source), resolve(options.out)))),
+    .action(async (options: { tag: string }) =>
+      console.log(JSON.stringify(await verifyRustRelease(options.tag, await repositoryRoot()))),
     );
 }

@@ -1,3 +1,10 @@
+---
+type: Policy
+title: Code of conduct
+description: Check community conduct and the reporting contact.
+tags: [community]
+---
+
 # Code of conduct
 
 Tessera adopts the [Contributor Covenant, version 3.0](https://www.contributor-covenant.org/version/3/0/code_of_conduct/) as its code of conduct. It applies to everyone taking part in the project: in issues, pull requests, discussions, reviews and any other project space, and when representing the project elsewhere.

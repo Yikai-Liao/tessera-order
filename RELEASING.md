@@ -1,6 +1,13 @@
+---
+type: Playbook
+title: Versions and releases
+description: Version a package and publish it after its release checks.
+tags: [release, ci]
+---
+
 # Versions and releases
 
-Each language package is versioned and released on its own ([decision 0001c](docs/decisions/0001c-independent-package-versions.md)). No package has been released yet; the versions below are examples.
+Each language package is versioned and released independently so fixes need not wait for other implementations. No package has been released yet; the versions below are examples.
 
 | Object | Identifier | Identifies |
 |---|---|---|
@@ -30,7 +37,7 @@ Public contracts are stability; float, NaN and signed-zero order; supported key 
 ## Release checklist
 
 1. Run the language's correctness, recovery, platform and package checks, and the performance checks in [`docs/development/benchmarking.md`](docs/development/benchmarking.md).
-2. Write the release notes, and update the README capability table. Collect the pull requests merged since the package's previous tag that affect the package, and the decision records they added. Check shared semantics and root configuration as well as the package directory. List what users can observe, grouped as breaking changes with their migration, additions, fixes and measured performance changes; leave out `ci`, `build`, `docs`, `refactor`, `test` and `chore` changes unless users see them. Link each entry to its pull request or decision record. The repository keeps no changelog file, because every pull request editing one file conflicts with every other ([decision 0032](docs/decisions/0032-parallel-pull-requests.md)).
+2. Write the release notes, and update the README capability table. Collect the pull requests merged since the package's previous tag that affect the package. Check shared semantics and root configuration as well as the package directory. List what users can observe, grouped as breaking changes with their migration, additions, fixes and measured performance changes; leave out `ci`, `build`, `docs`, `refactor`, `test` and `chore` changes unless users see them. Link each entry to its pull request. The repository keeps no shared changelog file, avoiding conflicts between parallel PRs.
 3. Before the first publication, tell Robert Clausecker that the project builds on his block partition.
 4. Push the tag. The release workflow publishes the package and creates a draft GitHub release; paste the notes into it and publish it. Never move a published tag or replace a published version; fix a bad release with the next version.
 
@@ -38,17 +45,7 @@ Benchmark manifests record the implementation (for example `tessera-rust`), pack
 
 ## CI and release workflows
 
-`ci.yml` selects languages from the changed paths and calls their workflows in parallel:
-
-| Changed paths | Runs |
-|---|---|
-| `rust/`, `bench/rust/`, root Cargo and rustfmt files | Rust, and Python because it embeds the Rust core |
-| `cpp/`, `bench/cpp/`, root CMake files | C++ |
-| `python/`, `bench/python/` | Python |
-| Markdown outside `conformance/` and the language directories, `assets/`, the documentation site's tooling, `.github/scripts/` | No language; `docs.yml` builds the site when its pages change, and the `lint` job tests the scripts |
-| Anything else (`conformance/`, vectors, license, workflows) | Every implemented language |
-
-Paths are compared from the merge base, so commits that reached `main` after a branch was cut do not select languages for it. A manual run, a new branch, or a base commit that is no longer reachable selects everything. In `rust-ci.yml`, tests, lints, Miri and ASan are separate jobs; packaging and the no-std target run inside the lint job.
+Language check routing and its merge-base behavior are owned by [CI](docs/development/ci.md) and [the router](.github/scripts/ci_changes.py), not release policy.
 
 `release.yml` routes each tag to its language's release workflow, which runs that language's CI, checks the tag against the package metadata and publishes. Each tag has its own concurrency group, so languages can release in parallel.
 

@@ -1,3 +1,10 @@
+---
+type: Explanation
+title: Block partition
+description: Understand block recycling, stable compaction and scratch sizing.
+tags: [engine, learning, safety]
+---
+
 # 4. The block partition
 
 The block partition is what lets Tessera split a large node stably without an n-record buffer. It is adapted from Robert Clausecker's `radixsort_permuted.c`, described in [*Parallel O(√n) Overhead LSD Radix Sort*](https://arxiv.org/abs/2607.05302) by Clausecker and Schintke, and lives in [`block.rs`](../../rust/tessera-sort/src/block.rs). Tessera runs one pass of it per node, on the node's top digit.

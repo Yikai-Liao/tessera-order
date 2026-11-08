@@ -1,3 +1,10 @@
+---
+type: Playbook
+title: Benchmark protocol
+description: Screen source changes or produce placement-controlled performance evidence.
+tags: [bench, performance]
+---
+
 # Benchmarking
 
 The comparison runner in `bench/rust` measures sorting algorithms on one machine. It answers four questions: how Tessera compares with the standard stable sort, with other stable sorts, with unstable sorts when equal keys are indistinguishable, and how much extra memory each sort uses. The [continuous suite](continuous-benchmarks.md) tracks regressions on Bencher; release comparisons use the paired measurements described here.
@@ -35,7 +42,6 @@ Standard algorithm-report figures show fixed slices and aggregates, not every me
 
 The [tooling design](../design/benchmark-tooling.md) describes the module boundaries and [figure guide](benchmark-figures.md) explains the shared presentation layer.
 
-
 ## Experiment plans
 
 All three workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). Repository presets, the shared catalog and selection fixtures use TOML for comments and readable input rules; custom files may use either TOML or JSON. Both formats decode into the same configuration model and use the same validation and selection rules. Plans describe what to measure; the harness owns input generation and the measurement protocol.
@@ -49,9 +55,7 @@ All three workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). 
 
 `compare` defaults to `local`; `run` defaults to `smoke`. The continuous executable embeds `continuous.toml` at build time, so its artifact carries the selection from the measured commit. Editing that file changes cloud coverage without editing the worker, publication workflow or case-registration code.
 
-A custom plan contains a union of products, followed by exclusions. These two files describe the same selection:
-
-::: code-group
+A custom plan contains a union of products, followed by exclusions. For example:
 
 ```toml [my-plan.toml]
 schema = 1
@@ -75,30 +79,7 @@ distributions = ["zipf2"]
 lengths = [1_000_000]
 ```
 
-```json [my-plan.json]
-{
-  "schema": 1,
-  "harness": "comparison",
-  "algorithms": ["glidesort", "radsort"],
-  "include": [
-    {
-      "types": ["u32", "u64"],
-      "distributions": ["random", "zipf2"],
-      "lengths": [65536, 1000000]
-    },
-    {
-      "types": ["row_u64"],
-      "distributions": ["d16"],
-      "lengths": [65536]
-    }
-  ],
-  "exclude": [
-    { "types": ["u32"], "distributions": ["zipf2"], "lengths": [1000000] }
-  ]
-}
-```
-
-:::
+JSON accepts the same decoded fields; use the exported schema rather than maintaining a second example.
 
 Values within an axis are alternatives; axes within a rule form a Cartesian product. `include` rules are unioned and duplicate inputs are measured once. Any matching `exclude` rule removes that combination. Omitted axes use the harness's catalog defaults when expanding inputs and match every value when excluding them. An empty choice array is invalid. Unknown fields and identities are errors, not ignored filters.
 
@@ -231,23 +212,7 @@ The regression-only `equal`, `two_values`, `sparse8` and `sorted_tail` inputs re
 
 Rust competitors are optional dependencies behind `compare`, pinned to exact versions. Native sources are pinned by repository, commit, archive SHA-256 and license in `native/sources.toml`; `fetch.py` verifies the archives and the build verifies the extracted trees. Third-party sources stay in ignored `bench/vendor/`.
 
-| Variant | Entry point | Stable | Supported tasks |
-|---|---|---|---|
-| `tessera` | `stable_sort`, `stable_sort_by_key` | yes | all |
-| `std-stable` | standard stable sort, float total order | yes | all |
-| `radsort` 0.1.1 | `sort_by_key` | yes | all, including owned records |
-| `voracious` 1.2.0 | `voracious_stable_sort` | yes | `u32`, `u64` keys |
-| `glidesort` 0.1.2 | `sort_by` | yes | all |
-| `glidesort-sqrt` | `sort_with_buffer_by` | yes | all; buffer limited to Tessera's measured peak |
-| `std-unstable` | standard unstable sort, float total order | no | all |
-| `rdst` 0.20.14 | `radix_sort_unstable`, default features disabled | no | keys, rows, wide records |
-| `clausecker` | `radixsort_permuted.c` | yes | `row_u32` |
-| `fluxsort` | typed upstream instantiations | yes | keys, rows, wide records |
-| `ips2ra` | sequential `ips2ra::sort` | no | keys, rows, wide records |
-| `ips4o` | sequential `ips4o::sort` | no | keys, rows, wide records |
-| `vqsort` | Highway `VQSort` with runtime dispatch | no | `u32`, `u64` keys |
-| `x86simdsort` | `qsort` with runtime dispatch | no | `u32`, `u64` keys |
-| `crumsort` | typed upstream instantiations | no | keys, rows, wide records |
+The [catalog](../../bench/catalog.toml) owns variant identities, stability and display names; executable adapters in [variant.rs](../../bench/rust/src/comparison/variant.rs) own actual capabilities. Use the runner's `list` output for supported tasks rather than maintaining a second matrix here.
 
 Voracious 1.2.0's record path fails the stable-reference check on duplicate keys, and its float path uses partial comparison for small inputs. Those tasks are unsupported by this adapter. VQSort and x86-simd-sort's floating-point interfaces do not provide the required NaN payload and signed-zero total order; their pair interfaces use layouts different from the row tasks.
 
@@ -265,7 +230,7 @@ Each case has nine blocks. Each block shuffles all supported variants and two Te
 
 For each block, a variant's ratio is its time per sort divided by the mean of the two Tessera times per sort. The report gives the median ratio, per-block minimum and maximum, and median nanoseconds per element. The A/A noise range is the minimum and maximum of both Tessera times divided by their block mean, across all nine blocks. This uses the same denominator as the variant ratios and is unchanged when the two control labels are exchanged. A variant is called faster or slower only when at least eight blocks agree on that direction and its median is outside that range. For example, controls of 100 and 120 give a mean of 110 and a noise range of 100/110 to 120/110; an opponent time of 109 remains within noise. The `tessera-aa` row separately reports A2 / A1, with its own per-block bounds.
 
-Each of the five figures states its finding as its title, says under it what is plotted, and draws one named row per item on one horizontal axis. Words appear once, in the title, column heads and axis ends; cells hold only numbers. Colour gives the kind of sort: blue for Tessera, orange for the other radix sorts and grey for comparison sorts, SIMD sorts included. When the Portable SIMD build was measured, it is a hollow blue ring in every speed figure, drawn over Tessera's dot so that equal speeds show as a ring around it. Speed is relative to `slice::sort` within the same blocks, on an axis symmetric in doublings around it; values beyond 32× point off the edge as triangles. The ranking gives each sort's speed on 1M `u64` keys as a geometric mean over the ten input shapes. The two input figures, at 1M and 1,000 `u64` keys, draw every sort on each shape as a dot and give Tessera's speed and rank, so its position in the whole field shows rather than a comparison with one opponent; keys make stability unobservable, so every sort is eligible. The element-type figure does the same per type at 1M, as a geometric mean over the ten shapes; records rank against stable sorts only. The memory figure gives each sort's peak extra heap on 10M `u64` keys, a ring for the random shape and a dot for the worst of the ten, against the input size. Tables under the figures carry Tessera's time per key and the other lengths. Every figure has a table of plotted values.
+The standard report panels show the 1M-key ranking, 1M and 1,000-key distribution comparisons, 1M element-type comparison and 10M-key peak heap. Keys admit stable and unstable opponents; record rankings admit stable opponents only. Speed panels anchor to `slice::sort` within the same blocks, with Portable SIMD shown separately. Every figure includes plotted values; [the figure guide](benchmark-figures.md) owns visual encoding and layout. Custom cases remain in full results even when no standard panel includes them.
 
 Continuous builds apply branch alignment to both feature configurations and use static linking, as described in the [continuous benchmark guide](continuous-benchmarks.md).
 

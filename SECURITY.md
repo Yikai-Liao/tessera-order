@@ -1,3 +1,10 @@
+---
+type: Policy
+title: Security reporting
+description: Report a suspected vulnerability privately and check supported versions.
+tags: [safety, security]
+---
+
 # Security policy
 
 Tessera uses unsafe code to move records through uninitialized memory. Memory-safety bugs are treated as security issues: out-of-bounds access, use of uninitialized memory, double drops, records lost or duplicated, or undefined behavior reachable from safe code, including through key functions that panic or return inconsistent keys.

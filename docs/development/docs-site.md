@@ -1,3 +1,10 @@
+---
+type: Playbook
+title: Documentation site
+description: Edit site pages, interactive figures or algorithm simulation models.
+tags: [docs, site]
+---
+
 # Documentation site
 
 The documentation site is built with [VitePress](https://vitepress.dev) from the Markdown files in this repository, and published to GitHub Pages by [`.github/workflows/docs.yml`](../../.github/workflows/docs.yml). The Markdown files are the source: they read correctly on GitHub and in an editor, and coding agents can read them directly.
@@ -6,7 +13,7 @@ The documentation site is built with [VitePress](https://vitepress.dev) from the
 
 | Path | Contents |
 |---|---|
-| `docs/**/*.md` | Pages. `docs/index.md` is the home page; `docs/README.md` is the directory index for GitHub and is not a page. |
+| `docs/**/*.md` | Pages. `docs/home.md` serves as `/`; `docs/explain/overview.md` serves as `/explain/`. `docs/index.md` is the repository task index, not a site page. The reserved `index.md` name is kept for OKF navigation. |
 | `conformance/semantics.md`, `ROADMAP.md`, `RELEASING.md`, `CONTRIBUTING.md` | Shared documents, also rendered as pages (`sharedPages` in the config) |
 | `docs/.vitepress/config.ts` | Site configuration, navigation and link handling |
 | `docs/.vitepress/theme/components/` | Vue components used by the explanation pages |
@@ -26,7 +33,7 @@ pnpm docs:typecheck             # type-check the config, theme and components
 pnpm docs:build                 # build into docs/.vitepress/dist; fails on dead links
 ```
 
-`docs:typecheck` uses the official native TypeScript 7.1 beta compiler and Vue\'s official `@vue/content-mapper` alpha, both pinned in `package.json`. The mapper is registered in `docs/.vitepress/tsconfig.json`; `--runExternalCode` explicitly enables its process. It checks SFC scripts and templates without `vue-tsc` or a legacy TypeScript compiler. Node runs the tooling\'s `.ts` files directly; VitePress handles site transformation and bundling.
+The pinned TypeScript compiler and Vue content mapper check SFC scripts and templates; `--runExternalCode` enables the mapper registered in `docs/.vitepress/tsconfig.json`.
 
 Pull requests that touch the site or its pages run the same checks in `docs.yml`. Pushes to `main` also deploy the site. The repository's Pages source must be set to *GitHub Actions* once, under *Settings → Pages*.
 

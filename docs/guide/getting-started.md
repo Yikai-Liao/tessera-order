@@ -1,3 +1,10 @@
+---
+type: Playbook
+title: Getting started
+description: Use the Rust sorting API with keys, records, floats or reverse order.
+tags: [api, rust]
+---
+
 # Getting started
 
 Tessera sorts slices by a primitive key: an integer up to 128 bits, an `f32` or `f64`, or `Reverse` of one of these. It is stable, runs in linear time for a fixed key width, and moves records of any type.

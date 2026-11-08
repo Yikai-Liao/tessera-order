@@ -1,35 +1,18 @@
----
-layout: home
+# Documentation
 
-hero:
-  name: Tessera
-  text: Stable radix sort with O(√n) auxiliary memory
-  tagline: Linear time, adaptive to real data, and safe for records that own resources.
-  image:
-    src: /logo.svg
-    alt: Tessera logo, a mosaic rosette
-  actions:
-    - theme: brand
-      text: How it works
-      link: /explain/
-    - theme: alt
-      text: Get started
-      link: /guide/getting-started
-    - theme: alt
-      text: GitHub
-      link: https://github.com/Yikai-Liao/tessera-sort
+Choose a task, then open only its topic. Documents carry OKF 0.2 metadata; [the knowledge workflow](development/knowledge.md) builds a disposable CLI bundle with generated per-directory indexes. Markdown remains the only maintained content. API contracts also live in Rust doctests (`cargo doc --open`).
 
-features:
-  - title: Stable, without a second buffer
-    details: A block partition recycles consumed input blocks as output blocks, so a split needs O(√n) memory instead of an n-record buffer.
-    link: /explain/block-partition
-  - title: Adaptive
-    details: Sorted, reversed, nearly sorted, constant and heavily repeated inputs take shortcuts, and key bits that never change cost nothing.
-    link: /explain/routing
-  - title: Any record type
-    details: No Copy, Clone, Default or Ord. Records are moved, never duplicated, even if the key function misbehaves or panics.
-    link: /explain/safety
-  - title: Wide keys
-    details: Integers up to 128 bits, f32 and f64 in total_cmp order, and Reverse for descending order that stays stable.
-    link: /explain/keys
----
+| Task | Start here |
+|---|---|
+| Use the library | [Getting started](guide/getting-started.md), [workspace reuse](guide/workspace.md) |
+| Check ordering, panic or memory guarantees | [Shared semantics](../conformance/semantics.md) |
+| Change the engine | [Engine reference](design/engine.md); [measurement evidence](design/port.md) for performance choices |
+| Learn the algorithm | [Explanation and reading order](explain/overview.md), with interactive figures |
+| Measure or investigate performance | [Benchmark protocol](development/benchmarking.md) |
+| Read current PR feedback or maintain tracking | [Continuous benchmarks](development/continuous-benchmarks.md) |
+| Change benchmark tooling | [Architecture](design/benchmark-tooling.md), [comparison harness](design/comparison-benchmarks.md), [figures](development/benchmark-figures.md) |
+| Maintain documentation or retrieval | [Knowledge workflow](development/knowledge.md), [site](development/docs-site.md) |
+| Contribute, change CI or release | [Contributing](../CONTRIBUTING.md), [CI](development/ci.md), [releases](../RELEASING.md) |
+| Work on future capabilities | [Roadmap](../ROADMAP.md), [Python proposal](proposals/python-binding.md) (not implemented) |
+
+Current rules and their rationale live together in these topics. Superseded decisions remain in Git history, not the active reading path.

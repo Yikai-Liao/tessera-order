@@ -1,3 +1,10 @@
+---
+type: Playbook
+title: Workspace reuse
+description: Reuse scratch across calls and bound retained memory.
+tags: [api, rust, memory]
+---
+
 # Reusing scratch memory with `Workspace`
 
 Tessera needs scratch memory while it sorts: O(√n) records for the block partition, one tile of up to 64 KiB of records, up to two bytes per record for user-key bucket IDs, and the order probe's encoded keys. Cursor tables live on the stack. The free functions such as `stable_sort_by_key` allocate this memory during each call and free it before returning.

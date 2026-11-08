@@ -41,6 +41,8 @@ class LanguageSelection(unittest.TestCase):
             "docs/.vitepress/config.ts",
             "docs/.vitepress/theme/sim/digits.ts",
             "docs/public/logo.svg",
+            "tools/knowledge.ts",
+            "tools/knowledge.test.ts",
             "package.json",
             "pnpm-lock.yaml",
             ".github/workflows/docs.yml",
@@ -54,7 +56,7 @@ class LanguageSelection(unittest.TestCase):
             "RELEASING.md",
             "ROADMAP.md",
             "docs/explain/keys.md",
-            "docs/decisions/0001a-single-bsd-2-clause-license.md",
+            "docs/development/knowledge.md",
             "bench/README.md",
             "assets/logo.svg",
         ]:

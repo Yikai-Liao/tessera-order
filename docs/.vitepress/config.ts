@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type MarkdownRenderer } from "vitepress";
@@ -15,9 +15,8 @@ const sharedPages = new Set([
   "RELEASING.md",
   "CONTRIBUTING.md",
 ]);
-// `docs/README.md` indexes the directory for GitHub readers; the site's home
-// page and sidebar replace it.
-const notPages = new Set(["docs/README.md"]);
+// The task index is for repository readers; the site has its own home page.
+const notPages = new Set(["docs/index.md"]);
 
 function isPage(path: string): boolean {
   if (!path.endsWith(".md") || notPages.has(path)) return false;
@@ -29,12 +28,20 @@ function isPage(path: string): boolean {
 /** Where a source file is served: `docs/` is the site root, `README.md` is a directory index. */
 function sitePath(path: string): string {
   const served = path.startsWith("docs/") ? path.slice("docs/".length) : path;
+  if (served === "home.md") return "index.md";
+  if (served === "explain/overview.md") return "explain/index.md";
   return served.replace(/(^|\/)README\.md$/, "$1index.md");
 }
 
 function markdownFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
-    if (entry === "node_modules" || entry === "target" || entry.startsWith(".git")) continue;
+    if (
+      entry === "node_modules" ||
+      entry === "target" ||
+      entry === ".knowledge" ||
+      entry.startsWith(".git")
+    )
+      continue;
     const full = join(dir, entry);
     const stat = statSync(full);
     if (stat.isDirectory()) {
@@ -126,8 +133,7 @@ export default defineConfig({
       {
         text: "Development",
         link: "/design/engine",
-        activeMatch:
-          "^/(design|development|decisions|proposals)/|^/(CONTRIBUTING|RELEASING|ROADMAP)",
+        activeMatch: "^/(design|development|proposals)/|^/(CONTRIBUTING|RELEASING|ROADMAP)",
       },
     ],
     sidebar: {
@@ -176,16 +182,7 @@ function guideSidebar() {
   ];
 }
 
-function firstHeading(path: string): string {
-  const heading = readFileSync(join(repoRoot, path), "utf8").match(/^# (.+)$/m);
-  return heading ? heading[1] : path;
-}
-
 function developmentSidebar() {
-  const decisions = allMarkdown
-    .filter((p) => /^docs\/decisions\/\d{4}[a-z]?-.*\.md$/.test(p))
-    .sort()
-    .map((p) => ({ text: firstHeading(p), link: `/${sitePath(p).replace(/\.md$/, "")}` }));
   return [
     {
       text: "Design",
@@ -204,6 +201,7 @@ function developmentSidebar() {
         { text: "Benchmark figures", link: "/development/benchmark-figures" },
         { text: "Continuous benchmarks", link: "/development/continuous-benchmarks" },
         { text: "Continuous integration", link: "/development/ci" },
+        { text: "Knowledge workflow", link: "/development/knowledge" },
         { text: "Documentation site", link: "/development/docs-site" },
         { text: "Releasing", link: "/RELEASING" },
       ],
@@ -214,11 +212,6 @@ function developmentSidebar() {
         { text: "Roadmap", link: "/ROADMAP" },
         { text: "Python binding proposal", link: "/proposals/python-binding" },
       ],
-    },
-    {
-      text: "Decision records",
-      collapsed: true,
-      items: [{ text: "Index", link: "/decisions/" }, ...decisions],
     },
   ];
 }

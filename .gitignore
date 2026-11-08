@@ -16,6 +16,9 @@ perf.data*
 # Python tooling caches
 __pycache__/
 
+# Disposable OKF bundle
+/.knowledge/
+
 # Documentation site
 /node_modules/
 /docs/.vitepress/dist/

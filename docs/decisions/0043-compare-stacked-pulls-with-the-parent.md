@@ -16,4 +16,4 @@ A pull request check fails when the promised comparison is missing: no start poi
 
 ## Consequences
 
-A stacked PR is measured against the code it builds on, so its alerts describe its own commits rather than the stack. Its parent must have been measured at the child's exact base commit; otherwise the check fails until that sample exists, instead of passing without one. Because the tracker runs default-branch code, the change applies after it merges. Comparisons against `main` are unchanged.
+A stacked PR is measured against the code it builds on, so its alerts describe its own commits rather than the stack. A comparison needs samples at the exact base commit, on `main` or on the parent; otherwise the check fails until that sample exists instead of passing without one. Because the tracker runs default-branch code, the change applies after it merges. Comparisons against `main` are unchanged.

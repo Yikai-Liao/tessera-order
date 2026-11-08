@@ -4,17 +4,17 @@ Before any radix pass, Tessera checks whether the input needs one. Many real inp
 
 ## Order probe
 
-`probe_order` looks at up to 4,096 adjacent pairs spread evenly over the input, with a stride of n / 4,096, and classifies it:
+`probe_order` checks adjacent pairs at a stride of max(1, floor(n / 4,096)): below 8,192 records it checks every pair; larger inputs get a spread-out sample. It classifies the input:
 
 | Sampled pairs | Class | What happens |
 |---|---|---|
 | some ascending and some descending | **unsorted** | go on to budgeted insertion |
 | all equal | **flat** | decide after the varying-bit scan (below) |
-| all `≤`, or all `≥` | candidate order | a full scan, `confirm_order`, checks every pair |
+| all `≤`, or all `≥` | candidate order | unit stride already checks every pair; otherwise `confirm_order` checks them |
 
 A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
 
-The sample rejects most unsorted inputs within a few pairs. The full scan runs only on inputs that look ordered.
+The sample rejects most unsorted inputs within a few pairs. At unit stride the probe itself confirms order; larger inputs need the additional scan only when the sample looks ordered.
 
 ## Budgeted insertion
 

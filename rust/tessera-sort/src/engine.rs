@@ -530,6 +530,9 @@ fn probe_order<T, E: Extract<T>>(
 ) -> Order {
     *strict_descending = false;
     let stride = (records.len() / ORDER_SAMPLES).max(1);
+    if stride == 1 {
+        return probe_full_order(records, extractor, strict_descending);
+    }
     let mut ascending = true;
     let mut descending = true;
     for index in (stride..records.len()).step_by(stride) {
@@ -547,6 +550,43 @@ fn probe_order<T, E: Extract<T>>(
         return Order::Flat;
     }
     confirm_order(records, extractor, strict_descending)
+}
+
+/// Classifies every adjacent pair when the sample stride would be one.
+#[inline(never)]
+fn probe_full_order<T, E: Extract<T>>(
+    records: &[T],
+    extractor: &mut E,
+    strict_descending: &mut bool,
+) -> Order {
+    let mut ascending = true;
+    let mut descending = true;
+    let mut strict = true;
+    for index in 1..records.len() {
+        // SAFETY: the range starts at one, so `index - 1` is in bounds.
+        let before = extractor.key(unsafe { records.get_unchecked(index - 1) });
+        // SAFETY: the range ends before `records.len()`.
+        let after = extractor.key(unsafe { records.get_unchecked(index) });
+        if before < after {
+            descending = false;
+            strict = false;
+        } else if before == after {
+            strict = false;
+        } else {
+            ascending = false;
+        }
+        if !ascending && !descending {
+            return Order::Unsorted;
+        }
+    }
+    if ascending && descending {
+        Order::Flat
+    } else if ascending {
+        Order::Ascending
+    } else {
+        *strict_descending = strict;
+        Order::Descending
+    }
 }
 
 /// Confirms direction from the first unequal key and reports strict descending order.
@@ -1225,6 +1265,36 @@ mod tests {
     }
 
     #[test]
+    fn full_probe_skips_confirmation() {
+        for descending in [false, true] {
+            let mut records: Vec<_> = (0..129u64).map(|id| (id / 4, id)).collect();
+            if descending {
+                records.reverse();
+            }
+            let mut calls = 0;
+            let mut strict_descending = false;
+            let order = probe_order(
+                &records,
+                &mut ByKey(|record: &(u64, u64)| {
+                    calls += 1;
+                    record.0
+                }),
+                &mut strict_descending,
+            );
+            assert!(
+                order
+                    == if descending {
+                        Order::Descending
+                    } else {
+                        Order::Ascending
+                    }
+            );
+            assert!(!strict_descending);
+            assert_eq!(calls, 2 * (records.len() - 1));
+        }
+    }
+
+    #[test]
     fn strict_reverse_skips_rescan() {
         let mut records: Vec<_> = (0..257u64).rev().map(|key| (key, key)).collect();
         let mut expected = records.clone();
@@ -1280,9 +1350,12 @@ mod tests {
         let mut values: Vec<_> = (0..len as u64).collect();
         let index = (len / 2) & !1;
         values.swap(index, index + 1);
-        // At 8192 records the strided gate checks odd pair offsets. Miri
-        // exercises the confirmation directly on a shorter vector scan.
+        // At 8192 records the stride-two gate misses this inversion; Miri
+        // checks the same case with a shorter full-stride input.
         let mut strict_descending = false;
+        assert!(probe_order(&values, &mut Direct, &mut strict_descending) == Order::Unsorted);
+        assert!(!strict_descending);
+        strict_descending = false;
         assert!(confirm_order(&values, &mut Direct, &mut strict_descending) == Order::Unsorted);
         assert!(!strict_descending);
         crate::stable_sort(&mut values);

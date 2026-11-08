@@ -25,6 +25,7 @@ test("commands reject invalid input before running", async () => {
     ["release", "--suite", "invalid"],
     ["run", "--plan", "smoke", "--suite", "release"],
     ["run", "--lengths", "0"],
+    ["run", "--modes", "api"],
     ["plan", "--format", "yaml"],
     ["compare", "--types", "u64,"],
     ["report"],

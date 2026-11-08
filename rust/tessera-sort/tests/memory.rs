@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Allocation counts of a reused `Workspace` and the accuracy of
-//! `retained_bytes`, measured with a counting global allocator.
+//! Per-call scratch allocation and release, measured with a counting allocator.
 
 // Miri keeps its own allocator; the other suites cover record handling there.
 #![cfg(not(miri))]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
-use tessera_sort::Workspace;
+use tessera_sort::{stable_sort, stable_sort_by_key};
 
 thread_local! {
     static ENABLED: Cell<bool> = const { Cell::new(false) };
@@ -67,20 +66,37 @@ fn measure(f: impl FnOnce()) -> (usize, isize) {
 }
 
 #[test]
-fn warm_workspace_reuses_buffers() {
+fn scratch_released_after_sort() {
     let mut input: Vec<_> = (0..20000u64)
         .map(|id| (id.wrapping_mul(0x9e3779b97f4a7c15), id))
         .collect();
-    let original = input.clone();
-    let mut workspace = Workspace::new();
-    assert_eq!(workspace.retained_bytes(), 0);
-    let (_, bytes) = measure(|| workspace.stable_sort_by_key(&mut input, |x| x.0));
-    assert_eq!(workspace.retained_bytes() as isize, bytes);
-    input.clone_from_slice(&original);
-    let (allocations, bytes) = measure(|| workspace.stable_sort_by_key(&mut input, |x| x.0));
-    assert_eq!((allocations, bytes), (0, 0));
-    let retained = workspace.retained_bytes();
-    let (_, freed) = measure(|| workspace.shrink_to_fit());
-    assert_eq!(freed, -(retained as isize));
-    assert_eq!(workspace.retained_bytes(), 0);
+    let (allocations, bytes) = measure(|| stable_sort_by_key(&mut input, |x| x.0));
+    assert!(allocations > 0);
+    assert_eq!(bytes, 0);
+    assert!(input.is_sorted_by_key(|x| x.0));
+
+    let mut keys: Vec<_> = (0..20000u64)
+        .map(|id| id.wrapping_mul(0x9e3779b97f4a7c15))
+        .collect();
+    let (allocations, bytes) = measure(|| stable_sort(&mut keys));
+    assert!(allocations > 0);
+    assert_eq!(bytes, 0);
+    assert!(keys.is_sorted());
+}
+
+#[test]
+fn ordered_inputs_do_not_allocate() {
+    for len in [0, 1, 48, 49, 8193, 20000] {
+        for constant in [false, true] {
+            let mut keys: Vec<_> = (0..len as u64)
+                .map(|id| if constant { 7 } else { id })
+                .collect();
+            assert_eq!(measure(|| stable_sort(&mut keys)), (0, 0));
+            let mut records: Vec<_> = keys.iter().copied().enumerate().collect();
+            assert_eq!(
+                measure(|| stable_sort_by_key(&mut records, |x| x.1)),
+                (0, 0)
+            );
+        }
+    }
 }

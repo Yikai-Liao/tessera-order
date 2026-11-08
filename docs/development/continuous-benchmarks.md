@@ -28,13 +28,7 @@ Bencher Free allows one job per organization, at most 5 minutes each. Tracking j
 
 ## Within-job scheduling
 
-The [supervisor](../../bench/continuous/worker.py) runs inputs below
-1,000,000 records in two single-threaded processes pinned to separate available
-CPUs. Whole case groups are balanced by timed ID count; API/workspace pairs stay
-together. Both workers finish before one pinned worker prepares or measures any
-larger input. Selection happens before input generation, and each worker has a
-separate Criterion directory. The supervisor rejects failed workers, missing
-results and duplicate IDs, then emits each worker's output without interleaving.
+The [supervisor](../../bench/continuous/worker.py) runs inputs below 1,000,000 records in two single-threaded processes pinned to separate available CPUs, balancing the number of cases between them. Both workers finish before one pinned worker prepares or measures any larger input. Selection happens before input generation, and each worker has a separate Criterion directory. The supervisor accepts only distinct `api` IDs, rejects failed workers and missing or duplicate results, then emits each worker's output without interleaving.
 
 Warm-up windows, sample counts, benchmark IDs and sort implementations are
 unchanged. Default and Portable SIMD still run in separate, sequential remote
@@ -48,7 +42,7 @@ artifacts without the listing/selection protocol must be rebuilt.
 
 ## Cases
 
-Benchmark IDs are `<language>/<case_id>/<mode>`, with `case_id` as in the [protocol](benchmarking.md#runner), for example `rust/u64/random/65536/s1/api`. The mode names the API being timed: `api` is the stable sort with its own scratch allocation, `workspace` the same sort with a prepared workspace. Further APIs, such as an unstable or a parallel sort, get their own mode in the same executable rather than a new build; reports group cases by mode ([Reports](#builds-are-columns-cases-are-rows)). Measure a new API on a representative subset of inputs: each build's run must stay under the remote job limit below. Each case is there for an engine path ([routing](../explain/routing.md)) or a key type. The TOML preset [`bench/plans/continuous.toml`](../../bench/plans/continuous.toml) defines the combinations, using the [shared selection rules](benchmarking.md#experiment-plans). It is compiled into each executable; the supervisor lists the resulting IDs before scheduling workers. The default 50 input cases (56 timed benchmark IDs, including workspace modes) cover:
+Benchmark IDs are `<language>/<case_id>/api`, with `case_id` as in the [protocol](benchmarking.md#runner), for example `rust/u64/random/65536/s1/api`. The fixed `api` suffix identifies the stable sort with call-owned scratch; it is not a plan selector. Reports still parse recorded mode suffixes ([Reports](#builds-are-columns-cases-are-rows)). Each build's run must stay under the remote job limit below. Each case is there for an engine path ([routing](../explain/routing.md)) or a key type. The TOML preset [`bench/plans/continuous.toml`](../../bench/plans/continuous.toml) defines the combinations, using the [shared selection rules](benchmarking.md#experiment-plans). It is compiled into each executable; the supervisor lists the resulting IDs before scheduling workers. The default 50 input cases (50 timed benchmark IDs) cover:
 
 - the insertion limit (`u64` only), one past it and one past the tile capacity, for `u64` keys and `{u32, u32}` rows, and one past the tile capacity for `{u64, u32}` rows. Cases this short move with code placement, so only the boundaries are kept;
 - sorted and reverse `u64` keys at 1,000, below one tile, where the order probe and the stable reversal decide the route before any tile routing. These two are short enough to move with code placement as well, so they screen the short-input path and an alert there still needs the protocol's controls;
@@ -61,8 +55,7 @@ Benchmark IDs are `<language>/<case_id>/<mode>`, with `case_id` as in the [proto
 - `{u64, u32}` rows over the 50% repeated input at 65,536, where the equality partition must keep payloads stable;
 - 1,000,000 records for `u64` (random, Zipf, `skew99`, `two_values`, 99% sorted, `sparse_digits`, `bimodal`, `hot50`, `d4096`), `u32`, `u128` (random, and `sparse8`, which widens the top digit) and `{u64, u32}` rows;
 - the four non-uniform `u64` inputs at 1,000,000 test the split sample and the equality partition: `sparse_digits` clears every second bit, leaving only 16 of 256 possible values per 8-bit digit at the root; `bimodal` puts two clusters 2^63 apart under a two-valued top window; `hot50` repeats one key in half the records and sorts the distinct rest; and `d4096` spreads 4,096 values over one wide partition;
-- 10,000,000 `u64` records, random and Zipf, where every level goes through the block partition and the scratch working set leaves the caches;
-- `workspace` mode beside `api` only where scratch allocation is a visible share of the time.
+- 10,000,000 `u64` records, random and Zipf, where every level goes through the block partition and the scratch working set leaves the caches.
 
 Cases at 1,000,000 records warm up for 1 s and take 40 samples over 4 s; a 1.5 s window gives them only a few hundred sorts, and their Bencher limits were the widest, ±5% to ±18%. Cases at 10,000,000 records take the same window with 20 samples, because 40 sorts of that length would need eight seconds. The other cases warm up for 0.5 s and take 30 samples over 1.5 s.
 
@@ -89,14 +82,14 @@ The scripts run directly on Node.js 24. `report.ts` owns the result model and cu
 The number of measured combinations grows in two directions, and the report treats them differently so that it grows by rows rather than by sections or charts:
 
 - A **build** is a separately compiled executable with its own Testbed and baseline, such as Default and Portable SIMD. Builds are **columns** everywhere in the comment: the overview, both charts and the changed-case table.
-- An **API variant** of one executable, such as `api` (the stable sort), `workspace`, and later an unstable or parallel sort, is the `mode` segment of the case ID and is measured within each build's run. It is a **row group**: the overview gets one row per mode, and the charts group cases under a mode title. Adding an API adds rows, not a Bencher job, a check or a chart.
+- An **API variant** of one executable, such as `api` (the stable sort) and later an unstable or parallel sort, is the `mode` segment of the case ID and is measured within each build's run. It is a **row group**: the overview gets one row per mode, and the charts group cases under a mode title. Adding an API adds rows, not a Bencher job, a check or a chart.
 
 Each case is named once however many builds measured it, and each alert says whether every build shares it or which builds it is confined to. That is the first clue to a cause: a slowdown in both builds points to shared code, one confined to Portable SIMD points to the SIMD backend. A build that failed to measure stays in the overview and gets its own line; the case lines, tables and charts cover only measured builds, so "only" never means "the other build failed".
 
 A comment reads top-down:
 
 1. The title, `Benchmarks · rust · 3 slower, 12 faster`, counts distinct cases: a case slower in two builds is one slower case. A failed build is appended, such as `, Portable SIMD failed`.
-2. The overview table has one column per build and the rows `All cases` and, when the suite has more than one mode, each mode (`stable`, `stable, workspace`, `unstable`, …). A cell is the geometric mean of current/baseline over that build's compared cases in that row, followed by its alert counts, such as `−4.7% · **2 slower** · 12 faster`. Bold marks alerts. Each build is compared with its own baseline: `main`, or the parent PR of a stacked one. A build with no compared case shows `—`, and its headline says "no baseline" rather than "no significant change"; a PR build whose promised comparison is missing says "no comparable baseline" and fails its check. There is no column across builds: their builds differ, so a combined mean could hide one build's regression behind the other's speedup.
+2. The overview table has one column per build and the rows `All cases` and, when the suite has more than one mode, each mode (`stable`, `unstable`, …). A cell is the geometric mean of current/baseline over that build's compared cases in that row, followed by its alert counts, such as `−4.7% · **2 slower** · 12 faster`. Bold marks alerts. Each build is compared with its own baseline: `main`, or the parent PR of a stacked one. A build with no compared case shows `—`, and its headline says "no baseline" rather than "no significant change"; a PR build whose promised comparison is missing says "no comparable baseline" and fails its check. There is no column across builds: their builds differ, so a combined mean could hide one build's regression behind the other's speedup.
 3. A caution box counts the slower cases by where they occur, such as "1 in Portable SIMD only, 2 in both", and lists the three worst with every build's change, such as `u64 · Zipf 2 · 1,000,000: Default +0.6%, Portable SIMD +13.0%`; further cases are counted and left to the table.
 4. A tip box does the same for faster cases, names the best and ends with "Nice work."
 5. The two embedded charts follow: the comparison with the base and, on a PR, the PR's history.

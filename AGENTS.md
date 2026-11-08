@@ -60,6 +60,10 @@ Register identities and display names in `bench/catalog.toml`, not per-report ma
 
 Never call a change faster or slower without measurements per [`docs/development/benchmarking.md`](docs/development/benchmarking.md), with the A/A range. A slowdown outside the controls is investigated, not assumed to be noise. Raw data, profiles and the research harness stay out of the repository.
 
+## Review
+
+Before pushing functional changes, request an independent subagent review using Agentic Review. Resolve accepted findings and re-review material fixes. Passing tests do not replace review of runtime paths, failure handling, trust boundaries and documentation contracts.
+
 ## Commits
 
 Commits and pull request titles follow [Conventional Commits](CONTRIBUTING.md#commit-messages): `type(scope)!: summary`, at most 64 characters; CI checks the title, which becomes the squash commit. Sign off (`git commit -s`) with the configured identity and add an `Assisted-by:` or `Co-authored-by:` trailer.

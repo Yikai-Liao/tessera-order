@@ -58,7 +58,10 @@ export function command(
       process.removeListener("SIGINT", interrupt);
       process.removeListener("SIGTERM", interrupt);
       if (code === 0) resolve(output.trim());
-      else reject(new Error(`${program} exited with ${signal ?? code}`));
+      else {
+        if (output) diagnostic(output.trimEnd());
+        reject(new Error(`${program} exited with ${signal ?? code}`));
+      }
     });
   });
 }

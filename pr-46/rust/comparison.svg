@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 282" width="720" height="282" role="img" aria-labelledby="t d">
+<title id="t">Benchmark changes against main: Default 3 faster; Portable SIMD no alerts</title>
+<desc id="d">{u64,u32} · random · 1,000,000: Default −6.3% improvement, Portable SIMD −0.8%; {u64,u32} · random · 65,536: Default −6.2% improvement, Portable SIMD −0.8%; u128 · random · 1,000,000: Default −5.1% improvement, Portable SIMD −1.1%</desc>
+<style>
+  .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
+  .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
+  .tag { fill: none; stroke: #c9c8c2; }
+  .slower { fill: #e8622f; } .faster { fill: #4a80e6; }
+  .stem-slower { stroke: #e8622f; } .stem-faster { stroke: #4a80e6; }
+  .within { fill: #fafaf8; stroke: #8d8c86; }
+  text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; font-feature-settings: "tnum", "cv11"; }
+  .val { font-size: 12px; } .sub { font-size: 11px; } .tiny { font-size: 10px; } .strong { font-weight: 600; }
+  .hero { font-size: 28px; font-weight: 600; letter-spacing: -0.6px; font-feature-settings: "pnum"; }
+  .stat { font-size: 18px; font-weight: 600; }
+  .caps { font-size: 10.5px; font-weight: 600; letter-spacing: 1.1px; }
+  @media (prefers-color-scheme: dark) {
+    .panel { fill: #1e1e1d; stroke: #3a3a37; } .ring { stroke: #1e1e1d; }
+    .ink { fill: #e8e7e3; } .muted { fill: #a3a29b; } .rule { stroke: #30302e; } .axis { stroke: #6f6e69; }
+    .tag { stroke: #4a4a46; }
+    .within { fill: #1e1e1d; stroke: #6f6e69; }
+  }
+</style>
+<rect class="panel" x="0.5" y="0.5" width="719" height="281" rx="12"/>
+<text class="ink strong" x="24.0" y="36.0">Run time against main</text>
+<text class="muted sub" x="24.0" y="51.0">each build, own baseline</text>
+<text class="hero faster" x="189.0" y="50.0">−0.1%</text>
+<text class="ink strong" x="283.0" y="36.0">Default</text>
+<text class="muted sub" x="283.0" y="51.0">3 faster</text>
+<text class="hero faster" x="452.5" y="50.0">−0.5%</text>
+<text class="ink strong" x="546.5" y="36.0">Portable SIMD</text>
+<text class="muted sub" x="546.5" y="51.0">no alerts</text>
+<line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
+<line class="rule" x1="231.0" x2="231.0" y1="90" y2="230" stroke-width="1"/>
+<text class="muted tiny" x="231.0" y="246.0" text-anchor="middle">−5%</text>
+<line class="axis" x1="366.5" x2="366.5" y1="90" y2="230" stroke-width="1"/>
+<text class="muted tiny" x="366.5" y="246.0" text-anchor="middle">0</text>
+<line class="rule" x1="494.5" x2="494.5" y1="90" y2="230" stroke-width="1"/>
+<text class="muted tiny" x="494.5" y="246.0" text-anchor="middle">−5%</text>
+<line class="axis" x1="630.0" x2="630.0" y1="90" y2="230" stroke-width="1"/>
+<text class="muted tiny" x="630.0" y="246.0" text-anchor="middle">0</text>
+<text class="caps muted" x="24.0" y="102.0">STABLE</text>
+<text class="ink" x="24.0" y="129.0">random</text>
+<text class="muted sub" x="24.0" y="144.0">{u64,u32} · 1,000,000</text>
+<line class="stem-faster" x1="366.5" x2="197.0" y1="131" y2="131" stroke-width="2" stroke-linecap="round"/>
+<circle class="faster ring" cx="197.0" cy="131" r="4" stroke-width="2"/>
+<text class="val ink strong" x="432.5" y="135.0" text-anchor="end">−6.3%</text>
+<circle class="within" cx="609.2" cy="131" r="3.5" stroke-width="1.5"/>
+<text class="val muted" x="696.0" y="135.0" text-anchor="end">−0.8%</text>
+<text class="ink" x="24.0" y="167.0">random</text>
+<text class="muted sub" x="24.0" y="182.0">{u64,u32} · 65,536</text>
+<line class="stem-faster" x1="366.5" x2="198.7" y1="169" y2="169" stroke-width="2" stroke-linecap="round"/>
+<circle class="faster ring" cx="198.7" cy="169" r="4" stroke-width="2"/>
+<text class="val ink strong" x="432.5" y="173.0" text-anchor="end">−6.2%</text>
+<circle class="within" cx="609.6" cy="169" r="3.5" stroke-width="1.5"/>
+<text class="val muted" x="696.0" y="173.0" text-anchor="end">−0.8%</text>
+<text class="ink" x="24.0" y="205.0">random</text>
+<text class="muted sub" x="24.0" y="220.0">u128 · 1,000,000</text>
+<line class="stem-faster" x1="366.5" x2="228.4" y1="207" y2="207" stroke-width="2" stroke-linecap="round"/>
+<circle class="faster ring" cx="228.4" cy="207" r="4" stroke-width="2"/>
+<text class="val ink strong" x="432.5" y="211.0" text-anchor="end">−5.1%</text>
+<circle class="within" cx="599.5" cy="207" r="3.5" stroke-width="1.5"/>
+<text class="val muted" x="696.0" y="211.0" text-anchor="end">−1.1%</text>
+<circle class="slower" cx="28" cy="264" r="4"/>
+<circle class="faster" cx="38" cy="264" r="4"/>
+<text class="muted sub" x="48.0" y="268.0">alert</text>
+<circle class="within" cx="91.1" cy="264" r="3.5" stroke-width="1.5"/>
+<text class="muted sub" x="101.1" y="268.0">within limits</text>
+<circle class="ink" cx="186.07" cy="264" r="5.5"/>
+<text class="muted sub" x="196.6" y="268.0">20% or more</text>
+<text class="slower sub" x="696.0" y="268.0" text-anchor="end">more time →</text>
+<text class="faster sub" x="621.7" y="268.0" text-anchor="end">← less time</text>
+</svg>

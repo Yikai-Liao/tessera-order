@@ -97,6 +97,21 @@ Both baseline copies are slower than the candidate outside its A/A range in 21 o
 
 The final implementation keeps strictness as a separate order-probe result and isolates whole-slice reversal in a non-inlined helper. A paired A/B rerun of that source confirmed the `u64` reverse speedup at 65,536, 1,000,000 and 10,000,000 records; see [decision 0041](../decisions/0041-strict-descending-fast-path.md). The continuous suite has no A/A control and alternated between no alert and alerts on different short cases in reruns, so it serves only as a regression screen.
 
+### Dense order probes
+
+Below 8,192 records, the probe stride is one and its pass already checks every adjacent pair. Returning that classification directly skips the redundant confirmation pass; the same scan still reports strict descent for [decision 0042](../decisions/0042-dense-order-probe-confirmation.md). Larger inputs keep the existing sampled-and-confirmed path.
+
+A paired default-release comparison measured 15 sorted or reverse cases in one binary: four lengths each for `u64` sorted/reverse and `row_u64` sorted, plus three `record128` sorted lengths. Each case used nine shuffled blocks, stable-reference verification, the candidate and a second candidate copy, and two baseline copies from the PR 41 head. The runner was pinned to CPU 2 on an AMD Ryzen 7 8845H; the host used the powersave governor with turbo and SMT enabled. Ratios are baseline-copy time divided by the candidate A/A mean, so values above one favor the change.
+
+| Case | Candidate ns/record | Baseline copy 1 | Baseline copy 2 |
+|---|---:|---:|---:|
+| `u64/sorted/1000` | 0.416 | 1.99× | 1.51× |
+| `row_u64/sorted/1000` | 0.487 | 2.18× | 1.78× |
+| `record128/sorted/1000` | 4.690 | 1.17× | 1.18× |
+| `u64/reverse/1000` | 0.710 | 1.66× | 1.77× |
+
+The candidate copy tracked the primary on these short cases. A/A ranges were 0.987–1.013 for `u64/sorted` and `record128/sorted`, 0.905–1.095 for `row_u64/sorted`, and 0.876–1.124 for `u64/reverse`. Longer cases exposed code-placement sensitivity: duplicate candidate and baseline copies did not agree on some sorted inputs, so no larger-input gain is claimed. Both baseline copies placed reverse cases at 65,536 records and above within the candidate's A/A range. Raw samples and temporary comparison adapters stay outside the repository.
+
 ## Not yet done
 
 - A crates.io release. See [RELEASING.md](../../RELEASING.md).

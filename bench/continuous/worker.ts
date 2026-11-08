@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
-import { command } from "../../tools/process.ts";
+import { CommandCancelledError, command } from "../../tools/process.ts";
 
 /** Keep API/workspace modes together and balance small groups by timed ID count. */
 export function partition(cases: string[]) {
@@ -40,11 +40,13 @@ export async function runWorkers(
   directory: string,
 ) {
   const children: { child: ChildProcess; done: Promise<Error | null>; output: string }[] = [];
-  const stop = () => {
-    for (const { child } of children) child.kill("SIGTERM");
+  let cancelled: CommandCancelledError | undefined;
+  const stop = (signal: NodeJS.Signals) => {
+    cancelled ??= new CommandCancelledError(signal);
+    for (const { child } of children) child.kill("SIGKILL");
   };
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
   try {
     for (const [lane, groups] of lanes.entries()) {
       if (!groups.length) continue;
@@ -52,6 +54,7 @@ export async function runWorkers(
       await mkdir(output, { recursive: true });
       const log = await open(join(output, "stdout"), "wx");
       try {
+        if (cancelled) throw cancelled;
         const child = spawn("taskset", ["-c", String(cpus[lane]), binary, "--bench"], {
           env: {
             ...process.env,
@@ -78,6 +81,7 @@ export async function runWorkers(
         if (error) throw error;
       }),
     );
+    if (cancelled) throw cancelled;
     return children.map(({ output }) => output);
   } finally {
     // SIGKILL also reaps a sibling that ignores the supervisor's termination.

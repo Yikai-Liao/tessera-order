@@ -2,7 +2,7 @@
 
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { command, diagnostic } from "../../tools/process.ts";
+import { CommandCancelledError, command, diagnostic } from "../../tools/process.ts";
 import { VARIANTS } from "../catalog.ts";
 import type { Plan } from "../plan.ts";
 import { buildBenchmark, withWorkspace } from "../workspace.ts";
@@ -154,6 +154,7 @@ export async function measureContinuous(options: MeasurementOptions) {
       await writeFile(join(options.out, `bencher-${variant.id}.json`), `${report}\n`);
       outcomes[variant.id] = "success";
     } catch (error) {
+      if (error instanceof CommandCancelledError) throw error;
       diagnostic(`${variant.name}: ${error instanceof Error ? error.message : String(error)}`);
       outcomes[variant.id] = "failure";
     }

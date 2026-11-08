@@ -24,6 +24,14 @@ export async function withCommandLog<T>(path: string, operation: () => Promise<T
   }
 }
 
+/** An operator cancellation, distinct from an unsuccessful child exit. */
+export class CommandCancelledError extends Error {
+  constructor(signal: NodeJS.Signals) {
+    super(`Operation cancelled by ${signal}`);
+    this.name = "CommandCancelledError";
+  }
+}
+
 interface CommandOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -37,9 +45,13 @@ export function command(
   options: CommandOptions = {},
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    // Nested helpers, including Cargo native builders, must remain inside
+    // the outer command's cancellation boundary rather than detach again.
+    const ownsGroup = process.platform !== "win32" && process.env.TESSERA_COMMAND_GROUP !== "1";
     const child = spawn(program, args, {
+      detached: ownsGroup,
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env: { ...process.env, ...options.env, TESSERA_COMMAND_GROUP: "1" },
       stdio: [
         "ignore",
         options.capture ? "pipe" : (commandLog.getStore() ?? "inherit"),
@@ -50,14 +62,42 @@ export function command(
     child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
       output += chunk;
     });
-    const interrupt = () => child.kill("SIGTERM");
-    process.once("SIGINT", interrupt);
-    process.once("SIGTERM", interrupt);
+    let cancelled: CommandCancelledError | undefined;
+    let escalation: ReturnType<typeof setTimeout> | undefined;
+    const terminate = (signal: NodeJS.Signals) => {
+      if (!ownsGroup) child.kill(signal);
+      else if (child.pid) {
+        try {
+          process.kill(-child.pid, signal);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        }
+      }
+    };
+    const interrupt = (signal: NodeJS.Signals) => {
+      if (cancelled) {
+        terminate("SIGKILL");
+        return;
+      }
+      cancelled = new CommandCancelledError(signal);
+      terminate("SIGTERM");
+      // Compilers and schedulers can own descendants; bound cancellation even
+      // when one ignores SIGTERM or retains a captured stdout pipe.
+      escalation = setTimeout(() => terminate("SIGKILL"), 1000);
+      escalation.unref();
+    };
+    process.on("SIGINT", interrupt);
+    process.on("SIGTERM", interrupt);
     child.once("error", reject);
     child.once("close", (code, signal) => {
+      // Logged/inherited stdio can close with the direct child while a
+      // descendant still runs. Finish cancellation before clearing its timer.
+      if (cancelled) terminate("SIGKILL");
+      if (escalation) clearTimeout(escalation);
       process.removeListener("SIGINT", interrupt);
       process.removeListener("SIGTERM", interrupt);
-      if (code === 0) resolve(output.trim());
+      if (cancelled) reject(cancelled);
+      else if (code === 0) resolve(output.trim());
       else {
         if (output) diagnostic(output.trimEnd());
         reject(new Error(`${program} exited with ${signal ?? code}`));

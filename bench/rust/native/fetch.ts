@@ -30,6 +30,14 @@ export async function fetchNativeSource(vendor: string, name: string, source: Na
     !/^[a-f0-9]{40}$/.test(source.commit)
   )
     throw new Error(`${name}: expected a pinned GitHub source`);
+  if (
+    source.paths &&
+    (!source.paths.length ||
+      source.paths.some(
+        (path) => !path || path.split("/").some((part) => !part || part === "." || part === ".."),
+      ))
+  )
+    throw new Error(`${name}: expected nonempty archive-relative source paths`);
   await mkdir(vendor, { recursive: true });
   // Staging beside the destination keeps installation on one filesystem.
   const directory = await mkdtemp(join(vendor, ".source-"));
@@ -53,7 +61,24 @@ export async function fetchNativeSource(vendor: string, name: string, source: Na
       throw new Error(`${name}: source archive SHA-256 mismatch`);
     const unpacked = join(directory, "unpacked");
     await mkdir(unpacked);
-    await extract({ file: archive, cwd: unpacked, strict: true });
+    await extract({
+      file: archive,
+      cwd: unpacked,
+      strict: true,
+      filter(path) {
+        if (!source.paths) return true;
+        const relative = path.split("/").slice(1).join("/").replace(/\/$/, "");
+        return (
+          !relative ||
+          source.paths.some(
+            (selected) =>
+              relative === selected ||
+              relative.startsWith(`${selected}/`) ||
+              selected.startsWith(`${relative}/`),
+          )
+        );
+      },
+    });
     const entries = await readdir(unpacked);
     if (entries.length !== 1) throw new Error(`${name}: expected one archive root`);
     const tree = join(unpacked, entries[0]);

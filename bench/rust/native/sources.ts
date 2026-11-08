@@ -11,6 +11,7 @@ export interface NativeSource {
   sha256: string;
   license: string;
   license_files: string[];
+  paths?: string[];
 }
 
 /** Read the one pinned native-source manifest shared by fetching and compilation. */

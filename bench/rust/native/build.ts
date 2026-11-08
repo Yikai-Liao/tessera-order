@@ -64,6 +64,10 @@ async function build(out: string) {
         ? ["-U_REENTRANT", `-I${vendor}/ips2ra/include`, `-I${vendor}/ips4o/include`]
         : []),
     ]);
+  add("tessera_native", join(root, "duckdb.cpp"), cxx, [
+    ...cpp,
+    ...["vergesort", "ska_sort", "pdqsort"].map((name) => `-I${vendor}/duckdb/third_party/${name}`),
+  ]);
   for (const name of ["fluxsort", "crumsort"])
     add("tessera_native", join(root, `${name}.c`), cc, [
       "-std=c11",

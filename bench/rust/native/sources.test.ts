@@ -42,5 +42,5 @@ test("source hashes preserve existing stamps and reject changes or escaping link
   await writeFile(join(root, "outside"), "outside");
   await symlink("../outside", join(tree, "escape"));
   await assert.rejects(treeHash(tree), /escapes/);
-  assert.equal(Object.keys(await nativeSources()).length, 7);
+  assert.equal(Object.keys(await nativeSources()).length, 8);
 });

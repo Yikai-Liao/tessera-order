@@ -41,6 +41,7 @@ class LanguageSelection(unittest.TestCase):
             "docs/.vitepress/config.ts",
             "docs/.vitepress/theme/sim/digits.ts",
             "docs/public/logo.svg",
+            "docs/development/[workflow].paths.ts",
             "package.json",
             "pnpm-lock.yaml",
             ".github/workflows/docs.yml",
@@ -50,6 +51,7 @@ class LanguageSelection(unittest.TestCase):
 
     def test_prose_selects_no_language(self):
         for path in [
+            "AGENTS.md",
             "README.md",
             "RELEASING.md",
             "ROADMAP.md",

@@ -9,11 +9,11 @@ import { defineConfig, type MarkdownRenderer } from "vitepress";
 // are the files under `docs/` plus the shared documents listed here.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const repository = "https://github.com/Yikai-Liao/tessera-sort";
-const sharedPages = new Map([
-  ["conformance/semantics.md", "conformance/semantics.md"],
-  ["ROADMAP.md", "ROADMAP.md"],
-  ["RELEASING.md", "RELEASING.md"],
-  ["CONTRIBUTING.md", "CONTRIBUTING.md"],
+const sharedPages = new Set([
+  "conformance/semantics.md",
+  "ROADMAP.md",
+  "RELEASING.md",
+  "CONTRIBUTING.md",
 ]);
 // The task index is for repository readers; the site has its own home page.
 const notPages = new Set(["docs/README.md"]);
@@ -27,8 +27,6 @@ function isPage(path: string): boolean {
 
 /** Where a source file is served: `docs/` is the site root, `README.md` is a directory index. */
 function sitePath(path: string): string {
-  const shared = sharedPages.get(path);
-  if (shared) return shared;
   const served = path.startsWith("docs/") ? path.slice("docs/".length) : path;
   return served.replace(/(^|\/)README\.md$/, "$1index.md");
 }

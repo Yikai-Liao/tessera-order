@@ -4,7 +4,7 @@ Tessera is a stable radix sort with O(√n) auxiliary memory. Keep code concise,
 
 ## Read only for your task
 
-Read the matching sections below; batch known required files in the first tool interaction and skip content already loaded. Follow deeper links only when the task needs them. A fact lookup needs its contract or reference, not a development procedure. The [human task index](docs/README.md) covers other topics.
+Read the matching sections below; batch known required reads in the first tool interaction and skip content already loaded. When an entry links to a section, locate its heading and use line-range reads for that section and needed subsections. Read other sections only as the task requires, rather than loading the whole document by default. Follow deeper links only when needed. A fact lookup needs its contract or reference, not a development procedure. The [human task index](docs/README.md) covers other topics.
 
 | Task | First read together |
 |---|---|

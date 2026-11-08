@@ -64,7 +64,6 @@ assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 |---|---|
 | `stable_sort(&mut [K])` | Sort keys themselves |
 | `stable_sort_by_key(&mut [T], F)` | Sort any records by a key computed by `F` |
-| `Workspace<T>` | The same sorts as methods, reusing scratch memory across calls ([guide](docs/guide/workspace.md)) |
 
 Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 
@@ -91,7 +90,6 @@ Each language package is versioned and released separately ([`RELEASING.md`](REL
 | Unstable sort | Not in 0.1 | Planned |
 | 128-bit keys | Signed and unsigned | Planned |
 | Records that own resources or hold `&mut` | Supported | Trivially copyable records only (planned) |
-| Reusable workspace | Supported | Planned |
 
 A Python binding is planned as well; see the [roadmap](ROADMAP.md).
 

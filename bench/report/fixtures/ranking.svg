@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 522" width="720" height="522" role="img" aria-labelledby="t d">
 <title id="t">Tessera ranks 2nd of 7 sorts on 1,000,000 u64 keys</title>
-<desc id="d">Speed relative to slice::sort, geometric mean over 10 input patterns. Speed: Tessera, Portable SIMD 3.3×; Tessera 2.6×; radsort 2.2×; long-stable-variant-name 2×; slice::sort 1.00×; glidesort-sqrt 0.99×; vqsort 2.8×; slice::sort_unstable 2.3×</desc>
+<desc id="d">Speed relative to slice::sort, geometric mean over the 10 baseline input patterns. Speed: Tessera, Portable SIMD 3.3×; Tessera 2.6×; radsort 2.2×; long-stable-variant-name 2×; slice::sort 1.00×; glidesort-sqrt 0.99×; vqsort 2.8×; slice::sort_unstable 2.3×</desc>
 <style>
   .panel { fill: #fafaf8; stroke: #d8d7d2; } .ring { stroke: #fafaf8; }
   .ink { fill: #0b0b0b; } .muted { fill: #6b6a66; } .rule { stroke: #e6e5e0; } .axis { stroke: #8d8c86; }
@@ -27,7 +27,7 @@
 </style>
 <rect class="panel" x="0.5" y="0.5" width="719" height="521" rx="12"/>
 <text class="ink stat" x="24.0" y="40.0">Tessera ranks 2nd of 7 sorts on 1,000,000 u64 keys</text>
-<text class="muted sub" x="24.0" y="60.0">Speed relative to slice::sort, geometric mean over 10 input patterns</text>
+<text class="muted sub" x="24.0" y="60.0">Speed relative to slice::sort, geometric mean over the 10 baseline input patterns</text>
 <line class="rule" x1="24" x2="696" y1="76" y2="76" stroke-width="1"/>
 <line class="axis" x1="420.4" x2="420.4" y1="90" y2="452" stroke-width="1"/>
 <text class="ink tiny" x="420.4" y="470.0" text-anchor="middle">slice::sort</text>

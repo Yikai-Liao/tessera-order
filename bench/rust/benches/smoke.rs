@@ -2,7 +2,7 @@
 
 //! Smoke suite for continuous benchmarking on Bencher Bare Metal.
 //!
-//! Benchmark IDs are `rust/<case_id>/<alloc_mode>`, where `case_id` is
+//! Benchmark IDs are `rust/<case_id>/<mode>`, where `case_id` is
 //! `type/distribution/length/seed` as in `docs/development/benchmarking.md`.
 //! Runners in other languages use the same case IDs under their own prefix.
 
@@ -12,7 +12,6 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use tessera_bench::case::{Key, Row, generate};
 use tessera_bench::plan::Plan;
-use tessera_sort::Workspace;
 
 /// Elements prepared per Criterion batch, so the cache footprint of a batch
 /// is the same for every length and does not depend on measured timings.
@@ -41,7 +40,7 @@ fn suite(c: &mut Criterion) {
     }
 }
 
-/// Measures a scalar-key case with the public API and optional workspace.
+/// Measures a scalar-key case with the public API.
 fn keys<K: Key>(c: &mut Criterion, distribution: &str, len: usize) {
     let id = format!("rust/{}/{distribution}/{len}/s1", K::NAME);
     if !selected(&id) {
@@ -53,18 +52,11 @@ fn keys<K: Key>(c: &mut Criterion, distribution: &str, len: usize) {
     measure(
         c,
         &id,
-        "api",
         &input,
         &expected,
         K::same,
         tessera_sort::stable_sort,
     );
-    if plan_selects(&id, "workspace") {
-        let mut ws = Workspace::new();
-        measure(c, &id, "workspace", &input, &expected, K::same, |v| {
-            ws.stable_sort(v)
-        });
-    }
 }
 
 /// Measures a keyed-row case while checking stable payload order.
@@ -81,13 +73,9 @@ fn rows<K: Key>(c: &mut Criterion, distribution: &str, len: usize) {
     let mut expected = input.clone();
     expected.sort_by(|a, b| a.key.order(&b.key));
     let same = |a: &Row<K>, b: &Row<K>| a.key.same(&b.key) && a.row == b.row;
-    let api = |v: &mut [Row<K>]| tessera_sort::stable_sort_by_key(v, |r| r.key);
-    measure(c, &id, "api", &input, &expected, same, api);
-    if plan_selects(&id, "workspace") {
-        let mut ws = Workspace::new();
-        let prepared = |v: &mut [Row<K>]| ws.stable_sort_by_key(v, |r| r.key);
-        measure(c, &id, "workspace", &input, &expected, same, prepared);
-    }
+    measure(c, &id, &input, &expected, same, |values| {
+        tessera_sort::stable_sort_by_key(values, |record| record.key);
+    });
 }
 
 /// A record of 128 bytes: a word key and a payload that carries the record's
@@ -122,33 +110,24 @@ fn records(c: &mut Criterion, distribution: &str, len: usize) {
     let mut expected = input.clone();
     expected.sort_by_key(|record| record.key);
     let same = |a: &Wide, b: &Wide| a.key == b.key && a.payload == b.payload;
-    let api = |v: &mut [Wide]| tessera_sort::stable_sort_by_key(v, |r| r.key);
-    measure(c, &id, "api", &input, &expected, same, api);
-    if plan_selects(&id, "workspace") {
-        let mut ws = Workspace::new();
-        let prepared = |v: &mut [Wide]| ws.stable_sort_by_key(v, |r| r.key);
-        measure(c, &id, "workspace", &input, &expected, same, prepared);
-    }
+    measure(c, &id, &input, &expected, same, |values| {
+        tessera_sort::stable_sort_by_key(values, |record| record.key);
+    });
 }
 
-/// Checks one entry point against the stable reference, then times it. The
-/// check also warms a prepared workspace.
+/// Checks a sort against the stable reference, then times it.
 fn measure<T: Copy>(
     c: &mut Criterion,
     id: &str,
-    mode: &str,
     input: &[T],
     expected: &[T],
     same: impl Fn(&T, &T) -> bool,
     mut sort: impl FnMut(&mut [T]),
 ) {
-    if !plan_selects(id, mode) {
-        return;
-    }
     let mut values = input.to_vec();
     sort(&mut values);
     let ok = values.iter().zip(expected).all(|(a, b)| same(a, b));
-    assert!(ok, "{id}/{mode}: output differs from the reference");
+    assert!(ok, "{id}/api: output differs from the reference");
 
     let batch = (BATCH_ELEMENTS / input.len()).max(1) as u64;
     let mut group = c.benchmark_group(id);
@@ -167,7 +146,7 @@ fn measure<T: Copy>(
         .warm_up_time(Duration::from_millis(warm_up))
         .measurement_time(Duration::from_millis(window))
         .sample_size(samples);
-    group.bench_function(mode, |b| {
+    group.bench_function("api", |b| {
         // Restoring the input and dropping buffers are not timed.
         b.iter_batched_ref(
             || input.to_vec(),
@@ -190,28 +169,14 @@ fn plan() -> &'static Plan {
     })
 }
 
-/// Tests a registered group and mode against the experiment selection.
-fn plan_selects(id: &str, mode: &str) -> bool {
-    let parts: Vec<_> = id.split('/').collect();
-    plan().selects(parts[1], parts[2], parts[3].parse().unwrap(), mode)
-}
-
 /// Selects groups before generation so idle workers create no memory traffic.
 fn selected(id: &str) -> bool {
-    let api = plan_selects(id, "api");
-    let prepared = plan_selects(id, "workspace");
     if std::env::var_os("TESSERA_BENCH_LIST").is_some() {
-        if api {
-            println!("{id}/api");
-        }
-        if prepared {
-            println!("{id}/workspace");
-        }
+        println!("{id}/api");
         return false;
     }
-    (api || prepared)
-        && std::env::var("TESSERA_BENCH_GROUPS")
-            .map_or(true, |groups| groups.lines().any(|group| group == id))
+    std::env::var("TESSERA_BENCH_GROUPS")
+        .map_or(true, |groups| groups.lines().any(|group| group == id))
 }
 
 /// Runs the Criterion suite with command-line case selection.

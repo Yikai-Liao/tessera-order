@@ -58,13 +58,12 @@ function addSelectionOptions(command: Command) {
     )
     .option("--types <ids>", "comma-separated record types", parseList)
     .option("--distributions <ids>", "comma-separated input distributions", parseList)
-    .option("--lengths <numbers>", "comma-separated positive record counts", parseLengths)
-    .option("--modes <ids>", "comma-separated API modes", parseList);
+    .option("--lengths <numbers>", "comma-separated positive record counts", parseLengths);
 }
 
 function selectAxes(options: MeasurementOptions): SelectionOptions {
   return Object.fromEntries(
-    ["algorithms", "types", "distributions", "lengths", "modes"]
+    ["algorithms", "types", "distributions", "lengths"]
       .filter((key) => options[key as keyof MeasurementOptions] !== undefined)
       .map((key) => [key, options[key as keyof MeasurementOptions]]),
   );

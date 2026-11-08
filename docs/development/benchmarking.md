@@ -43,9 +43,9 @@ All three workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). 
 | Preset | Harness | Default selection |
 |---|---|---|
 | `local` | `smoke` | Tessera, random `u64`, 65,536 records, `api` |
-| `continuous` | `smoke` | The 50 regression inputs and 56 timed IDs documented in the [continuous guide](continuous-benchmarks.md#cases) |
-| `smoke` | `comparison` | Rust competitors, 70 inputs at 1,000 records |
-| `release` | `comparison` | Rust and native competitors, 260 inputs across four lengths |
+| `continuous` | `smoke` | The 50 regression inputs and 50 timed IDs documented in the [continuous guide](continuous-benchmarks.md#cases) |
+| `smoke` | `comparison` | Rust competitors, 125 inputs at 1,000 records |
+| `release` | `comparison` | Rust and native competitors, 381 inputs across four lengths |
 
 `compare commit` defaults to `local`; `compare algorithms` defaults to `smoke`. The continuous executable embeds `continuous.toml` at build time, so its artifact carries the selection from the measured commit. Editing that file changes cloud coverage without editing the worker, publication workflow or case-registration code.
 
@@ -102,9 +102,9 @@ lengths = [1_000_000]
 
 Values within an axis are alternatives; axes within a rule form a Cartesian product. `include` rules are unioned and duplicate inputs are measured once. Any matching `exclude` rule removes that combination. Omitted axes use the harness's catalog defaults when expanding inputs and match every value when excluding them. An empty choice array is invalid. Unknown fields and identities are errors, not ignored filters.
 
-The selectable axes are `types`, `distributions`, `lengths` and `modes`. Lengths are positive record counts; custom numeric lengths need not already occur in a preset. Configuration files can also use `"insertion-max"`, `"insertion-next"` and `"tile-next"`. These resolve from the measured library's thresholds and the record width in the catalog. Case IDs retain the resolved numeric length; a commit comparison rejects different selected IDs between revisions.
+The selectable case axes are `types`, `distributions` and `lengths`. Lengths are positive record counts; custom numeric lengths need not already occur in a preset. Configuration files can also use `"insertion-max"`, `"insertion-next"` and `"tile-next"`. These resolve from the measured library's thresholds and the record width in the catalog. Case IDs retain the resolved numeric length; a commit comparison rejects different selected IDs between revisions.
 
-The `smoke` harness measures Tessera through `api` and `workspace`; its supported record representations and distributions are under `smoke` in [the catalog](../../bench/catalog.toml). The `comparison` harness measures supported algorithm/type pairs through `api`. Its default types, distributions and lengths are under `comparison`. Inputs always use seed 1. A plan that selects nothing fails before timing.
+The `smoke` harness measures Tessera through its public sorting functions; its supported record representations and distributions are under `smoke` in [the catalog](../../bench/catalog.toml). The `comparison` harness measures supported algorithm/type pairs; its default types, distributions and lengths are under `comparison`. Criterion IDs end in `/api`, while comparison input IDs use `type/distribution/length/s1`. Neither harness has a mode selector. Inputs always use seed 1. A plan that selects nothing fails before timing.
 
 Algorithm comparisons retain `tessera`, `std-stable` and the separately timed Tessera A/A control, even when only additional opponents are named. Native algorithms automatically enable source acquisition and native compilation. Portable SIMD is requested with `--simd`; that additional build measures the shared Tessera and standard-library anchors, while competitors run in the default build. Unsupported adapter/type pairs are omitted from the manifest's per-input capabilities, not recorded as measurements.
 
@@ -189,7 +189,7 @@ This executable measures Tessera twice and `slice::sort` on the same cases. Comp
 
 ## Cases and suites
 
-Case IDs are `type/distribution/length/s1`. A group contains all lengths of one type and distribution. The release suite contains 220 primary cases and 40 supplementary `row_u32` cases for Clausecker's original implementation. `smoke` uses the same types and distributions at length 1,000, for 70 validation cases. The existing Criterion smoke suite retains its own regression cases and IDs.
+Case IDs are `type/distribution/length/s1`. A group contains all lengths of one type and distribution. The release suite contains 381 inputs: the original 260-case cross-type matrix and 121 additional cases using the high-value distributions from continuous tracking. `smoke` validates the same 125 type/distribution pairs at length 1,000. The existing Criterion smoke suite retains its own regression cases and IDs.
 
 | Type | Task | Representation |
 |---|---|---|
@@ -202,15 +202,19 @@ Case IDs are `type/distribution/length/s1`. A group contains all lengths of one 
 
 Payloads encode the original index. Wide-record payloads also fill every remaining byte deterministically. Verification checks complete payloads, not just keys and indices.
 
-| Shape | Distributions |
-|---|---|
-| Random | `random` |
-| Few distinct values | `d256`, `d16` |
-| Frequency skew | `zipf1.1`, `zipf2`, `skew99` |
-| Presorted | `sorted`, `reverse`, `sorted99` |
-| Merged runs | `runs` |
+The ten baseline distributions remain `random`, `d16`, `d256`, `zipf1.1`, `zipf2`, `skew99`, `sorted`, `reverse`, `sorted99` and `runs`. Each runs on all seven types at 1,000, 65,536, 1,000,000 and 10,000,000 records; `record128` and `owned` stop at 1,000,000. They give the ranking and cross-type aggregate figures one common input set. The expanded release plan adds:
 
-Lengths are 1,000, 65,536, 1,000,000 and 10,000,000. `record128` and `owned` stop at 1,000,000. Memory is measured for every supported variant through 1,000,000 and for all `u64` cases at 10,000,000. Tessera's peak is also measured for the remaining 10M cases to provide `glidesort-sqrt` with its buffer size.
+| Distributions | What they distinguish | Types | Lengths |
+|---|---|---|---|
+| `equal`, `two_values`, `d4096`, `hot50` | Constant keys, widely separated ties, intermediate cardinality, and a repeated key beside a high-cardinality remainder | All seven | 65,536; 1,000,000 |
+| `far_swaps`, `sorted_tail` | Long-distance disorder and an ordered prefix with an outlier tail, rather than adjacent inversions alone | All seven | 65,536; 1,000,000 |
+| `sparse8` | Eight full-width keys rather than a narrow small-integer range | `u32`, `u64`, `row_u32`, `row_u64` | 65,536; 1,000,000 |
+| `sparse_digits`, `bimodal` | Sparse digit occupancy and two distant high-cardinality clusters | `u64`, `row_u64`, `record128`, `owned` | 65,536; 1,000,000 |
+| `finite_signed` | Finite signed floats with bounded magnitudes rather than arbitrary float bits | `f64` | 1,000; 65,536; 1,000,000; 10,000,000 |
+
+All nine new integer distributions also run on `u64` at 10,000,000. These are formal comparison inputs, plotted individually in the 1M per-type panels. The type restrictions preserve the generators' meaning: narrowing `bimodal` to `u32` would discard its cluster bit, and converting integer masks to floats changes their encoded digit structure. All generators and their existing input hashes are unchanged.
+
+Memory is measured for every supported variant through 1,000,000 and for all `u64` cases at 10,000,000. Tessera's peak is also measured for the remaining 10M cases to provide `glidesort-sqrt` with its buffer size.
 
 ### Input generation
 
@@ -219,13 +223,22 @@ Lengths are 1,000, 65,536, 1,000,000 and 10,000,000. `record128` and `owned` sto
 The random source is SplitMix64, starting at state 1. Each draw adds `0x9e3779b97f4a7c15`, then applies the xor-shift/multiply finalizer with shifts 30, 27, 31 and multipliers `0xbf58476d1ce4e5b9`, `0x94d049bb133111eb`, using wrapping 64-bit arithmetic. `u32` takes the low 32 bits; `u64` takes the draw; `u128` concatenates two draws, high word first; `f64` interprets the draw as bits.
 
 - `random` draws each key over its full bit range.
-- `dD` takes `next mod D`, for D = 16 or 256.
+- `dD` takes `next mod D`, for D = 16, 256 or 4,096.
 - Zipf inputs select ranks `k − 1`, for k = 1…n, from cumulative integer weights. `zipf2` uses `floor(2^62 / k²)`. `zipf1.1` uses `floor(2^48 / (k · floor(256 · k^(1/10))))`; the tenth root is computed by integer binary search. A draw selects `floor(next · total / 2^64)` and the first cumulative weight greater than it. The fixed-point root makes `zipf1.1` a reproducible approximation to the exponent 1.1.
 - `skew99` uses ten spread values: `v_k = k · floor(MAX / 10)` for integers and `k · 2^1020` for floats. A first draw selects `v_0` with 99% probability; otherwise a second selects `v_(1 + next mod 9)`.
 - `sorted` is 0…n−1; `reverse` reverses it. `sorted99` starts sorted and swaps adjacent elements at a spacing of `max(2, floor(n / max(1, floor(n / 100))))`.
 - `runs` draws random keys, then sorts consecutive runs of `16 + next mod 2048` keys, the final run shorter. Each run reverses if the next draw's high bit is set.
 
-The regression-only `equal`, `two_values`, `sparse8` and `sorted_tail` inputs retain their definitions and hashes. `sparse_digits` clears every second bit of a draw, leaving 16 values per 8-bit digit; `bimodal` sets bit 63 from one draw and fills bits 39…0 from the next, giving two clusters 2^63 apart over 2^40 keys each; `hot50` takes zero for half the records and `draw_high` for the rest; `d4096` takes `next mod 4096`; `far_swaps` starts ascending and swaps `max(1, len / 100)` pairs of random positions; `finite_signed` draws a random sign, an exponent field in 1000…1029 and a random mantissa for `f64`, and the full range for integers, where every value is finite. Tests pin the seed-one hashes of every distribution. Float validation additionally checks signed zeros, infinities, subnormals and NaNs of both signs with distinct payloads.
+- `equal` repeats one; `two_values` picks the spread values `v_0` and `v_9` with equal probability.
+- `sparse8` first draws eight full-width keys, then picks among them uniformly.
+- `sparse_digits` masks a draw with `0x5555_5555_5555_5555`, leaving 16 possible values per 8-bit digit.
+- `bimodal` sets bit 63 from one draw and fills bits 39…0 from the next, giving two clusters 2^63 apart over 2^40 keys each.
+- `hot50` takes zero with 50% probability and `draw_high` otherwise. For integers, the latter sets the top bit of a full-width draw; for `f64`, it draws positive NaN payloads or infinity. The remainder is high-cardinality but not guaranteed unique.
+- `far_swaps` starts ascending and swaps `max(1, len / 100)` pairs for lengths above one, choosing one position in each end quarter. Each swap spans at least half the array; positions may repeat.
+- `sorted_tail` starts with 0…`len - len / 128 - 1`, then appends `len / 128` draws from `draw_high`, above the prefix. The tail itself is not sorted.
+- `finite_signed` draws an `f64` sign, an exponent field in 1000…1029 and a random mantissa: magnitudes range from 2^-23 to below 2^7, without NaN or infinity.
+
+Tests pin the seed-one hashes of every distribution. Float validation additionally checks signed zeros, infinities, subnormals and NaNs of both signs with distinct payloads.
 
 ## Implementations
 
@@ -265,11 +278,11 @@ Each case has nine blocks. Each block shuffles all supported variants and two Te
 
 For each block, a variant's ratio is its time per sort divided by the mean of the two Tessera times per sort. The report gives the median ratio, per-block minimum and maximum, and median nanoseconds per element. The A/A noise range is the minimum and maximum of both Tessera times divided by their block mean, across all nine blocks. This uses the same denominator as the variant ratios and is unchanged when the two control labels are exchanged. A variant is called faster or slower only when at least eight blocks agree on that direction and its median is outside that range. For example, controls of 100 and 120 give a mean of 110 and a noise range of 100/110 to 120/110; an opponent time of 109 remains within noise. The `tessera-aa` row separately reports A2 / A1, with its own per-block bounds.
 
-Each of the five figures states its finding as its title, says under it what is plotted, and draws one named row per item on one horizontal axis. Words appear once, in the title, column heads and axis ends; cells hold only numbers. Colour gives the kind of sort: blue for Tessera, orange for the other radix sorts and grey for comparison sorts, SIMD sorts included. When the Portable SIMD build was measured, it is a hollow blue ring in every speed figure, drawn over Tessera's dot so that equal speeds show as a ring around it. Speed is relative to `slice::sort` within the same blocks, on an axis symmetric in doublings around it; values beyond 32× point off the edge as triangles. The ranking gives each sort's speed on 1M `u64` keys as a geometric mean over the ten input shapes. The two input figures, at 1M and 1,000 `u64` keys, draw every sort on each shape as a dot and give Tessera's speed and rank, so its position in the whole field shows rather than a comparison with one opponent; keys make stability unobservable, so every sort is eligible. The element-type figure does the same per type at 1M, as a geometric mean over the ten shapes; records rank against stable sorts only. The memory figure gives each sort's peak extra heap on 10M `u64` keys, a ring for the random shape and a dot for the worst of the ten, against the input size. Tables under the figures carry Tessera's time per key and the other lengths. Every figure has a table of plotted values.
+Each figure states its finding as its title, says under it what is plotted, and draws one named row per item on one horizontal axis. Words appear once, in the title, column heads and axis ends; cells hold only numbers. Colour gives the kind of sort: blue for Tessera, orange for the other radix sorts and grey for comparison sorts, SIMD sorts included. When the Portable SIMD build was measured, it is a hollow blue ring in every speed figure, drawn over Tessera's dot so that equal speeds show as a ring around it. Speed is relative to `slice::sort` within the same blocks, on an axis symmetric in doublings around it; values beyond 32× point off the edge as triangles. The ranking gives each sort's speed on 1M `u64` keys as a geometric mean over the ten baseline distributions. The 1M per-type input figures draw every eligible sort on each selected distribution as a dot and give Tessera's speed and rank, including all newly added distributions. Keys admit every sort; records rank against stable sorts only. The short-input figure shows 1,000 `u64` keys. The element-type aggregate retains the ten baseline distributions at 1M, so types share the same input set; neither aggregate claims to summarize the entire expanded suite. The memory figure gives each sort's peak extra heap on 10M `u64` keys, a ring for the random shape and a dot for the worst across all selected distributions, against the input size. Tables under the figures carry Tessera's time per key and the other lengths. Every figure has a table of plotted values.
 
 Continuous builds apply branch alignment to both feature configurations and use static linking, as described in the [continuous benchmark guide](continuous-benchmarks.md).
 
-The [port record](../design/port.md) describes separate placement controls for source A/B investigations. The release comparison measures lengths of at least 1,000 with the default target; native-CPU builds, branch alignment, workspace mode and cold-cache investigations remain separate work.
+The [port record](../design/port.md) describes separate placement controls for source A/B investigations. The release comparison measures lengths of at least 1,000 with the default target; native-CPU builds, branch alignment and cold-cache investigations remain separate work.
 
 ## Results and provenance
 

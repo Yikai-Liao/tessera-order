@@ -185,7 +185,7 @@ function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figur
     title,
     svg: renderRows({
       title,
-      guide: "Speed relative to slice::sort, geometric mean over 10 input patterns",
+      guide: "Speed relative to slice::sort, geometric mean over the 10 baseline input patterns",
       columns: ["Speed"],
       groups: [
         { title: "Stable sorts", rows: complete.filter((e) => e.stable).map(row) },
@@ -293,38 +293,54 @@ function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
   );
 }
 
-// Each input pattern of u64 keys: every sort competes, since keys make
-// stability unobservable.
+// Each selected input pattern of one type. Records admit only stable sorts;
+// for keys, stability is unobservable and every sort competes.
 function renderInputs(
   dataset: Dataset,
   summaries: Map<string, Summary>,
   name: string,
   n: number,
+  ty = "u64",
 ): Figure | null {
-  const variants = dataset.manifests.get("default")!.variants;
+  const manifest = dataset.manifests.get("default")!;
+  const variants = manifest.variants;
+  const patterns = manifest.cases
+    .filter((input) => input.ty === ty && input.len === n)
+    .map((input) => input.distribution);
+  // Retain the small-selection fallback rather than presenting a single input
+  // as a full pattern panel. Non-u64 panels add the type-specific coverage.
+  if (ty === "u64" && !shapes.every((shape) => patterns.includes(shape))) return null;
+  if (ty !== "u64" && !patterns.some((shape) => !shapes.includes(shape))) return null;
+  const record = recordType(ty);
+  const stableOnly = record.task === "records";
   const plotted: [string, Standing][] = [];
   const nsPerKey: number[] = [];
   const groups = SHAPE_GROUPS.map((g) => ({
     title: g.title,
-    rows: g.shapes.flatMap(([shape, label]) => {
-      const id = caseId({ ty: "u64", distribution: shape, len: n });
-      const s = standing(summaries, variants, [id], false);
-      const ns = summaries.get(measurementId("default", id, "tessera"))?.ns;
-      if (!s || ns === undefined) return [];
-      plotted.push([label, s]);
-      nsPerKey.push(ns);
-      return [fieldRow({ input: label, sub: "", tag: "" }, s)];
-    }),
+    rows: g.shapes
+      .filter(([shape]) => patterns.includes(shape))
+      .flatMap(([shape, label]) => {
+        const id = caseId({ ty, distribution: shape, len: n });
+        const s = standing(summaries, variants, [id], stableOnly);
+        const ns = summaries.get(measurementId("default", id, "tessera"))?.ns;
+        if (!s || ns === undefined) return [];
+        plotted.push([label, s]);
+        nsPerKey.push(ns);
+        return [fieldRow({ input: label, sub: "", tag: "" }, s)];
+      }),
   })).filter((g) => g.rows.length);
-  if (plotted.length !== shapes.length) return null;
+  if (!plotted.length) return null;
   const standings = plotted.map(([, s]) => s);
-  const title = fieldTitle(standings, "input patterns");
+  const title = fieldTitle(
+    standings,
+    ty === "u64" ? "input patterns" : `${record.label} input patterns`,
+  );
   return {
     name,
     title,
     svg: renderRows({
       title,
-      guide: `${formatLength(n)} u64 keys; each dot is one sort, placed by its speed relative to slice::sort`,
+      guide: `${formatLength(n)} ${ty === "u64" ? "u64 keys" : record.label}; each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to slice::sort`,
       columns: ["Speed", "Rank"],
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
@@ -358,7 +374,7 @@ function renderTypes(dataset: Dataset, summaries: Map<string, Summary>): Figure 
     title,
     svg: renderRows({
       title,
-      guide: `${formatLength(LARGE)} elements; speed relative to slice::sort, geometric mean over 10 input patterns`,
+      guide: `${formatLength(LARGE)} elements; speed relative to slice::sort, geometric mean over the 10 baseline input patterns`,
       columns: ["Speed", "Rank"],
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
@@ -371,8 +387,13 @@ function renderTypes(dataset: Dataset, summaries: Map<string, Summary>): Figure 
 
 function renderMemory(dataset: Dataset): Figure | null {
   const n = LARGEST;
+  const patterns = dataset.manifests
+    .get("default")!
+    .cases.filter((input) => input.ty === "u64" && input.len === n)
+    .map((input) => input.distribution);
+  if (!patterns.includes("random")) return null;
   const peaks = (variant: string) => {
-    const found = shapes.map(
+    const found = patterns.map(
       (shape) =>
         dataset.memory.find(
           (m) =>
@@ -382,7 +403,7 @@ function renderMemory(dataset: Dataset): Figure | null {
         )?.peak_extra_bytes,
     );
     return found.every((v): v is number => v !== undefined)
-      ? { random: found[0], worst: Math.max(...found) }
+      ? { random: found[patterns.indexOf("random")], worst: Math.max(...found) }
       : null;
   };
   const entries = dataset.manifests
@@ -437,7 +458,7 @@ function renderMemory(dataset: Dataset): Figure | null {
       axis: ["← less memory", "more memory →"],
       legend: [...kindLegend(false), [["hollow"], "random input"], [["reference"], "input size"]],
     }),
-    table: markdownTable(["Sort", "Random input", "Worst of 10 inputs"], plotted),
+    table: markdownTable(["Sort", "Random input", `Worst of ${patterns.length} inputs`], plotted),
   };
 }
 
@@ -505,6 +526,9 @@ export function renderFigures(dataset: Dataset, summaries: Map<string, Summary>)
   const figures = [
     renderRanking(dataset, summaries),
     renderInputs(dataset, summaries, "inputs", LARGE),
+    ...catalog.comparison.types
+      .filter((ty) => ty !== "u64")
+      .map((ty) => renderInputs(dataset, summaries, `inputs-${ty}`, LARGE, ty)),
     renderInputs(dataset, summaries, "short", SHORT),
     renderTypes(dataset, summaries),
     renderMemory(dataset),

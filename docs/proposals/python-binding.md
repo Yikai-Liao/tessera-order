@@ -121,4 +121,4 @@ Use a maturin wheel matrix for mainstream Linux, macOS and Windows, with NumPy p
 4. Validate identity and repeated references, exact key-call counts, extraction failure and callback mutation, integer bounds, mixed key rejection, float bits and stable reverse order, read-only/noncontiguous views, array widths, dtype errors and NumPy-free imports.
 5. Measure end-to-end costs, build/install/test platform wheels, and publish Python independently after its own release checks.
 
-Multidimensional `axis`, direct structured-dtype/multicolumn sorting and a Python workspace remain deferred until real use cases justify them. Internal tile, digit and insertion parameters are not Python API.
+Multidimensional `axis` and direct structured-dtype/multicolumn sorting remain deferred until real use cases justify them. Internal tile, digit and insertion parameters are not Python API.

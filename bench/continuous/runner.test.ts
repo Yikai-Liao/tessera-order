@@ -107,10 +107,11 @@ console.log(JSON.stringify({ measured: true }));
   assert.match(await readFile(`${out}.log`, "utf8"), /simulated measurement failure/);
 });
 
-test("scheduler groups preserve modes and exclude large cases from parallel lanes", () => {
+test("scheduler balances API cases and excludes large cases from parallel lanes", () => {
   const cases = [
     "rust/u64/random/65536/s1/api",
-    "rust/u64/random/65536/s1/workspace",
+    "rust/u64/equal/65536/s1/api",
+    "rust/u64/reverse/65536/s1/api",
     "rust/u32/random/65536/s1/api",
     "rust/u128/random/65536/s1/api",
     "rust/u64/random/1000000/s1/api",
@@ -121,11 +122,45 @@ test("scheduler groups preserve modes and exclude large cases from parallel lane
   assert.deepEqual(groups.large, ["rust/u64/random/1000000/s1", "rust/u64/random/10000000/s1"]);
   assert.deepEqual(
     groups.small.map((lane) => lane.length),
-    [1, 2],
+    [3, 2],
   );
   const all = [...groups.small.flat(), ...groups.large];
   assert.equal(new Set(all).size, all.length);
   assert.deepEqual(new Set(all), new Set(cases.map((id) => id.slice(0, id.lastIndexOf("/")))));
+});
+
+test("supervisor rejects invalid IDs before starting workers", {
+  skip: process.platform !== "linux",
+}, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tessera-scheduler-ids-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const id = "rust/u64/random/65536/s1/api";
+  const lists = ["", `${id}\n${id}`, id.replace("/api", "/workspace")];
+  for (const [index, listed] of lists.entries()) {
+    const binary = join(root, `bench-${index}`);
+    const started = join(root, `started-${index}`);
+    const out = join(root, `results-${index}`);
+    await writeFile(
+      binary,
+      [
+        "#!/usr/bin/env node",
+        "// SPDX-License-Identifier: BSD-2-Clause",
+        `if (process.env.TESSERA_BENCH_LIST) console.log(${JSON.stringify(listed)});`,
+        `else require('node:fs').writeFileSync(${JSON.stringify(started)}, 'started');`,
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const result = spawnSync(process.execPath, [cli, "continuous", "run", binary, "--out", out], {
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(
+      await readFile(`${out}.log`, "utf8"),
+      /Expected distinct benchmark IDs|Invalid benchmark ID/,
+    );
+    await assert.rejects(readFile(started), { code: "ENOENT" });
+  }
 });
 
 test("scheduler rejects duplicate and malformed measurements", async (t) => {

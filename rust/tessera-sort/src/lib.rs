@@ -42,8 +42,7 @@
 //! [`stable_sort_by_key`]. Each tile-local MSD level also keeps a cursor table
 //! of up to 32 KiB on the stack, with at most 22 levels for 128-bit keys.
 //!
-//! The free functions allocate this scratch during each call. A [`Workspace`]
-//! keeps it between calls.
+//! Each call allocates scratch as needed and frees it before returning.
 //!
 //! # Cargo features
 //!
@@ -73,17 +72,14 @@ mod key;
 mod portable_simd;
 mod scan;
 mod unwind;
-mod workspace;
 
 pub use key::RadixKey;
-pub use workspace::Workspace;
 
 /// Sorts keys in ascending order, keeping equal keys in input order.
 ///
 /// The order is the encoded order documented on [`RadixKey`]: integers in their
 /// usual order, floats as [`f64::total_cmp`], and [`Reverse`](core::cmp::Reverse)
-/// keys descending. To reuse scratch memory across calls, use
-/// [`Workspace::stable_sort`].
+/// keys descending.
 ///
 /// # Memory
 ///
@@ -101,14 +97,13 @@ pub use workspace::Workspace;
 /// assert_eq!(bits, expected);
 /// ```
 pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
-    engine::sort::<K, _, false>(values, &mut key::Direct, None);
+    engine::sort::<K, _, false>(values, &mut key::Direct);
 }
 
 /// Sorts records by a key, keeping records with equal keys in input order.
 ///
 /// `key` maps a record to a [`RadixKey`]. Records of any type are moved, never
 /// cloned or dropped, so `String`, `Box<T>` and `&mut T` records are fine.
-/// To reuse scratch memory across calls, use [`Workspace::stable_sort_by_key`].
 ///
 /// # Key function
 ///
@@ -147,7 +142,7 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 /// assert_eq!(names, ["a", "c", "d"]);
 /// ```
 pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
-    engine::sort::<T, _, true>(values, &mut key::ByKey(key), None);
+    engine::sort::<T, _, true>(values, &mut key::ByKey(key));
 }
 
 /// Internal thresholds, exported for benchmarks that probe boundary sizes.

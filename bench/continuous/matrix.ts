@@ -7,7 +7,7 @@ export { modeName } from "../catalog.ts";
 
 // One build configuration's measurement. A configuration is a separately
 // compiled executable with its own Testbed and baseline, such as Portable
-// SIMD. API variants of one executable (stable, workspace, later unstable or
+// SIMD. API variants of one executable (stable, later unstable or
 // parallel sorts) are not configurations: they are cases, named by the last
 // segment of the benchmark ID, so they add rows rather than columns.
 export interface Configuration {

@@ -9,24 +9,16 @@ import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { CommandCancelledError, command } from "../../tools/process.ts";
 
-/** Keep API/workspace modes together and balance small groups by timed ID count. */
+/** Balance API cases across two small lanes; run large cases separately. */
 export function partition(cases: string[]) {
-  const groups = new Map<string, string[]>();
-  for (const id of cases) {
-    const group = id.slice(0, id.lastIndexOf("/"));
-    groups.set(group, [...(groups.get(group) ?? []), id]);
-  }
   const small: string[][] = [[], []];
   const large: string[] = [];
-  const weights = [0, 0];
-  for (const [group, modes] of [...groups].sort(
-    ([a, av], [b, bv]) => bv.length - av.length || (a < b ? -1 : a > b ? 1 : 0),
-  )) {
+  for (const id of cases.toSorted()) {
+    const group = id.slice(0, id.lastIndexOf("/"));
     if (Number(group.split("/")[3]) >= 1_000_000) large.push(group);
     else {
-      const lane = weights[0] <= weights[1] ? 0 : 1;
+      const lane = small[0].length <= small[1].length ? 0 : 1;
       small[lane].push(group);
-      weights[lane] += modes.length;
     }
   }
   return { small, large };
@@ -126,7 +118,7 @@ export async function supervise(binary: string) {
   if (!cases.length || new Set(cases).size !== cases.length)
     throw new Error("Expected distinct benchmark IDs");
   for (const id of cases)
-    if (!/^rust\/[^/]+\/[^/]+\/[1-9]\d*\/[^/]+\/[^/]+$/.test(id))
+    if (!/^rust\/[^/]+\/[^/]+\/[1-9]\d*\/[^/]+\/api$/.test(id))
       throw new Error(`Invalid benchmark ID: ${id}`);
   const allowed = (await readFile("/proc/self/status", "utf8")).match(
     /^Cpus_allowed_list:\s*(.+)$/m,

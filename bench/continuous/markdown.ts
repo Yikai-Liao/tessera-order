@@ -279,7 +279,7 @@ export function renderFailure({ language, configuration, hash, runUrl, reason }:
 // the charts and the changed-case table. A case is named once however many
 // builds measured it, and each alert states whether it is shared by every
 // build or confined to some, which is the first clue to its cause. API
-// variants (stable, workspace, later unstable or parallel) are modes of the
+// variants (stable, later unstable or parallel) are modes of the
 // case ID and become row groups, so the report grows by rows, not by
 // sections or charts.
 

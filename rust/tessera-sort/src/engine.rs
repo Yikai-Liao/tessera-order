@@ -388,12 +388,11 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
     let tile_bytes = tile_bytes
         .max(record_bytes)
         .min(MAX_TILE_RECORDS.saturating_mul(record_bytes));
-    let mut strict_descending = false;
-    let sampled = probe_order(records, extractor, &mut strict_descending);
+    let sampled = probe_order(records, extractor);
     match sampled {
         Order::Ascending => return,
-        Order::Descending => {
-            if strict_descending {
+        Order::Descending { strict } => {
+            if strict {
                 reverse_strictly(records);
             } else {
                 reverse_stably(records, extractor);
@@ -418,9 +417,9 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
     if sampled == Order::Flat {
         // A flat sample contains an equal adjacent pair, so confirmed descending
         // keys here are not strict and must keep the stable reversal.
-        match confirm_order(records, extractor, &mut strict_descending) {
+        match confirm_order(records, extractor) {
             Order::Ascending => return,
-            Order::Descending => {
+            Order::Descending { .. } => {
                 reverse_stably(records, extractor);
                 return;
             }
@@ -511,7 +510,10 @@ fn insertion_probe<T, E: Extract<T>>(
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Order {
     Ascending,
-    Descending,
+    /// Keys descend; `strict` is false once an adjacent pair ties.
+    Descending {
+        strict: bool,
+    },
     /// Every sampled pair had equal keys; gaps may still contain differing keys.
     Flat,
     Unsorted,
@@ -521,14 +523,9 @@ enum Order {
 const ORDER_SAMPLES: usize = 4096;
 
 /// Rejects unordered input with strided adjacent pairs, then confirms order
-/// with a full scan. Sets `strict_descending` for a strictly descending result.
+/// with a full scan.
 #[inline(never)]
-fn probe_order<T, E: Extract<T>>(
-    records: &[T],
-    extractor: &mut E,
-    strict_descending: &mut bool,
-) -> Order {
-    *strict_descending = false;
+fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     let stride = (records.len() / ORDER_SAMPLES).max(1);
     let mut ascending = true;
     let mut descending = true;
@@ -546,16 +543,11 @@ fn probe_order<T, E: Extract<T>>(
     if ascending && descending {
         return Order::Flat;
     }
-    confirm_order(records, extractor, strict_descending)
+    confirm_order(records, extractor)
 }
 
-/// Confirms direction from the first unequal key and reports strict descending order.
-fn confirm_order<T, E: Extract<T>>(
-    records: &[T],
-    extractor: &mut E,
-    strict_descending: &mut bool,
-) -> Order {
-    *strict_descending = false;
+/// Confirms direction from the first unequal key, marking strict descent.
+fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     let first = extractor.key(&records[0]);
     let mut keys = records[1..].iter().map(|record| extractor.key(record));
     let Some(current) = keys.find(|&key| key != first) else {
@@ -579,10 +571,7 @@ fn confirm_order<T, E: Extract<T>>(
                 None
             }
         })
-        .map_or(Order::Unsorted, |(_, strict)| {
-            *strict_descending = strict;
-            Order::Descending
-        })
+        .map_or(Order::Unsorted, |(_, strict)| Order::Descending { strict })
     }
 }
 
@@ -1199,24 +1188,22 @@ mod tests {
                 records.reverse();
             }
             let mut visited = Vec::new();
-            let mut strict_descending = false;
             let order = confirm_order(
                 &records,
                 &mut ByKey(|record: &(u64, u64)| {
                     visited.push(record.1);
                     record.0
                 }),
-                &mut strict_descending,
             );
+            // Four records share a key, so descending order is never strict.
             assert!(
                 order
                     == if descending {
-                        Order::Descending
+                        Order::Descending { strict: false }
                     } else {
                         Order::Ascending
                     }
             );
-            assert!(!strict_descending);
             assert_eq!(
                 visited,
                 records.iter().map(|record| record.1).collect::<Vec<_>>()
@@ -1231,7 +1218,6 @@ mod tests {
         expected.reverse();
 
         let mut probe_calls = 0;
-        let mut strict_descending = false;
         assert!(
             probe_order(
                 &records,
@@ -1239,10 +1225,8 @@ mod tests {
                     probe_calls += 1;
                     record.0
                 }),
-                &mut strict_descending,
-            ) == Order::Descending
+            ) == Order::Descending { strict: true }
         );
-        assert!(strict_descending);
 
         let mut calls = 0;
         sort_with_tile_bytes::<_, _, true>(
@@ -1282,9 +1266,7 @@ mod tests {
         values.swap(index, index + 1);
         // At 8192 records the strided gate checks odd pair offsets. Miri
         // exercises the confirmation directly on a shorter vector scan.
-        let mut strict_descending = false;
-        assert!(confirm_order(&values, &mut Direct, &mut strict_descending) == Order::Unsorted);
-        assert!(!strict_descending);
+        assert!(confirm_order(&values, &mut Direct) == Order::Unsorted);
         crate::stable_sort(&mut values);
         assert_eq!(values, (0..len as u64).collect::<Vec<_>>());
     }

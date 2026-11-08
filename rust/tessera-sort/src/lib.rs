@@ -63,11 +63,12 @@
 //! with and without the feature.
 //!
 //! `rayon` is off by default and enables `par_stable_sort` and
-//! `par_stable_sort_by_key`. Large inputs partition their root serially, then
-//! sort complete buckets in Rayon's current pool; small inputs and one-thread
-//! pools use the serial engine. The feature requires `std`, `Send` records and
-//! a shared (`Fn + Sync`) key function. It also enables `std` when default
-//! features are disabled.
+//! `par_stable_sort_by_key`. Large inputs partition the root across disjoint
+//! shards, adopt them in input order and permute blocks in parallel. Complete
+//! buckets are sorted in Rayon's current pool while compaction proceeds; small
+//! inputs and one-thread pools use the serial engine. The feature requires
+//! `std`, `Send` records and a shared (`Fn + Sync`) key function. It also
+//! enables `std` when default features are disabled.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 

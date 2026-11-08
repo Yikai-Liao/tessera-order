@@ -7,7 +7,7 @@ on:
     paths:
       - "rust/**"
       - "bench/rust/**"
-      - "bench/catalog.json"
+      - "bench/catalog.toml"
       - "bench/plans/**"
       - "Cargo.toml"
       - "Cargo.lock"

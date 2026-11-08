@@ -21,7 +21,7 @@ pnpm bench run --plan release --simd --cpu 2
 pnpm bench report bench/results/SESSION
 ```
 
-Both measurement commands accept `--out DIR` and require a new directory. Their default output is `bench/results/<timestamp>`. They snapshot the current sources and clean up their temporary worktree and build directory under `~/code/tessera-bench/`; `TESSERA_BENCH_WORK` overrides that location. Results are retained. The lower-level commands below remain available for resumable algorithm sessions and custom investigations.
+Both measurement commands accept `--out DIR` and require a new directory. Their default output is `bench/results/<timestamp>`. They snapshot the current sources and clean up their temporary worktree and build directory under `~/code/tessera-bench/`; `TESSERA_BENCH_WORK` overrides that location. Repository-internal symlinks are materialized; escaping or dangling links and directory cycles are rejected before building. Current sources may use absolute links to internal files. Baseline links must resolve inside an archive of the selected commit; absolute links into the live checkout are rejected. Results are retained. The lower-level commands below remain available for resumable algorithm sessions and custom investigations.
 
 ### Working-tree comparisons
 
@@ -29,14 +29,16 @@ Both measurement commands accept `--out DIR` and require a new directory. Their 
 
 Each block runs two baseline processes and one current process, rotating through the six possible orders. Criterion's mean nanoseconds per sort is the observation. The current/baseline ratio uses the mean of the block's baseline pair; the report gives its median and block range, plus the paired A/A range. A direction needs eight of nine blocks and a median outside that range. This is a development screen with process-level A/A controls, not an in-process or placement-controlled performance claim.
 
-The output contains the resolved `plan.json`, `local.json`, `summaries.json`, `index.md` and `local.svg`. The JSON records revision and source hashes, executable hashes, compiler, flags, configuration, host information, selected IDs and block observations. Interrupted comparisons retain completed blocks but cannot be resumed or reported as complete. Use `pnpm bench report DIR` to regenerate a completed report.
+The output contains the resolved `plan.json`, `local.json`, `summaries.json`, `index.md` and `local.svg`. The JSON records revision and source hashes, executable hashes, both builds' actual Cargo provenance, configuration, host information, selected IDs and block observations. Compiler and encoded flags come from the build script, including `.cargo` target-specific settings and explicit `RUSTC`; mismatched build settings fail before measurement. Interrupted comparisons retain completed blocks but cannot be resumed or reported as complete. Use `pnpm bench report DIR` to regenerate a completed report.
+
+Standard algorithm-report figures show fixed slices and aggregates, not every measured case. A selected-input panel is generated only when no standard panel can be drawn. Custom lengths omitted from those figures remain in Full results and `summaries.json`.
 
 The [tooling design](../design/benchmark-tooling.md) describes the module boundaries and [figure guide](benchmark-figures.md) explains the shared presentation layer.
 
 
 ## Experiment plans
 
-All three workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). Repository presets use TOML for comments and readable input rules; custom files may use either TOML or JSON. Both formats decode into the same configuration model and use the same validation and selection rules. Plans describe what to measure; the harness owns input generation and the measurement protocol.
+All three workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). Repository presets, the shared catalog and selection fixtures use TOML for comments and readable input rules; custom files may use either TOML or JSON. Both formats decode into the same configuration model and use the same validation and selection rules. Plans describe what to measure; the harness owns input generation and the measurement protocol.
 
 | Preset | Harness | Default selection |
 |---|---|---|
@@ -102,7 +104,7 @@ Values within an axis are alternatives; axes within a rule form a Cartesian prod
 
 The selectable axes are `types`, `distributions`, `lengths` and `modes`. Lengths are positive record counts; custom numeric lengths need not already occur in a preset. Configuration files can also use `"insertion-max"`, `"insertion-next"` and `"tile-next"`. These resolve from the measured library's thresholds and the record width in the catalog. Case IDs retain the resolved numeric length; a commit comparison rejects different selected IDs between revisions.
 
-The `smoke` harness measures Tessera through `api` and `workspace`; its supported record representations and distributions are under `smoke` in [the catalog](../../bench/catalog.json). The `comparison` harness measures supported algorithm/type pairs through `api`. Its default types, distributions and lengths are under `comparison`. Inputs always use seed 1. A plan that selects nothing fails before timing.
+The `smoke` harness measures Tessera through `api` and `workspace`; its supported record representations and distributions are under `smoke` in [the catalog](../../bench/catalog.toml). The `comparison` harness measures supported algorithm/type pairs through `api`. Its default types, distributions and lengths are under `comparison`. Inputs always use seed 1. A plan that selects nothing fails before timing.
 
 Algorithm comparisons retain `tessera`, `std-stable` and the separately timed Tessera A/A control, even when only additional opponents are named. Native algorithms automatically enable source acquisition and native compilation. Portable SIMD is requested with `--simd`; that additional build measures the shared Tessera and standard-library anchors, while competitors run in the default build. Unsupported adapter/type pairs are omitted from the manifest's per-input capabilities, not recorded as measurements.
 

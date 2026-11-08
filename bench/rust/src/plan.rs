@@ -9,16 +9,21 @@ use tessera_sort::thresholds::{INSERTION_MAX, TILE_BYTES};
 
 /// The catalog fields needed to expand and validate experiments.
 #[derive(Deserialize)]
-struct Catalog {
-    algorithms: Vec<Identity>,
+pub(crate) struct Catalog {
+    schema: u32,
+    pub(crate) algorithms: Vec<Algorithm>,
     types: Vec<RecordType>,
     smoke: Inventory,
-    comparison: Inventory,
+    pub(crate) comparison: Inventory,
 }
-/// A registered algorithm.
+/// An algorithm's identity, stability and executable adapter family.
 #[derive(Deserialize)]
-struct Identity {
-    id: String,
+pub(crate) struct Algorithm {
+    pub(crate) id: String,
+    #[cfg(feature = "compare")]
+    pub(crate) stable: bool,
+    #[cfg(feature = "compare")]
+    pub(crate) adapter: String,
 }
 /// A record's identity and storage width.
 #[derive(Deserialize)]
@@ -28,17 +33,20 @@ struct RecordType {
 }
 /// Defaults and supported identities for one harness.
 #[derive(Deserialize)]
-struct Inventory {
-    types: Vec<String>,
+pub(crate) struct Inventory {
+    pub(crate) types: Vec<String>,
     shapes: Vec<String>,
     lengths: Vec<usize>,
     modes: Vec<String>,
 }
 /// Reads the language-neutral catalog once per executable.
-fn catalog() -> &'static Catalog {
+pub(crate) fn catalog() -> &'static Catalog {
     static CATALOG: OnceLock<Catalog> = OnceLock::new();
     CATALOG.get_or_init(|| {
-        serde_json::from_str(include_str!("../../catalog.json")).expect("valid benchmark catalog")
+        let catalog: Catalog =
+            toml::from_str(include_str!("../../catalog.toml")).expect("valid benchmark catalog");
+        assert_eq!(catalog.schema, 1, "unsupported benchmark catalog schema");
+        catalog
     })
 }
 
@@ -113,7 +121,7 @@ impl Rule {
 }
 
 /// One concrete seed-one input, shared by every selected API mode.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub struct InputCase {
     /// Record representation from the catalog.
     pub ty: String,
@@ -121,6 +129,18 @@ pub struct InputCase {
     pub distribution: String,
     /// Number of records.
     pub len: usize,
+}
+
+#[cfg(feature = "compare")]
+impl InputCase {
+    /// Formats the stable identifier used in raw samples and reports.
+    pub(crate) fn id(&self) -> String {
+        format!("{}/{}/{}/s1", self.ty, self.distribution, self.len)
+    }
+    /// Names the resumable group containing this case's lengths.
+    pub(crate) fn group(&self) -> String {
+        format!("{}/{}", self.ty, self.distribution)
+    }
 }
 
 /// A versioned experiment selection, independent of its measurement protocol.
@@ -285,7 +305,7 @@ mod tests {
     #[test]
     fn selection_rules_match_contract() {
         let fixture: Value =
-            serde_json::from_str(include_str!("../../plans/selection.fixture.json")).unwrap();
+            toml::from_str(include_str!("../../plans/selection.fixture.toml")).unwrap();
         let plan = Plan::parse(&fixture["plan"].to_string(), "smoke").unwrap();
         for input in fixture["cases"].as_array().unwrap() {
             assert_eq!(

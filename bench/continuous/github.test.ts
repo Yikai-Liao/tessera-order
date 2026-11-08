@@ -2,10 +2,10 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { VARIANTS } from "../catalog.ts";
 import { mockGitHub } from "./fixtures/github.ts";
 import { hash } from "./fixtures/report.ts";
 import { marker, publishComment, resolveSource, startReport } from "./github.ts";
-import { VARIANTS } from "./variants.ts";
 
 const repo = { owner: "owner", repo: "tessera" };
 const fullName = "owner/tessera";

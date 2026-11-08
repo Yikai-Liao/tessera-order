@@ -1,15 +1,70 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { command } from "./process.ts";
 
 export interface Workspace {
   directory: string;
   tree: string;
   target: string;
+}
+
+export interface BuildProvenance {
+  rustc: string;
+  cargo_encoded_rustflags: string;
+  target: string;
+  profile: string;
+  opt_level: string;
+  debug: string;
+  features: string[];
+}
+
+/** Materialize repository-local links; reject escaping targets and directory cycles.
+ *
+ * Copies contain regular files and directories, so later source edits cannot
+ * change their contents. Both absolute and relative internal links are allowed.
+ */
+export async function copySnapshot(source: string, destination: string, root: string) {
+  const boundary = await realpath(root);
+  const ancestors = new Set<string>();
+  async function validate(path: string) {
+    const target = await realpath(path);
+    const name = relative(boundary, target);
+    if (name.split(sep)[0] === ".." || isAbsolute(name))
+      throw new Error(`Snapshot link escapes repository: ${path}`);
+    if (!(await stat(target)).isDirectory()) return;
+    if (ancestors.has(target)) throw new Error(`Snapshot directory cycle: ${path}`);
+    ancestors.add(target);
+    for (const name of await readdir(path))
+      if (name !== "__pycache__") await validate(join(path, name));
+    ancestors.delete(target);
+  }
+  await validate(source);
+  await cp(source, destination, {
+    recursive: true,
+    dereference: true,
+    filter: (path) => basename(path) !== "__pycache__",
+  });
+}
+
+/** Materialize a library revision against its own repository, keeping the current harness. */
+export async function copyLibraryRevision(root: string, revision: string, destination: string) {
+  const directory = await mkdtemp(join(dirname(destination), "baseline-"));
+  try {
+    const archive = join(directory, "source.tar");
+    const tree = join(directory, "tree");
+    await mkdir(tree);
+    await command("git", ["archive", "--format=tar", `--output=${archive}`, revision], {
+      cwd: root,
+    });
+    await command("tar", ["-xf", archive, "-C", tree]);
+    await copySnapshot(join(tree, "rust/tessera-sort"), destination, tree);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 /** Hash relative paths and file contents in lexical order. */
@@ -47,21 +102,20 @@ export async function withWorkspace<T>(
     added = true;
     for (const path of ["rust/tessera-sort", "bench/rust", "bench/plans"]) {
       await rm(join(tree, path), { recursive: true, force: true });
-      await cp(join(root, path), join(tree, path), {
-        recursive: true,
-        filter: (source) => !source.split("/").includes("__pycache__"),
-      });
+      await copySnapshot(join(root, path), join(tree, path), root);
     }
-    for (const path of ["Cargo.toml", "Cargo.lock", "bench/catalog.json"]) {
-      await cp(join(root, path), join(tree, path));
+    for (const path of ["Cargo.toml", "Cargo.lock", "bench/catalog.toml"]) {
+      await copySnapshot(join(root, path), join(tree, path), root);
     }
     for (const path of ["rust-toolchain.toml", "rust-toolchain", ".cargo"]) {
       await rm(join(tree, path), { recursive: true, force: true });
       try {
-        await cp(join(root, path), join(tree, path), { recursive: true });
+        await lstat(join(root, path));
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
       }
+      await copySnapshot(join(root, path), join(tree, path), root);
     }
     return await operation({ directory, tree, target: join(directory, "target") });
   } finally {
@@ -74,31 +128,52 @@ export async function withWorkspace<T>(
   }
 }
 
-/** Build the continuous harness and return its single executable. */
-export async function buildSmoke(tree: string, target: string, simd: boolean): Promise<string> {
-  const output = await command(
-    "cargo",
-    [
-      "bench",
-      "--locked",
-      "-p",
-      "tessera-bench",
-      "--bench",
-      "smoke",
-      "--no-run",
-      "--message-format=json",
-      "--target-dir",
-      target,
-      ...(simd ? ["--features", "portable-simd"] : []),
-    ],
-    { cwd: tree, capture: true },
+/** Read Cargo's executable and matching build-script provenance, without guessing paths. */
+export async function buildArtifact(output: string, name: string) {
+  const messages = output
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const executables = messages.filter(
+    (value) =>
+      value.reason === "compiler-artifact" && value.target.name === name && value.executable,
   );
-  const executables = output.split("\n").flatMap((line) => {
-    const value = JSON.parse(line);
-    return value.reason === "compiler-artifact" && value.target.name === "smoke" && value.executable
-      ? [value.executable as string]
-      : [];
-  });
-  if (executables.length !== 1) throw new Error("Expected one smoke benchmark executable");
-  return executables[0];
+  if (executables.length !== 1) throw new Error(`Expected one ${name} benchmark executable`);
+  const artifact = executables[0];
+  const script = messages.find(
+    (value) => value.reason === "build-script-executed" && value.package_id === artifact.package_id,
+  );
+  if (!script) throw new Error(`Missing ${name} build provenance`);
+  const provenance = JSON.parse(
+    await readFile(join(script.out_dir, "provenance.json"), "utf8"),
+  ) as BuildProvenance;
+  return { executable: artifact.executable as string, provenance };
+}
+
+/** Build a runnable benchmark, including the comparison memory worker, with its provenance. */
+export async function buildBenchmark(
+  tree: string,
+  target: string,
+  name: "smoke" | "compare",
+  features: string[],
+) {
+  return buildArtifact(
+    await command(
+      "cargo",
+      [
+        ...(name === "smoke"
+          ? ["bench", "--bench", name, "--no-run"]
+          : ["build", "--release", "--bin", name, "--bin", "memory"]),
+        "--locked",
+        "-p",
+        "tessera-bench",
+        "--message-format=json",
+        "--target-dir",
+        target,
+        ...(features.length ? ["--features", features.join(",")] : []),
+      ],
+      { cwd: tree, capture: true },
+    ),
+    name,
+  );
 }

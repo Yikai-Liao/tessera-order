@@ -40,30 +40,6 @@ fn hash_tree(path: &Path, digest: &mut Sha256) {
         digest.update(fs::read(path).unwrap());
     }
 }
-/// Generates suite and adapter metadata from the shared benchmark catalog.
-fn write_catalog(out: &Path) {
-    println!("cargo:rerun-if-changed=../catalog.json");
-    let catalog: Value = serde_json::from_str(&fs::read_to_string("../catalog.json").unwrap())
-        .expect("benchmark catalog is valid JSON");
-    assert_eq!(catalog["schema"], 1, "unsupported benchmark catalog schema");
-    let mut generated = String::new();
-    let types = catalog["comparison"]["types"].as_array().unwrap();
-    generated.push_str(&format!(
-        "pub(super) const TYPES: [&str; {}] = {};\n",
-        types.len(),
-        serde_json::to_string(types).unwrap()
-    ));
-    generated.push_str("pub(super) const ALGORITHMS: &[(&str, bool, &str)] = &[\n");
-    for algorithm in catalog["algorithms"].as_array().unwrap() {
-        generated.push_str(&format!(
-            "({}, {}, {}),\n",
-            algorithm["id"], algorithm["stable"], algorithm["adapter"]
-        ));
-    }
-    generated.push_str("];\n");
-    fs::write(out.join("catalog.rs"), generated).unwrap();
-}
-
 /// Writes build provenance and compiles optional native adapters.
 fn main() {
     for key in [
@@ -85,7 +61,6 @@ fn main() {
         println!("cargo:rerun-if-changed={path}");
     }
     let out = env::var("OUT_DIR").unwrap();
-    write_catalog(Path::new(&out));
     let mut digest = Sha256::new();
     for path in [
         "../../rust/tessera-sort/src",
@@ -95,7 +70,7 @@ fn main() {
         "Cargo.toml",
         "../../Cargo.toml",
         "../../Cargo.lock",
-        "../catalog.json",
+        "../catalog.toml",
         "../plans",
     ] {
         hash_tree(Path::new(path), &mut digest);

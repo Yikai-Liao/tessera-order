@@ -1,9 +1,71 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import catalog from "./catalog.json" with { type: "json" };
+import { readFileSync } from "node:fs";
+import { z } from "zod";
+import { decodeConfig } from "./config.ts";
+
+const identity = z.object({ id: z.string(), label: z.string() });
+const inventory = z.object({
+  types: z.array(z.string()),
+  shapes: z.array(z.string()),
+  lengths: z.array(z.number().int().positive()),
+  modes: z.array(z.string()),
+});
 
 /** Language-neutral benchmark identities, presentation metadata and suite order. */
-export { catalog };
+export const catalog = z
+  .object({
+    schema: z.literal(1),
+    algorithms: z.array(
+      identity.extend({
+        stable: z.boolean(),
+        family: z.string(),
+        adapter: z.string(),
+        detail: z.string().optional(),
+        description: z.string().optional(),
+      }),
+    ),
+    types: z.array(
+      identity.extend({
+        detail: z.string(),
+        task: z.string(),
+        bytes: z.number().int().positive(),
+        compact: z.string().optional(),
+      }),
+    ),
+    distributions: z.array(
+      identity.extend({
+        compact: z.string().optional(),
+        group: z.string().optional(),
+      }),
+    ),
+    modes: z.array(identity),
+    configurations: z.array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        testbed: z.string(),
+        features: z.array(z.string()),
+      }),
+    ),
+    smoke: inventory,
+    comparison: inventory.extend({
+      typeGroups: z.array(
+        z.object({
+          title: z.string(),
+          keys: z.boolean(),
+          types: z.array(z.string()),
+        }),
+      ),
+    }),
+  })
+  .parse(
+    decodeConfig(readFileSync(new URL("./catalog.toml", import.meta.url), "utf8"), "catalog.toml"),
+  );
+
+/** Continuous configurations and their shared publication identity. */
+export const VARIANTS = catalog.configurations;
+export type Variant = (typeof VARIANTS)[number];
 
 function index<T extends { id: string }>(entries: T[]) {
   return new Map(entries.map((entry) => [entry.id, entry]));
@@ -15,7 +77,7 @@ const distributions = index(catalog.distributions);
 const modes = index(catalog.modes);
 
 /** Look up an algorithm's presentation without parsing its identifier. */
-export function algorithm(id: string) {
+export function algorithm(id: string): (typeof catalog.algorithms)[number] {
   return (
     algorithms.get(id) ?? { id, label: id, family: "comparison", adapter: "unknown", stable: false }
   );

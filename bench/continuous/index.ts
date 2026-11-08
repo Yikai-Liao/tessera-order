@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { readFileSync } from "node:fs";
+import type { Variant } from "../catalog.ts";
 import { chartSvg } from "./chart.ts";
 import {
   type ActionContext,
@@ -20,7 +21,6 @@ import {
 } from "./markdown.ts";
 import { type BencherReport, type ReportSummary, short, summarize } from "./report.ts";
 import { trendSvg } from "./trend-chart.ts";
-import type { Variant } from "./variants.ts";
 
 interface VariantInputs {
   variant: Variant;

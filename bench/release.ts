@@ -6,7 +6,7 @@ import { catalog } from "./catalog.ts";
 import type { Plan } from "./plan.ts";
 import { command } from "./process.ts";
 import { writeReport } from "./report/index.ts";
-import { withWorkspace } from "./workspace.ts";
+import { buildBenchmark, withWorkspace } from "./workspace.ts";
 
 export interface ReleaseOptions {
   root: string;
@@ -35,26 +35,7 @@ export async function compareAlgorithms(options: ReleaseOptions) {
         ...(native && !portable ? ["compare-native"] : []),
         ...(portable ? ["portable-simd"] : []),
       ];
-      await command(
-        "cargo",
-        [
-          "build",
-          "--locked",
-          "--release",
-          "-p",
-          "tessera-bench",
-          "--features",
-          features.join(","),
-          "--target-dir",
-          target,
-        ],
-        { cwd: tree },
-      );
-      const binary = join(
-        target,
-        "release",
-        process.platform === "win32" ? "compare.exe" : "compare",
-      );
+      const { executable: binary } = await buildBenchmark(tree, target, "compare", features);
       const selection = ["--plan", planPath, ...(group ? ["--group", group] : [])];
       await command(binary, ["validate", ...selection], { cwd: tree });
       const args = ["run", ...selection, "--out", out];

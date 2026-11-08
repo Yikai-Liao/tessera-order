@@ -76,7 +76,7 @@ Import `renderRows` and `RowChart` from `bench/plot/rows.ts`. The renderer accep
 
 VitePress uses [`BenchmarkFigure.vue`](../.vitepress/theme/components/BenchmarkFigure.vue), a reactive image adapter with responsive sizing and alternative text. Its `chart` prop is a `RowChart`; changing the data regenerates the SVG. When inserting SVG markup inline rather than using the image adapter, supply a unique chart `id` so accessibility references remain distinct.
 
-Benchmark identifiers and human-readable names come from [the catalog](../../bench/catalog.json). A caller should not invent another name map while preparing a figure.
+Benchmark identifiers and human-readable names come from [the catalog](../../bench/catalog.toml). A caller should not invent another name map while preparing a figure.
 
 ## Add or change a template
 

@@ -50,7 +50,7 @@ The engine moves records through uninitialized scratch memory. Every `unsafe` bl
 
 ## Performance changes
 
-Use `pnpm bench compare COMMIT` for a working-tree development screen, `pnpm bench run` for algorithm comparisons and `pnpm bench pr NUMBER` to read current-head continuous feedback. See the [benchmark guide](docs/development/benchmarking.md). Select coverage with `--plan NAME-OR-FILE` and CLI axis overrides; repository defaults live in `bench/plans/`. Tool dependencies use the pinned pnpm version; register display identities in `bench/catalog.json` and reuse the [shared figure templates](docs/development/benchmark-figures.md).
+Use `pnpm bench compare COMMIT` for a working-tree development screen, `pnpm bench run` for algorithm comparisons and `pnpm bench pr NUMBER` to read current-head continuous feedback. See the [benchmark guide](docs/development/benchmarking.md). Select coverage with `--plan NAME-OR-FILE` and CLI axis overrides; repository defaults live in `bench/plans/`. Tool dependencies use the pinned pnpm version; register display identities in `bench/catalog.toml` and reuse the [shared figure templates](docs/development/benchmark-figures.md).
 
 A claim that a change is faster or slower needs measurements that follow [`docs/development/benchmarking.md`](docs/development/benchmarking.md): paired with the previous version in one process, with the A/A range reported. Please include the raw output or a link to it.
 

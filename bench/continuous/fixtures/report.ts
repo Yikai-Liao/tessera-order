@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { VARIANTS } from "../../catalog.ts";
 import type { BencherReport, Boundary } from "../report.ts";
-import { VARIANTS } from "../variants.ts";
 
 export const hash = "a".repeat(40);
 export const baseHash = "b".repeat(40);

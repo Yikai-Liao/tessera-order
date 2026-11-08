@@ -2,7 +2,7 @@
 
 //! Record representations, shared inputs and supported sorting adapters.
 
-use super::{check, suite::Case};
+use super::{InputCase, check};
 use crate::case::{Key, Row, generate};
 use rdst::RadixSort;
 use std::{cmp::Ordering, hint::black_box, mem::MaybeUninit, rc::Rc};
@@ -188,7 +188,7 @@ pub(super) enum CaseInput {
 }
 impl CaseInput {
     /// Generates and prepares the concrete record representation of a suite case.
-    pub(super) fn new(c: &Case) -> Self {
+    pub(super) fn new(c: &InputCase) -> Self {
         match c.ty.as_str() {
             "u32" => Self::U32(PreparedRecords::new(generate::<u32>(
                 &c.distribution,
@@ -307,14 +307,18 @@ pub(super) struct Variant {
 }
 /// Lists the adapters measured in the selected executable configuration.
 pub(super) fn list_variants() -> Vec<Variant> {
-    super::catalog::ALGORITHMS
+    crate::plan::catalog()
+        .algorithms
         .iter()
-        .filter(|(_, _, adapter)| {
-            *adapter == "common"
+        .filter(|algorithm| {
+            algorithm.adapter == "common"
                 || (!cfg!(feature = "portable-simd")
-                    && (*adapter == "rust" || cfg!(feature = "compare-native")))
+                    && (algorithm.adapter == "rust" || cfg!(feature = "compare-native")))
         })
-        .map(|&(name, stable, _)| Variant { name, stable })
+        .map(|algorithm| Variant {
+            name: &algorithm.id,
+            stable: algorithm.stable,
+        })
         .collect()
 }
 /// Prepares the standard or Tessera adapter for any benchmark record type.

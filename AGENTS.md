@@ -56,7 +56,7 @@ Use `pnpm bench compare [COMMIT]` (default: `HEAD`) to screen uncommitted code a
 
 Read PR feedback with `pnpm --silent bench pr NUMBER --json` after authenticating `gh`. Match `head` to the PR's current commit and read both `Benchmarks (rust, …)` check summaries; a green tracking workflow does not mean those checks passed. A missing current-head comment is pending feedback, not a clean result. See [the continuous guide](docs/development/continuous-benchmarks.md#read-feedback-from-a-pr).
 
-Register identities and display names in `bench/catalog.json`, not per-report maps. Reuse `bench/plot/` templates and theme for figures, including VitePress. Keep plotting host-independent and follow [the figure guide](docs/development/benchmark-figures.md). Add a new template for a new visual structure rather than arbitrary styling callbacks.
+Register identities and display names in `bench/catalog.toml`, not per-report maps. Reuse `bench/plot/` templates and theme for figures, including VitePress. Keep plotting host-independent and follow [the figure guide](docs/development/benchmark-figures.md). Add a new template for a new visual structure rather than arbitrary styling callbacks.
 
 ## Measurements
 

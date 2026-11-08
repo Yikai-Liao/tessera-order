@@ -2,7 +2,7 @@
 
 //! Batch timing and paired block scheduling.
 
-use super::{suite::Case, variant::Kernel};
+use super::{InputCase, variant::Kernel};
 use serde::Serialize;
 use std::time::Instant;
 
@@ -43,7 +43,7 @@ pub(super) fn calibrate(
         .clamp(1, (prepared_cap_bytes / k.buffer_bytes()).max(1)))
 }
 /// Shuffles adapter slots reproducibly from the case identity and block.
-pub(super) fn shuffle_variants(n: usize, block: usize, c: &Case) -> Vec<usize> {
+pub(super) fn shuffle_variants(n: usize, block: usize, c: &InputCase) -> Vec<usize> {
     let mut seed = c.id().bytes().fold(block as u64 + 1, |a, b| {
         a.wrapping_mul(31).wrapping_add(u64::from(b))
     });
@@ -61,7 +61,7 @@ pub(super) fn shuffle_variants(n: usize, block: usize, c: &Case) -> Vec<usize> {
 
 /// Publishes nine shuffled blocks with a separate Tessera A/A sample.
 pub(super) fn measure_case(
-    case: &Case,
+    case: &InputCase,
     variants: &[super::variant::Variant],
     scratch_bytes: usize,
     min_sample_ns: u64,

@@ -56,6 +56,8 @@ export function renderRows(spec: RowChart) {
     !(spec.scale.low > 0 && spec.scale.high > spec.scale.low)
   )
     throw new Error("A row chart requires a positive, increasing scale");
+  const edge = (mark: Mark) =>
+    spec.scale.clamp && (mark.value < spec.scale.low || mark.value > spec.scale.high);
   const groups = spec.groups.filter((group) => group.rows.length);
   const rows = groups.flatMap((group) => group.rows);
   if (!rows.length || !spec.columns.length)
@@ -231,7 +233,9 @@ export function renderRows(spec: RowChart) {
               field,
               Plot.dodgeY("middle", {
                 x: "value",
-                r: (mark: Mark) => radius(mark),
+                r: (mark: Mark) => (edge(mark) ? 4.5 : radius(mark)),
+                symbol: (mark: Mark) => (edge(mark) ? "triangle" : "circle"),
+                rotate: (mark: Mark) => (edge(mark) ? (mark.value < spec.scale.low ? 270 : 90) : 0),
                 fill: (mark: Mark) => (mark.tone === "primary" ? "none" : ink[mark.tone]),
                 stroke: (mark: Mark) => (mark.tone === "primary" ? "none" : ink.panel),
                 strokeWidth: 2,
@@ -241,8 +245,6 @@ export function renderRows(spec: RowChart) {
         });
       }
       for (const mark of row.swarm ? primary : ordered) {
-        const edge =
-          spec.scale.clamp && (mark.value < spec.scale.low || mark.value > spec.scale.high);
         const dot = {
           x: "value",
           y: cy + (mark.dy ?? 0),
@@ -253,7 +255,7 @@ export function renderRows(spec: RowChart) {
         };
         layers.push({
           x,
-          marks: edge
+          marks: edge(mark)
             ? [
                 Plot.dot([mark], {
                   ...dot,

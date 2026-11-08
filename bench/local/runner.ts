@@ -6,7 +6,14 @@ import { arch, cpus, platform, release } from "node:os";
 import { join } from "node:path";
 import { type Plan, selectCaseIds } from "../plan.ts";
 import { command } from "../process.ts";
-import { buildSmoke, sourceHash, type Workspace, withWorkspace } from "../workspace.ts";
+import {
+  buildBenchmark,
+  copyLibraryRevision,
+  copySnapshot,
+  sourceHash,
+  type Workspace,
+  withWorkspace,
+} from "../workspace.ts";
 import { readEstimates } from "./criterion.ts";
 import { type LocalBlock, type LocalRun, summarizeLocal } from "./model.ts";
 import { renderLocalReport } from "./report.ts";
@@ -26,30 +33,36 @@ async function buildRevisions(root: string, workspace: Workspace, baseline: stri
   const { tree, directory, target } = workspace;
   const crate = join(tree, "rust/tessera-sort");
   const saved = join(directory, "current-source");
-  await cp(crate, saved, { recursive: true });
+  await copySnapshot(crate, saved, tree);
   const source = {
     current: await sourceHash(crate),
     baseline: "",
     harness: await sourceHash(join(tree, "bench/rust")),
     catalog: createHash("sha256")
-      .update(await readFile(join(tree, "bench/catalog.json")))
+      .update(await readFile(join(tree, "bench/catalog.toml")))
       .digest("hex"),
   };
   await rm(crate, { recursive: true });
-  const archive = join(directory, "baseline.tar");
-  await command(
-    "git",
-    ["archive", "--format=tar", `--output=${archive}`, baseline, "rust/tessera-sort"],
-    { cwd: root },
-  );
-  await command("tar", ["-xf", archive, "-C", tree]);
-  await rm(archive);
+  await copyLibraryRevision(root, baseline, crate);
   source.baseline = await sourceHash(crate);
+  const features = simd ? ["portable-simd"] : [];
   const binaries = { baseline: join(directory, "baseline"), current: join(directory, "current") };
-  await cp(await buildSmoke(tree, target, simd), binaries.baseline);
+  const first = await buildBenchmark(tree, target, "smoke", features);
+  await cp(first.executable, binaries.baseline);
   await rm(crate, { recursive: true });
-  await cp(saved, crate, { recursive: true });
-  await cp(await buildSmoke(tree, target, simd), binaries.current);
+  await copySnapshot(saved, crate, directory);
+  const second = await buildBenchmark(tree, target, "smoke", features);
+  await cp(second.executable, binaries.current);
+  for (const field of [
+    "rustc",
+    "cargo_encoded_rustflags",
+    "target",
+    "profile",
+    "opt_level",
+    "debug",
+  ] as const)
+    if (first.provenance[field] !== second.provenance[field])
+      throw new Error(`Build settings differ between revisions: ${field}`);
   const hash = async (binary: string) =>
     createHash("sha256")
       .update(await readFile(binary))
@@ -57,6 +70,7 @@ async function buildRevisions(root: string, workspace: Workspace, baseline: stri
   return {
     source,
     binaries,
+    builds: { baseline: first.provenance, current: second.provenance },
     hashes: { baseline: await hash(binaries.baseline), current: await hash(binaries.current) },
   };
 }
@@ -150,7 +164,12 @@ export async function compareLocal(options: LocalOptions) {
   const planPath = join(out, "plan.json");
   await writeFile(planPath, `${JSON.stringify(options.plan, null, 2)}\n`);
   await withWorkspace(root, async (workspace) => {
-    const { binaries, source, hashes } = await buildRevisions(root, workspace, baseline, simd);
+    const { binaries, source, hashes, builds } = await buildRevisions(
+      root,
+      workspace,
+      baseline,
+      simd,
+    );
     const run: LocalRun = {
       schema: 1,
       baseline,
@@ -158,8 +177,9 @@ export async function compareLocal(options: LocalOptions) {
       dirty,
       source,
       binaries: hashes,
-      rustc: await command("rustc", ["-vV"], { cwd: workspace.tree, capture: true }),
-      flags: process.env.CARGO_ENCODED_RUSTFLAGS ?? process.env.RUSTFLAGS ?? "",
+      builds,
+      rustc: builds.current.rustc,
+      flags: builds.current.cargo_encoded_rustflags,
       configuration: simd ? "portable-simd" : "default",
       host: {
         platform: platform(),

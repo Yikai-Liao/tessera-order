@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { stringify } from "smol-toml";
+import { decodeConfig } from "./config.ts";
 import { loadPlan, parsePlan, planSchema, selectCaseIds } from "./plan.ts";
-import fixture from "./plans/selection.fixture.json" with { type: "json" };
+
+const fixture = decodeConfig(
+  readFileSync(new URL("./plans/selection.fixture.toml", import.meta.url), "utf8"),
+  "selection.fixture.toml",
+) as { plan: Record<string, unknown> };
 
 test("the native selection fixture validates", () => {
   assert.equal(parsePlan(fixture.plan).harness, "smoke");

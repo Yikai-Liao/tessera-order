@@ -29,7 +29,7 @@ Both commands accept `--out DIR` and require a new output directory. The default
 ## Module boundaries
 
 ```text
-bench/catalog.json       identities, labels, families and comparison suite order
+bench/catalog.toml       identities, labels, families and comparison suite order
 bench/catalog.ts         typed catalog access and case-ID presentation
 bench/plans/             local, continuous, smoke and release selections
 bench/config.ts          JSON/TOML syntax decoding

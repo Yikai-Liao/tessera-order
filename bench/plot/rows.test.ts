@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { parseSvg } from "../svg-test-utils.ts";
 import { type RowChart, renderRows } from "./rows.ts";
 
 const fixture = (): RowChart => ({
@@ -63,6 +64,38 @@ test("long labels expand the panel", () => {
   const width = Number(svg.match(/viewBox="0 0 (\d+)/)?.[1]);
   assert.ok(width > 720);
   assert.doesNotMatch(svg, /NaN|Infinity/);
+});
+
+test("overflow symbols survive collision layout", () => {
+  for (const swarm of [false, true])
+    for (const tone of ["primary", "comparison"] as const)
+      for (const value of [0.25, 0.5, 1, 2, 4]) {
+        const input = fixture();
+        input.legend = { note: "" };
+        input.groups[0].rows[0].swarm = swarm;
+        input.groups[0].rows[0].marks = [{ value, tone }];
+        const root = parseSvg(renderRows(input));
+        const marks = [
+          ...root.querySelectorAll('[aria-label="dot"] circle, [aria-label="dot"] path'),
+        ];
+        const visible = marks.filter((mark) => mark.getAttribute("fill") !== "none");
+        assert.equal(visible.length, 1);
+        const mark = visible[0];
+        if (value < input.scale.low || value > input.scale.high) {
+          assert.match(
+            mark.getAttribute("transform") ?? "",
+            value < input.scale.low ? /rotate\(270\)/ : /rotate\(90\)/,
+          );
+          assert.equal(mark.tagName.toLowerCase(), "path");
+          assert.doesNotMatch(mark.getAttribute("d") ?? "", /A/);
+        } else {
+          const angle = mark.getAttribute("transform")?.match(/rotate\(([^)]+)\)/)?.[1] ?? "0";
+          assert.equal(Number(angle), 0);
+          assert.ok(
+            mark.tagName.toLowerCase() === "circle" || (mark.getAttribute("d") ?? "").includes("A"),
+          );
+        }
+      }
 });
 
 test("plotting modules have no host dependencies", async () => {

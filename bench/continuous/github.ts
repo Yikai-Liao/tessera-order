@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import type { context, getOctokit } from "@actions/github";
-import type { Variant } from "./variants.ts";
+import type { Variant } from "../catalog.ts";
 
 export type GitHub = ReturnType<typeof getOctokit>;
 export type ActionContext = Pick<typeof context, "repo" | "serverUrl" | "runId" | "payload">;

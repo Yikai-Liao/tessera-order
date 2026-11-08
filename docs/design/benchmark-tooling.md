@@ -21,9 +21,9 @@ The two A/A workflows and Bencher's alert model remain distinct. Their summaries
 
 ## One catalog
 
-[`bench/catalog.json`](../../bench/catalog.json) is the language-neutral authority for algorithm IDs, display labels, stability, sort families, record representations, distributions, API modes, build names and comparison suite order. Schema version 1 is checked by the Rust generator and catalog tests.
+[`bench/catalog.toml`](../../bench/catalog.toml) is the language-neutral authority for algorithm IDs, display labels, stability, sort families, record representations, distributions, API modes, build names and comparison suite order. Schema version 1 is checked by the TypeScript accessor, Rust parser and catalog tests. All repository-authored benchmark configurations and selection fixtures use TOML; JSON remains an accepted input and a machine-result format.
 
-The TypeScript accessor supplies readable fallbacks for historical IDs. Reports do not need their own dictionaries or string heuristics. A distribution can have a compact label for dense PR tables and a full label for release figures; both belong to its one catalog entry. Rust's build script generates the supported-type and adapter registry into `OUT_DIR`, so adding an algorithm's metadata does not require a second stability/name table. Record widths also belong to the catalog and resolve code-relative tile-boundary cases.
+The TypeScript accessor supplies readable fallbacks for historical IDs. Reports do not need their own dictionaries or string heuristics. A distribution can have a compact label for dense PR tables and a full label for release figures; both belong to its one catalog entry. Rust parses and caches the catalog once per executable. Plan validation and adapter selection consume that same typed representation, without a generated Rust registry or a second stability/name table. Record widths also belong to the catalog and resolve code-relative tile-boundary cases.
 
 Executable adapters and deterministic input generation remain typed Rust code. The catalog describes identities and presentation, not executable functions. Rust tests and smoke validation check that registered adapters support their advertised tasks.
 
@@ -39,13 +39,13 @@ Preset changes do not require editing case-registration functions. The continuou
 
 ## Source comparisons
 
-A local comparison copies the current crate and harness, including staged, unstaged and untracked source files, into an isolated worktree. The caller's index and working tree are not changed. Both executables use the current harness, workspace settings, lockfile and toolchain; only the library crate is replaced by the requested commit's version for the baseline build.
+A local comparison copies the current crate and harness, including staged, unstaged and untracked source files, into an isolated worktree. The caller's index and working tree are not changed. Repository-internal file and directory links are materialized into regular snapshot contents; links escaping the repository, dangling links and directory cycles fail before building. The baseline is materialized in a separate archive of its own repository, so library links to files outside the crate resolve against the selected commit, not the current checkout. Links outside that archive, including absolute links into the live checkout, are rejected. Only the materialized library is installed into the current harness. Source backups follow the same isolation rule, so hashing and compilation see the same inputs. Both executables use the current harness, workspace settings, lockfile and toolchain; only the library crate is replaced by the requested commit's version for the baseline build.
 
 The selected timed IDs must match in both executables. A historical commit must contain the crate and support the current harness's API and dependency constraints; incompatible commits fail at build or case selection instead of silently using another baseline. Threshold changes may change boundary IDs, so select common cases when comparing across such a change.
 
 Nine blocks rotate through the six orders of baseline, baseline control and current. Every process has a fresh Criterion directory. Its mean nanoseconds per sort is the observation. A block ratio divides current by the mean of the two baseline observations. A direction needs eight agreeing blocks and a median outside the paired A/A range. This screens execution changes but does not control different binary layouts.
 
-The workspace owns temporary sources, executables, Criterion files and build products. Result directories retain provenance, completed block observations, summaries and figures. An interrupted local run can be inspected but cannot be resumed or reported as complete. The lower-level Rust algorithm runner retains its existing group-resume contract when its executable and manifests remain available.
+Cargo JSON messages select each executable and its matching build-script provenance, including configured targets, compiler overrides and target-specific flags. The local runner retains both builds' provenance and rejects incompatible compiler settings instead of reconstructing them from its environment. The workspace owns temporary sources, executables, Criterion files and build products. Result directories retain provenance, completed block observations, summaries and figures. An interrupted local run can be inspected but cannot be resumed or reported as complete. The lower-level Rust algorithm runner retains its existing group-resume contract when its executable and manifests remain available.
 
 ## Extending figures
 
@@ -56,7 +56,7 @@ New data or algorithms use the catalog and an existing template. A new visual st
 The host-independent dependency direction is:
 
 ```text
-catalog.json → catalog.ts → result presentation
+catalog.toml → catalog.ts → result presentation
 Observable Plot + font metrics + theme → figure templates → report writers / Vue components
 ```
 

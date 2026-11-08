@@ -159,6 +159,8 @@ export async function writeReport(directories: string[], partial = false): Promi
   if (conditions.length)
     markdown += `## Observed conditions\n\n${conditions.map((w) => `- ${w}`).join("\n")}\n\n`;
   markdown += renderCapabilities(dataset);
+  markdown +=
+    "## Figure scope\n\nStandard panels show fixed slices and aggregates, not every measured case. The selected-input panel is a fallback used only when no standard panel can be drawn. All completed cases, including custom lengths absent from the figures, remain in [Full results](#full-results) and [summaries.json](summaries.json).\n\n";
   for (const chart of charts) {
     await writeFile(join(out, `${chart.name}.svg`), chart.svg);
     markdown += `## ${chart.title}\n\n![${chart.title}](${chart.name}.svg)\n\n<details>\n<summary>Plotted values</summary>\n\n${chart.table}\n</details>\n\n`;

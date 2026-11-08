@@ -141,7 +141,6 @@ const kindLegend = (simd: boolean): [Swatch[], string][] => [
   [["comparison"], "comparison sorts"],
 ];
 const SPEED_AXIS: [string, string] = ["← slower", "faster →"];
-const speedLegend = kindLegend;
 
 function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figure | null {
   const entries = dataset.manifests.get("default")!.variants.map((v) => ({
@@ -194,7 +193,7 @@ function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figur
       ].filter((g) => g.rows.length),
       scale: speedScale(complete.map((e) => e.speeds[at])),
       axis: SPEED_AXIS,
-      legend: speedLegend(complete.some((e) => e.simd)),
+      legend: kindLegend(complete.some((e) => e.simd)),
     }),
     table: markdownTable(
       [
@@ -330,7 +329,7 @@ function renderInputs(
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
       axis: SPEED_AXIS,
-      legend: speedLegend(standings.some((s) => s.simd !== null)),
+      legend: kindLegend(standings.some((s) => s.simd !== null)),
     }),
     table: fieldTable(plotted, nsPerKey),
   };
@@ -364,7 +363,7 @@ function renderTypes(dataset: Dataset, summaries: Map<string, Summary>): Figure 
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
       axis: SPEED_AXIS,
-      legend: speedLegend(standings.some((s) => s.simd !== null)),
+      legend: kindLegend(standings.some((s) => s.simd !== null)),
     }),
     table: fieldTable(plotted),
   };

@@ -39,6 +39,16 @@ jobs:
           script: |
             const { resolveSource } = require('./bench/continuous/github.ts');
             await resolveSource({ github, context, core });
+      - uses: pnpm/action-setup@v4
+        if: steps.source.outputs.eligible == 'true'
+      - uses: actions/setup-node@v7
+        if: steps.source.outputs.eligible == 'true'
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install trusted report dependencies
+        if: steps.source.outputs.eligible == 'true'
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Start the report checks
         id: check
         if: steps.source.outputs.eligible == 'true'
@@ -48,7 +58,7 @@ jobs:
         with:
           script: |
             const { startReport } = require('./bench/continuous/github.ts');
-            const { VARIANTS } = require('./bench/continuous/variants.ts');
+            const { VARIANTS } = require('./bench/catalog.ts');
             for (const variant of VARIANTS) {
               await startReport({ github, context, core, hash: process.env.HASH, variant });
             }
@@ -159,7 +169,7 @@ jobs:
         with:
           script: |
             const { publishReport } = require('./bench/continuous/index.ts');
-            const { VARIANTS } = require('./bench/continuous/variants.ts');
+            const { VARIANTS } = require('./bench/catalog.ts');
             const env = process.env;
             await publishReport({ github, context, core, inputs: {
               language: "rust", hash: env.HASH, number: env.PR_NUMBER,

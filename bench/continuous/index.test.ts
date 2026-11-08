@@ -1,16 +1,29 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
+import { VARIANTS, type Variant } from "../catalog.ts";
 import { chartSvg } from "./chart.ts";
 import { mockGitHub } from "./fixtures/github.ts";
 import { baseHash, fixture, hash } from "./fixtures/report.ts";
 import { publishReport } from "./index.ts";
 import { summarize } from "./report.ts";
-import { VARIANTS, type Variant } from "./variants.ts";
+
+test("trusted dependencies precede report checks", () => {
+  const workflow = readFileSync(
+    new URL("../../.github/workflows/bench-track.yml", import.meta.url),
+    "utf8",
+  );
+  const checkout = workflow.indexOf("github.workflow_sha");
+  const install = workflow.indexOf("run: pnpm install --frozen-lockfile --ignore-scripts");
+  const checks = workflow.indexOf("name: Start the report checks");
+  assert.ok(checkout >= 0 && checkout < install && install < checks);
+  assert.match(workflow, /pnpm\/action-setup@/);
+  assert.match(workflow, /node-version: 24/);
+});
 
 function publication(t: TestContext, outcome = "success", imageFailure = false) {
   const dir = mkdtempSync(join(tmpdir(), "tessera-report-"));

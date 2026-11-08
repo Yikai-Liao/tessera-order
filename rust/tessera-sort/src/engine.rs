@@ -591,14 +591,16 @@ pub(crate) fn confirm_ascending<T, E: Extract<T>>(
         .is_some()
 }
 
-/// Sorts a descending array, stably, by reversing it and then reversing each
-/// run of equal keys back. Reversal alone would swap equal keys past each other.
+/// Finishes a strictly descending array: every key is distinct, so one
+/// reversal sorts it without moving equal keys past each other.
 // Keep the reversal loop out of the general sort path.
 #[inline(never)]
 fn reverse_strictly<T>(records: &mut [T]) {
     records.reverse();
 }
 
+/// Sorts a descending array, stably, by reversing it and then reversing each
+/// run of equal keys back. Reversal alone would swap equal keys past each other.
 fn reverse_stably<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
     records.reverse();
     let mut start = 0;

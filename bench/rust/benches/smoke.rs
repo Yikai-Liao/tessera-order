@@ -55,6 +55,9 @@ fn suite(c: &mut Criterion) {
         "reverse",
         "sorted99",
         "equal",
+        // One pair of far-apart positions swapped per hundred records: the
+        // probe must decline before it moves them.
+        "far_swaps",
         // At most 8 varying bits: one block partition.
         "d16",
         // A repeated key: the equality partition.
@@ -74,14 +77,30 @@ fn suite(c: &mut Criterion) {
     keys::<f64>(c, "random", MID, false);
     keys::<f64>(c, "sorted", MID, false);
     keys::<f64>(c, "sorted99", MID, false);
+    // Measured magnitudes rather than arbitrary bits: both signs, magnitudes
+    // within 2^-23..2^7, no NaN or infinity.
+    keys::<f64>(c, "finite_signed", MID, false);
     rows::<u64>(c, "random", MID, true);
     rows::<u64>(c, "d16", MID, false);
+    // Half the records repeat one key and the rest are distinct: the equality
+    // partition must keep their payload order stable.
+    rows::<u64>(c, "hot50", MID, false);
     // A 128-byte record: its byte size, not its key, sets the tile capacity
     // and the cursor-table cap for records wider than a machine word.
     records(c, "random", MID, true);
+    // The sparse digits reach every byte of a record much wider than the
+    // cursor table entry that moves it.
+    records(c, "sparse_digits", MID, false);
 
     // The size at which most engine decisions were measured.
     for distribution in ["random", "zipf2", "skew99", "two_values", "sorted99"] {
+        keys::<u64>(c, distribution, LARGE, false);
+    }
+    // High-cardinality inputs that are not uniform, where the split sample
+    // decides the digit width: four random bits per byte never fill a sampled
+    // window, two clusters a machine word apart leave the top window with two
+    // values, and half a node repeating one key reaches the equality partition.
+    for distribution in ["sparse_digits", "bimodal", "hot50", "d4096"] {
         keys::<u64>(c, distribution, LARGE, false);
     }
     keys::<u32>(c, "random", LARGE, false);

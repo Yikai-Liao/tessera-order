@@ -93,7 +93,7 @@ The random source is SplitMix64, starting at state 1. Each draw adds `0x9e3779b9
 - `sorted` is 0…n−1; `reverse` reverses it. `sorted99` starts sorted and swaps adjacent elements at a spacing of `max(2, floor(n / max(1, floor(n / 100))))`.
 - `runs` draws random keys, then sorts consecutive runs of `16 + next mod 2048` keys, the final run shorter. Each run reverses if the next draw's high bit is set.
 
-The regression-only `equal`, `two_values`, `sparse8` and `sorted_tail` inputs retain their definitions and hashes. Float validation additionally checks signed zeros, infinities, subnormals and NaNs of both signs with distinct payloads.
+The regression-only `equal`, `two_values`, `sparse8` and `sorted_tail` inputs retain their definitions and hashes. `sparse_digits` clears every second bit of a draw, leaving 16 values per 8-bit digit; `bimodal` sets bit 63 from one draw and fills bits 39…0 from the next, giving two clusters 2^63 apart over 2^40 keys each; `hot50` takes zero for half the records and `draw_high` for the rest; `d4096` takes `next mod 4096`; `far_swaps` starts ascending and swaps `max(1, len / 100)` pairs of random positions; `finite_signed` draws a random sign, an exponent field in 1000…1029 and a random mantissa for `f64`, and the full range for integers, where every value is finite. Tests pin the seed-one hashes of every distribution. Float validation additionally checks signed zeros, infinities, subnormals and NaNs of both signs with distinct payloads.
 
 ## Implementations
 

@@ -11,6 +11,10 @@ pub trait Key: RadixKey + Copy {
     const NAME: &'static str;
     /// Draws from the type's whole bit range.
     fn draw(rng: &mut SplitMix64) -> Self;
+    /// Draws a finite value: floats with a random sign and a magnitude between
+    /// 2^-23 and 2^7; integers over the whole range, where every value is
+    /// finite.
+    fn draw_finite(rng: &mut SplitMix64) -> Self;
     /// Draws a key above every `small` value that differs from them in the
     /// highest varying bit.
     fn draw_high(rng: &mut SplitMix64) -> Self;
@@ -31,6 +35,9 @@ macro_rules! int_key {
             const NAME: &'static str = stringify!($t);
             fn draw(rng: &mut SplitMix64) -> Self {
                 $draw(rng)
+            }
+            fn draw_finite(rng: &mut SplitMix64) -> Self {
+                Self::draw(rng)
             }
             fn draw_high(rng: &mut SplitMix64) -> Self {
                 Self::draw(rng) | 1 << (<$t>::BITS - 1)
@@ -62,6 +69,13 @@ impl Key for f64 {
     // Arbitrary bit patterns include NaNs, infinities and subnormals.
     fn draw(rng: &mut SplitMix64) -> Self {
         f64::from_bits(rng.next_u64())
+    }
+    // Sign, an exponent field in 1000..=1029 and a random mantissa: magnitudes
+    // from 2^-23 to 2^7, as measured data has, and never NaN or infinite.
+    fn draw_finite(rng: &mut SplitMix64) -> Self {
+        let sign = rng.next_u64() & (1 << 63);
+        let exponent = 1000 + rng.next_u64() % 30;
+        f64::from_bits(sign | (exponent << 52) | (rng.next_u64() >> 12))
     }
     // Positive NaNs and +inf have the exponent's top bit set; every `small`
     // value is below 2^32 and has it clear.
@@ -128,8 +142,10 @@ pub fn generate<K: Key>(distribution: &str, len: usize) -> Vec<K> {
     let n = len as u64;
     match distribution {
         "random" => (0..len).map(|_| K::draw(&mut rng)).collect(),
+        "finite_signed" => (0..len).map(|_| K::draw_finite(&mut rng)).collect(),
         "d16" => (0..len).map(|_| K::small(rng.next_u64() % 16)).collect(),
         "d256" => (0..len).map(|_| K::small(rng.next_u64() % 256)).collect(),
+        "d4096" => (0..len).map(|_| K::small(rng.next_u64() % 4096)).collect(),
         "zipf1.1" => {
             let mut total = 0u64;
             let cdf: Vec<u64> = (1..=n)
@@ -176,6 +192,20 @@ pub fn generate<K: Key>(distribution: &str, len: usize) -> Vec<K> {
                 })
                 .collect()
         }
+        "hot50" => {
+            // Half the records take one value and the rest distinct keys above
+            // it in the top bit, so the equality partition and a wide child
+            // share the node.
+            (0..len)
+                .map(|_| {
+                    if rng.next_u64() >> 63 == 0 {
+                        K::small(0)
+                    } else {
+                        K::draw_high(&mut rng)
+                    }
+                })
+                .collect()
+        }
         "two_values" => (0..len)
             .map(|_| K::tenth(if rng.next_u64() >> 63 == 0 { 0 } else { 9 }))
             .collect(),
@@ -185,6 +215,25 @@ pub fn generate<K: Key>(distribution: &str, len: usize) -> Vec<K> {
             let values: Vec<K> = (0..8).map(|_| K::draw(&mut rng)).collect();
             (0..len)
                 .map(|_| values[(rng.next_u64() % 8) as usize])
+                .collect()
+        }
+        "sparse_digits" => {
+            // Four random bits per byte: each 8-bit digit takes 16 of its 256
+            // values, so a sampled split window never fills its buckets and the
+            // engine widens the digit.
+            (0..len)
+                .map(|_| K::small(rng.next_u64() & 0x5555_5555_5555_5555))
+                .collect()
+        }
+        "bimodal" => {
+            // Two clusters 2^63 apart, each uniform over 2^40 keys: the top
+            // window holds two values and the node splits into two wide
+            // children.
+            (0..len)
+                .map(|_| {
+                    let cluster = (rng.next_u64() & 1) << 63;
+                    K::small(cluster | (rng.next_u64() & ((1 << 40) - 1)))
+                })
                 .collect()
         }
         "sorted_tail" => {
@@ -212,6 +261,18 @@ pub fn generate<K: Key>(distribution: &str, len: usize) -> Vec<K> {
         }
         "sorted" => (0..n).map(K::small).collect(),
         "reverse" => (0..n).rev().map(K::small).collect(),
+        "far_swaps" => {
+            // Ascending, with len / 100 pairs of random positions swapped: the
+            // records are nearly in place but too far from it for insertion.
+            let mut values: Vec<u64> = (0..n).collect();
+            let swaps = if len > 1 { (len / 100).max(1) } else { 0 };
+            for _ in 0..swaps {
+                let a = (rng.next_u64() % n) as usize;
+                let b = (rng.next_u64() % n) as usize;
+                values.swap(a, b);
+            }
+            values.into_iter().map(K::small).collect()
+        }
         "sorted99" => {
             // Ascending, with len / 100 evenly spaced adjacent swaps.
             let mut values: Vec<u64> = (0..n).collect();
@@ -275,6 +336,26 @@ mod tests {
                 ],
             ),
             (
+                "finite_signed",
+                127,
+                [
+                    0x7f6817a2413fea1a,
+                    0xcbcadab83f300c9d,
+                    0xbced6f9334e69fc3,
+                    0x089415b68b0b9350,
+                ],
+            ),
+            (
+                "finite_signed",
+                4097,
+                [
+                    0x4bc287e322253b02,
+                    0x5ab7b7e4ec8d3771,
+                    0x7530fb09539b7747,
+                    0x4899eade2fa74905,
+                ],
+            ),
+            (
                 "d16",
                 127,
                 [
@@ -292,6 +373,26 @@ mod tests {
                     0x78c19323a8ed9ecd,
                     0xc6ba7e2d5bd5ee6d,
                     0x8127ffe5c5a20fa2,
+                ],
+            ),
+            (
+                "d4096",
+                127,
+                [
+                    0xf094e8ef75c87218,
+                    0x59f464899ffe0248,
+                    0x0a42d80f27444928,
+                    0xf6c1174075e53b19,
+                ],
+            ),
+            (
+                "d4096",
+                4097,
+                [
+                    0xfe9bacc5d82611f9,
+                    0xf45445bdf2e3e549,
+                    0x2750df8f5d57c5a9,
+                    0x2b44174978604e8f,
                 ],
             ),
             (
@@ -335,6 +436,26 @@ mod tests {
                 ],
             ),
             (
+                "hot50",
+                127,
+                [
+                    0x83a475a620110a3a,
+                    0x8ae6293ae539f9f7,
+                    0x8638936216b7800f,
+                    0x0b114450dd26793d,
+                ],
+            ),
+            (
+                "hot50",
+                4097,
+                [
+                    0xbe8f713e674fa160,
+                    0x24efa2fec6403544,
+                    0x6a4cbbd62974cdda,
+                    0x802d69c70b079b64,
+                ],
+            ),
+            (
                 "two_values",
                 127,
                 [
@@ -372,6 +493,46 @@ mod tests {
                     0xf9dcd6d3cc34b40b,
                     0x8882bc00c04d3d86,
                     0xf9dcd6d3cc34b40b,
+                ],
+            ),
+            (
+                "sparse_digits",
+                127,
+                [
+                    0x53ff9ce330cf8058,
+                    0x405a0eb497f50c25,
+                    0x9d1f18cec4a03ca5,
+                    0x40d8484a5dd4fcc1,
+                ],
+            ),
+            (
+                "sparse_digits",
+                4097,
+                [
+                    0x4242aecfccb85938,
+                    0xc2b61542826c8549,
+                    0x68fcc8c3dffe8989,
+                    0x4e153a21b66ac696,
+                ],
+            ),
+            (
+                "bimodal",
+                127,
+                [
+                    0x436b7907d534c77f,
+                    0xb34a71203093b06b,
+                    0x978d7f61a388ddab,
+                    0x3e4265035648e995,
+                ],
+            ),
+            (
+                "bimodal",
+                4097,
+                [
+                    0x369858a2a295217b,
+                    0x5b94276285362065,
+                    0x261cb28288f80a65,
+                    0xc7ee2aab7aa2c046,
                 ],
             ),
             (
@@ -472,6 +633,26 @@ mod tests {
                     0xb6ed6074b4bbd605,
                     0xda3faf098d294745,
                     0xbcc72fd635838090,
+                ],
+            ),
+            (
+                "far_swaps",
+                127,
+                [
+                    0x394d62dc4f49806a,
+                    0xed3a22b0d9025b7a,
+                    0x4eace0b3a861049a,
+                    0xc35e924f89b8b247,
+                ],
+            ),
+            (
+                "far_swaps",
+                4097,
+                [
+                    0xb8cd26d0e7dd2019,
+                    0x3a1c6981e77a5459,
+                    0x34509736d6373c99,
+                    0xcf3cfbcebcd0417c,
                 ],
             ),
             (

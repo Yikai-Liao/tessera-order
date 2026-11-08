@@ -10,8 +10,12 @@ export function resultDirectory(root: string, out?: string) {
 }
 
 /** Emit one compact result, retaining subprocess diagnostics outside the agent's context. */
-export async function runTask<T>(out: string, verbose: boolean, operation: () => Promise<T>) {
-  const log = `${out}.log`;
+export async function runTask<T>(
+  out: string,
+  verbose: boolean,
+  operation: () => Promise<T>,
+  log = `${out}.log`,
+) {
   await mkdir(dirname(out), { recursive: true });
   try {
     const result = verbose ? await operation() : await withCommandLog(log, operation);

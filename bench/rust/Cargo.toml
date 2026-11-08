@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
-compare = ["dep:radsort", "dep:rdst", "dep:glidesort", "dep:voracious_radix_sort", "dep:sha2"]
+compare = ["dep:radsort", "dep:rdst", "dep:glidesort", "dep:voracious_radix_sort", "dep:sha2", "dep:fs2"]
 compare-native = ["compare"]
 portable-simd = ["tessera-sort/portable-simd"]
 
@@ -21,6 +21,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = { version = "1.2", default-features = false, features = ["parse", "serde", "std"] }
 sha2 = { version = "=0.10.9", optional = true }
+fs2 = { version = "=0.4.3", optional = true }
 
 [build-dependencies]
 serde_json = "1"

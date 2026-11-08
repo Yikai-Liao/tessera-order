@@ -11,6 +11,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Define or preview an experiment | `pnpm -s tools plan local` |
 | Compare uncommitted sources with a commit | `pnpm -s tools compare commit HEAD` |
 | Compare sorting algorithms | `pnpm -s tools compare algorithms --plan smoke` |
+| Resume a prepared algorithm comparison | `pnpm -s tools compare resume bench/results/SESSION` |
 | Reproduce the native comparison CI job | `pnpm -s tools check --native` |
 | Build both continuous artifacts | `pnpm -s tools continuous build --out bench/results/artifacts` |
 | Run the continuous scheduler locally | `pnpm -s tools continuous run bench/results/artifacts/default/bench` |
@@ -48,9 +49,9 @@ pnpm -s tools status main --text
 
 `--details` adds full benchmark check summaries, the matching trusted report comment and workflow links under `details`. It does not download logs or historical reports. `--text` is an optional small human overview. Neither option triggers jobs or changes GitHub state. Authenticate the GitHub CLI with `gh auth login` first.
 
-Build and measurement tasks print one compact object containing `out`, `log` and `result`. Subprocess output and progress go to the adjacent `OUT.log`, leaving machine-readable stdout free of Cargo, compiler and Criterion output. A failed operation exits nonzero with the log path. Use `--verbose` only for interactive diagnosis; it streams subprocess diagnostics instead and no longer guarantees JSON-only stdout. Report regeneration prints its output location without reading or rebuilding sources. Plans print TOML by default or compact JSON with `--format json`.
+Build and measurement tasks print one compact object containing `out`, `log` and `result`. Subprocess output and progress go to the adjacent `OUT.log`, leaving machine-readable stdout free of Cargo, compiler and Criterion output. A failed operation exits nonzero with the log path. Each `compare resume` invocation uses a separate adjacent `OUT.resume-TIMESTAMP-PID.log`, preserving previous logs. Preparation, validation, memory and group progress go to these diagnostics, not machine-readable stdout. Use `--verbose` only for interactive diagnosis; it streams subprocess diagnostics instead and no longer guarantees JSON-only stdout. Report regeneration prints its output location without reading or rebuilding sources. Plans print TOML by default or compact JSON with `--format json`.
 
-A successful `status` exit means the read succeeded, not that every workflow passed. An experiment's command exit describes execution, not proof of a speedup. `continuous submit` records each remote measurement's outcome in `outcomes.json`, attempts both configurations even after a failure, and exits nonzero if either failed; regression checks are evaluated by report publication.
+A successful `status` exit means the read succeeded, not that every workflow passed. An experiment's command exit describes execution, not proof of a speedup. Algorithm comparisons retain exact executable pairs and recorded settings before measuring; `compare resume DIR` accepts no selection or sampling overrides. See [recovery](benchmarking.md#resuming-algorithm-comparisons) for interruptions and locks. `continuous submit` records each remote measurement's outcome in `outcomes.json`, attempts both configurations even after a failure, and exits nonzero if either failed; regression checks are evaluated by report publication.
 
 ## Reproduce continuous work locally
 

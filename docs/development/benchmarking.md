@@ -11,6 +11,7 @@ Run `pnpm tools` from the repository root with Node.js 24, the pinned pnpm and R
 | Compare working-tree code with a commit | `pnpm tools compare commit COMMIT` | Two revision builds, nine rotating baseline/control/current process blocks, paired process-level A/A, verification, provenance and a report |
 | Compare algorithms | `pnpm tools compare algorithms` | Registered algorithms in one timing executable per configuration, nine shuffled blocks, two Tessera calls for A/A, output verification, allocation measurement and a report |
 | Full algorithm comparison | `pnpm tools compare algorithms --plan release --simd` | Release coverage, native opponents and a separate Portable SIMD build |
+| Resume an interrupted algorithm comparison | `pnpm tools compare resume DIR` | Recorded selection, settings and exact retained builds; no rebuilding |
 | Preview or customize inputs | `pnpm -s tools plan NAME` | Validated selection without compiling or measuring |
 | Regenerate a report | `pnpm tools report DIR` | Statistics and figures from retained results, without new measurements |
 | Read current main or PR feedback | `pnpm -s tools status main` or `pnpm -s tools status --pr NUMBER` | Exact-ref workflow and benchmark states; [read-only interpretation](continuous-benchmarks.md#read-feedback-from-a-pr) |
@@ -41,7 +42,7 @@ Run `pnpm tools` from the repository root with Node.js 24, the pinned pnpm and R
    pnpm tools compare algorithms --plan release --simd --cpu 2
    ```
 
-   CPU 2 is an example, not a portable default. Both commands accept `--out DIR`, require a new directory and otherwise use `bench/results/<timestamp>`. Keep raw results and research harnesses outside Git. [Direct executable sessions](#direct-executable-sessions) support resuming algorithm groups and tuning sample duration or prepared-memory limits.
+   CPU 2 is an example, not a portable default. Both commands accept `--out DIR`, require a new directory and otherwise use `bench/results/<timestamp>`. Keep raw results and research harnesses outside Git. Algorithm comparisons accept `--sample-ms` (default 5) and `--memory-mib` (default 256); choose them before starting. Resume a prepared session with `pnpm tools compare resume DIR`, without changing its selection, settings or executables.
 
 4. Retain the resolved plan, source/build provenance, verification results and controls. Report tested coverage, environment, ratios, A/A ranges and result location. Identify partial, interrupted and unmeasured coverage explicitly. Investigate changes outside the controls, including apparently untouched cases; do not dismiss them as noise or tune source layout to one executable. The command contracts below define the scope of each result.
 
@@ -146,9 +147,23 @@ For static Rust checks without the native toolchain or fetched sources, use `TES
 
 Native builds default to `clang` and `clang++`. For published comparisons, prefer Clang with the same LLVM major version reported by `rustc -vV`; check it against `clang --version`. Set `CC` and `CXX` to select versioned Clang executables or another compiler. The manifests and report record the actual compiler versions, including any LLVM version difference.
 
+## Resuming algorithm comparisons
+
+`compare algorithms` builds and retains every selected configuration before starting measurements. Each configuration keeps its `compare` and `memory` executables under `bin/`; `session.json` records their hashes, the plan hash, CPU, optional group and sampling limits. Preparation removes its temporary source/build tree only after the executable pairs are retained. A session interrupted before `session.json` exists is not prepared; start a new output directory.
+
+```sh
+pnpm tools compare algorithms --plan release --simd --cpu 2 --out bench/results/release
+# After an interruption, use the same directory; no rebuild or selection overrides.
+pnpm tools compare resume bench/results/release
+```
+
+Resume verifies retained files before executing them. Validation receipts bind each successful validation to its executable pair, plan and group. The Rust journal retains complete nine-block groups and complete memory rows; it replaces interrupted groups and drops an incomplete final JSONL write. Plans or executables changed after preparation require a new session. Rust also checks the recorded host and build provenance before measurement.
+
+Only one session writer is allowed. After an abrupt parent exit, its lease must expire before another CLI writer can recover; a still-running comparison or memory worker retains its own kernel lock and blocks conflicting work. Handled cancellation rejects success and cleans up child processes. Neither a completed preparation nor a failed/cancelled measurement is a completed experiment.
+
 ## Direct executable sessions
 
-For normal comparisons, use `pnpm tools compare algorithms`. Use the binaries directly to resume completed groups, split a session across compatible directories, or set `--sample-ms` and `--memory-mib`. Keep default and Portable SIMD builds separate. The following commands show a native release session; omit `compare-native` and the fetch step for Rust-only opponents.
+For normal comparisons and recovery, use `pnpm tools compare algorithms` and `pnpm tools compare resume`. Use the binaries directly to split groups across compatible directories or investigate a lower-level harness issue. Keep default and Portable SIMD builds separate. The following commands show a native release session; omit `compare-native` and the fetch step for Rust-only opponents.
 
 ```sh
 pnpm tools native fetch
@@ -165,7 +180,7 @@ pnpm tools report bench/results/release
 
 CPU 2 is illustrative; use the [host conditions](#run-an-experiment) chosen for the experiment.
 
-`compare run` first invokes the sibling `memory` executable for any missing cases. Memory can also be measured separately:
+`compare run` first invokes the sibling `memory` executable, which repairs its journal and measures missing adapter/case rows before timing continues. Memory can also be measured separately:
 
 ```sh
 taskset -c 2 target/compare-default/release/memory \
@@ -282,6 +297,10 @@ The [port record](../design/port.md) describes separate placement controls for s
 
 ```text
 DIR/
+  plan.json                       normalized experiment selection
+  session.json                    immutable settings and executable hashes
+  bin/BUILD/compare, memory       retained executable pair for each build
+  bin/BUILD/validated.json        successful validation receipt
   manifest.json                   default timing build and complete case plan
   manifest-portable-simd.json     optional SIMD timing build
   memory-manifest-BUILD.json      memory executable's build provenance

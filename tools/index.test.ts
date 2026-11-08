@@ -23,6 +23,11 @@ test("commands reject invalid input before running", async () => {
     ["compare", "commit", "HEAD", "--filter", "["],
     ["compare", "algorithms", "--suite", "release"],
     ["compare", "algorithms", "--lengths", "0"],
+    ["compare", "algorithms", "--sample-ms", "0"],
+    ["compare", "algorithms", "--memory-mib", "1.5"],
+    ["compare", "resume", "session", "--plan", "release"],
+    ["compare", "resume", "session", "--cpu", "2"],
+    ["compare", "resume"],
     ["compare", "algorithms", "--modes", "api"],
     ["compare", "commit", "--modes", "api"],
     ["plan", "--modes", "api"],
@@ -58,6 +63,6 @@ test("task groups expose no legacy comparison aliases", () => {
   );
   assert.deepEqual(
     program.commands[0].commands.map((command) => command.name()),
-    ["commit", "algorithms"],
+    ["commit", "algorithms", "resume"],
   );
 });

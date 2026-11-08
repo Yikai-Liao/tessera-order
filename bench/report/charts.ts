@@ -1,23 +1,17 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { algorithm, catalog, recordType } from "../catalog.ts";
+import type { NameCell } from "../plot/layout.ts";
 import {
-  drawName,
-  type NameCell,
-  nameWidth,
-  svgWriter,
-  type Text,
-} from "../../.github/scripts/bencher/chart.ts";
-import { chartStyles, escapeXml, textWidth } from "../../.github/scripts/bencher/svg.ts";
-import {
-  caseId,
-  type Dataset,
-  geomean,
-  lengths,
-  measurementId,
-  median,
-  type Summary,
-  shapes,
-} from "./model.ts";
+  type RowChart as Chart,
+  type Mark,
+  type PlotRow as Row,
+  renderRows,
+  type Swatch,
+  type Tone,
+} from "../plot/rows.ts";
+import { geomean, median } from "../statistics.ts";
+import { caseId, type Dataset, lengths, measurementId, type Summary, shapes } from "./model.ts";
 
 export interface Figure {
   name: string;
@@ -35,92 +29,34 @@ export interface Figure {
 // for comparison sorts, SIMD ones included, so the classic radix-sort weak
 // spots show as orange dots falling behind.
 
-const PAD = 24;
-const W = 720;
-// Rows with a second line under the name need the taller height.
-const ROW_H = 38;
-const ROW_H_SINGLE = 34;
-const HEADER_RULE = 76;
-const PLOT_TOP = HEADER_RULE + 14;
 // Losses on short skewed inputs reach 50× against SIMD sorts. Beyond 32× a
 // mark sits on the edge as a triangle and the value keeps the exact figure.
 const RATIO_LIMIT = 32;
 
-const NAMES: Record<string, string> = {
-  tessera: "Tessera",
-  "std-stable": "slice::sort",
-  "std-unstable": "slice::sort_unstable",
-};
-const RADIX = new Set(["radsort", "voracious", "rdst", "ips2ra", "clausecker"]);
-const SIMD = new Set(["vqsort", "x86simdsort"]);
-const displayName = (variant: string) => NAMES[variant] ?? variant;
-const family = (variant: string) =>
-  variant === "glidesort-sqrt"
-    ? "comparison sort with Tessera's memory"
-    : variant === "tessera" || RADIX.has(variant)
-      ? "radix sort"
-      : SIMD.has(variant)
-        ? "SIMD sort"
-        : "comparison sort";
-
-// The one sort whose name needs a second line in a figure: glidesort-sqrt
-// receives Tessera's measured peak as its buffer, so its memory matches
-// Tessera's by construction.
-const sortName = (variant: string): NameCell => ({
-  input: displayName(variant),
-  sub: variant === "glidesort-sqrt" ? "given Tessera's memory" : "",
+const displayName = (id: string) => algorithm(id).label;
+const family = (id: string) => algorithm(id).description ?? `${algorithm(id).family} sort`;
+const sortName = (id: string): NameCell => ({
+  input: displayName(id),
+  sub: algorithm(id).detail ?? "",
   tag: "",
-  strong: variant === "tessera",
+  strong: id === "tessera",
 });
-
-const SHAPE_GROUPS: { title: string; shapes: [string, string][] }[] = [
-  { title: "Uniform", shapes: [["random", "random"]] },
-  {
-    title: "Few distinct keys",
-    shapes: [
-      ["d256", "256 values"],
-      ["d16", "16 values"],
-    ],
-  },
-  {
-    title: "Skewed",
-    shapes: [
-      ["zipf1.1", "Zipf 1.1"],
-      ["zipf2", "Zipf 2"],
-      ["skew99", "99% one key"],
-    ],
-  },
-  {
-    title: "Presorted",
-    shapes: [
-      ["sorted", "sorted"],
-      ["reverse", "reverse"],
-      ["sorted99", "99% sorted"],
-      ["runs", "sorted runs"],
-    ],
-  },
-];
-const TYPE_GROUPS: { title: string; keys: boolean; types: [string, string, string][] }[] = [
-  {
-    title: "Keys · against any sort",
-    keys: true,
-    types: [
-      ["u32", "u32", "4-byte key"],
-      ["u64", "u64", "8-byte key"],
-      ["f64", "f64", "total order"],
-    ],
-  },
-  {
-    title: "Records · against stable sorts",
-    keys: false,
-    types: [
-      ["row_u32", "{u32, u32}", "8-byte row"],
-      ["row_u64", "{u64, u32}", "16-byte row"],
-      ["record128", "128-byte record", "u64 key"],
-      ["owned", "owned record", "{u64, String}"],
-    ],
-  },
-];
+const SHAPE_GROUPS = [
+  ...Map.groupBy(
+    catalog.distributions.filter((shape) => shape.group),
+    (shape) => shape.group!,
+  ),
+].map(([title, entries]) => ({
+  title,
+  shapes: entries.map((shape) => [shape.id, shape.label] as const),
+}));
+const TYPE_GROUPS = catalog.comparison.typeGroups.map((group) => ({
+  ...group,
+  types: group.types.map((id) => {
+    const type = recordType(id);
+    return [id, type.label, type.detail] as const;
+  }),
+}));
 
 const LARGE = 1000000;
 const SHORT = 1000;
@@ -149,49 +85,16 @@ function markdownTable(headers: string[], rows: string[][]) {
   return `| ${headers.join(" | ")} |\n| ${headers.map(() => "---").join(" | ")} |\n${rows.map((r) => `| ${r.join(" | ")} |`).join("\n")}\n`;
 }
 
-type Tone = "tessera" | "radix" | "comparison";
 const toneOf = (variant: string): Tone =>
-  variant === "tessera" ? "tessera" : RADIX.has(variant) ? "radix" : "comparison";
-// Drawing order: Tessera last, on top of the field. Hollow rings are see-through
-// and drawn above filled dots, so a ring overlapping a dot stays a whole circle.
-const DEPTH: Record<Tone, number> = { comparison: 0, radix: 1, tessera: 2 };
-
-interface Mark {
-  value: number;
-  tone: Tone;
-  dy?: number;
-  hollow?: boolean;
-}
-interface Row {
-  name: NameCell;
-  swarm?: boolean;
-  marks: Mark[];
-  span?: [number, number];
-  cells: string[];
-  strong?: boolean;
-}
-interface Scale {
-  low: number;
-  high: number;
-  ticks: { value: number; label: string }[];
-  origin?: number;
-  clamp: boolean;
-}
-interface Chart {
-  title: string;
-  guide: string;
-  columns: string[];
-  groups: { title: string; rows: Row[] }[];
-  scale: Scale;
-  marker?: { value: number; label: string };
-  legend: (out: string[], t: Text, y: number) => void;
-  axis: [string, string];
-}
-
+  variant === "tessera"
+    ? "tessera"
+    : algorithm(variant).family === "radix"
+      ? "radix"
+      : "comparison";
 // A symmetric speed axis in doublings around slice::sort, wide enough for
 // the data. Left of the centre the labels are fractions, so a tick and a
 // value cell read the same way.
-function speedScale(ratios: number[]): Scale {
+function speedScale(ratios: number[]): Chart["scale"] {
   const reach = Math.max(2, ...ratios.map((r) => Math.min(RATIO_LIMIT, Math.max(r, 1 / r)) * 1.08));
   const span = 2 ** Math.ceil(Math.log2(reach));
   const steps = Math.log2(span);
@@ -204,219 +107,6 @@ function speedScale(ratios: number[]): Scale {
   return { low: 1 / span, high: span, ticks, origin: 1, clamp: true };
 }
 
-// Blue and grey come from the pull-request chart; the orange passes the
-// palette checks against both and both surfaces (CVD ΔE 11, normal ΔE 17).
-const extraStyles = `<style>
-  .tessera { fill: #4a80e6; } .radix { fill: #e8622f; } .comparison { fill: #8d8c86; }
-  .edge-tessera { stroke: #4a80e6; } .edge-radix { stroke: #e8622f; } .edge-comparison { stroke: #8d8c86; }
-</style>`;
-
-const hollowRadius = (m: Mark) => (m.tone === "tessera" ? 5.5 : 4);
-
-function drawMark(out: string[], x: number, rowY: number, m: Mark, edge: 0 | -1 | 1) {
-  const cy = rowY + (m.dy ?? 0);
-  const cls = m.tone;
-  if (edge) {
-    const tip = x + edge * 6,
-      back = x - edge * 3;
-    out.push(
-      `<path class="${cls} ring" d="M${tip.toFixed(1)} ${cy}L${back.toFixed(1)} ${cy - 6}L${back.toFixed(1)} ${cy + 6}Z" stroke-width="1.5" stroke-linejoin="round"/>`,
-    );
-    return;
-  }
-  if (m.hollow) {
-    const r = hollowRadius(m);
-    const width = m.tone === "tessera" ? 2 : 1.5;
-    const circle = `cx="${x.toFixed(1)}" cy="${cy}" r="${r}" fill="none"`;
-    out.push(
-      `<circle class="ring" ${circle} stroke-width="${width + 2}"/>`,
-      `<circle class="edge-${m.tone}" ${circle} stroke-width="${width}"/>`,
-    );
-    return;
-  }
-  const r = m.tone === "tessera" ? 6.5 : 4;
-  out.push(
-    `<circle class="${cls} ring" cx="${x.toFixed(1)}" cy="${cy}" r="${r}" stroke-width="2"/>`,
-  );
-}
-
-// Grey dots that would touch another dot move to a lane just above or below
-// the row, so every sort stays visible; Tessera keeps the centre line.
-function dodge(marks: Mark[], x: (v: number) => number) {
-  const radius = (m: Mark) => (m.tone === "tessera" ? 6.5 : 4);
-  const placed = marks.filter((m) => m.tone === "tessera").map((m) => ({ m, px: x(m.value) }));
-  const clearance = (m: Mark, px: number, dy: number) =>
-    Math.min(
-      ...placed.map((p) => Math.hypot(p.px - px, (p.m.dy ?? 0) - dy) - radius(p.m) - radius(m)),
-    );
-  for (const m of [...marks]
-    .filter((m) => m.tone !== "tessera")
-    .sort((a, b) => a.value - b.value)) {
-    const px = x(m.value);
-    const lanes = [0, -7, 7];
-    m.dy =
-      lanes.find((dy) => clearance(m, px, dy) >= 1) ??
-      lanes.reduce((best, dy) => (clearance(m, px, dy) > clearance(m, px, best) ? dy : best));
-    placed.push({ m, px });
-  }
-}
-
-// Header: the finding as the title, what is plotted under it, then a rule.
-function drawTitle(out: string[], t: Text, width: number, spec: Chart) {
-  t("ink stat", PAD, 40, spec.title);
-  t("muted sub", PAD, 60, spec.guide);
-  out.push(
-    `<line class="rule" x1="${PAD}" x2="${width - PAD}" y1="${HEADER_RULE}" y2="${HEADER_RULE}" stroke-width="1"/>`,
-  );
-}
-
-// A sort or input name, on one line when it has no second line.
-function drawRowName(out: string[], t: Text, name: NameCell, cy: number) {
-  if (name.sub) drawName(out, t, name, cy);
-  else t(`ink${name.strong ? " strong" : ""}`, PAD, cy + 4, name.input);
-}
-
-function renderChart(spec: Chart) {
-  const rows = spec.groups.flatMap((g) => g.rows);
-  const nameW = nameWidth(rows.map((r) => r.name));
-  const rowH = rows.some((r) => r.name.sub) ? ROW_H : ROW_H_SINGLE;
-  // Value columns, right-aligned from the edge; caps headings run wide.
-  const columnW = spec.columns.map((head, j) =>
-    Math.max(textWidth(head, 11) * 1.3, ...rows.map((r) => textWidth(r.cells[j], 12) * 1.05)),
-  );
-  const columnR = columnW.map((_, j) =>
-    columnW.slice(j + 1).reduce((right, w) => right - w - 20, W - PAD),
-  );
-  const plotL = PAD + Math.ceil(nameW) + 28;
-  const plotR = columnR[0] - columnW[0] - 24;
-  const room = 10;
-  const { low, high } = spec.scale;
-  const x = (v: number) =>
-    plotL +
-    room +
-    (Math.log(Math.min(high, Math.max(low, v)) / low) / Math.log(high / low)) *
-      (plotR - plotL - 2 * room);
-  const edgeOf = (v: number): 0 | -1 | 1 =>
-    spec.scale.clamp ? (v < low ? -1 : v > high ? 1 : 0) : 0;
-
-  let y = PLOT_TOP;
-  const layout = spec.groups.map((g, i) => {
-    y += i ? 10 : 0;
-    const titleY = y + 12;
-    y += 22;
-    const placed = g.rows.map((row) => {
-      const cy = y + rowH / 2;
-      y += rowH;
-      return { row, cy };
-    });
-    return { title: g.title, titleY, placed };
-  });
-  const plotBottom = y + 4;
-  const axisY = plotBottom + 18;
-  const legendY = axisY + 34;
-  const H = legendY + 18;
-
-  const { out, t } = svgWriter();
-  out.push(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="t d">`,
-  );
-  out.push(`<title id="t">${escapeXml(spec.title)}</title>`);
-  out.push(
-    `<desc id="d">${escapeXml(
-      `${spec.guide}. ${spec.columns.join(", ")}: ${rows.map((r) => `${r.name.input} ${r.cells.join(", ")}`).join("; ")}`,
-    )}</desc>`,
-  );
-  out.push(chartStyles, extraStyles);
-  out.push(`<rect class="panel" x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" rx="12"/>`);
-
-  drawTitle(out, t, W, spec);
-
-  for (const tick of spec.scale.ticks) {
-    const gx = x(tick.value).toFixed(1);
-    const origin = tick.value === spec.scale.origin;
-    out.push(
-      `<line class="${origin ? "axis" : "rule"}" x1="${gx}" x2="${gx}" y1="${PLOT_TOP}" y2="${plotBottom}" stroke-width="1"/>`,
-    );
-    t(
-      origin ? "ink tiny" : "muted tiny",
-      x(tick.value),
-      axisY,
-      tick.label,
-      ' text-anchor="middle"',
-    );
-  }
-  if (spec.marker) {
-    const mx = x(spec.marker.value).toFixed(1);
-    out.push(
-      `<line class="axis" x1="${mx}" x2="${mx}" y1="${PLOT_TOP - 2}" y2="${plotBottom}" stroke-width="1" stroke-dasharray="3 3"/>`,
-    );
-    t("muted tiny", x(spec.marker.value), PLOT_TOP - 4, spec.marker.label, ' text-anchor="middle"');
-  }
-  // The axis ends say in words which side is which.
-  const [left, right] = spec.axis;
-  t("muted sub", plotL, axisY + 16, left);
-  t("muted sub", plotR, axisY + 16, right, ' text-anchor="end"');
-
-  for (const [j, head] of spec.columns.entries())
-    t("caps muted", columnR[j], layout[0].titleY, head.toUpperCase(), ' text-anchor="end"');
-  for (const g of layout) {
-    t("caps muted", PAD, g.titleY, g.title.toUpperCase());
-    for (const { row, cy } of g.placed) {
-      drawRowName(out, t, row.name, cy);
-      if (row.span) {
-        // The line stops at a ring's edge rather than showing through it.
-        const inset = (value: number) => {
-          const ring = row.marks.find((m) => m.hollow && m.value === value);
-          return ring ? hollowRadius(ring) : 0;
-        };
-        const [lo, hi] = row.span;
-        out.push(
-          `<line class="edge-${row.marks[0].tone}" x1="${(x(lo) + inset(lo)).toFixed(1)}" x2="${(x(hi) - inset(hi)).toFixed(1)}" y1="${cy}" y2="${cy}" stroke-width="2" stroke-linecap="round"/>`,
-        );
-      }
-      if (row.swarm) dodge(row.marks, x);
-      const depth = (m: Mark) => DEPTH[m.tone] + (m.hollow ? 0.5 : 0);
-      for (const m of [...row.marks].sort((a, b) => depth(a) - depth(b)))
-        drawMark(out, x(m.value), cy, m, edgeOf(m.value));
-      // Tessera's cells are ink, its last cell bold; other sorts' are muted.
-      for (const [j, cell] of row.cells.entries()) {
-        const cls = !row.strong
-          ? "val muted"
-          : j === row.cells.length - 1
-            ? "val ink strong"
-            : "val ink";
-        t(cls, columnR[j], cy + 4, cell, ' text-anchor="end"');
-      }
-    }
-  }
-
-  spec.legend(out, t, legendY);
-  out.push("</svg>");
-  return `<!-- SPDX-License-Identifier: BSD-2-Clause -->\n${out.join("\n")}\n`;
-}
-
-type Swatch = Tone | "simd" | "within" | "dash";
-function legendRow(out: string[], t: Text, y: number, items: [Swatch[], string][]) {
-  let lx = PAD;
-  for (const [swatches, label] of items) {
-    for (const s of swatches) {
-      const cx = lx + 4;
-      if (s === "within" || s === "simd") {
-        const edge = s === "simd" ? " edge-tessera" : "";
-        out.push(
-          `<circle class="within${edge}" cx="${cx}" cy="${y - 4}" r="3.5" stroke-width="1.5"/>`,
-        );
-      } else if (s === "dash")
-        out.push(
-          `<line class="axis" x1="${cx}" x2="${cx}" y1="${y - 11}" y2="${y + 3}" stroke-width="1" stroke-dasharray="3 3"/>`,
-        );
-      else out.push(`<circle class="${s}" cx="${cx}" cy="${y - 4}" r="4"/>`);
-      lx += 10;
-    }
-    t("muted sub", lx + 4, y, label);
-    lx += 4 + textWidth(label, 11) + 18;
-  }
-}
 // Speed of one variant relative to slice::sort in the same blocks: the
 // slice::sort time over the variant's, per block, then the median.
 function speedOnCase(
@@ -451,8 +141,7 @@ const kindLegend = (simd: boolean): [Swatch[], string][] => [
   [["comparison"], "comparison sorts"],
 ];
 const SPEED_AXIS: [string, string] = ["← slower", "faster →"];
-const speedLegend = (simd: boolean) => (out: string[], t: Text, y: number) =>
-  legendRow(out, t, y, kindLegend(simd));
+const speedLegend = kindLegend;
 
 function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figure | null {
   const entries = dataset.manifests.get("default")!.variants.map((v) => ({
@@ -495,7 +184,7 @@ function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figur
   return {
     name: "ranking",
     title,
-    svg: renderChart({
+    svg: renderRows({
       title,
       guide: "Speed relative to slice::sort, geometric mean over 10 input patterns",
       columns: ["Speed"],
@@ -634,7 +323,7 @@ function renderInputs(
   return {
     name,
     title,
-    svg: renderChart({
+    svg: renderRows({
       title,
       guide: `${formatLength(n)} u64 keys; each dot is one sort, placed by its speed relative to slice::sort`,
       columns: ["Speed", "Rank"],
@@ -668,7 +357,7 @@ function renderTypes(dataset: Dataset, summaries: Map<string, Summary>): Figure 
   return {
     name: "types",
     title,
-    svg: renderChart({
+    svg: renderRows({
       title,
       guide: `${formatLength(LARGE)} elements; speed relative to slice::sort, geometric mean over 10 input patterns`,
       columns: ["Speed", "Rank"],
@@ -731,7 +420,7 @@ function renderMemory(dataset: Dataset): Figure | null {
   return {
     name: "memory",
     title,
-    svg: renderChart({
+    svg: renderRows({
       title,
       guide: `Peak heap allocation during one sort, beyond the ${formatBytes(input)} input`,
       columns: ["Worst"],
@@ -747,23 +436,79 @@ function renderMemory(dataset: Dataset): Figure | null {
       },
       marker: { value: input, label: "input size" },
       axis: ["← less memory", "more memory →"],
-      legend: (out, t, y) =>
-        legendRow(out, t, y, [
-          ...kindLegend(false),
-          [["within"], "random input"],
-          [["dash"], "input size"],
-        ]),
+      legend: [...kindLegend(false), [["within"], "random input"], [["dash"], "input size"]],
     }),
     table: markdownTable(["Sort", "Random input", "Worst of 10 inputs"], plotted),
   };
 }
 
+/** Plot selected inputs when a plan does not contain a complete release panel. */
+function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figure[] {
+  return dataset.manifests.get("default")!.cases.flatMap((input) => {
+    const id = caseId(input);
+    const groups = [...dataset.manifests.keys()].flatMap((build) => {
+      const entries = dataset.manifests.get(build)!.variants.flatMap((variant) => {
+        const summary = summaries.get(measurementId(build, id, variant.name));
+        return summary ? [summary] : [];
+      });
+      if (!entries.length) return [];
+      return [
+        {
+          title: build,
+          rows: entries.map(
+            (summary): Row => ({
+              name: sortName(summary.variant),
+              marks: [{ value: summary.ratio, tone: toneOf(summary.variant) }],
+              span: [summary.low, summary.high],
+              cells: [
+                times(summary.ratio),
+                `${summary.aaLow.toFixed(3)}–${summary.aaHigh.toFixed(3)}`,
+              ],
+            }),
+          ),
+        },
+      ];
+    });
+    if (!groups.length) return [];
+    const bounds = groups.flatMap((group) => group.rows.flatMap((row) => row.span!));
+    const scale = speedScale(bounds);
+    scale.ticks = scale.ticks.map((tick) =>
+      tick.value === 1 ? { ...tick, label: "Tessera" } : tick,
+    );
+    const title = `${recordType(input.ty).label} · ${input.distribution} · ${formatLength(input.len)} records`;
+    return [
+      {
+        name: `selected-${id.replaceAll("/", "-").replaceAll(".", "_")}`,
+        title,
+        svg: renderRows({
+          title,
+          guide: "Sort time / paired Tessera time · nine blocks per build",
+          columns: ["Time ratio", "A/A range"],
+          groups,
+          scale,
+          legend: {
+            note: "dot: median · line: block range · each build has its own Tessera control",
+          },
+          axis: ["← less time", "more time →"],
+        }),
+        table: markdownTable(
+          ["Build", "Sort", "Time ratio", "A/A range"],
+          groups.flatMap((group) =>
+            group.rows.map((row) => [group.title, row.name.input, ...row.cells]),
+          ),
+        ),
+      },
+    ];
+  });
+}
+
 export function renderFigures(dataset: Dataset, summaries: Map<string, Summary>): Figure[] {
-  return [
+  const figures = [
     renderRanking(dataset, summaries),
     renderInputs(dataset, summaries, "inputs", LARGE),
     renderInputs(dataset, summaries, "short", SHORT),
     renderTypes(dataset, summaries),
     renderMemory(dataset),
   ].filter((f): f is Figure => f !== null);
+  return figures.length ? figures : renderSelected(dataset, summaries);
 }

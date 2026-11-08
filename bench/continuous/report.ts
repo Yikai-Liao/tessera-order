@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { caseLabel, caseParts } from "../catalog.ts";
+
+export { caseLabel, caseParts } from "../catalog.ts";
+
 export interface ThresholdModel {
   test: string;
   min_sample_size: number;
@@ -113,59 +117,6 @@ export const MAJOR = 0.2;
 
 export function isMajor(r: Row) {
   return Math.abs(r.change ?? 0) >= MAJOR;
-}
-
-// Benchmark IDs are `<language>/<type>/<distribution>/<length>/<seed>/<mode>`,
-// as in docs/development/benchmarking.md. Readers get the words; the ID stays
-// in link titles and the full table, where it is copied into `cargo bench`.
-const DISTRIBUTIONS: Record<string, string> = {
-  random: "random",
-  sorted: "sorted",
-  reverse: "reverse",
-  equal: "all equal",
-  runs: "runs",
-  d16: "16 values",
-  d256: "256 values",
-  d4096: "4,096 values",
-  "zipf1.1": "Zipf 1.1",
-  zipf2: "Zipf 2",
-  sorted95: "95% sorted",
-  sorted99: "99% sorted",
-  skew50: "50% one key",
-  skew99: "99% one key",
-  two_values: "two values",
-  hot50: "50% one key, rest unique",
-  sparse8: "8 wide keys",
-  sparse_digits: "sparse digits",
-  bimodal: "two clusters",
-  far_swaps: "1% far swaps",
-  finite_signed: "finite floats",
-  sorted_tail: "sorted + tail",
-};
-
-export function caseParts(id: string) {
-  const parts = id.split("/");
-  if (parts.length !== 6 || !/^\d+$/.test(parts[3]))
-    return { type: "", input: id, n: "", extra: "", seed: "", mode: "" };
-  const [, type, distribution, length, seed, mode] = parts;
-  const row = type.match(/^row_(\w+)$/);
-  // Seed 1 and the public API are the defaults; only departures are named.
-  const extra = [];
-  if (seed !== "s1") extra.push(`seed ${seed.slice(1)}`);
-  if (mode !== "api") extra.push(mode);
-  return {
-    type: row ? `{${row[1]},u32}` : type,
-    input: DISTRIBUTIONS[distribution] ?? distribution,
-    n: Number(length).toLocaleString("en-US"),
-    extra: extra.join(", "),
-    seed,
-    mode,
-  };
-}
-
-export function caseLabel(id: string) {
-  const p = caseParts(id);
-  return [p.type, p.input, p.n].filter(Boolean).join(" · ") + (p.extra ? `, ${p.extra}` : "");
 }
 
 // One row per benchmark and measure. Alerts are authoritative for the

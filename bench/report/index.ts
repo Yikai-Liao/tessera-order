@@ -1,19 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { mkdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { median } from "../statistics.ts";
 import { renderFigures } from "./charts.ts";
 import { loadRun } from "./load.ts";
-import {
-  caseId,
-  type Dataset,
-  measurementId,
-  median,
-  type Summary,
-  summarize,
-  types,
-} from "./model.ts";
+import { caseId, type Dataset, measurementId, type Summary, summarize, types } from "./model.ts";
 
 function formatCell(value: unknown) {
   return String(value ?? "unavailable")
@@ -192,11 +184,4 @@ export async function writeReport(directories: string[], partial = false): Promi
   console.log(
     `Report: ${join(out, "index.md")} (${summaries.size} summaries, ${charts.length} figures)`,
   );
-}
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const args = process.argv.slice(2),
-    partial = args.includes("--partial"),
-    dirs = args.filter((a) => a !== "--partial");
-  if (!dirs.length) throw new Error("usage: npm run bench:report -- DIR [DIR ...] [--partial]");
-  await writeReport(dirs, partial);
 }

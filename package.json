@@ -9,25 +9,28 @@
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
-    "docs:typecheck": "vue-tsc --noEmit -p docs/.vitepress",
+    "docs:typecheck": "tsc --runExternalCode --noEmit -p docs/.vitepress",
     "docs:test": "node --test \"docs/.vitepress/theme/sim/*.test.ts\"",
-    "scripts:typecheck": "tsc --noEmit -p .github/scripts",
-    "scripts:test": "node --test \".github/scripts/bencher/*.test.ts\"",
-    "bench:report": "node bench/report/index.ts",
-    "bench:test": "node --test \"bench/report/*.test.ts\"",
-    "bench:typecheck": "tsc --noEmit -p bench/report"
+    "bench:report": "node bench/index.ts report",
+    "bench:test": "node --test \"bench/*.test.ts\" \"bench/local/*.test.ts\" \"bench/plot/*.test.ts\" \"bench/report/*.test.ts\" \"bench/continuous/*.test.ts\"",
+    "bench:typecheck": "tsc --noEmit -p bench && tsc --noEmit -p bench/plot",
+    "bench": "node bench/index.ts"
   },
   "devDependencies": {
     "@actions/github": "^9.1.1",
     "@biomejs/biome": "2.6.6",
     "@types/node": "^24.19.2",
+    "@vue/content-mapper": "4.0.0-alpha.0",
+    "commander": "^15.1.0",
     "markdown-it-mathjax3": "^4.3.2",
-    "typescript": "^6.0.3",
+    "typescript": "7.1.0-beta",
+    "vite": "^5.4.21",
     "vitepress": "^1.6.4",
     "vue": "^3.5.45",
-    "vue-tsc": "^3.3.14"
+    "zod": "^4.6.7"
   },
   "engines": {
     "node": ">=24.0.0"
-  }
+  },
+  "packageManager": "pnpm@10.34.0"
 }

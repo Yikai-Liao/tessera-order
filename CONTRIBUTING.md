@@ -18,10 +18,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
+TypeScript checks use the pinned official TypeScript 7.1 beta native compiler. Vue single-file components use the official `@vue/content-mapper` alpha through `contentMappers` and `--runExternalCode`; `vue-tsc` and a legacy TypeScript installation are not required. Node.js 24 executes the tooling's `.ts` files directly; VitePress owns site transformation and bundling.
+
 The documentation site and CI scripts are formatted and linted with [Biome](https://biomejs.dev/) (TypeScript, Vue, CSS, JSON) and [Ruff](https://docs.astral.sh/ruff/) (Python); CI checks both:
 
 ```sh
-npm ci && npm run format
+pnpm install --frozen-lockfile && pnpm format
 uvx ruff@0.17.4 format && uvx ruff@0.17.4 check
 ```
 
@@ -47,6 +49,8 @@ cargo +nightly miri test -p tessera-sort --doc --no-default-features
 The engine moves records through uninitialized scratch memory. Every `unsafe` block states the invariant it relies on in a `SAFETY:` comment. A change that adds or alters unsafe code must explain why the invariant still holds, and must keep the tests for panicking key functions, non-`Copy` records and records holding `&mut` references passing.
 
 ## Performance changes
+
+Use `pnpm bench compare COMMIT` for a working-tree development screen, `pnpm bench run` for algorithm comparisons and `pnpm bench pr NUMBER` to read current-head continuous feedback. See the [benchmark guide](docs/development/benchmarking.md). Select coverage with `--plan NAME-OR-FILE` and CLI axis overrides; repository defaults live in `bench/plans/`. Tool dependencies use the pinned pnpm version; register display identities in `bench/catalog.json` and reuse the [shared figure templates](docs/development/benchmark-figures.md).
 
 A claim that a change is faster or slower needs measurements that follow [`docs/development/benchmarking.md`](docs/development/benchmarking.md): paired with the previous version in one process, with the A/A range reported. Please include the raw output or a link to it.
 
@@ -93,7 +97,7 @@ Signed-off-by: Your Name <you@example.com>
 | `docs` | Documentation, comments and the documentation site |
 | `test` | Tests only |
 | `ci` | Workflows and `.github/scripts` |
-| `build` | Cargo, npm and tool configuration, such as the MSRV, Biome or Ruff |
+| `build` | Cargo, pnpm and tool configuration, such as the MSRV, Biome or Ruff |
 | `chore` | Other maintenance, such as releases |
 | `revert` | A revert of an earlier commit |
 

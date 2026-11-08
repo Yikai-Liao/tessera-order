@@ -119,12 +119,13 @@ jobs:
           PY
       - run: target/release/compare validate --suite smoke
       - run: target/release/compare run --suite smoke --group u64/random --sample-ms 1 --out bench/results/ci
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run bench:report -- bench/results/ci --partial
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm bench report bench/results/ci --partial
 
   miri:
     name: miri (${{ matrix.features }})

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { caseLabel, type caseParts, type ReportSummary, type Row } from "./report.ts";
+import { caseLabel, type caseParts, modeOrder } from "../catalog.ts";
+import type { ReportSummary, Row } from "./report.ts";
+
+export { modeName } from "../catalog.ts";
 
 // One build configuration's measurement. A configuration is a separately
 // compiled executable with its own Testbed and baseline, such as Portable
@@ -19,25 +22,6 @@ export interface CaseRow {
   parts: ReturnType<typeof caseParts>;
   label: string;
   cells: (Row | undefined)[];
-}
-
-// Display names for the mode segment of a benchmark ID, in report order.
-// Unknown modes keep their ID and follow these.
-const MODES: [string, string][] = [
-  ["api", "stable"],
-  ["workspace", "stable, workspace"],
-  ["unstable", "unstable"],
-  ["par", "parallel"],
-  ["par_unstable", "parallel unstable"],
-];
-
-export function modeName(mode: string) {
-  return MODES.find(([id]) => id === mode)?.[1] ?? mode;
-}
-
-function modeOrder(mode: string) {
-  const i = MODES.findIndex(([id]) => id === mode);
-  return i < 0 ? MODES.length : i;
 }
 
 export function caseRows(configurations: Configuration[]): CaseRow[] {

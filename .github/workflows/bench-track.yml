@@ -37,7 +37,7 @@ jobs:
         uses: actions/github-script@v9
         with:
           script: |
-            const { resolveSource } = require('./.github/scripts/bencher/github.ts');
+            const { resolveSource } = require('./bench/continuous/github.ts');
             await resolveSource({ github, context, core });
       - name: Start the report checks
         id: check
@@ -47,8 +47,8 @@ jobs:
           HASH: ${{ steps.source.outputs.hash }}
         with:
           script: |
-            const { startReport } = require('./.github/scripts/bencher/github.ts');
-            const { VARIANTS } = require('./.github/scripts/bencher/variants.ts');
+            const { startReport } = require('./bench/continuous/github.ts');
+            const { VARIANTS } = require('./bench/continuous/variants.ts');
             for (const variant of VARIANTS) {
               await startReport({ github, context, core, hash: process.env.HASH, variant });
             }
@@ -78,7 +78,7 @@ jobs:
           # The image definition is trusted; only the executable comes from the build.
           image="registry.bencher.dev/$BENCHER_PROJECT:$TAG"
           chmod +x artifact/default/bench artifact/portable-simd/bench
-          cp .github/scripts/bench_parallel.py artifact/bench_parallel.py
+          cp bench/continuous/worker.py artifact/bench_parallel.py
           printf 'FROM python:3.13-slim-bookworm\nCOPY default/bench /bench-default\nCOPY portable-simd/bench /bench-portable-simd\nCOPY bench_parallel.py /bench_parallel.py\n' \
             | docker build --platform linux/amd64 -t "$image" -f - artifact
           printf '%s' "$BENCHER_API_KEY" | docker login registry.bencher.dev \
@@ -158,8 +158,8 @@ jobs:
           CANCELLED: ${{ job.status == 'cancelled' }}
         with:
           script: |
-            const { publishReport } = require('./.github/scripts/bencher/index.ts');
-            const { VARIANTS } = require('./.github/scripts/bencher/variants.ts');
+            const { publishReport } = require('./bench/continuous/index.ts');
+            const { VARIANTS } = require('./bench/continuous/variants.ts');
             const env = process.env;
             await publishReport({ github, context, core, inputs: {
               language: "rust", hash: env.HASH, number: env.PR_NUMBER,

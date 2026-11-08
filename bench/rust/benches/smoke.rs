@@ -8,125 +8,43 @@
 
 use criterion::{BatchSize, Criterion};
 use std::hint::black_box;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tessera_bench::case::{Key, Row, generate};
+use tessera_bench::plan::Plan;
 use tessera_sort::Workspace;
-use tessera_sort::thresholds::{INSERTION_MAX, TILE_BYTES};
 
 /// Elements prepared per Criterion batch, so the cache footprint of a batch
 /// is the same for every length and does not depend on measured timings.
 const BATCH_ELEMENTS: usize = 1 << 18;
 
-/// Length below one tile where ordered inputs take the order-probe routes.
-const SHORT: usize = 1_000;
-/// Length spanning several tiles in the continuous suite.
-const MID: usize = 65_536;
 /// Length used for measured engine decisions.
 const LARGE: usize = 1_000_000;
 /// Length exercising the out-of-cache block partition.
 const HUGE: usize = 10_000_000;
 
-/// Registers the continuous suite's fixed case IDs and allocation modes.
+/// Expands the experiment before generating any inputs.
 fn suite(c: &mut Criterion) {
-    // Insertion limit, one past it, and one past the tile capacity for 8- and
-    // 16-byte records. Cases this short move with code placement, so only the
-    // boundaries themselves are kept.
-    keys::<u64>(c, "random", INSERTION_MAX, false);
-    for len in [INSERTION_MAX + 1, TILE_BYTES / 8 + 1] {
-        keys::<u64>(c, "random", len, true);
-        rows::<u32>(c, "random", len, false);
+    for case in plan().inputs().expect("nonempty benchmark plan") {
+        let distribution = &case.distribution;
+        let len = case.len;
+        match case.ty.as_str() {
+            "u32" => keys::<u32>(c, distribution, len),
+            "u64" => keys::<u64>(c, distribution, len),
+            "u128" => keys::<u128>(c, distribution, len),
+            "f64" => keys::<f64>(c, distribution, len),
+            "row_u32" => rows::<u32>(c, distribution, len),
+            "row_u64" => rows::<u64>(c, distribution, len),
+            "rec128_u64" => records(c, distribution, len),
+            _ => unreachable!("validated record type"),
+        }
     }
-    rows::<u64>(c, "random", TILE_BYTES / 16 + 1, true);
-
-    // Below one tile, an ordered input is confirmed or reversed before any
-    // tile routing, so this pair isolates the order probe and the reversal
-    // from the routes the cases above measure. Both are a screen only: code
-    // placement moves short cases, and an alert needs the protocol's controls.
-    for distribution in ["sorted", "reverse"] {
-        keys::<u64>(c, distribution, SHORT, false);
-    }
-
-    // PR #40: the low-fanout tile route benefits short, heavily skewed inputs.
-    // Keep a random control for both direct keys and stable keyed rows.
-    for distribution in ["random", "skew99"] {
-        keys::<u64>(c, distribution, SHORT, false);
-        rows::<u64>(c, distribution, SHORT, false);
-    }
-
-    // Eight tiles: one block-partition level and every root and node route.
-    keys::<u64>(c, "random", MID, true);
-    for distribution in [
-        // Root shortcuts: confirmed order, stable reversal, budgeted
-        // insertion, constant keys.
-        "sorted",
-        "reverse",
-        "sorted99",
-        "equal",
-        // One pair of far-apart positions swapped per hundred records: the
-        // probe must decline before it moves them.
-        "far_swaps",
-        // At most 8 varying bits: one block partition.
-        "d16",
-        // A repeated key: the equality partition.
-        "zipf2",
-        "skew99",
-        // A short end run separated by the top bit: the outlier run.
-        "sorted_tail",
-        // Mixed ascending and descending runs, as from merged sources: the
-        // insertion probe must give up early.
-        "runs",
-    ] {
-        keys::<u64>(c, distribution, MID, false);
-    }
-    keys::<u32>(c, "random", MID, false);
-    keys::<u32>(c, "sorted99", MID, false);
-    keys::<u128>(c, "random", MID, false);
-    keys::<f64>(c, "random", MID, false);
-    keys::<f64>(c, "sorted", MID, false);
-    keys::<f64>(c, "sorted99", MID, false);
-    // Measured magnitudes rather than arbitrary bits: both signs, magnitudes
-    // within 2^-23..2^7, no NaN or infinity.
-    keys::<f64>(c, "finite_signed", MID, false);
-    rows::<u64>(c, "random", MID, true);
-    rows::<u64>(c, "d16", MID, false);
-    // Half the records repeat one key and the rest are distinct: the equality
-    // partition must keep their payload order stable.
-    rows::<u64>(c, "hot50", MID, false);
-    // A 128-byte record: its byte size, not its key, sets the tile capacity
-    // and the cursor-table cap for records wider than a machine word.
-    records(c, "random", MID, true);
-    // The sparse digits reach every byte of a record much wider than the
-    // cursor table entry that moves it.
-    records(c, "sparse_digits", MID, false);
-
-    // The size at which most engine decisions were measured.
-    for distribution in ["random", "zipf2", "skew99", "two_values", "sorted99"] {
-        keys::<u64>(c, distribution, LARGE, false);
-    }
-    // High-cardinality inputs that are not uniform, where the split sample
-    // decides the digit width: four random bits per byte never fill a sampled
-    // window, two clusters a machine word apart leave the top window with two
-    // values, and half a node repeating one key reaches the equality partition.
-    for distribution in ["sparse_digits", "bimodal", "hot50", "d4096"] {
-        keys::<u64>(c, distribution, LARGE, false);
-    }
-    keys::<u32>(c, "random", LARGE, false);
-    keys::<u128>(c, "random", LARGE, false);
-    // Eight keys in 256 top-digit buckets: digit widening.
-    keys::<u128>(c, "sparse8", LARGE, false);
-    rows::<u64>(c, "random", LARGE, false);
-
-    // Ten million records leave the caches and go through the block partition
-    // on every level, which is where the block size and the scratch working set
-    // decide. Random is the worst case for routing and Zipf the common skew.
-    keys::<u64>(c, "random", HUGE, false);
-    keys::<u64>(c, "zipf2", HUGE, false);
 }
 
 /// Measures a scalar-key case with the public API and optional workspace.
-fn keys<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bool) {
+fn keys<K: Key>(c: &mut Criterion, distribution: &str, len: usize) {
     let id = format!("rust/{}/{distribution}/{len}/s1", K::NAME);
-    if !selected(&id, workspace) {
+    if !selected(&id) {
         return;
     }
     let input = generate::<K>(distribution, len);
@@ -141,7 +59,7 @@ fn keys<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bo
         K::same,
         tessera_sort::stable_sort,
     );
-    if workspace {
+    if plan_selects(&id, "workspace") {
         let mut ws = Workspace::new();
         measure(c, &id, "workspace", &input, &expected, K::same, |v| {
             ws.stable_sort(v)
@@ -150,9 +68,9 @@ fn keys<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bo
 }
 
 /// Measures a keyed-row case while checking stable payload order.
-fn rows<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bool) {
+fn rows<K: Key>(c: &mut Criterion, distribution: &str, len: usize) {
     let id = format!("rust/row_{}/{distribution}/{len}/s1", K::NAME);
-    if !selected(&id, workspace) {
+    if !selected(&id) {
         return;
     }
     let input: Vec<Row<K>> = generate::<K>(distribution, len)
@@ -165,7 +83,7 @@ fn rows<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bo
     let same = |a: &Row<K>, b: &Row<K>| a.key.same(&b.key) && a.row == b.row;
     let api = |v: &mut [Row<K>]| tessera_sort::stable_sort_by_key(v, |r| r.key);
     measure(c, &id, "api", &input, &expected, same, api);
-    if workspace {
+    if plan_selects(&id, "workspace") {
         let mut ws = Workspace::new();
         let prepared = |v: &mut [Row<K>]| ws.stable_sort_by_key(v, |r| r.key);
         measure(c, &id, "workspace", &input, &expected, same, prepared);
@@ -191,9 +109,9 @@ impl Wide {
 
 /// Times records much wider than their key, so record size rather than key
 /// size decides the tile capacity and the block size.
-fn records(c: &mut Criterion, distribution: &str, len: usize, workspace: bool) {
+fn records(c: &mut Criterion, distribution: &str, len: usize) {
     let id = format!("rust/rec128_u64/{distribution}/{len}/s1");
-    if !selected(&id, workspace) {
+    if !selected(&id) {
         return;
     }
     let input: Vec<Wide> = generate::<u64>(distribution, len)
@@ -206,7 +124,7 @@ fn records(c: &mut Criterion, distribution: &str, len: usize, workspace: bool) {
     let same = |a: &Wide, b: &Wide| a.key == b.key && a.payload == b.payload;
     let api = |v: &mut [Wide]| tessera_sort::stable_sort_by_key(v, |r| r.key);
     measure(c, &id, "api", &input, &expected, same, api);
-    if workspace {
+    if plan_selects(&id, "workspace") {
         let mut ws = Workspace::new();
         let prepared = |v: &mut [Wide]| ws.stable_sort_by_key(v, |r| r.key);
         measure(c, &id, "workspace", &input, &expected, same, prepared);
@@ -224,6 +142,9 @@ fn measure<T: Copy>(
     same: impl Fn(&T, &T) -> bool,
     mut sort: impl FnMut(&mut [T]),
 ) {
+    if !plan_selects(id, mode) {
+        return;
+    }
     let mut values = input.to_vec();
     sort(&mut values);
     let ok = values.iter().zip(expected).all(|(a, b)| same(a, b));
@@ -257,17 +178,40 @@ fn measure<T: Copy>(
     group.finish();
 }
 
+/// Reads the compiled continuous preset unless a local caller supplies a plan.
+fn plan() -> &'static Plan {
+    static PLAN: OnceLock<Plan> = OnceLock::new();
+    PLAN.get_or_init(|| {
+        let text = std::env::var("TESSERA_BENCH_PLAN").map_or_else(
+            |_| include_str!("../../plans/continuous.json").to_owned(),
+            |path| std::fs::read_to_string(path).expect("read benchmark plan"),
+        );
+        Plan::parse(&text, "smoke").expect("valid smoke benchmark plan")
+    })
+}
+
+/// Tests a registered group and mode against the experiment selection.
+fn plan_selects(id: &str, mode: &str) -> bool {
+    let parts: Vec<_> = id.split('/').collect();
+    plan().selects(parts[1], parts[2], parts[3].parse().unwrap(), mode)
+}
+
 /// Selects groups before generation so idle workers create no memory traffic.
-fn selected(id: &str, workspace: bool) -> bool {
+fn selected(id: &str) -> bool {
+    let api = plan_selects(id, "api");
+    let prepared = plan_selects(id, "workspace");
     if std::env::var_os("TESSERA_BENCH_LIST").is_some() {
-        println!("{id}/api");
-        if workspace {
+        if api {
+            println!("{id}/api");
+        }
+        if prepared {
             println!("{id}/workspace");
         }
         return false;
     }
-    std::env::var("TESSERA_BENCH_GROUPS")
-        .map_or(true, |groups| groups.lines().any(|group| group == id))
+    (api || prepared)
+        && std::env::var("TESSERA_BENCH_GROUPS")
+            .map_or(true, |groups| groups.lines().any(|group| group == id))
 }
 
 /// Runs the Criterion suite with command-line case selection.

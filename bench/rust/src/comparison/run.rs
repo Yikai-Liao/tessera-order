@@ -62,6 +62,7 @@ pub(super) fn shuffle_variants(n: usize, block: usize, c: &Case) -> Vec<usize> {
 /// Publishes nine shuffled blocks with a separate Tessera A/A sample.
 pub(super) fn measure_case(
     case: &Case,
+    variants: &[super::variant::Variant],
     scratch_bytes: usize,
     min_sample_ns: u64,
     prepared_cap_bytes: usize,
@@ -69,7 +70,6 @@ pub(super) fn measure_case(
     mut publish: impl FnMut(Sample) -> super::Result<()>,
 ) -> super::Result<()> {
     let input = super::variant::CaseInput::new(case);
-    let variants = super::variant::list_variants();
     let active: Vec<_> = variants
         .iter()
         .filter(|v| v.prepare(&input, scratch_bytes).is_some())

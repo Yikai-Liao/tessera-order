@@ -307,41 +307,15 @@ pub(super) struct Variant {
 }
 /// Lists the adapters measured in the selected executable configuration.
 pub(super) fn list_variants() -> Vec<Variant> {
-    let mut v = vec![
-        Variant {
-            name: "tessera",
-            stable: true,
-        },
-        Variant {
-            name: "std-stable",
-            stable: true,
-        },
-    ];
-    if !cfg!(feature = "portable-simd") {
-        for (name, stable) in [
-            ("radsort", true),
-            ("voracious", true),
-            ("glidesort", true),
-            ("glidesort-sqrt", true),
-            ("std-unstable", false),
-            ("rdst", false),
-        ] {
-            v.push(Variant { name, stable });
-        }
-        #[cfg(feature = "compare-native")]
-        for (name, stable) in [
-            ("clausecker", true),
-            ("fluxsort", true),
-            ("ips2ra", false),
-            ("ips4o", false),
-            ("vqsort", false),
-            ("x86simdsort", false),
-            ("crumsort", false),
-        ] {
-            v.push(Variant { name, stable });
-        }
-    }
-    v
+    super::catalog::ALGORITHMS
+        .iter()
+        .filter(|(_, _, adapter)| {
+            *adapter == "common"
+                || (!cfg!(feature = "portable-simd")
+                    && (*adapter == "rust" || cfg!(feature = "compare-native")))
+        })
+        .map(|&(name, stable, _)| Variant { name, stable })
+        .collect()
 }
 /// Prepares the standard or Tessera adapter for any benchmark record type.
 fn try_prepare_common<T: BenchmarkRecord>(

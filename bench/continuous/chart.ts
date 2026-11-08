@@ -1,8 +1,18 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { createFigure } from "../plot/figure.ts";
+import {
+  drawHeader,
+  drawName,
+  matrixLayout,
+  type NameCell,
+  nameWidth,
+  PAD,
+} from "../plot/layout.ts";
+import { textWidth } from "../plot/svg.ts";
+import { theme } from "../plot/theme.ts";
 import { type CaseRow, type Configuration, changedRows, isFaster, modeName } from "./matrix.ts";
 import { formatChange, formatPercent, isMajor, MAJOR, type Row } from "./report.ts";
-import { chartStyles, escapeXml, textWidth } from "./svg.ts";
 
 // Faster cases below this change share one summary line instead of a row, so
 // the chart grows with the notable changes rather than with the suite. It is
@@ -25,49 +35,6 @@ export function tickStep(k: number, minPx: number) {
   return STEPS.find((v) => v * k >= minPx) ?? largeTickStep(minPx / k);
 }
 
-export const PAD = 24;
-// Each value sits in a fixed right-aligned column of its cell, so values
-// line up down a configuration and read as a table.
-export const VALUE_W = 52;
-
-// The case-name column and one column per configuration. Two configurations
-// keep the 720 px width of a comment image; each further one adds a column
-// rather than another chart, so the cases are named once however many builds
-// are measured.
-export function matrixLayout(count: number, nameW: number) {
-  const W = 720 + Math.max(0, count - 2) * 180;
-  const gap = 20;
-  const plotL = PAD + Math.ceil(nameW) + 24;
-  const colW = (W - PAD - plotL - gap * (count - 1)) / count;
-  const cols = Array.from({ length: count }, (_, i) => {
-    const left = plotL + i * (colW + gap);
-    return { left, right: left + colW, plotR: left + colW - VALUE_W - 6 };
-  });
-  return { W, plotL, cols };
-}
-
-export interface NameCell {
-  input: string;
-  tag: string;
-  sub: string;
-  strong?: boolean;
-}
-
-export const tagWidth = (tag: string) => (tag ? textWidth(tag, 10) + 12 : 0);
-
-export function nameWidth(names: NameCell[]) {
-  // Bold text runs about 5% wider than the regular advances in textWidth.
-  return Math.max(
-    110,
-    ...names.map((n) =>
-      Math.max(
-        textWidth(n.input, 13) * (n.strong ? 1.05 : 1) + (n.tag ? tagWidth(n.tag) + 6 : 0),
-        textWidth(n.sub, 11),
-      ),
-    ),
-  );
-}
-
 // A case's name, an optional pill for a non-default seed, and its type and
 // length. The mode is the group title above it, not a pill.
 export function nameCell(row: CaseRow, strong: boolean): NameCell {
@@ -78,46 +45,6 @@ export function nameCell(row: CaseRow, strong: boolean): NameCell {
     tag: parts.seed && parts.seed !== "s1" ? `seed ${parts.seed.slice(1)}` : "",
     sub: [parts.type, parts.n].filter(Boolean).join(" · "),
   };
-}
-
-export type Text = (cls: string, x: number, y: number, text: string, extra?: string) => void;
-
-export function svgWriter() {
-  const out: string[] = [];
-  const t: Text = (cls, x, y, text, extra = "") =>
-    out.push(
-      `<text class="${cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}"${extra}>${escapeXml(text)}</text>`,
-    );
-  return { out, t };
-}
-
-export function drawName(out: string[], t: Text, name: NameCell, cy: number) {
-  t(`ink${name.strong ? " strong" : ""}`, PAD, cy - 2, name.input);
-  if (name.tag) {
-    const tx = PAD + textWidth(name.input, 13) + 6;
-    out.push(
-      `<rect class="tag" x="${tx.toFixed(1)}" y="${cy - 13}" width="${tagWidth(name.tag).toFixed(1)}" height="14" rx="7" stroke-width="1"/>`,
-    );
-    t("muted tiny", tx + tagWidth(name.tag) / 2, cy - 3, name.tag, ' text-anchor="middle"');
-  }
-  t("muted sub", PAD, cy + 13, name.sub);
-}
-
-// The column header: a configuration's headline number, its name and a short
-// line under it.
-export function drawHeader(
-  t: Text,
-  col: { left: number; right: number },
-  hero: string,
-  heroCls: string,
-  name: string,
-  sub: string,
-  subCls = "muted sub",
-) {
-  t(`hero ${heroCls}`, col.left, 50, hero);
-  const lx = col.left + textWidth(hero, 28) + 12;
-  t("ink strong", lx, 36, name);
-  t(subCls, lx, 51, sub);
 }
 
 function counts(summary: Configuration["summary"]) {
@@ -175,8 +102,8 @@ export function chartSvg(configurations: Configuration[], base = "main") {
   const zeroOffset = room + rf * k;
 
   // Rows grouped by mode, each group under its title.
-  const rowH = 38;
-  const heroBottom = 76;
+  const rowH = theme.layout.row;
+  const heroBottom = theme.layout.headerRule;
   const plotTop = heroBottom + 14;
   let y = plotTop;
   const groups: {
@@ -198,31 +125,23 @@ export function chartSvg(configurations: Configuration[], base = "main") {
   const plotBottom = y + 4;
   const H = plotBottom + 52;
 
-  const { out, t } = svgWriter();
-  out.push(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="t d">`,
-  );
-  out.push(
-    `<title id="t">Benchmark changes against ${escapeXml(base)}: ${escapeXml(configurations.map((c) => `${c.name} ${counts(c.summary) || "not measured"}`).join("; "))}</title>`,
-  );
-  out.push(
-    `<desc id="d">${escapeXml(
-      shown
-        .map(
-          (row) =>
-            `${row.label}: ` +
-            configurations
-              .map(
-                (c, i) =>
-                  `${c.name} ${formatChange(row.cells[i]?.change ?? null)}${row.cells[i] && row.cells[i]!.verdict !== "within" ? ` ${row.cells[i]!.verdict}` : ""}`,
-              )
-              .join(", "),
-        )
-        .join("; "),
-    )}</desc>`,
-  );
-  out.push(chartStyles);
-  out.push(`<rect class="panel" x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" rx="12"/>`);
+  const { out, t, finish } = createFigure({
+    width: W,
+    height: H,
+    title: `Benchmark changes against ${base}: ${configurations.map((configuration) => `${configuration.name} ${counts(configuration.summary) || "not measured"}`).join("; ")}`,
+    description: shown
+      .map(
+        (row) =>
+          `${row.label}: ` +
+          configurations
+            .map(
+              (c, i) =>
+                `${c.name} ${formatChange(row.cells[i]?.change ?? null)}${row.cells[i] && row.cells[i]!.verdict !== "within" ? ` ${row.cells[i]!.verdict}` : ""}`,
+            )
+            .join(", "),
+      )
+      .join("; "),
+  });
 
   // Header: the question on the left, each configuration's answer above its column.
   t("ink strong", PAD, 36, title.input);
@@ -329,6 +248,5 @@ export function chartSvg(configurations: Configuration[], base = "main") {
     "← less time",
     ' text-anchor="end"',
   );
-  out.push("</svg>");
-  return out.join("\n");
+  return finish();
 }

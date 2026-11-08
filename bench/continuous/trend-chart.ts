@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { createFigure } from "../plot/figure.ts";
 import {
   drawHeader,
   drawName,
@@ -7,11 +8,10 @@ import {
   type NameCell,
   nameWidth,
   PAD,
-  svgWriter,
-} from "./chart.ts";
+} from "../plot/layout.ts";
+import { theme } from "../plot/theme.ts";
 import { MIN_SWING, type TrendSeries, type TrendSummary } from "./history.ts";
 import { caseParts, formatChange, MAJOR, short } from "./report.ts";
-import { chartStyles, escapeXml } from "./svg.ts";
 
 export interface ConfigurationTrend {
   name: string;
@@ -107,43 +107,32 @@ export function trendSvg(configurations: ConfigurationTrend[], base = "main") {
   const plotBottom = rowTop(rows.length) + 4;
   const H = plotBottom + 52;
 
-  const { out, t } = svgWriter();
   const progress = (c: ConfigurationTrend) =>
     c.trend ? (1 + c.trend.overall.at(-1)!) / (1 + c.trend.overall[0]) - 1 : null;
-  out.push(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="t d">`,
-  );
-  out.push(
-    `<title id="t">PR benchmark history: ${escapeXml(
-      configurations
-        .map((c) =>
-          c.trend
-            ? `${c.name} ${formatChange(progress(c))} run time over ${c.trend.runs.length} runs`
-            : `${c.name} unavailable`,
-        )
-        .join("; "),
-    )}</title>`,
-  );
-  out.push(
-    `<desc id="d">${escapeXml(
-      rows
-        .map(
-          (r) =>
-            `${r.label}: ` +
-            configurations
-              .map((c, i) => `${c.name} ${r.cells[i]?.map(formatChange).join(", ") ?? "—"}`)
-              .join("; "),
-        )
-        .join(" | "),
-    )}</desc>`,
-  );
-  out.push(chartStyles);
-  out.push(`<style>
-  .main { stroke-dasharray: 3 3; } .on-main { fill: #8d8c86; }
-  @media (prefers-color-scheme: dark) { .on-main { fill: #6f6e69; } }
-</style>`);
-  out.push(`<rect class="panel" x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" rx="12"/>`);
-
+  const { out, t, finish } = createFigure({
+    width: W,
+    height: H,
+    title: `PR benchmark history: ${configurations
+      .map((c) =>
+        c.trend
+          ? `${c.name} ${formatChange(progress(c))} run time over ${c.trend.runs.length} runs`
+          : `${c.name} unavailable`,
+      )
+      .join("; ")}`,
+    description: rows
+      .map(
+        (r) =>
+          `${r.label}: ` +
+          configurations
+            .map((c, i) => `${c.name} ${r.cells[i]?.map(formatChange).join(", ") ?? "—"}`)
+            .join("; "),
+      )
+      .join(" | "),
+    styles: `<style>
+  .main { stroke-dasharray: 3 3; } .on-main { fill: ${theme.palette.grey}; }
+  @media (prefers-color-scheme: dark) { .on-main { fill: ${theme.palette.dark.axis}; } }
+</style>`,
+  });
   // The headline is the movement within the PR; the gap to main is the
   // comparison chart's headline and each Overall line's end.
   t("ink strong", PAD, 36, title.input);
@@ -247,6 +236,5 @@ export function trendSvg(configurations: ConfigurationTrend[], base = "main") {
     `value: latest run against ${base} · one scale per row`,
     ' text-anchor="end"',
   );
-  out.push("</svg>");
-  return out.join("\n");
+  return finish();
 }

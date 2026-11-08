@@ -7,11 +7,13 @@ on:
     paths:
       - "rust/**"
       - "bench/rust/**"
+      - "bench/catalog.json"
+      - "bench/plans/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - ".github/workflows/bench-*.yml"
-      - ".github/scripts/bench_parallel.py"
+      - "bench/continuous/worker.py"
   # Every push to main, so unchanged code also adds baseline samples.
   push:
     branches: [main]

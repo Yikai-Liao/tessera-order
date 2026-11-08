@@ -1,0 +1,144 @@
+{
+  "$comment": "SPDX-License-Identifier: BSD-2-Clause",
+  "schema": 1,
+  "harness": "smoke",
+  "algorithms": ["tessera"],
+  "include": [
+    {
+      "types": ["u64"],
+      "distributions": ["random"],
+      "lengths": ["insertion-max"],
+      "modes": ["api"]
+    },
+    {
+      "types": ["u64"],
+      "distributions": ["random"],
+      "lengths": ["insertion-next", "tile-next"],
+      "modes": ["api", "workspace"]
+    },
+    {
+      "types": ["row_u32"],
+      "distributions": ["random"],
+      "lengths": ["insertion-next", "tile-next"],
+      "modes": ["api"]
+    },
+    {
+      "types": ["row_u64"],
+      "distributions": ["random"],
+      "lengths": ["tile-next"],
+      "modes": ["api", "workspace"]
+    },
+    {
+      "types": ["u64"],
+      "distributions": ["sorted", "reverse"],
+      "lengths": [1000],
+      "modes": ["api"]
+    },
+    {
+      "types": ["u64", "row_u64"],
+      "distributions": ["random", "skew99"],
+      "lengths": [1000],
+      "modes": ["api"]
+    },
+    {
+      "types": ["u64"],
+      "distributions": ["random"],
+      "lengths": [65536],
+      "modes": ["api", "workspace"]
+    },
+    {
+      "types": ["u64"],
+      "distributions": [
+        "sorted",
+        "reverse",
+        "sorted99",
+        "equal",
+        "far_swaps",
+        "d16",
+        "zipf2",
+        "skew99",
+        "sorted_tail",
+        "runs"
+      ],
+      "lengths": [65536],
+      "modes": ["api"]
+    },
+    {
+      "types": ["u32"],
+      "distributions": ["random", "sorted99"],
+      "lengths": [65536],
+      "modes": ["api"]
+    },
+    {
+      "types": ["u128"],
+      "distributions": ["random"],
+      "lengths": [65536],
+      "modes": ["api"]
+    },
+    {
+      "types": ["f64"],
+      "distributions": ["random", "sorted", "sorted99", "finite_signed"],
+      "lengths": [65536],
+      "modes": ["api"]
+    },
+    {
+      "types": ["row_u64"],
+      "distributions": ["random"],
+      "lengths": [65536],
+      "modes": ["api", "workspace"]
+    },
+    {
+      "types": ["row_u64"],
+      "distributions": ["d16", "hot50"],
+      "lengths": [65536],
+      "modes": ["api"]
+    },
+    {
+      "types": ["rec128_u64"],
+      "distributions": ["random"],
+      "lengths": [65536],
+      "modes": ["api", "workspace"]
+    },
+    {
+      "types": ["rec128_u64"],
+      "distributions": ["sparse_digits"],
+      "lengths": [65536],
+      "modes": ["api"]
+    },
+    {
+      "types": ["u64"],
+      "distributions": [
+        "random",
+        "zipf2",
+        "skew99",
+        "two_values",
+        "sorted99",
+        "sparse_digits",
+        "bimodal",
+        "hot50",
+        "d4096"
+      ],
+      "lengths": [1000000],
+      "modes": ["api"]
+    },
+    {
+      "types": ["u32", "row_u64"],
+      "distributions": ["random"],
+      "lengths": [1000000],
+      "modes": ["api"]
+    },
+    {
+      "types": ["u128"],
+      "distributions": ["random", "sparse8"],
+      "lengths": [1000000],
+      "modes": ["api"]
+    },
+    {
+      "types": ["u64"],
+      "distributions": ["random", "zipf2"],
+      "lengths": [10000000],
+      "modes": ["api"]
+    }
+  ],
+  "exclude": []
+}

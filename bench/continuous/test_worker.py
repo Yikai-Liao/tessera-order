@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from bench_parallel import measured_cases, partition, run_workers
+from worker import measured_cases, partition, run_workers
 
 
 class SchedulerTests(unittest.TestCase):
@@ -59,7 +59,7 @@ class SchedulerTests(unittest.TestCase):
         first, second = Child(1), Child(None)
         with (
             tempfile.TemporaryDirectory() as temporary,
-            patch("bench_parallel.subprocess.Popen", side_effect=[first, second]),
+            patch("worker.subprocess.Popen", side_effect=[first, second]),
             self.assertRaises(RuntimeError),
         ):
             run_workers(Path("/unused"), [["a"], ["b"]], [0, 1], Path(temporary))

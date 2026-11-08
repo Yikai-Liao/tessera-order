@@ -1,8 +1,0 @@
-// SPDX-License-Identifier: BSD-2-Clause
-{
-  "extends": "../../.github/scripts/tsconfig.json",
-  "include": ["*.ts"],
-  "compilerOptions": {
-    "target": "ES2024"
-  }
-}

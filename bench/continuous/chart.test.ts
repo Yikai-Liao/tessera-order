@@ -3,11 +3,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { textWidth } from "../plot/svg.ts";
 import { chartSvg } from "./chart.ts";
 import { fixture } from "./fixtures/report.ts";
 import { attribution, changedRows } from "./matrix.ts";
 import { type BencherReport, summarize } from "./report.ts";
-import { textWidth } from "./svg.ts";
 
 const one = (report: BencherReport = fixture()) => [
   { name: "Default", summary: summarize(report) },

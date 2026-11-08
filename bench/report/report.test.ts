@@ -257,6 +257,22 @@ test("native compiler versions match", async () => {
   }
 });
 
+test("custom selections retain figures", () => {
+  const dataset = createFixture(true);
+  for (const manifest of dataset.manifests.values())
+    manifest.cases = manifest.cases.filter(
+      (input) => input.ty === "u64" && input.distribution === "random" && input.len === 65536,
+    );
+  dataset.samples = dataset.samples.filter((sample) => sample.case_id === "u64/random/65536/s1");
+  dataset.memory = dataset.memory.filter((sample) => sample.case_id === "u64/random/65536/s1");
+  const figures = renderFigures(dataset, summarize(dataset));
+  assert.equal(figures.length, 1);
+  assert.match(figures[0].name, /^selected-/);
+  assert.match(figures[0].svg, /65,536 records/);
+  assert.match(figures[0].svg, /portable-simd/i);
+  assert.doesNotMatch(figures[0].svg, /NaN|Infinity/);
+});
+
 test("SIMD shares the anchor", () => {
   const dataset = createFixture(true);
   validateRun(dataset);

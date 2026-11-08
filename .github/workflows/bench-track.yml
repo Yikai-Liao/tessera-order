@@ -88,9 +88,10 @@ jobs:
           # The image definition is trusted; only the executable comes from the build.
           image="registry.bencher.dev/$BENCHER_PROJECT:$TAG"
           chmod +x artifact/default/bench artifact/portable-simd/bench
-          cp bench/continuous/worker.py artifact/bench_parallel.py
-          printf 'FROM python:3.13-slim-bookworm\nCOPY default/bench /bench-default\nCOPY portable-simd/bench /bench-portable-simd\nCOPY bench_parallel.py /bench_parallel.py\n' \
-            | docker build --platform linux/amd64 -t "$image" -f - artifact
+          mkdir -p artifact/bench/continuous artifact/tools
+          cp bench/continuous/worker.ts artifact/bench/continuous/
+          cp tools/process.ts artifact/tools/
+          docker build --platform linux/amd64 -t "$image" -f bench/continuous/Dockerfile artifact
           printf '%s' "$BENCHER_API_KEY" | docker login registry.bencher.dev \
             --username "$BENCHER_PROJECT" --password-stdin
           docker push "$image"
@@ -104,53 +105,24 @@ jobs:
       - name: Measure on Bencher Bare Metal
         id: measure
         if: steps.source.outputs.eligible == 'true'
+        # Publication reads per-build outcomes even if one remote measurement fails.
+        continue-on-error: true
         env:
           BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
           BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
-          BRANCH: ${{ steps.source.outputs.branch }}
           HASH: ${{ steps.source.outputs.hash }}
-          BASE: ${{ steps.source.outputs.base }}
           START_POINT: ${{ steps.source.outputs.start_point }}
           BASE_HASH: ${{ steps.source.outputs.base_hash }}
           PR_NUMBER: ${{ steps.source.outputs.number }}
           IMAGE: ${{ steps.image.outputs.reference }}
-          VARIANTS_JSON: ${{ steps.check.outputs.variants }}
         run: |
+          args=()
+          if [ -n "$PR_NUMBER" ]; then args+=(--pr "$PR_NUMBER"); fi
           if [ -n "$START_POINT" ]; then
-            # Compare against the parent PR's samples at this PR's base commit.
-            # A stacked PR's base branch is a GitHub branch name, which Bencher
-            # never stores; the parent's `pr-<number>` is the Bencher branch.
-            args=(--start-point "$START_POINT" --start-point-hash "$BASE_HASH"
-              --start-point-clone-thresholds --start-point-reset)
-          elif [ -n "$PR_NUMBER" ]; then
-            # The tracker could not name a start point. Measure anyway; the
-            # report fails the check with the reason instead of passing
-            # without a comparison.
-            args=()
-          else
-            # Five percent around the previous main sample. A statistical test
-            # over a window of main samples mixes code from before and after
-            # each optimization, so its limits widen into the next one
-            # (decision 0029).
-            args=(--threshold-measure latency --threshold-test percentage
-              --threshold-min-sample-size 1 --threshold-max-sample-size 1
-              --threshold-upper-boundary 0.05 --threshold-lower-boundary 0.05
-              --thresholds-reset)
+            args+=(--start-point "$START_POINT" --base-hash "$BASE_HASH")
           fi
-          # Each configuration gets its own remote job and timeout. A failed
-          # measurement must not prevent measuring the other configuration.
-          while IFS=$'\t' read -r variant testbed; do
-            if bencher run --project "$BENCHER_PROJECT" --key "$BENCHER_API_KEY" \
-              --branch "$BRANCH" --hash "$HASH" \
-              --testbed "$testbed" --spec intel-v1 \
-              --image "$IMAGE" --job-timeout 240 \
-              --adapter rust_criterion --format json --quiet \
-              "${args[@]}" --exec -- /usr/local/bin/python3 /bench_parallel.py "/bench-$variant" > "$RUNNER_TEMP/bencher-$variant.json"; then
-              echo "$variant=success" >> "$GITHUB_OUTPUT"
-            else
-              echo "$variant=failure" >> "$GITHUB_OUTPUT"
-            fi
-          done < <(jq -r '.[] | [.id, .testbed] | @tsv' <<< "$VARIANTS_JSON")
+          pnpm --silent tools continuous submit --project "$BENCHER_PROJECT" \
+            --image "$IMAGE" --hash "$HASH" --out "$RUNNER_TEMP/measurement" "${args[@]}"
       - name: Publish report
         if: always() && (steps.check.outputs.default || steps.check.outputs['portable-simd'])
         uses: actions/github-script@v9
@@ -163,14 +135,19 @@ jobs:
           BASELINE_REASON: ${{ steps.source.outputs.baseline_reason }}
           CHECK_DEFAULT: ${{ steps.check.outputs.default }}
           CHECK_SIMD: ${{ steps.check.outputs['portable-simd'] }}
-          OUTCOME_DEFAULT: ${{ steps.measure.outputs.default }}
-          OUTCOME_SIMD: ${{ steps.measure.outputs['portable-simd'] }}
+          REPORT_DIR: ${{ runner.temp }}/measurement
           CANCELLED: ${{ job.status == 'cancelled' }}
         with:
           script: |
             const { publishReport } = require('./bench/continuous/index.ts');
             const { VARIANTS } = require('./bench/catalog.ts');
             const env = process.env;
+            let outcomes = {};
+            try {
+              outcomes = JSON.parse(require('node:fs').readFileSync(env.REPORT_DIR + '/outcomes.json', 'utf8'));
+            } catch {
+              core.notice('No remote outcome file; unfinished measurements will fail their checks.');
+            }
             await publishReport({ github, context, core, inputs: {
               language: "rust", hash: env.HASH, number: env.PR_NUMBER,
               baseRef: env.BASE || "main",
@@ -179,8 +156,15 @@ jobs:
               variants: VARIANTS.map(variant => ({
                 variant,
                 checkId: variant.id === 'default' ? env.CHECK_DEFAULT : env.CHECK_SIMD,
-                outcome: (variant.id === 'default' ? env.OUTCOME_DEFAULT : env.OUTCOME_SIMD)
-                  || (env.CANCELLED === 'true' ? 'cancelled' : 'failure'),
-                reportPath: `${env.RUNNER_TEMP}/bencher-${variant.id}.json`,
+                outcome: outcomes[variant.id] || (env.CANCELLED === 'true' ? 'cancelled' : 'failure'),
+                reportPath: `${env.REPORT_DIR}/bencher-${variant.id}.json`,
               })),
             } });
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.source.outputs.eligible == 'true'
+        with:
+          name: continuous-measurement
+          path: |
+            ${{ runner.temp }}/measurement/
+            ${{ runner.temp }}/measurement.log
+          if-no-files-found: ignore

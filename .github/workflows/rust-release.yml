@@ -18,17 +18,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Check tag against package version
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          python3 - <<'PY'
-          import os, tomllib
-          with open('rust/tessera-sort/Cargo.toml', 'rb') as f:
-              package = tomllib.load(f)['package']
-          assert os.environ['RELEASE_TAG'] == 'rust/v' + package['version'], 'tag/package version mismatch'
-          assert package.get('publish') is not False, 'package is still marked unpublished'
-          PY
+        run: pnpm tools release verify rust --tag "$RELEASE_TAG"
       - run: cargo publish --locked -p tessera-sort --dry-run
       - run: cargo publish --locked -p tessera-sort
         env:

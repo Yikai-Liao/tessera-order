@@ -147,6 +147,7 @@ export async function startReport({
     ...context.repo,
     name: `Benchmarks (rust, ${variant.name})`,
     head_sha: hash,
+    external_id: String(context.runId),
     status: "in_progress",
     details_url: workflowUrl(context),
   });

@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { access, mkdir } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
-import { Command, InvalidArgumentError, Option } from "commander";
+import { type Command, InvalidArgumentError, Option } from "commander";
 import { stringify as stringifyToml } from "smol-toml";
-import { renderLocalReport } from "./local/report.ts";
-import { compareLocal } from "./local/runner.ts";
-import { loadPlan, planSchema, type SelectionOptions } from "./plan.ts";
-import { pullFeedback } from "./pr.ts";
-import { command } from "./process.ts";
-import { compareAlgorithms } from "./release.ts";
-import { writeReport } from "./report/index.ts";
+import { renderLocalReport } from "../bench/local/report.ts";
+import { compareLocal } from "../bench/local/runner.ts";
+import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
+import { checkAlgorithms, compareAlgorithms } from "../bench/release.ts";
+import { writeReport } from "../bench/report/index.ts";
+import { repositoryRoot } from "../bench/workspace.ts";
+import { resultDirectory, runTask } from "./tasks.ts";
 
 interface MeasurementOptions extends SelectionOptions {
   plan?: string;
@@ -59,7 +58,7 @@ function selection(command: Command) {
     )
     .option("--types <ids>", "comma-separated record types", list)
     .option("--distributions <ids>", "comma-separated input distributions", list)
-    .option("--lengths <numbers>", "comma-separated supported record counts", lengths)
+    .option("--lengths <numbers>", "comma-separated positive record counts", lengths)
     .option("--modes <ids>", "comma-separated API modes", list);
 }
 
@@ -71,21 +70,8 @@ function selectors(options: MeasurementOptions): SelectionOptions {
   );
 }
 
-async function repository() {
-  return command("git", ["rev-parse", "--show-toplevel"], { capture: true });
-}
-
-async function resultDirectory(root: string, out?: string) {
-  const directory = resolve(
-    out ?? join(root, "bench/results", new Date().toISOString().replaceAll(":", "-")),
-  );
-  await mkdir(resolve(directory, ".."), { recursive: true });
-  console.log(`Results: ${directory}`);
-  return directory;
-}
-
-/** Regenerate a report from its persisted result format. */
-export async function report(directories: string[], partial = false) {
+/** Regenerate a report from its persisted result format without rerunning measurements. */
+async function report(directories: string[], partial = false) {
   const paths = directories.map((path) => resolve(path));
   let local = false;
   try {
@@ -101,57 +87,57 @@ export async function report(directories: string[], partial = false) {
   } else await writeReport(paths, partial);
 }
 
-/** Construct the supported command surface without running an experiment. */
-export function createProgram() {
-  const program = new Command()
-    .name("pnpm bench")
-    .description("Local comparisons, release figures and continuous benchmark feedback")
-    .showHelpAfterError()
-    .exitOverride();
-
+/** Register experiment selection, comparison, verification and regeneration tasks. */
+export function experimentCommands(program: Command) {
+  const compare = program.command("compare").description("Compare source revisions or algorithms");
   const measurement = (name: string, description: string) =>
-    selection(program.command(name))
+    selection(compare.command(name))
       .description(description)
-      .option("--out <directory>", "result directory (default: bench/results/<timestamp>)")
+      .option("--out <directory>", "new result directory (default: bench/results/<timestamp>)")
       .option("--cpu <number>", "pin measurement to one logical CPU (Linux)", logicalCpu)
       .option("--simd", "include Portable SIMD");
 
-  measurement("compare [commit]", "Compare the working tree with a commit (default: HEAD)")
+  measurement("commit [revision]", "Compare the working tree with a commit (default: HEAD)")
     .option("--filter <regex>", "additional case ID pattern", casePattern)
     .action(
       async (baseline: string | undefined, options: MeasurementOptions & { filter?: string }) => {
         const plan = await loadPlan(options.plan ?? "local", selectors(options));
         if (plan.harness !== "smoke")
           throw new Error("Commit comparisons require a smoke harness plan");
-        const root = await repository();
-        await compareLocal({
-          root,
-          baseline: baseline ?? "HEAD",
-          plan,
-          out: await resultDirectory(root, options.out),
-          cpu: options.cpu,
-          simd: Boolean(options.simd),
-          filter: options.filter,
-        });
+        const root = await repositoryRoot();
+        const out = resultDirectory(root, options.out);
+        await runTask(out, Boolean(program.opts().verbose), () =>
+          compareLocal({
+            root,
+            baseline: baseline ?? "HEAD",
+            plan,
+            out,
+            cpu: options.cpu,
+            simd: Boolean(options.simd),
+            filter: options.filter,
+          }),
+        );
       },
     );
 
-  measurement("run", "Build, validate, measure and report algorithm comparisons")
-    .alias("release")
+  measurement("algorithms", "Build, validate, measure and report algorithm comparisons")
     .option("--group <type/shape>", "measure one complete group and report it as partial")
     .action(async (options: MeasurementOptions & { group?: string }) => {
       const plan = await loadPlan(options.plan ?? "smoke", selectors(options));
       if (plan.harness !== "comparison")
         throw new Error("Algorithm comparisons require a comparison harness plan");
-      const root = await repository();
-      await compareAlgorithms({
-        root,
-        out: await resultDirectory(root, options.out),
-        cpu: options.cpu,
-        simd: Boolean(options.simd),
-        plan,
-        group: options.group,
-      });
+      const root = await repositoryRoot();
+      const out = resultDirectory(root, options.out);
+      await runTask(out, Boolean(program.opts().verbose), () =>
+        compareAlgorithms({
+          root,
+          out,
+          cpu: options.cpu,
+          simd: Boolean(options.simd),
+          plan,
+          group: options.group,
+        }),
+      );
     });
 
   selection(program.command("plan [name-or-file]"))
@@ -166,12 +152,12 @@ export function createProgram() {
         options: MeasurementOptions & { schema?: boolean; format: "json" | "toml" },
       ) => {
         if (options.schema) {
-          console.log(JSON.stringify(planSchema(), null, 2));
+          console.log(JSON.stringify(planSchema()));
           return;
         }
         const plan = await loadPlan(options.plan ?? name ?? "local", selectors(options));
         console.log(
-          options.format === "toml" ? stringifyToml(plan).trimEnd() : JSON.stringify(plan, null, 2),
+          options.format === "toml" ? stringifyToml(plan).trimEnd() : JSON.stringify(plan),
         );
       },
     );
@@ -182,48 +168,19 @@ export function createProgram() {
     .option("--partial", "allow completed groups of an algorithm suite")
     .action(async (directories: string[], options: { partial?: boolean }) => {
       await report(directories, options.partial);
+      console.log(JSON.stringify({ out: resolve(directories[0]), result: "reported" }));
     });
 
   program
-    .command("pr <number>")
-    .description("Read current-head continuous benchmark checks and report")
-    .option("--json", "emit machine-readable feedback")
-    .action(async (number: string, options: { json?: boolean }) => {
-      const feedback = await pullFeedback(number, await repository());
-      if (options.json) {
-        console.log(JSON.stringify(feedback, null, 2));
-        return;
-      }
-      console.log(`PR #${feedback.number} · ${feedback.head}\n${feedback.url}`);
-      for (const check of feedback.checks) {
-        console.log(
-          `\n${check.name}: ${check.conclusion ?? check.status}\n${check.output.title ?? ""}\n${check.details_url}\n${check.output.summary ?? ""}`,
-        );
-      }
-      console.log(
-        feedback.comment
-          ? `\n${feedback.comment.url}\n${feedback.comment.body}`
-          : "\nNo current-head benchmark comment yet.",
+    .command("check")
+    .description("Reproduce CI's comparison harness checks, not a performance experiment")
+    .option("--native", "include native adapters and verify sequential linkage (Linux)")
+    .option("--out <directory>", "new result directory (default: bench/results/<timestamp>)")
+    .action(async (options: { native?: boolean; out?: string }) => {
+      const root = await repositoryRoot();
+      const out = resultDirectory(root, options.out);
+      await runTask(out, Boolean(program.opts().verbose), () =>
+        checkAlgorithms(root, out, Boolean(options.native)),
       );
-    });
-
-  return program;
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  createProgram()
-    .parseAsync()
-    .catch((error: unknown) => {
-      if (
-        error instanceof Error &&
-        "code" in error &&
-        ["commander.helpDisplayed", "commander.help"].includes(String(error.code))
-      )
-        return;
-      if (
-        !(error instanceof Error && "code" in error && String(error.code).startsWith("commander."))
-      )
-        console.error(error instanceof Error ? error.message : String(error));
-      process.exitCode = 1;
     });
 }

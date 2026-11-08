@@ -1,20 +1,21 @@
 name: Build benchmarks
 
-# Unprivileged: runs PR code, including forks, without secrets. Uploads one
-# static executable per configuration; bench-track.yml packages and submits them.
+# Unprivileged: runs PR code, including forks, without secrets. The tracker
+# packages these artifacts without executing them on a credentialed runner.
 on:
   pull_request:
     paths:
       - "rust/**"
-      - "bench/rust/**"
-      - "bench/catalog.toml"
-      - "bench/plans/**"
+      - "bench/**"
+      - "tools/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/scripts/**"
       - ".github/workflows/bench-*.yml"
-      - "bench/continuous/worker.py"
-  # Every push to main, so unchanged code also adds baseline samples.
   push:
     branches: [main]
   workflow_dispatch:
@@ -24,7 +25,6 @@ permissions:
 
 concurrency:
   group: bench-build-${{ github.event.pull_request.number || github.ref }}
-  # A newer PR commit supersedes the old one; main keeps every commit.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -35,38 +35,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # Attribute measurements to the PR head, not a merge commit.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build a static executable per configuration
-        # Both configurations come from one runner: the extra build costs
-        # seconds, where a second job would hold a concurrency slot while the
-        # tracker waits for the pair anyway.
-        #
-        # Static glibc keeps glibc's allocator, which `api` mode measures.
-        # Branch alignment avoids costly JCC boundary cases on affected Intel CPUs.
-        env:
-          RUSTFLAGS: >-
-            -C target-feature=+crt-static
-            -C llvm-args=-x86-branches-within-32B-boundaries
-        run: |
-          # Without pipefail a failing cargo still surfaces as the executable
-          # count assertion, because jq swallows the empty stream.
-          set -o pipefail
-          build() {
-            dest=$1
-            shift
-            cargo bench --locked -p tessera-bench --bench smoke "$@" \
-              --target x86_64-unknown-linux-gnu --no-run --message-format=json \
-              | jq -r 'select(.reason == "compiler-artifact" and .target.name == "smoke")
-                       | .executable // empty' > executable.txt
-            test "$(wc -l < executable.txt)" -eq 1
-            mkdir -p "out/$dest" && cp "$(cat executable.txt)" "out/$dest/bench"
-            ldd "out/$dest/bench" | grep -q 'statically linked'
-          }
-          build default
-          build portable-simd --features tessera-sort/portable-simd
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # One runner builds both configurations, sharing one isolated target.
+      - run: pnpm tools continuous build --out out
       - uses: actions/upload-artifact@v7
         with:
           name: bench-rust-default
@@ -75,8 +54,13 @@ jobs:
           if-no-files-found: error
       - uses: actions/upload-artifact@v7
         with:
-          # The default-branch tracker also consumes this artifact on PRs.
           name: bench-rust
           path: out/portable-simd/bench
           retention-days: 7
           if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: benchmark-build-log
+          path: out.log
+          if-no-files-found: ignore

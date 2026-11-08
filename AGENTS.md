@@ -18,11 +18,9 @@ Tessera is a stable radix sort with O(√n) auxiliary memory, built as a mature 
 ```sh
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets && cargo test --workspace --doc
-pnpm install --frozen-lockfile && pnpm format && uvx ruff@0.17.4 format && uvx ruff@0.17.4 check
-pnpm docs:test && pnpm docs:typecheck && pnpm docs:build   # site changes
-pnpm bench:test && pnpm bench:typecheck                         # benchmark tooling
-python3 -m unittest discover -s bench/continuous -p "test_*.py"   # benchmark scheduler
-python3 -m unittest discover -s .github/scripts -p "test_*.py"     # CI routing changes
+pnpm install --frozen-lockfile && pnpm format
+pnpm tools:test && pnpm tools:typecheck                  # repository and benchmark tooling
+pnpm docs:test && pnpm docs:typecheck && pnpm docs:build  # site changes
 ```
 
 Run these locally. Miri, the MSRV and benchmarks run in CI on every pull request, together with one test cell per operating system; `main` also runs the remaining platforms and their MSRV ([details](docs/development/ci.md)). Push commits and read the results there.
@@ -34,7 +32,7 @@ Run these locally. Miri, the MSRV and benchmarks run in CI on every pull request
 - **License.** New files start with an `SPDX-License-Identifier: BSD-2-Clause` comment. Never copy code from other projects, including `sort-research-rs` ([decision 0001a](docs/decisions/0001a-single-bsd-2-clause-license.md)); `block.rs` keeps Robert Clausecker's notice.
 - **Unsafe.** A `// SAFETY:` comment above every `unsafe` block, a `# Safety` section on every `unsafe fn`. Keep the panic, inconsistent-key, owned-record and `&mut`-record tests passing.
 - **Engine decisions.** Routing, thresholds, digit planning and inlining change only with measurements ([port record](docs/design/port.md)).
-- **Tools own format and lints**: rustfmt, Biome, Ruff, configured in `Cargo.toml`, `biome.json`, `ruff.toml`. Fix the cause; suppress only at the site, with the reason.
+- **Tools own format and lints**: rustfmt and Biome, configured in `Cargo.toml` and `biome.json`. Fix the cause; suppress only at the site, with the reason.
 
 ## Naming
 
@@ -52,9 +50,9 @@ Run these locally. Miri, the MSRV and benchmarks run in CI on every pull request
 
 ## Benchmark tooling
 
-Use `pnpm bench compare [COMMIT]` (default: `HEAD`) to screen uncommitted code against a compatible commit and `pnpm bench run` for algorithm comparisons ([guide](docs/development/benchmarking.md)). Choose coverage with `--plan NAME-OR-FILE` and optional `--algorithms`, `--types`, `--distributions`, `--lengths`, `--modes` overrides. Preview with `pnpm --silent bench plan NAME`; maintain defaults in `bench/plans/`, not workflow or runner conditionals. Local process-level A/A screens do not replace placement-controlled measurements.
+Use `pnpm tools compare commit [COMMIT]` (default: `HEAD`) to screen uncommitted code against a compatible commit and `pnpm tools compare algorithms` for algorithm comparisons ([guide](docs/development/benchmarking.md)). Choose coverage with `--plan NAME-OR-FILE` and optional `--algorithms`, `--types`, `--distributions`, `--lengths`, `--modes` overrides. Preview with `pnpm --silent tools plan NAME`; maintain defaults in `bench/plans/`, not workflow or runner conditionals. Local process-level A/A screens do not replace placement-controlled measurements.
 
-Read PR feedback with `pnpm --silent bench pr NUMBER --json` after authenticating `gh`. Match `head` to the PR's current commit and read both `Benchmarks (rust, …)` check summaries; a green tracking workflow does not mean those checks passed. A missing current-head comment is pending feedback, not a clean result. See [the continuous guide](docs/development/continuous-benchmarks.md#read-feedback-from-a-pr).
+Read feedback with `pnpm -s tools status main` or `pnpm -s tools status --pr NUMBER` after authenticating `gh`. Output is compact JSON: match `target.head`, read `workflows[].state` and both `benchmarks[]` verdicts; a green tracking workflow does not mean the benchmark checks passed. Use `--details` only when summaries or the report body are needed. Missing checks or a null `report` are absent feedback, not a clean result. Build and measurement commands retain long diagnostics in the returned `log` file; inspect the failing section rather than loading the entire log. See [the tooling guide](docs/development/tooling.md) and [continuous guide](docs/development/continuous-benchmarks.md#read-feedback-from-a-pr).
 
 Register identities and display names in `bench/catalog.toml`, not per-report maps. Reuse `bench/plot/` templates and theme for figures, including VitePress. Keep plotting host-independent and follow [the figure guide](docs/development/benchmark-figures.md). Add a new template for a new visual structure rather than arbitrary styling callbacks.
 

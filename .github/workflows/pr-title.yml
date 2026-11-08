@@ -13,7 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - name: Check the title against CONTRIBUTING.md
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: python3 .github/scripts/check_pr_title.py
+        run: node .github/scripts/check_pr_title.ts

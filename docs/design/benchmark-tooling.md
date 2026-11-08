@@ -1,12 +1,15 @@
 # Benchmark tooling
 
-The benchmark subsystem serves three workflows: working-tree comparisons during development, published algorithm comparisons, and continuous regression tracking. Its public command is `pnpm bench`; its browser-compatible presentation modules can also be imported by VitePress.
+The benchmark subsystem serves three workflows: working-tree comparisons during development, published algorithm comparisons, and continuous regression tracking. It is exposed through the repository CLI, `pnpm tools`; its browser-compatible presentation modules can also be imported by VitePress.
 
 ## Ownership
 
 | Boundary | Owns | Does not own |
 |---|---|---|
-| CLI | Commands, argument validation and workflow dispatch | Case lists, experiment statistics or chart layout |
+| CLI (`tools/`) | Task groups, argument validation, compact results and dispatch | Case lists, experiment statistics, chart layout or CI event policy |
+| Status (`tools/status.ts`) | Exact remote target resolution, workflow/check association and bounded default feedback | Submitting jobs or inferring a benchmark verdict from workflow success |
+| Continuous execution | Static artifacts, the local/cloud scheduling protocol and Bencher submission policy | Secrets, image publication, event trust or queue ownership |
+| Repository checks (`.github/scripts/`) | Routing, title, DCO and release-input policy shared with the CLI | Runner provisioning or registry publication |
 | Plan | Format-independent contract, presets, overrides, products, exclusions and native case expansion | Measurement scheduling or report layout |
 | Workspace | Immutable source snapshot, build location, temporary worktree and cleanup | Result retention policy |
 | Local comparison | Two revisions built with one current harness; process-level blocks and A/A screening | In-process placement controls |
@@ -15,7 +18,7 @@ The benchmark subsystem serves three workflows: working-tree comparisons during 
 | Continuous reporting | Bencher alert semantics, PR history and GitHub publication | Local A/A verdicts |
 | Figure templates | Geometry, visual encoding, typography, theme and accessible SVG | Filesystem access, GitHub or benchmark statistics |
 
-The CLI delegates complete operations rather than asking callers to pair build, run, report and cleanup steps. Report regeneration consumes persisted results and does not rebuild code or contact a measurement service.
+The CLI delegates complete operations rather than asking callers to pair build, run, report and cleanup steps. Experiment grammar, continuous tasks and repository checks are separate command groups under `tools/`; command callbacks do not own build or measurement policy. Subprocess logging has one operation-scoped owner, so commands return compact JSON without dropping diagnostics. Status defaults to a projection of the exact target, latest workflows and published benchmark verdicts; full summaries and comments are opt-in rather than serialized GitHub payloads. Report regeneration consumes persisted results and does not rebuild code or contact a measurement service.
 
 The two A/A workflows and Bencher's alert model remain distinct. Their summaries can use the same presentation foundations without treating different measurement methods as interchangeable.
 
@@ -33,7 +36,7 @@ Build execution and artifact publication still have two explicit CI configuratio
 
 Plans in `bench/plans/` are the authority for workflow coverage. Repository presets use TOML; custom files accept JSON and TOML. Syntax decoding is confined to the input boundary, followed by one validated plan model. Reports and measurement scheduling do not branch on the source format; persisted effective plans use JSON. They share one schema and selection algebra: products within an inclusion rule, union across inclusion rules, then exclusions and deduplication. `bench/plan.ts` owns user-facing validation, editor schema and CLI overrides. `bench/rust/src/plan.rs` owns expansion, including boundaries resolved from the measured library. The CLI never recreates a native case inventory or relies on a regex to represent the plan.
 
-`local` and `continuous` use the Criterion harness; `smoke` and `release` use the paired algorithm harness. This is a capability boundary, not a second selection language. Numeric lengths are open, record and distribution identities come from the catalog, and each harness rejects unsupported selectors. Continuous defaults are compiled into each executable, so the trusted cloud supervisor does not evaluate a PR's configuration language or need Node to parse the plan. Local runs persist their effective plan and pass its path to both executables.
+`local` and `continuous` use the Criterion harness; `smoke` and `release` use the paired algorithm harness. This is a capability boundary, not a second selection language. Numeric lengths are open, record and distribution identities come from the catalog, and each harness rejects unsupported selectors. Continuous defaults are compiled into each executable, so the trusted cloud supervisor does not evaluate a PR's configuration language or parse the plan itself. Local runs persist their effective plan and pass its path to both executables.
 
 Preset changes do not require editing case-registration functions. The continuous preset preserves the 50 input cases and 56 timed IDs; the algorithm presets preserve 70 smoke and 260 release inputs. Tests check these counts, custom products, exclusions, deduplication and code-relative boundaries. Required controls are retained when opponents are overridden; per-type adapter capabilities remain executable Rust knowledge.
 
@@ -66,7 +69,7 @@ Figure renderers are deterministic string-producing functions without Node, netw
 
 The official TypeScript 7.1 beta native compiler checks the tooling and the host-independent plot boundary. Vue's official content mapper checks SFC scripts and templates through the same compiler; external code is enabled only by the explicit documentation typecheck command. Exact prerelease versions are pinned in `package.json` and `pnpm-lock.yaml`.
 
-Node's filesystem, process and test APIs provide resource handling and verification. The JSON runtime parser and smol-toml decode document syntax; Rust uses serde_json and toml. Zod owns the plan's strict runtime schema and editor JSON Schema; handwritten field-validation and schema-generation mechanisms are not maintained alongside it. Commander owns command parsing, help, option validation and errors; the CLI does not maintain its own parser. Criterion already owns calibration and continuous-run estimates.
+Node's filesystem, process and test APIs provide resource handling and verification. Repository scripts, native build orchestration and the continuous supervisor use TypeScript on Node.js 24, with no Python tooling runtime. The tar library owns secure archive extraction after the pinned SHA-256 has been checked; the tooling does not implement an archive parser. Dependency-free CI bootstrap adapters share routing and DCO functions with the repository CLI while keeping the trusted-base execution boundary. The JSON runtime parser and smol-toml decode document syntax; Rust uses serde_json and toml. Zod owns the plan's strict runtime schema and editor JSON Schema; handwritten field-validation and schema-generation mechanisms are not maintained alongside it. Commander owns command parsing, help, option validation and errors; the CLI does not maintain its own parser. Criterion already owns calibration and continuous-run estimates.
 
 Observable Plot owns quantitative scales, tick placement, axes, symbols, collision placement, line clipping and SVG mark generation. String-pixel-width supplies Inter font metrics; linkedom’s browser-compatible worker export supplies a private SVG document and serialization in both Node and VitePress. The templates retain the project’s table-like compositions: label and value columns, grouped rows, highlighted SIMD rings and per-row trend scales. They do not maintain a parallel drawing engine. Bencher selection and alert semantics stay in `continuous/`; the change and trend templates accept only formatted names, values and visual verdicts.
 

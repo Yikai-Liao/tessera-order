@@ -45,20 +45,13 @@ jobs:
         with:
           pattern: python-wheels-*
           path: wheel-artifacts
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Collect wheels without overwriting different builds
-        run: |
-          python3 - <<'PYCODE'
-          from pathlib import Path
-          import hashlib, shutil
-          output = Path('dist')
-          output.mkdir()
-          wheels = list(Path('wheel-artifacts').rglob('*.whl'))
-          assert wheels, 'no wheels downloaded'
-          for wheel in wheels:
-              target = output / wheel.name
-              if target.exists():
-                  assert hashlib.sha256(target.read_bytes()).digest() == hashlib.sha256(wheel.read_bytes()).digest(), f'conflicting wheel: {wheel.name}'
-              else:
-                  shutil.copyfile(wheel, target)
-          PYCODE
+        run: pnpm tools release collect-wheels wheel-artifacts --out dist
       - uses: pypa/gh-action-pypi-publish@release/v1

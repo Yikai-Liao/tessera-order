@@ -23,11 +23,16 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Check Python tag and extension version
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          python -c "import os,tomllib; p=tomllib.load(open('python/pyproject.toml','rb'))['project']; c=tomllib.load(open('python/Cargo.toml','rb'))['package']; v=p.get('version',c['version']); assert v == c['version']; assert os.environ['RELEASE_TAG'] == 'python/v' + v"
+        run: pnpm tools release verify python --tag "$RELEASE_TAG"
       - uses: PyO3/maturin-action@v1
         with:
           command: build

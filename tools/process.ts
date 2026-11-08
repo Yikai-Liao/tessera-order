@@ -1,6 +1,28 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
+import { writeSync } from "node:fs";
+import { open } from "node:fs/promises";
+
+const commandLog = new AsyncLocalStorage<number>();
+
+/** Write progress alongside command diagnostics, never into the machine result. */
+export function diagnostic(message: string) {
+  const fd = commandLog.getStore();
+  if (fd === undefined) process.stderr.write(`${message}\n`);
+  else writeSync(fd, `${message}\n`);
+}
+
+/** Keep subprocess output in one log for the lifetime of a complete operation. */
+export async function withCommandLog<T>(path: string, operation: () => Promise<T>): Promise<T> {
+  const log = await open(path, "wx");
+  try {
+    return await commandLog.run(log.fd, operation);
+  } finally {
+    await log.close();
+  }
+}
 
 interface CommandOptions {
   cwd?: string;
@@ -18,7 +40,11 @@ export function command(
     const child = spawn(program, args, {
       cwd: options.cwd,
       env: { ...process.env, ...options.env },
-      stdio: ["ignore", options.capture ? "pipe" : "inherit", "inherit"],
+      stdio: [
+        "ignore",
+        options.capture ? "pipe" : (commandLog.getStore() ?? "inherit"),
+        commandLog.getStore() ?? "inherit",
+      ],
     });
     let output = "";
     child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {

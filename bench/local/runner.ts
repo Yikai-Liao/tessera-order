@@ -4,8 +4,8 @@ import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { arch, cpus, platform, release } from "node:os";
 import { join } from "node:path";
+import { command, diagnostic } from "../../tools/process.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
-import { command } from "../process.ts";
 import {
   buildBenchmark,
   copyLibraryRevision,
@@ -126,7 +126,7 @@ async function measureBlock(
       binary = role === "current" ? binaries.current : binaries.baseline;
     const criterion = join(workspace.directory, "criterion");
     await rm(criterion, { recursive: true, force: true });
-    console.log(`Block ${run.blocks.length + 1}/9: ${role}`);
+    diagnostic(`Block ${run.blocks.length + 1}/9: ${role}`);
     const pattern = run.cases.map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
     const args = ["--bench", `^(?:${pattern})$`];
     const { cpu } = options;

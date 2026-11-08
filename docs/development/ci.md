@@ -1,15 +1,8 @@
----
-type: Playbook
-title: Continuous integration
-description: Change check routing, platform lanes or native static-check boundaries.
-tags: [ci]
----
-
 # Continuous integration
 
 [`ci.yml`](../../.github/workflows/ci.yml) decides which language checks a change needs, runs the repository-wide checks, and folds every result into the one required check, `ci-ok`. A language's checks are a reusable workflow that `ci.yml` calls only when its paths changed; [`ci_changes.py`](../../.github/scripts/ci_changes.py) holds the rules and its tests.
 
-Language files select their language; Rust also selects Python because the planned binding embeds the core. Shared contracts and unknown paths select all implemented languages. Site/retrieval tooling, CI scripts and Markdown outside language/conformance directories select none. The router uses the merge base; unavailable bases and manual/new-branch runs select everything. Python and C++ checks activate only when their manifests exist.
+Language files select their language; Rust also selects Python because the planned binding embeds the core. Shared contracts and unknown paths select all implemented languages. Site tooling, CI scripts and Markdown outside language/conformance directories select none. The router uses the merge base; unavailable bases and manual/new-branch runs select everything. Python and C++ checks activate only when their manifests exist.
 
 ## Lanes
 
@@ -27,7 +20,7 @@ Use a bounded number of lanes: the account has 20 concurrent slots, shared with 
 
 The Rust lint job checks all workspace features with Clippy and rustdoc, including the benchmark's native-facing Rust code. These commands do not link executables, so they set `TESSERA_BENCH_CHECK_ONLY=1` to skip the benchmark build script's native compilation and linker inputs. The lint runner needs neither fetched native sources nor native build tools. The comparison job leaves the variable unset and compiles, links and exercises the native competitors, including the sequential-linkage check. Cargo tracks changes to the variable so a check-only build cannot suppress a later executable build's native setup.
 
-The comparison job builds the pinned native competitors, validates the smoke suite and generates a partial report. Repository lint also validates OKF metadata and retrieval behavior with the pinned CLI; no language build depends on that tool.
+The comparison job builds the pinned native competitors, validates the smoke suite and generates a partial report. The docs workflow checks shared task skills and renders their sources as pages; it does not require a retrieval CLI.
 
 A cell's commands live in one composite action, [`rust-test`](../../.github/actions/rust-test/action.yml), which both the pull request cells and the extra `main` cells call. A job's `if` cannot branch on `matrix` — the matrix is expanded after the condition is evaluated — so the two sets of cells are two jobs over one action rather than one matrix with a skip per cell.
 

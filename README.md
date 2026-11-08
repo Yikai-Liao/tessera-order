@@ -1,10 +1,3 @@
----
-type: Reference
-title: Tessera overview
-description: Evaluate Tessera, its current capabilities and alternatives.
-tags: [api]
----
-
 <p align="center">
   <img src="https://raw.githubusercontent.com/Yikai-Liao/tessera-sort/main/assets/logo.svg" width="144" alt="Tessera logo: a mosaic rosette">
 </p>
@@ -110,7 +103,7 @@ A Python binding is planned as well; see the [roadmap](ROADMAP.md).
 | How the algorithm works, with interactive figures | [Algorithm explanation](https://yikai-liao.github.io/tessera-sort/explain/) |
 | How the engine works | [`docs/design/engine.md`](docs/design/engine.md) |
 | Why user key functions cache bucket IDs | [Record handling](docs/design/engine.md#record-handling) |
-| All documentation | [Documentation site](https://yikai-liao.github.io/tessera-sort/) · [Source index](docs/index.md) |
+| All documentation | [Documentation site](https://yikai-liao.github.io/tessera-sort/) · [Source index](docs/README.md) |
 
 ## Contributing
 

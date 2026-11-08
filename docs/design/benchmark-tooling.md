@@ -1,10 +1,3 @@
----
-type: Reference
-title: Benchmark tooling
-description: Locate ownership before changing plans, builds, reports or figures.
-tags: [bench, architecture]
----
-
 # Benchmark tooling
 
 `pnpm bench` owns three complete workflows: dirty-tree/commit screening, algorithm comparisons and continuous PR feedback. Commands and measurement contracts are in the [protocol](../development/benchmarking.md); this page identifies where to change behavior.

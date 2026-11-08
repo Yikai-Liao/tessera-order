@@ -1,10 +1,3 @@
----
-type: Explanation
-title: Algorithm overview
-description: Learn the sorting pipeline and choose a deeper explanation.
-tags: [engine, learning]
----
-
 # How Tessera works
 
 These pages explain the algorithm from first principles: what a radix sort does, why the textbook versions need either a second buffer or give up stability, and how Tessera avoids both. Each page has interactive figures. They run TypeScript models of the Rust source, and those models are tested against reference sorts. The text says everything the figures show, so you can read the Markdown files in [`docs/explain/`](.) without the site.

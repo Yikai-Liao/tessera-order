@@ -1,11 +1,3 @@
----
-type: Proposal
-title: Roadmap
-description: Select unfinished work and check milestone acceptance conditions.
-tags: [planning, release]
-status: draft
----
-
 # Roadmap
 
 This page tracks unfinished work and its acceptance conditions. Current behavior belongs in the [user guide](docs/guide/getting-started.md) and [engine reference](docs/design/engine.md).

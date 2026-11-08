@@ -1,36 +1,12 @@
----
-type: Playbook
-title: Benchmark protocol
-description: Screen source changes or produce placement-controlled performance evidence.
-tags: [bench, performance]
----
-
 # Benchmarking
 
 The comparison runner in `bench/rust` measures sorting algorithms on one machine. It answers four questions: how Tessera compares with the standard stable sort, with other stable sorts, with unstable sorts when equal keys are indistinguishable, and how much extra memory each sort uses. The [continuous suite](continuous-benchmarks.md) tracks regressions on Bencher; release comparisons use the paired measurements described here.
 
-## Development commands
+Use [the measurement workflow](../../.agents/skills/tessera-measure/SKILL.md) to choose and run a command. This page owns experiment selection semantics, prerequisites, timing, verification and reporting contracts.
 
-Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm install --frozen-lockfile`. The command surface is `pnpm bench --help`.
+## Working-tree comparisons
 
-```sh
-# Working tree, including uncommitted source changes, versus a commit.
-pnpm bench compare HEAD~1
-pnpm bench compare main --types u64,row_u64 --distributions random,zipf2 --cpu 2
-
-# Rust-only smoke comparison, including validation and a report.
-pnpm bench run
-
-# Full native comparison and optional Portable SIMD build.
-pnpm bench run --plan release --simd --cpu 2
-
-# Reports do not rebuild or rerun measurements.
-pnpm bench report bench/results/SESSION
-```
-
-Both measurement commands accept `--out DIR` and require a new directory. Their default output is `bench/results/<timestamp>`. They snapshot the current sources and clean up their temporary worktree and build directory under `~/code/tessera-bench/`; `TESSERA_BENCH_WORK` overrides that location. Repository-internal symlinks are materialized; escaping or dangling links and directory cycles are rejected before building. Current sources may use absolute links to internal files. Baseline links must resolve inside an archive of the selected commit; absolute links into the live checkout are rejected. Results are retained. The lower-level commands below remain available for resumable algorithm sessions and custom investigations.
-
-### Working-tree comparisons
+`bench compare` and `bench run` accept `--out DIR` and require a new directory. Their default output is `bench/results/<timestamp>`. They snapshot the current sources and clean up their temporary worktree and build directory under `~/code/tessera-bench/`; `TESSERA_BENCH_WORK` overrides that location. Repository-internal symlinks are materialized; escaping or dangling links and directory cycles are rejected before building. Current sources may use absolute links to internal files. Baseline links must resolve inside an archive of the selected commit; absolute links into the live checkout are rejected. Results are retained. The lower-level commands below remain available for resumable algorithm sessions and custom investigations.
 
 `compare [COMMIT]` defaults to `HEAD` and uses any resolvable local commit compatible with the current crate API, harness and lockfile. Both revisions are built from the current benchmark harness with one toolchain and the same features; the baseline substitutes only `rust/tessera-sort` from the named commit. Selected timed IDs must match. The `local` plan measures only `rust/u64/random/65536/s1/api`; override its axes or choose another plan explicitly, since each selected case runs 27 times across nine blocks. `--filter` optionally narrows the resulting timed IDs.
 

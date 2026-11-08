@@ -1,10 +1,3 @@
----
-type: Explanation
-title: Radix sort
-description: Learn counting passes, LSD versus MSD and the memory trade-off.
-tags: [engine, learning]
----
-
 # 1. Radix sort in one pass
 
 A comparison sort learns about the order by comparing two keys at a time, and it needs Ω(n log n) comparisons. A radix sort never compares keys. It reads a *digit*, a fixed window of key bits, and uses it as an array index. This page builds the textbook versions from one primitive, the counting pass, and compares them on the same input with Tessera.
@@ -71,4 +64,4 @@ For a top-digit split into R = 256 buckets, the block partition needs this much 
 | 10⁸ | 3.9 MiB | 763 MiB | 5.5 MiB | 1.5 GiB |
 | 10⁹ | 12 MiB | 7.5 GiB | 17 MiB | 15 GiB |
 
-The tile buffer (at most 64 KiB of records) and its cached bucket IDs come on top of these numbers. The [memory table](overview.md#memory-at-a-glance) lists every part.
+The tile buffer (at most 64 KiB of records) and its cached bucket IDs come on top of these numbers. The [memory table](index.md#memory-at-a-glance) lists every part.

@@ -1,10 +1,3 @@
----
-type: Policy
-title: Contributing
-description: Prepare a change, validate it, and submit a signed-off pull request.
-tags: [ci, docs, release]
----
-
 # Contributing to Tessera
 
 Tessera is pre-release. Bug reports, real-workload experience and measurements on other machines are especially useful. Follow the [code of conduct](CODE_OF_CONDUCT.md); discuss changes larger than a small fix in an issue first.
@@ -29,7 +22,11 @@ Use `pnpm bench compare COMMIT` for dirty-tree development screens, `pnpm bench 
 
 ## Documentation
 
-Use the [task index](docs/index.md) to find the current topic. [Knowledge maintenance](docs/development/knowledge.md#maintain-the-corpus) defines metadata, ownership and the test for adding a document. Keep rules and rationale together instead of adding a parallel decision record.
+Use the [task index](docs/README.md) to find the current topic. Edit an existing topic before adding a document; a new page needs a distinct contract, procedure, explanation or evidence. Delete obsolete instructions, keep current rules and non-obvious rationale together, and retain reproducible measurement conditions. Git/PR history preserves superseded decisions; do not add a parallel decision record. Markdown paragraphs occupy one line.
+
+Multi-step agent workflows live in [`.agents/skills/`](.agents/skills/), each with a task-selecting `name` and `description` in `SKILL.md`. A skill owns executable steps and completion criteria; shared contracts, design and evidence remain in their documents. Link those files directly rather than through another index, and list known mandatory reads in `AGENTS.md` so they can be loaded in one batch. Do not require a skill for a simple fact lookup. The site renders skill sources as human-readable workflow pages; never maintain a second copy of the procedure.
+
+Add a skill when a task has a distinct trigger, useful multi-step procedure and completion criterion. Split workflows when their descriptions let an agent avoid loading an unrelated branch; keep shared steps together when they are normally needed in one task. Do not create a skill per document or a generic repository skill that only forwards to other files. Check descriptions, first-read paths and unnecessary reads on representative tasks, not just document counts. Run the [site checks](docs/development/docs-site.md#commands) after changing shared workflows or pages.
 
 Rust items have a one-line summary. Public items explain their contract with intra-doc links and applicable `# Key function`, `# Panics`, `# Safety`, `# Memory` and `# Examples` sections; examples are asserting doctests. Internal comments explain invariants, hazards and measured choices. Update [shared semantics](conformance/semantics.md) with ordering, stability, panic or space changes, and explanations and simulation models with algorithm changes.
 

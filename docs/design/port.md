@@ -1,10 +1,3 @@
----
-type: Evidence
-title: Engine measurements
-description: Inspect paired evidence before changing routing, scans or inlining.
-tags: [engine, performance, evidence]
----
-
 # Rust engine port
 
 This page retains measured evidence behind engine choices, not current development instructions. The initial-port results and follow-ups below describe their recorded revisions and environments; they are not current-head validation.

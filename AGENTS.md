@@ -1,27 +1,25 @@
----
-type: Policy
-title: Agent entry point
-description: Start a repository task with safety rules and focused reading paths.
-tags: [agent, docs]
----
-
 # Instructions for coding agents
 
 Tessera is a stable radix sort with O(√n) auxiliary memory. Keep code concise, readable and in English.
 
 ## Read only for your task
 
-Start with the matching row, not the whole documentation tree. Each document has an OKF description and tags; [the index](docs/index.md) and `pnpm knowledge:build` expose them progressively. Without the CLI, read the linked file directly. With `okf` 0.5.2 installed, run `pnpm knowledge:build`, then `okf search .knowledge --tag engine --type Reference` for candidate IDs and `okf show .knowledge ID` only for the selected topic; generated directory indexes carry descriptions.
+Choose the matching task below. Batch its skill and required documents in the first tool interaction; do not read a skill just to discover already-listed paths. Skip anything already loaded. Reading needs no index build or CLI setup.
 
-| Task | Read before changing |
+For a fact lookup, open the relevant document directly and skip the workflow skill. For multi-step work, use the named skill; links to deeper references are conditional, not a request to read every linked file. Hosts without skill discovery can read `SKILL.md` as ordinary Markdown. The [human task index](docs/README.md) covers the remaining topics.
+
+| Task | First read together |
 |---|---|
-| Rust engine, keys or block partition | [Engine](docs/design/engine.md), [semantics](conformance/semantics.md); [measurements](docs/design/port.md) when changing routing, constants or inlining |
-| Measure a change | [Benchmark protocol](docs/development/benchmarking.md) |
-| Read PR performance feedback | [Continuous benchmarks](docs/development/continuous-benchmarks.md#read-feedback-from-a-pr) |
-| Benchmark tooling or figures | [Tooling boundaries](docs/design/benchmark-tooling.md), then [figures](docs/development/benchmark-figures.md) if needed |
-| Documentation or retrieval | [Knowledge workflow](docs/development/knowledge.md); [site](docs/development/docs-site.md) for pages or models |
+| Check ordering, panic or memory guarantees | [Semantics](conformance/semantics.md) |
+| Change the Rust engine, keys or block partition | [Engine skill](.agents/skills/tessera-engine/SKILL.md), [engine reference](docs/design/engine.md), [semantics](conformance/semantics.md) |
+| Measure a change or investigate a performance alert | [Measurement skill](.agents/skills/tessera-measure/SKILL.md), [protocol](docs/development/benchmarking.md); include relevant [engine evidence](docs/design/port.md) for routing, thresholds, digit planning or inlining |
+| Read existing PR performance feedback | [Read-only feedback skill](.agents/skills/tessera-pr-performance/SKILL.md); no other document required for the normal path |
+| Benchmark tooling or figures | [Tooling boundaries](docs/design/benchmark-tooling.md); include [figure guide](docs/development/benchmark-figures.md) for rendering changes |
+| Documentation or site | [Documentation rules](CONTRIBUTING.md#documentation); include [site guide](docs/development/docs-site.md) for pages or models |
 | CI, release or planned APIs | [CI](docs/development/ci.md), [release](RELEASING.md) or [roadmap](ROADMAP.md), respectively |
 | Open a PR or commit | [Contributing](CONTRIBUTING.md) |
+
+Engine routing, thresholds, digit planning and inlining changes also need the measurement skill, protocol and relevant evidence in that first batch.
 
 ## Always preserve
 
@@ -41,7 +39,6 @@ cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets && cargo test --workspace --doc
 pnpm install --frozen-lockfile && pnpm format
 uvx ruff@0.17.4 format && uvx ruff@0.17.4 check
-pnpm knowledge:test && pnpm knowledge:build                  # Markdown / retrieval
 pnpm docs:test && pnpm docs:typecheck && pnpm docs:build     # site / models
 pnpm bench:test && pnpm bench:typecheck                    # benchmark tooling
 python3 -m unittest discover -s bench/continuous -p "test_*.py"

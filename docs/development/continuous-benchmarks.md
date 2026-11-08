@@ -1,27 +1,10 @@
----
-type: Playbook
-title: Continuous benchmarks
-description: Read current-head PR feedback or maintain trusted benchmark tracking.
-tags: [bench, ci, performance]
----
-
 # Continuous benchmarks
 
 Rust changes and pushes to `main` run Default and Portable SIMD Criterion suites on [Bencher Bare Metal](https://bencher.dev/docs/explanation/images/). They flag changes to investigate; without in-process A/A and placement controls they cannot establish performance claims. Use the [full protocol](benchmarking.md) for those.
 
 ## Read feedback from a PR
 
-```sh
-gh auth login
-pnpm --silent bench pr 123 --json
-```
-
-This read-only command returns the current `head`, `checks[].conclusion`, `checks[].output.summary` and matching `comment`. Verify all of them:
-
-1. The report must match the current head. A missing comment or pending checks mean feedback is not ready, not clean.
-2. Read **both** `Benchmarks (rust, Default)` and `Benchmarks (rust, Portable SIMD)`. A green `Track benchmarks` workflow does not imply these checks passed. Their summaries distinguish alerts, measurement failure and a missing comparable baseline.
-3. A stacked PR must compare against its parent at the resolved base commit, not the whole stack against `main`.
-4. If checks are absent, inspect `Build benchmarks`, then `Track benchmarks`. The report links the workflow, Bencher JSON and case history.
+Use [the read-only feedback workflow](../../.agents/skills/tessera-pr-performance/SKILL.md) for commands, verdicts and missing-feedback handling. No build or measurement is required. This page describes tracking internals and configuration.
 
 ## Pipeline
 
@@ -47,7 +30,7 @@ These Testbeds separate concurrent measurements from the older serial histories.
 
 ## Cases
 
-[`bench/plans/continuous.toml`](../../bench/plans/continuous.toml) defines coverage, compiled into each measured executable. Preview it with `pnpm --silent bench plan continuous`; do not maintain a second case list here or in the supervisor. [Selection rules](benchmarking.md#experiment-plans) and the [case ID contract](benchmarking.md#runner) apply. IDs are `<language>/<case_id>/<mode>`, such as `rust/u64/random/65536/s1/api`. `workspace` measures the same API with prepared scratch.
+[`bench/plans/continuous.toml`](../../bench/plans/continuous.toml) defines coverage, compiled into each measured executable. Preview it with `pnpm --silent bench plan continuous`; do not maintain a second case list here or in the supervisor. [Selection rules](benchmarking.md#experiment-plans) and the [case ID contract](benchmarking.md#cases-and-suites) apply. IDs are `<language>/<case_id>/<mode>`, such as `rust/u64/random/65536/s1/api`. `workspace` measures the same API with prepared scratch.
 
 Coverage must exercise insertion/tile boundaries, confirmed order, low-fanout tiles, each node route, key widths, floats, stable payloads and large working sets. Keep random controls beside targeted distributions. Small cases are placement-sensitive; their alerts need the same investigation as large ones.
 

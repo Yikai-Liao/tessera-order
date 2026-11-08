@@ -1,11 +1,3 @@
----
-type: Proposal
-title: Python binding
-description: Implement the planned Python adapters with explicit buffer safety.
-tags: [python, api, planning, safety]
-status: draft
----
-
 # Proposal: Python binding
 
 Status: accepted, not started. Date: 2026-11-06.

@@ -1,10 +1,3 @@
----
-type: Playbook
-title: Benchmark figures
-description: Choose or extend a shared figure template without host dependencies.
-tags: [bench, docs, figures]
----
-
 # Benchmark figures
 
 Benchmark figures share a visual grammar, not just a palette. A reader should recognize the same typography, spacing and mark meanings in a release report, a PR comment and the documentation site.

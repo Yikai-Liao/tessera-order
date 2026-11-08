@@ -1,10 +1,3 @@
----
-type: Playbook
-title: Documentation site
-description: Edit site pages, interactive figures or algorithm simulation models.
-tags: [docs, site]
----
-
 # Documentation site
 
 The documentation site is built with [VitePress](https://vitepress.dev) from the Markdown files in this repository, and published to GitHub Pages by [`.github/workflows/docs.yml`](../../.github/workflows/docs.yml). The Markdown files are the source: they read correctly on GitHub and in an editor, and coding agents can read them directly.
@@ -13,8 +6,9 @@ The documentation site is built with [VitePress](https://vitepress.dev) from the
 
 | Path | Contents |
 |---|---|
-| `docs/**/*.md` | Pages. `docs/home.md` serves as `/`; `docs/explain/overview.md` serves as `/explain/`. `docs/index.md` is the repository task index, not a site page. The reserved `index.md` name is kept for OKF navigation. |
+| `docs/**/*.md` | Pages. `docs/index.md` serves as `/`; `docs/explain/index.md` serves as `/explain/`. `docs/README.md` is the repository task index, not a site page. |
 | `conformance/semantics.md`, `ROADMAP.md`, `RELEASING.md`, `CONTRIBUTING.md` | Shared documents, also rendered as pages (`sharedPages` in the config) |
+| `.agents/skills/*/SKILL.md` | Task workflows, rendered from the same source through `docs/development/[workflow].paths.ts`; no copied procedure or generated Markdown |
 | `docs/.vitepress/config.ts` | Site configuration, navigation and link handling |
 | `docs/.vitepress/theme/components/` | Vue components used by the explanation pages |
 | `docs/.vitepress/theme/sim/` | TypeScript models of the engine that drive the figures, with their tests |
@@ -36,6 +30,12 @@ pnpm docs:build                 # build into docs/.vitepress/dist; fails on dead
 The pinned TypeScript compiler and Vue content mapper check SFC scripts and templates; `--runExternalCode` enables the mapper registered in `docs/.vitepress/tsconfig.json`.
 
 Pull requests that touch the site or its pages run the same checks in `docs.yml`. Pushes to `main` also deploy the site. The repository's Pages source must be set to *GitHub Actions* once, under *Settings → Pages*.
+
+## Shared task skills
+
+Agent hosts discover names and descriptions from `.agents/skills/*/SKILL.md`. Pi discovers this project location natively; use `/reload` after adding skills in an active session. A description advertises when to load a workflow; Markdown links do not automatically load their targets. `AGENTS.md` lists first-read sets so skills and required references can be read together. Simple lookups go directly to the document.
+
+Register a workflow source and its public URL in `workflowPages` in `docs/development/[workflow].paths.ts`, and add the page to the sidebar. VitePress does not discover Markdown in hidden directories, so its dynamic route template renders the registered sources in memory. Write links relative to the actual skill directory (`../../../docs/…`); the site resolves them from that source and rewrites them to public page URLs or GitHub source links. Edit links also point to the skill source. Keep `.agents/skills/**` in the docs workflow path filters. Tests check discovery metadata, entry links, source reuse and page-link rewriting; the build checks the rendered pages. Restart `pnpm docs:dev` after editing a shared skill source.
 
 ## Writing pages
 

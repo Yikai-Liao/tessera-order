@@ -1,10 +1,3 @@
----
-type: Playbook
-title: Versions and releases
-description: Version a package and publish it after its release checks.
-tags: [release, ci]
----
-
 # Versions and releases
 
 Each language package is versioned and released independently so fixes need not wait for other implementations. No package has been released yet; the versions below are examples.

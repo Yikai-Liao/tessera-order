@@ -1,10 +1,3 @@
----
-type: Explanation
-title: Ownership and panics
-description: Understand cached buckets, ownership and recovery from key panics.
-tags: [engine, learning, safety]
----
-
 # 6. Ownership and panics
 
 Tessera sorts records of any type: `String`, `Box<T>`, `&mut T`, structs with destructors. It never requires `Copy`, `Clone` or `Default`. A sort that moves records with raw copies has to make sure that no record is dropped twice, leaked, or read while half-moved. That has to hold even when the user's key function returns inconsistent keys or panics. This page explains the rules that make this work.

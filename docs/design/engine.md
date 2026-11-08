@@ -1,10 +1,3 @@
----
-type: Reference
-title: Engine reference
-description: Change routing, digit planning or record movement without breaking invariants.
-tags: [engine, safety, performance]
----
-
 # Design
 
 This document describes the engine in `rust/tessera-sort`. It describes current routing and invariants; the [measurement record](port.md) covers the initial port and subsequent measured changes.

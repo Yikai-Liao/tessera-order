@@ -59,17 +59,6 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Install pinned OKF CLI
-        run: |
-          mkdir -p "$RUNNER_TEMP/okf"
-          curl --fail --location --silent --show-error \
-            https://github.com/okfcli/okf/releases/download/v0.5.2/okf_0.5.2_linux_amd64.tar.gz \
-            --output "$RUNNER_TEMP/okf/archive.tar.gz"
-          echo "05ecf191f1ef1396cdeefa9a1fd877d491b32b91f2a4a4d06393656e880e90b6  $RUNNER_TEMP/okf/archive.tar.gz" | sha256sum --check
-          tar -xzf "$RUNNER_TEMP/okf/archive.tar.gz" -C "$RUNNER_TEMP/okf" okf
-          echo "$RUNNER_TEMP/okf" >> "$GITHUB_PATH"
-      # Retrieval tests also build and validate the repository corpus.
-      - run: pnpm knowledge:test
       - run: pnpm lint
       - run: pipx run ruff==0.17.4 format --check
       - run: pipx run ruff==0.17.4 check

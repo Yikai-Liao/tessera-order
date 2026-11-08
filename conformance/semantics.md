@@ -1,10 +1,3 @@
----
-type: Reference
-title: Ordering semantics
-description: Check ordering, key callbacks, panic behavior and space guarantees.
-tags: [engine, safety, api]
----
-
 # Ordering semantics
 
 Status: implemented by the unreleased Rust crate; the planned C++ implementation follows the same rules. Shared test vectors in `conformance/vectors/` will be added with the benchmark runner; until then the Rust tests generate their own inputs.

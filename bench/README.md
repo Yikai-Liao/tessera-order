@@ -1,10 +1,3 @@
----
-type: Reference
-title: Benchmark entry point
-description: Choose the benchmark command and topic for the task.
-tags: [bench, performance]
----
-
 # Benchmarks
 
 The CLI is `pnpm bench --help` (Node.js 24; install with `pnpm install --frozen-lockfile`). Choose the task before loading its documentation:

@@ -3,20 +3,22 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type MarkdownRenderer } from "vitepress";
+import { workflowPages, workflowSource } from "../development/[workflow].paths.ts";
 
 // The site renders the Markdown files of the repository in place, so the
 // same files read correctly on GitHub, in an editor, and on the site. Pages
 // are the files under `docs/` plus the shared documents listed here.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const repository = "https://github.com/Yikai-Liao/tessera-sort";
-const sharedPages = new Set([
-  "conformance/semantics.md",
-  "ROADMAP.md",
-  "RELEASING.md",
-  "CONTRIBUTING.md",
+const sharedPages = new Map([
+  ["conformance/semantics.md", "conformance/semantics.md"],
+  ["ROADMAP.md", "ROADMAP.md"],
+  ["RELEASING.md", "RELEASING.md"],
+  ["CONTRIBUTING.md", "CONTRIBUTING.md"],
+  ...workflowPages,
 ]);
 // The task index is for repository readers; the site has its own home page.
-const notPages = new Set(["docs/index.md"]);
+const notPages = new Set(["docs/README.md"]);
 
 function isPage(path: string): boolean {
   if (!path.endsWith(".md") || notPages.has(path)) return false;
@@ -27,21 +29,15 @@ function isPage(path: string): boolean {
 
 /** Where a source file is served: `docs/` is the site root, `README.md` is a directory index. */
 function sitePath(path: string): string {
+  const shared = sharedPages.get(path);
+  if (shared) return shared;
   const served = path.startsWith("docs/") ? path.slice("docs/".length) : path;
-  if (served === "home.md") return "index.md";
-  if (served === "explain/overview.md") return "explain/index.md";
   return served.replace(/(^|\/)README\.md$/, "$1index.md");
 }
 
 function markdownFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
-    if (
-      entry === "node_modules" ||
-      entry === "target" ||
-      entry === ".knowledge" ||
-      entry.startsWith(".git")
-    )
-      continue;
+    if (entry === "node_modules" || entry === "target" || entry.startsWith(".git")) continue;
     const full = join(dir, entry);
     const stat = statSync(full);
     if (stat.isDirectory()) {
@@ -55,9 +51,10 @@ function markdownFiles(dir: string, out: string[] = []): string[] {
 }
 
 const allMarkdown = markdownFiles(repoRoot);
-const rewrites = Object.fromEntries(
-  allMarkdown.filter((p) => isPage(p) && sitePath(p) !== p).map((p) => [p, sitePath(p)]),
-);
+const rewrites = Object.fromEntries([
+  ...allMarkdown.filter((p) => isPage(p) && sitePath(p) !== p).map((p) => [p, sitePath(p)]),
+  ...[...workflowPages.values()].map((page) => [`docs/${page}`, page]),
+]);
 
 /**
  * Turns relative links into what each reader needs: a page link becomes an
@@ -66,8 +63,11 @@ const rewrites = Object.fromEntries(
  */
 function repositoryLinks(md: MarkdownRenderer) {
   md.core.ruler.push("tessera_repository_links", (state) => {
-    const source: string | undefined = state.env.realPath ?? state.env.path;
-    if (!source) return;
+    const page: string | undefined = state.env.path;
+    const original: string | undefined = state.env.realPath ?? page;
+    if (!original) return;
+    const workflow = page && workflowSource(relative(repoRoot, page).split(sep).join("/"));
+    const source = workflow ? join(repoRoot, workflow) : original;
     const visit = (tokens: typeof state.tokens) => {
       for (const token of tokens) {
         if (token.children) visit(token.children);
@@ -109,6 +109,11 @@ export default defineConfig({
   rewrites,
   cleanUrls: true,
   lastUpdated: true,
+  transformPageData(page) {
+    const source = workflowSource(page.relativePath);
+    // The dynamic template is not the workflow's edit target or update timestamp.
+    if (source) return { filePath: source, lastUpdated: undefined };
+  },
   head: [
     [
       "link",
@@ -197,11 +202,13 @@ function developmentSidebar() {
       text: "Development",
       items: [
         { text: "Contributing", link: "/CONTRIBUTING" },
+        { text: "Change the engine", link: "/development/change-engine" },
+        { text: "Measure a change", link: "/development/measure-change" },
+        { text: "PR performance feedback", link: "/development/pr-performance" },
         { text: "Benchmark protocol", link: "/development/benchmarking" },
         { text: "Benchmark figures", link: "/development/benchmark-figures" },
         { text: "Continuous benchmarks", link: "/development/continuous-benchmarks" },
         { text: "Continuous integration", link: "/development/ci" },
-        { text: "Knowledge workflow", link: "/development/knowledge" },
         { text: "Documentation site", link: "/development/docs-site" },
         { text: "Releasing", link: "/RELEASING" },
       ],

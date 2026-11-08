@@ -1,10 +1,3 @@
----
-type: Reference
-title: Comparison harness
-description: Change verified timing, allocation accounting or resumable result groups.
-tags: [bench, safety]
----
-
 # Comparison benchmark design
 
 The comparison is a local measurement pipeline: adapters produce verified block samples, a separate process measures allocations, and an offline TypeScript report computes every statistic and figure. Commands, inputs and measurement contracts are in [Benchmarking](../development/benchmarking.md). Release sessions run on one maintainer-controlled machine: hosted job limits must not determine groups or absolute-time comparisons.

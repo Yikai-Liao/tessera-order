@@ -1,10 +1,3 @@
----
-type: Explanation
-title: Key encoding
-description: Understand integer, float and reverse encodings and varying bits.
-tags: [engine, learning, keys]
----
-
 # 2. Keys as unsigned integers
 
 A radix sort indexes arrays with digits, so it needs keys whose **bit pattern** sorts in the same order as their **values**. Unsigned integers already do. Every other key type that Tessera supports is first *encoded* into an unsigned integer of the same width, and the engine only ever sees the encoded key. The encodings are in [`key.rs`](../../rust/tessera-sort/src/key.rs), and the order they produce is part of the [ordering semantics](../../conformance/semantics.md#key-encoding).

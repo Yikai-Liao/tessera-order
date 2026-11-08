@@ -1,0 +1,26 @@
+{
+  "prerequisite_commit": "be857051e4c903e461691b6d629b51513b8d3c8d",
+  "prerequisite_archive": "research/region-child-mask",
+  "identities_sha256": {
+    "source_plan": "a56ad1441373b3af342675a64d0a3d317e4bb022dfc0b283d48c8f0178237c60",
+    "core": "9ad13ad1555a5ea9c3b58a7274d5bf684e5d2e7a848dedd67b4a09296a46ab2d",
+    "report": "8d3d03233e2e24567a0785d039b4df316b3ae4def565e4f2d8b50defb34e7452",
+    "analysis": "5812c95501111d98f13bc8fcafa8935ba9422279aa7c83806f164b9b14d3e781",
+    "v1_SOURCE-PLAN.json": "88dd383afd9b6a47ecf29c217f1ef0caa73333e91f914c33dc2d45cc74734da8",
+    "v1_src_lib.rs": "3c4c10ad06aaa0bea86203bad4ca094319a88aaeed0cadfc78c4109142f87bd3",
+    "v1_evidence_build-result.json": "e78bdbdb84b322981aa5f952fae1d5450b4b2b7d9004552216e19230dfe4bc4a",
+    "v2_SOURCE-PLAN.json": "c47087546ff8f200aec830a35413d360f5d867ed038acec5e756d6206e496ed5",
+    "v2_src_lib.rs": "ed23fe5cf7cff2672370fd492d95c3c3176a4c572f0f2646139f6876790e26b2",
+    "v2_evidence_build-result.json": "3dc2428f964c0fdc6257db9c8177c3d25cd965b7259db19536d82e97a18454f3",
+    "v3_SOURCE-PLAN.json": "a56ad1441373b3af342675a64d0a3d317e4bb022dfc0b283d48c8f0178237c60",
+    "v3_src_lib.rs": "9ad13ad1555a5ea9c3b58a7274d5bf684e5d2e7a848dedd67b4a09296a46ab2d",
+    "v3_evidence_build-result.json": "bf6ebcaf6a3ccc6a0fe3c7a6a907082d04ea4a4ab984e3feee5a5987bee4686e",
+    "resume_build-result.json": "4571f75f2e307d78910e82bbc65d5d930c96d12121382567b3b2403949e754b0",
+    "resume_validate-result.json": "e7edfa67b98b0636691bd68a56a22c27d8634c7a64dd14e867ade38ce15e91a1",
+    "resume_miri-result.json": "2d17ef0224298db9318468b9a53bb1a62d069ffe72e831f5516eb0a251a15823",
+    "timing-u64.jsonl": "80572ca59024c87155c6265bfebf665844da8cc26edd9603d0ce2f7fc27f145c",
+    "timing-row16.jsonl": "ae25ea9358f4dc29a493a7522097c8132b5795599ea6c2645c9f5d9596a42126"
+  },
+  "original_build_passed": false,
+  "runtime_adoption": false
+}

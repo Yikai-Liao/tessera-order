@@ -1,0 +1,283 @@
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -221,22 +221,92 @@
+     }
+ }
+ 
+-struct Cursor<T> {
++/// Hot per-bucket write interval; rank metadata is needed only on refill.
++struct Writer<T> {
+     next: *mut MaybeUninit<T>,
+     end: *mut MaybeUninit<T>,
++}
++/// Cold exact-rank state for the next lazily allocated segment.
++struct Segment {
+     logical: usize,
+     first_offset: usize,
+     end_rank: usize,
+ }
+-// SAFETY: a cursor is owned by one shard. Its writable interval ends at its
++// The split preserves the five-word field payload on the target architecture.
++const _: () = {
++    assert!(size_of::<Writer<u64>>() == 2 * size_of::<usize>());
++    assert!(size_of::<Writer<Row16>>() == 2 * size_of::<usize>());
++    assert!(size_of::<Writer<Row128>>() == 2 * size_of::<usize>());
++    assert!(size_of::<Segment>() == 3 * size_of::<usize>());
++};
++// SAFETY: a writer is owned by one shard. Its writable interval ends at its
+ // own segment boundary, even when the physical block has other shard writers.
+ // All physical pointers derive from the shared original allocation ancestors.
+-unsafe impl<T: Send> Send for Cursor<T> {}
++unsafe impl<T: Send> Send for Writer<T> {}
+ struct Shard<T> {
+     first: usize,
+     end: usize,
+-    cursors: Vec<Cursor<T>>,
++    writers: Vec<Writer<T>>,
++    segments: Vec<Segment>,
+     free: Vec<usize>,
++}
++
++/// Writes one source record using the exact checked, before-write refill body.
++/// References borrow only metadata; no record reference survives this call.
++#[inline(always)]
++fn scatter_record<T: Record>(
++    shard: &mut Shard<T>,
++    memory: &Memory<T>,
++    boundary_map: &[usize],
++    output: &Directory,
++    config: &Config,
++    at: usize,
++    b: usize,
++    r: usize,
++) {
++    // SAFETY: this shard exclusively reads its original interval.
++    // Its free pool never contains an unconsumed source block.
++    let record = unsafe { input_read(memory, at) };
++    let bucket = ((record.key() >> config.shift) as usize) & (r - 1);
++    let writer = &mut shard.writers[bucket];
++    if writer.next == writer.end {
++        let segment = &mut shard.segments[bucket];
++        let logical = segment.logical;
++        let base_rank = logical.checked_mul(b).unwrap();
++        // These checks are per block, not per record. Even the last
++        // shared-boundary fragment stops at this segment's own end.
++        assert!(base_rank < segment.end_rank);
++        let end_offset = (segment.end_rank - base_rank).min(b);
++        assert!(segment.first_offset < end_offset);
++        let id = if boundary_map[logical] != usize::MAX {
++            boundary_map[logical]
++        } else {
++            assert_eq!(segment.first_offset, 0);
++            assert_eq!(end_offset, b);
++            // R seeds cover at most R active bodies while the
++            // current source block is still being consumed.
++            let id = shard.free.pop().expect("proved shard pool bound");
++            output.set(logical, id);
++            id
++        };
++        let physical = memory.ptr(id);
++        // SAFETY: both bounds lie inside this physical block. The
++        // fragment endpoint is capped to the owning segment, not
++        // merely to B, so no pointer advances into a foreign range.
++        unsafe {
++            writer.next = physical.add(segment.first_offset);
++            writer.end = physical.add(end_offset);
++        }
++        segment.first_offset = 0;
++        segment.logical += 1;
++    }
++    // SAFETY: the cursor is inside this segment's assigned record
++    // interval. A full block/fragment triggers allocation before the
++    // next write; writer.end may be one-past but is never written.
++    unsafe {
++        writer.next.write(MaybeUninit::new(record));
++        writer.next = writer.next.add(1);
++    }
+ }
+ 
+ /// Stably partitions records and returns cumulative ends of materialized buckets.
+@@ -342,12 +412,16 @@
+         let (first, end) = ranges[j];
+         let mut free = Vec::with_capacity((end - first) / b + r);
+         free.extend((0..r).map(|k| f + boundary_count + j * r + k));
+-        let cursors = starts[j]
++        let writers = (0..r)
++            .map(|_| Writer {
++                next: std::ptr::null_mut(),
++                end: std::ptr::null_mut(),
++            })
++            .collect();
++        let segments = starts[j]
+             .iter()
+             .zip(&counts[j])
+-            .map(|(&start, &count)| Cursor {
+-                next: std::ptr::null_mut(),
+-                end: std::ptr::null_mut(),
++            .map(|(&start, &count)| Segment {
+                 logical: start / b,
+                 first_offset: start % b,
+                 end_rank: start + count,
+@@ -356,7 +430,8 @@
+         shards.push(Shard {
+             first,
+             end,
+-            cursors,
++            writers,
++            segments,
+             free,
+         });
+     }
+@@ -367,61 +442,106 @@
+     let scatter = |shard: &mut Shard<T>| {
+         for source_begin in (shard.first..shard.end).step_by(b) {
+             let source_end = (source_begin + b).min(shard.end);
+-            for at in source_begin..source_end {
+-                // SAFETY: this shard exclusively reads its original interval.
+-                // Its free pool never contains an unconsumed source block.
+-                let record = unsafe { input_read(&memory, at) };
+-                let bucket = ((record.key() >> config.shift) as usize) & (r - 1);
+-                let cursor = &mut shard.cursors[bucket];
+-                if cursor.next == cursor.end {
+-                    let logical = cursor.logical;
+-                    let base_rank = logical.checked_mul(b).unwrap();
+-                    // These checks are per block, not per record. Even the last
+-                    // shared-boundary fragment stops at this segment's own end.
+-                    assert!(base_rank < cursor.end_rank);
+-                    let end_offset = (cursor.end_rank - base_rank).min(b);
+-                    assert!(cursor.first_offset < end_offset);
+-                    let id = if boundary_map[logical] != usize::MAX {
+-                        boundary_map[logical]
+-                    } else {
+-                        assert_eq!(cursor.first_offset, 0);
+-                        assert_eq!(end_offset, b);
+-                        // R seeds cover at most R active bodies while the
+-                        // current source block is still being consumed.
+-                        let id = shard.free.pop().expect("proved shard pool bound");
+-                        output.set(logical, id);
+-                        id
+-                    };
+-                    let physical = memory.ptr(id);
+-                    // SAFETY: both bounds lie inside this physical block. The
+-                    // fragment endpoint is capped to the owning segment, not
+-                    // merely to B, so no pointer advances into a foreign range.
+-                    unsafe {
+-                        cursor.next = physical.add(cursor.first_offset);
+-                        cursor.end = physical.add(end_offset);
++            // Preserve exact source order and retire only complete source blocks.
++            // This bounded size-scaled schedule matches the native writer loop.
++            let group = (4 * size_of::<usize>() / size_of::<T>().max(1)).clamp(1, 4);
++            let complete = source_begin + (source_end - source_begin) / group * group;
++            for start in (source_begin..complete).step_by(group) {
++                match group {
++                    4 => {
++                        scatter_record(
++                            shard,
++                            &memory,
++                            &boundary_map,
++                            &output,
++                            &config,
++                            start + 0,
++                            b,
++                            r,
++                        );
++                        scatter_record(
++                            shard,
++                            &memory,
++                            &boundary_map,
++                            &output,
++                            &config,
++                            start + 1,
++                            b,
++                            r,
++                        );
++                        scatter_record(
++                            shard,
++                            &memory,
++                            &boundary_map,
++                            &output,
++                            &config,
++                            start + 2,
++                            b,
++                            r,
++                        );
++                        scatter_record(
++                            shard,
++                            &memory,
++                            &boundary_map,
++                            &output,
++                            &config,
++                            start + 3,
++                            b,
++                            r,
++                        );
+                     }
+-                    cursor.first_offset = 0;
+-                    cursor.logical += 1;
++                    2 => {
++                        scatter_record(
++                            shard,
++                            &memory,
++                            &boundary_map,
++                            &output,
++                            &config,
++                            start + 0,
++                            b,
++                            r,
++                        );
++                        scatter_record(
++                            shard,
++                            &memory,
++                            &boundary_map,
++                            &output,
++                            &config,
++                            start + 1,
++                            b,
++                            r,
++                        );
++                    }
++                    _ => {
++                        for offset in 0..group {
++                            scatter_record(
++                                shard,
++                                &memory,
++                                &boundary_map,
++                                &output,
++                                &config,
++                                start + offset,
++                                b,
++                                r,
++                            );
++                        }
++                    }
+                 }
+-                // SAFETY: the cursor is inside this segment's assigned record
+-                // interval. A full block/fragment triggers allocation before the
+-                // next write; cursor.end may be one-past but is never written.
+-                unsafe {
+-                    cursor.next.write(MaybeUninit::new(record));
+-                    cursor.next = cursor.next.add(1);
+-                }
++            }
++            for at in complete..source_end {
++                scatter_record(shard, &memory, &boundary_map, &output, &config, at, b, r);
+             }
+             // The original short tail is never recycled as a full block.
+             if source_end - source_begin == b {
+                 shard.free.push(source_begin / b);
+             }
+         }
+-        for cursor in &shard.cursors {
+-            if cursor.next.is_null() {
+-                assert_eq!(cursor.logical * b + cursor.first_offset, cursor.end_rank);
++        for (writer, segment) in shard.writers.iter().zip(&shard.segments) {
++            if writer.next.is_null() {
++                assert_eq!(segment.logical * b + segment.first_offset, segment.end_rank);
+             } else {
+-                assert_eq!(cursor.next, cursor.end);
+-                assert_eq!(cursor.logical, cursor.end_rank.div_ceil(b));
++                assert_eq!(writer.next, writer.end);
++                assert_eq!(segment.logical, segment.end_rank.div_ceil(b));
+             }
+         }
+     };

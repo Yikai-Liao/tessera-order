@@ -1,0 +1,10 @@
+{
+  "files": {
+    "LICENSE": "705d08b60e66eac43d9e0348dfabf8a1e1ef4f450e23c3f63ba3a84aaa8fb405",
+    "PROOF.md": "4f1943a185ec2ae914b722d5f2a3c44b999378b940bebe75b4af6ab1d5fec432",
+    "README.md": "5c9247bc55a9014f7b0bc53c3818ce239f328f6e208a37fafeb273dc921646d2",
+    "RESULT.md": "025c93e19921d7fde5d1b1318eedd2c78f56c3103bce43902662aa018e1dc2a4",
+    "hot-cursor.patch": "709b7abfcfeb5b51891d457fb153a3117eeadc260172aeb4b274acf7e6a4dbd7",
+    "provenance.json": "30a7228e7500f99ae2d481304025b01d9923999bf3a52fb014251061f299d330"
+  }
+}

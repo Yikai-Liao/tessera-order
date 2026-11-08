@@ -94,6 +94,36 @@ fn float_total_order() {
 }
 
 #[test]
+fn descending_ties_stay_stable() {
+    let lengths: &[usize] = if cfg!(miri) {
+        &[4, 49, 129]
+    } else {
+        &[4, 49, 129, 8192]
+    };
+    for &len in lengths {
+        for start in [0, len / 2, len - 2] {
+            for run_len in [2, 3] {
+                if start + run_len > len {
+                    continue;
+                }
+                let mut records: Vec<_> = (0..len).map(|id| ((len - id) as u64, id)).collect();
+                let key = records[start].0;
+                for record in &mut records[start + 1..start + run_len] {
+                    record.0 = key;
+                }
+                let mut expected = records.clone();
+                expected.sort_by_key(|record| record.0);
+                stable_sort_by_key(&mut records, |record| record.0);
+                assert_eq!(
+                    records, expected,
+                    "len={len} start={start} run_len={run_len}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn record_shapes_and_thresholds() {
     let mut state = 71;
     let lengths: &[usize] = if cfg!(miri) {

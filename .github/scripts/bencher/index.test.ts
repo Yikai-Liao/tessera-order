@@ -348,7 +348,7 @@ test("publishes one check per build and one comment with builds as columns", asy
     /\| u64 \| 49 \| stable \| \*\*\+3\.8%\*\* <sub>736 ns<\/sub> \| −26\.4% <sub>736 ns<\/sub> \|/,
   );
   assert.match(body, /1 new case without a baseline in each build/);
-  assert.match(body, /\*\*Portable SIMD\*\* · `intel-v1-portable-simd`/);
+  assert.match(body, /\*\*Portable SIMD\*\* · `intel-v1-portable-simd-hybrid-v1`/);
   // Every table is folded below the charts.
   assert.doesNotMatch(body.replace(/<details>[\s\S]*?<\/details>/g, ""), /\| Input \|/);
   assert.ok(

@@ -125,10 +125,13 @@ fn suite(c: &mut Criterion) {
 
 /// Measures a scalar-key case with the public API and optional workspace.
 fn keys<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bool) {
+    let id = format!("rust/{}/{distribution}/{len}/s1", K::NAME);
+    if !selected(&id, workspace) {
+        return;
+    }
     let input = generate::<K>(distribution, len);
     let mut expected = input.clone();
     expected.sort_by(K::order);
-    let id = format!("rust/{}/{distribution}/{len}/s1", K::NAME);
     measure(
         c,
         &id,
@@ -148,6 +151,10 @@ fn keys<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bo
 
 /// Measures a keyed-row case while checking stable payload order.
 fn rows<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bool) {
+    let id = format!("rust/row_{}/{distribution}/{len}/s1", K::NAME);
+    if !selected(&id, workspace) {
+        return;
+    }
     let input: Vec<Row<K>> = generate::<K>(distribution, len)
         .into_iter()
         .zip(0..)
@@ -156,7 +163,6 @@ fn rows<K: Key>(c: &mut Criterion, distribution: &str, len: usize, workspace: bo
     let mut expected = input.clone();
     expected.sort_by(|a, b| a.key.order(&b.key));
     let same = |a: &Row<K>, b: &Row<K>| a.key.same(&b.key) && a.row == b.row;
-    let id = format!("rust/row_{}/{distribution}/{len}/s1", K::NAME);
     let api = |v: &mut [Row<K>]| tessera_sort::stable_sort_by_key(v, |r| r.key);
     measure(c, &id, "api", &input, &expected, same, api);
     if workspace {
@@ -186,6 +192,10 @@ impl Wide {
 /// Times records much wider than their key, so record size rather than key
 /// size decides the tile capacity and the block size.
 fn records(c: &mut Criterion, distribution: &str, len: usize, workspace: bool) {
+    let id = format!("rust/rec128_u64/{distribution}/{len}/s1");
+    if !selected(&id, workspace) {
+        return;
+    }
     let input: Vec<Wide> = generate::<u64>(distribution, len)
         .into_iter()
         .enumerate()
@@ -194,7 +204,6 @@ fn records(c: &mut Criterion, distribution: &str, len: usize, workspace: bool) {
     let mut expected = input.clone();
     expected.sort_by_key(|record| record.key);
     let same = |a: &Wide, b: &Wide| a.key == b.key && a.payload == b.payload;
-    let id = format!("rust/rec128_u64/{distribution}/{len}/s1");
     let api = |v: &mut [Wide]| tessera_sort::stable_sort_by_key(v, |r| r.key);
     measure(c, &id, "api", &input, &expected, same, api);
     if workspace {
@@ -246,6 +255,19 @@ fn measure<T: Copy>(
         );
     });
     group.finish();
+}
+
+/// Selects groups before generation so idle workers create no memory traffic.
+fn selected(id: &str, workspace: bool) -> bool {
+    if std::env::var_os("TESSERA_BENCH_LIST").is_some() {
+        println!("{id}/api");
+        if workspace {
+            println!("{id}/workspace");
+        }
+        return false;
+    }
+    std::env::var("TESSERA_BENCH_GROUPS")
+        .map_or(true, |groups| groups.lines().any(|group| group == id))
 }
 
 /// Runs the Criterion suite with command-line case selection.

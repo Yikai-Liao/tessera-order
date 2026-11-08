@@ -11,6 +11,7 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - ".github/workflows/bench-*.yml"
+      - ".github/scripts/bench_parallel.py"
   # Every push to main, so unchanged code also adds baseline samples.
   push:
     branches: [main]

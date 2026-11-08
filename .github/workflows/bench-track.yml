@@ -78,7 +78,8 @@ jobs:
           # The image definition is trusted; only the executable comes from the build.
           image="registry.bencher.dev/$BENCHER_PROJECT:$TAG"
           chmod +x artifact/default/bench artifact/portable-simd/bench
-          printf 'FROM scratch\nCOPY default/bench /bench-default\nCOPY portable-simd/bench /bench-portable-simd\n' \
+          cp .github/scripts/bench_parallel.py artifact/bench_parallel.py
+          printf 'FROM python:3.13-slim-bookworm\nCOPY default/bench /bench-default\nCOPY portable-simd/bench /bench-portable-simd\nCOPY bench_parallel.py /bench_parallel.py\n' \
             | docker build --platform linux/amd64 -t "$image" -f - artifact
           printf '%s' "$BENCHER_API_KEY" | docker login registry.bencher.dev \
             --username "$BENCHER_PROJECT" --password-stdin
@@ -134,7 +135,7 @@ jobs:
               --testbed "$testbed" --spec intel-v1 \
               --image "$IMAGE" --job-timeout 240 \
               --adapter rust_criterion --format json --quiet \
-              "${args[@]}" --exec -- "/bench-$variant" --bench > "$RUNNER_TEMP/bencher-$variant.json"; then
+              "${args[@]}" --exec -- /usr/local/bin/python3 /bench_parallel.py "/bench-$variant" > "$RUNNER_TEMP/bencher-$variant.json"; then
               echo "$variant=success" >> "$GITHUB_OUTPUT"
             else
               echo "$variant=failure" >> "$GITHUB_OUTPUT"

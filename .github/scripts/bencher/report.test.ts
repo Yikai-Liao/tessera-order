@@ -86,7 +86,7 @@ test("leads with counts and call-outs, then both charts and the tables", () => {
     body,
     /\*\*Overall run time −[\d.]+%\*\* against `main`, the geometric mean over 4 cases/,
   );
-  assert.match(body, /<sub>aaaaaaa → `main` bbbbbbb · `intel-v1`/);
+  assert.match(body, /<sub>aaaaaaa → `main` bbbbbbb · `intel-v1-hybrid-v1`/);
   // Names link to history, with the benchmark ID as the link title.
   assert.match(
     body,

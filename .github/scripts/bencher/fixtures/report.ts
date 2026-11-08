@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import type { BencherReport, Boundary } from "../report.ts";
+import { VARIANTS } from "../variants.ts";
 
 export const hash = "a".repeat(40);
 export const baseHash = "b".repeat(40);
@@ -33,7 +34,7 @@ export function fixture(): BencherReport {
     start_time: "2026-11-07T02:00:00Z",
     end_time: "2026-11-07T02:01:00Z",
     project: { slug: "proj" },
-    testbed: { uuid: "t-1", name: "intel-v1", spec: { uuid: "spec-1" } },
+    testbed: { uuid: "t-1", name: VARIANTS[0].testbed, spec: { uuid: "spec-1" } },
     branch: {
       uuid: "br-pr",
       name: "pr-8",

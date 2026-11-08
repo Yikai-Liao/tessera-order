@@ -5,13 +5,33 @@ Every push to `main` and every PR that touches Rust code runs the same small Cri
 ## Pipeline
 
 1. `bench-build.yml` runs without secrets, also for forks. One job compiles `bench/rust/benches/smoke.rs` twice, in sequence: with default features, and with `tessera-sort/portable-simd` added. Each static glibc executable has its own artifact, `bench-rust-default` or `bench-rust`. A second runner would save seconds, but the tracker waits for both executables anyway, so one job keeps to one concurrency slot. Static glibc keeps glibc's allocator, which `api` mode measures. The builds use the same compiler and flags; only the feature differs. Portable SIMD retains the artifact name and executable path consumed by the default-branch tracker, so a PR introducing this artifact can still be measured before its tracker changes merge.
-2. `bench-track.yml` runs trusted default-branch code through `workflow_run`. It looks up the source PR through the GitHub API ([`github.ts`](../../.github/scripts/bencher/github.ts)) and skips closed or superseded PRs. For a stacked PR it also resolves the parent pull request, because Bencher stores a PR's samples under `pr-<number>` and never under its GitHub branch name. It then wraps both executables in a `FROM scratch` image that the workflow defines itself, pushes the image and submits its digest to Bencher. It measures each executable in a separate remote job, one after the other, so each gets its own timeout. A failed measurement does not skip the other configuration. The executables only ever run on Bencher's runner, which receives no credentials.
+2. `bench-track.yml` runs trusted default-branch code through `workflow_run`. It looks up the source PR through the GitHub API ([`github.ts`](../../.github/scripts/bencher/github.ts)) and skips closed or superseded PRs. For a stacked PR it also resolves the parent pull request, because Bencher stores a PR's samples under `pr-<number>` and never under its GitHub branch name. It then wraps both executables and the trusted Python supervisor in a self-contained image, pushes the image and submits its digest to Bencher. It measures each executable in a separate remote job, one after the other, so each gets its own timeout. A failed measurement does not skip the other configuration. The executables only ever run on Bencher's runner, which receives no credentials.
 
 Default keeps the default-on `std` feature. It may still use the compiler's automatic vectorization. Portable SIMD adds the optional `fearless_simd` backend, using stable Rust and runtime detection on x86. No SIMD level is forced or disabled: the remote CPU's available features determine the backend. `+crt-static` controls linking, and does not cap SIMD dispatch. The build does not use `target-cpu=native`, because the GitHub build host differs from the measurement host.
 
 Both builds also use `-C llvm-args=-x86-branches-within-32B-boundaries` to keep branches from crossing or ending on 32-byte boundaries, mitigating code-placement effects on Intel CPUs affected by the JCC erratum. This is a benchmark build setting; the published crate does not impose it on users. It does not eliminate every layout effect or replace the A/A and placement controls. See [decision 0031](../decisions/0031-align-continuous-benchmark-branches.md).
 
-Bencher Free allows one job per organization, at most 5 minutes each. Tracking jobs share the `bencher-bare-metal` concurrency group with [`queue: max`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-queueing-multiple-pending-runs), which keeps up to 100 pending runs. The tracking job waits for both remote runs while holding the concurrency slot. Each remote run has a 240-second timeout. The suite takes about 130 seconds locally per configuration; keep each under 3 minutes when adding cases.
+Bencher Free allows one job per organization, at most 5 minutes each. Tracking jobs share the `bencher-bare-metal` concurrency group with [`queue: max`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-queueing-multiple-pending-runs), which keeps up to 100 pending runs. The tracking job waits for both remote runs while holding the concurrency slot. Each remote run has a 240-second timeout. Keep each configuration under 3 minutes when adding cases.
+
+## Within-job scheduling
+
+The [supervisor](../../.github/scripts/bench_parallel.py) runs inputs below
+1,000,000 records in two single-threaded processes pinned to separate available
+CPUs. Whole case groups are balanced by timed ID count; API/workspace pairs stay
+together. Both workers finish before one pinned worker prepares or measures any
+larger input. Selection happens before input generation, and each worker has a
+separate Criterion directory. The supervisor rejects failed workers, missing
+results and duplicate IDs, then emits each worker's output without interleaving.
+
+Warm-up windows, sample counts, benchmark IDs and sort implementations are
+unchanged. Default and Portable SIMD still run in separate, sequential remote
+jobs. Direct execution of either benchmark binary remains serial.
+
+Hybrid runs use new Testbeds, `intel-v1-hybrid-v1` and
+`intel-v1-portable-simd-hybrid-v1`, rather than comparing concurrent measurements
+with serial history. The first `main` run establishes these baselines. PRs based
+on older commits may need a rebase after that sample exists. Older benchmark
+artifacts without the listing/selection protocol must be rebuilt.
 
 ## Cases
 

@@ -3,7 +3,7 @@
 import { catalog } from "../catalog.ts";
 import { median, summarizePaired } from "../statistics.ts";
 
-export const { shapes, types, lengths } = catalog.comparison;
+export const { summaryShapes: shapes, types, lengths } = catalog.comparison;
 export interface Case {
   ty: string;
   distribution: string;

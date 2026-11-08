@@ -32,13 +32,13 @@ Public contracts are stability; float, NaN and signed-zero order; supported key 
 1. Run the language's correctness, recovery, platform and package checks, and the performance checks in [`docs/development/benchmarking.md`](docs/development/benchmarking.md).
 2. Write the release notes, and update the README capability table. Collect the pull requests merged since the package's previous tag that affect the package. Check shared semantics and root configuration as well as the package directory. List what users can observe, grouped as breaking changes with their migration, additions, fixes and measured performance changes; leave out `ci`, `build`, `docs`, `refactor`, `test` and `chore` changes unless users see them. Link each entry to its pull request. The repository keeps no shared changelog file, avoiding conflicts between parallel PRs.
 3. Before the first publication, tell Robert Clausecker that the project builds on his block partition.
-4. Push the tag. Rust and C++ workflows publish their package and create a draft GitHub release; paste the notes into it and publish it. The Python path uploads wheels to PyPI without creating a GitHub release. Never move a published tag or replace a published version; fix a bad release with the next version.
+4. Push the tag. Rust and C++ workflows publish their package and create a draft GitHub release; paste the notes into it and publish it. A future Python binding needs its own publication workflow. Never move a published tag or replace a published version; fix a bad release with the next version.
 
 Benchmark manifests record the implementation (for example `tessera-rust`), package version, full commit, actual kernel, toolchain and build flags. Cross-language results state whether they compare one commit or each language's latest release. Uncommitted code also needs source hashes or a patch, because a commit alone does not identify it.
 
 ## CI and release workflows
 
-Language check routing and its merge-base behavior are owned by [CI](docs/development/ci.md) and [the router](.github/scripts/ci_changes.py), not release policy.
+Language check routing and its merge-base behavior are owned by [CI](docs/development/ci.md) and [the router](.github/scripts/ci_changes.ts), not release policy.
 
 `release.yml` routes each tag to its language's release workflow, which runs that language's CI, checks the tag against the package metadata and publishes. Each tag has its own concurrency group, so languages can release in parallel.
 
@@ -46,8 +46,7 @@ Language check routing and its merge-base behavior are owned by [CI](docs/develo
 |---|---|---|
 | Rust | Now. Publishing needs `publish = false` removed and the `CARGO_REGISTRY_TOKEN` secret | crates.io and a GitHub release with the `.crate` file |
 | C++ | `cpp/CMakeLists.txt` exists. It must honor `BUILD_TESTING`, register tests with CTest and configure CPack with the package version | CI configures, builds and runs CTest on Linux x86-64 and AArch64, macOS and Windows; the release checks `CPACK_PACKAGE_VERSION` against the tag and attaches a TGZ package to a GitHub release |
-| Python | `python/pyproject.toml` and `python/Cargo.toml` exist | GIL-enabled wheels for CPython 3.11 and 3.13 on the same four platforms, uploaded to PyPI |
 
-Until then, CI skips the language and says so in the job summary; there is no placeholder job that passes without testing anything.
+Until then, CI skips C++ and says so in the job summary; there is no placeholder job that passes without testing anything.
 
-The PyPI upload runs in `release.yml` itself because [PyPI does not accept a reusable workflow as a trusted publisher](https://docs.pypi.org/trusted-publishers/troubleshooting/#reusable-workflows-on-github). Before the first Python release: configure the trusted publisher, confirm the supported interpreter and ABI matrix, record the core source and toolchain in each wheel build, and add install tests for the release wheels. See the [Python binding proposal](docs/proposals/python-binding.md).
+Python publication is not implemented. Design the trusted publisher, supported interpreter/ABI matrix, core/toolchain provenance and wheel install tests alongside the [binding](docs/proposals/python-binding.md), rather than maintaining inactive CI.

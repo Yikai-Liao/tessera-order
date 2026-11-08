@@ -9,7 +9,6 @@ const inventory = z.object({
   types: z.array(z.string()),
   shapes: z.array(z.string()),
   lengths: z.array(z.number().int().positive()),
-  modes: z.array(z.string()),
 });
 
 /** Language-neutral benchmark identities, presentation metadata and suite order. */
@@ -50,6 +49,7 @@ export const catalog = z
     ),
     smoke: inventory,
     comparison: inventory.extend({
+      summaryShapes: z.array(z.string()),
       typeGroups: z.array(
         z.object({
           title: z.string(),

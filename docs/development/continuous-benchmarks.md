@@ -7,13 +7,14 @@ Rust changes and pushes to `main` run Default and Portable SIMD Criterion suites
 Run from the repository root with Node.js 24, the pinned pnpm dependencies and authenticated `gh`:
 
 ```sh
-gh auth status
-pnpm --silent bench pr 123 --json
+pnpm -s tools status main
+pnpm -s tools status --pr 123
+pnpm -s tools status --pr 123 --details
 ```
 
-Replace `123` with the PR number. If dependencies are absent, install them with `pnpm install --frozen-lockfile`; if authentication is missing, ask the operator to authenticate. The command reads existing feedback without building, measuring or changing remote state. A read-only feedback request does not authorize a new experiment.
+The command uses the authenticated GitHub CLI (`gh auth login`) and reads an exact remote commit's workflows and benchmark verdicts. Output is compact JSON by default: inspect `target.head`, `workflows[].state`, `benchmarks[].state` and `benchmarks[].title`. A current-head report URL appears in `report`. Add `--details` only when full `details.checks[].output.summary` or `details.comment.body` is needed. It does not submit jobs or change the PR. See [the tooling guide](tooling.md) for local reproduction, logging and command groups.
 
-1. Match the returned `head` to the PR's current commit. Read `checks[].conclusion`, `checks[].output.summary` and the matching `comment`; stale-head feedback is not the current result.
+1. Match the returned `target.head` to the PR's current commit. Read `benchmarks[].state` and `benchmarks[].title`; use `--details` for `details.checks[].output.summary` and the matching `details.comment.body`; stale-head feedback is not the current result.
 2. Check **both** `Benchmarks (rust, Default)` and `Benchmarks (rust, Portable SIMD)`. A green `Track benchmarks` workflow does not imply those checks passed. Distinguish a measured alert, a failed measurement and a missing comparable baseline.
 3. A missing comment or pending check means feedback is not ready, not clean. If checks are absent, inspect the linked `Build benchmarks` run, then `Track benchmarks`. For baseline or queueing problems, use [Pipeline](#pipeline), [Testbeds](#within-job-scheduling) and [Alerts](#alerts) below.
 4. For stacked PRs, verify the comparison uses the parent at the resolved base commit, not the whole stack against `main`.
@@ -25,14 +26,14 @@ Report the head, each build verdict, relevant cases and baseline, and any pendin
 
 Use the [public dashboard](https://bencher.dev/perf/yikai-liao-s-project) and the corresponding `Track benchmarks` job summaries to inspect existing `main` results. Check the commit, build/Testbed and baseline: `main` compares with its previous sample; its first sample has no comparison. [Alerts](#alerts) defines missing-baseline and PR start-point rules.
 
-For PR trends, use the report's [history](#pr-history): all points compare against the latest report's baseline over a fixed common case set, separately for each build. Coverage changes and aggregate means are not source-change attribution. The CLI's `pr` command reads the current PR head, not arbitrary `main` commits or history.
+For PR trends, use the report's [history](#pr-history): all points compare against the latest report's baseline over a fixed common case set, separately for each build. Coverage changes and aggregate means are not source-change attribution. `pnpm -s tools status main` reads current `main`; `--pr NUMBER` reads that PR’s current head. The commands do not replace dashboard history.
 
 Read the sections below when changing tracking, investigating missing feedback or interpreting report details. Tracker changes need the [tooling source map](../design/benchmark-tooling.md); deployment and baseline seeding in [Setup](#setup) are remote changes, not part of reading existing evidence.
 
 ## Pipeline
 
-- [Build](../../.github/workflows/bench-build.yml): unprivileged, including forks; compiles Default and Portable SIMD sequentially in one job. Static glibc preserves allocator behavior in `api` mode. Artifacts are `bench-rust-default` and `bench-rust`.
-- [Track](../../.github/workflows/bench-track.yml): trusted default-branch code resolves PR identity via the API, skips closed/superseded heads, wraps executables with the trusted [supervisor](../../bench/continuous/worker.py), and submits image digests. Executables run only on Bencher without credentials. Each configuration has a separate timeout; failure of one does not skip the other.
+- [Build](../../.github/workflows/bench-build.yml): unprivileged, including forks; calls `pnpm tools continuous build` to compile Default and Portable SIMD sequentially in one job. Static glibc preserves allocator behavior in `api` mode. Artifacts are `bench-rust-default` and `bench-rust`.
+- [Track](../../.github/workflows/bench-track.yml): trusted default-branch code resolves PR identity via the API, skips closed/superseded heads, wraps executables with the trusted [supervisor](../../bench/continuous/worker.ts), and uses `pnpm tools continuous submit` to submit image digests. Executables run only on Bencher without credentials. Each configuration has a separate timeout; failure of one does not skip the other.
 - Builds share compiler and flags; Portable SIMD adds runtime dispatch, not forced ISA or `target-cpu=native` (the build and measurement hosts differ). Both use `-C llvm-args=-x86-branches-within-32B-boundaries` for Intel JCC boundary hazards. This benchmark-only flag does not eliminate all placement effects.
 - Bencher Free has one remote slot and a five-minute job limit. Each run times out at 240 seconds; keep coverage below three minutes. The shared `bencher-bare-metal` concurrency group queues up to 100 tracking runs and holds its slot across both measurements. It does not coordinate other repositories in the organization.
 
@@ -40,7 +41,7 @@ Tracker changes in a PR take effect only after merging: `workflow_run` uses defa
 
 ## Within-job scheduling
 
-The supervisor assigns whole input groups below 1,000,000 records to two single-threaded processes pinned to separate available CPUs. API/workspace pairs stay together; groups balance by timed ID count. Both workers finish before one pinned worker prepares or measures larger inputs. Selection precedes generation; Criterion directories are independent. Failed workers, missing results and duplicate IDs fail the run. Direct binary execution remains serial.
+The supervisor splits the 50 distinct API timed IDs into small cases below 1,000,000 records and large cases. Small IDs balance across two single-threaded workers pinned to separate available CPUs. Both workers finish before one pinned worker prepares or measures larger inputs. Selection precedes generation; Criterion directories are independent. Failed workers, missing results and duplicate IDs fail the run. Direct binary execution remains serial.
 
 The [catalog](../../bench/catalog.toml) is the authority for configuration identities:
 
@@ -53,7 +54,7 @@ These Testbeds separate concurrent measurements from the older serial histories.
 
 ## Cases
 
-[`bench/plans/continuous.toml`](../../bench/plans/continuous.toml) defines coverage, compiled into each measured executable. Preview it with `pnpm --silent bench plan continuous`; do not maintain a second case list here or in the supervisor. [Selection rules](benchmarking.md#experiment-plans) and the [case ID contract](benchmarking.md#cases-and-suites) apply. IDs are `<language>/<case_id>/<mode>`, such as `rust/u64/random/65536/s1/api`. `workspace` measures the same API with prepared scratch.
+[`bench/plans/continuous.toml`](../../bench/plans/continuous.toml) defines coverage, compiled into each measured executable. Preview it with `pnpm -s tools plan continuous`; do not maintain a second case list here or in the supervisor. [Selection rules](benchmarking.md#experiment-plans) and the [case ID contract](benchmarking.md#cases-and-suites) apply. All 50 timed IDs measure the two public sorting functions with per-call scratch allocation; there is no mode selector. IDs are `<language>/<case_id>/api`, such as `rust/u64/random/65536/s1/api`.
 
 Coverage must exercise insertion/tile boundaries, confirmed order, low-fanout tiles, each node route, key widths, floats, stable payloads and large working sets. Keep random controls beside targeted distributions. Small cases are placement-sensitive; their alerts need the same investigation as large ones.
 
@@ -81,7 +82,7 @@ Ownership: `report.ts` derives comparisons, `matrix.ts` aligns builds, `history.
 
 ### Builds are columns, cases are rows
 
-A separately compiled configuration has its own Testbed, check and column. API modes are row groups within that executable, not additional jobs or charts. Compute geometric means within each build only; combining builds can hide a regression. Count a case once even if both builds alert. A failed build remains visible and must never be described as a clean opposite of a measured alert.
+A separately compiled configuration has its own Testbed, check and column. Current runs have one API row group within each executable; historical mode groups remain reportable, not separate builds or charts. Compute geometric means within each build only; combining builds can hide a regression. Count a case once even if both builds alert. A failed build remains visible and must never be described as a clean opposite of a measured alert.
 
 Minus means less run time. The summary gives per-build means and alerts; expanded tables give every changed case and baseline/limits/current values. Alert verdicts come only from thresholds, not chart emphasis.
 

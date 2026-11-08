@@ -14,7 +14,7 @@ The first crates.io release. It provides the stable sort only. Use the implement
 Open questions for this milestone:
 
 - **Sample duration and prepared-memory cap.** Fix the defaults from the test machine's memory and the time a 10M-record case takes.
-- **Cost of cached bucket IDs on 8-byte rows.** `{u32 key, u32 row}` records have not been measured. If the cost is large, consider an `unsafe` entry point that skips the cache ([rationale](docs/design/engine.md#record-handling)).
+- **Cost of cached bucket IDs on 8-byte rows.** Evaluate `{u32 key, u32 row}` results in the first complete release report. If the cost is large, consider an `unsafe` entry point that skips the cache ([rationale](docs/design/engine.md#record-handling)).
 
 ## Python binding
 
@@ -27,7 +27,7 @@ An independent track that binds the Rust crate and does not wait for C++. See th
 
 ## Benchmark investigations
 
-- Extend the comparison to workspace and cold-cache modes, additional seeds and threshold cases when an investigation needs them.
+- Extend the comparison to cold-cache experiments, additional seeds and threshold cases when an investigation needs them.
 - Add native-CPU and branch-aligned placement controls for source A/B studies.
 - Add hosted comparison groups using the existing Bencher queue after the local release report; retain complete per-type length groups for absolute scaling.
 

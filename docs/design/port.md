@@ -16,13 +16,12 @@ The port changes how the engine is reached, not what it decides:
 | `Copy` records skip cached bucket IDs and initialize scratch on the first pass | `stable_sort_by_key` always caches bucket IDs; `stable_sort` recomputes library-encoded keys |
 | Open `Key` trait | Sealed `RadixKey` for primitive integers, `f32`, `f64` and `Reverse<K>` |
 | Wide-key narrowing casts the record slice | Narrowing wraps the extractor (`KeyHalf`) |
-| Scratch owned by each call | Optional `Workspace<T>` keeps capacity between calls |
 
 Free functions create tile/block scratch only after the root fast paths, so confirmed ordered and constant inputs do not allocate. Budgeted insertion on a larger unsorted input can allocate an encoded-key probe buffer before the varying-bit scan. Block metadata is created only when a node needs a block partition.
 
 ## Correctness
 
-The tests are written for this repository and use only the public API and engine internals. They cover every key encoding, float edge cases, thresholds around the insertion limit and tile size, 128-bit key halves, over-aligned and zero-sized records, owned records (`String`, drop tracking) and `&mut` records under panicking and changing key functions, workspace reuse after a panic, and allocation counts of a warm workspace.
+The tests are written for this repository and use only the public API and engine internals. They cover every key encoding, float edge cases, thresholds around the insertion limit and tile size, 128-bit key halves, over-aligned and zero-sized records, owned records (`String`, drop tracking) and `&mut` records under panicking and changing key functions, per-call scratch release and allocation-free ordered inputs.
 
 Run locally on x86-64 Linux: Stable (debug and release), Rust 1.85, Miri, AddressSanitizer, Clippy, rustdoc and `cargo package`. GitHub CI then passed on Stable and Rust 1.85 on Linux (x86-64 and AArch64), macOS (AArch64) and Windows (x86-64), with Miri and AddressSanitizer on Linux x86-64.
 

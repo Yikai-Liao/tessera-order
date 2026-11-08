@@ -70,7 +70,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/): `typ
 | `build` | Toolchain, dependencies or configuration |
 | `chore`, `revert` | Other maintenance or a revert |
 
-Scope is optional: `engine`, `block`, `key`, `simd`, `site`, `bench`, `fuzz` or `deps`; new language packages add their name. Use one type per PR. The imperative English title starts lowercase unless it starts with a name, has no final period, and is at most 64 characters. Breaking changes add `!` and a `BREAKING CHANGE:` paragraph describing migration. Type/scope changes update both these rules and [the checker](.github/scripts/check_pr_title.py).
+Scope is optional: `engine`, `block`, `key`, `simd`, `site`, `bench`, `fuzz` or `deps`; new language packages add their name. Use one type per PR. The imperative English title starts lowercase unless it starts with a name, has no final period, and is at most 64 characters. Breaking changes add `!` and a `BREAKING CHANGE:` paragraph describing migration. Type/scope changes update both these rules and [the checker](.github/scripts/check_pr_title.ts).
 
 Branches need not be up to date with `main`; rebase only for conflicts. Describe user-visible changes in the PR: [release notes](RELEASING.md#release-checklist) are written from merged PRs, without a shared changelog.
 
@@ -85,7 +85,7 @@ git rebase --signoff origin/main
 git push --force-with-lease
 ```
 
-Only the current Dependabot head can be exempt: the authenticated bot must open/update a same-repository PR, and GitHub must verify its signature and bot attribution. Other commits, including human additions to bot PRs, still need matching sign-offs. Missing provenance or API failures grant no exception. The [verification helper](.github/scripts/verify_dependabot.py) runs from the target branch without executing PR contents. Ask Dependabot to rebase human-updated branches rather than rewriting its signature.
+Only the current Dependabot head can be exempt: the authenticated bot must open/update a same-repository PR, and GitHub must verify its signature and bot attribution. Other commits, including human additions to bot PRs, still need matching sign-offs. Missing provenance or API failures grant no exception. The [verification helper](.github/scripts/verify_dependabot.ts) runs from the target branch without executing PR contents. Ask Dependabot to rebase human-updated branches rather than rewriting its signature.
 
 ## License
 

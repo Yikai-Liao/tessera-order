@@ -22,17 +22,19 @@ Read the matching sections below; batch known required reads in the first tool i
 
 ## Use the benchmark CLI
 
-Use `pnpm bench` for covered tasks; do not recreate its build/run/report orchestration, timing, A/A, verification or provenance in ad-hoc scripts. Run from the repository root:
+Use `pnpm tools` for covered tasks; do not recreate its build/run/report orchestration, timing, A/A, verification or provenance in ad-hoc scripts. Run from the repository root:
 
 | Task | Command |
 |---|---|
-| Working tree versus a commit | `pnpm bench compare COMMIT` |
-| Paired sorting-algorithm comparison | `pnpm bench run` |
-| Preview inputs without measuring | `pnpm --silent bench plan NAME` |
-| Regenerate retained results | `pnpm bench report DIR` |
-| Read current-head PR feedback | `pnpm --silent bench pr NUMBER --json` |
+| Working tree versus a commit | `pnpm tools compare commit COMMIT` |
+| Paired sorting-algorithm comparison | `pnpm tools compare algorithms` |
+| Preview inputs without measuring | `pnpm -s tools plan NAME` |
+| Regenerate retained results | `pnpm tools report DIR` |
+| Read current-head PR feedback | `pnpm -s tools status --pr NUMBER` |
 
 Replace uppercase placeholders. The [capability table](docs/development/benchmarking.md#command-capabilities) owns defaults, coverage options and evidence limits. A read-only feedback request does not authorize new measurements. Before a custom experiment, identify the concrete unsupported requirement and obtain operator agreement; prefer extending the maintained pipeline.
+
+Read main feedback with `pnpm -s tools status main`. Status is compact JSON: match `target.head`, read both `benchmarks[]` verdicts and `workflows[].state`; use `--details` for check summaries and the matching report body. A successful read is not a passing benchmark. The [CLI reference](docs/development/tooling.md) owns output and logging contracts.
 
 ## Always preserve
 
@@ -45,17 +47,18 @@ Replace uppercase placeholders. The [capability table](docs/development/benchmar
 - Update semantics with contract changes; engine explanations and `docs/.vitepress/theme/sim/` with algorithm changes. Keep current rationale in its topic, not a parallel decision record. Update the roadmap for planned work and describe user-visible changes in the PR.
 - Formatters and linters own style. Fix causes; suppress only locally with a reason. Follow Conventional Commits (64-character title limit), sign off with the configured identity, and add an `Assisted-by:` or `Co-authored-by:` trailer.
 
+## Independent review
+
+Every PR must pass an independent subagent Agentic Review before merge. Resolve accepted findings and re-review material fixes. Tests and CI do not replace review of runtime paths, trust boundaries and documentation contracts.
+
 ## Commands
 
 ```sh
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets && cargo test --workspace --doc
 pnpm install --frozen-lockfile && pnpm format
-uvx ruff@0.17.4 format && uvx ruff@0.17.4 check
 pnpm docs:test && pnpm docs:typecheck && pnpm docs:build     # site / models
-pnpm bench:test && pnpm bench:typecheck                    # benchmark tooling
-python3 -m unittest discover -s bench/continuous -p "test_*.py"
-python3 -m unittest discover -s .github/scripts -p "test_*.py"
+pnpm tools:test && pnpm tools:typecheck                    # benchmark tooling
 ```
 
 Run applicable checks locally; engine feature and Miri checks are in [contributing](CONTRIBUTING.md#validation). Miri, MSRV, platform and benchmark checks also run in CI; [CI](docs/development/ci.md) explains coverage. A green tracking workflow is not a benchmark verdict: read both current-head benchmark checks.

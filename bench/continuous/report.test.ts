@@ -29,13 +29,13 @@ test("ignores dismissed alerts", () => {
 
 test("names cases in words and keeps the ID for copying", () => {
   assert.equal(report.caseLabel("rust/u64/sorted99/65536/s1/api"), "u64 · 99% sorted · 65,536");
-  assert.deepEqual(report.caseParts("rust/row_u64/random/4097/s1/workspace"), {
+  assert.deepEqual(report.caseParts("rust/row_u64/random/4097/s1/unstable"), {
     type: "{u64,u32}",
     input: "random",
     n: "4,097",
-    extra: "workspace",
+    extra: "unstable",
     seed: "s1",
-    mode: "workspace",
+    mode: "unstable",
   });
   assert.equal(report.caseLabel("rust/u32/d16/48/s2/api"), "u32 · 16 values · 48, seed 2");
   assert.equal(
@@ -44,7 +44,7 @@ test("names cases in words and keeps the ID for copying", () => {
   );
   assert.equal(
     report.caseLabel("rust/row_u64/hot50/65536/s1/api"),
-    "{u64,u32} · 50% one key, rest unique · 65,536",
+    "{u64,u32} · 50% one key, rest random · 65,536",
   );
   assert.equal(
     report.caseLabel("rust/f64/finite_signed/65536/s1/api"),

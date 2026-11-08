@@ -21,7 +21,6 @@ const rule = z.strictObject({
       z.enum(["insertion-max", "insertion-next", "tile-next"]),
     ]),
   ).optional(),
-  modes: choices(ids(catalog.modes)).optional(),
 });
 const schema = z.strictObject({
   $comment: z.string().optional(),
@@ -46,17 +45,11 @@ export function parsePlan(value: unknown): Plan {
     throw new Error(
       "The smoke harness measures Tessera only; use a comparison plan for algorithms",
     );
-  if (
-    plan.harness === "comparison" &&
-    [...plan.include, ...plan.exclude].some((entry) => entry.modes?.some((mode) => mode !== "api"))
-  )
-    throw new Error("The comparison harness supports api mode only");
   const inventory = plan.harness === "smoke" ? catalog.smoke : catalog.comparison;
   for (const entry of [...plan.include, ...plan.exclude]) {
     if (
       entry.types?.some((id) => !inventory.types.includes(id)) ||
-      entry.distributions?.some((id) => !inventory.shapes.includes(id)) ||
-      entry.modes?.some((id) => !inventory.modes.includes(id))
+      entry.distributions?.some((id) => !inventory.shapes.includes(id))
     )
       throw new Error(`Selector is unsupported by the ${plan.harness} harness`);
   }

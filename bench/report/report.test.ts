@@ -159,6 +159,52 @@ test("figures preserve plotted values", () => {
   assert.match(charts[1].title, /fastest on 0 of 10 input patterns/);
 });
 
+test("new patterns enter type panels and memory maxima", () => {
+  const dataset = createFixture(true);
+  const additions = [
+    ["u64", "hot50", 1000000],
+    ["u64", "sparse_digits", 1000000],
+    ["f64", "finite_signed", 1000000],
+    ["record128", "bimodal", 1000000],
+    ["u64", "hot50", 10000000],
+  ] as const;
+  for (const [ty, distribution, len] of additions) {
+    const sourceId = `${ty}/random/${len}/s1`;
+    const targetId = `${ty}/${distribution}/${len}/s1`;
+    for (const manifest of dataset.manifests.values()) {
+      const source = manifest.cases.find(
+        (input) => input.ty === ty && input.distribution === "random" && input.len === len,
+      )!;
+      manifest.cases.push({ ...source, distribution });
+    }
+    dataset.samples.push(
+      ...dataset.samples
+        .filter((row) => row.case_id === sourceId)
+        .map((row) => ({ ...row, case_id: targetId, group: `${ty}/${distribution}` })),
+    );
+    dataset.memory.push(
+      ...dataset.memory
+        .filter((row) => row.case_id === sourceId)
+        .map((row) => ({ ...row, case_id: targetId, peak_extra_bytes: 99_000_000 })),
+    );
+  }
+  const charts = renderFigures(dataset, summarize(dataset));
+  const inputs = charts.find((chart) => chart.name === "inputs")!;
+  assert.match(inputs.table, /50% one key, rest random/);
+  assert.match(inputs.table, /sparse digits/);
+  assert.match(inputs.title, /12 input patterns/);
+  const floats = charts.find((chart) => chart.name === "inputs-f64")!;
+  assert.match(floats.table, /finite floats/);
+  const records = charts.find((chart) => chart.name === "inputs-record128")!;
+  assert.match(records.table, /two clusters/);
+  assert.doesNotMatch(records.table, /sort_unstable|vqsort/);
+  assert.match(records.svg, /each dot is one stable sort/);
+  const memory = charts.find((chart) => chart.name === "memory")!;
+  assert.match(memory.table, /Worst of 11 inputs/);
+  assert.match(memory.table, /99 MB/);
+  for (const chart of charts) assert.doesNotMatch(chart.svg, /NaN|Infinity|undefined/);
+});
+
 test("raw results round trip", async () => {
   const dir = await mkdtemp(join(tmpdir(), "tessera-report-"));
   try {

@@ -4,7 +4,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use std::cmp::Reverse;
-use tessera_sort::{Workspace, stable_sort, stable_sort_by_key};
+use tessera_sort::{stable_sort, stable_sort_by_key};
 
 fuzz_target!(|data: &[u8]| check(data));
 
@@ -38,16 +38,9 @@ fn check(data: &[u8]) {
     // input: unsorted
     assert_eq!(actual, expected);
 
-    let mut workspace = Workspace::new();
-    actual = input.clone();
-    workspace.stable_sort_by_key(&mut actual, |record| record.0);
-    // A reused workspace must sort with the same stable ordering.
-    // mutant: ext/tessera-sort-sort/src/rust/tessera-sort/src/workspace.rs:110 `values` -> `&mut []`
-    // input: unsorted
-    assert_eq!(actual, expected);
     expected.sort_by_key(|record| Reverse(record.0));
     actual = input.clone();
-    workspace.stable_sort_by_key(&mut actual, |record| Reverse(record.0));
+    stable_sort_by_key(&mut actual, |record| Reverse(record.0));
     // Descending order must retain the original order of equal keys.
     // mutant: ext/tessera-sort-sort/src/rust/tessera-sort/src/key.rs:198 `!self.0.encode()` -> `self.0.encode()`
     // input: unsorted
@@ -61,14 +54,6 @@ fn check(data: &[u8]) {
     // mutant: ext/tessera-sort-sort/src/rust/tessera-sort/src/lib.rs:104 `values` -> `&mut []`
     // input: unsorted
     assert_eq!(keys, expected_keys);
-    keys = input.iter().map(|record| record.0).collect();
-    let mut key_workspace = Workspace::new();
-    key_workspace.stable_sort(&mut keys);
-    // The workspace and free function must have the same direct-sort result.
-    // mutant: ext/tessera-sort-sort/src/rust/tessera-sort/src/workspace.rs:87 `values` -> `&mut []`
-    // input: unsorted
-    assert_eq!(keys, expected_keys);
-
     let mut calls = 0u8;
     actual = input.clone();
     stable_sort_by_key(&mut actual, |record| {

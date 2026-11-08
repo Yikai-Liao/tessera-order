@@ -43,15 +43,9 @@ Descending order is expressed by reversing the key, not by reversing an ascendin
 
 ## Space
 
-Implementations document three quantities separately:
+Implementations document the scratch memory one call needs and fixed-size storage on the stack separately. Each Rust call owns its scratch and releases it before returning, including when a key function unwinds. Already ordered or constant inputs do not allocate.
 
-1. the scratch memory one call needs;
-2. fixed-size storage on the stack;
-3. capacity a reusable workspace retains between calls.
-
-A workspace reuses capacity only. Every call re-establishes which scratch records are live; bytes left by an earlier call are never treated as records. Sorting with a workspace produces the same result as the corresponding free function, and a workspace stays usable after a key function panics.
-
-In Rust, the heap memory comes from `alloc`, so a `no_std` build needs a global allocator. One call needs O(√n) block scratch for a fixed record size and key width, a tile of up to 64 KiB of records (at least one record), up to two bytes of cached bucket ID per tile record, and at most 65,535 encoded probe keys of up to 16 bytes. Each tile-local MSD level holds up to 32 KiB of cursors on the stack, with at most 22 levels for 128-bit keys. `Workspace::retained_bytes()` reports the retained heap capacity and `shrink_to_fit()` releases all of it.
+In Rust, the heap memory comes from `alloc`, so a `no_std` build needs a global allocator. One call needs O(√n) block scratch for a fixed record size and key width, a tile of up to 64 KiB of records (at least one record), up to two bytes of cached bucket ID per tile record, and at most 65,535 encoded probe keys of up to 16 bytes. Each tile-local MSD level holds up to 32 KiB of cursors on the stack, with at most 22 levels for 128-bit keys.
 
 ## Language adapters
 

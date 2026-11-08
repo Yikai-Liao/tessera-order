@@ -167,7 +167,6 @@ function guideSidebar() {
       text: "User guide",
       items: [
         { text: "Getting started", link: "/guide/getting-started" },
-        { text: "Reusing scratch memory", link: "/guide/workspace" },
         { text: "Ordering semantics", link: "/conformance/semantics" },
       ],
     },

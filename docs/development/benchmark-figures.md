@@ -89,4 +89,4 @@ Benchmark identifiers and human-readable names come from [the catalog](../../ben
 
 [`bench/report/fixtures/`](../../bench/report/fixtures/) holds five standard algorithm figures; [the PR fixture](../../bench/continuous/fixtures/chart.svg) covers the comparison matrix. The original SVG references are retained when changing rendering libraries. Tests compare their content and canvas dimensions and separately check values and layout invariants. Render both implementations from the same recorded dataset for visual inspection; synthetic fixtures exercise boundary cases and do not serve as performance evidence.
 
-Run `pnpm bench:test`, `pnpm bench:typecheck`, `pnpm docs:typecheck` and `pnpm docs:build` when the shared figure layer changes.
+Run `pnpm tools:test`, `pnpm tools:typecheck`, `pnpm docs:typecheck` and `pnpm docs:build` when the shared figure layer changes.

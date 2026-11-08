@@ -1,8 +1,8 @@
 # Continuous integration
 
-[`ci.yml`](../../.github/workflows/ci.yml) decides which language checks a change needs, runs the repository-wide checks, and folds every result into the one required check, `ci-ok`. A language's checks are a reusable workflow that `ci.yml` calls only when its paths changed; [`ci_changes.py`](../../.github/scripts/ci_changes.py) holds the rules and its tests.
+[`ci.yml`](../../.github/workflows/ci.yml) decides which language checks a change needs, runs the repository-wide checks, and folds every result into the one required check, `ci-ok`. A language's checks are a reusable workflow that `ci.yml` calls only when its paths changed; [`ci_changes.ts`](../../.github/scripts/ci_changes.ts) holds the rules and its tests.
 
-Language files select their language; Rust also selects Python because the planned binding embeds the core. Shared contracts and unknown paths select all implemented languages. Site tooling, CI scripts and Markdown outside language/conformance directories select none. The router uses the merge base; unavailable bases and manual/new-branch runs select everything. Python and C++ checks activate only when their manifests exist.
+Language files select their language. Shared contracts and unknown paths select all implemented languages. Site tooling, CI scripts and Markdown outside language/conformance directories select none. The router uses the merge base; unavailable bases and manual/new-branch runs select everything. C++ checks activate only when its manifest exists; Python workflows will be designed with an implemented binding.
 
 ## Lanes
 
@@ -26,10 +26,10 @@ A cell's commands live in one composite action, [`rust-test`](../../.github/acti
 
 ## Adding a language
 
-- Add a reusable workflow and a job in `ci.yml` that calls it, gated by `ci_changes.py` so changes outside the language skip it.
+- Add a reusable workflow and a job in `ci.yml` that calls it, gated by `ci_changes.ts` so changes outside the language skip it.
 - Give it one test cell per instruction set, not one per operating system. Put the cells every pull request runs in one job and the rest in a second job gated by `if: github.event_name != 'pull_request'`, both calling one composite action; [`rust-ci.yml`](../../.github/workflows/rust-ci.yml) and [its test action](../../.github/actions/rust-test/action.yml) show the pattern.
 - Keep the pull request matrix at four cells or fewer. If it cannot shrink, cap it with `strategy: max-parallel` so the workflow queues its own cells instead of holding every slot.
-- Report the language's checks into `ci-ok`; it is the only required check.
+- Report the language's checks into `ci-ok`; it is the aggregate CI check. DCO and PR-title checks are separate merge requirements.
 
 ## Reproducing locally
 

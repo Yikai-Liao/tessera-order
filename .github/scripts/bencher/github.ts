@@ -32,12 +32,8 @@ interface ActionArguments {
 // tracker's own workflow runs default-branch code.
 const DEFAULT_BRANCH = "main";
 
-interface Baseline {
-  // Bencher branch holding the samples to compare against.
-  startPoint: string;
-  // The exact commit those samples must come from.
-  hash: string;
-}
+// Either the Bencher branch a PR must compare against, or why none exists.
+type Baseline = { startPoint: string; hash: string } | { reason: string };
 
 interface PullRequest {
   number: number;
@@ -52,7 +48,7 @@ interface PullRequest {
 async function baselineFor(
   { github, context, core }: ActionArguments,
   pr: PullRequest,
-): Promise<Baseline | string> {
+): Promise<Baseline> {
   const repo = context.repo;
   if (pr.base.ref === DEFAULT_BRANCH) return { startPoint: DEFAULT_BRANCH, hash: pr.base.sha };
   const { data: candidates } = await github.rest.pulls.list({
@@ -75,7 +71,7 @@ async function baselineFor(
       ? `several pull requests use ${pr.base.ref} as their head`
       : `the base branch ${pr.base.ref} has no pull request`;
     core.notice(`No baseline for the benchmark: ${reason}.`);
-    return reason;
+    return { reason };
   }
   return { startPoint: `pr-${parent.number}`, hash: pr.base.sha };
 }
@@ -132,8 +128,8 @@ export async function resolveSource({ github, context, core }: ActionArguments) 
   core.setOutput("number", String(pr.number));
   core.setOutput("eligible", "true");
   const baseline = await baselineFor({ github, context, core }, pr);
-  if (typeof baseline === "string") {
-    core.setOutput("baseline_reason", baseline);
+  if ("reason" in baseline) {
+    core.setOutput("baseline_reason", baseline.reason);
   } else {
     core.setOutput("start_point", baseline.startPoint);
     core.setOutput("base_hash", baseline.hash);

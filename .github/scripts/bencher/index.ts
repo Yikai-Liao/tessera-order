@@ -62,7 +62,8 @@ type Measurement =
     }
   | { ok: false; reason: string };
 
-interface Baseline {
+// What a PR run promised to compare against, as the tracker resolved it.
+interface Comparison {
   startPoint: string;
   hash: string | null;
   reason: string | null;
@@ -73,7 +74,7 @@ export async function publishReport(options: ReportOptions) {
   const { language, hash, number, baseRef } = inputs;
   const runUrl = workflowUrl(context);
   // Every PR run promises a comparison; `main` records samples without one.
-  const baseline: Baseline | null = number
+  const baseline: Comparison | null = number
     ? {
         startPoint: inputs.startPoint || baseRef || "main",
         hash: inputs.baseHash || null,
@@ -208,7 +209,7 @@ function errorMessage(error: unknown) {
 function readMeasurement(
   { outcome, reportPath, variant }: VariantInputs,
   hash: string,
-  baseline: Baseline | null,
+  baseline: Comparison | null,
 ): Measurement {
   if (outcome !== "success") {
     return {
@@ -239,7 +240,7 @@ function readMeasurement(
 function unavailableReason(
   report: BencherReport,
   summary: ReportSummary,
-  baseline: Baseline | null,
+  baseline: Comparison | null,
 ) {
   if (!baseline) return null;
   if (baseline.reason) return baseline.reason;

@@ -51,7 +51,9 @@ a23a63708b26593e50270cc3d0df0041f24e5662d784f8f0295cce1865e05592.
 | Default, only sizes below 1M | 41 | 0.528 | 0/41 | 0.274 | 8/41 |
 
 Controls are not zero-width: the full Default A/A envelope was approximately
-0.9834-1.0166, and the full SIMD envelope approximately 0.9856-1.0144.
+0.9578-1.0422 (the short row_u32/random/49 case), and the full SIMD envelope
+approximately 0.9856-1.0144. The short Default control's cause was not isolated;
+its concurrent result must be interpreted within that larger envelope.
 In the small-only experiment, 40 cases stayed within approximately +/-0.77%;
 u128/random/65536 had an anomalous envelope of approximately +/-4.02%.
 For that case, serial A2 was about 8% above A1 in rounds 0 and 2, but not

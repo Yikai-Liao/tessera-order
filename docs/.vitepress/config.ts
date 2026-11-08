@@ -193,6 +193,7 @@ function developmentSidebar() {
         { text: "Engine design", link: "/design/engine" },
         { text: "Port from the prototype", link: "/design/port" },
         { text: "Comparison benchmarks", link: "/design/comparison-benchmarks" },
+        { text: "Benchmark tooling", link: "/design/benchmark-tooling" },
       ],
     },
     {
@@ -200,6 +201,7 @@ function developmentSidebar() {
       items: [
         { text: "Contributing", link: "/CONTRIBUTING" },
         { text: "Benchmark protocol", link: "/development/benchmarking" },
+        { text: "Benchmark figures", link: "/development/benchmark-figures" },
         { text: "Continuous benchmarks", link: "/development/continuous-benchmarks" },
         { text: "Continuous integration", link: "/development/ci" },
         { text: "Documentation site", link: "/development/docs-site" },

@@ -1,19 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { mkdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { median } from "../statistics.ts";
 import { renderFigures } from "./charts.ts";
 import { loadRun } from "./load.ts";
-import {
-  caseId,
-  type Dataset,
-  measurementId,
-  median,
-  type Summary,
-  summarize,
-  types,
-} from "./model.ts";
+import { caseId, type Dataset, measurementId, type Summary, summarize, types } from "./model.ts";
 
 function formatCell(value: unknown) {
   return String(value ?? "unavailable")
@@ -167,6 +159,8 @@ export async function writeReport(directories: string[], partial = false): Promi
   if (conditions.length)
     markdown += `## Observed conditions\n\n${conditions.map((w) => `- ${w}`).join("\n")}\n\n`;
   markdown += renderCapabilities(dataset);
+  markdown +=
+    "## Figure scope\n\nStandard panels show fixed slices and aggregates, not every measured case. The selected-input panel is a fallback used only when no standard panel can be drawn. All completed cases, including custom lengths absent from the figures, remain in [Full results](#full-results) and [summaries.json](summaries.json).\n\n";
   for (const chart of charts) {
     await writeFile(join(out, `${chart.name}.svg`), chart.svg);
     markdown += `## ${chart.title}\n\n![${chart.title}](${chart.name}.svg)\n\n<details>\n<summary>Plotted values</summary>\n\n${chart.table}\n</details>\n\n`;
@@ -192,11 +186,4 @@ export async function writeReport(directories: string[], partial = false): Promi
   console.log(
     `Report: ${join(out, "index.md")} (${summaries.size} summaries, ${charts.length} figures)`,
   );
-}
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const args = process.argv.slice(2),
-    partial = args.includes("--partial"),
-    dirs = args.filter((a) => a !== "--partial");
-  if (!dirs.length) throw new Error("usage: npm run bench:report -- DIR [DIR ...] [--partial]");
-  await writeReport(dirs, partial);
 }

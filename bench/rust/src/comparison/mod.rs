@@ -7,9 +7,9 @@ mod host;
 #[cfg(feature = "compare-native")]
 mod native;
 mod run;
-mod suite;
 mod variant;
 
+use crate::plan::{InputCase, catalog};
 use serde_json::{Value, json};
 use std::{
     collections::BTreeSet,
@@ -18,7 +18,6 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
 };
-use suite::Case;
 
 /// Fallible comparison commands and result persistence.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -34,6 +33,8 @@ struct Options {
     command: String,
     suite: String,
     group: Option<String>,
+    plan: crate::plan::Plan,
+    plan_path: Option<PathBuf>,
     output_dir: PathBuf,
     min_sample_ns: u64,
     prepared_cap_bytes: usize,
@@ -51,6 +52,11 @@ impl Options {
             command,
             suite: "smoke".into(),
             group: None,
+            plan: crate::plan::Plan::parse(
+                include_str!("../../../plans/smoke.toml"),
+                "comparison",
+            )?,
+            plan_path: None,
             output_dir: "bench/results/local".into(),
             min_sample_ns: 5_000_000,
             prepared_cap_bytes: 256 << 20,
@@ -66,6 +72,7 @@ impl Options {
             match key.as_str() {
                 "--suite" => options.suite = value,
                 "--group" => options.group = Some(value),
+                "--plan" => options.plan_path = Some(value.into()),
                 "--out" => options.output_dir = value.into(),
                 "--sample-ms" => {
                     options.min_sample_ns = value
@@ -84,7 +91,49 @@ impl Options {
                 _ => return Err(format!("unknown option {key}").into()),
             }
         }
+        let text = if let Some(path) = &options.plan_path {
+            options.suite = "custom".into();
+            fs::read_to_string(path)?
+        } else {
+            match options.suite.as_str() {
+                "smoke" => include_str!("../../../plans/smoke.toml").into(),
+                "release" => include_str!("../../../plans/release.toml").into(),
+                _ => return Err("expected smoke or release suite".into()),
+            }
+        };
+        options.plan = crate::plan::Plan::parse(&text, "comparison")?;
+        let available = variant::list_variants();
+        for id in &options.plan.algorithms {
+            if BUILD == "default"
+                && options.plan_path.is_some()
+                && !available.iter().any(|entry| entry.name == id)
+            {
+                return Err(format!("algorithm {id} is unavailable; enable compare-native").into());
+            }
+        }
         Ok(options)
+    }
+
+    /// Selects all supported cases before applying a resumable group restriction.
+    fn cases(&self, group: Option<&str>) -> Result<Vec<InputCase>> {
+        let cases: Vec<_> = self
+            .plan
+            .inputs()?
+            .into_iter()
+            .filter(|case| group.is_none_or(|group| case.group() == group))
+            .collect();
+        if cases.is_empty() {
+            return Err("the benchmark plan selects no supported cases".into());
+        }
+        Ok(cases)
+    }
+
+    /// Retains the selected algorithms available in this build configuration.
+    fn variants(&self) -> Vec<variant::Variant> {
+        variant::list_variants()
+            .into_iter()
+            .filter(|entry| self.plan.algorithms.iter().any(|id| id == entry.name))
+            .collect()
     }
 }
 /// Writes new provenance or checks an existing run for compatibility.
@@ -107,7 +156,7 @@ fn append_record(file: &mut File, value: &impl serde::Serialize) -> Result<()> {
     Ok(())
 }
 /// Combines build provenance with the suite and adapter capabilities.
-fn create_manifest(options: &Options, cases: &[Case]) -> Value {
+fn create_manifest(options: &Options, cases: &[InputCase]) -> Value {
     let mut provenance: Value =
         serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/provenance.json")))
             .expect("build provenance is valid JSON");
@@ -120,17 +169,18 @@ fn create_manifest(options: &Options, cases: &[Case]) -> Value {
     ));
     provenance["suite"] = json!(options.suite);
     provenance["suite_version"] = json!(1);
+    provenance["plan"] = json!(options.plan);
     provenance["cases"] = json!(
         cases
             .iter()
             .map(|case| {
-                let probe = Case {
+                let probe = InputCase {
                     len: 32,
                     distribution: "random".into(),
                     ..case.clone()
                 };
                 let input = variant::CaseInput::new(&probe);
-                let supported: Vec<_> = variant::list_variants()
+                let supported: Vec<_> = options.variants()
                     .iter()
                     .filter(|v| v.prepare(&input, 0).is_some())
                     .map(|v| v.name)
@@ -144,7 +194,8 @@ fn create_manifest(options: &Options, cases: &[Case]) -> Value {
     provenance["prepared_cap_bytes"] = json!(options.prepared_cap_bytes);
     provenance["blocks"] = json!(run::BLOCKS);
     provenance["variants"] = json!(
-        variant::list_variants()
+        options
+            .variants()
             .iter()
             .map(|v| json!({"name":v.name,"stable":v.stable}))
             .collect::<Vec<_>>()
@@ -162,7 +213,7 @@ fn prepare_output(options: &Options) -> Result<()> {
         &options.output_dir.join("host.json"),
         &host::read_fingerprint(),
     )?;
-    let all = suite::plan_cases(&options.suite, None)?;
+    let all = options.cases(None)?;
     let mut provenance = create_manifest(options, &all);
     if options.command == "memory" {
         provenance.as_object_mut().unwrap().remove("min_sample_ns");
@@ -246,17 +297,17 @@ fn verify_memory_build(options: &Options) -> Result<()> {
 }
 
 /// Finds Tessera's measured peak allocation size for a case.
-fn find_scratch_bytes(case: &Case, rows: &[Value]) -> Option<usize> {
+fn find_scratch_bytes(case: &InputCase, rows: &[Value]) -> Option<usize> {
     rows.iter()
         .find(|r| r["case_id"] == case.id() && r["variant"] == "tessera" && r["build"] == BUILD)
         .and_then(|r| r["peak_extra_bytes"].as_u64())
         .map(|n| n as usize)
 }
 /// Checks every supported adapter against each case's shared reference.
-fn validate_cases(cases: &[Case]) -> Result<()> {
+fn validate_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
     for case in cases {
         let input = variant::CaseInput::new(case);
-        for v in variant::list_variants() {
+        for v in options.variants() {
             if let Some(mut k) = v.prepare(&input, 32_768) {
                 run::measure_batch(&mut *k, 1)
                     .map_err(|e| format!("{} {}: {e}", case.id(), v.name))?;
@@ -267,7 +318,7 @@ fn validate_cases(cases: &[Case]) -> Result<()> {
     Ok(())
 }
 /// Resumes completed groups and records the missing paired measurements.
-fn measure_cases(options: &Options, cases: &[Case]) -> Result<()> {
+fn measure_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
     prepare_output(options)?;
     let mem_path = options.output_dir.join("memory.jsonl");
     let mem = read_memory_samples(&mem_path)?;
@@ -277,8 +328,12 @@ fn measure_cases(options: &Options, cases: &[Case]) -> Result<()> {
     {
         let exe = std::env::current_exe()?.with_file_name("memory");
         let mut cmd = std::process::Command::new(exe);
-        cmd.args(["--suite", &options.suite, "--out"])
-            .arg(&options.output_dir);
+        cmd.arg("--out").arg(&options.output_dir);
+        if let Some(path) = &options.plan_path {
+            cmd.arg("--plan").arg(path);
+        } else {
+            cmd.args(["--suite", &options.suite]);
+        }
         if let Some(g) = &options.group {
             cmd.args(["--group", g]);
         }
@@ -311,7 +366,7 @@ fn measure_cases(options: &Options, cases: &[Case]) -> Result<()> {
     }
     fs::rename(temporary, &path)?;
     let mut f = OpenOptions::new().create(true).append(true).open(path)?;
-    let groups: BTreeSet<_> = cases.iter().map(Case::group).collect();
+    let groups: BTreeSet<_> = cases.iter().map(InputCase::group).collect();
     for group in groups {
         if completed.contains(&group) {
             continue;
@@ -325,6 +380,7 @@ fn measure_cases(options: &Options, cases: &[Case]) -> Result<()> {
                 .ok_or_else(|| format!("missing Tessera memory measurement: {}", case.id()))?;
             run::measure_case(
                 case,
+                &options.variants(),
                 bytes,
                 options.min_sample_ns,
                 options.prepared_cap_bytes,
@@ -355,19 +411,22 @@ pub fn main(memory: bool) -> Result<()> {
             "compare <list|validate|run>"
         };
         println!(
-            "{command} [--suite smoke|release] [--group TYPE/SHAPE] [--out DIR] [--sample-ms N] [--memory-mib N]"
+            "{command} [--suite smoke|release | --plan FILE] [--group TYPE/SHAPE] [--out DIR] [--sample-ms N] [--memory-mib N]"
         );
         return Ok(());
     }
-    let cases = suite::plan_cases(&options.suite, options.group.as_deref())?;
+    let cases = options.cases(options.group.as_deref())?;
     match options.command.as_str() {
         "list" => {
             for v in variant::list_variants() {
-                let supported: Vec<_> = suite::TYPES
-                    .into_iter()
+                let supported: Vec<_> = catalog()
+                    .comparison
+                    .types
+                    .iter()
+                    .map(String::as_str)
                     .filter(|ty| {
                         v.prepare(
-                            &variant::CaseInput::new(&Case {
+                            &variant::CaseInput::new(&InputCase {
                                 ty: (*ty).into(),
                                 distribution: "random".into(),
                                 len: 32,
@@ -386,20 +445,20 @@ pub fn main(memory: bool) -> Result<()> {
             }
             Ok(())
         }
-        "validate" => validate_cases(&cases),
+        "validate" => validate_cases(&options, &cases),
         "run" => measure_cases(&options, &cases),
         "memory" => measure_memory(&options, &cases),
         _ => Err(format!("unknown command {}", options.command).into()),
     }
 }
 /// Measures one isolated sort allocation peak per supported case and adapter.
-fn measure_memory(options: &Options, cases: &[Case]) -> Result<()> {
+fn measure_memory(options: &Options, cases: &[InputCase]) -> Result<()> {
     prepare_output(options)?;
     let path = options.output_dir.join("memory.jsonl");
     let mut rows = read_memory_samples(&path)?;
     for case in cases {
         let input = variant::CaseInput::new(case);
-        for v in variant::list_variants() {
+        for v in options.variants() {
             if case.len > 1_000_000 && case.ty != "u64" && v.name != "tessera" {
                 continue;
             }
@@ -446,6 +505,9 @@ mod tests {
             command: "run".into(),
             suite: "smoke".into(),
             group: None,
+            plan: crate::plan::Plan::parse(include_str!("../../../plans/smoke.toml"), "comparison")
+                .unwrap(),
+            plan_path: None,
             output_dir,
             min_sample_ns: 1_000_000,
             prepared_cap_bytes: 1 << 20,

@@ -1,19 +1,9 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-export const shapes = [
-  "random",
-  "d256",
-  "d16",
-  "zipf1.1",
-  "zipf2",
-  "skew99",
-  "sorted",
-  "reverse",
-  "sorted99",
-  "runs",
-];
-export const types = ["u32", "u64", "f64", "row_u64", "record128", "owned", "row_u32"];
-export const lengths = [1000, 65536, 1000000, 10000000];
+import { catalog } from "../catalog.ts";
+import { median, summarizePaired } from "../statistics.ts";
+
+export const { shapes, types, lengths } = catalog.comparison;
 export interface Case {
   ty: string;
   distribution: string;
@@ -85,17 +75,6 @@ export interface Dataset {
 export function caseId(c: Pick<Case, "ty" | "distribution" | "len">) {
   return `${c.ty}/${c.distribution}/${c.len}/s1`;
 }
-export function median(values: number[]) {
-  if (!values.length) throw new Error("cannot summarize an empty sample");
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = sorted.length >> 1;
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-export function geomean(values: number[]) {
-  if (!values.length || values.some((v) => !Number.isFinite(v) || v <= 0))
-    throw new Error("geometric mean requires positive values");
-  return Math.exp(values.reduce((a, b) => a + Math.log(b), 0) / values.length);
-}
 export function measurementId(build: string, id: string, variant: string) {
   return `${build}:${id}:${variant}`;
 }
@@ -125,23 +104,20 @@ export function summarize(dataset: Dataset): Map<string, Summary> {
     const times = (values: Sample[]) => new Map(values.map((s) => [s.block, time(s)]));
     const first = times(a),
       second = times(b);
-    const mean = (block: number) => (first.get(block)! + second.get(block)!) / 2;
-    // Both controls use the competitor's denominator, so their labels cannot change a verdict.
-    const aa = a.flatMap((s) => [time(s) / mean(s.block), second.get(s.block)! / mean(s.block)]);
-    const ratios = samples.map((s) =>
-      variant === "tessera-aa" ? time(s) / first.get(s.block)! : time(s) / mean(s.block),
+    const paired = summarizePaired(
+      samples.map((sample) => ({
+        first: first.get(sample.block)!,
+        second: second.get(sample.block)!,
+        value: time(sample),
+      })),
     );
-    const ratio = median(ratios),
-      aaLow = Math.min(...aa),
-      aaHigh = Math.max(...aa);
-    const verdict =
-      variant === "tessera" || variant === "tessera-aa"
-        ? "within noise"
-        : ratio < aaLow && ratios.filter((r) => r < 1).length >= 8
-          ? "faster"
-          : ratio > aaHigh && ratios.filter((r) => r > 1).length >= 8
-            ? "slower"
-            : "within noise";
+    if (variant === "tessera-aa") {
+      paired.ratios = samples.map((sample) => time(sample) / first.get(sample.block)!);
+      paired.ratio = median(paired.ratios);
+      paired.low = Math.min(...paired.ratios);
+      paired.high = Math.max(...paired.ratios);
+    }
+    if (variant.startsWith("tessera")) paired.verdict = "within noise";
     result.set(measurementId(build, id, variant), {
       caseId: id,
       build,
@@ -149,14 +125,8 @@ export function summarize(dataset: Dataset): Map<string, Summary> {
       stable:
         variant.startsWith("tessera") ||
         dataset.manifests.get(build)!.variants.find((v) => v.name === variant)!.stable,
-      ratios,
-      ratio,
-      low: Math.min(...ratios),
-      high: Math.max(...ratios),
-      aaLow,
-      aaHigh,
+      ...paired,
       ns: median(samples.map((s) => time(s) / Number(id.split("/")[2]))),
-      verdict,
     });
   }
   return result;

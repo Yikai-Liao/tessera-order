@@ -42,7 +42,7 @@ class LanguageSelection(unittest.TestCase):
             "docs/.vitepress/theme/sim/digits.ts",
             "docs/public/logo.svg",
             "package.json",
-            "package-lock.json",
+            "pnpm-lock.yaml",
             ".github/workflows/docs.yml",
         ]:
             with self.subTest(path=path):

@@ -12,19 +12,21 @@ The documentation site is built with [VitePress](https://vitepress.dev) from the
 | `docs/.vitepress/theme/components/` | Vue components used by the explanation pages |
 | `docs/.vitepress/theme/sim/` | TypeScript models of the engine that drive the figures, with their tests |
 | `docs/public/` | Static files, such as the logo (a copy of `assets/logo.svg`) |
-| `package.json`, `package-lock.json` | The site's pinned toolchain, at the repository root |
+| `package.json`, `pnpm-lock.yaml` | The site's pinned toolchain, at the repository root |
 
 ## Commands
 
-Run these from the repository root, with Node.js 24 or later. The npm project sits at the root so that pages outside `docs/`, such as `ROADMAP.md`, resolve the same dependencies.
+Run these from the repository root, with Node.js 24 or later. The pnpm project sits at the root so that pages outside `docs/`, such as `ROADMAP.md`, resolve the same dependencies.
 
 ```sh
-npm ci                   # install the pinned toolchain
-npm run docs:dev         # local server with hot reload
-npm run docs:test        # check the models against reference sorts
-npm run docs:typecheck   # type-check the config, theme and components
-npm run docs:build       # build into docs/.vitepress/dist; fails on dead links
+pnpm install --frozen-lockfile  # install the pinned toolchain
+pnpm docs:dev                   # local server with hot reload
+pnpm docs:test                  # check the models against reference sorts
+pnpm docs:typecheck             # type-check the config, theme and components
+pnpm docs:build                 # build into docs/.vitepress/dist; fails on dead links
 ```
+
+`docs:typecheck` uses the official native TypeScript 7.1 beta compiler and Vue\'s official `@vue/content-mapper` alpha, both pinned in `package.json`. The mapper is registered in `docs/.vitepress/tsconfig.json`; `--runExternalCode` explicitly enables its process. It checks SFC scripts and templates without `vue-tsc` or a legacy TypeScript compiler. Node runs the tooling\'s `.ts` files directly; VitePress handles site transformation and bundling.
 
 Pull requests that touch the site or its pages run the same checks in `docs.yml`. Pushes to `main` also deploy the site. The repository's Pages source must be set to *GitHub Actions* once, under *Settings → Pages*.
 

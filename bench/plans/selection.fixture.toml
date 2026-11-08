@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+[plan]
+schema = 1
+harness = "smoke"
+algorithms = [ "tessera" ]
+
+[[plan.include]]
+types = [ "u64", "row_u64" ]
+distributions = [ "random", "zipf2" ]
+lengths = [ 1000, 65536 ]
+
+[[plan.include]]
+types = [ "f64" ]
+distributions = [ "sorted" ]
+modes = [ "workspace" ]
+
+[[plan.exclude]]
+types = [ "row_u64" ]
+distributions = [ "zipf2" ]
+
+[[plan.exclude]]
+lengths = [ 1000 ]
+modes = [ "workspace" ]
+
+[[cases]]
+type = "u64"
+distribution = "random"
+length = 1000
+mode = "api"
+selected = true
+
+[[cases]]
+type = "u64"
+distribution = "zipf2"
+length = 65536
+mode = "workspace"
+selected = true
+
+[[cases]]
+type = "u64"
+distribution = "random"
+length = 1000
+mode = "workspace"
+selected = false
+
+[[cases]]
+type = "row_u64"
+distribution = "zipf2"
+length = 65536
+mode = "api"
+selected = false
+
+[[cases]]
+type = "row_u64"
+distribution = "random"
+length = 65536
+mode = "api"
+selected = true
+
+[[cases]]
+type = "f64"
+distribution = "sorted"
+length = 999
+mode = "workspace"
+selected = true
+
+[[cases]]
+type = "f64"
+distribution = "sorted"
+length = 999
+mode = "api"
+selected = false
+
+[[cases]]
+type = "u64"
+distribution = "random"
+length = 1234
+mode = "api"
+selected = false
+
+[[cases]]
+type = "u64"
+distribution = "reverse"
+length = 65536
+mode = "api"
+selected = false
+
+[[cases]]
+type = "u32"
+distribution = "random"
+length = 65536
+mode = "api"
+selected = false

@@ -5,14 +5,14 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { figureContent } from "../svg-test-utils.ts";
 import { renderFigures } from "./charts.ts";
 import { createFixture } from "./fixture.ts";
 import { collectWarnings, writeReport } from "./index.ts";
 import { loadRun, validateRun } from "./load.ts";
 import { measurementId, summarize } from "./model.ts";
 
-async function writeFixture(directory: string, simd = false) {
-  const dataset = createFixture(simd);
+async function writeFixture(directory: string, simd = false, dataset = createFixture(simd)) {
   await Promise.all([
     writeFile(join(directory, "host.json"), JSON.stringify(dataset.host)),
     ...[...dataset.manifests].flatMap(([build, manifest]) =>
@@ -257,6 +257,52 @@ test("native compiler versions match", async () => {
   }
 });
 
+test("custom selections retain figures", () => {
+  const dataset = createFixture(true);
+  for (const manifest of dataset.manifests.values())
+    manifest.cases = manifest.cases.filter(
+      (input) => input.ty === "u64" && input.distribution === "random" && input.len === 65536,
+    );
+  dataset.samples = dataset.samples.filter((sample) => sample.case_id === "u64/random/65536/s1");
+  dataset.memory = dataset.memory.filter((sample) => sample.case_id === "u64/random/65536/s1");
+  const figures = renderFigures(dataset, summarize(dataset));
+  assert.equal(figures.length, 1);
+  assert.match(figures[0].name, /^selected-/);
+  assert.match(figures[0].svg, /65,536 records/);
+  assert.match(figures[0].svg, /portable-simd/i);
+  assert.doesNotMatch(figures[0].svg, /NaN|Infinity/);
+});
+
+test("mixed plans disclose figure scope", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-mixed-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const dataset = createFixture();
+  const manifest = dataset.manifests.get("default")!;
+  const original = manifest.cases.find(
+    (input) => input.ty === "u64" && input.distribution === "random" && input.len === 1000,
+  )!;
+  manifest.cases.push({ ...original, len: 1234 });
+  dataset.samples.push(
+    ...dataset.samples
+      .filter((row) => row.case_id === "u64/random/1000/s1")
+      .map((row) => ({ ...row, case_id: "u64/random/1234/s1" })),
+  );
+  dataset.memory.push(
+    ...dataset.memory
+      .filter((row) => row.case_id === "u64/random/1000/s1")
+      .map((row) => ({ ...row, case_id: "u64/random/1234/s1" })),
+  );
+  await writeFixture(directory, false, dataset);
+  await writeReport([directory]);
+  const report = await readFile(join(directory, "report/index.md"), "utf8");
+  assert.match(report, /Standard panels show fixed slices and aggregates/);
+  assert.match(report, /fallback used only when no standard panel/);
+  assert.match(report, /1,234/);
+  assert.match(report, /ranking.svg/);
+  const summaries = JSON.parse(await readFile(join(directory, "report/summaries.json"), "utf8"));
+  assert.ok(summaries.some((row: { caseId: string }) => row.caseId === "u64/random/1234/s1"));
+});
+
 test("SIMD shares the anchor", () => {
   const dataset = createFixture(true);
   validateRun(dataset);
@@ -269,12 +315,14 @@ test("SIMD shares the anchor", () => {
   assert.ok(Math.abs(simdStd / defaultStd - 1.25) < 0.001);
 });
 
-test("SVG fixtures stay synchronized", async () => {
+test("legacy figures preserve content", async () => {
   const dataset = createFixture(true);
   for (const chart of renderFigures(dataset, summarize(dataset))) {
-    assert.equal(
-      chart.svg,
-      await readFile(new URL(`./fixtures/${chart.name}.svg`, import.meta.url), "utf8"),
+    assert.deepEqual(
+      figureContent(chart.svg),
+      figureContent(
+        await readFile(new URL(`./fixtures/${chart.name}.svg`, import.meta.url), "utf8"),
+      ),
     );
   }
 });

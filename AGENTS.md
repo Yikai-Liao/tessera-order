@@ -18,8 +18,10 @@ Tessera is a stable radix sort with O(√n) auxiliary memory, built as a mature 
 ```sh
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets && cargo test --workspace --doc
-npm ci && npm run format && uvx ruff@0.17.4 format && uvx ruff@0.17.4 check
-npm run docs:test && npm run docs:typecheck && npm run docs:build   # site changes
+pnpm install --frozen-lockfile && pnpm format && uvx ruff@0.17.4 format && uvx ruff@0.17.4 check
+pnpm docs:test && pnpm docs:typecheck && pnpm docs:build   # site changes
+pnpm bench:test && pnpm bench:typecheck                         # benchmark tooling
+python3 -m unittest discover -s bench/continuous -p "test_*.py"   # benchmark scheduler
 python3 -m unittest discover -s .github/scripts -p "test_*.py"     # CI routing changes
 ```
 
@@ -47,6 +49,14 @@ Run these locally. Miri, the MSRV and benchmarks run in CI on every pull request
 - Comments explain why — the invariant, the hazard, the measurement behind a constant with its numbers — for a reader of the current code. History belongs in `docs/design/port.md` or a decision record.
 - Markdown paragraphs are one line each.
 - Update in the same change: `docs/explain/` and `theme/sim/` for routing, thresholds, digit planning or the block partition (their text says all a figure shows); `conformance/semantics.md` for ordering, stability, panics or space bounds; a decision record, numbered by its pull request, for a settled choice; `ROADMAP.md` for planned work; the pull request description for user-visible changes, which release notes are written from.
+
+## Benchmark tooling
+
+Use `pnpm bench compare [COMMIT]` (default: `HEAD`) to screen uncommitted code against a compatible commit and `pnpm bench run` for algorithm comparisons ([guide](docs/development/benchmarking.md)). Choose coverage with `--plan NAME-OR-FILE` and optional `--algorithms`, `--types`, `--distributions`, `--lengths`, `--modes` overrides. Preview with `pnpm --silent bench plan NAME`; maintain defaults in `bench/plans/`, not workflow or runner conditionals. Local process-level A/A screens do not replace placement-controlled measurements.
+
+Read PR feedback with `pnpm --silent bench pr NUMBER --json` after authenticating `gh`. Match `head` to the PR's current commit and read both `Benchmarks (rust, …)` check summaries; a green tracking workflow does not mean those checks passed. A missing current-head comment is pending feedback, not a clean result. See [the continuous guide](docs/development/continuous-benchmarks.md#read-feedback-from-a-pr).
+
+Register identities and display names in `bench/catalog.toml`, not per-report maps. Reuse `bench/plot/` templates and theme for figures, including VitePress. Keep plotting host-independent and follow [the figure guide](docs/development/benchmark-figures.md). Add a new template for a new visual structure rather than arbitrary styling callbacks.
 
 ## Measurements
 

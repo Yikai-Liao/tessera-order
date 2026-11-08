@@ -9,7 +9,7 @@ from pathlib import Path
 # The documentation site's tooling; `docs.yml` builds it, and no language
 # depends on it.
 DOCS_SITE = ("docs/.vitepress/", "docs/public/")
-DOCS_SITE_FILES = {"package.json", "package-lock.json", ".github/workflows/docs.yml"}
+DOCS_SITE_FILES = {"package.json", "pnpm-lock.yaml", "tsconfig.json", ".github/workflows/docs.yml"}
 # No language build reads Markdown outside its own directory or images under
 # `assets/`; the crate's README symlink is packaged, but `cargo package` only
 # needs the file to exist. The conformance rules stay shared because every

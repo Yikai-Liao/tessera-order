@@ -2,9 +2,139 @@
 
 The comparison runner in `bench/rust` measures sorting algorithms on one machine. It answers four questions: how Tessera compares with the standard stable sort, with other stable sorts, with unstable sorts when equal keys are indistinguishable, and how much extra memory each sort uses. The [continuous suite](continuous-benchmarks.md) tracks regressions on Bencher; release comparisons use the paired measurements described here.
 
+## Development commands
+
+Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm install --frozen-lockfile`. The command surface is `pnpm bench --help`.
+
+```sh
+# Working tree, including uncommitted source changes, versus a commit.
+pnpm bench compare HEAD~1
+pnpm bench compare main --types u64,row_u64 --distributions random,zipf2 --cpu 2
+
+# Rust-only smoke comparison, including validation and a report.
+pnpm bench run
+
+# Full native comparison and optional Portable SIMD build.
+pnpm bench run --plan release --simd --cpu 2
+
+# Reports do not rebuild or rerun measurements.
+pnpm bench report bench/results/SESSION
+```
+
+Both measurement commands accept `--out DIR` and require a new directory. Their default output is `bench/results/<timestamp>`. They snapshot the current sources and clean up their temporary worktree and build directory under `~/code/tessera-bench/`; `TESSERA_BENCH_WORK` overrides that location. Repository-internal symlinks are materialized; escaping or dangling links and directory cycles are rejected before building. Current sources may use absolute links to internal files. Baseline links must resolve inside an archive of the selected commit; absolute links into the live checkout are rejected. Results are retained. The lower-level commands below remain available for resumable algorithm sessions and custom investigations.
+
+### Working-tree comparisons
+
+`compare [COMMIT]` defaults to `HEAD` and uses any resolvable local commit compatible with the current crate API, harness and lockfile. Both revisions are built from the current benchmark harness with one toolchain and the same features; the baseline substitutes only `rust/tessera-sort` from the named commit. Selected timed IDs must match. The `local` plan measures only `rust/u64/random/65536/s1/api`; override its axes or choose another plan explicitly, since each selected case runs 27 times across nine blocks. `--filter` optionally narrows the resulting timed IDs.
+
+Each block runs two baseline processes and one current process, rotating through the six possible orders. Criterion's mean nanoseconds per sort is the observation. The current/baseline ratio uses the mean of the block's baseline pair; the report gives its median and block range, plus the paired A/A range. A direction needs eight of nine blocks and a median outside that range. This is a development screen with process-level A/A controls, not an in-process or placement-controlled performance claim.
+
+The output contains the resolved `plan.json`, `local.json`, `summaries.json`, `index.md` and `local.svg`. The JSON records revision and source hashes, executable hashes, both builds' actual Cargo provenance, configuration, host information, selected IDs and block observations. Compiler and encoded flags come from the build script, including `.cargo` target-specific settings and explicit `RUSTC`; mismatched build settings fail before measurement. Interrupted comparisons retain completed blocks but cannot be resumed or reported as complete. Use `pnpm bench report DIR` to regenerate a completed report.
+
+Standard algorithm-report figures show fixed slices and aggregates, not every measured case. A selected-input panel is generated only when no standard panel can be drawn. Custom lengths omitted from those figures remain in Full results and `summaries.json`.
+
+The [tooling design](../design/benchmark-tooling.md) describes the module boundaries and [figure guide](benchmark-figures.md) explains the shared presentation layer.
+
+
+## Experiment plans
+
+All three workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). Repository presets, the shared catalog and selection fixtures use TOML for comments and readable input rules; custom files may use either TOML or JSON. Both formats decode into the same configuration model and use the same validation and selection rules. Plans describe what to measure; the harness owns input generation and the measurement protocol.
+
+| Preset | Harness | Default selection |
+|---|---|---|
+| `local` | `smoke` | Tessera, random `u64`, 65,536 records, `api` |
+| `continuous` | `smoke` | The 50 regression inputs and 56 timed IDs documented in the [continuous guide](continuous-benchmarks.md#cases) |
+| `smoke` | `comparison` | Rust competitors, 70 inputs at 1,000 records |
+| `release` | `comparison` | Rust and native competitors, 260 inputs across four lengths |
+
+`compare` defaults to `local`; `run` defaults to `smoke`. The continuous executable embeds `continuous.toml` at build time, so its artifact carries the selection from the measured commit. Editing that file changes cloud coverage without editing the worker, publication workflow or case-registration code.
+
+A custom plan contains a union of products, followed by exclusions. These two files describe the same selection:
+
+::: code-group
+
+```toml [my-plan.toml]
+schema = 1
+harness = "comparison"
+algorithms = ["glidesort", "radsort"]
+
+# Each rule expands into a Cartesian product.
+[[include]]
+types = ["u32", "u64"]
+distributions = ["random", "zipf2"]
+lengths = [65_536, 1_000_000]
+
+[[include]]
+types = ["row_u64"]
+distributions = ["d16"]
+lengths = [65_536]
+
+[[exclude]]
+types = ["u32"]
+distributions = ["zipf2"]
+lengths = [1_000_000]
+```
+
+```json [my-plan.json]
+{
+  "schema": 1,
+  "harness": "comparison",
+  "algorithms": ["glidesort", "radsort"],
+  "include": [
+    {
+      "types": ["u32", "u64"],
+      "distributions": ["random", "zipf2"],
+      "lengths": [65536, 1000000]
+    },
+    {
+      "types": ["row_u64"],
+      "distributions": ["d16"],
+      "lengths": [65536]
+    }
+  ],
+  "exclude": [
+    { "types": ["u32"], "distributions": ["zipf2"], "lengths": [1000000] }
+  ]
+}
+```
+
+:::
+
+Values within an axis are alternatives; axes within a rule form a Cartesian product. `include` rules are unioned and duplicate inputs are measured once. Any matching `exclude` rule removes that combination. Omitted axes use the harness's catalog defaults when expanding inputs and match every value when excluding them. An empty choice array is invalid. Unknown fields and identities are errors, not ignored filters.
+
+The selectable axes are `types`, `distributions`, `lengths` and `modes`. Lengths are positive record counts; custom numeric lengths need not already occur in a preset. Configuration files can also use `"insertion-max"`, `"insertion-next"` and `"tile-next"`. These resolve from the measured library's thresholds and the record width in the catalog. Case IDs retain the resolved numeric length; a commit comparison rejects different selected IDs between revisions.
+
+The `smoke` harness measures Tessera through `api` and `workspace`; its supported record representations and distributions are under `smoke` in [the catalog](../../bench/catalog.toml). The `comparison` harness measures supported algorithm/type pairs through `api`. Its default types, distributions and lengths are under `comparison`. Inputs always use seed 1. A plan that selects nothing fails before timing.
+
+Algorithm comparisons retain `tessera`, `std-stable` and the separately timed Tessera A/A control, even when only additional opponents are named. Native algorithms automatically enable source acquisition and native compilation. Portable SIMD is requested with `--simd`; that additional build measures the shared Tessera and standard-library anchors, while competitors run in the default build. Unsupported adapter/type pairs are omitted from the manifest's per-input capabilities, not recorded as measurements.
+
+```sh
+# Preview a resolved plan without compiling or timing.
+pnpm --silent bench plan local --types u32,u64 --distributions random,zipf2
+
+# Save that selection and reuse it against different commits.
+pnpm --silent bench plan local --types u32,u64 > my-plan.toml
+pnpm bench compare main --plan my-plan.toml
+pnpm bench compare HEAD~1 --plan my-plan.toml
+
+# JSON remains available for saved plans and automation.
+pnpm --silent bench plan local --format json > my-plan.json
+
+# Override algorithms and inputs for one horizontal comparison.
+pnpm bench run --plan smoke --algorithms glidesort,radsort \\
+  --types u64 --distributions random,zipf2 --lengths 1234,65536
+
+# Export the validation schema for editors or external tooling.
+pnpm --silent bench plan --schema > benchmark-plan.schema.json
+```
+
+`--plan` accepts a preset name or a `.toml`/`.json` path relative to the current directory. `plan` prints TOML by default; `--format json` selects JSON. `--schema` always emits JSON Schema, which describes the decoded model for either format. The comma-separated CLI axes replace the corresponding axis in every inclusion rule; exclusions remain in force. `--algorithms` replaces the opponent list before required controls are added. Preview commands print the resolved selection, not a list of code-relative case IDs; the native harness expands those IDs using the measured code. Every result directory retains the normalized `plan.json`, regardless of the input encoding, and algorithm manifests retain the resolved case and capability lists. A selected subset is a complete experiment in its own right; `--group` instead runs one resumable group from that plan and marks the report partial.
+
+`release` remains an alias for `run`. The lower-level Rust binaries also accept `--plan FILE`; `--suite smoke|release` remains available for their built-in sessions.
+
 ## Run a comparison
 
-The Rust competitors need Cargo's stable toolchain. Native competitors additionally need Linux x86-64 with glibc, Python 3.12 or later, Clang with C++17 support, CMake, GNU binutils, and TBB headers (`libtbb-dev` on Debian/Ubuntu). The pinned IPS²Ra/IPS⁴o headers include TBB queue declarations even for their sequential entry points; the benchmark executables do not link TBB or OpenMP. Fetching sources is a separate step; building and measuring use the verified local sources without network access. The report requires Node.js 24 and `npm ci`.
+The Rust competitors need Cargo's stable toolchain. Native competitors additionally need Linux x86-64 with glibc, Python 3.12 or later, Clang with C++17 support, CMake, GNU binutils, and TBB headers (`libtbb-dev` on Debian/Ubuntu). The pinned IPS²Ra/IPS⁴o headers include TBB queue declarations even for their sequential entry points; the benchmark executables do not link TBB or OpenMP. Fetching sources is a separate step; building and measuring use the verified local sources without network access. The report requires Node.js 24 and `pnpm install --frozen-lockfile`.
 
 For static Rust checks without the native toolchain or fetched sources, use `TESSERA_BENCH_CHECK_ONLY=1 cargo clippy --workspace --all-targets --all-features` or `TESSERA_BENCH_CHECK_ONLY=1 cargo doc --workspace --no-deps --all-features`. This mode omits native compilation and linker inputs, not the native-facing Rust code. Leave the variable unset for builds, tests and measurements that link native competitors.
 
@@ -20,7 +150,7 @@ target/compare-default/release/compare validate --suite release
 
 taskset -c 2 target/compare-default/release/compare run \
   --suite release --out bench/results/release
-npm run bench:report -- bench/results/release
+pnpm bench report bench/results/release
 ```
 
 Choose a CPU allowed by the machine's affinity policy. The recommended conditions are an idle machine, the performance governor, turbo and SMT disabled, and a run pinned to one logical CPU. The runner records these conditions and leaves host configuration to the operator.
@@ -35,7 +165,7 @@ taskset -c 2 target/compare-default/release/memory \
 `--group TYPE/SHAPE` selects one complete group, for example `--group u64/random`. Repeating a run skips completed groups and replaces any interrupted group. An interrupted final JSONL write is discarded on resume. A change to the executable, build provenance, suite or host fingerprint requires a new output directory. Groups measured in separate directories can be reported together when their host fingerprints and build manifests agree:
 
 ```sh
-npm run bench:report -- bench/results/part-1 bench/results/part-2
+pnpm bench report bench/results/part-1 bench/results/part-2
 ```
 
 The report requires the complete suite. `--partial` generates a report of the completed groups during development. Results go into the first directory's `report/`, with Markdown, five SVG figures where the required cases are present, and machine-readable summaries. `bmf.json` in that directory can be uploaded with the Bencher CLI. The report reads only the result directories.
@@ -52,7 +182,7 @@ cargo build --release -p tessera-bench --features compare,portable-simd \
 target/compare-simd/release/compare validate --suite smoke
 taskset -c 2 target/compare-simd/release/compare run \
   --suite release --out bench/results/release
-npm run bench:report -- bench/results/release
+pnpm bench report bench/results/release
 ```
 
 This executable measures Tessera twice and `slice::sort` on the same cases. Competitors are measured in the default build. Each build has its own A/A control; `slice::sort` anchors the ranking to the same scale. The report records the absolute anchor drift between processes and flags differences above 5%. Both builds belong to the same session and use the same source revision, toolchain and target flags.

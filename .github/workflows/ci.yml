@@ -50,19 +50,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Test the CI scripts
-        run: python3 -m unittest discover -s .github/scripts -p "test_*.py"
+        run: |
+          python3 -m unittest discover -s .github/scripts -p "test_*.py"
+          python3 -m unittest discover -s bench/continuous -p "test_*.py"
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run lint
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
       - run: pipx run ruff==0.17.4 format --check
       - run: pipx run ruff==0.17.4 check
-      - run: npm run scripts:typecheck
-      - run: npm run scripts:test
-      - run: npm run bench:typecheck
-      - run: npm run bench:test
+      - run: pnpm bench:typecheck
+      - run: pnpm bench:test
 
   rust:
     needs: changes

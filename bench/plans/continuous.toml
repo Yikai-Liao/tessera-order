@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+schema = 1
+harness = "smoke"
+algorithms = [ "tessera" ]
+exclude = []
+
+[[include]]
+types = [ "u64" ]
+distributions = [ "random" ]
+lengths = [ "insertion-max" ]
+modes = [ "api" ]
+
+[[include]]
+types = [ "u64" ]
+distributions = [ "random" ]
+lengths = [ "insertion-next", "tile-next" ]
+modes = [ "api", "workspace" ]
+
+[[include]]
+types = [ "row_u32" ]
+distributions = [ "random" ]
+lengths = [ "insertion-next", "tile-next" ]
+modes = [ "api" ]
+
+[[include]]
+types = [ "row_u64" ]
+distributions = [ "random" ]
+lengths = [ "tile-next" ]
+modes = [ "api", "workspace" ]
+
+[[include]]
+types = [ "u64" ]
+distributions = [ "sorted", "reverse" ]
+lengths = [ 1000 ]
+modes = [ "api" ]
+
+[[include]]
+types = [ "u64", "row_u64" ]
+distributions = [ "random", "skew99" ]
+lengths = [ 1000 ]
+modes = [ "api" ]
+
+[[include]]
+types = [ "u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+modes = [ "api", "workspace" ]
+
+[[include]]
+types = [ "u64" ]
+distributions = [ "sorted", "reverse", "sorted99", "equal", "far_swaps", "d16", "zipf2", "skew99", "sorted_tail", "runs" ]
+lengths = [ 65536 ]
+modes = [ "api" ]
+
+[[include]]
+types = [ "u32" ]
+distributions = [ "random", "sorted99" ]
+lengths = [ 65536 ]
+modes = [ "api" ]
+
+[[include]]
+types = [ "u128" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+modes = [ "api" ]
+
+[[include]]
+types = [ "f64" ]
+distributions = [ "random", "sorted", "sorted99", "finite_signed" ]
+lengths = [ 65536 ]
+modes = [ "api" ]
+
+[[include]]
+types = [ "row_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+modes = [ "api", "workspace" ]
+
+[[include]]
+types = [ "row_u64" ]
+distributions = [ "d16", "hot50" ]
+lengths = [ 65536 ]
+modes = [ "api" ]
+
+[[include]]
+types = [ "rec128_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+modes = [ "api", "workspace" ]
+
+[[include]]
+types = [ "rec128_u64" ]
+distributions = [ "sparse_digits" ]
+lengths = [ 65536 ]
+modes = [ "api" ]
+
+[[include]]
+types = [ "u64" ]
+distributions = [ "random", "zipf2", "skew99", "two_values", "sorted99", "sparse_digits", "bimodal", "hot50", "d4096" ]
+lengths = [ 1000000 ]
+modes = [ "api" ]
+
+[[include]]
+types = [ "u32", "row_u64" ]
+distributions = [ "random" ]
+lengths = [ 1000000 ]
+modes = [ "api" ]
+
+[[include]]
+types = [ "u128" ]
+distributions = [ "random", "sparse8" ]
+lengths = [ 1000000 ]
+modes = [ "api" ]
+
+[[include]]
+types = [ "u64" ]
+distributions = [ "random", "zipf2" ]
+lengths = [ 10000000 ]
+modes = [ "api" ]

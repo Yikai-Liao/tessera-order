@@ -49,7 +49,7 @@ function parseManifest(value: unknown): Manifest {
     value.schema !== 1 ||
     value.suite_version !== 1 ||
     value.blocks !== 9 ||
-    !["smoke", "release"].includes(String(value.suite))
+    !["smoke", "release", "custom"].includes(String(value.suite))
   )
     throw new Error("unsupported measurement schema or suite");
   if (!["default", "portable-simd"].includes(String(value.build))) throw new Error("unknown build");

@@ -2,10 +2,23 @@
 
 Every push to `main` and every PR that touches Rust code runs the same small Criterion suite in two configurations, Default and Portable SIMD, on [Bencher Bare Metal](https://bencher.dev/docs/explanation/images/). It flags changes worth investigating. It is not the [release and A/B protocol](benchmarking.md): there is no in-process A/A or placement control, so an alert is not evidence for a performance claim.
 
+## Read feedback from a PR
+
+```sh
+pnpm bench pr 123
+pnpm --silent bench pr 123 --json
+```
+
+The command uses the authenticated GitHub CLI (`gh auth login`) and reads the PR's current head, its benchmark check summaries and the matching GitHub Actions report comment. It does not submit jobs or change the PR. The JSON form is suitable for agents: inspect `head`, `checks[].conclusion`, `checks[].output.summary` and `comment`.
+
+Check the measured head before interpreting results. Pending checks or an absent current-head comment mean feedback is not ready; an older report is not a result for the new head. A failing benchmark check may indicate an alert, measurement failure or missing comparable baseline; read its summary to distinguish them. For stacked PRs, verify that the baseline is the parent PR at the resolved base commit.
+
+The required checks are `Benchmarks (rust, Default)` and `Benchmarks (rust, Portable SIMD)`. The `Track benchmarks` workflow can succeed even when those checks fail. The check summaries and current-head report, not the workflow's green badge alone, carry the verdict. If no checks appear, inspect the unprivileged `Build benchmarks` run first, then the trusted `Track benchmarks` run. Links in the report lead to the workflow, Bencher report, JSON and case history.
+
 ## Pipeline
 
 1. `bench-build.yml` runs without secrets, also for forks. One job compiles `bench/rust/benches/smoke.rs` twice, in sequence: with default features, and with `tessera-sort/portable-simd` added. Each static glibc executable has its own artifact, `bench-rust-default` or `bench-rust`. A second runner would save seconds, but the tracker waits for both executables anyway, so one job keeps to one concurrency slot. Static glibc keeps glibc's allocator, which `api` mode measures. The builds use the same compiler and flags; only the feature differs. Portable SIMD retains the artifact name and executable path consumed by the default-branch tracker, so a PR introducing this artifact can still be measured before its tracker changes merge.
-2. `bench-track.yml` runs trusted default-branch code through `workflow_run`. It looks up the source PR through the GitHub API ([`github.ts`](../../.github/scripts/bencher/github.ts)) and skips closed or superseded PRs. For a stacked PR it also resolves the parent pull request, because Bencher stores a PR's samples under `pr-<number>` and never under its GitHub branch name. It then wraps both executables and the trusted Python supervisor in a self-contained image, pushes the image and submits its digest to Bencher. It measures each executable in a separate remote job, one after the other, so each gets its own timeout. A failed measurement does not skip the other configuration. The executables only ever run on Bencher's runner, which receives no credentials.
+2. `bench-track.yml` runs trusted default-branch code through `workflow_run`. It looks up the source PR through the GitHub API ([`github.ts`](../../bench/continuous/github.ts)) and skips closed or superseded PRs. For a stacked PR it also resolves the parent pull request, because Bencher stores a PR's samples under `pr-<number>` and never under its GitHub branch name. It then wraps both executables and the trusted Python supervisor in a self-contained image, pushes the image and submits its digest to Bencher. It measures each executable in a separate remote job, one after the other, so each gets its own timeout. A failed measurement does not skip the other configuration. The executables only ever run on Bencher's runner, which receives no credentials.
 
 Default keeps the default-on `std` feature. It may still use the compiler's automatic vectorization. Portable SIMD adds the optional `fearless_simd` backend, using stable Rust and runtime detection on x86. No SIMD level is forced or disabled: the remote CPU's available features determine the backend. `+crt-static` controls linking, and does not cap SIMD dispatch. The build does not use `target-cpu=native`, because the GitHub build host differs from the measurement host.
 
@@ -15,7 +28,7 @@ Bencher Free allows one job per organization, at most 5 minutes each. Tracking j
 
 ## Within-job scheduling
 
-The [supervisor](../../.github/scripts/bench_parallel.py) runs inputs below
+The [supervisor](../../bench/continuous/worker.py) runs inputs below
 1,000,000 records in two single-threaded processes pinned to separate available
 CPUs. Whole case groups are balanced by timed ID count; API/workspace pairs stay
 together. Both workers finish before one pinned worker prepares or measures any
@@ -35,7 +48,7 @@ artifacts without the listing/selection protocol must be rebuilt.
 
 ## Cases
 
-Benchmark IDs are `<language>/<case_id>/<mode>`, with `case_id` as in the [protocol](benchmarking.md#runner), for example `rust/u64/random/65536/s1/api`. The mode names the API being timed: `api` is the stable sort with its own scratch allocation, `workspace` the same sort with a prepared workspace. Further APIs, such as an unstable or a parallel sort, get their own mode in the same executable rather than a new build; reports group cases by mode ([Reports](#builds-are-columns-cases-are-rows)). Measure a new API on a representative subset of inputs: each build's run must stay under the remote job limit below. Each case is there for an engine path ([routing](../explain/routing.md)) or a key type. The 50 input cases (56 timed benchmark IDs, including workspace modes) cover:
+Benchmark IDs are `<language>/<case_id>/<mode>`, with `case_id` as in the [protocol](benchmarking.md#runner), for example `rust/u64/random/65536/s1/api`. The mode names the API being timed: `api` is the stable sort with its own scratch allocation, `workspace` the same sort with a prepared workspace. Further APIs, such as an unstable or a parallel sort, get their own mode in the same executable rather than a new build; reports group cases by mode ([Reports](#builds-are-columns-cases-are-rows)). Measure a new API on a representative subset of inputs: each build's run must stay under the remote job limit below. Each case is there for an engine path ([routing](../explain/routing.md)) or a key type. The TOML preset [`bench/plans/continuous.toml`](../../bench/plans/continuous.toml) defines the combinations, using the [shared selection rules](benchmarking.md#experiment-plans). It is compiled into each executable; the supervisor lists the resulting IDs before scheduling workers. The default 50 input cases (56 timed benchmark IDs, including workspace modes) cover:
 
 - the insertion limit (`u64` only), one past it and one past the tile capacity, for `u64` keys and `{u32, u32}` rows, and one past the tile capacity for `{u64, u32}` rows. Cases this short move with code placement, so only the boundaries are kept;
 - sorted and reverse `u64` keys at 1,000, below one tile, where the order probe and the stable reversal decide the route before any tile routing. These two are short enough to move with code placement as well, so they screen the short-input path and an alert there still needs the protocol's controls;
@@ -63,13 +76,13 @@ History and alerts are available on the [public Bencher dashboard](https://bench
 
 ## Reports
 
-[`bencher/index.ts`](../../.github/scripts/bencher/index.ts) turns the JSON report from `bencher run` into three outputs:
+[`bench/continuous/index.ts`](../../bench/continuous/index.ts) turns the JSON report from `bencher run` into three outputs:
 
 - **Checks `Benchmarks (rust, Default)` and `Benchmarks (rust, Portable SIMD)`** on the measured commit, one per build, so each can be required. Both start as in progress; each completes with its own verdict and holds that build's report on its own: counts in the title, caution and tip boxes, both charts, the overall line and expanded `Slower` and `Faster` tables. A check fails for possible regressions, a promised comparison that did not happen, or a failed measurement, and passes only when the cases were compared and none alerted. The workflow itself does not fail on alerts or a remote measurement failure; the checks carry those failures.
 - **Job summary** of the tracking run, for `main` and PRs.
 - **PR comment** for each measured head, combining both builds after both measurements finish. A rerun of the same head updates its comment. A new head gets a new comment at the end of the timeline, and earlier reports (including comments from `bencher run --github-actions`) are minimized as outdated. That way the newest result is the visible one, and the PR shows one expanded report however often it is pushed. If the PR moves on while a run is queued, the stale result goes to the job summary only.
 
-The scripts run directly on Node.js 24. `report.ts` owns the result model and current comparison; `matrix.ts` lines the builds' results up by case; `history.ts` loads and normalizes PR history. `chart.ts` and `trend-chart.ts` share the column layout, SVG styles and text metrics. `markdown.ts` formats the report; `images.ts` publishes generated SVGs; `github.ts` resolves commits and manages checks and comments. Run `npm ci`, `npm run scripts:typecheck` and `npm run scripts:test` to check them.
+The scripts run directly on Node.js 24. `report.ts` owns the result model and current comparison; `matrix.ts` lines the builds' results up by case; `history.ts` loads and normalizes PR history. `chart.ts` and `trend-chart.ts` share the column layout, SVG styles and text metrics. `markdown.ts` formats the report; `images.ts` publishes generated SVGs; `github.ts` resolves commits and manages checks and comments. Run `pnpm install --frozen-lockfile`, `pnpm bench:typecheck` and `pnpm bench:test` to check them.
 
 ### Builds are columns, cases are rows
 

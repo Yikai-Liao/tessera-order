@@ -70,6 +70,8 @@ fn main() {
         "Cargo.toml",
         "../../Cargo.toml",
         "../../Cargo.lock",
+        "../catalog.toml",
+        "../plans",
     ] {
         hash_tree(Path::new(path), &mut digest);
     }

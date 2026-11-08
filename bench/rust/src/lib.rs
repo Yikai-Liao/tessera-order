@@ -5,6 +5,7 @@
 pub mod case;
 #[cfg(feature = "compare")]
 mod comparison;
+pub mod plan;
 #[cfg(feature = "compare")]
 pub use comparison::main;
 

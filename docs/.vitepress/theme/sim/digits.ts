@@ -78,6 +78,8 @@ export function chooseTileLeaf(
 
   const sampleLen = Math.min(128, records);
   const distinct = Math.max(1, Math.min(sampledDistinct, sampleLen));
+  if (distinct <= 2) return "msd";
+
   const { digit } = topWindow(varying, tableWidth, bits);
   const fanout = distinct >= sampleLen ? 2 ** digit.width : distinct;
   let largest = records;
@@ -86,5 +88,5 @@ export function chooseTileLeaf(
     depth++;
     largest = Math.floor(largest / fanout);
   }
-  return distinct <= 2 || Math.max(depth, 1) + 1 < passes ? "msd" : "lsd";
+  return Math.max(depth, 1) + 1 < passes ? "msd" : "lsd";
 }

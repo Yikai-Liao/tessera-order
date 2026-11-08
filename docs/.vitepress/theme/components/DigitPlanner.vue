@@ -147,7 +147,8 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
       but never starts or ends on one.
     </p>
     <p class="tsr-note">
-      For an 8,192-key <code>u64</code> tile, this sample selects <strong>{{ tileLeafLabel }}</strong>.
+      For 8,192 <code>u64</code> keys with the selected {{ width }}-bit table limit, this sample selects
+      <strong>{{ tileLeafLabel }}</strong>. The engine itself uses a 14-bit limit at this tile size.
       {{ tileLeafReason }}
     </p>
   </figure>

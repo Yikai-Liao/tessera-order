@@ -43,4 +43,13 @@ check(chooseTileLeaf(1000, (1n << 64n) - 1n, 11, 2, 64), "msd");
 check(chooseTileLeaf(1000, (1n << 20n) - 1n, 11, 2, 64), "lsd");
 check(chooseTileLeaf(48, (1n << 64n) - 1n, 11, 2, 64), "insertion");
 check(chooseTileLeaf(8192, 0n, 14, 2, 32), "done");
+for (const [distinct, leaf] of [
+  [1, "msd"],
+  [2, "msd"],
+  [3, "lsd"],
+  [127, "lsd"],
+  [128, "msd"],
+] as const) {
+  check(chooseTileLeaf(8192, (1n << 32n) - 1n, 14, distinct, 32), leaf);
+}
 console.log("digit planner and tile routing models ok");

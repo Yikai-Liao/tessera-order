@@ -21,7 +21,7 @@ baselines. The guest receives no credentials.
 
 Dispatch the existing Track benchmarks workflow on this exact branch. Inputs:
 variant (default or portable-simd), rounds (1–5), batches (space-separated 0–3).
-Start with one round and batch 0 to verify transport. The benchmark environment
+Start with one round and batch 0 to verify transport. The small suite excludes\nall inputs of at least one million records and balances the remaining 41 IDs\nover two batches; select batches 0 and 1 for that suite. The benchmark environment
 temporarily authorizes only this exact branch; remove that policy after all
 remote jobs finish.
 

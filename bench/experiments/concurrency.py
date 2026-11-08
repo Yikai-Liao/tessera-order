@@ -103,6 +103,7 @@ def main():
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--batch", type=int, required=True, choices=range(4))
     parser.add_argument("--round", type=int, required=True)
+    parser.add_argument("--small-only", action="store_true")
     args = parser.parse_args()
     binary = args.binary.resolve()
     env = dict(os.environ, TESSERA_EXPERIMENT_LIST="1")
@@ -110,7 +111,12 @@ def main():
     cases = sorted(line for line in listed.splitlines() if line.startswith("rust/"))
     if len(cases) != 56 or len(set(cases)) != 56:
         raise RuntimeError(f"Expected 56 distinct cases, got {len(cases)}")
-    lanes = plan(cases)[args.batch]
+    batches = 2 if args.small_only else 4
+    if args.batch >= batches:
+        raise ValueError(f"Batch must be below {batches} for this suite")
+    if args.small_only:
+        cases = [case for case in cases if int(case.split("/")[3]) < 1_000_000]
+    lanes = plan(cases, batches=batches)[args.batch]
     selected_groups = {group for lane in lanes for group in lane}
     selected = [case for case in cases if case.rsplit("/", 1)[0] in selected_groups]
     cpus = sorted(os.sched_getaffinity(0))[:4]
@@ -118,6 +124,7 @@ def main():
         raise RuntimeError(f"Need four available CPUs, got {cpus}")
     metadata = {
         "schema": 1,
+        "suite": "small-only" if args.small_only else "full",
         "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
         "round": args.round,
         "batch": args.batch,

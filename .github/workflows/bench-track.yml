@@ -9,6 +9,10 @@ on:
         type: choice
         default: default
         options: [default, portable-simd]
+      suite:
+        type: choice
+        default: full
+        options: [full, small]
       rounds:
         type: number
         default: 3
@@ -245,6 +249,7 @@ jobs:
           IMAGE: ${{ steps.image.outputs.reference }}
           VARIANT: ${{ inputs.variant }}
           ROUNDS: ${{ inputs.rounds }}
+          SUITE: ${{ inputs.suite }}
           BATCHES: ${{ inputs.batches }}
         run: |
           python3 - <<'PY'
@@ -254,16 +259,20 @@ jobs:
           assert batches and len(batches) == len(set(batches))
           assert all(batch in ("0", "1", "2", "3") for batch in batches)
           PY
+          extra=()
+          if [ "$SUITE" = small ]; then
+            extra=(--small-only)
+          fi
           for ((round=0; round<ROUNDS; round++)); do
             for batch in $BATCHES; do
               file="results/$VARIANT-r$round-b$batch"
               bencher run --project "$BENCHER_PROJECT" --key "$BENCHER_API_KEY" \
                 --branch "experiment-concurrency-$GITHUB_RUN_ID" --hash "$GITHUB_SHA" \
-                --testbed "experiment-concurrency-$VARIANT" --spec intel-v1 \
+                --testbed "experiment-concurrency-$VARIANT-$SUITE" --spec intel-v1 \
                 --image "$IMAGE" --job-timeout 270 \
                 --adapter json --format json --quiet --exec -- \
                 /usr/local/bin/python3 /experiment.py --binary /bench \
-                --batch "$batch" --round "$round" > "$file.report.json"
+                --batch "$batch" --round "$round" "${extra[@]}" > "$file.report.json"
               job=$(jq -er '.job' "$file.report.json")
               curl --fail --silent --show-error \
                 -H "Authorization: Bearer $BENCHER_API_KEY" \

@@ -96,7 +96,7 @@ const toneOf = (variant: string): Tone =>
 // value cell read the same way.
 function speedScale(ratios: number[]): Chart["scale"] {
   const reach = Math.max(2, ...ratios.map((r) => Math.min(RATIO_LIMIT, Math.max(r, 1 / r)) * 1.08));
-  const span = 2 ** Math.ceil(Math.log2(reach));
+  const span = Math.min(RATIO_LIMIT, 2 ** Math.ceil(Math.log2(reach)));
   const steps = Math.log2(span);
   // Every doubling is labelled while there is room; wider axes label every other one.
   const every = steps <= 3 ? 1 : 2;
@@ -343,7 +343,9 @@ function renderInputs(
       guide: `${formatLength(n)} ${ty === "u64" ? "u64 keys" : record.label}; each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to slice::sort`,
       columns: ["Speed", "Rank"],
       groups,
-      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
+      scale: speedScale(
+        standings.flatMap((s) => [s.tessera, s.simd ?? s.tessera, ...s.speeds.map((v) => v.speed)]),
+      ),
       axis: SPEED_AXIS,
       legend: kindLegend(standings.some((s) => s.simd !== null)),
     }),
@@ -377,7 +379,9 @@ function renderTypes(dataset: Dataset, summaries: Map<string, Summary>): Figure 
       guide: `${formatLength(LARGE)} elements; speed relative to slice::sort, geometric mean over the 10 baseline input patterns`,
       columns: ["Speed", "Rank"],
       groups,
-      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
+      scale: speedScale(
+        standings.flatMap((s) => [s.tessera, s.simd ?? s.tessera, ...s.speeds.map((v) => v.speed)]),
+      ),
       axis: SPEED_AXIS,
       legend: kindLegend(standings.some((s) => s.simd !== null)),
     }),

@@ -349,6 +349,39 @@ test("mixed plans disclose figure scope", async (t) => {
   assert.ok(summaries.some((row: { caseId: string }) => row.caseId === "u64/random/1234/s1"));
 });
 
+test("field scales include SIMD rings", () => {
+  for (const factor of [1 / 8, 64]) {
+    const dataset = createFixture(true);
+    for (const sample of dataset.samples) {
+      if (sample.build === "portable-simd" && sample.variant !== "std-stable")
+        sample.elapsed_ns = Math.round(sample.elapsed_ns * factor);
+    }
+    const figures = renderFigures(dataset, summarize(dataset));
+    for (const name of ["inputs", "short", "types"]) {
+      const figure = figures.find((chart) => chart.name === name)!;
+      // SIMD speeds of 26x or 0.05x fit inside the 32x limit and must
+      // remain rings, not overflow triangles on a default-only scale.
+      assert.match(figure.svg, />16×<\/text>/, `${name}, factor=${factor}`);
+      assert.doesNotMatch(figure.svg, /rotate\((90|270)\)/, `${name}, factor=${factor}`);
+    }
+  }
+});
+
+test("speed panels keep the stated overflow limit", () => {
+  const dataset = createFixture(true);
+  for (const sample of dataset.samples) {
+    if (sample.build === "portable-simd" && sample.variant !== "std-stable")
+      sample.elapsed_ns = Math.round(sample.elapsed_ns / 12);
+  }
+  for (const figure of renderFigures(dataset, summarize(dataset)).filter(
+    (chart) => chart.name !== "memory",
+  )) {
+    // A 39x speed exceeds the 32x cap even after axis padding.
+    assert.doesNotMatch(figure.svg, />64×<\/text>/, figure.name);
+    assert.match(figure.svg, /rotate\(90\)/, figure.name);
+  }
+});
+
 test("SIMD shares the anchor", () => {
   const dataset = createFixture(true);
   validateRun(dataset);

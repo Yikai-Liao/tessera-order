@@ -2,10 +2,10 @@
 
 //! Rayon entry points for stable sorting.
 //!
-//! The parallel engine uses the existing serial probes and node/tile sorting.
-//! It partitions the root serially, then sorts each complete bucket in Rayon's
-//! current pool while root compaction continues. Small inputs and one-thread
-//! pools use the serial engine.
+//! The parallel engine shares the serial probes and node/tile sorting.
+//! Large inputs partition the root across disjoint shards, permute root blocks
+//! in parallel, then sort each materialized bucket while compaction continues.
+//! Small inputs and one-thread pools use the serial engine.
 
 use crate::key::{ByKey, Direct};
 use crate::{RadixKey, engine};
@@ -14,16 +14,16 @@ use crate::{RadixKey, engine};
 ///
 /// Available with the `rayon` feature. Ordering and stability are the same as
 /// [`crate::stable_sort`], including floats and [`Reverse`](core::cmp::Reverse).
-/// Small inputs and one-thread pools use the serial engine; larger inputs split
-/// completed root buckets across Rayon's current pool.
+/// Small inputs and one-thread pools use the serial engine; large inputs
+/// partition the root and sort completed buckets across Rayon's current pool.
 ///
 /// # Memory
 ///
-/// Scratch remains O(√n) for fixed record size and key width. The root digit is
-/// at most 12 bits, so at most 4096 child jobs can retain workspaces. If job
-/// `i` holds `mᵢ` records, their disjoint inputs give
-/// `Σ√mᵢ ≤ √(4096n)`; the root partition scratch and fixed-size tile buffers
-/// preserve the same bound.
+/// For `P` root shards, scratch is O(√(nP)) for fixed record size and key
+/// width; a fixed pool width therefore keeps it O(√n). The root digit is at
+/// most 12 bits, so at most 4096 child jobs can retain workspaces. If job `i`
+/// holds `mᵢ` records, their disjoint inputs give
+/// `Σ√mᵢ ≤ √(4096n)`; child workspaces remain O(√n).
 ///
 /// # Examples
 ///
@@ -60,9 +60,9 @@ pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
 ///
 /// # Memory
 ///
-/// Scratch remains O(√n) for fixed record size and key width. The root digit is
-/// at most 12 bits, bounding the pool to 4096 job workspaces; fixed fan-out
-/// keeps their combined scratch O(√n).
+/// For `P` root shards, scratch is O(√(nP)) for fixed record size and key
+/// width; with a fixed pool width this is O(√n). The root digit is at most 12
+/// bits, bounding child workspace fan-out independently of the pool width.
 ///
 /// # Examples
 ///

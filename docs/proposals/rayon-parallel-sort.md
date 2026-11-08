@@ -2,9 +2,9 @@
 
 # Proposal: Rayon parallel sorting
 
-Status: optional API and overlapped root-bucket sorting implemented. Root scatter remains serial; broad acceptance measurements are pending. Date: 2026-11-08.
+Status: experimental Rayon API with root-sharded scatter, parallel block permutation and overlapped bucket sorting implemented. Broad acceptance measurements are pending. Date: 2026-11-08.
 
-Add parallel stable radix sorting as an optional capability of the existing Rust crate. The first execution stage reuses the engine's probes, digit planner, block partition and tile/node sorting. It partitions the root serially, then sorts complete child buckets in bounded Rayon jobs. It is a baseline for further root-partition work, not a speedup claim or final parallel design.
+Add parallel stable radix sorting as an optional capability of the existing Rust crate. The implementation reuses the engine's probes, digit planner, block partition and tile/node sorting. Large roots are scattered across disjoint shards, their stable block directories are adopted in original shard order, and complete child buckets are sorted in bounded Rayon jobs while blocks are materialized. This is an experimental root-parallel stage; broad acceptance measurements are still required.
 
 ## Public API
 
@@ -43,26 +43,26 @@ Do not add parallel methods to `Workspace<T>` yet. It currently owns scratch for
 |---|---|
 | `src/lib.rs` | Crate documentation, feature gates and root exports |
 | `src/parallel.rs` | Rayon entry points and serial fallback |
-| `src/engine/parallel.rs` | Root split, complete-bucket jobs and per-job workspace reuse |
+| `src/engine/parallel.rs` | Root split, shard count, complete-bucket jobs and per-job workspace reuse |
 | `src/engine.rs` | Shared order probes, routing, digit planning, node partition orchestration and tile sorting |
 | `src/key.rs` | Shared sealed encodings and `Direct` / `ByKey` extractors |
-| `src/block.rs` | Block partition, scratch ownership and panic restoration |
+| `src/block.rs` | Shared block partition, scratch ownership and panic restoration |
+| `src/block/parallel.rs` | Disjoint root shards, stable directory adoption and scratch transfer |
+| `src/block/parallel/compact.rs` | Parallel block-cycle permutation and bounded boundary snapshots |
 | `src/workspace.rs` | Scratch for one serial sorting operation |
 | `tests/parallel.rs` | Public Rayon API and, later, scheduling and recovery contracts |
 
-Name the module `parallel` for its responsibility; name the feature `rayon` for its dependency. Keep it private and re-export its two entry points. Start with flat files, matching the crate. A separate crate, public slice extension trait or executor abstraction would introduce more integration points than these two complete operations need.
+Name the entry-point module `parallel` and the feature `rayon`. Keep the module private and re-export only the two entry points. The root partition and block permutation live in `block/parallel.rs` and its `compact` submodule because they form a separate ownership stage with independent stability, panic-recovery and permutation tests; the serial partition remains in `block.rs`.
 
 The scaffold directly calls `engine::sort` with `Direct` or `ByKey(&key)`. This preserves the existing distinction between sealed direct keys and cached user classifications. It introduces no second extractor trait, duplicate sort engine, new unsafe code or serial-engine refactor.
 
-The parallel entry point shares the existing order probes and key encodings, but keeps the serial entry point unchanged. It uses the existing digit planner and `Sorter` for root selection and child sorting. The block engine hands each complete bucket to a scoped Rayon job during compaction, overlapping child sorting with the remaining root compaction. Each job retains the pointer and length of every bucket as a distinct region; adjacent addresses are not combined into a wider borrow. This narrow handoff uses raw pointers because the visitor's temporary borrow cannot outlive its callback. Its safety argument depends on compaction retiring each handed-off region as both destination and copy source.
-
-Keep block movement with the partition while it shares the partition's ownership and recovery invariants. Split a complete mechanism into `block/parallel.rs` only if a future measured design establishes a separately understandable boundary; do not create empty module trees or a second `parallel_engine.rs` in advance.
+The parallel entry point shares order probes, key encodings, digit planning and child sorting with the serial engine. Each root shard owns a disjoint contiguous input range and runs the existing block partition. The global directory concatenates the shard bucket ranges in original shard order, so equal keys remain stable; it adopts each shard's scratch allocation as a segment rather than copying live records into another arena. A parallel cycle permutation moves full blocks into global order, snapshots only bounded cycle boundaries, and then reuses the existing squeeze. During that squeeze, complete buckets are handed to scoped Rayon jobs while root materialization continues. Each job retains the pointer and length of every bucket as a distinct region; adjacent addresses are never combined into a wider borrow. The raw-pointer handoff is safe because compaction retires every handed-off region as both destination and copy source.
 
 ## Scratch and scheduling
 
-The current fallback has the serial engine's documented memory bounds. That does not establish the future parallel bound. For `q` concurrent disjoint nodes of lengths `n_i`, block scratch proportional to `sum(sqrt(n_i))` is at most `sqrt(q * n)`; tile buffers, cursor tables, probe keys, bucket metadata and Rayon runtime storage must be accounted for separately.
+For `P` root shards, `R` buckets, `n` records and `s` bytes per record, the block size is approximately `sqrt(20 n / (2 P R s))`. The `20` accounts for local and global block directories coexisting during adoption; each shard contributes `2 R` scratch blocks of that size. Thus root scratch and directories are O(√(nP)) for fixed record size and key width, which is O(√n) when the caller's pool width is fixed. `P` never exceeds the current Rayon pool size, and no n-record output buffer is allocated.
 
-The root digit is chosen by the existing planner and has at most twelve bits, so there are at most 4096 nonempty buckets and jobs. A job reuses one workspace across its buckets; the pool lock is held only to take or return a workspace. The root's O(√n) block scratch remains live during child work because it is needed for compaction. If `mᵢ` is the largest bucket handled by job `i`, the `mᵢ` are disjoint across jobs and `Σ√mᵢ ≤ √(4096n)`. Thus the root reserve plus child reserves, bounded job metadata and fixed per-workspace tile storage remain O(√n) for fixed record size and key width. Reentrant key functions may suspend jobs, so workspace count is bounded by the fixed root fan-out, not by worker count. Rayon runtime storage and thread stacks are separate. A reusable parallel workspace remains deferred until these lifetimes and reuse costs are understood.
+The root digit has at most twelve bits, so there are at most 4096 buckets. A job reuses one workspace across its buckets; the pool lock is held only to take or return a workspace. If `mᵢ` is the largest bucket handled by job `i`, the `mᵢ` are disjoint and `Σ√mᵢ ≤ √(4096n)`. Child scratch therefore remains O(√n) for fixed key width; root scratch dominates the pool-dependent factor. Reentrant key functions may suspend jobs, so workspace count is bounded by the fixed root fan-out, not worker count. Rayon runtime storage and thread stacks are separate. A reusable parallel workspace remains deferred until these lifetimes and reuse costs are understood.
 
 ## Focused measurements
 
@@ -74,5 +74,5 @@ Nearby job sizes did not justify changing the 256 KiB cutoff. On 10M full-width 
 
 1. **Scaffold (complete).** The optional dependency, two entry points, documented serial fallback and contract tests are in place. Continue to validate default, `no_std`, Rayon, Rayon without default features, and Rayon with Portable SIMD; check the Rayon MSRV as the engine evolves. No scheduling thresholds or serial engine heuristics change.
 2. **Overlapped root bucket completion (complete).** Large inputs reuse the shared probes, digit planner and node/tile engine; complete buckets are grouped into 256 KiB jobs and sorted while the serial root compaction continues. Root fan-out is bounded by the existing 12-bit radix maximum, and the serial path is unchanged. Contract tests cover task panics, provenance, and multiple workers. The job cutoff remains subject to controlled measurement.
-3. **Parallel root partition (in progress).** Address the serial root classification/scatter and compaction from their stable-rank and in-place movement invariants. Reuse encoding and digit planning; account for synchronization, block movement, rollback and scratch lifetimes. The overlap implementation is a measured baseline, not an acceptance target by itself.
+3. **Parallel root partition (implemented experimentally).** Root shards reuse the existing block partition, merge bucket directories stably, adopt shard scratch, and parallelize the resulting block permutation before the existing squeeze and overlapping bucket jobs. Contract tests cover ownership, stability, exclusive borrows and panic recovery. Controlled A/B, peak-scratch and broad-distribution acceptance remain in progress.
 4. **Acceptance.** Follow the [benchmark protocol](../development/benchmarking.md), comparing the complete public call against the serial engine and Rayon's stable sort at controlled pool widths. Cover random, ordered, repeated and skewed keys, wide keys, owned records and expensive extraction; report A/A ranges and peak memory. Extend sanitizer and Miri coverage to the new mechanisms. Promote the implemented contracts to a guide and engine design, and record settled choices under the implementation pull request's number.

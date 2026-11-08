@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Parallel completion of materialized root buckets.
+//! Parallel root partition and completion of materialized buckets.
 
 use super::*;
 use rayon::Scope;
@@ -214,13 +214,34 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
     let node_bytes = records.len().saturating_mul(core::mem::size_of::<T>());
     let low = varying.trailing_zeros() as usize;
     let top = bit_len(varying);
-    if node_bytes <= tile_bytes || node_bytes < 4 * tile_bytes || top - low <= SPLIT_BITS {
+    if node_bytes <= tile_bytes || node_bytes < 4 * tile_bytes {
         Sorter::<T, E, CACHED> {
             workspace,
             extractor,
             tile_bytes,
         }
         .sort_node(records, varying);
+        return;
+    }
+    let shards = rayon::current_num_threads().min((node_bytes / MIN_TASK_BYTES).max(1));
+    if top - low <= SPLIT_BITS {
+        if extractor.try_count_window(records, low, top - low) {
+            return;
+        }
+        let ends = block::partition_digit_parallel_with_visit(
+            records,
+            top - low,
+            low,
+            extractor.clone(),
+            workspace.block_buffers(),
+            shards,
+            &mut |_| {},
+        );
+        workspace
+            .block
+            .as_mut()
+            .expect("partition buffers restored")
+            .recycle_ends(ends);
         return;
     }
 
@@ -240,19 +261,30 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
     let digit = choose_split_digit(records, top, tile_bytes, extractor);
     let candidate = varying & !digit.mask::<E::Value>().to_u128();
     if candidate == 0 {
-        Sorter::<T, E, CACHED> {
-            workspace,
-            extractor,
-            tile_bytes,
-        }
-        .sort_node(records, varying);
+        let ends = block::partition_digit_parallel_with_visit(
+            records,
+            digit.width,
+            digit.shift,
+            extractor.clone(),
+            workspace.block_buffers(),
+            shards,
+            &mut |_| {},
+        );
+        workspace
+            .block
+            .as_mut()
+            .expect("partition buffers restored")
+            .recycle_ends(ends);
         return;
     }
 
     let pool = Pool::new();
-    rayon::scope(|scope| {
+    let pool_ref = &pool;
+    let root_extractor = extractor.clone();
+    let child_extractor = extractor.clone();
+    rayon::scope(move |scope| {
         let mut pending: Option<Job<T>> = None;
-        let mut visit = |bucket: &mut [T], visit_extractor: &mut E| {
+        let mut visit = |bucket: &mut [T]| {
             let mut job = pending.take().unwrap_or_else(Job::new);
             job.push(bucket);
             if job.bytes() >= MIN_TASK_BYTES {
@@ -260,25 +292,33 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send, const CACHED: bool>(
                     scope,
                     job,
                     candidate,
-                    visit_extractor.clone(),
+                    child_extractor.clone(),
                     tile_bytes,
-                    &pool,
+                    pool_ref,
                 );
             } else {
                 pending = Some(job);
             }
         };
-        let ends = block::partition_digit_with_ends(
+        let ends = block::partition_digit_parallel_with_visit(
             records,
             digit.width,
             digit.shift,
-            extractor,
+            root_extractor,
             workspace.block_buffers(),
+            shards,
             &mut visit,
         );
         drop(visit);
         if let Some(job) = pending {
-            spawn_job::<T, E, CACHED>(scope, job, candidate, extractor.clone(), tile_bytes, &pool);
+            spawn_job::<T, E, CACHED>(
+                scope,
+                job,
+                candidate,
+                child_extractor.clone(),
+                tile_bytes,
+                pool_ref,
+            );
         }
         workspace
             .block

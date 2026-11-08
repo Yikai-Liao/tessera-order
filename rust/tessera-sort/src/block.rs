@@ -53,6 +53,11 @@ use core::{marker::PhantomData, mem::MaybeUninit, ptr};
 /// digit width (the Tessera engine) bound it by this constant.
 pub(crate) const MAX_RADIX_BITS: usize = 12;
 
+#[cfg(feature = "rayon")]
+mod parallel;
+#[cfg(feature = "rayon")]
+pub(crate) use parallel::partition_digit_parallel_with_visit;
+
 /// Logical input and output block cursors for the current pass.
 struct ScatterPosition {
     input: usize,
@@ -391,6 +396,9 @@ struct BlockStorage<'a, T> {
     scratch_blocks: usize,
     block_count: usize,
     scratch: Vec<MaybeUninit<T>>,
+    // Parallel root partitions adopt each shard's scratch allocation directly.
+    #[cfg(feature = "rayon")]
+    scratch_segments: Vec<Vec<MaybeUninit<T>>>,
     input_borrow: PhantomData<&'a mut [T]>,
 }
 
@@ -433,6 +441,8 @@ impl<'a, T> BlockStorage<'a, T> {
             scratch_blocks,
             block_count,
             scratch,
+            #[cfg(feature = "rayon")]
+            scratch_segments: Vec::new(),
             input_borrow: PhantomData,
         }
     }
@@ -447,6 +457,26 @@ impl<'a, T> BlockStorage<'a, T> {
                     .as_mut_ptr()
                     .cast::<T>()
                     .add(physical * self.block_size)
+            } else {
+                self.input
+                    .add((physical - self.scratch_blocks) * self.block_size)
+            }
+        }
+    }
+
+    /// Returns a block pointer when scratch is held in shard allocations.
+    #[cfg(feature = "rayon")]
+    fn block_ptr_segmented(&mut self, physical: usize) -> *mut T {
+        assert!(physical < self.block_count);
+        // SAFETY: physical is in bounds; each scratch segment contains the same
+        // number of complete blocks and remains allocated for the partition.
+        unsafe {
+            if physical < self.scratch_blocks {
+                let segment_blocks = self.scratch_blocks / self.scratch_segments.len();
+                self.scratch_segments[physical / segment_blocks]
+                    .as_mut_ptr()
+                    .cast::<T>()
+                    .add((physical % segment_blocks) * self.block_size)
             } else {
                 self.input
                     .add((physical - self.scratch_blocks) * self.block_size)
@@ -873,7 +903,22 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     fn compact_with(
         &mut self,
         ends: &[usize],
+        visit: Option<Visit<'_, T>>,
+    ) -> Option<unwind::Payload> {
+        #[cfg(feature = "rayon")]
+        if !self.blocks.scratch_segments.is_empty() {
+            return self.compact_with_access(ends, visit, |blocks, physical| {
+                blocks.block_ptr_segmented(physical)
+            });
+        }
+        self.compact_with_access(ends, visit, |blocks, physical| blocks.block_ptr(physical))
+    }
+
+    fn compact_with_access(
+        &mut self,
+        ends: &[usize],
         mut visit: Option<Visit<'_, T>>,
+        mut block_ptr: impl FnMut(&mut BlockStorage<'a, T>, usize) -> *mut T,
     ) -> Option<unwind::Payload> {
         // Sorting is finished. Reuse the output buffer as the inverse map:
         // physical block ID -> position in block_order.
@@ -921,8 +966,8 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 debug_assert!(
                     free_logical < self.bucket_count || free_logical >= self.active_blocks_end
                 );
-                let from = self.blocks.block_ptr(destination);
-                let to = self.blocks.block_ptr(free_physical);
+                let from = block_ptr(&mut self.blocks, destination);
+                let to = block_ptr(&mut self.blocks, free_physical);
                 // SAFETY: both physical IDs are valid full blocks. Free block
                 // receives live output which would otherwise be overwritten.
                 // ptr::copy preserves uninitialized padding without reading it
@@ -938,7 +983,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 output = block_positions[destination] as usize;
             }
             let length = self.next_block_len(input, &mut partial);
-            let from = self.blocks.block_ptr(source);
+            let from = block_ptr(&mut self.blocks, source);
             assert!(start + length <= self.blocks.input_len);
             // Completed partials can only shorten preceding output: start <=
             // (destination - scratch_blocks) * block_size, and
@@ -965,7 +1010,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             let source = self.block_order[input] as usize;
             assert!(source < self.blocks.scratch_blocks);
             let length = self.next_block_len(input, &mut partial);
-            let from = self.blocks.block_ptr(source);
+            let from = block_ptr(&mut self.blocks, source);
             assert!(start + length <= self.blocks.input_len);
             // SAFETY: the remaining live prefix fits the checked output range;
             // ptr::copy permits overlap and preserves padding bytes.

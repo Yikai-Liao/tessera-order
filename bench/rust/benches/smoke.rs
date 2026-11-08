@@ -46,6 +46,13 @@ fn suite(c: &mut Criterion) {
         keys::<u64>(c, distribution, SHORT, false);
     }
 
+    // PR #40: the low-fanout tile route benefits short, heavily skewed inputs.
+    // Keep a random control for both direct keys and stable keyed rows.
+    for distribution in ["random", "skew99"] {
+        keys::<u64>(c, distribution, SHORT, false);
+        rows::<u64>(c, distribution, SHORT, false);
+    }
+
     // Eight tiles: one block-partition level and every root and node route.
     keys::<u64>(c, "random", MID, true);
     for distribution in [

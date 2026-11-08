@@ -59,13 +59,12 @@ function selection(command: Command) {
     )
     .option("--types <ids>", "comma-separated record types", list)
     .option("--distributions <ids>", "comma-separated input distributions", list)
-    .option("--lengths <numbers>", "comma-separated supported record counts", lengths)
-    .option("--modes <ids>", "comma-separated API modes", list);
+    .option("--lengths <numbers>", "comma-separated supported record counts", lengths);
 }
 
 function selectors(options: MeasurementOptions): SelectionOptions {
   return Object.fromEntries(
-    ["algorithms", "types", "distributions", "lengths", "modes"]
+    ["algorithms", "types", "distributions", "lengths"]
       .filter((key) => options[key as keyof MeasurementOptions] !== undefined)
       .map((key) => [key, options[key as keyof MeasurementOptions]]),
   );

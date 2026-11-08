@@ -28,13 +28,7 @@ Bencher Free allows one job per organization, at most 5 minutes each. Tracking j
 
 ## Within-job scheduling
 
-The [supervisor](../../bench/continuous/worker.py) runs inputs below
-1,000,000 records in two single-threaded processes pinned to separate available
-CPUs. Whole case groups are balanced by timed ID count; modes of each case stay
-together. Both workers finish before one pinned worker prepares or measures any
-larger input. Selection happens before input generation, and each worker has a
-separate Criterion directory. The supervisor rejects failed workers, missing
-results and duplicate IDs, then emits each worker's output without interleaving.
+The [supervisor](../../bench/continuous/worker.py) runs inputs below 1,000,000 records in two single-threaded processes pinned to separate available CPUs, balancing the number of cases between them. Both workers finish before one pinned worker prepares or measures any larger input. Selection happens before input generation, and each worker has a separate Criterion directory. The supervisor accepts only distinct `api` IDs, rejects failed workers and missing or duplicate results, then emits each worker's output without interleaving.
 
 Warm-up windows, sample counts, benchmark IDs and sort implementations are
 unchanged. Default and Portable SIMD still run in separate, sequential remote
@@ -48,7 +42,7 @@ artifacts without the listing/selection protocol must be rebuilt.
 
 ## Cases
 
-Benchmark IDs are `<language>/<case_id>/<mode>`, with `case_id` as in the [protocol](benchmarking.md#runner), for example `rust/u64/random/65536/s1/api`. The mode names the API being timed: `api` is the stable sort with its own scratch allocation. Further APIs, such as an unstable or a parallel sort, get their own mode in the same executable rather than a new build; reports group cases by mode ([Reports](#builds-are-columns-cases-are-rows)). Measure a new API on a representative subset of inputs: each build's run must stay under the remote job limit below. Each case is there for an engine path ([routing](../explain/routing.md)) or a key type. The TOML preset [`bench/plans/continuous.toml`](../../bench/plans/continuous.toml) defines the combinations, using the [shared selection rules](benchmarking.md#experiment-plans). It is compiled into each executable; the supervisor lists the resulting IDs before scheduling workers. The default 50 input cases (50 timed benchmark IDs) cover:
+Benchmark IDs are `<language>/<case_id>/api`, with `case_id` as in the [protocol](benchmarking.md#runner), for example `rust/u64/random/65536/s1/api`. The fixed `api` suffix identifies the stable sort with call-owned scratch; it is not a plan selector. Reports still parse recorded mode suffixes ([Reports](#builds-are-columns-cases-are-rows)). Each build's run must stay under the remote job limit below. Each case is there for an engine path ([routing](../explain/routing.md)) or a key type. The TOML preset [`bench/plans/continuous.toml`](../../bench/plans/continuous.toml) defines the combinations, using the [shared selection rules](benchmarking.md#experiment-plans). It is compiled into each executable; the supervisor lists the resulting IDs before scheduling workers. The default 50 input cases (50 timed benchmark IDs) cover:
 
 - the insertion limit (`u64` only), one past it and one past the tile capacity, for `u64` keys and `{u32, u32}` rows, and one past the tile capacity for `{u64, u32}` rows. Cases this short move with code placement, so only the boundaries are kept;
 - sorted and reverse `u64` keys at 1,000, below one tile, where the order probe and the stable reversal decide the route before any tile routing. These two are short enough to move with code placement as well, so they screen the short-input path and an alert there still needs the protocol's controls;

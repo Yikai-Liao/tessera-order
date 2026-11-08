@@ -7,14 +7,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from worker import measured_cases, partition, run_workers
+from worker import main, measured_cases, partition, run_workers
 
 
 class SchedulerTests(unittest.TestCase):
-    def test_partition_preserves_modes_and_excludes_large_cases(self):
+    def test_partition_balances_small_cases_and_excludes_large_cases(self):
         cases = [
             "rust/u64/random/65536/s1/api",
-            "rust/u64/random/65536/s1/unstable",
+            "rust/u64/equal/65536/s1/api",
+            "rust/u64/reverse/65536/s1/api",
             "rust/u32/random/65536/s1/api",
             "rust/u128/random/65536/s1/api",
             "rust/u64/random/1000000/s1/api",
@@ -23,11 +24,32 @@ class SchedulerTests(unittest.TestCase):
         small, large = partition(cases)
         self.assertEqual(partition(list(reversed(cases))), (small, large))
         self.assertEqual(large, ["rust/u64/random/1000000/s1", "rust/u64/random/10000000/s1"])
-        self.assertEqual(len(small[0]), 1)
-        self.assertEqual(len(small[1]), 2)
+        self.assertEqual(
+            small,
+            [
+                [
+                    "rust/u128/random/65536/s1",
+                    "rust/u64/equal/65536/s1",
+                    "rust/u64/reverse/65536/s1",
+                ],
+                ["rust/u32/random/65536/s1", "rust/u64/random/65536/s1"],
+            ],
+        )
         all_groups = [group for lane in small for group in lane] + large
         self.assertEqual(len(all_groups), len(set(all_groups)))
         self.assertEqual(set(all_groups), {case.rsplit("/", 1)[0] for case in cases})
+
+    def test_supervisor_rejects_invalid_ids_before_spawning_workers(self):
+        case = "rust/u64/random/65536/s1/api"
+        for listed in ["", f"{case}\n{case}", case.replace("/api", "/unstable")]:
+            with (
+                patch("worker.sys.argv", ["worker", "/unused"]),
+                patch("worker.subprocess.check_output", return_value=listed),
+                patch("worker.run_workers") as workers,
+                self.assertRaises(RuntimeError),
+            ):
+                main()
+            workers.assert_not_called()
 
     def test_missing_and_duplicate_measurements(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -57,7 +57,6 @@ test("presets validate and overrides replace axes", async () => {
       types: ["u64", "row_u64"],
       distributions: ["random", "zipf2"],
       lengths: [1000],
-      modes: ["api"],
     },
   ]);
   assert.deepEqual(
@@ -84,6 +83,7 @@ test("invalid plans fail before execution", () => {
     { ...plan, include: [{ lengths: [1.5] }] },
     { ...plan, include: [{ lengths: [1, 1] }] },
     { ...plan, algorithms: ["glidesort"] },
+    { ...plan, include: [{ modes: ["api"] }] },
     { ...plan, include: [{ modes: ["workspace"] }] },
     { ...plan, harness: "comparison", include: [{ modes: ["unstable"] }] },
   ])
@@ -93,10 +93,10 @@ test("invalid plans fail before execution", () => {
 test("selection uses actual IDs and rejects empty experiments", async () => {
   const ids = [
     "rust/u64/random/65536/s1/api",
-    "rust/u64/random/65536/s1/unstable",
+    "rust/u64/d16/65536/s1/api",
     "rust/u64/random/1000/s1/api",
   ];
-  assert.deepEqual(selectCaseIds(ids, "/api$"), [ids[0], ids[2]]);
+  assert.deepEqual(selectCaseIds(ids, "/random/"), [ids[0], ids[2]]);
   assert.throws(() => selectCaseIds(ids, "^never$"), /no supported cases/);
   assert.throws(() => selectCaseIds([]), /no supported cases/);
   assert.equal(planSchema().type, "object");

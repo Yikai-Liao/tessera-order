@@ -52,7 +52,7 @@ Run these locally. Miri, the MSRV and benchmarks run in CI on every pull request
 
 ## Benchmark tooling
 
-Use `pnpm bench compare [COMMIT]` (default: `HEAD`) to screen uncommitted code against a compatible commit and `pnpm bench run` for algorithm comparisons ([guide](docs/development/benchmarking.md)). Choose coverage with `--plan NAME-OR-FILE` and optional `--algorithms`, `--types`, `--distributions`, `--lengths`, `--modes` overrides. Preview with `pnpm --silent bench plan NAME`; maintain defaults in `bench/plans/`, not workflow or runner conditionals. Local process-level A/A screens do not replace placement-controlled measurements.
+Use `pnpm bench compare [COMMIT]` (default: `HEAD`) to screen uncommitted code against a compatible commit and `pnpm bench run` for algorithm comparisons ([guide](docs/development/benchmarking.md)). Choose coverage with `--plan NAME-OR-FILE` and optional `--algorithms`, `--types`, `--distributions`, `--lengths` overrides. Preview with `pnpm --silent bench plan NAME`; maintain defaults in `bench/plans/`, not workflow or runner conditionals. Local process-level A/A screens do not replace placement-controlled measurements.
 
 Read PR feedback with `pnpm --silent bench pr NUMBER --json` after authenticating `gh`. Match `head` to the PR's current commit and read both `Benchmarks (rust, …)` check summaries; a green tracking workflow does not mean those checks passed. A missing current-head comment is pending feedback, not a clean result. See [the continuous guide](docs/development/continuous-benchmarks.md#read-feedback-from-a-pr).
 

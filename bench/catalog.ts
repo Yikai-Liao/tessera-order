@@ -9,7 +9,6 @@ const inventory = z.object({
   types: z.array(z.string()),
   shapes: z.array(z.string()),
   lengths: z.array(z.number().int().positive()),
-  modes: z.array(z.string()),
 });
 
 /** Language-neutral benchmark identities, presentation metadata and suite order. */

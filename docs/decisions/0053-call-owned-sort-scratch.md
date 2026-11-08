@@ -14,10 +14,10 @@ Expose sorting only through `stable_sort` and `stable_sort_by_key`. Delete `Work
 
 Keep ordered and constant inputs allocation-free. Preserve ordering, stability, key-extraction and panic guarantees, owned and borrowed record handling, `no_std` block-panic abort behavior and the documented memory bounds. Routing thresholds, digit planning and inlining policy do not change.
 
-Remove the benchmark's `workspace` mode and its catalog and plan selections. Preserve the continuous suite's 50 input cases, now measured through 50 `api` IDs, and leave comparison harness API modes unchanged. Git source/build workspaces in benchmark tooling are unrelated and remain.
+Remove the benchmark's `workspace` mode and its catalog and plan selections. Preserve the continuous suite's 50 input cases, now measured through 50 `api` IDs. Both harnesses have only the public API, so remove the singleton `modes` selection axis, CLI option and inventory fields. Preserve the `/api` result-ID suffix and report-side mode parsing; they describe recorded results rather than executable choices. Git source/build workspaces in benchmark tooling are unrelated and remain.
 
 ## Consequences
 
-Existing pre-release callers must replace workspace method calls with the corresponding free functions and remove retained-memory management. There is one public sorting protocol and no caller-controlled scratch lifetime. Tests cover scratch release after a call and allocation-free ordered inputs; panic and conformance tests use the free functions.
+Existing pre-release callers must replace workspace method calls with the corresponding free functions and remove retained-memory management. There is one public sorting protocol and no caller-controlled scratch lifetime. Tests cover scratch release after a call and allocation-free ordered inputs; panic and conformance tests use the free functions. Custom plans must remove `modes` fields and callers must stop passing `--modes`; strict parsing rejects the removed selector rather than silently ignoring it.
 
 Current guides, navigation and plans describe only the remaining API. Earlier decision records retain their historical workspace references. No timed measurements accompany this simplification, and it makes no performance claim.

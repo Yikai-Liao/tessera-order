@@ -37,7 +37,6 @@ pub(crate) struct Inventory {
     pub(crate) types: Vec<String>,
     shapes: Vec<String>,
     lengths: Vec<usize>,
-    modes: Vec<String>,
 }
 /// Reads the language-neutral catalog once per executable.
 pub(crate) fn catalog() -> &'static Catalog {
@@ -96,12 +95,10 @@ struct Rule {
     distributions: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     lengths: Option<Vec<Length>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    modes: Option<Vec<String>>,
 }
 impl Rule {
     /// Matches all specified axes, resolving code-relative counts for this type.
-    fn matches(&self, ty: &str, distribution: &str, len: usize, mode: &str) -> bool {
+    fn matches(&self, ty: &str, distribution: &str, len: usize) -> bool {
         self.types
             .as_ref()
             .is_none_or(|values| values.iter().any(|v| v == ty))
@@ -113,10 +110,6 @@ impl Rule {
                 .lengths
                 .as_ref()
                 .is_none_or(|values| values.iter().any(|v| v.resolve(ty) == len))
-            && self
-                .modes
-                .as_ref()
-                .is_none_or(|values| values.iter().any(|v| v == mode))
     }
 }
 
@@ -197,7 +190,6 @@ impl Plan {
             for (values, supported, field) in [
                 (&rule.types, &inventory.types, "types"),
                 (&rule.distributions, &inventory.shapes, "distributions"),
-                (&rule.modes, &inventory.modes, "modes"),
             ] {
                 if let Some(values) = values {
                     if !unique(values) || values.iter().any(|id| !supported.contains(id)) {
@@ -239,14 +231,14 @@ impl Plan {
     }
 
     /// Includes matching products, then removes matching exclusions.
-    pub fn selects(&self, ty: &str, distribution: &str, len: usize, mode: &str) -> bool {
+    fn selects(&self, ty: &str, distribution: &str, len: usize) -> bool {
         self.include
             .iter()
-            .any(|rule| rule.matches(ty, distribution, len, mode))
+            .any(|rule| rule.matches(ty, distribution, len))
             && !self
                 .exclude
                 .iter()
-                .any(|rule| rule.matches(ty, distribution, len, mode))
+                .any(|rule| rule.matches(ty, distribution, len))
     }
 
     /// Expands products into unique inputs before allocating any records.
@@ -275,11 +267,7 @@ impl Plan {
                 for distribution in &shapes {
                     for length in &lengths {
                         let len = length.resolve(ty);
-                        if inventory
-                            .modes
-                            .iter()
-                            .any(|mode| self.selects(ty, distribution, len, mode))
-                        {
+                        if self.selects(ty, distribution, len) {
                             cases.insert(InputCase {
                                 ty: ty.clone(),
                                 distribution: distribution.clone(),
@@ -312,8 +300,7 @@ mod tests {
                 plan.selects(
                     input["type"].as_str().unwrap(),
                     input["distribution"].as_str().unwrap(),
-                    input["length"].as_u64().unwrap() as usize,
-                    input["mode"].as_str().unwrap()
+                    input["length"].as_u64().unwrap() as usize
                 ),
                 input["selected"].as_bool().unwrap(),
                 "{input}"
@@ -326,18 +313,6 @@ mod tests {
         let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
         let cases = continuous.inputs().unwrap();
         assert_eq!(cases.len(), 50);
-        assert_eq!(
-            cases
-                .iter()
-                .map(|case| catalog()
-                    .smoke
-                    .modes
-                    .iter()
-                    .filter(|mode| continuous.selects(&case.ty, &case.distribution, case.len, mode))
-                    .count())
-                .sum::<usize>(),
-            50
-        );
         for (text, expected) in [
             (include_str!("../../plans/smoke.toml"), 125),
             (include_str!("../../plans/release.toml"), 381),
@@ -414,7 +389,7 @@ mod tests {
     fn formats_share_selection_rules() {
         let json = r#"{"schema":1,"harness":"smoke","algorithms":["tessera"],
             "include":[{"types":["u64"],"distributions":["random"],"lengths":[1000,"tile-next"]}],
-            "exclude":[{"lengths":[1000],"modes":["api"]}]}"#;
+            "exclude":[{"lengths":[1000]}]}"#;
         let text = r#"
             # Numeric counts and code-relative boundaries share one axis.
             schema = 1
@@ -426,7 +401,6 @@ mod tests {
             lengths = [1_000, "tile-next"]
             [[exclude]]
             lengths = [1_000]
-            modes = ["api"]
         "#;
         let expected = Plan::parse(json, "smoke").unwrap();
         let actual = Plan::parse(text, "smoke").unwrap();
@@ -435,10 +409,11 @@ mod tests {
             serde_json::to_value(&expected).unwrap()
         );
         assert_eq!(actual.inputs().unwrap(), expected.inputs().unwrap());
-        assert!(!actual.selects("u64", "random", 1000, "api"));
+        assert!(!actual.selects("u64", "random", 1000));
         for invalid in [
             text.replace("schema = 1", "schema = 2"),
-            text.replace(r#"["api"]"#, r#"["workspace"]"#),
+            format!("{text}\n modes = [\"api\"]"),
+            format!("{text}\n modes = [\"workspace\"]"),
             text.replace("types =", "type ="),
             text.replace("[1_000,", "[0,"),
             text.replace("[1_000,", "[1_000, 1_000,"),

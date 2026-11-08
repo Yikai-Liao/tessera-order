@@ -10,21 +10,16 @@ from pathlib import Path
 
 
 def partition(cases):
-    """Keep API modes together and balance small groups by case count."""
-    groups = {}
-    for case in cases:
-        group, _ = case.rsplit("/", 1)
-        groups.setdefault(group, []).append(case)
+    """Balance API cases across two small lanes; run large cases separately."""
     small = [[], []]
     large = []
-    weights = [0, 0]
-    for group, modes in sorted(groups.items(), key=lambda item: (-len(item[1]), item[0])):
+    for case in sorted(cases):
+        group, _ = case.rsplit("/", 1)
         if int(group.split("/")[3]) >= 1_000_000:
             large.append(group)
         else:
-            lane = min(range(2), key=lambda i: (weights[i], i))
+            lane = min(range(2), key=lambda lane: len(small[lane]))
             small[lane].append(group)
-            weights[lane] += len(modes)
     return small, large
 
 
@@ -90,7 +85,7 @@ def main():
         raise RuntimeError("Expected distinct benchmark IDs")
     for case in cases:
         parts = case.split("/")
-        if len(parts) != 6 or parts[0] != "rust" or not parts[3].isdigit():
+        if len(parts) != 6 or parts[0] != "rust" or not parts[3].isdigit() or parts[5] != "api":
             raise RuntimeError(f"Invalid benchmark ID: {case}")
     cpus = sorted(os.sched_getaffinity(0))[:2]
     if len(cpus) != 2:

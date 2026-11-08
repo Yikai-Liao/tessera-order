@@ -29,7 +29,7 @@ export async function renderLocalReport(directory: string, input?: LocalRun) {
             sub: s.id.split("/").slice(3).join(" · "),
             tag: "",
           },
-          marks: [{ value: s.ratio, tone: "tessera" }],
+          marks: [{ value: s.ratio, tone: "primary" }],
           span: [s.low, s.high],
           cells: [`${s.ratio.toFixed(4)}×`, `${s.aaLow.toFixed(4)}–${s.aaHigh.toFixed(4)}`],
           strong: true,

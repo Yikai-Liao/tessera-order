@@ -18,7 +18,7 @@ test("snapshots preserve dirty sources and clean up failures", async () => {
       "Cargo.lock",
       "rust-toolchain.toml",
       "bench/catalog.json",
-      "bench/plans/continuous.json",
+      "bench/plans/continuous.toml",
       "rust/tessera-sort/src/lib.rs",
       "bench/rust/src/lib.rs",
     ])
@@ -44,7 +44,7 @@ test("snapshots preserve dirty sources and clean up failures", async () => {
     );
     await writeFile(join(root, "rust/tessera-sort/src/lib.rs"), "modified\n");
     await writeFile(join(root, "rust/tessera-sort/src/new.rs"), "untracked\n");
-    await writeFile(join(root, "bench/plans/continuous.json"), "dirty plan\n");
+    await writeFile(join(root, "bench/plans/continuous.toml"), "dirty plan\n");
     const before = await command("git", ["status", "--porcelain"], { cwd: root, capture: true });
     let directory = "";
     await assert.rejects(
@@ -59,7 +59,7 @@ test("snapshots preserve dirty sources and clean up failures", async () => {
           "untracked\n",
         );
         assert.equal(
-          await readFile(join(workspace.tree, "bench/plans/continuous.json"), "utf8"),
+          await readFile(join(workspace.tree, "bench/plans/continuous.toml"), "utf8"),
           "dirty plan\n",
         );
         throw new Error("operation failed");

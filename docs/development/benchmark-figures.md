@@ -8,41 +8,41 @@ import type { RowChart } from "../../bench/plot/rows.ts";
 
 const example: RowChart = {
   id: "figure-guide",
-  title: "A shared template keeps comparisons aligned",
-  guide: "Synthetic layout example · relative speed · larger is better",
+  title: "Recorded release: three stable sorts on 1,000,000 u64 keys",
+  guide: "AMD Ryzen 7 8845H · speed relative to slice::sort · geometric mean over 10 inputs",
   columns: ["Speed"],
   groups: [{
-    title: "Example series",
+    title: "Stable sorts",
     rows: [
       {
         name: { input: "Tessera", sub: "", tag: "", strong: true },
-        marks: [{ value: 1.7, tone: "tessera" }],
-        cells: ["1.70×"], strong: true,
+        marks: [{ value: 2.6, tone: "primary" }],
+        cells: ["2.6×"], strong: true,
       },
       {
-        name: { input: "Other radix sort", sub: "", tag: "" },
-        marks: [{ value: 1.2, tone: "radix" }],
-        cells: ["1.20×"],
+        name: { input: "fluxsort", sub: "", tag: "" },
+        marks: [{ value: 1.5, tone: "comparison" }],
+        cells: ["1.5×"],
       },
       {
-        name: { input: "Comparison sort", sub: "", tag: "" },
-        marks: [{ value: 0.8, tone: "comparison" }],
-        cells: ["0.80×"],
+        name: { input: "voracious", sub: "", tag: "" },
+        marks: [{ value: 1.3, tone: "radix" }],
+        cells: ["1.3×"],
       },
     ],
   }],
   scale: {
-    low: 0.5, high: 2, origin: 1, clamp: true,
-    ticks: [{ value: 0.5, label: "1/2×" }, { value: 1, label: "reference" }, { value: 2, label: "2×" }],
+    low: 0.5, high: 4, origin: 1, clamp: true,
+    ticks: [{ value: 0.5, label: "1/2×" }, { value: 1, label: "slice::sort" }, { value: 2, label: "2×" }, { value: 4, label: "4×" }],
   },
-  legend: [[["tessera"], "Tessera"], [["radix"], "other radix sorts"], [["comparison"], "comparison sorts"]],
+  legend: [[["primary"], "Tessera"], [["radix"], "other radix sorts"], [["comparison"], "comparison sorts"]],
   axis: ["← slower", "faster →"],
 };
 </script>
 
 <BenchmarkFigure :chart="example" />
 
-This is a synthetic layout example, not a performance result. The site renders it with the same [row template](../../bench/plot/rows.ts) used by offline reports.
+These rounded values come from the recorded `release-benchmark-raw-2d6fac2` session, measured at commit [`2d6fac2`](https://github.com/Yikai-Liao/tessera-sort/commit/2d6fac27d2584694eb4d3c989f2f09f538dd78aa) with the default build, nine blocks and ten input patterns. This is a three-sort excerpt, not the complete ranking or a measurement of the current commit. The site renders it with the same [row template](../../bench/plot/rows.ts) used by offline reports.
 
 ## Choose an expression
 
@@ -68,7 +68,7 @@ A new dataset does not require a new template. A genuinely different question ma
 - Thin rules separate groups. Titles and value columns carry hierarchy; avoid gradients, shadows, 3D effects and per-chart font choices.
 - Light and dark surfaces use the same semantic colours and separate neutral tokens. Every SVG includes a title and description.
 
-The row interface accepts no arbitrary style objects or drawing callbacks. It owns label measurement, column widths, row spacing, collision lanes, drawing order, legends and escaping. Its input remains unchanged, so reactive callers can render it repeatedly.
+The row interface accepts no arbitrary style objects or drawing callbacks. The template owns column widths, row spacing, drawing order and legends; Observable Plot supplies scales, axes, collision placement and SVG marks, string-pixel-width supplies font metrics, and a private SVG document handles escaping and serialization. The input remains unchanged, so reactive callers can render it repeatedly.
 
 ## Use from TypeScript or VitePress
 
@@ -87,6 +87,6 @@ Benchmark identifiers and human-readable names come from [the catalog](../../ben
 5. Render a reference example in light and dark appearance and inspect it at its actual display width. Check hierarchy, label fit, value alignment and whether the main finding is visible without reading every number.
 6. Keep the plotted-value table or equivalent accessible report alongside published figures.
 
-[`bench/report/fixtures/`](../../bench/report/fixtures/) holds five standard algorithm figures; [the PR fixture](../../bench/continuous/fixtures/chart.svg) covers the comparison matrix. Snapshot tests detect output changes, while semantic tests check values and layout invariants. Update a snapshot only after inspecting the rendered change; an updated snapshot is not itself evidence of a better design.
+[`bench/report/fixtures/`](../../bench/report/fixtures/) holds five standard algorithm figures; [the PR fixture](../../bench/continuous/fixtures/chart.svg) covers the comparison matrix. The original SVG references are retained when changing rendering libraries. Tests compare their content and canvas dimensions and separately check values and layout invariants. Render both implementations from the same recorded dataset for visual inspection; synthetic fixtures exercise boundary cases and do not serve as performance evidence.
 
 Run `pnpm bench:test`, `pnpm bench:typecheck`, `pnpm docs:typecheck` and `pnpm docs:build` when the shared figure layer changes.

@@ -139,12 +139,16 @@ pub struct Plan {
     exclude: Vec<Rule>,
 }
 impl Plan {
-    /// Reads and validates an experiment, retaining its protocol's controls.
+    /// Reads a JSON or TOML experiment, retaining its protocol's controls.
     ///
     /// Invalid identities, empty axes, duplicate choices and unsupported harness
     /// features return an error before input generation or measurement.
     pub fn parse(text: &str, harness: &str) -> Result<Self, String> {
-        let mut plan: Self = serde_json::from_str(text).map_err(|error| error.to_string())?;
+        let mut plan: Self = serde_json::from_str(text).or_else(|json_error| {
+            toml::from_str(text).map_err(|toml_error| {
+                format!("invalid plan document\nJSON: {json_error}\nTOML: {toml_error}")
+            })
+        })?;
         if plan.schema != 1
             || plan.harness != harness
             || !["smoke", "comparison"].contains(&harness)
@@ -299,7 +303,7 @@ mod tests {
 
     #[test]
     fn presets_preserve_case_counts() {
-        let continuous = Plan::parse(include_str!("../../plans/continuous.json"), "smoke").unwrap();
+        let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
         let cases = continuous.inputs().unwrap();
         assert_eq!(cases.len(), 50);
         assert_eq!(
@@ -313,8 +317,8 @@ mod tests {
             56
         );
         for (text, expected) in [
-            (include_str!("../../plans/smoke.json"), 70),
-            (include_str!("../../plans/release.json"), 260),
+            (include_str!("../../plans/smoke.toml"), 70),
+            (include_str!("../../plans/release.toml"), 260),
         ] {
             assert_eq!(
                 Plan::parse(text, "comparison")
@@ -337,6 +341,42 @@ mod tests {
             Plan::parse(text, "smoke").unwrap().inputs().unwrap().len(),
             3
         );
+    }
+
+    #[test]
+    fn formats_share_selection_rules() {
+        let json = r#"{"schema":1,"harness":"smoke","algorithms":["tessera"],
+            "include":[{"types":["u64"],"distributions":["random"],"lengths":[1000,"tile-next"]}],
+            "exclude":[{"lengths":[1000],"modes":["workspace"]}]}"#;
+        let text = r#"
+            # Numeric counts and code-relative boundaries share one axis.
+            schema = 1
+            harness = "smoke"
+            algorithms = ["tessera"]
+            [[include]]
+            types = ["u64"]
+            distributions = ["random"]
+            lengths = [1_000, "tile-next"]
+            [[exclude]]
+            lengths = [1_000]
+            modes = ["workspace"]
+        "#;
+        let expected = Plan::parse(json, "smoke").unwrap();
+        let actual = Plan::parse(text, "smoke").unwrap();
+        assert_eq!(
+            serde_json::to_value(&actual).unwrap(),
+            serde_json::to_value(&expected).unwrap()
+        );
+        assert_eq!(actual.inputs().unwrap(), expected.inputs().unwrap());
+        assert!(!actual.selects("u64", "random", 1000, "workspace"));
+        for invalid in [
+            text.replace("schema = 1", "schema = 2"),
+            text.replace("types =", "type ="),
+            text.replace("[1_000,", "[0,"),
+            text.replace("[1_000,", "[1_000, 1_000,"),
+        ] {
+            assert!(Plan::parse(&invalid, "smoke").is_err());
+        }
     }
 
     #[test]

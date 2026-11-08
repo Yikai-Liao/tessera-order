@@ -36,7 +36,7 @@ The [tooling design](../design/benchmark-tooling.md) describes the module bounda
 
 ## Experiment plans
 
-All three workflows use the schema-1 JSON plans in [`bench/plans/`](../../bench/plans/). Plans describe what to measure; the harness owns input generation and the measurement protocol. JSON keeps the format readable by Node, Rust, editors and CI without an executable configuration language.
+All three workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). Repository presets use TOML for comments and readable input rules; custom files may use either TOML or JSON. Both formats decode into the same configuration model and use the same validation and selection rules. Plans describe what to measure; the harness owns input generation and the measurement protocol.
 
 | Preset | Harness | Default selection |
 |---|---|---|
@@ -45,11 +45,35 @@ All three workflows use the schema-1 JSON plans in [`bench/plans/`](../../bench/
 | `smoke` | `comparison` | Rust competitors, 70 inputs at 1,000 records |
 | `release` | `comparison` | Rust and native competitors, 260 inputs across four lengths |
 
-`compare` defaults to `local`; `run` defaults to `smoke`. The continuous executable embeds `continuous.json` at build time, so its artifact carries the selection from the measured commit. Editing that file changes cloud coverage without editing the worker, publication workflow or case-registration code.
+`compare` defaults to `local`; `run` defaults to `smoke`. The continuous executable embeds `continuous.toml` at build time, so its artifact carries the selection from the measured commit. Editing that file changes cloud coverage without editing the worker, publication workflow or case-registration code.
 
-A custom plan contains a union of products, followed by exclusions:
+A custom plan contains a union of products, followed by exclusions. These two files describe the same selection:
 
-```json
+::: code-group
+
+```toml [my-plan.toml]
+schema = 1
+harness = "comparison"
+algorithms = ["glidesort", "radsort"]
+
+# Each rule expands into a Cartesian product.
+[[include]]
+types = ["u32", "u64"]
+distributions = ["random", "zipf2"]
+lengths = [65_536, 1_000_000]
+
+[[include]]
+types = ["row_u64"]
+distributions = ["d16"]
+lengths = [65_536]
+
+[[exclude]]
+types = ["u32"]
+distributions = ["zipf2"]
+lengths = [1_000_000]
+```
+
+```json [my-plan.json]
 {
   "schema": 1,
   "harness": "comparison",
@@ -72,6 +96,8 @@ A custom plan contains a union of products, followed by exclusions:
 }
 ```
 
+:::
+
 Values within an axis are alternatives; axes within a rule form a Cartesian product. `include` rules are unioned and duplicate inputs are measured once. Any matching `exclude` rule removes that combination. Omitted axes use the harness's catalog defaults when expanding inputs and match every value when excluding them. An empty choice array is invalid. Unknown fields and identities are errors, not ignored filters.
 
 The selectable axes are `types`, `distributions`, `lengths` and `modes`. Lengths are positive record counts; custom numeric lengths need not already occur in a preset. Configuration files can also use `"insertion-max"`, `"insertion-next"` and `"tile-next"`. These resolve from the measured library's thresholds and the record width in the catalog. Case IDs retain the resolved numeric length; a commit comparison rejects different selected IDs between revisions.
@@ -85,9 +111,12 @@ Algorithm comparisons retain `tessera`, `std-stable` and the separately timed Te
 pnpm --silent bench plan local --types u32,u64 --distributions random,zipf2
 
 # Save that selection and reuse it against different commits.
-pnpm --silent bench plan local --types u32,u64 > my-plan.json
-pnpm bench compare main --plan my-plan.json
-pnpm bench compare HEAD~1 --plan my-plan.json
+pnpm --silent bench plan local --types u32,u64 > my-plan.toml
+pnpm bench compare main --plan my-plan.toml
+pnpm bench compare HEAD~1 --plan my-plan.toml
+
+# JSON remains available for saved plans and automation.
+pnpm --silent bench plan local --format json > my-plan.json
 
 # Override algorithms and inputs for one horizontal comparison.
 pnpm bench run --plan smoke --algorithms glidesort,radsort \\
@@ -97,7 +126,7 @@ pnpm bench run --plan smoke --algorithms glidesort,radsort \\
 pnpm --silent bench plan --schema > benchmark-plan.schema.json
 ```
 
-`--plan` accepts a preset name or a JSON path relative to the current directory. The comma-separated CLI axes replace the corresponding axis in every inclusion rule; exclusions remain in force. `--algorithms` replaces the opponent list before required controls are added. Preview commands print the resolved selection, not a list of code-relative case IDs; the native harness expands those IDs using the measured code. Every result directory retains `plan.json`, and algorithm manifests retain the resolved case and capability lists. A selected subset is a complete experiment in its own right; `--group` instead runs one resumable group from that plan and marks the report partial.
+`--plan` accepts a preset name or a `.toml`/`.json` path relative to the current directory. `plan` prints TOML by default; `--format json` selects JSON. `--schema` always emits JSON Schema, which describes the decoded model for either format. The comma-separated CLI axes replace the corresponding axis in every inclusion rule; exclusions remain in force. `--algorithms` replaces the opponent list before required controls are added. Preview commands print the resolved selection, not a list of code-relative case IDs; the native harness expands those IDs using the measured code. Every result directory retains the normalized `plan.json`, regardless of the input encoding, and algorithm manifests retain the resolved case and capability lists. A selected subset is a complete experiment in its own right; `--group` instead runs one resumable group from that plan and marks the report partial.
 
 `release` remains an alias for `run`. The lower-level Rust binaries also accept `--plan FILE`; `--suite smoke|release` remains available for their built-in sessions.
 

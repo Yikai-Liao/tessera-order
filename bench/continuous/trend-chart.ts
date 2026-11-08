@@ -1,15 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { createFigure } from "../plot/figure.ts";
-import {
-  drawHeader,
-  drawName,
-  matrixLayout,
-  type NameCell,
-  nameWidth,
-  PAD,
-} from "../plot/layout.ts";
-import { theme } from "../plot/theme.ts";
+import type { Headline } from "../plot/matrix.ts";
+import { renderTrends } from "../plot/trends.ts";
 import { MIN_SWING, type TrendSeries, type TrendSummary } from "./history.ts";
 import { caseParts, formatChange, MAJOR, short } from "./report.ts";
 
@@ -17,224 +9,108 @@ export interface ConfigurationTrend {
   name: string;
   trend: TrendSummary | null;
 }
-
-function side(change: number) {
-  return change < 0 ? "faster" : change > 0 ? "slower" : null;
-}
-
 const swing = (changes: number[]) => (1 + Math.max(...changes)) / (1 + Math.min(...changes)) - 1;
 
-// The PR history, drawn with the comparison chart's columns (chart.ts): one
-// column per configuration, one row for each configuration's overall change
-// and one per case that history.ts selected in any configuration. Each
-// cell's dashed grey axis is the comparison base, `main` unless a stacked
-// PR names its parent; its line is blue while the PR takes less time than
-// the base and orange while it takes more, so colour changes only where a
-// line crosses the base, not with rerun noise. A row's cells share one
-// vertical scale, so the same swing has the same height in every build.
+/** Select continuous history's focus cases and supply formatted, protocol-free rows. */
 export function trendSvg(configurations: ConfigurationTrend[], base = "main") {
-  const measured = configurations.filter((c) => c.trend);
+  const measured = configurations.filter((configuration) => configuration.trend);
   if (!measured.length) return null;
   const byName = configurations.map(
-    (c) => new Map((c.trend?.series ?? []).map((series) => [series.name, series])),
+    (configuration) =>
+      new Map((configuration.trend?.series ?? []).map((series) => [series.name, series])),
   );
-  // A case selected in any configuration gets a row in all of them; rows run
-  // from the largest swing in any configuration down.
   const selected = [
-    ...new Set(configurations.flatMap((c) => c.trend?.focus.map((series) => series.name) ?? [])),
+    ...new Set(
+      configurations.flatMap(
+        (configuration) => configuration.trend?.focus.map((series) => series.name) ?? [],
+      ),
+    ),
   ];
   const largest = (name: string) =>
     Math.max(
       ...byName
-        .map((m) => m.get(name))
-        .filter((s): s is TrendSeries => !!s)
-        .map((s) => swing(s.changes)),
+        .map((entries) => entries.get(name))
+        .filter((series): series is TrendSeries => !!series)
+        .map((series) => swing(series.changes)),
     );
   selected.sort((a, b) => largest(b) - largest(a) || a.localeCompare(b));
-
-  interface TrendRow {
-    name: NameCell;
-    cells: (number[] | undefined)[];
-    aggregate: boolean;
-    label: string;
-  }
-  const overall: TrendRow = {
-    name: { input: "Overall", tag: "", sub: "geometric mean", strong: true },
-    cells: configurations.map((c) => c.trend?.overall),
-    aggregate: true,
-    label: "Overall",
-  };
-  const rows: TrendRow[] = [
-    overall,
+  const cell = (changes: number[] | undefined) =>
+    changes
+      ? {
+          changes,
+          value: formatChange(changes.at(-1)!),
+          major: Math.abs(changes.at(-1)!) >= MAJOR,
+        }
+      : null;
+  const rows = [
+    {
+      name: { input: "Overall", tag: "", sub: "geometric mean", strong: true },
+      aggregate: true,
+      cells: configurations.map((configuration) => cell(configuration.trend?.overall)),
+    },
     ...selected.map((name) => {
-      const p = caseParts(name);
-      const latest = byName.map((m) => m.get(name)?.changes.at(-1) ?? 0);
+      const parts = caseParts(name);
       return {
         name: {
-          input: p.input,
-          sub: [p.type, p.n].filter(Boolean).join(" · "),
+          input: parts.input,
+          sub: [parts.type, parts.n].filter(Boolean).join(" · "),
           tag: [
-            p.seed && p.seed !== "s1" ? `seed ${p.seed.slice(1)}` : "",
-            p.mode !== "api" ? p.mode : "",
+            parts.seed && parts.seed !== "s1" ? `seed ${parts.seed.slice(1)}` : "",
+            parts.mode !== "api" ? parts.mode : "",
           ]
             .filter(Boolean)
             .join(", "),
-          strong: latest.some((v) => Math.abs(v) >= MAJOR),
+          strong: byName.some(
+            (entries) => Math.abs(entries.get(name)?.changes.at(-1) ?? 0) >= MAJOR,
+          ),
         },
-        cells: byName.map((m) => m.get(name)?.changes),
         aggregate: false,
-        label: name,
+        cells: byName.map((entries) => cell(entries.get(name)?.changes)),
       };
     }),
   ];
-
-  const title: NameCell = {
-    input: "Run time during this PR",
-    tag: "",
-    sub: "first to latest run",
-    strong: true,
-  };
-  const { W, cols } = matrixLayout(
-    configurations.length,
-    nameWidth([...rows.map((r) => r.name), title]),
-  );
-  const rowH = 46;
-  const bandH = 24;
-  const heroBottom = 76;
-  const plotTop = heroBottom + 10;
-  // A hairline sets the cases off from Overall.
-  const rowTop = (i: number) => plotTop + i * rowH + (i ? 12 : 0);
-  const plotBottom = rowTop(rows.length) + 4;
-  const H = plotBottom + 52;
-
-  const progress = (c: ConfigurationTrend) =>
-    c.trend ? (1 + c.trend.overall.at(-1)!) / (1 + c.trend.overall[0]) - 1 : null;
-  const { out, t, finish } = createFigure({
-    width: W,
-    height: H,
-    title: `PR benchmark history: ${configurations
-      .map((c) =>
-        c.trend
-          ? `${c.name} ${formatChange(progress(c))} run time over ${c.trend.runs.length} runs`
-          : `${c.name} unavailable`,
-      )
-      .join("; ")}`,
-    description: rows
-      .map(
-        (r) =>
-          `${r.label}: ` +
-          configurations
-            .map((c, i) => `${c.name} ${r.cells[i]?.map(formatChange).join(", ") ?? "—"}`)
-            .join("; "),
-      )
-      .join(" | "),
-    styles: `<style>
-  .main { stroke-dasharray: 3 3; } .on-main { fill: ${theme.palette.grey}; }
-  @media (prefers-color-scheme: dark) { .on-main { fill: ${theme.palette.dark.axis}; } }
-</style>`,
+  const progress = (configuration: ConfigurationTrend) =>
+    configuration.trend
+      ? (1 + configuration.trend.overall.at(-1)!) / (1 + configuration.trend.overall[0]) - 1
+      : null;
+  const columns: Headline[] = configurations.map((configuration) => {
+    const value = progress(configuration);
+    return {
+      name: configuration.name,
+      value: formatChange(value),
+      detail: configuration.trend ? `${configuration.trend.runs.length} runs` : "no history",
+      tone: value == null ? "muted" : value < 0 ? "primary" : value > 0 ? "radix" : "text",
+    };
   });
-  // The headline is the movement within the PR; the gap to main is the
-  // comparison chart's headline and each Overall line's end.
-  t("ink strong", PAD, 36, title.input);
-  t("muted sub", PAD, 51, title.sub);
-  configurations.forEach((c, i) => {
-    if (!c.trend) {
-      drawHeader(t, cols[i], "—", "muted", c.name, "no history");
-      return;
-    }
-    const p = progress(c)!;
-    const runs = c.trend.runs;
-    drawHeader(t, cols[i], formatChange(p), side(p) ?? "ink", c.name, `${runs.length} runs`);
-  });
-  out.push(
-    `<line class="rule" x1="${PAD}" x2="${W - PAD}" y1="${heroBottom}" y2="${heroBottom}" stroke-width="1"/>`,
-  );
-  if (rows.length > 1) {
-    const ruleY = plotTop + rowH + 6;
-    out.push(
-      `<line class="rule" x1="${PAD}" x2="${W - PAD}" y1="${ruleY}" y2="${ruleY}" stroke-width="1"/>`,
-    );
-  }
-
-  rows.forEach((r, i) => {
-    const cy = rowTop(i) + rowH / 2;
-    drawName(out, t, r.name, cy);
-    // A row's scale spans its range in every configuration and main, but
-    // never less than MIN_SWING, so a gap below the selection threshold does
-    // not fill the row and look as large as one selected for its size.
-    const all = r.cells.flatMap((cell) => cell ?? []);
-    const low = Math.min(0, ...all);
-    const high = Math.max(0, ...all);
-    const span = Math.max(high - low, MIN_SWING);
-    const mid = (high + low) / 2;
-    const ly = (v: number) => cy + 3 - ((v - mid) / span) * bandH;
-    r.cells.forEach((changes, j) => {
-      const col = cols[j];
-      if (!changes) {
-        t("muted sub", col.right, cy + 4, "—", ' text-anchor="end"');
-        return;
-      }
-      const lineL = col.left + 6;
-      const lineR = col.plotR - 8;
-      const latest = changes.length - 1;
-      const x = (k: number) => (latest ? lineL + (k * (lineR - lineL)) / latest : lineR);
-      out.push(
-        `<line class="axis main" x1="${lineL}" x2="${lineR.toFixed(1)}" y1="${ly(0).toFixed(1)}" y2="${ly(0).toFixed(1)}" stroke-width="1"/>`,
-      );
-      // Split each segment where it crosses main so each piece has one colour.
-      const piece = (x0: number, v0: number, x1: number, v1: number) => {
-        const cls = side(v0 + v1);
-        out.push(
-          `<line class="${cls ? `stem-${cls}` : "axis"}" x1="${x0.toFixed(1)}" y1="${ly(v0).toFixed(1)}" x2="${x1.toFixed(1)}" y2="${ly(v1).toFixed(1)}" stroke-width="2" stroke-linecap="round"/>`,
-        );
-      };
-      changes.slice(1).forEach((v1, k) => {
-        const v0 = changes[k];
-        if (v0 * v1 < 0) {
-          const xc = x(k) + ((x(k + 1) - x(k)) * v0) / (v0 - v1);
-          piece(x(k), v0, xc, 0);
-          piece(xc, 0, x(k + 1), v1);
-        } else piece(x(k), v0, x(k + 1), v1);
-      });
-      const end = changes[latest];
-      const major = Math.abs(end) >= MAJOR;
-      if (latest)
-        out.push(
-          `<circle class="${side(changes[0]) ?? "on-main"} ring" cx="${x(0).toFixed(1)}" cy="${ly(changes[0]).toFixed(1)}" r="2.5" stroke-width="1.5"/>`,
-        );
-      out.push(
-        `<circle class="${side(end) ?? "on-main"} ring" cx="${x(latest).toFixed(1)}" cy="${ly(end).toFixed(1)}" r="${major ? 5.5 : 4}" stroke-width="2"/>`,
-      );
-      t(
-        `val ink${r.aggregate || major ? " strong" : ""}`,
-        col.right,
-        cy + 4,
-        formatChange(end),
-        ' text-anchor="end"',
-      );
-    });
-  });
-
-  const legendY = plotBottom + 30;
-  out.push(
-    `<line class="axis main" x1="${PAD}" x2="${PAD + 14}" y1="${legendY - 4}" y2="${legendY - 4}" stroke-width="1"/>`,
-  );
-  // Builds of one tracking run share their commits, so the range is usually
-  // one; a build with a failed run lists its own.
-  const bases = [...new Set(measured.map((c) => short(c.trend!.base)))];
+  const bases = [...new Set(measured.map((configuration) => short(configuration.trend!.base)))];
   const ranges = [
     ...new Set(
-      measured.map((c) => `${short(c.trend!.runs[0].hash)} → ${short(c.trend!.runs.at(-1)!.hash)}`),
+      measured.map(
+        (configuration) =>
+          `${short(configuration.trend!.runs[0].hash)} → ${short(configuration.trend!.runs.at(-1)!.hash)}`,
+      ),
     ),
   ];
-  const baseLabel = `${base} ${bases.join(", ")} · runs ${ranges.join(", ")}`;
-  t("muted sub", PAD + 20, legendY, baseLabel);
-  t(
-    "muted sub",
-    W - PAD,
-    legendY,
-    `value: latest run against ${base} · one scale per row`,
-    ' text-anchor="end"',
-  );
-  return finish();
+  return renderTrends({
+    title: { input: "Run time during this PR", sub: "first to latest run", tag: "", strong: true },
+    headline: `PR benchmark history: ${configurations
+      .map((configuration) =>
+        configuration.trend
+          ? `${configuration.name} ${formatChange(progress(configuration))} run time over ${configuration.trend.runs.length} runs`
+          : `${configuration.name} unavailable`,
+      )
+      .join("; ")}`,
+    description: [
+      `Overall: ${configurations.map((configuration, index) => `${configuration.name} ${rows[0].cells[index]?.changes.map(formatChange).join(", ") ?? "—"}`).join("; ")}`,
+      ...selected.map(
+        (name, index) =>
+          `${name}: ${configurations.map((configuration, column) => `${configuration.name} ${rows[index + 1].cells[column]?.changes.map(formatChange).join(", ") ?? "—"}`).join("; ")}`,
+      ),
+    ].join(" | "),
+    columns,
+    rows,
+    minimumSpan: MIN_SWING,
+    reference: `${base} ${bases.join(", ")} · runs ${ranges.join(", ")}`,
+    guide: `value: latest run against ${base} · one scale per row`,
+  });
 }

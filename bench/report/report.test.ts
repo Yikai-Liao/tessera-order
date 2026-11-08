@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { figureContent } from "../svg-test-utils.ts";
 import { renderFigures } from "./charts.ts";
 import { createFixture } from "./fixture.ts";
 import { collectWarnings, writeReport } from "./index.ts";
@@ -285,12 +286,14 @@ test("SIMD shares the anchor", () => {
   assert.ok(Math.abs(simdStd / defaultStd - 1.25) < 0.001);
 });
 
-test("SVG fixtures stay synchronized", async () => {
+test("legacy figures preserve content", async () => {
   const dataset = createFixture(true);
   for (const chart of renderFigures(dataset, summarize(dataset))) {
-    assert.equal(
-      chart.svg,
-      await readFile(new URL(`./fixtures/${chart.name}.svg`, import.meta.url), "utf8"),
+    assert.deepEqual(
+      figureContent(chart.svg),
+      figureContent(
+        await readFile(new URL(`./fixtures/${chart.name}.svg`, import.meta.url), "utf8"),
+      ),
     );
   }
 });

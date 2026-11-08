@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+schema = 1
+harness = "smoke"
+algorithms = [ "tessera" ]
+exclude = []
+
+[[include]]
+types = [ "u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+modes = [ "api" ]

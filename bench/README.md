@@ -15,14 +15,14 @@ pnpm bench --help
 | Produce the full native and SIMD comparison | `pnpm bench run --plan release --simd --cpu 2` |
 | Measure one complete release group | `pnpm bench run --plan release --group u64/random` |
 | Preview or save a custom selection | `pnpm --silent bench plan local --types u32,u64` |
-| Run a saved algorithm selection | `pnpm bench run --plan my-plan.json` |
+| Run a saved algorithm selection | `pnpm bench run --plan my-plan.toml` |
 | Regenerate figures and tables | `pnpm bench report bench/results/SESSION` |
 | Read the latest continuous feedback for a PR | `pnpm bench pr 123` |
 | Read that feedback as JSON | `pnpm bench pr 123 --json` |
 
 The [benchmark guide](../docs/development/benchmarking.md) explains measurement protocols, requirements and result formats. Local comparisons are development screens with process-level A/A controls, not in-process placement-controlled performance claims. Published algorithm comparisons use the full release protocol.
 
-`compare` defaults to `HEAD` and the `local` plan: one 65,536-element random `u64` API case. It takes nine blocks, each containing two baseline processes and one working-tree process. `run` defaults to the small Rust comparison plan; the full native plan must be requested explicitly. Both use the [same JSON selection rules](../docs/development/benchmarking.md#experiment-plans), with CLI overrides for algorithms, types, distributions, lengths and API modes. Continuous coverage is configured in `bench/plans/continuous.json`. Each result directory retains the resolved plan.
+`compare` defaults to `HEAD` and the `local` plan: one 65,536-element random `u64` API case. It takes nine blocks, each containing two baseline processes and one working-tree process. `run` defaults to the small Rust comparison plan; the full native plan must be requested explicitly. Both use the [same JSON/TOML selection rules](../docs/development/benchmarking.md#experiment-plans), with CLI overrides for algorithms, types, distributions, lengths and API modes. Continuous coverage is configured in `bench/plans/continuous.toml`. `--plan` accepts TOML and JSON files; `plan` prints TOML by default or JSON with `--format json`. Each result directory retains the normalized `plan.json`.
 
 Both commands accept `--out DIR` and require a new output directory. The default is `bench/results/<timestamp>`. Source snapshots and builds live under `~/code/tessera-bench/` (override with `TESSERA_BENCH_WORK`) and are removed on completion or a handled failure; results remain. A hard kill can leave a worktree: list it with `git worktree list`, remove that session's `tree` with `git worktree remove --force`, and delete that session's remaining build files.
 
@@ -32,7 +32,8 @@ Both commands accept `--out DIR` and require a new output directory. The default
 bench/catalog.json       identities, labels, families and comparison suite order
 bench/catalog.ts         typed catalog access and case-ID presentation
 bench/plans/             local, continuous, smoke and release selections
-bench/plan.ts            plan loading, validation, CLI overrides and JSON Schema
+bench/config.ts          JSON/TOML syntax decoding
+bench/plan.ts            shared plan validation, CLI overrides and JSON Schema
 bench/index.ts           command-line interface
 bench/workspace.ts       source snapshots, builds and resource lifetime
 bench/local/             commit comparison execution, analysis and report

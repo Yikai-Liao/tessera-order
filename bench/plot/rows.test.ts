@@ -18,7 +18,7 @@ const fixture = (): RowChart => ({
           name: { input: "row", sub: "", tag: "" },
           swarm: true,
           marks: [
-            { value: 1, tone: "tessera" },
+            { value: 1, tone: "primary" },
             { value: 1, tone: "comparison" },
           ],
           cells: ["1.0×"],
@@ -27,7 +27,7 @@ const fixture = (): RowChart => ({
     },
   ],
   scale: { low: 0.5, high: 2, origin: 1, ticks: [{ value: 1, label: "reference" }], clamp: true },
-  legend: [[["tessera"], "primary series"]],
+  legend: [[["primary"], "primary series"]],
   axis: ["less", "more"],
 });
 

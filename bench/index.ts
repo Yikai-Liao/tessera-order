@@ -3,7 +3,8 @@
 import { access, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { Command, InvalidArgumentError } from "commander";
+import { Command, InvalidArgumentError, Option } from "commander";
+import { stringify as stringifyToml } from "smol-toml";
 import { renderLocalReport } from "./local/report.ts";
 import { compareLocal } from "./local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "./plan.ts";
@@ -50,7 +51,7 @@ function lengths(value: string) {
 
 function selection(command: Command) {
   return command
-    .option("--plan <name-or-file>", "JSON plan or local/continuous/smoke/release preset")
+    .option("--plan <name-or-file>", "JSON/TOML plan or local/continuous/smoke/release preset")
     .option(
       "--algorithms <ids>",
       "comma-separated algorithms (required controls are retained)",
@@ -154,16 +155,24 @@ export function createProgram() {
     });
 
   selection(program.command("plan [name-or-file]"))
-    .description("Print a resolved JSON plan without compiling or measuring")
+    .description("Print a resolved plan without compiling or measuring")
+    .addOption(
+      new Option("--format <format>", "output encoding").choices(["json", "toml"]).default("toml"),
+    )
     .option("--schema", "print the plan JSON Schema")
     .action(
-      async (name: string | undefined, options: MeasurementOptions & { schema?: boolean }) => {
+      async (
+        name: string | undefined,
+        options: MeasurementOptions & { schema?: boolean; format: "json" | "toml" },
+      ) => {
         if (options.schema) {
           console.log(JSON.stringify(planSchema(), null, 2));
           return;
         }
         const plan = await loadPlan(options.plan ?? name ?? "local", selectors(options));
-        console.log(JSON.stringify(plan, null, 2));
+        console.log(
+          options.format === "toml" ? stringifyToml(plan).trimEnd() : JSON.stringify(plan, null, 2),
+        );
       },
     );
 

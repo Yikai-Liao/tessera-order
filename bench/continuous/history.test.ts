@@ -2,6 +2,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { ink } from "../plot/annotations.ts";
+import { parseSvg, svgAttribute } from "../svg-test-utils.ts";
 import { baseHash, fixture, hash } from "./fixtures/report.ts";
 import { loadHistory, summarizeTrend } from "./history.ts";
 import { trendSvg } from "./trend-chart.ts";
@@ -191,9 +193,23 @@ test("draws main as each row's axis and colours by side of main", () => {
   const trend = summarizeTrend(reports, current, "rust")!;
   assert.equal(trend.series.length, 1);
   const svg = trendSvg([{ name: "Default", trend }])!;
-  assert.match(svg, /class="stem-faster"/);
-  assert.match(svg, /class="stem-slower"/);
-  assert.match(svg, /<line class="axis main"/);
+  const panel = parseSvg(svg);
+  const paths = [...panel.querySelectorAll("path")];
+  assert.ok(paths.some((path) => svgAttribute(path, "stroke") === ink.primary));
+  assert.ok(paths.some((path) => svgAttribute(path, "stroke") === ink.radix));
+  const references = [...panel.querySelectorAll("line")].filter(
+    (line) =>
+      svgAttribute(line, "stroke-dasharray") === "3 3" &&
+      Number(line.getAttribute("x2")) - Number(line.getAttribute("x1")) > 20,
+  );
+  assert.equal(references.length, 2);
+  for (const clipped of panel.querySelectorAll("[clip-path]")) {
+    const reference = clipped.getAttribute("clip-path")!;
+    assert.ok(reference.startsWith("url(#") && reference.endsWith(")"));
+    const id = reference.slice(5, -1);
+    assert.ok([...panel.querySelectorAll("clipPath")].some((clip) => clip.id === id));
+  }
+  assert.equal(trendSvg([{ name: "Default", trend }]), svg);
   assert.match(svg, />main bbbbbbb · runs 0000000 → 0000000</);
   assert.match(svg, />Default</);
   assert.match(svg, />100 runs</);

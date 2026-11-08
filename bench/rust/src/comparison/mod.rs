@@ -57,7 +57,7 @@ impl Options {
             suite: "smoke".into(),
             group: None,
             plan: crate::plan::Plan::parse(
-                include_str!("../../../plans/smoke.json"),
+                include_str!("../../../plans/smoke.toml"),
                 "comparison",
             )?,
             plan_path: None,
@@ -100,8 +100,8 @@ impl Options {
             fs::read_to_string(path)?
         } else {
             match options.suite.as_str() {
-                "smoke" => include_str!("../../../plans/smoke.json").into(),
-                "release" => include_str!("../../../plans/release.json").into(),
+                "smoke" => include_str!("../../../plans/smoke.toml").into(),
+                "release" => include_str!("../../../plans/release.toml").into(),
                 _ => return Err("expected smoke or release suite".into()),
             }
         };
@@ -514,7 +514,7 @@ mod tests {
             command: "run".into(),
             suite: "smoke".into(),
             group: None,
-            plan: crate::plan::Plan::parse(include_str!("../../../plans/smoke.json"), "comparison")
+            plan: crate::plan::Plan::parse(include_str!("../../../plans/smoke.toml"), "comparison")
                 .unwrap(),
             plan_path: None,
             output_dir,

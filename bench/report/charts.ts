@@ -87,7 +87,7 @@ function markdownTable(headers: string[], rows: string[][]) {
 
 const toneOf = (variant: string): Tone =>
   variant === "tessera"
-    ? "tessera"
+    ? "primary"
     : algorithm(variant).family === "radix"
       ? "radix"
       : "comparison";
@@ -135,8 +135,8 @@ const u64Cases = (n: number) =>
   shapes.map((shape) => caseId({ ty: "u64", distribution: shape, len: n }));
 
 const kindLegend = (simd: boolean): [Swatch[], string][] => [
-  [["tessera"], "Tessera"],
-  ...(simd ? [[["simd"], "Tessera, Portable SIMD"] as [Swatch[], string]] : []),
+  [["primary"], "Tessera"],
+  ...(simd ? [[["alternate"], "Tessera, Portable SIMD"] as [Swatch[], string]] : []),
   [["radix"], "other radix sorts"],
   [["comparison"], "comparison sorts"],
 ];
@@ -156,7 +156,7 @@ function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figur
     entries.push({
       cell: { input: "Tessera, Portable SIMD", sub: "", tag: "", strong: true },
       kind: "radix sort, SIMD build",
-      tone: "tessera" as Tone,
+      tone: "primary" as Tone,
       simd: true,
       stable: true,
       speeds: lengths.map((n) => speedOver(summaries, u64Cases(n), "tessera", "portable-simd")),
@@ -251,8 +251,8 @@ function fieldRow(name: NameCell, s: Standing): Row {
       ...s.speeds
         .filter((v) => v.variant !== "std-stable")
         .map((v): Mark => ({ value: v.speed, tone: toneOf(v.variant) })),
-      ...(s.simd === null ? [] : [{ value: s.simd, tone: "tessera" as Tone, hollow: true }]),
-      { value: s.tessera, tone: "tessera" },
+      ...(s.simd === null ? [] : [{ value: s.simd, tone: "primary" as Tone, hollow: true }]),
+      { value: s.tessera, tone: "primary" },
     ],
     cells: [times(s.tessera), ordinal(s.rank)],
     strong: true,
@@ -412,7 +412,7 @@ function renderMemory(dataset: Dataset): Figure | null {
       ],
       span: spread ? [Math.max(low, random), worst] : undefined,
       cells,
-      strong: tone === "tessera",
+      strong: tone === "primary",
     };
   };
   const input = n * 8;
@@ -436,7 +436,7 @@ function renderMemory(dataset: Dataset): Figure | null {
       },
       marker: { value: input, label: "input size" },
       axis: ["← less memory", "more memory →"],
-      legend: [...kindLegend(false), [["within"], "random input"], [["dash"], "input size"]],
+      legend: [...kindLegend(false), [["hollow"], "random input"], [["reference"], "input size"]],
     }),
     table: markdownTable(["Sort", "Random input", "Worst of 10 inputs"], plotted),
   };

@@ -1,21 +1,12 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { createFigure } from "./figure.ts";
-import { drawName, type NameCell, nameWidth, type Text } from "./layout.ts";
-import { textWidth } from "./svg.ts";
+import * as Plot from "@observablehq/plot";
+import { ink, label, rowName, textWidth } from "./annotations.ts";
+import { renderFigure } from "./figure.ts";
+import { type NameCell, nameWidth } from "./layout.ts";
 import { theme } from "./theme.ts";
 
-const PAD = theme.layout.pad;
-const ROW_H = theme.layout.row;
-const ROW_H_SINGLE = theme.layout.singleRow;
-const HEADER_RULE = theme.layout.headerRule;
-const PLOT_TOP = HEADER_RULE + 14;
-
-export type Tone = "tessera" | "radix" | "comparison";
-// Drawing order: Tessera last, on top of the field. Hollow rings are see-through
-// and drawn above filled dots, so a ring overlapping a dot stays a whole circle.
-const DEPTH: Record<Tone, number> = { comparison: 0, radix: 1, tessera: 2 };
-
+export type Tone = "primary" | "radix" | "comparison";
 export interface Mark {
   value: number;
   tone: Tone;
@@ -30,102 +21,33 @@ export interface PlotRow {
   cells: string[];
   strong?: boolean;
 }
-interface Scale {
-  low: number;
-  high: number;
-  ticks: { value: number; label: string }[];
-  origin?: number;
-  clamp: boolean;
-}
+export type Swatch = Tone | "alternate" | "hollow" | "reference";
 export interface RowChart {
   id?: string;
   title: string;
   guide: string;
   columns: string[];
   groups: { title: string; rows: PlotRow[] }[];
-  scale: Scale;
+  scale: {
+    low: number;
+    high: number;
+    ticks: { value: number; label: string }[];
+    origin?: number;
+    clamp: boolean;
+  };
   marker?: { value: number; label: string };
   legend: [Swatch[], string][] | { note: string };
   axis: [string, string];
 }
 
-// Blue and grey come from the pull-request chart; the orange passes the
-// palette checks against both and both surfaces (CVD ΔE 11, normal ΔE 17).
-const extraStyles = `<style>
-  .tessera { fill: ${theme.palette.blue}; } .radix { fill: ${theme.palette.orange}; } .comparison { fill: ${theme.palette.grey}; }
-  .edge-tessera { stroke: ${theme.palette.blue}; } .edge-radix { stroke: ${theme.palette.orange}; } .edge-comparison { stroke: ${theme.palette.grey}; }
-</style>`;
+const depth: Record<Tone, number> = { comparison: 0, radix: 1, primary: 2 };
+const radius = (mark: Mark) => (mark.tone === "primary" ? (mark.hollow ? 5.5 : 6.5) : 4);
 
-const hollowRadius = (m: Mark) => (m.tone === "tessera" ? 5.5 : 4);
-
-function drawMark(out: string[], x: number, rowY: number, m: Mark, edge: 0 | -1 | 1) {
-  const cy = rowY + (m.dy ?? 0);
-  const cls = m.tone;
-  if (edge) {
-    const tip = x + edge * 6,
-      back = x - edge * 3;
-    out.push(
-      `<path class="${cls} ring" d="M${tip.toFixed(1)} ${cy}L${back.toFixed(1)} ${cy - 6}L${back.toFixed(1)} ${cy + 6}Z" stroke-width="1.5" stroke-linejoin="round"/>`,
-    );
-    return;
-  }
-  if (m.hollow) {
-    const r = hollowRadius(m);
-    const width = m.tone === "tessera" ? 2 : 1.5;
-    const circle = `cx="${x.toFixed(1)}" cy="${cy}" r="${r}" fill="none"`;
-    out.push(
-      `<circle class="ring" ${circle} stroke-width="${width + 2}"/>`,
-      `<circle class="edge-${m.tone}" ${circle} stroke-width="${width}"/>`,
-    );
-    return;
-  }
-  const r = m.tone === "tessera" ? 6.5 : 4;
-  out.push(
-    `<circle class="${cls} ring" cx="${x.toFixed(1)}" cy="${cy}" r="${r}" stroke-width="2"/>`,
-  );
-}
-
-// Grey dots that would touch another dot move to a lane just above or below
-// the row, so every sort stays visible; Tessera keeps the centre line.
-function dodge(marks: Mark[], x: (v: number) => number) {
-  const radius = (m: Mark) => (m.tone === "tessera" ? 6.5 : 4);
-  const placed = marks.filter((m) => m.tone === "tessera").map((m) => ({ m, px: x(m.value) }));
-  const clearance = (m: Mark, px: number, dy: number) =>
-    Math.min(
-      ...placed.map((p) => Math.hypot(p.px - px, (p.m.dy ?? 0) - dy) - radius(p.m) - radius(m)),
-    );
-  for (const m of [...marks]
-    .filter((m) => m.tone !== "tessera")
-    .sort((a, b) => a.value - b.value)) {
-    const px = x(m.value);
-    const lanes = [0, -7, 7];
-    m.dy =
-      lanes.find((dy) => clearance(m, px, dy) >= 1) ??
-      lanes.reduce((best, dy) => (clearance(m, px, dy) > clearance(m, px, best) ? dy : best));
-    placed.push({ m, px });
-  }
-}
-
-// Header: the finding as the title, what is plotted under it, then a rule.
-function drawTitle(out: string[], t: Text, width: number, spec: RowChart) {
-  t("ink stat", PAD, 40, spec.title);
-  t("muted sub", PAD, 60, spec.guide);
-  out.push(
-    `<line class="rule" x1="${PAD}" x2="${width - PAD}" y1="${HEADER_RULE}" y2="${HEADER_RULE}" stroke-width="1"/>`,
-  );
-}
-
-// A sort or input name, on one line when it has no second line.
-function drawRowName(out: string[], t: Text, name: NameCell, cy: number) {
-  if (name.sub) drawName(out, t, name, cy);
-  else t(`ink${name.strong ? " strong" : ""}`, PAD, cy + 4, name.input);
-}
-
-/** Render a grouped ratio or memory chart using the shared visual grammar.
+/** Render named rows with a shared logarithmic axis and aligned value columns.
  *
- * Values use a positive logarithmic scale. Groups contain named rows, marks
- * and right-aligned value cells; layout, typography and drawing order belong
- * to the template. The input is not modified. Use a unique `id` for inline SVGs.
+ * The template owns the table-like visual structure. Plot owns scales, axes,
+ * collision placement, symbols and SVG generation. No benchmark identifiers
+ * or statistical definitions are interpreted here; the input is unchanged.
  */
 export function renderRows(spec: RowChart) {
   if (
@@ -134,15 +56,7 @@ export function renderRows(spec: RowChart) {
     !(spec.scale.low > 0 && spec.scale.high > spec.scale.low)
   )
     throw new Error("A row chart requires a positive, increasing scale");
-  const groups = spec.groups
-    .filter((group) => group.rows.length)
-    .map((group) => ({
-      ...group,
-      rows: group.rows.map((row) => ({
-        ...row,
-        marks: row.marks.map((mark) => ({ ...mark })),
-      })),
-    }));
+  const groups = spec.groups.filter((group) => group.rows.length);
   const rows = groups.flatMap((group) => group.rows);
   if (!rows.length || !spec.columns.length)
     throw new Error("A row chart requires rows and value columns");
@@ -154,140 +68,250 @@ export function renderRows(spec: RowChart) {
     )
       throw new Error("Rows require matching value cells and positive finite plot values");
   }
-  const nameW = nameWidth(rows.map((r) => r.name));
-  const rowH = rows.some((r) => r.name.sub) ? ROW_H : ROW_H_SINGLE;
-  // Value columns, right-aligned from the edge; caps headings run wide.
-  const columnW = spec.columns.map((head, j) =>
-    Math.max(textWidth(head, 11) * 1.3, ...rows.map((r) => textWidth(r.cells[j], 12) * 1.05)),
-  );
-  const columnsWidth = columnW.reduce((sum, width) => sum + width, 0) + (columnW.length - 1) * 20;
-  const W = Math.max(theme.layout.width, 2 * PAD + Math.ceil(nameW) + 28 + 160 + 24 + columnsWidth);
-  const columnR = columnW.map((_, j) =>
-    columnW.slice(j + 1).reduce((right, w) => right - w - 20, W - PAD),
-  );
-  const plotL = PAD + Math.ceil(nameW) + 28;
-  const plotR = columnR[0] - columnW[0] - 24;
-  const room = 10;
-  const { low, high } = spec.scale;
-  const x = (v: number) =>
-    plotL +
-    room +
-    (Math.log(Math.min(high, Math.max(low, v)) / low) / Math.log(high / low)) *
-      (plotR - plotL - 2 * room);
-  const edgeOf = (v: number): 0 | -1 | 1 =>
-    spec.scale.clamp ? (v < low ? -1 : v > high ? 1 : 0) : 0;
 
-  let y = PLOT_TOP;
-  const layout = groups.map((g, i) => {
-    y += i ? 10 : 0;
+  const { pad, headerRule } = theme.layout;
+  const top = headerRule + 14;
+  const rowHeight = rows.some((row) => row.name.sub) ? theme.layout.row : theme.layout.singleRow;
+  const columnWidths = spec.columns.map((heading, index) =>
+    Math.max(
+      textWidth(heading, 11) * 1.3,
+      ...rows.map((row) => textWidth(row.cells[index], 12) * 1.05),
+    ),
+  );
+  const valuesWidth =
+    columnWidths.reduce((sum, width) => sum + width, 0) + (columnWidths.length - 1) * 20;
+  const namesWidth = Math.ceil(nameWidth(rows.map((row) => row.name)));
+  const width = Math.max(theme.layout.width, 2 * pad + namesWidth + 28 + 160 + 24 + valuesWidth);
+  const columns = columnWidths.map((_, index) =>
+    columnWidths.slice(index + 1).reduce((right, value) => right - value - 20, width - pad),
+  );
+  const left = pad + namesWidth + 28;
+  const right = columns[0] - columnWidths[0] - 24;
+
+  let y = top;
+  const layout = groups.map((group, index) => {
+    y += index ? 10 : 0;
     const titleY = y + 12;
     y += 22;
-    const placed = g.rows.map((row) => {
-      const cy = y + rowH / 2;
-      y += rowH;
+    const placed = group.rows.map((row) => {
+      const cy = y + rowHeight / 2;
+      y += rowHeight;
       return { row, cy };
     });
-    return { title: g.title, titleY, placed };
+    return { title: group.title, titleY, placed };
   });
-  const plotBottom = y + 4;
-  const axisY = plotBottom + 18;
-  const legendY = axisY + 34;
-  const H = legendY + 18;
-
-  const { out, t, finish } = createFigure({
-    width: W,
-    height: H,
-    title: spec.title,
-    id: spec.id,
-    styles: extraStyles,
-    description: `${spec.guide}. ${spec.columns.join(", ")}: ${rows.map((row) => `${row.name.input} ${row.cells.join(", ")}`).join("; ")}`,
+  const bottom = y + 4,
+    axisY = bottom + 18,
+    legendY = axisY + 34,
+    height = legendY + 18;
+  const x: Plot.ScaleOptions = {
+    type: "log",
+    base: 2,
+    domain: [spec.scale.low, spec.scale.high],
+    range: [left + 10, right - 10],
+    clamp: spec.scale.clamp,
+    nice: false,
+  };
+  const annotations: Plot.Markish[] = [
+    label(spec.title, pad, 40, { size: theme.font.title, strong: true }),
+    label(spec.guide, pad, 60, { size: 11, tone: ink.muted }),
+    Plot.ruleY([headerRule], { x1: pad, x2: width - pad, stroke: ink.rule }),
+    label(spec.axis[0], left, axisY + 16, { size: 11, tone: ink.muted }),
+    label(spec.axis[1], right, axisY + 16, { size: 11, tone: ink.muted, anchor: "end" }),
+  ];
+  spec.columns.forEach((heading, index) => {
+    annotations.push(
+      label(heading.toUpperCase(), columns[index], layout[0].titleY, {
+        size: 10.5,
+        tone: ink.muted,
+        caps: true,
+        anchor: "end",
+      }),
+    );
   });
+  const layers: Plot.PlotOptions[] = [
+    {
+      x,
+      marks: [
+        Plot.ruleX(spec.scale.ticks, {
+          x: "value",
+          y1: top,
+          y2: bottom,
+          stroke: (tick: { value: number }) =>
+            tick.value === spec.scale.origin ? ink.axis : ink.rule,
+        }),
+        Plot.axisX(spec.scale.ticks, {
+          x: "value",
+          text: "label",
+          y: bottom,
+          tickSize: 0,
+          tickPadding: 11,
+          fontSize: 10,
+          label: null,
+          fill: (tick: { value: number }) =>
+            tick.value === spec.scale.origin ? ink.text : ink.muted,
+        }),
+        ...(spec.marker
+          ? [
+              Plot.ruleX([spec.marker.value], {
+                y1: top - 2,
+                y2: bottom,
+                stroke: ink.axis,
+                strokeDasharray: "3 3",
+              }),
+              Plot.text([{ value: spec.marker.value, text: spec.marker.label }], {
+                x: "value",
+                y: top - 4,
+                text: "text",
+                lineAnchor: "bottom",
+                fontSize: 10,
+                fill: ink.muted,
+              }),
+            ]
+          : []),
+      ],
+    },
+  ];
 
-  drawTitle(out, t, W, spec);
-
-  for (const tick of spec.scale.ticks) {
-    const gx = x(tick.value).toFixed(1);
-    const origin = tick.value === spec.scale.origin;
-    out.push(
-      `<line class="${origin ? "axis" : "rule"}" x1="${gx}" x2="${gx}" y1="${PLOT_TOP}" y2="${plotBottom}" stroke-width="1"/>`,
+  for (const group of layout) {
+    annotations.push(
+      label(group.title.toUpperCase(), pad, group.titleY, {
+        size: 10.5,
+        tone: ink.muted,
+        caps: true,
+      }),
     );
-    t(
-      origin ? "ink tiny" : "muted tiny",
-      x(tick.value),
-      axisY,
-      tick.label,
-      ' text-anchor="middle"',
-    );
-  }
-  if (spec.marker) {
-    const mx = x(spec.marker.value).toFixed(1);
-    out.push(
-      `<line class="axis" x1="${mx}" x2="${mx}" y1="${PLOT_TOP - 2}" y2="${plotBottom}" stroke-width="1" stroke-dasharray="3 3"/>`,
-    );
-    t("muted tiny", x(spec.marker.value), PLOT_TOP - 4, spec.marker.label, ' text-anchor="middle"');
-  }
-  // The axis ends say in words which side is which.
-  const [left, right] = spec.axis;
-  t("muted sub", plotL, axisY + 16, left);
-  t("muted sub", plotR, axisY + 16, right, ' text-anchor="end"');
-
-  for (const [j, head] of spec.columns.entries())
-    t("caps muted", columnR[j], layout[0].titleY, head.toUpperCase(), ' text-anchor="end"');
-  for (const g of layout) {
-    t("caps muted", PAD, g.titleY, g.title.toUpperCase());
-    for (const { row, cy } of g.placed) {
-      drawRowName(out, t, row.name, cy);
+    for (const { row, cy } of group.placed) {
+      annotations.push(...rowName(row.name, cy));
+      row.cells.forEach((cell, index) => {
+        annotations.push(
+          label(cell, columns[index], cy + 4, {
+            size: 12,
+            tone: row.strong ? ink.text : ink.muted,
+            strong: !!row.strong && index === row.cells.length - 1,
+            anchor: "end",
+          }),
+        );
+      });
       if (row.span) {
-        // The line stops at a ring's edge rather than showing through it.
         const inset = (value: number) => {
-          const ring = row.marks.find((m) => m.hollow && m.value === value);
-          return ring ? hollowRadius(ring) : 0;
+          const ring = row.marks.find((mark) => mark.hollow && mark.value === value);
+          return ring ? radius(ring) : 0;
         };
-        const [lo, hi] = row.span;
-        out.push(
-          `<line class="edge-${row.marks[0].tone}" x1="${(x(lo) + inset(lo)).toFixed(1)}" x2="${(x(hi) - inset(hi)).toFixed(1)}" y1="${cy}" y2="${cy}" stroke-width="2" stroke-linecap="round"/>`,
-        );
+        layers.push({
+          x,
+          marks: [
+            Plot.ruleY([cy], {
+              x1: row.span[0],
+              x2: row.span[1],
+              insetLeft: inset(row.span[0]),
+              insetRight: inset(row.span[1]),
+              stroke: ink[row.marks[0].tone],
+              strokeWidth: 2,
+              strokeLinecap: "round",
+            }),
+          ],
+        });
       }
-      if (row.swarm) dodge(row.marks, x);
-      const depth = (m: Mark) => DEPTH[m.tone] + (m.hollow ? 0.5 : 0);
-      for (const m of [...row.marks].sort((a, b) => depth(a) - depth(b)))
-        drawMark(out, x(m.value), cy, m, edgeOf(m.value));
-      // Tessera's cells are ink, its last cell bold; other sorts' are muted.
-      for (const [j, cell] of row.cells.entries()) {
-        const cls = !row.strong
-          ? "val muted"
-          : j === row.cells.length - 1
-            ? "val ink strong"
-            : "val ink";
-        t(cls, columnR[j], cy + 4, cell, ' text-anchor="end"');
+      const ordered = [...row.marks].sort(
+        (a, b) => depth[a.tone] + Number(!!a.hollow) / 2 - depth[b.tone] - Number(!!b.hollow) / 2,
+      );
+      const primary = ordered.filter((mark) => mark.tone === "primary");
+      const competitors = ordered.filter((mark) => mark.tone !== "primary");
+      if (row.swarm && competitors.length) {
+        // The highlighted filled dot anchors the field; Plot places competitors.
+        const anchor = primary.find((mark) => !mark.hollow);
+        const field = [...(anchor ? [anchor] : []), ...competitors];
+        layers.push({
+          x,
+          marginTop: cy,
+          marginBottom: height - cy,
+          marks: [
+            Plot.dot(
+              field,
+              Plot.dodgeY("middle", {
+                x: "value",
+                r: (mark: Mark) => radius(mark),
+                fill: (mark: Mark) => (mark.tone === "primary" ? "none" : ink[mark.tone]),
+                stroke: (mark: Mark) => (mark.tone === "primary" ? "none" : ink.panel),
+                strokeWidth: 2,
+              }),
+            ),
+          ],
+        });
+      }
+      for (const mark of row.swarm ? primary : ordered) {
+        const edge =
+          spec.scale.clamp && (mark.value < spec.scale.low || mark.value > spec.scale.high);
+        const dot = {
+          x: "value",
+          y: cy + (mark.dy ?? 0),
+          r: radius(mark),
+          fill: ink[mark.tone],
+          stroke: ink.panel,
+          strokeWidth: 2,
+        };
+        layers.push({
+          x,
+          marks: edge
+            ? [
+                Plot.dot([mark], {
+                  ...dot,
+                  symbol: "triangle",
+                  rotate: mark.value < spec.scale.low ? 270 : 90,
+                  r: 4.5,
+                }),
+              ]
+            : mark.hollow
+              ? [
+                  Plot.dot([mark], { ...dot, fill: "none", strokeWidth: 4 }),
+                  Plot.dot([mark], {
+                    ...dot,
+                    fill: "none",
+                    stroke: ink[mark.tone],
+                    strokeWidth: 2,
+                  }),
+                ]
+              : [Plot.dot([mark], dot)],
+        });
       }
     }
   }
-
-  if (Array.isArray(spec.legend)) legendRow(out, t, legendY, spec.legend);
-  else t("muted sub", PAD, legendY, spec.legend.note);
-  return `<!-- SPDX-License-Identifier: BSD-2-Clause -->\n${finish()}\n`;
-}
-
-export type Swatch = Tone | "simd" | "within" | "dash";
-function legendRow(out: string[], t: Text, y: number, items: [Swatch[], string][]) {
-  let lx = PAD;
-  for (const [swatches, label] of items) {
-    for (const s of swatches) {
-      const cx = lx + 4;
-      if (s === "within" || s === "simd") {
-        const edge = s === "simd" ? " edge-tessera" : "";
-        out.push(
-          `<circle class="within${edge}" cx="${cx}" cy="${y - 4}" r="3.5" stroke-width="1.5"/>`,
+  if (Array.isArray(spec.legend)) {
+    let left = pad;
+    for (const [swatches, text] of spec.legend) {
+      for (const swatch of swatches) {
+        annotations.push(
+          swatch === "reference"
+            ? Plot.ruleX([left + 4], {
+                y1: legendY - 11,
+                y2: legendY + 3,
+                stroke: ink.axis,
+                strokeDasharray: "3 3",
+              })
+            : Plot.dot([[left + 4, legendY - 4]], {
+                r: swatch === "alternate" || swatch === "hollow" ? 3.5 : 4,
+                fill: swatch === "alternate" || swatch === "hollow" ? ink.panel : ink[swatch],
+                stroke:
+                  swatch === "alternate" ? ink.primary : swatch === "hollow" ? ink.axis : "none",
+                strokeWidth: 1.5,
+              }),
         );
-      } else if (s === "dash")
-        out.push(
-          `<line class="axis" x1="${cx}" x2="${cx}" y1="${y - 11}" y2="${y + 3}" stroke-width="1" stroke-dasharray="3 3"/>`,
-        );
-      else out.push(`<circle class="${s}" cx="${cx}" cy="${y - 4}" r="4"/>`);
-      lx += 10;
+        left += 10;
+      }
+      annotations.push(label(text, left + 4, legendY, { size: 11, tone: ink.muted }));
+      left += 4 + textWidth(text, 11) + 18;
     }
-    t("muted sub", lx + 4, y, label);
-    lx += 4 + textWidth(label, 11) + 18;
-  }
+  } else annotations.push(label(spec.legend.note, pad, legendY, { size: 11, tone: ink.muted }));
+  layers.push({ marks: annotations });
+  return `<!-- SPDX-License-Identifier: BSD-2-Clause -->\n${renderFigure(
+    {
+      width,
+      height,
+      id: spec.id,
+      title: spec.title,
+      description: `${spec.guide}. ${spec.columns.join(", ")}: ${rows.map((row) => `${row.name.input} ${row.cells.join(", ")}`).join("; ")}`,
+    },
+    layers,
+  )}\n`;
 }

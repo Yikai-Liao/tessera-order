@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { catalog } from "./catalog.ts";
+import { decodeConfig } from "./config.ts";
 
 const ids = (entries: { id: string }[]) => z.enum(entries.map((entry) => entry.id));
 const choices = <T extends z.ZodType>(schema: T) =>
@@ -63,12 +64,12 @@ export function parsePlan(value: unknown): Plan {
   return plan;
 }
 
-/** Load a repository preset or a caller's JSON file, then apply explicit axis overrides. */
+/** Load a TOML preset or a JSON/TOML file, then apply explicit axis overrides. */
 export async function loadPlan(name: string, options: SelectionOptions = {}): Promise<Plan> {
   const path = ["local", "continuous", "smoke", "release"].includes(name)
-    ? fileURLToPath(new URL(`./plans/${name}.json`, import.meta.url))
+    ? fileURLToPath(new URL(`./plans/${name}.toml`, import.meta.url))
     : name;
-  const plan = schema.parse(JSON.parse(await readFile(path, "utf8")));
+  const plan = schema.parse(decodeConfig(await readFile(path, "utf8"), path));
   const { algorithms, ...axes } = options;
   return parsePlan({
     ...plan,

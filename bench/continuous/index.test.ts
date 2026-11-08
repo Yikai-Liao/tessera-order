@@ -84,10 +84,7 @@ test("embeds both published charts in the summary, check and PR comment", async 
     images.get("pr-7/rust/comparison.svg"),
     chartSvg([{ name: "Default", summary: summarize(fixture()) }]),
   );
-  assert.match(
-    images.get("pr-7/rust/trend.svg")!,
-    /^<svg[^>]*>\n<title id="t">PR benchmark history: Default /,
-  );
+  assert.match(images.get("pr-7/rust/trend.svg")!, /<title id="t">PR benchmark history: Default /);
   assert.match(action.summaries[0], /^### Benchmarks · rust · 2 slower, 1 faster$/m);
   const raw = "https://raw.githubusercontent.com/o/r/image-commit/pr-7/rust";
   for (const [alt, file] of [

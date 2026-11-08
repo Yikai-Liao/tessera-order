@@ -7,7 +7,7 @@ The benchmark subsystem serves three workflows: working-tree comparisons during 
 | Boundary | Owns | Does not own |
 |---|---|---|
 | CLI | Commands, argument validation and workflow dispatch | Case lists, experiment statistics or chart layout |
-| Plan | JSON contract, presets, overrides, products, exclusions and native case expansion | Measurement scheduling or report layout |
+| Plan | Format-independent contract, presets, overrides, products, exclusions and native case expansion | Measurement scheduling or report layout |
 | Workspace | Immutable source snapshot, build location, temporary worktree and cleanup | Result retention policy |
 | Local comparison | Two revisions built with one current harness; process-level blocks and A/A screening | In-process placement controls |
 | Rust comparison | Cases, supported adapters, verified timing, allocation measurement and resumable raw groups | Display labels |
@@ -31,7 +31,7 @@ Build execution and artifact publication still have two explicit CI configuratio
 
 ## Experiment selection
 
-Plans in `bench/plans/` are the authority for workflow coverage. They share one schema and selection algebra: products within an inclusion rule, union across inclusion rules, then exclusions and deduplication. `bench/plan.ts` owns user-facing validation, editor schema and CLI overrides. `bench/rust/src/plan.rs` owns expansion, including boundaries resolved from the measured library. The CLI never recreates a native case inventory or relies on a regex to represent the plan.
+Plans in `bench/plans/` are the authority for workflow coverage. Repository presets use TOML; custom files accept JSON and TOML. Syntax decoding is confined to the input boundary, followed by one validated plan model. Reports and measurement scheduling do not branch on the source format; persisted effective plans use JSON. They share one schema and selection algebra: products within an inclusion rule, union across inclusion rules, then exclusions and deduplication. `bench/plan.ts` owns user-facing validation, editor schema and CLI overrides. `bench/rust/src/plan.rs` owns expansion, including boundaries resolved from the measured library. The CLI never recreates a native case inventory or relies on a regex to represent the plan.
 
 `local` and `continuous` use the Criterion harness; `smoke` and `release` use the paired algorithm harness. This is a capability boundary, not a second selection language. Numeric lengths are open, record and distribution identities come from the catalog, and each harness rejects unsupported selectors. Continuous defaults are compiled into each executable, so the trusted cloud supervisor does not evaluate a PR's configuration language or need Node to parse the plan. Local runs persist their effective plan and pass its path to both executables.
 
@@ -57,15 +57,17 @@ The host-independent dependency direction is:
 
 ```text
 catalog.json → catalog.ts → result presentation
-theme.ts → SVG surface and layout → figure templates → report writers / Vue components
+Observable Plot + font metrics + theme → figure templates → report writers / Vue components
 ```
 
-Figure renderers are deterministic string-producing functions without Node, DOM, network or mutable global state. Offline reports write the strings to files; the VitePress adapter renders the same strings as SVG images.
+Figure renderers are deterministic string-producing functions without Node, network access or host-global state. Each render creates its own lightweight SVG document; it does not read or alter a browser’s live DOM. Offline reports write the strings to files; the VitePress adapter renders the same strings as SVG images.
 
 ## Dependencies
 
 The official TypeScript 7.1 beta native compiler checks the tooling and the host-independent plot boundary. Vue's official content mapper checks SFC scripts and templates through the same compiler; external code is enabled only by the explicit documentation typecheck command. Exact prerelease versions are pinned in `package.json` and `pnpm-lock.yaml`.
 
-Node's filesystem, process and test APIs provide resource handling and verification. Zod owns the plan's strict runtime schema and editor JSON Schema; handwritten field-validation and schema-generation mechanisms are not maintained alongside it. Commander owns command parsing, help, option validation and errors; the CLI does not maintain its own parser. Criterion already owns calibration and continuous-run estimates.
+Node's filesystem, process and test APIs provide resource handling and verification. The JSON runtime parser and smol-toml decode document syntax; Rust uses serde_json and toml. Zod owns the plan's strict runtime schema and editor JSON Schema; handwritten field-validation and schema-generation mechanisms are not maintained alongside it. Commander owns command parsing, help, option validation and errors; the CLI does not maintain its own parser. Criterion already owns calibration and continuous-run estimates.
 
-The custom SVG templates retain the project's label columns, overlaid SIMD rings, collision lanes, accessibility descriptions and matching dark theme. Replacing a logarithmic interpolation formula with a library would not materially shrink this code. A full chart-library migration would need to remove the template implementation, including its layout adaptations, rather than wrapping it with another layer. Current SVG fixtures provide a comparison point for evaluating that migration.
+Observable Plot owns quantitative scales, tick placement, axes, symbols, collision placement, line clipping and SVG mark generation. String-pixel-width supplies Inter font metrics; linkedom’s browser-compatible worker export supplies a private SVG document and serialization in both Node and VitePress. The templates retain the project’s table-like compositions: label and value columns, grouped rows, highlighted SIMD rings and per-row trend scales. They do not maintain a parallel drawing engine. Bencher selection and alert semantics stay in `continuous/`; the change and trend templates accept only formatted names, values and visual verdicts.
+
+The original SVG fixtures remain unchanged as content and canvas references. Tests compare their titles, descriptions, labels and dimensions with the new output, and check semantic geometry separately rather than depending on a library’s attribute order. Visual acceptance additionally requires rendering old and new versions from the same recorded results in light and dark appearance; synthetic fixtures cover boundary cases, not measured performance.

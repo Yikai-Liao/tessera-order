@@ -183,7 +183,7 @@ fn plan() -> &'static Plan {
     static PLAN: OnceLock<Plan> = OnceLock::new();
     PLAN.get_or_init(|| {
         let text = std::env::var("TESSERA_BENCH_PLAN").map_or_else(
-            |_| include_str!("../../plans/continuous.json").to_owned(),
+            |_| include_str!("../../plans/continuous.toml").to_owned(),
             |path| std::fs::read_to_string(path).expect("read benchmark plan"),
         );
         Plan::parse(&text, "smoke").expect("valid smoke benchmark plan")

@@ -3,7 +3,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { textWidth } from "../plot/svg.ts";
+import { ink, textWidth } from "../plot/annotations.ts";
+import { figureContent, parseSvg, svgAttribute, textPosition } from "../svg-test-utils.ts";
 import { chartSvg } from "./chart.ts";
 import { fixture } from "./fixtures/report.ts";
 import { attribution, changedRows } from "./matrix.ts";
@@ -23,22 +24,28 @@ function two() {
   return [...one(), { name: "Portable SIMD", summary: summarize(simd) }];
 }
 
-const marks = (svg: string, cls: string) =>
-  (
-    svg.match(
-      new RegExp(
-        `<circle class="${cls}( ring)?" cx="[\\d.]+" cy="\\d+(\\.\\d)?" r="[\\d.]+" stroke-width`,
-        "g",
-      ),
-    ) ?? []
+const marks = (svg: string, status: "slower" | "faster" | "within") =>
+  [...parseSvg(svg).querySelectorAll("circle")].filter(
+    (dot) =>
+      svgAttribute(dot, "fill") ===
+        (status === "slower" ? ink.radix : status === "faster" ? ink.primary : ink.panel) &&
+      svgAttribute(dot, "stroke") === (status === "within" ? ink.axis : ink.panel),
   ).length;
 
 test("draws one build as a column with its headline and one mark per alerted case", () => {
   const svg = chartSvg(one());
   assert.ok(svg);
-  assert.equal(svg, readFileSync(new URL("./fixtures/chart.svg", import.meta.url), "utf8"));
-  assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
-  assert.match(svg, /<text class="hero faster"[^>]*>−5\.1%<\/text>/);
+  assert.deepEqual(
+    figureContent(svg),
+    figureContent(readFileSync(new URL("./fixtures/chart.svg", import.meta.url), "utf8")),
+  );
+  const panel = parseSvg(svg);
+  assert.equal(panel.getAttribute("xmlns"), "http://www.w3.org/2000/svg");
+  const headline = [...panel.querySelectorAll("text")].find(
+    (text) => text.textContent === "−5.1%",
+  )!;
+  assert.equal(svgAttribute(headline, "fill"), ink.primary);
+  assert.equal(svgAttribute(headline, "font-size"), "28");
   assert.match(svg, />Default</);
   assert.match(svg, />2 slower · 1 faster</);
   assert.equal(marks(svg, "slower"), 2);
@@ -61,12 +68,25 @@ test("names each case once and shows its quiet values in the other builds", () =
   // the other two as hollow dots within limits; the legend has one more.
   assert.equal(marks(svg, "slower"), 3);
   assert.equal(marks(svg, "within"), 2 + 1);
-  assert.match(svg, /<text class="val muted"[^>]*>−29\.1%</);
-  // Both columns share one scale: equal changes are equally far from zero.
-  const axes = [...svg.matchAll(/<line class="axis" x1="([\d.]+)"/g)].map((m) => Number(m[1]));
-  const dots = [...svg.matchAll(/<circle class="slower ring" cx="([\d.]+)" cy="(\d+)"/g)].map(
-    (m) => [Number(m[1]), Number(m[2])],
+  const panel = parseSvg(svg);
+  assert.ok(
+    [...panel.querySelectorAll("text")].some(
+      (text) => text.textContent === "−29.1%" && svgAttribute(text, "fill") === ink.muted,
+    ),
   );
+  // Both columns share one scale: equal changes are equally far from zero.
+  const axes = [...panel.querySelectorAll("line")]
+    .filter(
+      (line) =>
+        svgAttribute(line, "stroke") === ink.axis &&
+        line.getAttribute("x1") === line.getAttribute("x2"),
+    )
+    .map((line) => Number(line.getAttribute("x1")));
+  const dots = [...panel.querySelectorAll("circle")]
+    .filter(
+      (dot) => svgAttribute(dot, "fill") === ink.radix && svgAttribute(dot, "stroke") === ink.panel,
+    )
+    .map((dot) => [Number(dot.getAttribute("cx")), Number(dot.getAttribute("cy"))]);
   const row = dots.filter(([, cy]) => cy === dots[0][1]);
   assert.equal(row.length, 2);
   assert.ok(Math.abs(row[0][0] - axes[0] - (row[1][0] - axes[1])) < 0.2);
@@ -150,9 +170,13 @@ test("keeps ticks legible for a large regression", () => {
   assert.ok(measure.boundary);
   measure.metric.value = measure.boundary.baseline * 1001;
   const svg = chartSvg(one(input))!;
-  const ticks = [...svg.matchAll(/<line class="rule" x1="([\d.-]+)" x2="([\d.-]+)"/g)]
-    .filter((match) => match[1] === match[2])
-    .map((match) => Number(match[1]))
+  const ticks = [...parseSvg(svg).querySelectorAll("line")]
+    .filter(
+      (line) =>
+        svgAttribute(line, "stroke") === ink.rule &&
+        line.getAttribute("x1") === line.getAttribute("x2"),
+    )
+    .map((line) => Number(line.getAttribute("x1")))
     .sort((a, b) => a - b);
   assert.ok(ticks.length > 0 && ticks.length <= 12);
   assert.ok(ticks.slice(1).every((tick, index) => tick - ticks[index] >= 43.9));
@@ -163,9 +187,10 @@ test("keeps header and legend text inside the panel", () => {
   for (const configurations of [one(), two()]) {
     const svg = chartSvg(configurations)!;
     const width = Number(svg.match(/viewBox="0 0 (\d+)/)![1]);
-    const x = Number(svg.match(/<text class="slower sub" x="([\d.]+)"[^>]*>more time →</)![1]);
+    const texts = [...parseSvg(svg).querySelectorAll("text")];
+    const x = textPosition(texts.find((text) => text.textContent === "more time →")!).x;
     assert.ok(x <= width - 24);
-    const title = Number(svg.match(/<text class="hero [a-z]+" x="([\d.]+)"/)![1]);
+    const title = textPosition(texts.find((text) => svgAttribute(text, "font-size") === "28")!).x;
     assert.ok(
       24 + textWidth("Run time against main", 13) * 1.05 < title,
       `title overlaps the first column at ${title}`,

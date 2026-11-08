@@ -1,12 +1,41 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import { stringify } from "smol-toml";
 import { loadPlan, parsePlan, planSchema, selectCaseIds } from "./plan.ts";
 import fixture from "./plans/selection.fixture.json" with { type: "json" };
 
 test("the native selection fixture validates", () => {
   assert.equal(parsePlan(fixture.plan).harness, "smoke");
+});
+
+test("file formats share validation", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-plan-"));
+  try {
+    for (const preset of ["local", "continuous", "smoke", "release"]) {
+      const expected = await loadPlan(preset);
+      for (const [extension, encode] of [
+        ["json", (value: unknown) => JSON.stringify(value)],
+        ["toml", stringify],
+      ] as const) {
+        const path = join(directory, `${preset}.${extension}`);
+        await writeFile(path, encode(expected));
+        assert.deepEqual(await loadPlan(path), expected);
+        const override = { lengths: [1234] };
+        assert.deepEqual(await loadPlan(path, override), await loadPlan(preset, override));
+        await writeFile(path, encode({ ...expected, include: [{ types: ["typo"] }] }));
+        await assert.rejects(loadPlan(path), /types/);
+        await writeFile(path, encode({ ...expected, unexpected: true }));
+        await assert.rejects(loadPlan(path), /unexpected/);
+      }
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("presets validate and overrides replace axes", async () => {

@@ -329,12 +329,14 @@ mod tests {
         assert_eq!(
             cases
                 .iter()
-                .map(|case| ["api", "workspace"]
+                .map(|case| catalog()
+                    .smoke
+                    .modes
                     .iter()
                     .filter(|mode| continuous.selects(&case.ty, &case.distribution, case.len, mode))
                     .count())
                 .sum::<usize>(),
-            56
+            50
         );
         for (text, expected) in [
             (include_str!("../../plans/smoke.toml"), 125),
@@ -412,7 +414,7 @@ mod tests {
     fn formats_share_selection_rules() {
         let json = r#"{"schema":1,"harness":"smoke","algorithms":["tessera"],
             "include":[{"types":["u64"],"distributions":["random"],"lengths":[1000,"tile-next"]}],
-            "exclude":[{"lengths":[1000],"modes":["workspace"]}]}"#;
+            "exclude":[{"lengths":[1000],"modes":["api"]}]}"#;
         let text = r#"
             # Numeric counts and code-relative boundaries share one axis.
             schema = 1
@@ -424,7 +426,7 @@ mod tests {
             lengths = [1_000, "tile-next"]
             [[exclude]]
             lengths = [1_000]
-            modes = ["workspace"]
+            modes = ["api"]
         "#;
         let expected = Plan::parse(json, "smoke").unwrap();
         let actual = Plan::parse(text, "smoke").unwrap();
@@ -433,9 +435,10 @@ mod tests {
             serde_json::to_value(&expected).unwrap()
         );
         assert_eq!(actual.inputs().unwrap(), expected.inputs().unwrap());
-        assert!(!actual.selects("u64", "random", 1000, "workspace"));
+        assert!(!actual.selects("u64", "random", 1000, "api"));
         for invalid in [
             text.replace("schema = 1", "schema = 2"),
+            text.replace(r#"["api"]"#, r#"["workspace"]"#),
             text.replace("types =", "type ="),
             text.replace("[1_000,", "[0,"),
             text.replace("[1_000,", "[1_000, 1_000,"),

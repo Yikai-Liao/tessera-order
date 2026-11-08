@@ -31,10 +31,10 @@ With the default `std` feature, a panic in the key function is caught, every rec
 - **During a tile pass**, `RestoreTile` copies the last complete record set back into the tile if it was in scratch. The interrupted pass only wrote stale copies into the other buffer.
 - **During a compaction callback** (a tile finished while cache-hot), compaction continues without further callbacks. The panic is resumed once the input holds every record again.
 
-Afterwards the slice holds every record exactly once, in an unspecified order. The [workspace](../guide/workspace.md) stays usable.
+Afterwards the slice holds every record exactly once, in an unspecified order.
 
 Without `std`, the crate cannot catch a panic. If the key function panics while records are spread over blocks, unwinding would run destructors over an incomplete block table, which could free a record twice. An abort-on-unwind guard turns such a panic into an abort instead. Panics elsewhere unwind normally with every record in place ([decision 0005b](../decisions/0005b-no-std-unwind-guard.md)).
 
 ## Where this is tested
 
-The tests in [`rust/tessera-sort/tests`](../../rust/tessera-sort/tests) and the engine's unit tests cover owned records with drop tracking, `&mut` records under panicking and changing key functions, workspace reuse after a panic, over-aligned and zero-sized records, and key-function panics at many points of a sort. Miri and AddressSanitizer run them in CI.
+The tests in [`rust/tessera-sort/tests`](../../rust/tessera-sort/tests) and the engine's unit tests cover owned records with drop tracking, `&mut` records under panicking and changing key functions, over-aligned and zero-sized records, and key-function panics at many points of a sort. Miri and AddressSanitizer run them in CI.

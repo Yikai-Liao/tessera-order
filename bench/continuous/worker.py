@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 def partition(cases):
-    """Keep allocation modes together and balance small groups by case count."""
+    """Keep API modes together and balance small groups by case count."""
     groups = {}
     for case in cases:
         group, _ = case.rsplit("/", 1)

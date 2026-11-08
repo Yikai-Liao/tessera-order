@@ -13,7 +13,7 @@ lengths = [ 1000, 65536 ]
 [[plan.include]]
 types = [ "f64" ]
 distributions = [ "sorted" ]
-modes = [ "workspace" ]
+modes = [ "api" ]
 
 [[plan.exclude]]
 types = [ "row_u64" ]
@@ -21,12 +21,12 @@ distributions = [ "zipf2" ]
 
 [[plan.exclude]]
 lengths = [ 1000 ]
-modes = [ "workspace" ]
+modes = [ "api" ]
 
 [[cases]]
 type = "u64"
 distribution = "random"
-length = 1000
+length = 65536
 mode = "api"
 selected = true
 
@@ -34,14 +34,14 @@ selected = true
 type = "u64"
 distribution = "zipf2"
 length = 65536
-mode = "workspace"
+mode = "api"
 selected = true
 
 [[cases]]
 type = "u64"
 distribution = "random"
 length = 1000
-mode = "workspace"
+mode = "api"
 selected = false
 
 [[cases]]
@@ -62,12 +62,12 @@ selected = true
 type = "f64"
 distribution = "sorted"
 length = 999
-mode = "workspace"
+mode = "api"
 selected = true
 
 [[cases]]
 type = "f64"
-distribution = "sorted"
+distribution = "reverse"
 length = 999
 mode = "api"
 selected = false

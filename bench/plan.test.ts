@@ -84,7 +84,8 @@ test("invalid plans fail before execution", () => {
     { ...plan, include: [{ lengths: [1.5] }] },
     { ...plan, include: [{ lengths: [1, 1] }] },
     { ...plan, algorithms: ["glidesort"] },
-    { ...plan, harness: "comparison", include: [{ modes: ["workspace"] }] },
+    { ...plan, include: [{ modes: ["workspace"] }] },
+    { ...plan, harness: "comparison", include: [{ modes: ["unstable"] }] },
   ])
     assert.throws(() => parsePlan(invalid));
 });
@@ -92,7 +93,7 @@ test("invalid plans fail before execution", () => {
 test("selection uses actual IDs and rejects empty experiments", async () => {
   const ids = [
     "rust/u64/random/65536/s1/api",
-    "rust/u64/random/65536/s1/workspace",
+    "rust/u64/random/65536/s1/unstable",
     "rust/u64/random/1000/s1/api",
   ];
   assert.deepEqual(selectCaseIds(ids, "/api$"), [ids[0], ids[2]]);

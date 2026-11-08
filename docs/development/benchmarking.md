@@ -43,7 +43,7 @@ All three workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). 
 | Preset | Harness | Default selection |
 |---|---|---|
 | `local` | `smoke` | Tessera, random `u64`, 65,536 records, `api` |
-| `continuous` | `smoke` | The 50 regression inputs and 56 timed IDs documented in the [continuous guide](continuous-benchmarks.md#cases) |
+| `continuous` | `smoke` | The 50 regression inputs and 50 timed IDs documented in the [continuous guide](continuous-benchmarks.md#cases) |
 | `smoke` | `comparison` | Rust competitors, 125 inputs at 1,000 records |
 | `release` | `comparison` | Rust and native competitors, 381 inputs across four lengths |
 
@@ -104,7 +104,7 @@ Values within an axis are alternatives; axes within a rule form a Cartesian prod
 
 The selectable axes are `types`, `distributions`, `lengths` and `modes`. Lengths are positive record counts; custom numeric lengths need not already occur in a preset. Configuration files can also use `"insertion-max"`, `"insertion-next"` and `"tile-next"`. These resolve from the measured library's thresholds and the record width in the catalog. Case IDs retain the resolved numeric length; a commit comparison rejects different selected IDs between revisions.
 
-The `smoke` harness measures Tessera through `api` and `workspace`; its supported record representations and distributions are under `smoke` in [the catalog](../../bench/catalog.toml). The `comparison` harness measures supported algorithm/type pairs through `api`. Its default types, distributions and lengths are under `comparison`. Inputs always use seed 1. A plan that selects nothing fails before timing.
+The `smoke` harness measures Tessera through `api`; its supported record representations and distributions are under `smoke` in [the catalog](../../bench/catalog.toml). The `comparison` harness measures supported algorithm/type pairs through `api`. Its default types, distributions and lengths are under `comparison`. Inputs always use seed 1. A plan that selects nothing fails before timing.
 
 Algorithm comparisons retain `tessera`, `std-stable` and the separately timed Tessera A/A control, even when only additional opponents are named. Native algorithms automatically enable source acquisition and native compilation. Portable SIMD is requested with `--simd`; that additional build measures the shared Tessera and standard-library anchors, while competitors run in the default build. Unsupported adapter/type pairs are omitted from the manifest's per-input capabilities, not recorded as measurements.
 
@@ -282,7 +282,7 @@ Each figure states its finding as its title, says under it what is plotted, and 
 
 Continuous builds apply branch alignment to both feature configurations and use static linking, as described in the [continuous benchmark guide](continuous-benchmarks.md).
 
-The [port record](../design/port.md) describes separate placement controls for source A/B investigations. The release comparison measures lengths of at least 1,000 with the default target; native-CPU builds, branch alignment, workspace mode and cold-cache investigations remain separate work.
+The [port record](../design/port.md) describes separate placement controls for source A/B investigations. The release comparison measures lengths of at least 1,000 with the default target; native-CPU builds, branch alignment and cold-cache investigations remain separate work.
 
 ## Results and provenance
 

@@ -14,7 +14,7 @@ class SchedulerTests(unittest.TestCase):
     def test_partition_preserves_modes_and_excludes_large_cases(self):
         cases = [
             "rust/u64/random/65536/s1/api",
-            "rust/u64/random/65536/s1/workspace",
+            "rust/u64/random/65536/s1/unstable",
             "rust/u32/random/65536/s1/api",
             "rust/u128/random/65536/s1/api",
             "rust/u64/random/1000000/s1/api",

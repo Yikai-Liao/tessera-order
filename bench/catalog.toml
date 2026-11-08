@@ -59,7 +59,6 @@ distributions = [
 
 modes = [
   { id = "api", label = "stable" },
-  { id = "workspace", label = "stable, workspace" },
   { id = "unstable", label = "unstable" },
   { id = "par", label = "parallel" },
   { id = "par_unstable", label = "parallel unstable" },
@@ -86,4 +85,4 @@ modes = ["api"]
 types = ["u32","u64","u128","f64","row_u32","row_u64","rec128_u64"]
 shapes = ["random","d256","d16","zipf1.1","zipf2","skew99","sorted","reverse","sorted99","runs","equal","d4096","two_values","hot50","sparse8","sparse_digits","bimodal","far_swaps","finite_signed","sorted_tail"]
 lengths = [1000,65536,1000000,10000000]
-modes = ["api","workspace"]
+modes = ["api"]

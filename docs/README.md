@@ -4,7 +4,7 @@ These files are also published as the documentation site, built from this direct
 
 | Directory | For | Contents |
 |---|---|---|
-| [`guide/`](guide/) | Library users | [Getting started](guide/getting-started.md) and [reusing scratch memory with `Workspace`](guide/workspace.md) |
+| [`guide/`](guide/) | Library users | [Getting started](guide/getting-started.md) |
 | [`explain/`](explain/index.md) | Anyone learning the algorithm | [How Tessera works](explain/index.md), in reading order, with interactive figures |
 | [`design/`](design/) | Readers of the engine source | [Engine design](design/engine.md), the [port from the research prototype](design/port.md), [comparison benchmarks](design/comparison-benchmarks.md) and [benchmark tooling](design/benchmark-tooling.md) |
 | [`development/`](development/) | Contributors | [Benchmark protocol](development/benchmarking.md), [figure guide](development/benchmark-figures.md), [continuous benchmarks](development/continuous-benchmarks.md), [continuous integration](development/ci.md) and the [documentation site](development/docs-site.md) |

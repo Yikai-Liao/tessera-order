@@ -35,7 +35,7 @@ Plans in `bench/plans/` are the authority for workflow coverage. Repository pres
 
 `local` and `continuous` use the Criterion harness; `smoke` and `release` use the paired algorithm harness. This is a capability boundary, not a second selection language. Numeric lengths are open, record and distribution identities come from the catalog, and each harness rejects unsupported selectors. Continuous defaults are compiled into each executable, so the trusted cloud supervisor does not evaluate a PR's configuration language or need Node to parse the plan. Local runs persist their effective plan and pass its path to both executables.
 
-Preset changes do not require editing case-registration functions. The continuous preset preserves the 50 input cases and 56 timed IDs; the algorithm presets select 125 smoke and 381 release inputs, with smoke validating every release type/distribution pair. Tests check these counts, custom products, exclusions, deduplication and code-relative boundaries. Required controls are retained when opponents are overridden; per-type adapter capabilities remain executable Rust knowledge.
+Preset changes do not require editing case-registration functions. The continuous preset preserves the 50 input cases and 50 timed IDs; the algorithm presets select 125 smoke and 381 release inputs, with smoke validating every release type/distribution pair. Tests check these counts, custom products, exclusions, deduplication and code-relative boundaries. Required controls are retained when opponents are overridden; per-type adapter capabilities remain executable Rust knowledge.
 
 ## Source comparisons
 

@@ -370,13 +370,6 @@ struct BucketWriter<T> {
     end: *mut T,
 }
 
-// SAFETY: writers are only dereferenced during a partition under exclusive
-// access to its input and workspace. Between calls these are stale addresses,
-// never dereferenced. Moving/sharing capacity obeys the same bounds as T.
-unsafe impl<T: Send> Send for BucketWriter<T> {}
-// SAFETY: shared access never dereferences the pointers or mutates records.
-unsafe impl<T: Sync> Sync for BucketWriter<T> {}
-
 /// Physical block storage: the input slice and a scratch allocation.
 ///
 /// Physical block IDs number the scratch blocks first, then the full input
@@ -455,10 +448,9 @@ impl<'a, T> BlockStorage<'a, T> {
     }
 }
 
-/// Allocations a block partition reuses across passes and calls.
+/// Allocations a block partition reuses across passes within one sort.
 ///
-/// A [`Workspace`](crate::Workspace) keeps them between sorts. Their contents
-/// are never carried over: each pass resizes and rewrites what it uses.
+/// Each pass resizes and rewrites what it uses.
 pub(crate) struct Buffers<T> {
     scratch: Vec<MaybeUninit<T>>,
     block_order: Vec<u32>,
@@ -486,34 +478,6 @@ impl<T> Buffers<T> {
             seen: Vec::new(),
             ends: Vec::new(),
         }
-    }
-
-    /// Returns the heap capacity held by these buffers, in bytes.
-    pub(crate) fn retained_bytes(&self) -> usize {
-        let debug_bytes = {
-            #[cfg(debug_assertions)]
-            {
-                self.seen.capacity() * core::mem::size_of::<bool>()
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                0
-            }
-        };
-        debug_bytes
-            + self.scratch.capacity() * core::mem::size_of::<T>()
-            + (self.block_order.capacity() + self.next_block_order.capacity())
-                * core::mem::size_of::<u32>()
-            + self.bucket_ids.capacity() * core::mem::size_of::<u16>()
-            + self.partial_blocks.capacity() * core::mem::size_of::<PartialBlock>()
-            + self.writers.capacity() * core::mem::size_of::<BucketWriter<T>>()
-            + self.counts.capacity() * core::mem::size_of::<usize>()
-            + self.ends.capacity() * core::mem::size_of::<Vec<usize>>()
-            + self
-                .ends
-                .iter()
-                .map(|v| v.capacity() * core::mem::size_of::<usize>())
-                .sum::<usize>()
     }
 
     /// Keeps the allocation of a bucket-end vector for a later pass.

@@ -126,6 +126,7 @@ const DISTRIBUTIONS: Record<string, string> = {
   runs: "runs",
   d16: "16 values",
   d256: "256 values",
+  d4096: "4,096 values",
   "zipf1.1": "Zipf 1.1",
   zipf2: "Zipf 2",
   sorted95: "95% sorted",
@@ -133,7 +134,12 @@ const DISTRIBUTIONS: Record<string, string> = {
   skew50: "50% one key",
   skew99: "99% one key",
   two_values: "two values",
+  hot50: "50% one key, rest unique",
   sparse8: "8 wide keys",
+  sparse_digits: "sparse digits",
+  bimodal: "two clusters",
+  far_swaps: "1% far swaps",
+  finite_signed: "finite floats",
   sorted_tail: "sorted + tail",
 };
 

@@ -38,6 +38,18 @@ test("names cases in words and keeps the ID for copying", () => {
     mode: "workspace",
   });
   assert.equal(report.caseLabel("rust/u32/d16/48/s2/api"), "u32 · 16 values · 48, seed 2");
+  assert.equal(
+    report.caseLabel("rust/u64/sparse_digits/1000000/s1/api"),
+    "u64 · sparse digits · 1,000,000",
+  );
+  assert.equal(
+    report.caseLabel("rust/row_u64/hot50/65536/s1/api"),
+    "{u64,u32} · 50% one key, rest unique · 65,536",
+  );
+  assert.equal(
+    report.caseLabel("rust/f64/finite_signed/65536/s1/api"),
+    "f64 · finite floats · 65,536",
+  );
   assert.equal(report.caseLabel("not/a/benchmark"), "not/a/benchmark");
 });
 

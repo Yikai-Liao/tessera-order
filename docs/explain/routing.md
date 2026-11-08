@@ -12,7 +12,7 @@ Before any radix pass, Tessera checks whether the input needs one. Many real inp
 | all equal | **flat** | decide after the varying-bit scan (below) |
 | all `≤`, or all `≥` | candidate order | a full scan, `confirm_order`, checks every pair |
 
-A confirmed **ascending** input returns immediately. A confirmed **descending** input is reversed, and then each run of equal keys is reversed back (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
+A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
 
 The sample rejects most unsorted inputs within a few pairs. The full scan runs only on inputs that look ordered.
 

@@ -4,7 +4,7 @@ The engine in `rust/tessera-sort` is a Stable Rust port of the research prototyp
 
 ## What changed
 
-The sorting pipeline is unchanged: order probe, budgeted insertion, variation scan, root narrowing for 128-bit keys, node routing, digit planning, tile leaves, order confirmation and stable reversal of equal-key runs all follow the prototype.
+The initial port keeps the research pipeline: order probe, budgeted insertion, variation scan, root narrowing for 128-bit keys, node routing, digit planning, tile leaves and stable reversal of equal-key runs. A measured follow-up recognizes strictly descending keys during order confirmation and reverses them directly; descending inputs with equal keys keep the stable reversal.
 
 The port changes how the engine is reached, not what it decides:
 
@@ -79,7 +79,24 @@ On these five cases, branch alignment brought the port and the cached prototype 
 
 The crate therefore has nothing to fix. The final link of each program decides where a function lands, and Stable Rust has no attribute for function or branch alignment, so a source change that helps one binary can hurt another. Benchmarks control for placement instead ([build profiles](../development/benchmarking.md#build-profiles)).
 
+### Strictly descending inputs
+
+The order probe now distinguishes strictly descending keys from descending keys with ties. Strictly descending records need one slice reversal; tied keys still use `reverse_stably` to restore their input order. This removes the equal-run scan for the strict case without changing the stable-sort contract. The implementation and paired measurements are recorded in [decision 0041](../decisions/0041-strict-descending-fast-path.md).
+
+The release comparison runner measured 22 reverse cases in one release binary: the candidate, its `tessera-aa` control, two separately linked copies of baseline `b973f09`, and a second candidate copy. Each case used nine shuffled blocks, input restoration outside the clock and stable-reference verification. The run was pinned to CPU 2 on a Ryzen 7 8845H; the report records host conditions and per-case A/A ranges. Ratios below are baseline-copy time divided by the candidate A/A mean, so values above 1 favor the change.
+
+| Case | Candidate ns/record | Baseline A/B ratio |
+|---|---:|---:|
+| `u64/reverse/10000000` | 0.890 | 1.47 / 1.24 |
+| `f64/reverse/10000000` | 1.021 | 1.55 / 1.56 |
+| `row_u64/reverse/10000000` | 1.233 | 1.35 / 1.35 |
+| `record128/reverse/1000000` | 9.334 | 1.52 / 1.52 |
+| `owned/reverse/1000000` | 2.024 | 1.38 / 1.39 |
+
+Both baseline copies are slower than the candidate outside its A/A range in 21 of 22 cases; `record128/reverse/1000` is within noise. A separate-process run had suggested a small loss there, but the paired run placed both baseline copies inside the candidate's A/A band (0.977–1.023), and the second candidate copy also tracked the primary. The small case therefore shows no established gain or regression. Baseline-copy ratios vary on some scalar cases, which exposes code-placement sensitivity; the improvement remains in both copies. Raw samples and the temporary comparison adapters stay outside the repository.
+
+Strictness travels in the order classification, so the probe keeps the machine code it had before the change, and whole-slice reversal stays in a non-inlined helper. A paired A/B with both implementations in one binary confirmed the `u64` reverse speedup at every length and measured what an out-parameter had added to the constant-key case; see [decision 0041](../decisions/0041-strict-descending-fast-path.md). The continuous suite has no A/A control and alternated between no alert and alerts on different short cases in reruns, so it serves only as a regression screen.
+
 ## Not yet done
 
-- The standalone benchmark runner, shared input vectors and the release report described in [benchmarking.md](../development/benchmarking.md).
 - A crates.io release. See [RELEASING.md](../../RELEASING.md).

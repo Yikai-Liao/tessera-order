@@ -54,7 +54,7 @@ These rounded values come from the recorded `release-benchmark-raw-2d6fac2` sess
 | Which build regressed? | PR comparison matrix | Shared cases, one column per build, stems from zero |
 | What changed during a PR? | PR trend matrix | One time series per case and build, reference at the baseline |
 
-A new dataset does not require a new template. A genuinely different question may require one; the [extension boundary](../design/benchmark-tooling.md#extending-figures) explains where that implementation belongs.
+A new dataset does not require a new template. A genuinely different question may require one; the [extension boundary](../design/benchmark-tooling.md#figure-boundary) explains where that implementation belongs.
 
 ## Fixed visual decisions
 

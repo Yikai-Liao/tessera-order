@@ -12,7 +12,7 @@ Tessera sorts slices by a primitive key: an integer up to 128 bits, an `f32` or 
 tessera-sort = "0.1"
 ```
 
-The crate has no dependencies. The `std` feature is on by default. Without it, the crate uses `core` and `alloc` and needs a global allocator:
+The crate has no required dependencies; the optional `portable-simd` feature adds `fearless_simd` (see the [Cargo feature documentation](../../rust/tessera-sort/src/lib.rs)). The `std` feature is on by default. Without it, the crate uses `core` and `alloc` and needs a global allocator:
 
 ```toml
 [dependencies]

@@ -4,7 +4,7 @@ Before any radix pass, Tessera checks whether the input needs one. Many real inp
 
 ## Order probe
 
-`probe_order` looks at up to 4,096 adjacent pairs spread evenly over the input, with a stride of n / 4,096, and classifies it:
+`probe_order` samples adjacent pairs with a stride of `max(1, floor(n / 4,096))` and classifies the input below. The target of 4,096 determines the stride, not a hard limit: for example, 8,191 records use stride 1 and can visit 8,190 pairs before the confirmation scan.
 
 | Sampled pairs | Class | What happens |
 |---|---|---|
@@ -31,7 +31,7 @@ Next, one scan computes the [varying bits](keys.md#varying-bits). If no bit vari
 
 128-bit keys whose variation fits in the low or high 64 bits continue as 64-bit keys.
 
-Only now do the free functions allocate scratch memory. Ordered and constant inputs never allocate.
+Only now do the free functions create tile/block scratch. Budgeted insertion on a larger unsorted input may already have allocated the encoded-key probe buffer. Confirmed ordered and constant inputs never allocate.
 
 ## Nodes and tiles
 

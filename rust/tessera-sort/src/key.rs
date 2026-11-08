@@ -66,7 +66,7 @@ mod sealed {
             // Tile finishing crosses many short ordered runs, so a blocked scan
             // would build a 32-pair mask for every inversion it finds. `ByKey`
             // scans one pair at a time; budgeted probes keep the blocked scan
-            // for their long ordered stretches (decision 0030).
+            // for their long ordered stretches.
             crate::engine::finish_insertion(keys, &mut super::ByKey(|key: &Self| *key));
         }
 

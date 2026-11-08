@@ -1,6 +1,6 @@
 # Design
 
-This document describes the engine in `rust/tessera-sort`. It makes the same decisions as the research prototype (`sort-research-rs`, commit `6c0877f`); the [port record](port.md) lists how the port reaches them differently.
+This document describes the engine in `rust/tessera-sort`. It describes current routing and invariants; the [measurement record](port.md) covers the initial port and subsequent measured changes.
 
 ## Vocabulary
 
@@ -16,23 +16,23 @@ This document describes the engine in `rust/tessera-sort`. It makes the same dec
 
 ### 1. Order probe
 
-The engine samples up to 4,096 evenly spaced adjacent pairs to classify the input as ascending, descending, flat (every sampled pair equal) or unsorted. An ascending or descending sample is confirmed by a full scan, which takes its direction from the first unequal key. A confirmed ascending input returns immediately. A confirmed descending input is reversed stably. Strictly descending keys need only the whole-slice reversal; otherwise each run of equal keys is reversed back. A flat sample is confirmed after the varying-bit scan below, since a constant input stops there.
+The engine samples adjacent pairs at a stride of `max(1, floor(n / 4,096))` to classify the input as ascending, descending, flat (every sampled pair equal) or unsorted. The 4,096-pair target determines the stride, not a hard sample limit. Unless unsortedness is found early, the loop visits `floor((n - 1) / stride)` pairs. An ascending or descending sample is confirmed by a full scan, which takes its direction from the first unequal key. A confirmed ascending input returns immediately. A confirmed descending input is reversed stably. Strictly descending keys need only the whole-slice reversal; otherwise each run of equal keys is reversed back. A flat sample is confirmed after the varying-bit scan below, since a constant input stops there.
 
-An unsorted input gets a budgeted stable insertion pass. When the probe window, one tile of records, is shorter than the input, the pass first runs on a copy of the window's keys to estimate the number of swaps, and only then touches the records with a budget scaled to the whole input. If the budget runs out, the input is left as a stable permutation of itself and the radix path continues. See [Insertion and scans](#insertion-and-scans) for how the pass finds inversions.
+An unsorted input gets a budgeted stable insertion pass. When the probe window, one tile of records, is shorter than the input, the pass first runs on a buffered copy of the window's keys to estimate the number of swaps, and only then touches the records with a budget scaled to the whole input. Each call owns this encoded-key buffer and releases it before the radix path continues. If the budget runs out, the input is left as a stable permutation of itself and the radix path continues. See [Insertion and scans](#insertion-and-scans) for how the pass finds inversions.
 
 ### 2. Varying bits
 
-One scan computes the bitwise union and intersection of all keys. Bits that are equal in every key cannot change the order and are excluded from every later digit. A constant input returns at this point. Wide keys whose variation fits in one 64-bit half are sorted by that half as a 64-bit key.
+One scan computes the bitwise union and intersection of all keys. Bits that are equal in every key cannot change the order and are excluded from every later digit. A constant input returns at this point. Wide keys whose variation fits in one 64-bit half are sorted by that half as a 64-bit key. Tile and block scratch are created only after these root fast paths; budgeted insertion may already have allocated probe keys. Confirmed ordered and constant inputs do not allocate.
 
 ### 3. Node partitioning
 
-A node whose remaining variation spans at most eight bits is one window away from sorted. When the records are their own keys (`Direct`), it is finished by counting that window: one `usize` count and one remembered record per bucket, then each run is filled from its record. Every sealed encoding is a bijection on bit patterns, so equal keys mean equal records and a filled run is the same permutation the block partition would produce, without block tables or record moves. A user key function keeps payloads that its key does not identify, so `ByKey` declines and takes the partition. See [decision 0022](../decisions/0022-count-narrow-direct-windows.md).
+A node whose remaining variation spans at most eight bits is one window away from sorted. When the records are their own keys (`Direct`), it is finished by counting that window: one `usize` count and one remembered record per bucket, then each run is filled from its record. Every sealed encoding is a bijection on bit patterns, so equal keys mean equal records and a filled run is the same permutation the block partition would produce, without block tables or record moves. A user key function keeps payloads that its key does not identify, so `ByKey` declines and takes the partition. The eight-bit cap bounds the stack table to 256 counts and records. The window must cover every remaining key difference or filling would merge distinct records.
 
 Otherwise the node is split by one of three partitions, all of them stable. The first two are tried only on nodes of at least four tiles, which amortize their 64-key sample:
 
 - **Repeated key.** The node samples 64 keys in runs of 8. If one value covers at least a quarter of the sample, an equality partition separates it from the rest, so heavily repeated keys stop costing passes.
 - **Outlier run.** If a short run at either end of the node (at most 1,024 records) disagrees with all other records on the highest varying bit, the run is split off and finished by insertion sort, and the rest of the node keeps a narrower set of varying bits.
-- **Top digit.** Otherwise the node is split on its top digit. The initial width is 8 bits and may grow to 12; a sample of 128 keys checks that the digit actually divides the range.
+- **Top digit.** Otherwise [`choose_split_digit`](../../rust/tessera-sort/src/engine.rs) targets children of half a tile. It starts with enough bits for `n / target` children, clamped to 3–8 bits and the available key bits. A sample of 128 keys checks whether at least a quarter of the digit's buckets are occupied; a concentrated digit widens by two bits at a time, up to 12 or the available key bits.
 
 The digit partition uses the block LSD scheme of Clausecker and Schintke. Buckets are filled block by block, consumed input blocks are reused as output blocks, and permutation metadata records their logical order. Stability holds without a full-size output buffer, and the extra space is O(√n) for a fixed digit width and record size. The block size in records is
 
@@ -40,7 +40,7 @@ The digit partition uses the block LSD scheme of Clausecker and Schintke. Bucket
 max(1, 4 * ceil(sqrt(10n / (2 R s))), floor(1024 / s), 32)
 ```
 
-where `n` is the input length, `s` the record size and `R` the number of buckets.
+where `n` is the input length, `s` the record size and `R` the number of buckets. The no-std build computes the equivalent size with integer `isqrt` and ceiling correction; tests check square boundaries and agreement with the measured std formula.
 
 The root is the paper's trade-off evaluated for this implementation. A block size `b` costs `2 R b s` bytes of scratch — one output block per bucket, plus as many in reserve, because an input block may only be recycled once every record in it has been read — and `10 n / b` bytes of tables, because a block position owns two `u32` block-order entries and one `u16` bucket id. The two terms are equal at that root, so it is the minimum of the sum: substituting `b = c b*` multiplies the total by `(c + 1/c) / 2`, which grows in both directions. The engine takes four times that root: the minimum is where memory is smallest, not where the sort is fastest, and a larger block amortises the random read that compaction pays per block.
 
@@ -60,7 +60,7 @@ The leaf and the digit widths are chosen by a cost model that counts passes and 
 
 ## Insertion and scans
 
-Every insertion pass, whether a budgeted probe or the finish of a tile or bucket, runs one loop, `insertion_loop`: it scans for the first adjacent pair whose keys descend, moves the later record left, and resumes the scan after it. A probe returns its swap count and may stop at its budget. A finishing pass, `finish_insertion`, has no budget and returns `()`, so the unused count is discarded inside the inlined loop rather than returned across a target-feature boundary ([decision 0008b](../decisions/0008b-insertion-finishing-entry-point.md)).
+Every insertion pass, whether a budgeted probe or the finish of a tile or bucket, runs one loop, `insertion_loop`: it scans for the first adjacent pair whose keys descend, moves the later record left, and resumes the scan after it. A probe returns its swap count and may stop at its budget. A finishing pass, `finish_insertion`, has no budget and returns `()`, so the unused count is discarded inside the inlined loop rather than returned across a target-feature boundary.
 
 The scan depends on the extractor and the build:
 
@@ -68,10 +68,12 @@ The scan depends on the extractor and the build:
 |---|---|---|
 | Key function (`stable_sort_by_key`) | One record at a time, keeping the previous key, so the key function runs once per scanned record | Same |
 | Direct keys, budgeted probe | Blocked scan of 32 pairs per mask update (`scan::first_inversion`); `f64` uses the scalar scan | Vector scan, with the instruction set selected once per pass |
-| Direct keys, insertion finish | Scalar scan: the short ordered runs a radix partition leaves do not amortize a block mask ([decision 0030](../decisions/0030-scalar-default-insertion-finishing.md)) | Vector scan, with the instruction set selected once per pass |
-| Direct keys, ascending confirmation | Scalar scan | The vector scan, dispatched once ([decision 0019](../decisions/0019-vector-ascending-confirmation.md)) |
+| Direct keys, insertion finish | Scalar scan: the short ordered runs a radix partition leaves do not amortize a block mask ([measurements](port.md#scalar-insertion-finishing)) | Vector scan, with the instruction set selected once per pass |
+| Direct keys, ascending confirmation | Scalar scan | The vector scan, dispatched once |
 
-With `portable-simd`, slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time, and `Reverse<K>` keys keep the default-build scans. The insertion loop is inlined into the dispatched function, so its scan runs with the selected target features ([decision 0008a](../decisions/0008a-optional-simd-backend.md)).
+With `portable-simd`, slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time, and `Reverse<K>` keys keep the default-build scans. The insertion loop is inlined into the dispatched function, so its scan runs with the selected target features.
+
+Dispatch stays inside one insertion pass: per-scan dispatch repeats overhead on short runs, and moving a SIMD token outside its target-feature context loses the intended code generation. SIMD is optional and requires `std` (MSRV in the feature dependency); the default build keeps its lower MSRV and no-std support. User-key tiles retain scalar callbacks rather than materializing a second key array. The [exploratory SIMD measurements](port.md#exploratory-simd-constraints) preserve the evidence for these constraints but were not the full paired protocol and establish no formal speedup claim.
 
 ## Record handling
 
@@ -94,7 +96,7 @@ Key functions are user code and may panic. On a panic:
 
 The slice holds every record afterwards, in an unspecified order. No record is dropped twice or leaked.
 
-Without the `std` feature, a panic cannot be caught. A key-function panic during block partitioning, where the input slice does not own every record, aborts through an unwind guard; panics elsewhere unwind with every record in place ([decision 0005b](../decisions/0005b-no-std-unwind-guard.md)).
+Without the `std` feature, a panic cannot be caught. A key-function panic during block partitioning, where the input slice does not own every record, aborts through an unwind guard; panics elsewhere unwind with every record in place. A no-std library may run in an unwinding host; a documented abort requirement alone would not protect the safe API. The guard aborts before restoration can use an incomplete ownership directory.
 
 ## Stack usage
 

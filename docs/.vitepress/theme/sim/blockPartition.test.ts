@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
-// Run with `pnpm test:sim`: the model must produce the stable order and
+// Run with `pnpm docs:test`: the model must produce the stable order and
 // conserve every record for every small configuration.
 import { simulate } from "./blockPartition.ts";
 

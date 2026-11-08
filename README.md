@@ -69,10 +69,10 @@ Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned int
 
 ## Performance
 
-Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). These continuous measurements flag changes to investigate; performance claims require the [A/B protocol](docs/development/benchmarking.md).
+Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). These continuous measurements flag changes to investigate; use the [benchmark protocol](docs/development/benchmarking.md#command-capabilities) for paired algorithm comparisons and source-change attribution.
 
 > [!NOTE]
-> TODO: performance results will be published with the benchmark runner ([roadmap](ROADMAP.md)). This README provides no performance data until then.
+> The comparison runner is implemented. The first complete release comparison and its published figures remain on the [roadmap](ROADMAP.md); this README provides no performance data until then.
 
 ## When to use something else
 
@@ -100,7 +100,7 @@ A Python binding is planned as well; see the [roadmap](ROADMAP.md).
 | Ordering, key functions, floats, panics and memory bounds | [`conformance/semantics.md`](conformance/semantics.md) |
 | How the algorithm works, with interactive figures | [Algorithm explanation](https://yikai-liao.github.io/tessera-sort/explain/) |
 | How the engine works | [`docs/design/engine.md`](docs/design/engine.md) |
-| Why every record type caches bucket IDs | [Decision 0001b](docs/decisions/0001b-cache-bucket-ids-for-every-record.md) |
+| Why user key functions cache bucket IDs | [Record handling](docs/design/engine.md#record-handling) |
 | All documentation | [Documentation site](https://yikai-liao.github.io/tessera-sort/) · [Source index](docs/README.md) |
 
 ## Contributing

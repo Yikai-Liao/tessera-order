@@ -11,10 +11,10 @@ pub trait Key: RadixKey + Copy {
     const NAME: &'static str;
     /// Draws from the type's whole bit range.
     fn draw(rng: &mut SplitMix64) -> Self;
-    /// Draws a finite value: floats with a random sign and a magnitude between
-    /// 2^-23 and 2^7; integers over the whole range, where every value is
-    /// finite.
-    fn draw_finite(rng: &mut SplitMix64) -> Self;
+    /// Draws bounded finite floats; integers use their ordinary random draw.
+    fn draw_finite(rng: &mut SplitMix64) -> Self {
+        Self::draw(rng)
+    }
     /// Draws a key above every `small` value that differs from them in the
     /// highest varying bit.
     fn draw_high(rng: &mut SplitMix64) -> Self;
@@ -35,9 +35,6 @@ macro_rules! int_key {
             const NAME: &'static str = stringify!($t);
             fn draw(rng: &mut SplitMix64) -> Self {
                 $draw(rng)
-            }
-            fn draw_finite(rng: &mut SplitMix64) -> Self {
-                Self::draw(rng)
             }
             fn draw_high(rng: &mut SplitMix64) -> Self {
                 Self::draw(rng) | 1 << (<$t>::BITS - 1)
@@ -70,8 +67,8 @@ impl Key for f64 {
     fn draw(rng: &mut SplitMix64) -> Self {
         f64::from_bits(rng.next_u64())
     }
-    // Sign, an exponent field in 1000..=1029 and a random mantissa: magnitudes
-    // from 2^-23 to 2^7, as measured data has, and never NaN or infinite.
+    // Sign, exponent field 1000..=1029 and random mantissa: magnitudes from
+    // 2^-23 to below 2^7, with no NaN or infinity.
     fn draw_finite(rng: &mut SplitMix64) -> Self {
         let sign = rng.next_u64() & (1 << 63);
         let exponent = 1000 + rng.next_u64() % 30;
@@ -262,13 +259,14 @@ pub fn generate<K: Key>(distribution: &str, len: usize) -> Vec<K> {
         "sorted" => (0..n).map(K::small).collect(),
         "reverse" => (0..n).rev().map(K::small).collect(),
         "far_swaps" => {
-            // Ascending, with len / 100 pairs of random positions swapped: the
-            // records are nearly in place but too far from it for insertion.
+            // Ascending, with len / 100 swaps between opposite end quarters:
+            // each swap spans at least half the array.
             let mut values: Vec<u64> = (0..n).collect();
             let swaps = if len > 1 { (len / 100).max(1) } else { 0 };
+            let quarter = (n / 4).max(1);
             for _ in 0..swaps {
-                let a = (rng.next_u64() % n) as usize;
-                let b = (rng.next_u64() % n) as usize;
+                let a = (rng.next_u64() % quarter) as usize;
+                let b = (n - 1 - rng.next_u64() % quarter) as usize;
                 values.swap(a, b);
             }
             values.into_iter().map(K::small).collect()
@@ -639,20 +637,20 @@ mod tests {
                 "far_swaps",
                 127,
                 [
-                    0x394d62dc4f49806a,
-                    0xed3a22b0d9025b7a,
-                    0x4eace0b3a861049a,
-                    0xc35e924f89b8b247,
+                    0x4a8260e2142abbfa,
+                    0xee9dd32740a88e1a,
+                    0xd607392b853894da,
+                    0x30191c5ea434f667,
                 ],
             ),
             (
                 "far_swaps",
                 4097,
                 [
-                    0xb8cd26d0e7dd2019,
-                    0x3a1c6981e77a5459,
-                    0x34509736d6373c99,
-                    0xcf3cfbcebcd0417c,
+                    0xfb038fa50c7586a9,
+                    0x81791730e52b76d9,
+                    0xae3fbe5106731fb9,
+                    0x9f6f51cf1cad88e8,
                 ],
             ),
             (

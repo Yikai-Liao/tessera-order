@@ -344,7 +344,16 @@ mod tests {
     fn presets_preserve_case_counts() {
         let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
         let cases = continuous.inputs().unwrap();
-        assert_eq!(cases.len(), 61);
+        assert_eq!(cases.len(), 60);
+        assert_eq!(cases.iter().filter(|case| case.len >= 1_000_000).count(), 7);
+        for distribution in ["skew99", "two_values"] {
+            assert!(cases.iter().any(|case| {
+                case.ty == "u64" && case.distribution == distribution && case.len == 65_536
+            }));
+            assert!(!cases.iter().any(|case| {
+                case.ty == "u64" && case.distribution == distribution && case.len >= 1_000_000
+            }));
+        }
         for ty in ["u64", "row_u64"] {
             for distribution in ["random", "sorted", "reverse", "equal"] {
                 assert!(cases.iter().any(|case| {

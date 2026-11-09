@@ -267,8 +267,9 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
 
     let mut keys = [KeyValue::<T, E>::from_usize(0); MODE_SAMPLE_LEN];
     sample_keys(records, &mut keys, extractor);
-    let bit = KeyValue::<T, E>::from_usize(1) << KeyValue::<T, E>::from_usize(top - 1);
-    if sample_mode(&mut keys).is_some() || outlier_run(records, &keys, bit, extractor).is_some() {
+    // A node the order already groups is finished sequentially: the
+    // bucket-order split needs no partition pass, so there is nothing to share.
+    if sample_mode(&mut keys).is_some() || ordered_width(records, top, extractor).is_some() {
         Sorter::<T, E, CACHED> {
             scratch,
             extractor,

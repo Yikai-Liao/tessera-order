@@ -139,6 +139,30 @@ impl InputCase {
     }
 }
 
+/// Formats the seed-one Criterion group for validated input identities.
+///
+/// The mode remains separate because Criterion takes a group and a function name.
+///
+/// ```
+/// assert_eq!(tessera_bench::plan::criterion_group("u64", "random", 1000),
+///            "rust/u64/random/1000/s1");
+/// ```
+pub fn criterion_group(ty: &str, distribution: &str, len: usize) -> String {
+    format!("rust/{ty}/{distribution}/{len}/s1")
+}
+
+/// Joins a formatted Criterion group and the selected API mode for exact selection.
+///
+/// This matches Criterion's timed ID without parsing it or validating identities.
+///
+/// ```
+/// assert_eq!(tessera_bench::plan::criterion_id("rust/u64/random/1000/s1", "api"),
+///            "rust/u64/random/1000/s1/api");
+/// ```
+pub fn criterion_id(group: &str, mode: &str) -> String {
+    format!("{group}/{mode}")
+}
+
 /// A versioned experiment selection, independent of its measurement protocol.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -337,6 +361,27 @@ mod tests {
                 input["selected"].as_bool().unwrap(),
                 "{input}"
             );
+        }
+    }
+
+    #[test]
+    fn identities_match_shared_contract() {
+        let fixture: Value =
+            toml::from_str(include_str!("../../plans/selection.fixture.toml")).unwrap();
+        for entry in fixture["identities"].as_array().unwrap() {
+            let case = InputCase {
+                ty: entry["type"].as_str().unwrap().into(),
+                distribution: entry["distribution"].as_str().unwrap().into(),
+                len: entry["length"].as_u64().unwrap() as usize,
+            };
+            let group = criterion_group(&case.ty, &case.distribution, case.len);
+            assert_eq!(group, entry["criterion_group"].as_str().unwrap());
+            assert_eq!(
+                criterion_id(&group, entry["mode"].as_str().unwrap()),
+                entry["criterion"].as_str().unwrap()
+            );
+            #[cfg(feature = "compare")]
+            assert_eq!(case.id(), entry["comparison"].as_str().unwrap());
         }
     }
 

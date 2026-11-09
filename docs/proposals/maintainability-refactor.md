@@ -132,7 +132,7 @@ Each refactor PR replays the tasks its boundary affects, updates their entries a
 
 ### Baseline at `826e6ec`
 
-These are repository-only walkthroughs, not implemented additions. The CI-check entry is replayed for F4 and native compiler coverage; record/algorithm entries are replayed for F1/F2/F7. The other entries retain the baseline. The [tooling ownership map](../design/benchmark-tooling.md#ownership) and [validation commands](../../AGENTS.md#commands) are the common starting points. The files below identify separate responsibilities as well as repeated decisions; touching several files is not by itself a defect.
+These are repository-only walkthroughs, not implemented additions. The CI-check entry is replayed for F4 and native compiler coverage; record/algorithm entries for F1/F2/F7; distribution/mode entries for F3. The other entries retain the baseline. The [tooling ownership map](../design/benchmark-tooling.md#ownership) and [validation commands](../../AGENTS.md#commands) are the common starting points. The files below identify separate responsibilities as well as repeated decisions; touching several files is not by itself a defect.
 
 #### Add a record type
 
@@ -144,7 +144,7 @@ These are repository-only walkthroughs, not implemented additions. The CI-check 
 #### Add a distribution
 
 - Read [`case.rs::generate`](../../bench/rust/src/case.rs), [catalog distribution labels and suite inventories](../../bench/catalog.toml), and the intended [plans](../../bench/plans/). Generation, presentation and regression coverage are distinct decisions: adding a generator does not automatically add a continuous case.
-- TypeScript [plan validation](../../bench/plan.ts) and [Rust expansion](../../bench/rust/src/plan.rs) consume the catalog and plans. For the [shared selection fixture](../../bench/plans/selection.fixture.toml), TypeScript validates the plan and Rust checks the listed selection expectations; it does not compare both implementations' selection results. No third distribution parser is needed.
+- TypeScript [plan validation](../../bench/plan.ts) and [Rust expansion](../../bench/rust/src/plan.rs) consume the catalog and plans. For the [shared fixture](../../bench/plans/selection.fixture.toml), TypeScript validates the plan and Rust checks the listed selection expectations; it does not compare both implementations' selection results. Its separate explicit ID examples now check both languages' formatters. No third distribution parser is needed.
 - Manually choose which smoke/comparison inventories and plan inclusions exercise the distribution. Existing generator-identity assertions protect retained inputs, not an unselected new branch. Preview the selected inputs with `pnpm -s tools plan NAME` and validate their generated output through the maintained harness.
 
 #### Add an algorithm
@@ -155,10 +155,10 @@ These are repository-only walkthroughs, not implemented additions. The CI-check 
 
 #### Add a benchmark mode
 
-- Read [catalog modes](../../bench/catalog.toml), [Criterion dispatch and ID construction](../../bench/rust/benches/smoke.rs), [continuous build/list validation](../../bench/continuous/runner.ts) and the [trusted worker](../../bench/continuous/worker.ts). A label does not implement a new API or grant it a worker lane.
-- ID interpretation also reaches [catalog display helpers](../../bench/catalog.ts), [local report labels](../../bench/local/report.ts) and [comparison report IDs/length parsing](../../bench/report/model.ts). Criterion and comparison IDs are different grammars. Positional parsing and `api`/`par-4` suffix checks currently require coordinated edits (F3).
+- Read [catalog modes](../../bench/catalog.toml) and their [TypeScript ID owner](../../bench/catalog.ts), then [Rust's Criterion formatters](../../bench/rust/src/plan.rs), [typed API dispatch](../../bench/rust/benches/smoke.rs), [continuous build/list validation](../../bench/continuous/runner.ts) and the [trusted worker](../../bench/continuous/worker.ts). A label does not implement a new API or grant it a worker lane.
+- TypeScript format/parse rules now live in `catalog.ts`; runner validation and comparison report lengths use its strict decoders. Historical continuous labels retain their permissive fallback, and local reports retain raw labels through the same owner. Changing a grammar no longer requires editing positional parsing in either report or suffix checks in runner. Rust formatting stays in `plan.rs`, independently checked against explicit shared-fixture IDs.
 - The worker's dependency-free copy is an intentional trust boundary: [the tracker](../../.github/workflows/bench-track.yml) packages only default-branch worker/process code. Keep its scheduling rule checked against the ID owner rather than importing the catalog into the image.
-- Runner tests protect additive listings; worker tests protect lane assignment. Build verification checks serial-only and parallel-enabled listings for both configurations. A mode change needs those checks together; an unchanged serial listing alone does not establish the new schedule.
+- The existing runner test protects additive listings; a new parity assertion checks worker lanes against owner-decoded lengths and modes at the exclusive boundary. Worker tests still protect lane assignment. Build verification checks serial-only and parallel-enabled listings for both configurations. A mode change needs those checks together; an unchanged serial listing alone does not establish the new schedule.
 
 #### Add a figure
 

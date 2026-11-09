@@ -105,6 +105,65 @@ export function modeOrder(id: string) {
   return order < 0 ? catalog.modes.length : order;
 }
 
+/** Identity fields shared by input manifests and the two benchmark ID grammars. */
+export interface CaseIdentity {
+  ty: string;
+  distribution: string;
+  len: number;
+}
+
+/** Format the comparison harness's seed-one input identity. */
+export function comparisonId(input: CaseIdentity) {
+  return `${input.ty}/${input.distribution}/${input.len}/s1`;
+}
+
+/** Format a Criterion timed identity; catalog membership is checked by its consumer. */
+export function criterionId(input: CaseIdentity, mode: string) {
+  return `rust/${comparisonId(input)}/${mode}`;
+}
+
+/** Decode comparison inputs, including historical type and distribution names. */
+export function parseComparisonId(id: string) {
+  const parts = id.split("/");
+  const [ty, distribution, length, seed] = parts;
+  if (
+    parts.length !== 4 ||
+    !ty ||
+    !distribution ||
+    !/^[1-9]\d*$/.test(length) ||
+    !Number.isSafeInteger(Number(length)) ||
+    !/^s[1-9]\d*$/.test(seed)
+  )
+    throw new Error(`Invalid comparison benchmark ID: ${id}`);
+  return { ty, distribution, len: Number(length), seed };
+}
+
+/** Strictly decode Criterion IDs with known catalog fields, not display fallbacks. */
+export function parseCriterionId(id: string) {
+  const [language, ty, distribution, length, seed, mode, ...extra] = id.split("/");
+  if (
+    language !== "rust" ||
+    extra.length ||
+    !records.has(ty) ||
+    !distributions.has(distribution) ||
+    !/^[1-9]\d*$/.test(length) ||
+    !Number.isSafeInteger(Number(length)) ||
+    !/^s[1-9]\d*$/.test(seed) ||
+    !modes.has(mode)
+  )
+    throw new Error(`Invalid Criterion benchmark ID: ${id}`);
+  return { ty, distribution, len: Number(length), seed, mode };
+}
+
+/** Preserve raw Criterion components for local reports, including old unknown IDs. */
+export function rawCaseParts(id: string) {
+  const parts = id.split("/");
+  return {
+    input: parts.slice(1, 3).join(" · "),
+    sub: parts.slice(3).join(" · "),
+  };
+}
+
 /** Decode a continuous case ID into its display fields. */
 export function caseParts(id: string) {
   const parts = id.split("/");

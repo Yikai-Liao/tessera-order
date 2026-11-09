@@ -3,20 +3,20 @@
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { CommandCancelledError, command, diagnostic } from "../../tools/process.ts";
-import { VARIANTS } from "../catalog.ts";
+import { parseCriterionId, VARIANTS } from "../catalog.ts";
 import type { Plan } from "../plan.ts";
 import { buildBenchmark, withWorkspace } from "../workspace.ts";
 
 /** Validate an additive API listing without duplicating the plan's case count. */
 export function validateApiListings(listed: string[], legacy: string[]) {
-  const parallel = listed.filter((id) => id.endsWith("/par-4"));
+  const parallel = listed.filter((id) => parseCriterionId(id).mode === "par-4");
   if (
     !legacy.length ||
     !parallel.length ||
     new Set(listed).size !== listed.length ||
     new Set(legacy).size !== legacy.length ||
     listed.length !== legacy.length + parallel.length ||
-    legacy.some((id) => !id.endsWith("/api") || !listed.includes(id))
+    legacy.some((id) => parseCriterionId(id).mode !== "api" || !listed.includes(id))
   )
     throw new Error("Expected serial-only legacy IDs and additional four-thread parallel cases");
   return { serial: legacy[0], parallel };

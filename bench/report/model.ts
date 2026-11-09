@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { catalog } from "../catalog.ts";
+import { type CaseIdentity, catalog, parseComparisonId } from "../catalog.ts";
+
+export { comparisonId as caseId } from "../catalog.ts";
+
 import { median, summarizePaired } from "../statistics.ts";
 
 export const { summaryShapes: shapes, types, lengths } = catalog.comparison;
-export interface Case {
-  ty: string;
-  distribution: string;
-  len: number;
+export interface Case extends CaseIdentity {
   variants: string[];
 }
 export interface Manifest {
@@ -72,9 +72,6 @@ export interface Dataset {
   memory: Memory[];
   partial: boolean;
 }
-export function caseId(c: Pick<Case, "ty" | "distribution" | "len">) {
-  return `${c.ty}/${c.distribution}/${c.len}/s1`;
-}
 export function measurementId(build: string, id: string, variant: string) {
   return `${build}:${id}:${variant}`;
 }
@@ -98,6 +95,7 @@ export function summarize(dataset: Dataset): Map<string, Summary> {
   for (const unsorted of groups.values()) {
     const samples = [...unsorted].sort((a, b) => a.block - b.block);
     const { build, case_id: id, variant } = samples[0];
+    const len = parseComparisonId(id).len;
     const a = groups.get(measurementId(build, id, "tessera"))!;
     const b = groups.get(measurementId(build, id, "tessera-aa"))!;
     const time = (s: Sample) => s.elapsed_ns / s.batch;
@@ -126,7 +124,7 @@ export function summarize(dataset: Dataset): Map<string, Summary> {
         variant === "tessera-aa" ||
         dataset.manifests.get(build)!.variants.find((v) => v.name === variant)!.stable,
       ...paired,
-      ns: median(samples.map((s) => time(s) / Number(id.split("/")[2]))),
+      ns: median(samples.map((s) => time(s) / len)),
     });
   }
   return result;

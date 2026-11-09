@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { catalog, criterionId, parseCriterionId } from "../catalog.ts";
 import { baselineArguments, validateApiListings } from "./runner.ts";
 import { measuredCases, partition, runWorkers } from "./worker.ts";
 
@@ -148,6 +149,32 @@ test("scheduler balances API cases and excludes large cases from parallel lanes"
   const all = [...groups.small.flat(), ...groups.large];
   assert.equal(new Set(all).size, all.length);
   assert.deepEqual(new Set(all), new Set(cases));
+});
+
+test("trusted partition agrees with the ID owner at lane and mode boundaries", () => {
+  // The catalog also names historical APIs; only the worker grants these phases.
+  const modes = catalog.modes.filter((mode) => ["api", "par-4"].includes(mode.id));
+  const lengths = [...new Set([...catalog.smoke.lengths, 999_999, 1_000_000, 1_000_001])];
+  const cases = catalog.smoke.types.flatMap((ty) =>
+    lengths.flatMap((len) =>
+      modes.map((mode) => criterionId({ ty, distribution: "random", len }, mode.id)),
+    ),
+  );
+  const expected: { small: string[][]; large: string[]; parallel: string[] } = {
+    small: [[], []],
+    large: [],
+    parallel: [],
+  };
+  for (const id of cases.toSorted()) {
+    const { len, mode } = parseCriterionId(id);
+    if (mode === "par-4") expected.parallel.push(id);
+    else if (len >= 1_000_000) expected.large.push(id);
+    else {
+      const lane = expected.small[0].length <= expected.small[1].length ? 0 : 1;
+      expected.small[lane].push(id);
+    }
+  }
+  assert.deepEqual(partition(cases), expected);
 });
 
 test("supervisor rejects invalid IDs before starting workers", {

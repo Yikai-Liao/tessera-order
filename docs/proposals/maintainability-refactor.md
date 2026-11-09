@@ -109,7 +109,7 @@ When benchmark checks run, read both before merging. Investigate any alert under
 
 Use the [commands](../../AGENTS.md#commands) that apply to the touched area. No PR in this round adds measurements beyond the existing PR benchmark checks.
 
-Every PR description states which boundary changed, what was deleted or merged, the net production line change, which invalid combination the types or tests now reject, and which checks ran or were left to CI. Reject a refactor PR that also changes behavior, adds an abstraction without removing a duplicate or encoding a constraint, or claims improvement only from shorter files.
+Every PR description states which boundary changed, how its [task walkthroughs](#task-walkthroughs) changed, what was deleted or merged, the net production line change, which invalid combination the types or tests now reject, and which checks ran or were left to CI. Reject a refactor PR that also changes behavior, adds an abstraction without removing a duplicate or encoding a constraint, or claims improvement only from shorter files.
 
 ## Engine debt for a measured round
 
@@ -124,6 +124,12 @@ These findings concern the parallel engine merged in `8bd64d9`. Each changes cod
 | E5 | `block.rs:401,880` | Serial block storage carries the `rayon`-only `scratch_segments` field and a branch in `compact_with`. Both continuous builds enable `rayon` (`bench/catalog.toml:78-79`), so serial tracking measures this layout rather than the default feature set. Changing that is a protocol decision for the maintainer |
 | E6 | `engine.rs` | About 1,240 production lines combine routing, sampling, digit planning, node and tile sorting, and scratch. Split only along mechanism boundaries that keep invariants local, and only with layout controls |
 
+## Task walkthroughs
+
+Before PR 2, walk through each common task on `main` without implementing it: add a record type, a distribution, an algorithm, a benchmark mode, a figure and a CI check. Work only from what the repository states, not from session context. For each task, record here the files and authorities a maintainer must read, the rules they must keep consistent by hand, and how a mistake would be caught. Separate distinct responsibilities, such as catalog metadata, case generation and plan coverage for a distribution, from restated rules.
+
+Each refactor PR replays the tasks its boundary affects, updates their entries and states the difference in its description. A refactor that leaves its tasks' manual synchronization and required reading unchanged has not shown a benefit.
+
 ## Stop condition
 
-Stop when common tasks (add a record type, a distribution, an algorithm, a figure or a CI check) touch a predictable, small set of files and no rule is restated in several places. Stop earlier if further restructuring adds interfaces instead of removing them.
+Stop when the [task walkthroughs](#task-walkthroughs) touch a predictable, small set of files and no rule is restated in several places. Stop earlier if further restructuring adds interfaces instead of removing them.

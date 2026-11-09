@@ -87,7 +87,7 @@ Each PR changes one boundary, can be reverted on its own and passes an independe
 
 | PR | Scope | Verification class | Done when |
 |---|---|---|---|
-| 1 | This proposal, the refactoring rule in `CONTRIBUTING.md` and links | Docs | Merged |
+| 1 | This proposal, the refactoring, review, duplication and identity rules, and links | Docs | Merged |
 | 2 | F4 | TypeScript | `tools` no longer imports `bench/workspace.ts` or `bench/continuous/github.ts`. CLI names, options, output and exit codes are unchanged |
 | 3 | F1, F7 | Comparison harness | A record type and a native index can no longer be combined freely. Layout and kernel output tests pass. Native comparison output is unchanged |
 | 4 | F2 | Comparison harness | Adding a `Row<K>`-like record or an algorithm changes one adapter location and the catalog. Comparison output and checks are unchanged |

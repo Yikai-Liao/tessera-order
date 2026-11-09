@@ -50,7 +50,7 @@ Read main feedback with `pnpm -s tools status main`. Status is compact JSON: mat
 
 ## Independent review
 
-Every PR must pass an independent subagent Agentic Review before merge. Resolve accepted findings and re-review material fixes. Tests and CI do not replace review of runtime paths, trust boundaries and documentation contracts.
+Every PR must pass an independent subagent Agentic Review before merge. Resolve accepted findings and re-review material fixes. Tests and CI do not replace review of runtime paths, trust boundaries and documentation contracts. Review names each new consumer of a shared rule (case ID or mode, catalog field, native registry index, threshold) with its owner. Accepted debt that is not fixed in the PR goes to the [roadmap](ROADMAP.md).
 
 ## Commands
 

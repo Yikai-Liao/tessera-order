@@ -6,6 +6,10 @@ Tessera is pre-release. Bug reports, real-workload experience and measurements o
 
 Use stable Rust (MSRV in `Cargo.toml`), Node.js 24 and the pnpm version pinned in `package.json`. Run the applicable [local checks](AGENTS.md#commands). [CI](docs/development/ci.md) covers platform, MSRV, Miri and sanitizer checks.
 
+### Refactoring
+
+A refactor serves maintainability, readability and lower change cost: fewer duplicated rules and smaller change surfaces, not more files, layers or abstractions. It keeps algorithm logic, generated inputs and the benchmark protocol unchanged; timed regions call the same library functions with the same record types and key extractors, with no added indirection. Ship behavior or performance changes in separate PRs. Moving or splitting engine code can change inlining and code placement, so it follows the measurement rule for [engine changes](#engine-changes).
+
 ### Engine changes
 
 Read the [engine reference](docs/design/engine.md) and [shared semantics](conformance/semantics.md) together. Routing, thresholds, digit planning and inlining also require the [measurement procedure](docs/development/benchmarking.md#run-an-experiment), its [source-attribution controls](docs/development/benchmarking.md#additional-source-attribution-controls) and relevant [engine evidence](docs/design/port.md) before implementation.

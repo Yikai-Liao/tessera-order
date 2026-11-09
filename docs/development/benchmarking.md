@@ -11,6 +11,7 @@ CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment
 | Task | Command | What it provides |
 |---|---|---|
 | Compare working-tree code with a commit | `pnpm tools compare commit COMMIT` | Two revision builds, nine rotating baseline/control/current process blocks, paired process-level A/A, verification, provenance and a report |
+| Sample revision comparisons across layouts | `pnpm tools compare commit COMMIT --layout-seeds 1,2,3,4,5` | One revision pair per fixed LLD seed, nine blocks per seed, link maps and descriptive cross-layout ranges; Linux x86-64 GNU only |
 | Compare algorithms | `pnpm tools compare algorithms` | Registered algorithms in one timing executable per configuration, nine shuffled blocks, two Tessera calls for A/A, output verification, allocation measurement and a report |
 | Local parallel comparison | `pnpm tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` | Serial controls, Tessera-8 and Rayon stable-8 in the shared paired harness; choose a CPU list appropriate to the host |
 | Full algorithm comparison | `pnpm tools compare algorithms --plan release --simd` | Release coverage, native opponents and a separate Portable SIMD build |
@@ -53,7 +54,7 @@ CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment
 
 Algorithm comparisons from `compare algorithms` use the [paired timing contract](#timing-and-statistics) and report results for the measured inputs and environment. Attributing a gain to a source change rather than code placement additionally needs in-process revision comparisons and independent placement controls, as in the [engine measurements](../design/port.md). Process-level `compare commit` and continuous alerts alone do not provide that attribution evidence.
 
-`compare algorithms` compares registered implementations from the current source snapshot, not a baseline commit. `compare commit` accepts a baseline commit but builds two executables; its A/A pair repeats the baseline executable rather than an independently linked copy. The CLI does not automatically register both revisions and independent layout copies in one timing executable.
+`compare algorithms` compares registered implementations from the current source snapshot, not a baseline commit. `compare commit` accepts a baseline commit and builds two executables per selected layout; its A/A pair repeats that layout's baseline executable rather than an independently linked copy. `--layout-seeds` samples section ordering across builds, but does not put revisions in one address space or provide independent-layout A/A within a block. The CLI does not automatically register both revisions and independent layout copies in one timing executable.
 
 Before adding a custom experiment, identify the exact unmet requirement, explain why existing plans, options or adapters cannot meet it, and obtain operator agreement. Prefer extending the maintained comparison pipeline so verification, provenance and reporting remain shared. Historical harnesses record past evidence, not the default procedure for new measurements.
 
@@ -70,6 +71,24 @@ The output contains the resolved `plan.json`, `local.json`, `summaries.json`, `i
 Standard algorithm-report figures show fixed slices and aggregates, not every measured case. A selected-input panel is generated only when no standard panel can be drawn. Custom lengths omitted from those figures remain in Full results and `summaries.json`.
 
 The [tooling design](../design/benchmark-tooling.md) describes the module boundaries and [figure guide](benchmark-figures.md) explains the shared presentation layer.
+
+### Layout sampling
+
+Use `compare commit --layout-seeds 1,2,3,4,5` to investigate sensitivity to function-section ordering. This opt-in experiment requires Linux x86-64, the `x86_64-unknown-linux-gnu` target, a GNU-compatible `cc` driver and LLD. Seeds are a comma-separated list of distinct integers in 1..4294967295. Zero is rejected because LLD interprets it as random. The option applies `--shuffle-sections=.text.*=<seed>` through final benchmark rustc arguments, keeping dependency flags unchanged. These builds explicitly select `cc` and LLD; they are a separate local configuration, not a reproduction of continuous benchmark flags. Linker and driver versions, final rustc arguments and both revisions' link maps are retained. Inspect the maps to confirm that the functions under investigation moved; distinct executable hashes alone do not establish this.
+
+Preview the same plan and axes first, then run a small same-source calibration before comparing an engine change:
+
+```sh
+pnpm tools plan local --types u32,u64 --distributions random --lengths 48,65536
+pnpm tools compare commit HEAD --types u32,u64 --distributions random --lengths 48,65536 \
+  --layout-seeds 1,2,3,4,5 --out bench/results/layout-calibration
+```
+
+For a same-source calibration, keep the working-tree library identical to `HEAD`; the recorded source hashes verify that condition. Each seed gets the unchanged nine-block protocol, with seed order rotating between blocks. Measurement work therefore grows linearly with the number of seeds: this command does not split a fixed sample budget. Start with sensitive small inputs and larger random controls rather than the full continuous plan.
+
+Schema-2 `local.json` retains every seed's schema-1 revision run. Reports keep each seed's process-level A/A range and verdict, then describe the median and min/max of the per-seed median ratios. Each revision's spread is max/min minus one across its per-seed median times. Per-case `layout-N.svg` figures show absolute median times and nine-block ranges for both revisions; baseline observations are the paired process means. These ranges describe the observed sample; they include host/process variation and are not confidence intervals or automatic regression thresholds. Equal seeds need not produce matching addresses across revisions, because section inventories and sizes can change. A few favorable seeds cannot establish source attribution or determine how many layouts suffice for a cloud budget. Function-section shuffling also does not independently vary block ordering inside a function or CGU/inlining choices.
+
+Use `pnpm tools report DIR` for either local schema; every seed must have nine complete blocks. Layout sampling does not change continuous Testbeds, thresholds, sampling windows or submission behavior.
 
 ## Experiment plans
 

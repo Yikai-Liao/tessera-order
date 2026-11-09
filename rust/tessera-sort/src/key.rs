@@ -521,7 +521,10 @@ mod tests {
             let mut expected = input.clone();
             expected.sort();
 
-            for parallel in [false, true] {
+            // Interpret ownership and offsets sequentially; native runs also
+            // exercise Rayon's pool, as with the block-storage Miri fixtures.
+            let modes: &[bool] = if cfg!(miri) { &[false] } else { &[false, true] };
+            for &parallel in modes {
                 let mut borrowed = input.clone();
                 let mut owned = input.clone();
                 let mut direct = Direct;

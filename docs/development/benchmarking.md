@@ -6,6 +6,8 @@ The comparison runner in `bench/rust` measures sorting algorithms on one machine
 
 Run `pnpm tools` from the repository root with Node.js 24, the pinned pnpm and Rust toolchains. Install JavaScript dependencies with `pnpm install --frozen-lockfile`.
 
+CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment (`-C llvm-args=-align-loops=64`, `-C llvm-args=-align-all-nofallthru-blocks=6`) for both revisions, Rust algorithm competitors and memory workers. The shared builder first lets Cargo resolve [its flag sources](https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags), then prepends the defaults to those resolved flags and rebuilds when needed; explicitly configured alignment values occur later and can override the defaults. This can add a compilation when the initial build lacks alignment. Retained provenance records the effective flags. Direct Cargo commands retain their own configuration; continuous builds already include alignment with their static/JCC flags.
+
 | Task | Command | What it provides |
 |---|---|---|
 | Compare working-tree code with a commit | `pnpm tools compare commit COMMIT` | Two revision builds, nine rotating baseline/control/current process blocks, paired process-level A/A, verification, provenance and a report |

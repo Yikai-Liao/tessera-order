@@ -6,6 +6,14 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { command } from "../tools/process.ts";
 
+/** Align measured Rust code while retaining later, explicitly configured overrides. */
+export const ALIGNMENT_RUSTFLAGS = [
+  "-C",
+  "llvm-args=-align-loops=64",
+  "-C",
+  "llvm-args=-align-all-nofallthru-blocks=6",
+];
+
 export interface Workspace {
   directory: string;
   tree: string;
@@ -156,24 +164,34 @@ export async function buildBenchmark(
   features: string[],
   options: { targetTriple?: string; env?: NodeJS.ProcessEnv } = {},
 ) {
-  return buildArtifact(
-    await command(
-      "cargo",
-      [
-        ...(name === "smoke"
-          ? ["bench", "--bench", name, "--no-run"]
-          : ["build", "--release", "--bin", name, "--bin", "memory"]),
-        "--locked",
-        "-p",
-        "tessera-bench",
-        "--message-format=json",
-        "--target-dir",
-        target,
-        ...(options.targetTriple ? ["--target", options.targetTriple] : []),
-        ...(features.length ? ["--features", features.join(",")] : []),
-      ],
-      { cwd: tree, capture: true, env: options.env },
-    ),
-    name,
-  );
+  const build = async (env = options.env) =>
+    buildArtifact(
+      await command(
+        "cargo",
+        [
+          ...(name === "smoke"
+            ? ["bench", "--bench", name, "--no-run"]
+            : ["build", "--release", "--bin", name, "--bin", "memory"]),
+          "--locked",
+          "-p",
+          "tessera-bench",
+          "--message-format=json",
+          "--target-dir",
+          target,
+          ...(options.targetTriple ? ["--target", options.targetTriple] : []),
+          ...(features.length ? ["--features", features.join(",")] : []),
+        ],
+        { cwd: tree, capture: true, env },
+      ),
+      name,
+    );
+  const reference = await build();
+  const flags = reference.provenance.cargo_encoded_rustflags;
+  if (ALIGNMENT_RUSTFLAGS.every((flag) => flags.split("\x1f").includes(flag))) return reference;
+  // Cargo resolves string/array, target and environment settings itself. An
+  // encoded override before this build would discard some of those settings.
+  return build({
+    ...options.env,
+    CARGO_ENCODED_RUSTFLAGS: [...ALIGNMENT_RUSTFLAGS, flags].filter(Boolean).join("\x1f"),
+  });
 }

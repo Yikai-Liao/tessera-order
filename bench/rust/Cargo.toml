@@ -8,7 +8,8 @@ license.workspace = true
 
 [features]
 rayon = ["tessera-sort/rayon", "dep:rayon"]
-compare = ["dep:radsort", "dep:rdst", "dep:glidesort", "dep:voracious_radix_sort", "dep:sha2", "dep:fs2"]
+# Competitor pools do not require Tessera's optional parallel API.
+compare = ["dep:rayon", "dep:radsort", "dep:rdst", "dep:glidesort", "dep:voracious_radix_sort", "dep:sha2", "dep:fs2"]
 compare-native = ["compare"]
 portable-simd = ["tessera-sort/portable-simd"]
 

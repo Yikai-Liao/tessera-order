@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { arch, cpus, platform, release } from "node:os";
 import { join } from "node:path";
+import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
 import {
@@ -28,11 +29,23 @@ interface LocalOptions {
   cpu?: string;
 }
 
+/** Keep unused parallel-API forwarding out of both serial source builds. */
+export function serialHarnessManifest(source: string) {
+  const manifest = parse(source);
+  const features = manifest.features as Record<string, string[]>;
+  features.rayon = features.rayon.filter((feature) => feature !== "tessera-sort/rayon");
+  return stringify(manifest);
+}
+
 /** Compile both revisions with one harness, lockfile, toolchain and build directory. */
 async function buildRevisions(root: string, workspace: Workspace, baseline: string, simd: boolean) {
   const { tree, directory, target } = workspace;
   const crate = join(tree, "rust/tessera-sort");
   const saved = join(directory, "current-source");
+  // Cargo validates even inactive forwarding against the replaced library.
+  // Normalize once before hashing, so both builds have the identical harness.
+  const manifest = join(tree, "bench/rust/Cargo.toml");
+  await writeFile(manifest, serialHarnessManifest(await readFile(manifest, "utf8")));
   await copySnapshot(crate, saved, tree);
   const source = {
     current: await sourceHash(crate),

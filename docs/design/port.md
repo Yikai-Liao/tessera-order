@@ -43,6 +43,70 @@ Blocks at two and eight times the balanced size were also screened (`scale-two`,
 
 Remaining work includes improving record scaling beyond 5×, understanding the ordered-path build sensitivity, wide-record and skew scaling, and independent source/placement controls. No result here establishes a speedup on other machines or a gain attributable to one isolated source edit.
 
+### Memory-organization diagnostics at `7ab58c9`
+
+A follow-up investigated random seed-one `u32` and 8-byte `{u32, u32}` records at 10M on the same eight physical cores. The sorting implementation remained at `7ab58c9`; none of the candidates below was accepted. Full reports and primary raw evidence are retained outside Git at `/home/lyk/code/tessera-research/parallel-7ab58c9/`, with an index in `README.md` and file hashes in `SHA256SUMS`. This is a regular directory outside both temporary storage and the user cache. Its three analysis reports cover the streaming reference (`roofline/ANALYSIS.md`), movement counters (`cost-attribution-ANALYSIS.md`) and sorting-scoped hardware sampling (`uprof-scoped-ANALYSIS.md`).
+
+#### Logical movement and contention
+
+Temporary per-bucket instrumentation ran through the maintained comparison pipeline. Counters were aggregated after joining; journals identified repeated relocations of each immutable source prefix. The twenty finishing invocations per type include validation, warm-up, timed calls and allocation measurement, not just the nine timed samples. Instrumented durations are diagnostic: probing `try_lock` before a contended acquisition and recording copy statistics can change scheduling and cache behavior.
+
+| Median metric | `u32`, 40 MB input | 8-byte records, 80 MB input |
+|---|---:|---:|
+| Gather calls | 23,503 | 32,746 |
+| Relocated record bytes | 30.377 MB | 63.059 MB |
+| Relocation bytes / input bytes | 0.759 | 0.788 |
+| Bytes moved after a source's first relocation | 12.119 MB | 26.020 MB |
+| Maximum relocations of one source | 8.5 | 9 |
+| Final write calls | 22,776 | 31,900 |
+| Physical-owner lock acquisitions | 83,652 | 119,146.5 |
+| Contended physical-owner acquisitions | 5 | 12 |
+| Summed blocked acquisition time | 651 ns | 3,044 ns |
+| Contended free-cache acquisitions | 0 | 0 |
+| Peer `try_lock` failures / `yield_now` calls | 0 / 0 | 0 / 0 |
+
+Fractional event counts are medians over an even number of invocations. Most record writes were 2–4 KiB; most `u32` writes were 1–2 KiB. Gathering and final writing each transferred the whole input once. Relocation bytes count moved records, not reads plus writes: moving 63 MB adds approximately 126 MB of logical payload traffic. None of these quantities is a measurement of DRAM traffic. Lock blocking was negligible in these samples; false sharing, coherence traffic and uncontended lock costs remain separate questions.
+
+The diagnostic bucket-finish elapsed medians were 4.484 ms for keys and 7.728 ms for records. Summed gather/sort/write durations were 5.468/24.730/3.909 thread-ms for keys and 16.681/29.400/13.305 thread-ms for records. These accumulated wall durations include stalls and overlap across workers; they are neither CPU times nor additive critical-path durations. The counters and their instrumentation are archived as `cost-attribution*`.
+
+#### Streaming references are not a DRAM roofline
+
+Unmodified STREAM source at `jeffhammond/STREAM@6703f7504a38a8da96b353cadafa64d3c2d7a2d3` was compiled outside the repository with GCC 16.2.1, `-O3 -march=native -fopenmp`, twenty iterations and 80 MB or 160 MB per array. The eight-worker copy reference measured approximately 35 GB/s with ordinary cached stores and 56 GB/s with large non-temporal copies. Rates count payload reads plus writes and summarize three processes' average iteration times; these calibration runs have repeat ranges, not the sorting runner's paired A/A controls. Compiler flags, source hashes, validation and the store-policy distinction are retained in `roofline/`.
+
+For 8-byte records, five nominal whole-input record copies represent 800 MB of logical read/write traffic. The uninstrumented sorting median of 11.557 ms would imply 69.2 GB/s, exceeding the large-copy reference because tile traffic reuses caches. Conversely, write allocation and metadata can add traffic omitted by nominal copies. The earlier 4.081 ms root scatter corresponds to 39.2 GB/s of logical payload throughput, about 70% of the large-copy reference, not 70% DRAM utilization. No reliable whole-sort distance from a DRAM roofline was established.
+
+#### Sorting-scoped hardware samples
+
+AMD uProf 6.0.1520 collected separate IBS OP and CPI profiles. The initial release profile lacked debug information and reliable stack unwinding, so its whole-process totals were not used for sorting-only attribution. A diagnostic build added debug information, frame pointers and a temporary controller scope around Tessera's `ThreadPool::install`. Profiling started paused: input generation, pool construction, other algorithms, restores and verification remained outside the enabled windows. The memory worker's separate process was excluded from the tables below. The profiler permission policy changed externally from `perf_event_paranoid=2` to `-1`; the experiment did not change power, SMT or kernel-symbol settings.
+
+The diagnostic build retained the baseline sorting source. Its manifest source hash, including the benchmark-only controller patch, was `7f740d7bbc2cffa33cea0fa5a5bb186e8ac66df41bbfb83f06f9ce283381a758`; its executable hash was `52bc21e5af7f1e97c31cbcc1799a1a744c8303a612c3e63775bb4ed69c8d56e7`. The retained runner performed eighteen parallel calls in the main timing process, including calibration. These builds and profiled times are not acceptance measurements. The patch, flags, manifests and executables are in `uprof-scoped-build/` and `uprof-scoped-harness.patch`.
+
+The main process's CPI profile contained 21,206 cycle samples:
+
+| Function category | Self cycle samples | Share |
+|---|---:|---:|
+| Tile sorter | 8,316 | 39.22% |
+| Root scatter | 4,874 | 22.98% |
+| Copy instructions | 5,465 | 25.77% |
+| Bucket finishing outside callees | 2,183 | 10.29% |
+| Other | 368 | 1.74% |
+
+These are sampled active-core cycle proportions, not wall-clock critical-path percentages. Inclusive Rayon call-graph counts overlap and must not be summed. Dynamic callers identify parallel shard work even when folded generic code receives another partition symbol's name. Instruction/op sample shares also differ from cycle shares: the tile accounts for about 70% of sampled ops but 39% of sampled cycles. Reports are in `uprof-scoped-cpi/`.
+
+The tile's IBS profile contained 5,902 sampled loads: 5,493 L1 hits, 392 L2 hits, 14 local-cache hits and 3 local-DRAM hits. About 93.1% hit L1 and 6.6% hit L2. Its 409 sampled L1 load misses averaged 16.84 cycles, with about 80.6% of accumulated sampled miss latency attributed to L2 service. Of 4,765 sampled stores, 1,335 missed L1 (28.0%). These are sampled demand operations, not byte fractions: prefetches, write allocation and writebacks are not accounted by the hit percentages. They establish neither DDR nor L2 bandwidth saturation. Reports and raw captures are in `uprof-scoped-row32/`.
+
+The balanced two-pass plan over the remaining contiguous 24 key bits uses twelve-bit digits, or 4,096 buckets per pass. One active 64-byte line per bucket represents 256 KiB, larger than the 32 KiB L1 data cache, while much of the private tile working set can fit in the 1 MiB L2. Cache-level locality is therefore a relevant next hypothesis. Precise false-sharing attribution and memory-controller read/write traffic remain unmeasured.
+
+#### Candidate outcomes and remaining work
+
+Index-only leaves and indexed final writes did not demonstrate a whole-call improvement: the first record screen measured 14.823 ms versus the earlier 11.557 ms baseline, and packed-key variants measured 18.379 and 15.844 ms. Separating complete-band protection from copying measured 12.420 ms; a frozen-directory wave prototype measured 15.294 ms. These are separate-build development screens, not isolated source-causal comparisons. Native tests passed, but no candidate received full production validation or was retained as an optimization.
+
+Cache-line-padded physical owners did not demonstrate a benefit; that record screen's A/A envelope was 0.909–1.091, so it does not settle the false-sharing hypothesis. Source-aware placement, preferring free blocks strictly inside an unread source's own final band, reduced instrumented record relocation volume to 53.405 MB and repeated volume to 16.548 MB. Its whole-call timing benefit is unverified. A sorted-local-free-list variant avoided linear preferred-block selection but likewise established no reliable speedup.
+
+Later unchanged-baseline repeats also shifted beyond earlier controls. Increasing the sample target to 100 ms and prepared cap to 1,024 MiB for both baseline and candidate did not settle the variation: the baseline record A/A envelope still spanned 0.831–1.169. That experiment also changed the prepared working set and is not directly comparable with the earlier 5 ms sessions. No serial gain or regression is attributed to these source changes; the serial core was not modified, and future candidates must preserve its performance rather than trade it for parallel speedup.
+
+The next unimplemented hypothesis is to scatter the final tile pass directly into its protected final input band, eliminating the subsequent staging-to-input copy without key/index indirection. It requires an explicit ownership handoff, no metadata locks across user callbacks, and restoration to staging if a key panics before the final scatter. Smaller digit fan-out is a separate hypothesis whose additional passes and restoration copies must be measured. No new algorithm or routing choice is settled by these diagnostics.
+
 ## What changed
 
 The initial port keeps the research pipeline: order probe, budgeted insertion, variation scan, root narrowing for 128-bit keys, node routing, digit planning, tile leaves and stable reversal of equal-key runs. A measured follow-up recognizes strictly descending keys during order confirmation and reverses them directly; descending inputs with equal keys keep the stable reversal.

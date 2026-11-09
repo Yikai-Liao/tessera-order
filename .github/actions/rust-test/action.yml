@@ -44,13 +44,15 @@ runs:
     # chosen by ISA, not by operating system, so on main the x86-64 and AArch64
     # Linux runners already interpret what macOS and Windows would repeat; those
     # platforms only have to compile the feature, which is the part a platform
-    # change can break.
+    # change can break. Select library features explicitly: workspace-wide
+    # --all-features also enables tessera-bench/compare-native, which requires
+    # the fetched sources and Linux x86-64 toolchain of the comparison job.
     - shell: bash
       if: inputs.toolchain == 'stable' && runner.os == 'Linux'
-      run: cargo test --workspace --lib --tests --all-features
+      run: cargo test --workspace --lib --tests --features tessera-sort/portable-simd,tessera-sort/rayon
     - shell: bash
       if: inputs.toolchain == 'stable' && runner.os == 'Linux'
-      run: cargo test --workspace --doc --all-features
+      run: cargo test --workspace --doc --features tessera-sort/portable-simd,tessera-sort/rayon
     - shell: bash
       if: inputs.toolchain == 'stable' && runner.os != 'Linux'
-      run: cargo build --workspace --lib --all-features
+      run: cargo build --workspace --lib --features tessera-sort/portable-simd,tessera-sort/rayon

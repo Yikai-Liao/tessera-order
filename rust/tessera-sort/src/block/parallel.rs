@@ -341,9 +341,7 @@ fn partition_impl_with_visit<T: Send, E: Extract<T> + Clone + Send>(
             return ends;
         }
     }
-    if cfg!(miri) || std::env::var_os("TESSERA_COMPACT_SERIAL").is_none() {
-        compact::permute_blocks(&mut global, shards, config.parallel);
-    }
+    compact::permute_blocks(&mut global, shards, config.parallel);
     let panic = global.compact_with(&ends, visit);
     if let Some(payload) = panic {
         unwind::resume(payload);

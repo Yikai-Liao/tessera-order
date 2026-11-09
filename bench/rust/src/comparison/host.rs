@@ -77,15 +77,57 @@ pub(super) fn observe_group(group: &str, phase: &str) -> Value {
 }
 /// Rejects threads outside the adapter's explicitly owned worker pool.
 pub(super) fn check_threads(workers: usize) -> Result<(), String> {
-    if cfg!(target_os = "linux")
-        && fs::read_dir("/proc/self/task")
-            .map_err(|e| e.to_string())?
-            .count()
-            != 1 + workers
-    {
-        return Err(format!(
-            "variant thread count differs from its {workers}-worker budget"
-        ));
+    if !cfg!(target_os = "linux") {
+        return Ok(());
     }
-    Ok(())
+    wait_for_thread_count(1 + workers, || {
+        Ok(fs::read_dir("/proc/self/task")
+            .map_err(|error| error.to_string())?
+            .count())
+    })
+}
+
+/// Requires an exact census before another sample, allowing only bounded retirement.
+fn wait_for_thread_count(
+    expected: usize,
+    mut census: impl FnMut() -> Result<usize, String>,
+) -> Result<(), String> {
+    // pthread_join finishes Rust/TLS work before Linux necessarily removes its
+    // task entry. A churn probe reproduces this with both /proc enumeration and
+    // the kernel Threads field. Census checks are outside the timed region.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(100);
+    loop {
+        let actual = census()?;
+        if actual == expected {
+            return Ok(());
+        }
+        if actual < expected || std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "variant thread count differs: expected {expected}, observed {actual}"
+            ));
+        }
+        std::thread::yield_now();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn census_waits_for_retirement_but_rejects_persistent_or_missing_workers() {
+        let mut counts = [5, 2, 1].into_iter();
+        assert!(wait_for_thread_count(1, || Ok(counts.next().unwrap())).is_ok());
+        assert!(
+            wait_for_thread_count(1, || Ok(2))
+                .unwrap_err()
+                .contains("observed 2")
+        );
+        assert!(
+            wait_for_thread_count(2, || Ok(1))
+                .unwrap_err()
+                .contains("observed 1")
+        );
+        assert!(wait_for_thread_count(1, || Err("cannot inspect threads".into())).is_err());
+    }
 }

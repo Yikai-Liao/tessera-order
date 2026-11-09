@@ -46,7 +46,8 @@ impl BenchmarkPool {
 
 impl Drop for BenchmarkPool {
     fn drop(&mut self) {
-        // Rayon shutdown alone does not wait for TLS cleanup or OS thread exit.
+        // Rayon shutdown alone does not wait for worker/TLS cleanup. Linux may
+        // still expose a retiring task entry briefly after these joins return.
         drop(self.pool.take());
         for worker in self.workers.drain(..) {
             worker.join().expect("join benchmark worker");

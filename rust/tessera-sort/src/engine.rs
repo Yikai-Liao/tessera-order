@@ -405,41 +405,9 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
     let tile_bytes = tile_bytes
         .max(record_bytes)
         .min(MAX_TILE_RECORDS.saturating_mul(record_bytes));
-    let sampled = probe_order(records, extractor);
-    match sampled {
-        Order::Ascending => return,
-        Order::Descending { strict } => {
-            if strict {
-                reverse_strictly(records);
-            } else {
-                reverse_stably(records, extractor);
-            }
-            return;
-        }
-        Order::Unsorted => {
-            let probe_len = (tile_bytes / record_bytes).max(2).min(records.len());
-            if insertion_probe(records, extractor, probe_len) {
-                return;
-            }
-        }
-        Order::Flat => {}
-    }
-    let varying = block::varying_key_bits(records, extractor);
-    if varying == 0 {
+    let Some(varying) = prepare(records, extractor, tile_bytes) else {
         return;
-    }
-    if sampled == Order::Flat {
-        // A flat sample contains an equal adjacent pair, so confirmed descending
-        // keys here are not strict and must keep the stable reversal.
-        match confirm_order(records, extractor) {
-            Order::Ascending => return,
-            Order::Descending { .. } => {
-                reverse_stably(records, extractor);
-                return;
-            }
-            _ => {}
-        }
-    }
+    };
     let mut scratch = Scratch::new();
     let scratch = &mut scratch;
     if E::Value::BITS > 64 {
@@ -468,6 +436,52 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
         tile_bytes,
     }
     .sort_node(records, varying);
+}
+
+/// Applies the shared order, insertion and varying-bit probes before root routing.
+fn prepare<T, E: Extract<T>>(
+    records: &mut [T],
+    extractor: &mut E,
+    tile_bytes: usize,
+) -> Option<u128> {
+    let record_bytes = core::mem::size_of::<T>();
+    let sampled = probe_order(records, extractor);
+    match sampled {
+        Order::Ascending => return None,
+        Order::Descending { strict } => {
+            if strict {
+                reverse_strictly(records);
+            } else {
+                reverse_stably(records, extractor);
+            }
+            return None;
+        }
+        Order::Unsorted => {
+            let probe_len = (tile_bytes / record_bytes).max(2).min(records.len());
+            if insertion_probe(records, extractor, probe_len) {
+                return None;
+            }
+        }
+        Order::Flat => {}
+    }
+
+    let varying = block::varying_key_bits(records, extractor);
+    if varying == 0 {
+        return None;
+    }
+    if sampled == Order::Flat {
+        // An equal sampled pair rules out strictly descending order; confirmed
+        // descending keys must therefore retain the stable reversal.
+        match confirm_order(records, extractor) {
+            Order::Ascending => return None,
+            Order::Descending { .. } => {
+                reverse_stably(records, extractor);
+                return None;
+            }
+            Order::Unsorted | Order::Flat => {}
+        }
+    }
+    Some(varying)
 }
 
 /// Tries to finish `records` with a budgeted insertion pass and returns whether it

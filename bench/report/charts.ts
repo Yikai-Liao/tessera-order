@@ -63,9 +63,10 @@ const SHORT = 1000;
 const LARGEST = 10000000;
 
 // Two significant digits, except that values near 1 keep two decimals so a
-// small difference does not print as "1×".
+// small difference does not print as "1×". Small positive values keep
+// significant digits rather than rounding to zero.
 const times = (v: number) =>
-  `${v >= 100 ? v.toFixed(0) : v < 1.095 ? v.toFixed(2) : Number(v.toPrecision(2))}×`;
+  `${v < 0.01 ? v.toPrecision(2) : v >= 100 ? v.toFixed(0) : v < 1.095 ? v.toFixed(2) : Number(v.toPrecision(2))}×`;
 const formatLength = (n: number) => n.toLocaleString("en-US");
 const formatNs = (v: number) => `${Number(v.toPrecision(3))} ns`;
 function formatBytes(n: number) {
@@ -96,7 +97,7 @@ const toneOf = (variant: string): Tone =>
 // value cell read the same way.
 function speedScale(ratios: number[]): Chart["scale"] {
   const reach = Math.max(2, ...ratios.map((r) => Math.min(RATIO_LIMIT, Math.max(r, 1 / r)) * 1.08));
-  const span = 2 ** Math.ceil(Math.log2(reach));
+  const span = Math.min(RATIO_LIMIT, 2 ** Math.ceil(Math.log2(reach)));
   const steps = Math.log2(span);
   // Every doubling is labelled while there is room; wider axes label every other one.
   const every = steps <= 3 ? 1 : 2;
@@ -343,7 +344,9 @@ function renderInputs(
       guide: `${formatLength(n)} ${ty === "u64" ? "u64 keys" : record.label}; each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to slice::sort`,
       columns: ["Speed", "Rank"],
       groups,
-      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
+      scale: speedScale(
+        standings.flatMap((s) => [s.tessera, s.simd ?? s.tessera, ...s.speeds.map((v) => v.speed)]),
+      ),
       axis: SPEED_AXIS,
       legend: kindLegend(standings.some((s) => s.simd !== null)),
     }),
@@ -377,7 +380,9 @@ function renderTypes(dataset: Dataset, summaries: Map<string, Summary>): Figure 
       guide: `${formatLength(LARGE)} elements; speed relative to slice::sort, geometric mean over the 10 baseline input patterns`,
       columns: ["Speed", "Rank"],
       groups,
-      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
+      scale: speedScale(
+        standings.flatMap((s) => [s.tessera, s.simd ?? s.tessera, ...s.speeds.map((v) => v.speed)]),
+      ),
       axis: SPEED_AXIS,
       legend: kindLegend(standings.some((s) => s.simd !== null)),
     }),
@@ -482,6 +487,7 @@ function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figu
               span: [summary.low, summary.high],
               cells: [
                 times(summary.ratio),
+                `${times(summary.low)}–${times(summary.high)}`,
                 `${summary.aaLow.toFixed(3)}–${summary.aaHigh.toFixed(3)}`,
               ],
             }),
@@ -503,16 +509,16 @@ function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figu
         svg: renderRows({
           title,
           guide: "Sort time / paired Tessera time · nine blocks per build",
-          columns: ["Time ratio", "A/A range"],
+          columns: ["Time ratio", "Block range", "A/A range"],
           groups,
           scale,
           legend: {
-            note: "dot: median · line: block range · each build has its own Tessera control",
+            note: "dot: median · line: block range · triangle: off-scale · per-build Tessera control",
           },
           axis: ["← less time", "more time →"],
         }),
         table: markdownTable(
-          ["Build", "Sort", "Time ratio", "A/A range"],
+          ["Build", "Sort", "Time ratio", "Block range", "A/A range"],
           groups.flatMap((group) =>
             group.rows.map((row) => [group.title, row.name.input, ...row.cells]),
           ),

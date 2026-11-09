@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { parseSvg } from "../svg-test-utils.ts";
+import { parseSvg, textPosition } from "../svg-test-utils.ts";
 import { type RowChart, renderRows } from "./rows.ts";
 
 const fixture = (): RowChart => ({
@@ -96,6 +96,60 @@ test("overflow symbols survive collision layout", () => {
           );
         }
       }
+});
+
+test("span endpoints disclose overflow", () => {
+  for (const [span, rotations] of [
+    [[0.5, 2], []],
+    [[0.25, 2], [270]],
+    [[0.5, 4], [90]],
+    [
+      [0.25, 4],
+      [270, 90],
+    ],
+  ] as [number[], number[]][]) {
+    const input = fixture();
+    const row = input.groups[0].rows[0];
+    row.swarm = false;
+    row.marks = [{ value: 1, tone: "primary" }];
+    row.span = [span[0], span[1]];
+    input.scale.ticks = [
+      { value: input.scale.low, label: "low limit" },
+      { value: 1, label: "reference" },
+      { value: input.scale.high, label: "high limit" },
+    ];
+    input.legend = { note: "" };
+    const root = parseSvg(renderRows(input));
+    const triangles = [...root.querySelectorAll('[aria-label="dot"] path')];
+    assert.deepEqual(
+      triangles.map((mark) =>
+        Number(mark.getAttribute("transform")?.match(/rotate\(([^)]+)\)/)?.[1]),
+      ),
+      rotations,
+      String(span),
+    );
+    const median = root.querySelectorAll('[aria-label="dot"] circle');
+    assert.equal(median.length, 1);
+    const ticks = [...root.querySelectorAll('[aria-label="x-axis tick label"] text')];
+    for (const triangle of triangles) {
+      const rotation = Number(triangle.getAttribute("transform")?.match(/rotate\(([^)]+)\)/)?.[1]);
+      const boundary = ticks.find(
+        (tick) => tick.textContent === (rotation === 270 ? "low limit" : "high limit"),
+      );
+      assert.ok(boundary);
+      const position = textPosition(triangle);
+      assert.ok(
+        Math.abs(position.x - textPosition(boundary).x) < 1e-6,
+        "endpoint is at axis limit",
+      );
+      assert.equal(position.y, Number(median[0].getAttribute("cy")), "endpoint stays on its row");
+      assert.notEqual(
+        position.x,
+        Number(median[0].getAttribute("cx")),
+        "endpoint is not at median",
+      );
+    }
+  }
 });
 
 test("plotting modules have no host dependencies", async () => {

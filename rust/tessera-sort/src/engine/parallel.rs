@@ -3,6 +3,7 @@
 //! Parallel root partition and completion of materialized buckets.
 
 use super::*;
+use crate::key::OwnedKeyHalf;
 use rayon::Scope;
 
 /// The archived experiment did not reliably win at 512 KiB; keep 1 MiB as a
@@ -37,12 +38,12 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: b
     // Keep the existing narrow kernels when only one half of a 128-bit key varies.
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
-            let mut key = Narrow::<E, 0>(extractor.clone());
+            let mut key = OwnedKeyHalf::<E, 0>(extractor.clone());
             sort_root::<T, _, CACHED>(records, &mut key, &mut scratch, varying, tile_bytes);
             return;
         }
         if varying & ((1u128 << 64) - 1) == 0 {
-            let mut key = Narrow::<E, 64>(extractor.clone());
+            let mut key = OwnedKeyHalf::<E, 64>(extractor.clone());
             sort_root::<T, _, CACHED>(records, &mut key, &mut scratch, varying >> 64, tile_bytes);
             return;
         }
@@ -119,30 +120,6 @@ fn prepare<T, E: Extract<T>>(
         }
     }
     Some(varying)
-}
-
-#[derive(Clone)]
-struct Narrow<E, const SHIFT: usize>(E);
-
-impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for Narrow<E, SHIFT> {
-    type Value = u64;
-
-    #[inline]
-    fn key(&mut self, record: &T) -> u64 {
-        (self.0.key(record).to_u128() >> SHIFT) as u64
-    }
-
-    fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
-        self.0.try_count_window(records, low + SHIFT, width)
-    }
-
-    fn try_count_window_parallel(&mut self, records: &mut [T], low: usize, width: usize) -> bool
-    where
-        T: Send,
-    {
-        self.0
-            .try_count_window_parallel(records, low + SHIFT, width)
-    }
 }
 
 /// A batch of retired root buckets, retained as separate exclusive borrows.

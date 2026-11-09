@@ -433,37 +433,134 @@ impl<K: RadixKey> Extract<K> for Direct {
     }
 }
 
-/// The 64 key bits starting at `SHIFT`, used when only one half of a 128-bit
-/// key varies.
+/// Borrows the 64 key bits starting at `SHIFT` when the other half is constant.
 pub(crate) struct KeyHalf<'a, E, const SHIFT: usize>(pub &'a mut E);
-impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for KeyHalf<'_, E, SHIFT> {
-    type Value = u64;
-    #[inline]
-    fn key(&mut self, record: &T) -> u64 {
-        (self.0.key(record).to_u128() >> SHIFT) as u64
-    }
 
-    fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
-        // The engine narrows a key to one half only when the other half is
-        // constant, so the window moves up with the half and still covers every
-        // difference in the underlying key.
-        self.0.try_count_window(records, low + SHIFT, width)
-    }
+/// Owns the same half-key view so parallel jobs can clone its extractor.
+#[cfg(feature = "rayon")]
+#[derive(Clone)]
+pub(crate) struct OwnedKeyHalf<E, const SHIFT: usize>(pub E);
 
-    #[cfg(feature = "rayon")]
-    fn try_count_window_parallel(&mut self, records: &mut [T], low: usize, width: usize) -> bool
-    where
-        T: Send,
-    {
-        self.0
-            .try_count_window_parallel(records, low + SHIFT, width)
-    }
+/// Keeps truncation and window translation identical for both ownership forms.
+/// Scans retain the defaults for the narrowed keys, not the inner key width.
+macro_rules! impl_key_half {
+    ($half:ty) => {
+        impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for $half {
+            type Value = u64;
+
+            #[inline]
+            fn key(&mut self, record: &T) -> u64 {
+                (self.0.key(record).to_u128() >> SHIFT) as u64
+            }
+
+            fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
+                // The other half is constant, so this translated window still
+                // covers every difference in the underlying key.
+                self.0.try_count_window(records, low + SHIFT, width)
+            }
+
+            #[cfg(feature = "rayon")]
+            fn try_count_window_parallel(
+                &mut self,
+                records: &mut [T],
+                low: usize,
+                width: usize,
+            ) -> bool
+            where
+                T: Send,
+            {
+                self.0
+                    .try_count_window_parallel(records, low + SHIFT, width)
+            }
+        }
+    };
 }
+
+impl_key_half!(KeyHalf<'_, E, SHIFT>);
+#[cfg(feature = "rayon")]
+impl_key_half!(OwnedKeyHalf<E, SHIFT>);
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloc::vec::Vec;
+
+    #[test]
+    fn half_keys_keep_encoded_bits() {
+        let key = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210u128;
+        assert_eq!(
+            KeyHalf::<_, 0>(&mut Direct).key(&key),
+            0xfedc_ba98_7654_3210
+        );
+        assert_eq!(
+            KeyHalf::<_, 64>(&mut Direct).key(&key),
+            0x0123_4567_89ab_cdef
+        );
+        #[cfg(feature = "rayon")]
+        {
+            assert_eq!(
+                OwnedKeyHalf::<_, 0>(Direct).key(&key),
+                0xfedc_ba98_7654_3210
+            );
+            assert_eq!(
+                OwnedKeyHalf::<_, 64>(Direct).key(&key),
+                0x0123_4567_89ab_cdef
+            );
+        }
+    }
+
+    /// Exercises both ownership forms against an independently sorted full key.
+    #[cfg(feature = "rayon")]
+    fn check_half_windows<const SHIFT: usize>() {
+        for (low, width) in [(0, 8), (9, 3), (57, 7)] {
+            let mask = ((1u128 << width) - 1) << (low + SHIFT);
+            let base = 0x73a5_491b_c621_d8e0_2b93_a3f7_1d05_0000u128 & !mask;
+            let input: Vec<_> = (0..65)
+                .map(|index| base | (((index * 37) as u128) << (low + SHIFT) & mask))
+                .collect();
+            let mut expected = input.clone();
+            expected.sort();
+
+            for parallel in [false, true] {
+                let mut borrowed = input.clone();
+                let mut owned = input.clone();
+                let mut direct = Direct;
+                let mut half = KeyHalf::<_, SHIFT>(&mut direct);
+                let mut owned_half = OwnedKeyHalf::<_, SHIFT>(Direct);
+                if parallel {
+                    assert!(half.try_count_window_parallel(&mut borrowed, low, width));
+                    assert!(owned_half.try_count_window_parallel(&mut owned, low, width));
+                } else {
+                    assert!(half.try_count_window(&mut borrowed, low, width));
+                    assert!(owned_half.try_count_window(&mut owned, low, width));
+                }
+                assert_eq!(borrowed, expected);
+                assert_eq!(owned, expected);
+
+                let mut records: Vec<_> = input.iter().copied().zip(0..input.len()).collect();
+                let original = records.clone();
+                let mut by_key = ByKey(|record: &(u128, usize)| record.0);
+                let mut half = KeyHalf::<_, SHIFT>(&mut by_key);
+                let mut owned_half =
+                    OwnedKeyHalf::<_, SHIFT>(ByKey(|record: &(u128, usize)| record.0));
+                if parallel {
+                    assert!(!half.try_count_window_parallel(&mut records, low, width));
+                    assert!(!owned_half.try_count_window_parallel(&mut records, low, width));
+                } else {
+                    assert!(!half.try_count_window(&mut records, low, width));
+                    assert!(!owned_half.try_count_window(&mut records, low, width));
+                }
+                assert_eq!(records, original);
+            }
+        }
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn half_windows_keep_offsets_and_payloads() {
+        check_half_windows::<0>();
+        check_half_windows::<64>();
+    }
 
     /// Checks confirmation against scalar extraction at every adjacent pair.
     fn check_confirmation<K: RadixKey>(mut keys: Vec<K>) {

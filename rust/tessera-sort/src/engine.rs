@@ -1555,12 +1555,15 @@ mod tests {
             // the stack.
             let mut extractor = ByKey(|_: &u16| -> u16 {
                 assert!(calls < 12_000, "node recursion did not make progress");
-                let phase = calls % (len + 65 + MODE_SAMPLE_LEN);
+                let phase = calls % (len + 65 + 4 + MODE_SAMPLE_LEN);
                 calls += 1;
                 if phase < len {
                     1
                 } else if phase < len + 65 {
                     if phase % 2 == 0 { 0 } else { 0x1ff }
+                } else if phase < len + 65 + 4 {
+                    // Reject the node order gate before the next mode sample.
+                    [1, 0, 0, 1][phase - len - 65]
                 } else if greater {
                     0
                 } else {

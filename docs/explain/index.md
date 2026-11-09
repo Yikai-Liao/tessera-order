@@ -12,7 +12,7 @@ A radix sort reads digits of the key instead of comparing keys, so it runs in ti
 
 1. Split large inputs on their **top digit** with a stable **block partition** that recycles consumed input blocks as output blocks. It needs only 2R spare blocks and a small block table (R is the number of buckets).
 2. Once a bucket fits a **64 KiB tile**, finish it in a cache-resident scratch buffer with the cheapest leaf: insertion sort, a tile-local MSD partition, or LSD counting passes.
-3. Before any of that, **skip work the data does not need**: sorted or reversed inputs, nearly sorted inputs, key bits that never change, heavily repeated keys and short outlier runs.
+3. Before any of that, **skip work the data does not need**: sorted or reversed inputs, nearly sorted inputs, key bits that never change and heavily repeated keys. Reuse order confirmation when partitions expose monotone children.
 
 ## The pipeline
 
@@ -23,8 +23,8 @@ The figure, as a list:
 1. **Order probe.** Sample adjacent pairs. Ascending inputs return at once. Strictly descending inputs reverse directly; other descending inputs reverse stably.
 2. **Budgeted insertion.** Unsorted inputs get an insertion pass with a swap budget. Nearly sorted inputs finish here.
 3. **Varying bits.** One scan finds the bits that differ between keys. If none do, the input is done. Later digits cover only the varying bits.
-4. **Node or tile.** An input larger than 64 KiB of records is a *node*, and anything smaller is a *tile*.
-5. **Node partitions.** A node is split by a repeated-key partition, an outlier-run lift or a top-digit block partition. Each child is routed again.
+4. **Child order, then node or tile.** A routed slice first reuses the order probe, returning or reversing stably when confirmed ordered. An unfinished slice larger than 64 KiB of records is a *node*, and anything smaller is a *tile*.
+5. **Node partitions.** A node is split by a repeated-key partition or a top-digit block partition. Larger children return to the shared order gate. Tile-sized digit buckets finish directly during block compaction.
 6. **Tile leaves.** A tile is finished by insertion sort, a tile-local MSD partition or LSD counting passes.
 
 ## Reading order
@@ -33,7 +33,7 @@ The figure, as a list:
 |---|---|
 | [1. Radix sort in one pass](radix-sort.md) | Counting passes, LSD versus MSD, and a side-by-side comparison with Block LSD and Tessera |
 | [2. Keys as unsigned integers](keys.md) | How signed integers, floats and `Reverse` become radix keys, and why constant bits are free |
-| [3. Routing an input](routing.md) | The order probe, budgeted insertion, nodes and tiles, repeated keys and outlier runs |
+| [3. Routing an input](routing.md) | The order probe, budgeted insertion, nodes and tiles, ordered children and repeated keys |
 | [4. The block partition](block-partition.md) | The O(√n) stable partition, step by step, and how the block size is chosen |
 | [5. Finishing tiles](tiles.md) | Digit planning, the cost model, and the three tile leaves |
 | [6. Ownership and panics](safety.md) | Why any record type is safe, and what happens when a key function panics |

@@ -48,7 +48,7 @@ What the figure shows:
 | Extra memory | n records | n records | O(R × depth) counters | O(√n) | O(√n) + one 64 KiB tile |
 | Digit order | low → high | high → low | high → low | low → high | high digit split, then tiles |
 | Records moved | every pass moves all n | only buckets that still need sorting | only buckets that still need sorting | every pass moves all n | each split level moves its node once; tiles are sorted in cache |
-| Adapts to data | no | stops on small buckets | stops on small buckets | no | probes order, drops constant bits, partitions repeated keys and outliers, picks a leaf per tile |
+| Adapts to data | no | stops on small buckets | stops on small buckets | no | probes root and child order, drops constant bits, partitions repeated keys, picks a leaf per tile |
 | Cache behaviour on large n | each pass streams through n records twice | good once buckets are small | random swaps over the whole array | each pass streams through n records | one streaming split, then cache-resident tiles |
 
 Tessera takes **stability and O(√n) memory** from Block LSD, the **top-digit-first split** and early stop from MSD, and uses **LSD counting passes** only inside tiles, where the second buffer is at most 64 KiB.

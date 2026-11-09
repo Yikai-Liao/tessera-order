@@ -330,6 +330,33 @@ A Default-build process screen against `e26cd29`, using the maintained `compare 
 
 A second screen after adding the tile-fit guard measured sorted and reverse `u64` inputs at 48 records. Their medians, 0.9958 and 0.9990, were inside the respective A/A ranges, 0.9923–1.0077 and 0.9953–1.0047. The sorted case nevertheless had a block ratio of 1.1321; its cause remains unresolved. These local screens do not establish a general gain or explain the placement-sensitive alerts of other revisions. Raw results remain outside the repository under `short-insertion-random48` and `short-insertion-ordered48`; exact-head continuous results remain the performance acceptance gate.
 
+### Ordered children and bucket order
+
+Partition children scan their remaining candidate bits and then reuse the root's full order confirmation, and a node that already holds the two runs of its top varying bit is split there instead of being partitioned. Together these replace the specialized minority-bit/end-run detector, its 1,024-record cap and its rotation/insertion route. Tile-sized digit buckets still finish during compaction.
+
+The two general properties are cheaper than the detector they replace. Both scans stop at their first conflict, so an unordered child pays a few key reads. The run split reads the top varying bit once: a node that is `0*1*` or `1*0*` in that bit already holds the two runs the partition would form, so one rotation at most puts them in order and no block scratch is reserved. It has no sample, no threshold and no length cap, and it applies to a block of keys at either end of the body rather than to one end.
+
+A maintained `pnpm -s tools compare commit 8bd64d9` screen on this host (one pinned CPU, `u64`, 65,536 records, nine blocks, paired process-level A/A) measured these current/baseline ratios:
+
+| Input | Ratio | Blocks | A/A | Screen |
+|---|---:|---|---|---|
+| `u64/sorted_tail/65536` | 0.3329 | 0.304–0.361 | 0.955–1.045 | faster |
+| `u64/d16/65536` | 1.1214 | 1.070–1.205 | 0.903–1.097 | slower |
+| `u64/random/65536` | 0.9655 | 0.920–1.060 | 0.961–1.040 | within noise |
+| `u64/sorted/65536` | 0.9631 | 0.852–1.147 | 0.844–1.157 | within noise |
+| `u64/sorted99/65536` | 0.9738 | 0.836–1.092 | 0.927–1.073 | within noise |
+| `u64/far_swaps/65536` | 1.0197 | 0.936–1.090 | 0.920–1.080 | within noise |
+| `u64/equal/65536` | 0.9589 | 0.818–1.028 | 0.942–1.058 | within noise |
+| `u64/two_values/65536` | 0.9915 | 0.944–1.066 | 0.934–1.066 | within noise |
+
+`sorted_tail/1000000` was checked with the research harness rather than the screen: 18.2–23.1 ms for the baseline executable against 3.6–5.0 ms for this one. `d16` is the one screen that reports a direction, and it reads every record the same number of times in both revisions: the whole node varies in four bits, so it takes the counted window instead of any partition this branch added. Its Portable SIMD configuration measured −1.1 % on the same head, so the direction tracks placement rather than work; it remains an open observation rather than a claimed result.
+
+A peak-allocation harness measured the scratch of one `u64/sorted_tail/65536` sort at 8,672,352 bytes for a partitioned revision and 65,536 bytes for this one, against 89,356 bytes for `fafaaa2`. The 8.4 MB was one block-scratch allocation: the 12-bit digit that a concentrated top window selects reserves `2 x 4096` blocks of records. The run split never reaches that partition, with the run behind or ahead of the body.
+
+An earlier revision of this branch also reordered `confirm_order` to check ascending order first, so constant children could reuse the blocked or vector scan instead of a scalar search. Callgrind counted 12,827,780 instructions for that revision against 12,037,195 for `fafaaa2` on the same three batches of `f64/sorted/65536`, a difference of about one instruction per key, and the case measured 8% slower in every local run and 12–13% slower in continuous Default. Constant children never reached the reordered backend on the continuous cases either: `u64/equal/65536` read exactly one key per record in both revisions. The reordering was reverted, which restores `fafaaa2`'s confirmation schedule; the child gate and the bucket-order split do not depend on it.
+
+Continuous feedback for the same executable is also repeated rather than stable on the smallest cases: two runs of `a7192af` on Bencher measured `u64/equal/1000` Portable SIMD at 640 ns both times and `u64/sorted/1000` at 626 and 627 ns, while `row_u64/equal/48` moved from +7.3% to −1.2%. Those inputs read every record exactly once in both revisions, so the alerts track the executable's placement, not its work; this revision returns their code to the `fafaaa2` schedule.
+
 ### Exploratory SIMD constraints
 
 The optional backend experiments used AVX2, seven interleaved rounds of separate binaries summarized by per-round minimum times, and a separate A/A run. They did not use the [protocol](../development/benchmarking.md#timing-and-statistics)'s nine-block paired timing or independently placed baseline copies, and did not record output-hash checks. These observations preserve design constraints, not established speedup or regression claims.

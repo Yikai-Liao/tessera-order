@@ -13,6 +13,7 @@ thread_local! {
     static ENABLED: Cell<bool> = const { Cell::new(false) };
     static ALLOCS: Cell<usize> = const { Cell::new(0) };
     static BYTES: Cell<isize> = const { Cell::new(0) };
+    static PEAK: Cell<isize> = const { Cell::new(0) };
 }
 struct Counting;
 #[global_allocator]
@@ -20,7 +21,11 @@ static ALLOCATOR: Counting = Counting;
 
 fn record(bytes: isize, allocation: bool) {
     if ENABLED.try_with(Cell::get).unwrap_or(false) {
-        BYTES.with(|total| total.set(total.get() + bytes));
+        BYTES.with(|total| {
+            let live = total.get() + bytes;
+            total.set(live);
+            PEAK.with(|peak| peak.set(peak.get().max(live)));
+        });
         if allocation {
             ALLOCS.with(|total| total.set(total.get() + 1));
         }
@@ -57,12 +62,21 @@ unsafe impl GlobalAlloc for Counting {
 }
 
 fn measure(f: impl FnOnce()) -> (usize, isize) {
+    measure_peak(f).0
+}
+
+/// Measures allocation count, net bytes and the peak live size of one call.
+fn measure_peak(f: impl FnOnce()) -> ((usize, isize), isize) {
     ALLOCS.with(|x| x.set(0));
     BYTES.with(|x| x.set(0));
+    PEAK.with(|x| x.set(0));
     ENABLED.with(|x| x.set(true));
     f();
     ENABLED.with(|x| x.set(false));
-    (ALLOCS.with(Cell::get), BYTES.with(Cell::get))
+    (
+        (ALLOCS.with(Cell::get), BYTES.with(Cell::get)),
+        PEAK.with(Cell::get),
+    )
 }
 
 #[test]
@@ -82,6 +96,30 @@ fn scratch_released_after_sort() {
     assert!(allocations > 0);
     assert_eq!(bytes, 0);
     assert!(keys.is_sorted());
+}
+
+#[test]
+fn bucket_ordered_input_keeps_scratch_in_one_tile() {
+    // A sorted body with a run of keys above it is already in bucket order at
+    // the top bit, so splitting there needs no block partition. The run sits
+    // either side of the body: behind it after a rotation. The wide digit the
+    // partition would choose reserves 2 * 2^12 blocks of records, which is
+    // 8 MiB for these keys.
+    let len = 65_536usize;
+    let run = len / 128;
+    let above: Vec<u64> = (0..run as u64).rev().map(|id| 1 << 63 | id).collect();
+    let body: Vec<u64> = (0..(len - run) as u64).collect();
+    for keys in [
+        body.iter().chain(&above).copied().collect::<Vec<_>>(),
+        above.iter().chain(&body).copied().collect::<Vec<_>>(),
+    ] {
+        let mut keys = keys;
+        let ((allocations, net), peak) = measure_peak(|| stable_sort(&mut keys));
+        assert!(keys.is_sorted());
+        assert!(allocations > 0);
+        assert_eq!(net, 0);
+        assert!(peak <= 128 * 1024, "peak scratch {peak}");
+    }
 }
 
 #[test]

@@ -6,6 +6,12 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { command } from "../tools/process.ts";
 
+/** Align loops and non-fallthrough blocks to 64 bytes in measured Rust builds. */
+export const ALIGNMENT_RUSTFLAGS = [
+  "-Cllvm-args=-align-loops=64",
+  "-Cllvm-args=-align-all-nofallthru-blocks=6",
+];
+
 /** Resolve the checkout that supplies benchmark sources and configuration. */
 export function repositoryRoot() {
   return command("git", ["rev-parse", "--show-toplevel"], { capture: true });

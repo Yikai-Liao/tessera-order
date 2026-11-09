@@ -8,6 +8,7 @@ import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
 import {
+  ALIGNMENT_RUSTFLAGS,
   buildBenchmark,
   copyLibraryRevision,
   copySnapshot,
@@ -124,11 +125,7 @@ export async function buildRevisions(
           `link-arg=-Map=${map}`,
         ];
   const extraFlags =
-    control === "cgu1"
-      ? ["-Ccodegen-units=1"]
-      : control === "aligned"
-        ? ["-Cllvm-args=-align-loops=64", "-Cllvm-args=-align-all-nofallthru-blocks=6"]
-        : [];
+    control === "cgu1" ? ["-Ccodegen-units=1"] : control === "aligned" ? ALIGNMENT_RUSTFLAGS : [];
   let env: NodeJS.ProcessEnv | undefined;
   const build = async (role: "baseline" | "current", seed: number | undefined) => {
     const args = rustcArgs(seed);

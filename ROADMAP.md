@@ -16,6 +16,18 @@ Open questions for this milestone:
 - **Sample duration and prepared-memory cap.** Fix the defaults from the test machine's memory and the time a 10M-record case takes.
 - **Cost of cached bucket IDs on 8-byte rows.** Evaluate `{u32 key, u32 row}` results in the first complete release report. If the cost is large, consider an `unsafe` entry point that skips the cache ([rationale](docs/design/engine.md#record-handling)).
 
+## Maintainability refactor
+
+A repository-wide round that removes duplicated rules and narrows change surfaces without changing algorithm logic or performance. See the [maintainability refactor proposal](docs/proposals/maintainability-refactor.md).
+
+| Deliverable | Done when |
+|---|---|
+| Typed native identity | A record type and a native registry index cannot be combined freely; layout, kernel output and algorithm name tests pass |
+| Benchmark IDs and records | Each ID grammar has one owner per language; each record and adapter rule has one authoritative location |
+| Tooling and documentation boundaries | `tools/` gets the repository root and comment marker without importing the workspace or GitHub publisher; stale statements and the implemented Rayon proposal are folded into their topics |
+
+The proposal also lists engine debt from the parallel engine for a separately measured round.
+
 ## Python binding
 
 An independent track that binds the Rust crate and does not wait for C++. See the [Python binding proposal](docs/proposals/python-binding.md).

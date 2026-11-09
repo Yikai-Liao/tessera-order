@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { catalog } from "../catalog.ts";
 import {
   caseId,
   type Dataset,
@@ -72,6 +73,8 @@ export function createFixture(simd = false): Dataset {
   };
   const groups = new Set<string>();
   for (const c of cases) {
+    const recordBytes = catalog.types.find((record) => record.id === c.ty)?.bytes;
+    if (recordBytes === undefined) throw new Error(`Missing catalog width for ${c.ty}`);
     const group = `${c.ty}/${c.distribution}`;
     groups.add(group);
     const factors: Record<string, number> = {
@@ -105,17 +108,16 @@ export function createFixture(simd = false): Dataset {
     }
     for (const variant of c.variants) {
       if (c.len > 1000000 && c.ty !== "u64" && variant !== "tessera") continue;
-      const size = c.ty === "record128" ? 128 : c.ty === "u32" ? 4 : 8;
       dataset.memory.push({
         case_id: caseId(c),
         variant,
         build: "default",
         peak_extra_bytes:
           variant === "tessera" || variant === "glidesort-sqrt"
-            ? Math.ceil(Math.sqrt(c.len)) * size * 16
+            ? Math.ceil(Math.sqrt(c.len)) * recordBytes * 16
             : variant === "vqsort" || variant === "std-unstable"
               ? 0
-              : c.len * size,
+              : c.len * recordBytes,
         verified: true,
       });
     }

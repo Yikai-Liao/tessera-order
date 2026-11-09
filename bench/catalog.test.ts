@@ -9,6 +9,7 @@ import {
   caseParts,
   catalog,
   comparisonId,
+  criterionGroup,
   criterionId,
   distribution,
   modeName,
@@ -56,6 +57,7 @@ test("both benchmark grammars match the shared language fixture", () => {
       length: number;
       mode: string;
       comparison: string;
+      criterion_group: string;
       criterion: string;
     }[];
   };
@@ -63,6 +65,7 @@ test("both benchmark grammars match the shared language fixture", () => {
     const input = { ty: entry.type, distribution: entry.distribution, len: entry.length };
     assert.equal(comparisonId(input), entry.comparison);
     assert.equal(criterionId(input, entry.mode), entry.criterion);
+    assert.equal(criterionGroup(entry.criterion), entry.criterion_group);
     assert.deepEqual(parseComparisonId(entry.comparison), { ...input, seed: "s1" });
     assert.deepEqual(parseCriterionId(entry.criterion), {
       ...input,

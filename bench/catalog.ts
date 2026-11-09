@@ -122,6 +122,11 @@ export function criterionId(input: CaseIdentity, mode: string) {
   return `rust/${comparisonId(input)}/${mode}`;
 }
 
+/** Extract a timed ID's Criterion group; callers supply a structurally valid ID. */
+export function criterionGroup(id: string) {
+  return id.slice(0, id.lastIndexOf("/"));
+}
+
 /** Decode comparison inputs, including historical type and distribution names. */
 export function parseComparisonId(id: string) {
   const parts = id.split("/");

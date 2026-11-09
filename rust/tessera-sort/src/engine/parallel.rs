@@ -50,6 +50,60 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: b
     sort_root::<T, E, CACHED>(records, extractor, &mut scratch, varying, tile_bytes);
 }
 
+/// Prepares a large root while preserving the serial entry's call geometry.
+fn prepare<T, E: Extract<T>>(
+    records: &mut [T],
+    extractor: &mut E,
+    tile_bytes: usize,
+) -> Option<u128> {
+    let record_bytes = core::mem::size_of::<T>();
+    let sampled = probe_order(records, extractor);
+    match sampled {
+        Order::Ascending => return None,
+        Order::Descending { strict } => {
+            if strict {
+                reverse_strictly(records);
+            } else {
+                reverse_stably(records, extractor);
+            }
+            return None;
+        }
+        Order::Unsorted => {
+            // This input already fits the insertion leaf; a budget and varying-bit
+            // scan cannot select a different finishing algorithm.
+            if records.len() <= INSERTION_MAX
+                && records.len().saturating_mul(record_bytes) <= tile_bytes
+            {
+                extractor.finish_insertion(records);
+                return None;
+            }
+            let probe_len = (tile_bytes / record_bytes).max(2).min(records.len());
+            if insertion_probe(records, extractor, probe_len) {
+                return None;
+            }
+        }
+        Order::Flat => {}
+    }
+
+    let varying = block::varying_key_bits(records, extractor);
+    if varying == 0 {
+        return None;
+    }
+    if sampled == Order::Flat {
+        // An equal sampled pair rules out strictly descending order; confirmed
+        // descending keys must therefore retain the stable reversal.
+        match confirm_order(records, extractor) {
+            Order::Ascending => return None,
+            Order::Descending { .. } => {
+                reverse_stably(records, extractor);
+                return None;
+            }
+            Order::Unsorted | Order::Flat => {}
+        }
+    }
+    Some(varying)
+}
+
 #[derive(Clone)]
 struct Narrow<E, const SHIFT: usize>(E);
 

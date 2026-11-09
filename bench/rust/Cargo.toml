@@ -12,6 +12,7 @@ rayon = ["tessera-sort/rayon", "dep:rayon"]
 compare = ["dep:rayon", "dep:radsort", "dep:rdst", "dep:glidesort", "dep:voracious_radix_sort", "dep:sha2", "dep:fs2"]
 compare-native = ["compare"]
 portable-simd = ["tessera-sort/portable-simd"]
+layout-study = []
 
 [dependencies]
 rayon = { version = "1.12", optional = true }

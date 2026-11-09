@@ -8,6 +8,8 @@ mod comparison;
 pub mod plan;
 #[cfg(any(feature = "compare", feature = "rayon"))]
 pub mod pool;
+#[cfg(feature = "layout-study")]
+pub mod timing;
 #[cfg(feature = "compare")]
 pub use comparison::main;
 

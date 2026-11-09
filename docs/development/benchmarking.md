@@ -10,6 +10,7 @@ Run `pnpm tools` from the repository root with Node.js 24, the pinned pnpm and R
 |---|---|---|
 | Compare working-tree code with a commit | `pnpm tools compare commit COMMIT` | Two revision builds, nine rotating baseline/control/current process blocks, paired process-level A/A, verification, provenance and a report |
 | Sample revision comparisons across layouts | `pnpm tools compare commit COMMIT --layout-seeds 1,2,3,4,5` | One revision pair per fixed LLD seed, nine blocks per seed, link maps and descriptive cross-layout ranges; Linux x86-64 GNU only |
+| Study candidate-only versus paired multi-layout budgets | `pnpm tools compare protocols COMMIT` | Nine held-out layout cohorts, fixed ±5% screens, effective timing settings, measured process costs and diagnostic wall times; local experiment only |
 | Compare algorithms | `pnpm tools compare algorithms` | Registered algorithms in one timing executable per configuration, nine shuffled blocks, two Tessera calls for A/A, output verification, allocation measurement and a report |
 | Local parallel comparison | `pnpm tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` | Serial controls, Tessera-8 and Rayon stable-8 in the shared paired harness; choose a CPU list appropriate to the host |
 | Full algorithm comparison | `pnpm tools compare algorithms --plan release --simd` | Release coverage, native opponents and a separate Portable SIMD build |
@@ -18,7 +19,7 @@ Run `pnpm tools` from the repository root with Node.js 24, the pinned pnpm and R
 | Regenerate a report | `pnpm tools report DIR` | Statistics and figures from retained results, without new measurements |
 | Read current main or PR feedback | `pnpm -s tools status main` or `pnpm -s tools status --pr NUMBER` | Exact-ref workflow and benchmark states; [read-only interpretation](continuous-benchmarks.md#read-feedback-from-a-pr) |
 
-`compare commit` defaults to `HEAD` and the `local` plan; `compare algorithms` defaults to the smoke algorithm plan. Replace uppercase placeholders. The [CLI reference](tooling.md) defines output, logs and CI commands. Use [plans and axis overrides](#experiment-plans) for custom coverage. `report` reads retained results without compiling or measuring; incomplete algorithm sessions require `--partial`, while local revision reports require all nine blocks.
+`compare commit` and `compare protocols` default to `HEAD` and the `local` plan; `compare algorithms` defaults to the smoke algorithm plan. Replace uppercase placeholders. The [CLI reference](tooling.md) defines output, logs and CI commands. Use [plans and axis overrides](#experiment-plans) for custom coverage. `report` reads retained results without compiling or measuring; incomplete algorithm sessions require `--partial`, while local revision and protocol reports require all nine blocks or trials.
 
 ## Run an experiment
 
@@ -87,6 +88,24 @@ For a same-source calibration, keep the working-tree library identical to `HEAD`
 Schema-2 `local.json` retains every seed's schema-1 revision run. Reports keep each seed's process-level A/A range and verdict, then describe the median and min/max of the per-seed median ratios. Each revision's spread is max/min minus one across its per-seed median times. Per-case `layout-N.svg` figures show absolute median times and nine-block ranges for both revisions; baseline observations are the paired process means. These ranges describe the observed sample; they include host/process variation and are not confidence intervals or automatic regression thresholds. Equal seeds need not produce matching addresses across revisions, because section inventories and sizes can change. A few favorable seeds cannot establish source attribution or determine how many layouts suffice for a cloud budget. Function-section shuffling also does not independently vary block ordering inside a function or CGU/inlining choices.
 
 Use `pnpm tools report DIR` for either local schema; every seed must have nine complete blocks. Layout sampling does not change continuous Testbeds, thresholds, sampling windows or submission behavior.
+
+### Candidate-budget protocol study
+
+`compare protocols [COMMIT]` tests whether three shorter layouts improve screening within the current candidate-only process budget. It does not change continuous behavior. The baseline library comes from the named commit; current library sources and the harness come from the working-tree snapshot. The default `--expect same` requires identical library source hashes. Use `--expect faster` or `--expect slower` to declare a changed-source hypothesis before measuring, and `--control REGEX` for unaffected timed IDs within that study. A control pattern must match at least one selected case. Preview the same plan first.
+
+```sh
+pnpm tools plan local --types u32 --distributions random --lengths 48
+pnpm tools compare protocols HEAD --types u32 --distributions random --lengths 48 \
+  --cpu 2 --seed 101 --out bench/results/protocol-null
+```
+
+The command uses the [layout-build prerequisites](#layout-sampling) and a local-only `layout-study` benchmark feature. Its timing overrides are compiled out of ordinary smoke and continuous builds. Builds finish before any timed trial. `--seed` selects the first of 54 distinct LLD seeds, defaulting to 101; choose a new range for a held-out validation rather than replacing unfavorable seeds. Nine trials each have three baseline/current pairs with distinct seeds even when source is identical. Source roles alternate within seed pairs; the single-layout pair rotates among the three. Single/multiple arm order alternates between trials, while process and layout order rotate. Both arms execute the same retained binary for each shared revision/seed.
+
+The single-layout score is current / baseline from full Criterion windows. The three-layout score is median(current layouts) / median(baseline layouts), with each warm-up and measurement window divided by six. Sample counts round upward and retain Criterion's ten-sample minimum, so a large case's samples need not divide evenly. Executables emit their effective per-case warm-up, window and sample counts before input generation; both revisions must agree. Extra baseline repetitions supply process A/A diagnostics but never enter either score. Each trial uses the existing fixed 0.95–1.05 limits, independently of those diagnostics; this is a different experimental screen from the normal eight-of-nine/A/A revision rule.
+
+Budget accounting charges one current process for the single-layout arm, treating the baseline as cached, versus three baseline and three current processes for the paired arm. Each recorded process cost includes startup, preparation, verification, warm-up, measurement, analysis and result collection. The prespecified gate is a median paired cost ratio no greater than 1.0000. Complete arm wall times separately include all diagnostic A/A processes and arm-specific setup/collection; builds and case listing are excluded. Dividing windows establishes a nominal allocation, not a guaranteed elapsed-time budget. A slower result is a cost/reliability tradeoff, not an equal-budget improvement. These local process costs do not measure an end-to-end Bencher job or its two-worker scheduling.
+
+Schema-3 `local.json` retains source/build provenance, assignments, effective settings, process observations and both cost measures, including incomplete trials. `pnpm tools report DIR` regenerates tables only after all nine trials finish. Reports count faster/slower alerts separately for same-source and unaffected controls, and expected-direction alerts for changed source. Nine cohorts give descriptive counts, not a population false-positive rate or calibrated confidence interval. A historical change's expected direction does not establish that it exceeds 5% on this host, and detection of that change does not establish sensitivity to arbitrary 5% or 10% regressions. Historical-machine drift and deployment acceptance require separate evidence.
 
 ## Experiment plans
 

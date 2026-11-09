@@ -18,6 +18,31 @@ const LARGE: usize = 1_000_000;
 /// Length exercising the out-of-cache block partition.
 const HUGE: usize = 10_000_000;
 
+/// Resolves full preset windows, or opt-in divided windows for a local study.
+fn timing(records_len: usize) -> (u64, u64, usize) {
+    let preset = if records_len >= HUGE {
+        // A sort can take about 0.2 s; forty samples would exceed the four-second window.
+        (1000, 4000, 20)
+    } else if records_len >= LARGE {
+        (1000, 4000, 40)
+    } else {
+        (500, 1500, 30)
+    };
+    #[cfg(feature = "layout-study")]
+    {
+        let divisor = std::env::var_os("TESSERA_BENCH_TIME_DIVISOR").map_or(1, |value| {
+            value
+                .into_string()
+                .expect("UTF-8 timing divisor")
+                .parse()
+                .expect("integer timing divisor")
+        });
+        tessera_bench::timing::divide_timing(preset, divisor)
+    }
+    #[cfg(not(feature = "layout-study"))]
+    preset
+}
+
 /// Expands both API selections without multiplying their coverage.
 fn suite(c: &mut Criterion) {
     for case in plan().inputs().expect("nonempty benchmark plan") {
@@ -200,13 +225,9 @@ fn measure<T: Copy>(
     );
     let batch = (BATCH_ELEMENTS / input.len()).max(1) as u64;
     let mut group = c.benchmark_group(id);
-    let (warm_up, window, samples) = if input.len() >= HUGE {
-        (1000, 4000, 20)
-    } else if input.len() >= LARGE {
-        (1000, 4000, 40)
-    } else {
-        (500, 1500, 30)
-    };
+    // A sort of 10^6 keys takes milliseconds, so a 1.5 s window gives it only
+    // a few hundred sorts; it gets more time and samples to narrow its limits.
+    let (warm_up, window, samples) = timing(input.len());
     group
         .warm_up_time(Duration::from_millis(warm_up))
         .measurement_time(Duration::from_millis(window))
@@ -236,6 +257,21 @@ fn plan() -> &'static Plan {
 /// Selects exact timed IDs; legacy group selection supports the pre-upgrade tracker.
 fn selected(id: &str, mode: &str) -> bool {
     let full = format!("{id}/{mode}");
+    #[cfg(feature = "layout-study")]
+    if std::env::var_os("TESSERA_BENCH_STUDY_SETTINGS").is_some() {
+        let records_len = id
+            .split('/')
+            .nth(3)
+            .expect("case length")
+            .parse()
+            .expect("numeric case length");
+        let (warm_up_ms, measurement_ms, samples) = timing(records_len);
+        println!(
+            "{}",
+            serde_json::json!({ "id": full, "warm_up_ms": warm_up_ms, "measurement_ms": measurement_ms, "samples": samples })
+        );
+        return false;
+    }
     if std::env::var_os("TESSERA_BENCH_LIST").is_some() {
         println!("{full}");
         return false;

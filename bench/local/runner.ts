@@ -48,13 +48,12 @@ export function serialBaselineManifest(baseline: string, current: string) {
 }
 
 /** Compile both revisions with one harness, lockfile, toolchain and build directory. */
-async function buildRevisions(
+export async function buildRevisions(
   root: string,
   workspace: Workspace,
   baseline: string,
-  simd: boolean,
-  out: string,
-  seed?: number,
+  features: string[],
+  layout?: { baselineSeed: number; currentSeed: number; out: string },
 ) {
   const { tree, directory, target } = workspace;
   const crate = join(tree, "rust/tessera-sort");
@@ -81,10 +80,9 @@ async function buildRevisions(
     ),
   );
   source.baseline = await sourceHash(crate);
-  const features = simd ? ["portable-simd"] : [];
   const map = join(directory, "layout.map");
   // Keep the map path out of -Wl's comma-separated argument list.
-  const rustcArgs =
+  const rustcArgs = (seed: number | undefined) =>
     seed === undefined
       ? undefined
       : [
@@ -102,20 +100,24 @@ async function buildRevisions(
           `link-arg=-Map=${map}`,
         ];
   const binaries = {
-    baseline: join(directory, `baseline-${seed ?? "default"}`),
-    current: join(directory, `current-${seed ?? "default"}`),
+    baseline: join(directory, `baseline-${layout?.baselineSeed ?? "default"}`),
+    current: join(directory, `current-${layout?.currentSeed ?? "default"}`),
   };
-  const first = await buildBenchmark(tree, target, "smoke", features, { rustcArgs });
-  if (seed !== undefined) {
+  const first = await buildBenchmark(tree, target, "smoke", features, {
+    rustcArgs: rustcArgs(layout?.baselineSeed),
+  });
+  if (layout) {
     if (first.provenance.target !== "x86_64-unknown-linux-gnu")
       throw new Error("Layout experiments require the x86_64-unknown-linux-gnu target");
-    await cp(map, join(out, `layout-${seed}-baseline.map`));
+    await cp(map, join(layout.out, `layout-${layout.baselineSeed}-baseline.map`));
   }
   await cp(first.executable, binaries.baseline);
   await rm(crate, { recursive: true });
   await copySnapshot(saved, crate, directory);
-  const second = await buildBenchmark(tree, target, "smoke", features, { rustcArgs });
-  if (seed !== undefined) await cp(map, join(out, `layout-${seed}-current.map`));
+  const second = await buildBenchmark(tree, target, "smoke", features, {
+    rustcArgs: rustcArgs(layout?.currentSeed),
+  });
+  if (layout) await cp(map, join(layout.out, `layout-${layout.currentSeed}-current.map`));
   await cp(second.executable, binaries.current);
   for (const field of [
     "rustc",
@@ -140,7 +142,7 @@ async function buildRevisions(
 }
 
 /** Select the same timed IDs in both executables before starting measurements. */
-async function selectedCases(
+export async function selectedCases(
   binaries: { baseline: string; current: string },
   planPath: string,
   pattern: string | undefined,
@@ -168,13 +170,14 @@ async function selectedCases(
 }
 
 /** Measure one process-level block, cycling through the six possible orders. */
-async function measureBlock(
-  run: LocalRun,
+export async function measureBlock(
+  cases: string[],
   binaries: { baseline: string; current: string },
   workspace: Workspace,
-  options: LocalOptions,
+  options: { block: number; planPath: string; cpu?: string; timeDivisor?: number },
 ): Promise<LocalBlock> {
   const values = {} as LocalBlock;
+  values.elapsedMs = { baseline: 0, control: 0, current: 0 };
   const roles = ["baseline", "control", "current"] as const;
   const orders = [
     [0, 1, 2],
@@ -184,14 +187,15 @@ async function measureBlock(
     [2, 0, 1],
     [1, 0, 2],
   ];
-  const groups = [...new Set(run.cases.map((id) => id.slice(0, id.lastIndexOf("/"))))].join("\n");
-  for (const index of orders[run.blocks.length % orders.length]) {
+  const groups = [...new Set(cases.map((id) => id.slice(0, id.lastIndexOf("/"))))].join("\n");
+  for (const index of orders[options.block % orders.length]) {
+    const started = performance.now();
     const role = roles[index],
       binary = role === "current" ? binaries.current : binaries.baseline;
     const criterion = join(workspace.directory, "criterion");
     await rm(criterion, { recursive: true, force: true });
-    diagnostic(`Block ${run.blocks.length + 1}/9: ${role}`);
-    const pattern = run.cases.map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+    diagnostic(`Block ${options.block + 1}/9: ${role}`);
+    const pattern = cases.map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
     const args = ["--bench", `^(?:${pattern})$`];
     const { cpu } = options;
     await command(cpu ? "taskset" : binary, cpu ? ["-c", cpu, binary, ...args] : args, {
@@ -199,12 +203,28 @@ async function measureBlock(
       env: {
         CRITERION_HOME: criterion,
         TESSERA_BENCH_GROUPS: groups,
-        TESSERA_BENCH_PLAN: join(options.out, "plan.json"),
+        TESSERA_BENCH_PLAN: options.planPath,
+        TESSERA_BENCH_TIME_DIVISOR: String(options.timeDivisor ?? 1),
       },
     });
     values[role] = await readEstimates(criterion);
+    values.elapsedMs[role] = performance.now() - started;
   }
   return values;
+}
+
+/** Identify the compiler driver and the LLD it will select for local layout builds. */
+export async function readLayoutLinker(): Promise<LayoutRun["linker"]> {
+  if (platform() !== "linux" || arch() !== "x64")
+    throw new Error("Layout experiments require Linux x86-64, cc and LLD");
+  return {
+    driver: await command("cc", ["--version"], { capture: true }),
+    version: await command(
+      await command("cc", ["-print-prog-name=ld.lld"], { capture: true }),
+      ["--version"],
+      { capture: true },
+    ),
+  };
 }
 
 /** Compare an immutable working-tree snapshot with a commit, retaining only results. */
@@ -223,16 +243,7 @@ export async function compareLocal(options: LocalOptions) {
   let linker: LayoutRun["linker"] | undefined;
   if (options.layoutSeeds) {
     parseLayoutSeeds(options.layoutSeeds.join(","));
-    if (platform() !== "linux" || arch() !== "x64")
-      throw new Error("Layout experiments require Linux x86-64, cc and LLD");
-    linker = {
-      driver: await command("cc", ["--version"], { capture: true }),
-      version: await command(
-        await command("cc", ["-print-prog-name=ld.lld"], { capture: true }),
-        ["--version"],
-        { capture: true },
-      ),
-    };
+    linker = await readLayoutLinker();
   }
   const baseline = await command("git", ["rev-parse", "--verify", `${options.baseline}^{commit}`], {
     cwd: root,
@@ -254,9 +265,8 @@ export async function compareLocal(options: LocalOptions) {
         root,
         workspace,
         baseline,
-        simd,
-        out,
-        seed,
+        simd ? ["portable-simd"] : [],
+        seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
       );
       const run: LocalRun = {
         schema: 1,
@@ -294,7 +304,9 @@ export async function compareLocal(options: LocalOptions) {
         const index = (block + offset) % layouts.length;
         const { seed, run } = layouts[index];
         if (linker) diagnostic(`Layout seed ${seed}`);
-        run.blocks.push(await measureBlock(run, executables[index], workspace, options));
+        run.blocks.push(
+          await measureBlock(run.cases, executables[index], workspace, { block, planPath, cpu }),
+        );
         if (run.blocks.length === 9) summarizeLocal(run);
         await save();
       }

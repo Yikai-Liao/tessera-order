@@ -6,6 +6,8 @@ import { type Command, InvalidArgumentError, Option } from "commander";
 import { stringify as stringifyToml } from "smol-toml";
 import { cpuListSchema } from "../bench/affinity.ts";
 import { parseLayoutSeeds } from "../bench/local/layout.ts";
+import { type ExpectedDirection, protocolSeeds } from "../bench/local/protocol.ts";
+import { compareProtocols } from "../bench/local/protocol-runner.ts";
 import { renderLocalReport } from "../bench/local/report.ts";
 import { compareLocal } from "../bench/local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
@@ -93,7 +95,7 @@ async function report(directories: string[], partial = false) {
   }
   if (local) {
     if (paths.length !== 1 || partial)
-      throw new Error("Local reports require one directory and nine complete blocks per layout");
+      throw new Error("Local reports require one complete result directory");
     await renderLocalReport(paths[0]);
   } else await writeReport(paths, partial);
 }
@@ -141,6 +143,60 @@ export function experimentCommands(program: Command) {
             simd: Boolean(options.simd),
             filter: options.filter,
             layoutSeeds: options.layoutSeeds,
+          }),
+        );
+      },
+    );
+
+  measurement(
+    "protocols [revision]",
+    "Compare a candidate-only budget with same-job median-of-three layouts",
+  )
+    .addOption(
+      new Option("--expect <direction>", "prespecified source-change direction")
+        .choices(["same", "faster", "slower"])
+        .default("same"),
+    )
+    .option(
+      "--control <regex>",
+      "unchanged control cases within a changed-source study",
+      parseCasePattern,
+    )
+    .option(
+      "--seed <number>",
+      "first of 54 distinct held-out layout seeds",
+      (value) => {
+        const seed = parsePositiveInteger(value);
+        try {
+          protocolSeeds(seed);
+        } catch (error) {
+          throw new InvalidArgumentError((error as Error).message);
+        }
+        return seed;
+      },
+      101,
+    )
+    .action(
+      async (
+        baseline: string | undefined,
+        options: MeasurementOptions & { expect: ExpectedDirection; control?: string; seed: number },
+      ) => {
+        const plan = await loadPlan(options.plan ?? "local", selectAxes(options));
+        if (plan.harness !== "smoke")
+          throw new Error("Protocol studies require a smoke harness plan");
+        const root = await repositoryRoot();
+        const out = resultDirectory(root, options.out);
+        await runTask(out, Boolean(program.opts().verbose), () =>
+          compareProtocols({
+            root,
+            baseline: baseline ?? "HEAD",
+            plan,
+            out,
+            cpu: options.cpu,
+            simd: Boolean(options.simd),
+            expected: options.expect,
+            control: options.control,
+            firstSeed: options.seed,
           }),
         );
       },

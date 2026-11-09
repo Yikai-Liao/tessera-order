@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { renderRows } from "../plot/rows.ts";
 import { type LayoutRun, summarizeLayouts } from "./layout.ts";
 import { type LocalRun, summarizeLocal } from "./model.ts";
+import type { ProtocolRun } from "./protocol.ts";
+import { renderProtocolReport } from "./protocol-report.ts";
 
 /** Show absolute times and repeatability for each case, without a revision-ratio axis. */
 async function writeLayoutFigures(
@@ -70,10 +72,17 @@ async function writeLayoutFigures(
 }
 
 /** Write a local comparison's table, provenance and process-level control chart. */
-export async function renderLocalReport(directory: string, input?: LocalRun | LayoutRun) {
+export async function renderLocalReport(
+  directory: string,
+  input?: LocalRun | LayoutRun | ProtocolRun,
+) {
   const result =
     input ??
-    (JSON.parse(await readFile(join(directory, "local.json"), "utf8")) as LocalRun | LayoutRun);
+    (JSON.parse(await readFile(join(directory, "local.json"), "utf8")) as
+      | LocalRun
+      | LayoutRun
+      | ProtocolRun);
+  if (result.schema === 3) return renderProtocolReport(directory, result);
   if (result.schema !== 1 && result.schema !== 2)
     throw new Error("Unsupported local result schema");
   const layoutSummaries = result.schema === 2 ? summarizeLayouts(result) : undefined;

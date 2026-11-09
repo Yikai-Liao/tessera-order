@@ -64,18 +64,47 @@ const boxes: Box[] = [
     kind: "exit",
   },
   {
-    id: "node",
+    id: "childOrder",
     x: 200,
     y: 230,
+    w: 280,
+    title: "Confirm child order",
+    detail: "confirm first; scan variation if needed",
+    link: "/explain/routing#nodes-and-tiles",
+  },
+  {
+    id: "childDone",
+    x: 530,
+    y: 230,
+    w: 160,
+    title: "Done",
+    detail: "or reverse stably",
+    link: "/explain/routing#nodes-and-tiles",
+    kind: "exit",
+  },
+  {
+    id: "node",
+    x: 200,
+    y: 300,
     w: 280,
     title: "Larger than a tile?",
     detail: "64 KiB of records",
     link: "/explain/routing#nodes-and-tiles",
   },
   {
+    id: "bucket",
+    x: 260,
+    y: 390,
+    w: 190,
+    title: "Bucket order",
+    detail: "digit route: split where order is",
+    link: "/explain/routing#already-in-bucket-order",
+    kind: "node",
+  },
+  {
     id: "mode",
     x: 30,
-    y: 320,
+    y: 390,
     w: 190,
     title: "Repeated key",
     detail: "equality partition",
@@ -83,19 +112,9 @@ const boxes: Box[] = [
     kind: "node",
   },
   {
-    id: "outlier",
-    x: 260,
-    y: 320,
-    w: 190,
-    title: "Outlier run",
-    detail: "lift a short end run",
-    link: "/explain/routing#outlier-run",
-    kind: "node",
-  },
-  {
     id: "digit",
     x: 490,
-    y: 320,
+    y: 390,
     w: 190,
     title: "Top digit",
     detail: "stable block partition",
@@ -105,7 +124,7 @@ const boxes: Box[] = [
   {
     id: "leafI",
     x: 30,
-    y: 456,
+    y: 526,
     w: 190,
     title: "Insertion sort",
     detail: "≤ 48 records",
@@ -115,7 +134,7 @@ const boxes: Box[] = [
   {
     id: "leafM",
     x: 260,
-    y: 456,
+    y: 526,
     w: 190,
     title: "Tile MSD",
     detail: "partition, then recurse",
@@ -125,7 +144,7 @@ const boxes: Box[] = [
   {
     id: "leafL",
     x: 490,
-    y: 456,
+    y: 526,
     w: 190,
     title: "Tile LSD",
     detail: "counting passes in scratch",
@@ -150,7 +169,7 @@ const go = (link: string) => router.go(withBase(link));
 
 <template>
   <figure class="tsr-figure">
-    <svg viewBox="0 0 700 516" width="700" role="img" aria-label="Tessera's pipeline from order probe to tile leaves">
+    <svg viewBox="0 0 700 586" width="700" role="img" aria-label="Tessera's pipeline from order probe to tile leaves">
       <defs>
         <marker id="tsr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M0,0 L10,5 L0,10 z" fill="var(--vp-c-text-3)" />
@@ -166,30 +185,34 @@ const go = (link: string) => router.go(withBase(link));
         <path d="M480,103 C505,103 505,62 526,48" marker-end="url(#tsr-arrow)" />
         <path d="M340,126 V146" marker-end="url(#tsr-arrow)" />
         <path d="M480,173 H526" marker-end="url(#tsr-arrow)" />
-        <path d="M340,196 V226" marker-end="url(#tsr-arrow)" />
+        <!-- The root was already probed; only children use the second gate. -->
+        <path d="M340,196 H180 V323 H196" marker-end="url(#tsr-arrow)" />
+        <path d="M480,253 H526" marker-end="url(#tsr-arrow)" />
+        <path d="M340,276 V296" marker-end="url(#tsr-arrow)" />
         <!-- yes: node partitions -->
-        <path d="M300,276 C300,298 125,294 125,316" marker-end="url(#tsr-arrow)" />
-        <path d="M340,276 C340,298 355,294 355,316" marker-end="url(#tsr-arrow)" />
-        <path d="M380,276 C380,298 585,294 585,316" marker-end="url(#tsr-arrow)" />
+        <path d="M280,346 C280,368 125,364 125,386" marker-end="url(#tsr-arrow)" />
+        <path d="M340,346 V386" marker-end="url(#tsr-arrow)" />
+        <path d="M400,346 C400,368 585,364 585,386" marker-end="url(#tsr-arrow)" />
         <!-- no: tile leaves -->
-        <path d="M480,253 H690 V428 H125" />
-        <path v-for="x in centers" :key="`leaf${x}`" :d="`M${x},428 V452`" marker-end="url(#tsr-arrow)" />
+        <path d="M480,323 H690 V498 H125" />
+        <path v-for="x in centers" :key="`leaf${x}`" :d="`M${x},498 V522`" marker-end="url(#tsr-arrow)" />
       </g>
 
-      <!-- Children re-enter the node test. -->
+      <!-- Larger partition children re-enter the shared order gate. -->
       <g stroke="#5CA4F8" stroke-width="1.5" stroke-dasharray="5 4" fill="none">
-        <path v-for="x in centers" :key="`child${x}`" :d="`M${x},366 V392`" />
-        <path d="M585,392 H12 V253 H196" marker-end="url(#tsr-arrow-node)" />
+        <path v-for="x in [125, 355, 585]" :key="`child${x}`" :d="`M${x},436 V462`" />
+        <path d="M585,462 H12 V253 H196" marker-end="url(#tsr-arrow-node)" />
       </g>
 
       <g font-size="10" style="fill: var(--vp-c-text-2)">
         <text x="486" y="26">ordered</text>
         <text x="488" y="84">sorted</text>
         <text x="486" y="166">none</text>
-        <text x="520" y="246">no: a tile</text>
-        <text x="490" y="272">yes: a node</text>
-        <text x="236" y="408">each child is routed again</text>
-        <text x="140" y="422">the cost model picks one leaf</text>
+        <text x="486" y="246">ordered</text>
+        <text x="520" y="316">no: a tile</text>
+        <text x="490" y="342">yes: a node</text>
+        <text x="236" y="478">larger children are routed again</text>
+        <text x="140" y="492">the cost model picks one leaf</text>
       </g>
 
       <!-- biome-ignore lint/a11y/useSemanticElements: SVG `<a>` breaks VitePress prefetching (see the script comment). -->

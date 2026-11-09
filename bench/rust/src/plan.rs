@@ -344,8 +344,15 @@ mod tests {
     fn presets_preserve_case_counts() {
         let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
         let cases = continuous.inputs().unwrap();
-        assert_eq!(cases.len(), 60);
-        assert_eq!(cases.iter().filter(|case| case.len >= 1_000_000).count(), 7);
+        assert_eq!(cases.len(), 62);
+        assert_eq!(cases.iter().filter(|case| case.len >= 1_000_000).count(), 8);
+        // Separated-tail coverage replaces the removed end-run route: keyed rows
+        // at 65,536 records and direct keys past its 1,024-record cap.
+        for (ty, len) in [("row_u64", 65_536), ("u64", 1_000_000)] {
+            assert!(cases.iter().any(|case| {
+                case.ty == ty && case.distribution == "sorted_tail" && case.len == len
+            }));
+        }
         for distribution in ["skew99", "two_values"] {
             assert!(cases.iter().any(|case| {
                 case.ty == "u64" && case.distribution == distribution && case.len == 65_536
@@ -402,6 +409,11 @@ mod tests {
         assert!(cases.iter().any(|case| {
             case.ty == "u32" && case.distribution == "sorted" && case.len == 65_536
         }));
+        for (ty, len) in [("u64", 1_000_000), ("row_u64", 65_536)] {
+            assert!(cases.iter().any(|case| {
+                case.ty == ty && case.distribution == "sorted_tail" && case.len == len
+            }));
+        }
         for (text, expected) in [
             (include_str!("../../plans/smoke.toml"), 125),
             (include_str!("../../plans/release.toml"), 381),

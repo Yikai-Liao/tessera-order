@@ -122,6 +122,24 @@ A Default-build process screen against `e26cd29`, using the maintained `compare 
 
 A second screen after adding the tile-fit guard measured sorted and reverse `u64` inputs at 48 records. Their medians, 0.9958 and 0.9990, were inside the respective A/A ranges, 0.9923–1.0077 and 0.9953–1.0047. The sorted case nevertheless had a block ratio of 1.1321; its cause remains unresolved. These local screens do not establish a general gain or explain the placement-sensitive alerts of other revisions. Raw results remain outside the repository under `short-insertion-random48` and `short-insertion-ordered48`; exact-head continuous results remain the performance acceptance gate.
 
+### Ordered children without an end-run route
+
+Partition children now reuse full order confirmation before scanning their remaining candidate bits. This replaces the specialized minority-bit/end-run detector, its 1,024-record cap and its rotation/insertion route. Tile-sized digit buckets still finish during compaction. The general confirmation checks ascending order through the existing extractor backend first, then checks descent only after a failure; a descending child's leading ties can therefore be read twice, within two linear scans and without allocation.
+
+The first direct-confirmation implementation searched for the first unequal key before using the ascending backend. Constant children never reached that backend, leaving their complete confirmation scalar. Against baseline `fafaaa2`, a Default process screen measured `u64/two_values/1000000` at 1.0721 candidate/baseline with A/A 0.9905–1.0095. Three linked-revision processes reproduced the loss in both independently placed candidate copies: baseline/candidate-A medians were 0.9508–0.9576, while candidate-B/candidate-A stayed at 0.9966–1.0012. This was a source-path regression, not a dismissed placement alert.
+
+Candidate `90423d5` removes that scalar pre-scan. The maintained linked-revision experiment used two named baseline libraries and two named candidate libraries in each Default and Portable SIMD executable, Rust 1.99.1, an i7-10875H pinned to CPU 6, unchanged powersave/SMT/turbo settings, 32 inputs, three independent processes and nine shuffled blocks per process. Minimum samples were 10 ms with a 64 MiB prepared-buffer cap; restoration and exact stable-reference verification stayed outside timing. Ratios below are the range of per-process medians for either baseline copy divided by candidate A:
+
+| Input | Default | Portable SIMD |
+|---|---|---|
+| `u64/two_values/65536` | 1.0020–1.0073 | 0.9962–1.0001 |
+| `u64/two_values/1000000` | 1.0047–1.0096 | 0.9935–1.0145 |
+| `u64/sorted_tail/65536` | 1.3003–1.3241 | 1.2858–1.3121 |
+| `u64/sorted_tail/1000000` | 2.1880–2.3833 | 2.2205–2.2695 |
+| `row_u64/sorted_tail/65536` | 1.6615–1.7199 | 1.6654–1.6954 |
+
+The million-record two-value case's A/A bounds ranged from 0.9908 to 1.0092 in Default and 0.9918 to 1.0082 in Portable SIMD. The previous consistent loss is absent, and both placements retain the sorted-tail gain outside their controls. Random, reverse, runs, far-swap and 99%-sorted controls were retained, including unfavorable observations. Small differences do not establish a source effect when independent copies disagree: for example, Portable SIMD `u64/reverse/65536` candidate B was 4.4–5.0% slower than candidate A, while both baseline copies tracked candidate A. Raw samples, verification receipts, hashes and placement disassembly remain outside the repository. These local controls do not replace exact-head continuous feedback or prove the cause of an alert on its remote host.
+
 ### Exploratory SIMD constraints
 
 The optional backend experiments used AVX2, seven interleaved rounds of separate binaries summarized by per-round minimum times, and a separate A/A run. They did not use the [protocol](../development/benchmarking.md#timing-and-statistics)'s nine-block paired timing or independently placed baseline copies, and did not record output-hash checks. These observations preserve design constraints, not established speedup or regression claims.

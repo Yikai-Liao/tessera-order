@@ -1771,7 +1771,7 @@ mod tests {
         assert_eq!(records, expected);
 
         // A record holding the top bit before the body ends blocks the split.
-        let mut inverted: Vec<u64> = vec![(1 << 63) | 5, 3, 4];
+        let mut inverted: Vec<u64> = alloc::vec![(1 << 63) | 5, 3, 4];
         let varying = inverted
             .iter()
             .fold(0u128, |mask, record| mask | u128::from(*record));

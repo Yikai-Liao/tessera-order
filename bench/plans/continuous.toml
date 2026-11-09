@@ -47,7 +47,7 @@ lengths = [ 65536 ]
 
 [[include]]
 types = [ "u32" ]
-distributions = [ "random", "sorted99" ]
+distributions = [ "random", "sorted", "sorted99" ]
 lengths = [ 65536 ]
 
 [[include]]

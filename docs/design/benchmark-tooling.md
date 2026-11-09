@@ -33,7 +33,7 @@ Repository-authored selections use TOML; custom plans accept JSON too. Decode sy
 
 `local` and `continuous` use Criterion; `smoke` and `release` use the paired algorithm harness. This is a capability boundary, not a second selection language. Continuous defaults compile into the executable so trusted cloud supervision never evaluates a PR's configuration. Local results retain the normalized plan. [Plan tests](../../bench/plan.test.ts) and Rust tests protect selection counts and boundary behavior.
 
-Selection axes are type, distribution and length; there is no mode selector. Criterion IDs end in `/api`; comparison input IDs use `type/distribution/length/s1`. Presets retain 50 continuous inputs, 125 comparison smoke inputs and 381 release inputs.
+Selection axes are type, distribution and length; there is no mode selector. Criterion IDs end in `/api`; comparison input IDs use `type/distribution/length/s1`. The [continuous plan](../../bench/plans/continuous.toml) owns regression coverage; comparison presets retain 125 smoke inputs and 381 release inputs.
 
 ## Source comparison boundary
 

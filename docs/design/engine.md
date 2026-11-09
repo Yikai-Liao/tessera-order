@@ -69,7 +69,7 @@ The scan depends on the extractor and the build:
 | Key function (`stable_sort_by_key`) | One record at a time, keeping the previous key, so the key function runs once per scanned record | Same |
 | Direct keys, budgeted probe | Blocked scan of 32 pairs per mask update (`scan::first_inversion`); `f64` uses the scalar scan | Vector scan, with the instruction set selected once per pass |
 | Direct keys, insertion finish | Scalar scan: the short ordered runs a radix partition leaves do not amortize a block mask ([measurements](port.md#scalar-insertion-finishing)) | Vector scan, with the instruction set selected once per pass |
-| Direct keys, ascending confirmation | Scalar scan | The vector scan, dispatched once |
+| Direct keys, ascending confirmation | The same scan as a budgeted probe, after checking the encoded predecessor | The vector scan, dispatched once |
 
 With `portable-simd`, slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time, and `Reverse<K>` keys keep the default-build scans. The insertion loop is inlined into the dispatched function, so its scan runs with the selected target features.
 

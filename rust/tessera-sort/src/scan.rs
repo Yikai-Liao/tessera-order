@@ -2,8 +2,8 @@
 
 //! Scalar and blocked adjacent-pair scans.
 //!
-//! Direct extraction uses the blocked scan for budgeted insertion probes in the
-//! default build; the compiler auto-vectorizes it at the target's baseline
+//! Direct extraction uses the blocked scan for order confirmation and budgeted
+//! insertion probes in the default build; the compiler auto-vectorizes it at the target's baseline
 //! width. The scalar scan serves `f64`, which that width compares poorly, and
 //! the keys the `portable-simd` backend has no vector kernel for.
 

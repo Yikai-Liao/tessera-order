@@ -75,7 +75,7 @@ All three workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). 
 | Preset | Harness | Default selection |
 |---|---|---|
 | `local` | `smoke` | Tessera, random `u64`, 65,536 records, `api` |
-| `continuous` | `smoke` | The 50 regression inputs and 50 timed IDs documented in the [continuous guide](continuous-benchmarks.md#cases) |
+| `continuous` | `smoke` | Regression inputs and timed IDs from the [continuous plan](../../bench/plans/continuous.toml), documented in the [continuous guide](continuous-benchmarks.md#cases) |
 | `smoke` | `comparison` | Rust competitors, 125 inputs at 1,000 records |
 | `release` | `comparison` | Rust and native competitors, 381 inputs across four lengths |
 

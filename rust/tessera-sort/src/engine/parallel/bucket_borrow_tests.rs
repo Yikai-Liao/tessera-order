@@ -8,11 +8,14 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-fn sort_group<T: Send, E: Extract<T> + Clone + Send>(records: &mut [T], mut extractor: E) {
+fn sort_group<'records, T: Send, E: Extract<T> + Clone + Send>(
+    records: &'records mut [T],
+    mut extractor: E,
+) {
     let mut scratch = Scratch::new();
     let pool = Pool::new();
-    let mut pending: Option<Job<T>> = None;
-    let mut visit = |bucket: &mut [T], _: &mut E| {
+    let mut pending: Option<Job<'records, T>> = None;
+    let mut visit = |bucket: &'records mut [T], _: &mut E| {
         pending.get_or_insert_with(Job::new).push(bucket);
     };
     let ends = block::partition_digit_with_ends(

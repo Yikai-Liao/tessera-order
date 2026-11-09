@@ -12,10 +12,10 @@ mod finish;
 type BucketSort<'a, T> = &'a (dyn Fn(&mut [T]) + Sync);
 
 /// Bounded finishing with the existing materialized-bucket fallback.
-pub(crate) struct BucketFinish<'a, T> {
+pub(crate) struct BucketFinish<'callback, 'records, T> {
     pub limit: usize,
-    pub sort: BucketSort<'a, T>,
-    pub visit: Visit<'a, T>,
+    pub sort: BucketSort<'callback, T>,
+    pub visit: Visit<'callback, 'records, T>,
 }
 
 /// Sorting callback and size cap; absent for fallback-only partitions.
@@ -57,14 +57,18 @@ impl<T, E: Extract<T>> Shard<'_, '_, T, E> {
     }
 }
 
-pub(crate) fn partition_digit_parallel_with_visit<T: Send, E: Extract<T> + Clone + Send>(
-    arr: &mut [T],
+pub(crate) fn partition_digit_parallel_with_visit<
+    'records,
+    T: Send,
+    E: Extract<T> + Clone + Send,
+>(
+    arr: &'records mut [T],
     radix: usize,
     shift: usize,
     key: E,
     buffers: &mut Buffers<T>,
     requested_shards: usize,
-    visit: Visit<'_, T>,
+    visit: Visit<'_, 'records, T>,
 ) -> Vec<usize> {
     partition_impl_with_visit(
         arr,
@@ -83,14 +87,18 @@ pub(crate) fn partition_digit_parallel_with_visit<T: Send, E: Extract<T> + Clone
 }
 
 /// Partitions the root with an optional bounded pre-materialization finisher.
-pub(crate) fn partition_digit_parallel_with_finish<T: Send, E: Extract<T> + Clone + Send>(
-    records: &mut [T],
+pub(crate) fn partition_digit_parallel_with_finish<
+    'records,
+    T: Send,
+    E: Extract<T> + Clone + Send,
+>(
+    records: &'records mut [T],
     width: usize,
     shift: usize,
     key: E,
     buffers: &mut Buffers<T>,
     shards: usize,
-    finish: BucketFinish<'_, T>,
+    finish: BucketFinish<'_, 'records, T>,
 ) -> Vec<usize> {
     partition_impl_with_visit(
         records,
@@ -123,14 +131,14 @@ fn partition_impl<T: Send, E: Extract<T> + Clone + Send>(
     partition_impl_with_visit(arr, radix, shift, key, buffers, config, None)
 }
 
-fn partition_impl_with_visit<T: Send, E: Extract<T> + Clone + Send>(
-    arr: &mut [T],
+fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
+    arr: &'records mut [T],
     radix: usize,
     shift: usize,
     key: E,
     buffers: &mut Buffers<T>,
     config: Config<'_, T>,
-    mut visit: Option<Visit<'_, T>>,
+    mut visit: Option<Visit<'_, 'records, T>>,
 ) -> Vec<usize> {
     assert!((1..=MAX_RADIX_BITS).contains(&radix));
     assert!(shift < E::Value::BITS);
@@ -234,7 +242,8 @@ fn partition_impl_with_visit<T: Send, E: Extract<T> + Clone + Send>(
     // shard and can recover it if allocation or directory construction fails.
     let mut order = alloc::vec![0u32; block_count];
     let next_order = alloc::vec![0u32; block_count];
-    let bucket_ids = alloc::vec![0u16; block_count];
+    // The adopted guard only compacts or finishes; it never scatters again.
+    let bucket_ids = Vec::new();
     let mut partials = Vec::with_capacity(head);
     let mut ends = Vec::with_capacity(bucket_count);
     let mut output = head;

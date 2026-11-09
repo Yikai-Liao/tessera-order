@@ -172,8 +172,8 @@ fn balanced_block_size_integer(len: usize, record_bytes: usize, radix: usize) ->
     balanced as usize
 }
 
-/// Called on a bucket as soon as its records are contiguous in the input.
-type Visit<'a, T> = &'a mut dyn FnMut(&mut [T]);
+/// Transfers a retired bucket borrow; later compaction never accesses it again.
+type Visit<'callback, 'records, T> = &'callback mut dyn FnMut(&'records mut [T]);
 
 /// Partitions `records` stably by the `radix`-bit digit of its keys at `shift`.
 ///
@@ -200,28 +200,28 @@ pub(crate) fn partition_digit<T, E: Extract<T>>(
 ///
 /// Returns an empty vector for inputs of fewer than two records or zero-sized
 /// records. A `visit` panic is resumed after every record is back in `records`.
-pub(crate) fn partition_digit_with_ends<T, E: Extract<T>>(
-    records: &mut [T],
+pub(crate) fn partition_digit_with_ends<'records, T, E: Extract<T>>(
+    records: &'records mut [T],
     radix: usize,
     shift: usize,
     extractor: &mut E,
     buffers: &mut Buffers<T>,
-    visit: &mut dyn FnMut(&mut [T], &mut E),
+    visit: KeyVisit<'_, 'records, T, E>,
 ) -> Vec<usize> {
     partition_digit_inner(records, radix, shift, extractor, buffers, Some(visit))
 }
 
 /// A [`Visit`] that also receives the extractor, which classification has
 /// finished borrowing by the time buckets are visited.
-type KeyVisit<'a, T, E> = &'a mut dyn FnMut(&mut [T], &mut E);
+type KeyVisit<'callback, 'records, T, E> = &'callback mut dyn FnMut(&'records mut [T], &mut E);
 
-fn partition_digit_inner<T, E: Extract<T>>(
-    records: &mut [T],
+fn partition_digit_inner<'records, T, E: Extract<T>>(
+    records: &'records mut [T],
     radix: usize,
     shift: usize,
     extractor: &mut E,
     buffers: &mut Buffers<T>,
-    visit: Option<KeyVisit<'_, T, E>>,
+    visit: Option<KeyVisit<'_, 'records, T, E>>,
 ) -> Vec<usize> {
     let record_bytes = core::mem::size_of::<T>();
     if records.len() < 2 || record_bytes == 0 {
@@ -279,14 +279,14 @@ pub(crate) fn partition_by<T, E: Extract<T>>(
 /// Runs one block pass and compacts the result back into `records`.
 ///
 /// Returns bucket ends when `want_ends` is set, and an empty vector otherwise.
-fn partition_pass<T, E: Extract<T>>(
-    records: &mut [T],
+fn partition_pass<'records, T, E: Extract<T>>(
+    records: &'records mut [T],
     buckets: usize,
     extractor: &mut E,
     buffers: &mut Buffers<T>,
     mut classify: impl FnMut(&mut E, &T) -> usize,
     want_ends: bool,
-    visit: Option<KeyVisit<'_, T, E>>,
+    visit: Option<KeyVisit<'_, 'records, T, E>>,
 ) -> Vec<usize> {
     let radix = buckets.trailing_zeros() as usize;
     let block_size = default_block_size(records.len(), core::mem::size_of::<T>(), radix);
@@ -303,7 +303,7 @@ fn partition_pass<T, E: Extract<T>>(
     // Classification has finished borrowing the extractor before any tile
     // callback starts; both phases use the same FnMut state in sequence.
     let panic = if let Some(visit) = visit {
-        let mut callback = |child: &mut [T]| visit(child, extractor);
+        let mut callback = |child: &'records mut [T]| visit(child, extractor);
         sorter.compact_with(&ends, Some(&mut callback))
     } else {
         sorter.compact_with(&ends, None)
@@ -874,7 +874,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     fn compact_with(
         &mut self,
         ends: &[usize],
-        visit: Option<Visit<'_, T>>,
+        visit: Option<Visit<'_, 'a, T>>,
     ) -> Option<unwind::Payload> {
         #[cfg(feature = "rayon")]
         if !self.blocks.scratch_segments.is_empty() {
@@ -888,7 +888,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     fn compact_with_access(
         &mut self,
         ends: &[usize],
-        mut visit: Option<Visit<'_, T>>,
+        mut visit: Option<Visit<'_, 'a, T>>,
         mut block_ptr: impl FnMut(&mut BlockStorage<'a, T>, usize) -> *mut T,
     ) -> Option<unwind::Payload> {
         // Sorting is finished. Reuse the output buffer as the inverse map:

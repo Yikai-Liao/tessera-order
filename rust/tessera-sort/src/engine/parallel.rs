@@ -69,14 +69,8 @@ fn prepare<T, E: Extract<T>>(
             return None;
         }
         Order::Unsorted => {
-            // This input already fits the insertion leaf; a budget and varying-bit
-            // scan cannot select a different finishing algorithm.
-            if records.len() <= INSERTION_MAX
-                && records.len().saturating_mul(record_bytes) <= tile_bytes
-            {
-                extractor.finish_insertion(records);
-                return None;
-            }
+            // The parallel entry already rejected roots below 1 MiB, so this
+            // root cannot fit the serial insertion leaf's one-tile budget.
             let probe_len = (tile_bytes / record_bytes).max(2).min(records.len());
             if insertion_probe(records, extractor, probe_len) {
                 return None;
@@ -128,28 +122,16 @@ impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for Narrow<E, SHIFT> {
     }
 }
 
-/// One bucket pointer with the provenance of its own materialized slice.
-struct Bucket<T> {
-    start: *mut T,
-    len: usize,
-}
-
-/// A batch of disjoint root buckets, each kept as its own borrowed region.
+/// A batch of retired root buckets, retained as separate exclusive borrows.
 ///
-/// The pointers live only inside the Rayon scope that borrows the input. A
-/// bucket is handed off after compaction has materialized it and retired it as
-/// a copy source; the partition never accesses that region again.
-struct Job<T> {
+/// Compaction transfers each borrow only after retiring its destination and
+/// copy sources. The Rayon scope joins every job before the input is reused.
+struct Job<'records, T> {
     records: usize,
-    buckets: Vec<Bucket<T>>,
+    buckets: Vec<&'records mut [T]>,
 }
 
-// SAFETY: each pointer names one complete, exclusively owned bucket from the
-// input. The block partition transfers it once, no job overlaps another, and
-// the enclosing Rayon scope joins every job before the input borrow ends.
-unsafe impl<T: Send> Send for Job<T> {}
-
-impl<T> Job<T> {
+impl<'records, T> Job<'records, T> {
     fn new() -> Self {
         Self {
             records: 0,
@@ -157,12 +139,9 @@ impl<T> Job<T> {
         }
     }
 
-    fn push(&mut self, bucket: &mut [T]) {
+    fn push(&mut self, bucket: &'records mut [T]) {
         self.records += bucket.len();
-        self.buckets.push(Bucket {
-            start: bucket.as_mut_ptr(),
-            len: bucket.len(),
-        });
+        self.buckets.push(bucket);
     }
 
     fn bytes(&self) -> usize {
@@ -177,11 +156,7 @@ impl<T> Job<T> {
         pool: &Pool<T>,
     ) {
         let mut scratch = pool.take();
-        for bucket in &self.buckets {
-            // SAFETY: this exact pointer and length came from one exclusive
-            // materialized bucket. It is disjoint from the other stored slices,
-            // and compaction no longer reads or writes any of them.
-            let child = unsafe { core::slice::from_raw_parts_mut(bucket.start, bucket.len) };
+        for child in &mut self.buckets {
             if child.len() > 1 {
                 let varying = scan_varying_bits(child, candidate, &mut extractor);
                 Sorter::<T, E, CACHED> {
@@ -225,8 +200,8 @@ impl<T> Pool<T> {
 }
 
 /// Partitions the root and sorts each bucket as soon as compaction releases it.
-fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: bool>(
-    records: &mut [T],
+fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: bool>(
+    records: &'records mut [T],
     extractor: &mut E,
     scratch: &mut Scratch<T>,
     varying: u128,
@@ -235,7 +210,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: bool>(
     let node_bytes = records.len().saturating_mul(core::mem::size_of::<T>());
     let low = varying.trailing_zeros() as usize;
     let top = bit_len(varying);
-    if node_bytes <= tile_bytes || node_bytes < 4 * tile_bytes {
+    if node_bytes < 4 * tile_bytes {
         Sorter::<T, E, CACHED> {
             scratch,
             extractor,
@@ -301,8 +276,8 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: bool>(
     let root_extractor = extractor.clone();
     let child_extractor = extractor.clone();
     rayon::scope(move |scope| {
-        let mut pending: Option<Job<T>> = None;
-        let mut visit = |bucket: &mut [T]| {
+        let mut pending: Option<Job<'records, T>> = None;
+        let mut visit = |bucket: &'records mut [T]| {
             let mut job = pending.take().unwrap_or_else(Job::new);
             job.push(bucket);
             if job.bytes() >= MIN_TASK_BYTES {
@@ -384,7 +359,7 @@ fn spawn_job<
     const CACHED: bool,
 >(
     scope: &Scope<'scope>,
-    mut job: Job<T>,
+    mut job: Job<'scope, T>,
     candidate: u128,
     extractor: E,
     tile_bytes: usize,

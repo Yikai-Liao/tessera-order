@@ -790,8 +790,13 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         if records.len() < 2 || candidate == 0 {
             return;
         }
-        // Partitions expose ordered and constant children. Confirm directly
-        // so either property finishes in one scan, without a preceding sample.
+        // A constant child finishes on the varying scan alone, as without this
+        // route. An ordered child is confirmed next so it skips the partition
+        // the digit would otherwise need.
+        let varying = scan_varying_bits(records, candidate, self.extractor);
+        if varying == 0 {
+            return;
+        }
         match confirm_order(records, self.extractor) {
             Order::Ascending => return,
             Order::Descending { strict: true } => {
@@ -804,7 +809,6 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             }
             Order::Flat | Order::Unsorted => {}
         }
-        let varying = scan_varying_bits(records, candidate, self.extractor);
         self.sort_node(records, varying);
     }
 
@@ -1801,10 +1805,11 @@ mod tests {
                 tile_bytes: 128,
             }
             .sort_child(&mut records, u64::MAX as u128);
-            // Ascending completion reads no keys beyond the order probe;
-            // tied descending completion also scans equal runs during reversal.
+            // Ascending completion costs the varying scan and the confirming
+            // scan, both cheaper than the partition they replace; tied
+            // descending completion also scans equal runs during reversal.
             if !descending {
-                assert_eq!(child_calls, probe_calls);
+                assert_eq!(child_calls, 2 * probe_calls);
             }
             assert_eq!(records, expected);
             assert!(scratch.tile.is_empty());

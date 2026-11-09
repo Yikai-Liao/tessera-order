@@ -21,6 +21,8 @@ export async function prepareRevisions(root: string, tree: string, revisions: Re
     });
   const baseline = await commit(revisions.baseline);
   const current = revisions.current ? await commit(revisions.current) : undefined;
+  // Fresh CI hosts need the locked registry metadata before offline path resolution.
+  await command("cargo", ["fetch", "--locked"], { cwd: tree });
   const library = join(tree, "rust/tessera-sort");
   if (current) {
     // The current harness stays in place; only the requested library is replaced.

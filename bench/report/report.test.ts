@@ -33,6 +33,19 @@ async function writeFixture(directory: string, simd = false, dataset = createFix
   return dataset;
 }
 
+test("synthetic memory uses the full record width", () => {
+  const dataset = createFixture();
+  for (const [id, bytes] of [
+    ["row_u64/random/1000/s1", 16_000],
+    ["owned/random/1000/s1", 32_000],
+  ] as const) {
+    const memory = dataset.memory.find(
+      (sample) => sample.case_id === id && sample.variant === "std-stable",
+    );
+    assert.equal(memory?.peak_extra_bytes, bytes, id);
+  }
+});
+
 test("paired ratios respect noise", () => {
   const dataset = createFixture();
   validateRun(dataset);

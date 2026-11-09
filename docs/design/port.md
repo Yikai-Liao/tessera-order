@@ -336,22 +336,22 @@ Partition children scan their remaining candidate bits and then reuse the root's
 
 The two general properties are cheaper than the detector they replace. Both scans stop at their first conflict, so an unordered child pays a few key reads. The run split reads the top varying bit once: a node that is `0*1*` or `1*0*` in that bit already holds the two runs the partition would form, so one rotation at most puts them in order and no block scratch is reserved. It has no sample, no threshold and no length cap, and it applies to a block of keys at either end of the body rather than to one end.
 
-A maintained `pnpm tools compare commit fafaaa2` screen on this host (one pinned CPU, ten selected cases, nine blocks, paired process-level A/A) measured these current/baseline ratios:
+A maintained `pnpm -s tools compare commit 8bd64d9` screen on this host (one pinned CPU, `u64`, 65,536 records, nine blocks, paired process-level A/A) measured these current/baseline ratios:
 
 | Input | Ratio | Blocks | A/A | Screen |
 |---|---:|---|---|---|
-| `u64/sorted_tail/65536` | 0.3806 | 0.356–0.428 | 0.928–1.072 | faster |
-| `u64/sorted_tail/1000000` | 0.3332 | 0.302–0.347 | 0.924–1.076 | faster |
-| `u64/d16/65536` | 0.8006 | 0.722–1.064 | 0.961–1.039 | faster |
-| `u64/random/65536` | 1.0138 | 0.976–1.139 | 0.955–1.046 | within noise |
-| `u64/sorted/65536` | 0.9944 | 0.922–1.101 | 0.944–1.056 | within noise |
-| `u64/sorted99/65536` | 1.0007 | 0.918–1.106 | 0.938–1.063 | within noise |
-| `u64/far_swaps/65536` | 1.0434 | 0.990–1.136 | 0.939–1.061 | within noise |
-| `u64/equal/65536` | 0.9565 | 0.851–1.132 | 0.900–1.100 | within noise |
-| `f64/sorted/65536` | 0.9871 | 0.895–1.270 | 0.947–1.053 | within noise |
-| `u64/two_values/1000000` | 1.0727 | 1.035–1.143 | 0.919–1.081 | within noise |
+| `u64/sorted_tail/65536` | 0.3329 | 0.304–0.361 | 0.955–1.045 | faster |
+| `u64/d16/65536` | 1.1214 | 1.070–1.205 | 0.903–1.097 | slower |
+| `u64/random/65536` | 0.9655 | 0.920–1.060 | 0.961–1.040 | within noise |
+| `u64/sorted/65536` | 0.9631 | 0.852–1.147 | 0.844–1.157 | within noise |
+| `u64/sorted99/65536` | 0.9738 | 0.836–1.092 | 0.927–1.073 | within noise |
+| `u64/far_swaps/65536` | 1.0197 | 0.936–1.090 | 0.920–1.080 | within noise |
+| `u64/equal/65536` | 0.9589 | 0.818–1.028 | 0.942–1.058 | within noise |
+| `u64/two_values/65536` | 0.9915 | 0.944–1.066 | 0.934–1.066 | within noise |
 
-A peak-allocation harness measured the scratch of one `u64/sorted_tail/65536` sort at 8,672,352 bytes for the partitioned revision and 65,536 bytes for this one, against 89,356 bytes for `fafaaa2`. The 8.4 MB was one block-scratch allocation: the 12-bit digit that a concentrated top window selects reserves `2 x 4096` blocks of records. Splitting at the order the input already has never reaches that partition.
+`sorted_tail/1000000` was checked with the research harness rather than the screen: 18.2–23.1 ms for the baseline executable against 3.6–5.0 ms for this one. `d16` is the one screen that reports a direction, and it reads every record the same number of times in both revisions: the whole node varies in four bits, so it takes the counted window instead of any partition this branch added. Its Portable SIMD configuration measured −1.1 % on the same head, so the direction tracks placement rather than work; it remains an open observation rather than a claimed result.
+
+A peak-allocation harness measured the scratch of one `u64/sorted_tail/65536` sort at 8,672,352 bytes for a partitioned revision and 65,536 bytes for this one, against 89,356 bytes for `fafaaa2`. The 8.4 MB was one block-scratch allocation: the 12-bit digit that a concentrated top window selects reserves `2 x 4096` blocks of records. The run split never reaches that partition, with the run behind or ahead of the body.
 
 An earlier revision of this branch also reordered `confirm_order` to check ascending order first, so constant children could reuse the blocked or vector scan instead of a scalar search. Callgrind counted 12,827,780 instructions for that revision against 12,037,195 for `fafaaa2` on the same three batches of `f64/sorted/65536`, a difference of about one instruction per key, and the case measured 8% slower in every local run and 12–13% slower in continuous Default. Constant children never reached the reordered backend on the continuous cases either: `u64/equal/65536` read exactly one key per record in both revisions. The reordering was reverted, which restores `fafaaa2`'s confirmation schedule; the child gate and the bucket-order split do not depend on it.
 

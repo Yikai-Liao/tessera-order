@@ -29,11 +29,19 @@ interface LocalOptions {
   cpu?: string;
 }
 
-/** Keep unused parallel-API forwarding out of both serial source builds. */
-export function serialHarnessManifest(source: string) {
-  const manifest = parse(source);
-  const features = manifest.features as Record<string, string[]>;
-  features.rayon = features.rayon.filter((feature) => feature !== "tessera-sort/rayon");
+/** Complete only unused optional metadata for pre-parallel serial baselines. */
+export function serialBaselineManifest(baseline: string, current: string) {
+  const manifest = parse(baseline);
+  const features = manifest.features as Record<string, unknown>;
+  if ("rayon" in features) return baseline;
+  const dependencies = manifest.dependencies as Record<string, unknown>;
+  if ("rayon" in dependencies)
+    throw new Error("Historical Rayon dependencies require explicit review");
+  const reference = parse(current);
+  const dependency = (reference.dependencies as Record<string, { optional?: boolean }>).rayon;
+  if (!dependency?.optional) throw new Error("The serial baseline shim requires optional Rayon");
+  features.rayon = (reference.features as Record<string, unknown>).rayon;
+  dependencies.rayon = dependency;
   return stringify(manifest);
 }
 
@@ -42,10 +50,6 @@ async function buildRevisions(root: string, workspace: Workspace, baseline: stri
   const { tree, directory, target } = workspace;
   const crate = join(tree, "rust/tessera-sort");
   const saved = join(directory, "current-source");
-  // Cargo validates even inactive forwarding against the replaced library.
-  // Normalize once before hashing, so both builds have the identical harness.
-  const manifest = join(tree, "bench/rust/Cargo.toml");
-  await writeFile(manifest, serialHarnessManifest(await readFile(manifest, "utf8")));
   await copySnapshot(crate, saved, tree);
   const source = {
     current: await sourceHash(crate),
@@ -57,6 +61,16 @@ async function buildRevisions(root: string, workspace: Workspace, baseline: stri
   };
   await rm(crate, { recursive: true });
   await copyLibraryRevision(root, baseline, crate);
+  // Cargo validates inactive forwarding and locks optional dependency edges.
+  // Keep the shared harness/lockfile; this metadata never enables a parallel API.
+  const manifest = join(crate, "Cargo.toml");
+  await writeFile(
+    manifest,
+    serialBaselineManifest(
+      await readFile(manifest, "utf8"),
+      await readFile(join(saved, "Cargo.toml"), "utf8"),
+    ),
+  );
   source.baseline = await sourceHash(crate);
   const features = simd ? ["portable-simd"] : [];
   const binaries = { baseline: join(directory, "baseline"), current: join(directory, "current") };

@@ -25,6 +25,7 @@ export interface BuildProvenance {
   opt_level: string;
   debug: string;
   features: string[];
+  rustc_args?: string[];
 }
 
 /** Materialize repository-local links; reject escaping targets and directory cycles.
@@ -159,14 +160,18 @@ export async function buildBenchmark(
   target: string,
   name: "smoke" | "compare",
   features: string[],
-  options: { targetTriple?: string; env?: NodeJS.ProcessEnv } = {},
+  options: { targetTriple?: string; env?: NodeJS.ProcessEnv; rustcArgs?: string[] } = {},
 ) {
-  return buildArtifact(
+  if (options.rustcArgs && name !== "smoke")
+    throw new Error("Final rustc arguments require a smoke benchmark build");
+  const build = await buildArtifact(
     await command(
       "cargo",
       [
         ...(name === "smoke"
-          ? ["bench", "--bench", name, "--no-run"]
+          ? options.rustcArgs
+            ? ["rustc", "--profile", "bench", "--bench", name]
+            : ["bench", "--bench", name, "--no-run"]
           : ["build", "--release", "--bin", name, "--bin", "memory"]),
         "--locked",
         "-p",
@@ -176,9 +181,12 @@ export async function buildBenchmark(
         target,
         ...(options.targetTriple ? ["--target", options.targetTriple] : []),
         ...(features.length ? ["--features", features.join(",")] : []),
+        ...(options.rustcArgs ? ["--", ...options.rustcArgs] : []),
       ],
       { cwd: tree, capture: true, env: options.env },
     ),
     name,
   );
+  if (options.rustcArgs) build.provenance.rustc_args = options.rustcArgs;
+  return build;
 }

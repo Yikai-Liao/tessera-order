@@ -78,6 +78,8 @@ A promised comparison fails its check if there is no unique parent, no start poi
 
 A rolling t-test was rejected because changing code is not one stationary population: after a step from about 190 µs to 124 µs, its window baseline stayed at 187 µs and called a 151 µs PR faster. The previous-sample rule follows code changes immediately. Cases noisier than 5% need their own boundary or a new ID; do not dismiss alerts as noise. Inspect the [public dashboard](https://bencher.dev/perf/yikai-liao-s-project), then use paired A/A and placement controls.
 
+For local layout investigation, [`compare commit --layout-seeds`](benchmarking.md#layout-sampling) retains a separate nine-block process-level A/A screen per fixed LLD section order. Its observed cross-layout range is not an alert threshold. Adjacent `main` samples mix source changes, placement and host variation, so history alone cannot estimate layout-only noise.
+
 ## Reports
 
 [`bench/continuous/index.ts`](../../bench/continuous/index.ts) publishes one check per build, a job summary, and one combined PR comment per measured head. Same-head reruns update their comment; newer heads get a new comment and minimize older ones. Results for superseded heads go only to the summary. Missing supplemental history/images is logged in the footer without changing the measurement verdict.

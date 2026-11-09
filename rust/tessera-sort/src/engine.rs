@@ -1218,6 +1218,61 @@ mod tests {
     }
 
     #[test]
+    fn short_root_respects_tile() {
+        /// Records which insertion stage the root selected.
+        #[derive(Default)]
+        struct InsertionStages {
+            probes: usize,
+            finishes: usize,
+        }
+
+        impl<const WORDS: usize> Extract<[u64; WORDS]> for InsertionStages {
+            type Value = u64;
+
+            fn key(&mut self, record: &[u64; WORDS]) -> u64 {
+                record[0]
+            }
+
+            fn insertion_sort(
+                &mut self,
+                records: &mut [[u64; WORDS]],
+                budget: usize,
+            ) -> Option<usize> {
+                self.probes += 1;
+                insertion_loop(records, budget, self)
+            }
+
+            fn finish_insertion(&mut self, records: &mut [[u64; WORDS]]) {
+                self.finishes += 1;
+                finish_insertion(records, self);
+            }
+        }
+
+        /// Checks the root choice with one inversion that fits either budget.
+        fn check<const WORDS: usize>(tile_bytes: usize, direct: bool) {
+            let mut records: Vec<_> = (0..INSERTION_MAX)
+                .map(|id| {
+                    let mut record = [0u64; WORDS];
+                    record[0] = id as u64;
+                    record
+                })
+                .collect();
+            let expected = records.clone();
+            records.swap(0, 1);
+            let mut stages = InsertionStages::default();
+            sort_with_tile_bytes::<_, _, true>(&mut records, &mut stages, tile_bytes);
+            assert_eq!(records, expected);
+            assert_eq!(stages.finishes, usize::from(direct));
+            assert_eq!(stages.probes, usize::from(!direct));
+        }
+
+        let fit_bytes = INSERTION_MAX * core::mem::size_of::<u64>();
+        check::<1>(fit_bytes, true);
+        check::<1>(fit_bytes - 1, false);
+        check::<257>(TILE_BYTES, false);
+    }
+
+    #[test]
     fn confirm_order_calls_key_in_order() {
         for descending in [false, true] {
             let mut records: Vec<_> = (0..129u64).map(|id| (id / 4, id)).collect();

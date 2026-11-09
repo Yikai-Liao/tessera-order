@@ -414,6 +414,14 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
             return;
         }
         Order::Unsorted => {
+            // This input already fits the insertion leaf; a budget and varying-bit
+            // scan cannot select a different finishing algorithm.
+            if records.len() <= INSERTION_MAX
+                && records.len().saturating_mul(record_bytes) <= tile_bytes
+            {
+                extractor.finish_insertion(records);
+                return;
+            }
             let probe_len = (tile_bytes / record_bytes).max(2).min(records.len());
             if insertion_probe(records, extractor, probe_len) {
                 return;
@@ -1182,6 +1190,32 @@ mod tests {
     use super::*;
     use crate::key::ByKey;
     use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    #[test]
+    fn short_unordered_finishes_directly() {
+        for len in [INSERTION_MAX - 1, INSERTION_MAX] {
+            let mut records: Vec<_> = (0..len).map(|id| ((id * 17 % len) as u64, id)).collect();
+            let mut expected = records.clone();
+            let mut expected_visits = Vec::new();
+            let mut extractor = ByKey(|record: &(u64, usize)| {
+                expected_visits.push(record.1);
+                record.0
+            });
+            assert!(probe_order(&expected, &mut extractor) == Order::Unsorted);
+            extractor.finish_insertion(&mut expected);
+
+            let mut visits = Vec::new();
+            sort::<_, _, true>(
+                &mut records,
+                &mut ByKey(|record: &(u64, usize)| {
+                    visits.push(record.1);
+                    record.0
+                }),
+            );
+            assert_eq!(records, expected);
+            assert_eq!(visits, expected_visits);
+        }
+    }
 
     #[test]
     fn confirm_order_calls_key_in_order() {

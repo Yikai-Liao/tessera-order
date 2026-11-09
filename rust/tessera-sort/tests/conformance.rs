@@ -138,6 +138,36 @@ fn descending_ties_stay_stable() {
 }
 
 #[test]
+fn insertion_boundary_keeps_order() {
+    for len in [47usize, 48, 49] {
+        for pattern in 0..5 {
+            let mut records: Vec<_> = (0..len)
+                .map(|id| {
+                    let key = match pattern {
+                        0 => id,
+                        1 => len - id,
+                        2 => 0,
+                        3 => (len - id) / 3,
+                        _ => id * 17 % len / 3,
+                    };
+                    (key as u64, id)
+                })
+                .collect();
+            let mut keys: Vec<_> = records.iter().map(|record| record.0).collect();
+            let mut expected = records.clone();
+            expected.sort_by_key(|record| record.0);
+            stable_sort(&mut keys);
+            stable_sort_by_key(&mut records, |record| record.0);
+            assert_eq!(records, expected, "len={len} pattern={pattern}");
+            assert_eq!(
+                keys,
+                expected.iter().map(|record| record.0).collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+#[test]
 fn record_shapes_and_thresholds() {
     let mut state = 71;
     let lengths: &[usize] = if cfg!(miri) {

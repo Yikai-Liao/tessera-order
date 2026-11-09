@@ -41,7 +41,7 @@ Tracker changes in a PR take effect only after merging: `workflow_run` uses defa
 
 ## Within-job scheduling
 
-The supervisor splits the 51 distinct API timed IDs into small cases below 1,000,000 records and large cases. Small IDs balance across two single-threaded workers pinned to separate available CPUs. Both workers finish before one pinned worker prepares or measures larger inputs. Selection precedes generation; Criterion directories are independent. Failed workers, missing results and duplicate IDs fail the run. Direct binary execution remains serial.
+The supervisor splits the plan’s distinct API timed IDs into small cases below 1,000,000 records and large cases. Small IDs balance across two single-threaded workers pinned to separate available CPUs. Both workers finish before one pinned worker prepares or measures larger inputs. Selection precedes generation; Criterion directories are independent. Failed workers, missing results and duplicate IDs fail the run. Direct binary execution remains serial.
 
 The [catalog](../../bench/catalog.toml) is the authority for configuration identities:
 
@@ -54,9 +54,9 @@ These Testbeds separate concurrent measurements from the older serial histories.
 
 ## Cases
 
-[`bench/plans/continuous.toml`](../../bench/plans/continuous.toml) defines coverage, compiled into each measured executable. Preview it with `pnpm -s tools plan continuous`; do not maintain a second case list here or in the supervisor. [Selection rules](benchmarking.md#experiment-plans) and the [case ID contract](benchmarking.md#cases-and-suites) apply. All 51 timed IDs measure the two public sorting functions with per-call scratch allocation; there is no mode selector. IDs are `<language>/<case_id>/api`, such as `rust/u64/random/65536/s1/api`.
+[`bench/plans/continuous.toml`](../../bench/plans/continuous.toml) defines coverage, compiled into each measured executable. Preview it with `pnpm -s tools plan continuous`; do not maintain a second case list here or in the supervisor. [Selection rules](benchmarking.md#experiment-plans) and the [case ID contract](benchmarking.md#cases-and-suites) apply. All timed IDs measure the two public sorting functions with per-call scratch allocation; there is no mode selector. IDs are `<language>/<case_id>/api`, such as `rust/u64/random/65536/s1/api`.
 
-Coverage must exercise insertion/tile boundaries, confirmed order, low-fanout tiles, each node route, key widths, floats, stable payloads and large working sets. Keep random controls beside targeted distributions. Small cases are placement-sensitive; their alerts need the same investigation as large ones. The direct-key ascending-confirmation coverage includes both `u32` and `u64` at 65,536 records; the new `u32` row keeps the existing Testbed and has no comparative baseline until one is established.
+Coverage must exercise insertion/tile boundaries, confirmed order, low-fanout tiles, each node route, key widths, floats, stable payloads and large working sets. Keep random controls beside targeted distributions. Small cases are placement-sensitive; their alerts need the same investigation as large ones. Insertion-threshold coverage includes random, sorted, reverse and equal inputs for direct `u64` keys and keyed rows. Ordered controls retain the root probe and reversal paths; only unsorted insertion-sized tiles take direct insertion finishing. Added cases retain the same Testbeds and remain new measurements until comparative baselines exist. The direct-key ascending-confirmation coverage includes both `u32` and `u64` at 65,536 records; the new `u32` row keeps the existing Testbed and has no comparative baseline until one is established.
 
 | Length | Warm-up | Samples | Measurement window |
 |---|---|---|---|

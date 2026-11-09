@@ -91,7 +91,7 @@ While the block partition writes its result back into the input, each child that
 |---|---|---|
 | sorted | probe + one confirming scan | ~1 read pass, no allocation |
 | reversed | probe + scan + stable reversal | ~2 passes, no allocation |
-| all keys equal | probe + varying-bit scan | ~1 read pass, no allocation |
+| all keys equal | confirmation at unit stride; otherwise flat sample + varying-bit scan | ~1 read pass, no allocation |
 | unsorted tile, at most 48 records | insertion finish | bounded quadratic leaf, no allocation |
 | larger nearly sorted input | budgeted insertion | linear in n plus inversions |
 | one dominant key | equality partition | one partition, the equal band is done |

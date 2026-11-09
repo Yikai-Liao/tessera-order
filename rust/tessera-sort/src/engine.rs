@@ -491,9 +491,12 @@ fn insertion_probe<T, E: Extract<T>>(
         .collect();
     match Direct.insertion_sort(&mut keys, probe_len) {
         Some(0) | None => false,
-        Some(swaps) => extractor
-            .insertion_sort(records, swaps * records.len() / probe_len)
-            .is_some(),
+        Some(swaps) => {
+            // The successful probe bounds swaps by probe_len, so the quotient
+            // fits usize even when the intermediate product does not.
+            let budget = (swaps as u128 * records.len() as u128 / probe_len as u128) as usize;
+            extractor.insertion_sort(records, budget).is_some()
+        }
     }
 }
 
@@ -877,6 +880,20 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             &mut self.scratch.block,
             classify,
         );
+        if ends[0] == records.len() || ends[1] == 0 {
+            // A changing key can leave the whole node below or above the
+            // sampled pivot. Force a digit partition to remove candidate bits
+            // rather than repeat the same equality partition indefinitely.
+            self.scratch.block.recycle_ends(ends);
+            let digit = choose_split_digit(
+                records,
+                bit_len(parent_varying),
+                self.tile_bytes,
+                self.extractor,
+            );
+            self.partition_digit(records, digit, parent_varying);
+            return;
+        }
         for range in [0..ends[0], ends[1]..records.len()] {
             let child = &mut records[range];
             if child.len() > 1 {
@@ -1351,6 +1368,79 @@ mod tests {
         .sort_tile(&mut records, u64::MAX as u128);
         records.sort_unstable();
         assert_eq!(records, (0..1000u64).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn insertion_budget_keeps_floor() {
+        struct Budget {
+            actual: Option<usize>,
+        }
+        impl Extract<u32> for Budget {
+            type Value = u32;
+
+            fn key(&mut self, record: &u32) -> u32 {
+                *record
+            }
+
+            fn insertion_sort(&mut self, _records: &mut [u32], budget: usize) -> Option<usize> {
+                self.actual = Some(budget);
+                Some(0)
+            }
+        }
+        for (len, probe_len, pairs, expected) in [
+            (3, 3, 0, Some(3)),
+            (9, 4, 0, None),
+            (9, 4, 1, Some(2)),
+            (9, 4, 2, Some(4)),
+            (10, 4, 2, Some(5)),
+        ] {
+            let mut records: Vec<_> = (0..len as u32).collect();
+            for pair in 0..pairs {
+                records.swap(2 * pair, 2 * pair + 1);
+            }
+            let mut extractor = Budget { actual: None };
+            assert_eq!(
+                insertion_probe(&mut records, &mut extractor, probe_len),
+                expected.is_some(),
+            );
+            assert_eq!(extractor.actual, expected);
+        }
+    }
+
+    #[test]
+    fn changing_keys_finish_node() {
+        for greater in [false, true] {
+            let len = if cfg!(miri) { 65 } else { 129 };
+            let mut records: Vec<_> = (0..len as u16).collect();
+            let mut scratch = Scratch::new();
+            let mut calls = 0;
+            // Each equality pass puts every record in one non-equal band.
+            // The child scan restores all bits; the next sample picks the
+            // same absent pivot. Stop safely before a broken sort exhausts
+            // the stack.
+            let mut extractor = ByKey(|_: &u16| -> u16 {
+                assert!(calls < 12_000, "node recursion did not make progress");
+                let phase = calls % (len + 65 + MODE_SAMPLE_LEN);
+                calls += 1;
+                if phase < len {
+                    1
+                } else if phase < len + 65 {
+                    if phase % 2 == 0 { 0 } else { 0x1ff }
+                } else if greater {
+                    0
+                } else {
+                    0x1ff
+                }
+            });
+            Sorter::<_, _, true> {
+                scratch: &mut scratch,
+                extractor: &mut extractor,
+                tile_bytes: 32,
+            }
+            .partition_equal(&mut records, if greater { 0 } else { 0x1ff }, 0x1ff);
+            records.sort_unstable();
+            assert_eq!(records, (0..len as u16).collect::<Vec<_>>());
+        }
     }
 
     #[test]

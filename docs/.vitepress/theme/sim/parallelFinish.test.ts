@@ -9,8 +9,16 @@ test("bounded finishing preserves every record under suspended bucket schedules"
   for (const buckets of [2, 4, 8]) {
     for (const blockSize of [1, 3, 7]) {
       for (const shards of [2, 4]) {
-        for (const len of [33, 73, 127]) {
-          const keys = Array.from({ length: len }, (_, id) => (id * 7919 + 73) % (buckets * 256));
+        // Repeated keys in the longest input cross shard boundaries.
+        for (const [len, keySpace] of [
+          [33, 256],
+          [73, 256],
+          [127, 4],
+        ] as const) {
+          const keys = Array.from(
+            { length: len },
+            (_, id) => (id * 7919 + 73) % (buckets * keySpace),
+          );
           const order = Array.from({ length: buckets }, (_, i) => i);
           for (const reverse of [false, true]) {
             if (reverse) order.reverse();
@@ -25,7 +33,7 @@ test("bounded finishing preserves every record under suspended bucket schedules"
                 buckets,
                 blockSize,
                 shards,
-                classify: (key) => Math.floor(key / 256),
+                classify: (key) => Math.floor(key / keySpace),
                 actions,
               });
               const expected = keys.map((key, id) => ({ key, id })).sort((a, b) => a.key - b.key);

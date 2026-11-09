@@ -27,6 +27,8 @@ An independent track that binds the Rust crate and does not wait for C++. See th
 
 ## Benchmark investigations
 
+- Consolidate distribution-sensitive routing into general mechanisms. Evaluate child-order reuse against the former capped end-run route with current-head Default and Portable SIMD continuous feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
+
 - Extend the comparison to cold-cache experiments, additional seeds and threshold cases when an investigation needs them.
 - Add native-CPU and branch-aligned placement controls for source A/B studies.
 - Add hosted comparison groups using the existing Bencher queue after the local release report; retain complete per-type length groups for absolute scaling.

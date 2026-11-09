@@ -118,94 +118,6 @@ fn sample_mode<V: Unsigned>(keys: &mut [V]) -> Option<V> {
     (best.len() * MODE_SHARE_DENOMINATOR >= len).then_some(best[0])
 }
 
-/// A side holding at most `1 / MINORITY_DENOMINATOR` of the sample is the minority.
-const MINORITY_DENOMINATOR: usize = 8;
-
-/// Whether `bit` separates a minority of the sample, and which side is the
-/// minority: `true` when the records with the bit set are the few.
-fn sample_minority_bit<V: Unsigned>(keys: &[V], bit: V) -> Option<bool> {
-    let zero = V::from_usize(0);
-    let set = keys.iter().filter(|key| (**key & bit) != zero).count();
-    let clear = keys.len() - set;
-    if set * MINORITY_DENOMINATOR <= keys.len() {
-        Some(true)
-    } else if clear * MINORITY_DENOMINATOR <= keys.len() {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-/// Records at one end that a split may waste a whole pass on. The run is
-/// finished by an insertion sort, which is quadratic, hence the cap.
-const OUTLIER_RUN_MAX: usize = 1024;
-
-/// A short run at one end of a node whose records disagree with every other
-/// record on the node's top bit, and the variation of the rest.
-struct OutlierRun {
-    /// The run sits at the start of the node (`true`) or at its end.
-    head: bool,
-    /// Whether the run is the side with the bit set.
-    set: bool,
-    len: usize,
-    body_varying: u128,
-}
-
-/// Finds a short end run separated by the top bit and scans the body
-/// for variation. A scattered minority stops the scan at its first occurrence.
-fn outlier_run<T, E: Extract<T>>(
-    records: &[T],
-    keys: &[KeyValue<T, E>],
-    bit: KeyValue<T, E>,
-    extractor: &mut E,
-) -> Option<OutlierRun> {
-    let minority_set = sample_minority_bit(keys, bit)?;
-    let zero = KeyValue::<T, E>::from_usize(0);
-    let is_minority = |key: KeyValue<T, E>| ((key & bit) != zero) == minority_set;
-    let cap = OUTLIER_RUN_MAX.min(records.len() / 2);
-    let mut head = 0;
-    while head < cap && is_minority(extractor.key(&records[head])) {
-        head += 1;
-    }
-    let mut tail = 0;
-    while tail < cap && is_minority(extractor.key(&records[records.len() - 1 - tail])) {
-        tail += 1;
-    }
-    // The minority must occupy exactly one end.
-    if (head == 0) == (tail == 0) {
-        return None;
-    }
-    let (head_run, len) = if head > 0 {
-        (true, head)
-    } else {
-        (false, tail)
-    };
-    if len == cap {
-        return None;
-    }
-    let (start, end) = if head_run {
-        (len, records.len())
-    } else {
-        (0, records.len() - len)
-    };
-    let mut union = extractor.key(&records[start]);
-    let mut intersection = union;
-    for record in &records[start + 1..end] {
-        let key = extractor.key(record);
-        if is_minority(key) {
-            return None;
-        }
-        union |= key;
-        intersection = intersection & key;
-    }
-    Some(OutlierRun {
-        head: head_run,
-        set: minority_set,
-        len,
-        body_varying: union.to_u128() ^ intersection.to_u128(),
-    })
-}
-
 /// Stably inserts inverted records until sorted or the swap budget runs out.
 /// A failed pass still leaves a stable permutation of the input.
 ///
@@ -833,6 +745,20 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         }
         let record_bytes = core::mem::size_of::<T>();
         let node_bytes = len.saturating_mul(record_bytes);
+        // Partitions can expose ordered children inside an unordered input.
+        // Reuse the root gate instead of recognizing particular end runs.
+        match probe_order(records, self.extractor) {
+            Order::Ascending => return,
+            Order::Descending { strict: true } => {
+                reverse_strictly(records);
+                return;
+            }
+            Order::Descending { strict: false } => {
+                reverse_stably(records, self.extractor);
+                return;
+            }
+            Order::Flat | Order::Unsorted => {}
+        }
         if node_bytes <= self.tile_bytes {
             self.sort_tile(records, varying);
             return;
@@ -867,12 +793,6 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             // An equality partition finishes the repeated key immediately.
             if let Some(equal) = sample_mode(&mut keys) {
                 self.partition_equal(records, equal, varying);
-                return;
-            }
-            // Lift a short end run rather than move the whole node to separate it.
-            let bit = KeyValue::<T, E>::from_usize(1) << KeyValue::<T, E>::from_usize(top - 1);
-            if let Some(outlier) = outlier_run(records, &keys, bit, self.extractor) {
-                self.sort_outlier_run(records, outlier);
                 return;
             }
         }
@@ -959,34 +879,6 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             }
         }
         self.scratch.block.recycle_ends(ends);
-    }
-
-    /// Moves a run of disagreeing records to the end its bit belongs to, then
-    /// finishes both parts: the body by the ordinary recursion, the run by
-    /// insertion.
-    fn sort_outlier_run(&mut self, records: &mut [T], outlier: OutlierRun) {
-        let len = records.len();
-        let run = outlier.len;
-        // The run belongs before the body when its bit is clear and after it when
-        // set: every record outside the run has the opposite bit.
-        let before = !outlier.set;
-        if outlier.head && !before {
-            records.rotate_left(run);
-        } else if !outlier.head && before {
-            records.rotate_right(run);
-        }
-        let body = if before {
-            &mut records[run..]
-        } else {
-            &mut records[..len - run]
-        };
-        self.sort_node(body, outlier.body_varying);
-        let lifted = if before {
-            &mut records[..run]
-        } else {
-            &mut records[len - run..]
-        };
-        self.extractor.finish_insertion(lifted);
     }
 
     /// Reserves `len` scratch records and, when bucket IDs are cached and do not
@@ -1791,7 +1683,27 @@ mod tests {
     }
 
     #[test]
-    fn outlier_run_at_either_end() {
+    fn ordered_nodes_skip_scratch() {
+        for descending in [false, true] {
+            let mut records: Vec<_> = (0..129u64)
+                .map(|id| (if descending { (128 - id) / 4 } else { id / 4 }, id))
+                .collect();
+            let mut expected = records.clone();
+            expected.sort_by_key(|record| record.0);
+            let mut scratch = Scratch::new();
+            Sorter::<_, _, true> {
+                scratch: &mut scratch,
+                extractor: &mut ByKey(|record: &(u64, u64)| record.0),
+                tile_bytes: 128,
+            }
+            .sort_node(&mut records, u64::MAX as u128);
+            assert_eq!(records, expected);
+            assert!(scratch.tile.is_empty());
+        }
+    }
+
+    #[test]
+    fn end_runs_sort_stably() {
         let len = if cfg!(miri) { 129 } else { 8193 };
         for high in [false, true] {
             let mut values: Vec<_> = (0..len)

@@ -312,7 +312,7 @@ mod tests {
     fn presets_preserve_case_counts() {
         let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
         let cases = continuous.inputs().unwrap();
-        assert_eq!(cases.len(), 65);
+        assert_eq!(cases.len(), 67);
         for ty in ["u64", "row_u64"] {
             for distribution in ["random", "sorted", "reverse", "equal"] {
                 assert!(cases.iter().any(|case| {
@@ -337,6 +337,11 @@ mod tests {
         assert!(cases.iter().any(|case| {
             case.ty == "u32" && case.distribution == "sorted" && case.len == 65_536
         }));
+        for (ty, len) in [("u64", 1_000_000), ("row_u64", 65_536)] {
+            assert!(cases.iter().any(|case| {
+                case.ty == ty && case.distribution == "sorted_tail" && case.len == len
+            }));
+        }
         for (text, expected) in [
             (include_str!("../../plans/smoke.toml"), 125),
             (include_str!("../../plans/release.toml"), 381),

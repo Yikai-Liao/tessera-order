@@ -72,7 +72,7 @@ lengths = [ 65536 ]
 
 [[include]]
 types = [ "row_u64" ]
-distributions = [ "d16", "hot50" ]
+distributions = [ "d16", "hot50", "sorted_tail" ]
 lengths = [ 65536 ]
 
 [[include]]
@@ -87,7 +87,7 @@ lengths = [ 65536 ]
 
 [[include]]
 types = [ "u64" ]
-distributions = [ "random", "zipf2", "skew99", "two_values", "sorted99", "sparse_digits", "bimodal", "hot50", "d4096" ]
+distributions = [ "random", "zipf2", "skew99", "two_values", "sorted99", "sparse_digits", "bimodal", "hot50", "d4096", "sorted_tail" ]
 lengths = [ 1000000 ]
 
 [[include]]

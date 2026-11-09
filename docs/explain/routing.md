@@ -44,7 +44,9 @@ From here on, the engine works on slices of the input and sorts each one in plac
 - a **tile** is a slice of at most 64 KiB of records. It is finished in a scratch buffer of the same size, which stays in the L2 cache ([tiles](tiles.md));
 - a **node** is anything larger. It is split by a stable partition into children, and each child is routed again.
 
-A node first looks at its varying bits. If they span at most 8 bits, the node is one window away from sorted, and one of the routes below finishes it: every record is then in its final position.
+Each slice entering `sort_node` first reuses the order probe described above. An ascending slice is already done; a descending slice uses the same strict or stable reversal. Thus a radix partition can expose an ordered child even when the full input was not ordered. This applies equally to children from either end or the interior of the input, without a separate end-run detector or length cap. Unsorted and flat samples continue to the normal routes. The extra check takes at most linear work in the slice length and allocates nothing; it does not run insertion or create a second key buffer.
+
+A node then looks at its varying bits. If they span at most 8 bits, the node is one window away from sorted, and one of the routes below finishes it: every record is then in its final position.
 
 ### Counted window
 
@@ -54,7 +56,7 @@ Records sorted by a key function keep their payloads: two records with key 7 may
 
 ### Block partition of the window
 
-The remaining inputs get one [block partition](block-partition.md) on the window, which also finishes the node. Wider nodes have three ways to split. The first two are checked only on nodes of at least four tiles, so their 64-key sample is paid for.
+The remaining inputs get one [block partition](block-partition.md) on the window, which also finishes the node. Wider nodes have two ways to split. Equality sampling is checked only on nodes of at least four tiles, so its 64-key sample is paid for.
 
 ### Repeated key
 
@@ -63,18 +65,6 @@ The node samples 64 keys in 8 runs of 8 consecutive keys. Runs rather than singl
 A heavily skewed distribution (Zipf, a default value, a null marker) would otherwise put most records in one bucket on every digit, and that bucket would cost one pass per digit.
 
 A changing key function can make the sampled value disappear: every record then enters the same non-equal band, leaving the node unchanged. In that case the engine uses a top-digit partition instead. Its digit bits are removed from the next candidate mask even if the records again enter one bucket, so changing keys cannot repeat this node indefinitely.
-
-### Outlier run
-
-Some inputs are sorted data with a few records appended or prepended: a sentinel, a late batch, a `u64::MAX` marker. A digit partition would move the whole node to separate them.
-
-Tessera looks at the top varying bit. If at most an eighth of the sample disagrees with the majority on that bit, and those records form one run of at most 1,024 records at the start or end of the node, then:
-
-1. the run is rotated to the end it belongs to (records with the bit clear go first);
-2. the rest of the node, which no longer contains the top bit's minority, is routed again with a narrower set of varying bits;
-3. the run is finished by insertion sort.
-
-If the minority also appears anywhere outside the run, the check gives up at the first such record and the node takes the top-digit split.
 
 ### Top digit
 
@@ -95,6 +85,6 @@ While the block partition writes its result back into the input, each child that
 | unsorted tile, at most 48 records | insertion finish | bounded quadratic leaf, no allocation |
 | larger nearly sorted input | budgeted insertion | linear in n plus inversions |
 | one dominant key | equality partition | one partition, the equal band is done |
-| sorted with a short outlier run | rotate + insertion | the body is routed on fewer bits |
+| ordered child exposed by a partition | order probe + confirmation, then return or stable reversal | at most linear work in that child |
 | at most 8 varying bits, record is its own key | counted window | one counting pass and one fill |
 | everything else | top-digit block partition, then tiles | one streaming pass per node level, then cache-resident tiles |

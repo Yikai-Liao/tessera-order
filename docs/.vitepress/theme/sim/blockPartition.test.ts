@@ -58,4 +58,38 @@ for (const band of [0, 2]) {
     if (++passes > 6) throw new Error("digit fallback did not terminate");
   }
 }
+// A stable digit partition can expose monotone children anywhere in the
+// input. Confirming each child allows a return or a stable reversal without
+// assuming a short end run or reversing equal-key identities.
+for (const descending of [false, true]) {
+  const keys = Array.from({ length: 48 }, (_, id) =>
+    descending ? 15 - Math.floor(id / 3) : Math.floor(id / 3),
+  );
+  keys.splice(16, 0, ...keys.splice(0, 8));
+  const partition = simulate({ keys, buckets: 4, blockSize: 4, classify: (key) => key >> 2 });
+  const output = [];
+  for (let bucket = 0; bucket < 4; bucket++) {
+    const child = partition.output.filter((record) => record.bucket === bucket);
+    const ascending = child.every(
+      (record, index) => index === 0 || child[index - 1].key <= record.key,
+    );
+    const descending = child.every(
+      (record, index) => index === 0 || child[index - 1].key >= record.key,
+    );
+    if (ascending) output.push(...child);
+    else if (descending) {
+      child.reverse();
+      for (let start = 0; start < child.length; ) {
+        let end = start + 1;
+        while (end < child.length && child[end].key === child[start].key) end++;
+        child.splice(start, end - start, ...child.slice(start, end).reverse());
+        start = end;
+      }
+      output.push(...child);
+    } else output.push(...child.sort((a, b) => a.key - b.key));
+  }
+  const expected = keys.map((key, id) => ({ key, id })).sort((a, b) => a.key - b.key);
+  if (output.map((record) => record.id).join() !== expected.map((record) => record.id).join())
+    throw new Error("child-order routing changed stable record order");
+}
 console.log(`block partition model: ${cases} cases ok`);

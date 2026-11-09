@@ -32,6 +32,8 @@ test("continuous parallel coverage is explicit and independent of serial coverag
       distributions: ["random"],
       lengths: [10000000],
     },
+    { types: ["u64"], distributions: ["sorted", "reverse", "equal"], lengths: [10000000] },
+    { types: ["row_u32"], distributions: ["skew99"], lengths: [10000000] },
   ]);
   assert.equal(plan.algorithms.length, 1);
   assert.throws(() => parsePlan({ ...plan, harness: "comparison" }), /smoke harness/);

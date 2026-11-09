@@ -2,13 +2,13 @@
 
 //! Caller-owned Rayon pools prepared outside the timed and counted region.
 
-use super::{BatchKernel, BenchmarkRecord, Kernel, PreparedRecords};
+use super::{BatchKernel, Kernel, PreparedRecords, TesseraAdapter};
 use crate::pool::BenchmarkPool;
 use rayon::prelude::*;
 use std::rc::Rc;
 
 /// Prepares a verified parallel batch with no global pool or timed pool creation.
-pub(super) fn prepare<T: BenchmarkRecord>(
+pub(super) fn prepare<T: TesseraAdapter>(
     input: Rc<PreparedRecords<T>>,
     adapter: &'static str,
     threads: usize,

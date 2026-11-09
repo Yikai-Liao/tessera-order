@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 // Models block/parallel.rs directory adoption and parallel/finish.rs transfers.
 // Actions are serial linearizations of whole-bucket staging and final writes;
-// mutex scheduling, key panics and raw-pointer provenance remain Rust tests.
+// mutex scheduling, batch-cache release before callbacks, key panics and
+// raw-pointer provenance remain Rust tests.
 import { type Rec, simulate } from "./blockPartition.ts";
 
 export interface FinishAction {

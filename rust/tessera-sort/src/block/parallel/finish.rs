@@ -195,12 +195,18 @@ impl<T> Bucket<T> {
             // Allocate before transferring ownership; completed buckets release
             // capacity so ordinary scheduling retains only active buffers.
             self.records.resize_with(self.len, MaybeUninit::uninit);
-            let mut offset = 0;
-            for source in &self.sources {
-                // SAFETY: staging has capacity for the concatenated prefixes.
-                let output = unsafe { self.records.as_mut_ptr().add(offset).cast() };
-                lock(&storage.free[self.cache]).push(storage.gather(source, output));
-                offset += source.len;
+            {
+                // Publish the gathered free blocks as one callback-free batch.
+                // Peers only try-lock this cache; physical-owner holders never
+                // wait for it. Release the cache before invoking the sorter.
+                let mut free = lock(&storage.free[self.cache]);
+                let mut offset = 0;
+                for source in &self.sources {
+                    // SAFETY: staging has capacity for the concatenated prefixes.
+                    let output = unsafe { self.records.as_mut_ptr().add(offset).cast() };
+                    free.push(storage.gather(source, output));
+                    offset += source.len;
+                }
             }
             self.staged = true;
         }
@@ -375,6 +381,53 @@ mod tests {
             },
             Some(&mut |_| panic!("bounded finishing unexpectedly declined")),
         );
+    }
+
+    #[test]
+    fn staging_publishes_free_blocks_before_sorting() {
+        let mut records = [2usize, 1];
+        let input = records.as_mut_ptr();
+        let storage = Storage {
+            // SAFETY: these two initialized input blocks share the retained
+            // ancestor; gathering transfers both records to private staging.
+            addresses: unsafe { vec![input, input.add(1)] },
+            input,
+            full_blocks: 2,
+            scratch_blocks: 0,
+            block_size: 1,
+            owners: [0, 1].into_iter().map(Mutex::new).collect(),
+            locations: [0, 1].into_iter().map(AtomicUsize::new).collect(),
+            lengths: vec![1, 1],
+            free: vec![Mutex::new(Vec::with_capacity(2)), Mutex::new(Vec::new())],
+        };
+        let mut bucket = Bucket {
+            sources: vec![Source { logical: 0, len: 1 }, Source { logical: 1, len: 1 }],
+            start: 0,
+            len: 2,
+            records: Vec::new(),
+            cache: 0,
+            staged: false,
+            completed: false,
+            panic: None,
+        };
+        bucket.finish(
+            &storage,
+            Some(&|staged| {
+                let free = storage.free[0]
+                    .try_lock()
+                    .expect("staging cache held across the key callback");
+                assert_eq!(*free, [0, 1]);
+                drop(free);
+                for owner in &storage.owners {
+                    assert_eq!(*owner.try_lock().expect("source lock held"), FREE);
+                }
+                staged.sort();
+            }),
+        );
+        assert!(bucket.panic.is_none());
+        assert!(bucket.completed);
+        assert!(bucket.records.is_empty());
+        assert_eq!(records, [1, 2]);
     }
 
     #[test]

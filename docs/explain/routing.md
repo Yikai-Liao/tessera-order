@@ -4,7 +4,9 @@ Before any radix pass, Tessera checks whether the input needs one. Many real inp
 
 ## Order probe
 
-`probe_order` samples adjacent pairs with a stride of `max(1, floor(n / 4,096))` and classifies the input below. The target of 4,096 determines the stride, not a hard limit: for example, 8,191 records use stride 1 and can visit 8,190 pairs before the confirmation scan.
+`probe_order` chooses a stride of `max(1, floor(n / 4,096))`. At stride 1 — fewer than 8,192 records — it classifies order in one adjacent-key scan: sampling every pair and then confirming would repeat the same work. It evaluates each visited record once. Before choosing a directional continuation, it checks up to three keys: three are the minimum that can demonstrate both rising and falling pairs. A direction conflict returns unsorted immediately. If these keys are equal, the scan finds the first unequal key; it then checks only the surviving direction, retaining the previous encoded key and rejecting the first conflict without dispatching a separate ascending scan. A completed scan returns ascending for sorted or constant keys, or distinguishes strict descent from descent with ties.
+
+At larger strides, the adjacent-pair sample classifies the input below. The target of 4,096 determines the stride, not a hard sample limit. An ordered, non-flat candidate takes the stages modeled in [`orderProbe.ts`](../.vitepress/theme/sim/orderProbe.ts).
 
 | Sampled pairs | Class | What happens |
 |---|---|---|
@@ -14,7 +16,7 @@ Before any radix pass, Tessera checks whether the input needs one. Many real inp
 
 A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. Any leading equal keys skipped while finding the direction rule out strict descent. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
 
-The sample rejects most unsorted inputs within a few pairs. The full scan runs only on inputs that look ordered. For direct keys, ascending confirmation checks the encoded predecessor and then reuses the scan that budgeted insertion uses: blocked adjacent pairs in the default build (`f64` keeps its scalar scan), or the vector backend with Portable SIMD. Key functions keep the scalar confirmation, evaluating each visited record once.
+At larger strides, the sample rejects most unsorted inputs within a few pairs. The full scan runs only on inputs that look ordered. For direct keys, this separate ascending confirmation checks the encoded predecessor and then reuses the scan that budgeted insertion uses: blocked adjacent pairs in the default build (`f64` keeps its scalar scan), or the vector backend with Portable SIMD. Key functions keep the scalar confirmation, evaluating each visited record once.
 
 ## Budgeted insertion
 
@@ -89,7 +91,7 @@ While the block partition writes its result back into the input, each child that
 |---|---|---|
 | sorted | probe + one confirming scan | ~1 read pass, no allocation |
 | reversed | probe + scan + stable reversal | ~2 passes, no allocation |
-| all keys equal | probe + varying-bit scan | ~1 read pass, no allocation |
+| all keys equal | confirmation at unit stride; otherwise flat sample + varying-bit scan | ~1 read pass, no allocation |
 | unsorted tile, at most 48 records | insertion finish | bounded quadratic leaf, no allocation |
 | larger nearly sorted input | budgeted insertion | linear in n plus inversions |
 | one dominant key | equality partition | one partition, the equal band is done |

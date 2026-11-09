@@ -523,11 +523,60 @@ enum Order {
 /// Target pair count used to choose the order gate's stride.
 const ORDER_SAMPLES: usize = 4096;
 
-/// Rejects unordered input with strided adjacent pairs, then confirms order
-/// with a full scan.
+/// Classifies adjacent keys directly at unit stride, otherwise samples pairs
+/// before confirming candidate order with a full scan.
 #[inline(never)]
 fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     let stride = (records.len() / ORDER_SAMPLES).max(1);
+    if stride == 1 {
+        // Three keys are the shortest mixed-direction witness. Reject it
+        // before selecting a directional continuation; each key is read once.
+        let first = extractor.key(&records[0]);
+        let mut keys = records[1..].iter().map(|record| extractor.key(record));
+        let Some(mut current) = keys.next() else {
+            return Order::Ascending;
+        };
+        let mut ascending = first <= current;
+        let mut descending = first >= current;
+        let mut strict = first != current;
+        if let Some(after) = keys.next() {
+            ascending &= current <= after;
+            descending &= current >= after;
+            strict &= current != after;
+            if !ascending && !descending {
+                return Order::Unsorted;
+            }
+            current = after;
+        }
+        if ascending && descending {
+            let Some(after) = keys.find(|&key| key != current) else {
+                return Order::Ascending;
+            };
+            ascending = current < after;
+            current = after;
+        }
+        if ascending {
+            return if keys
+                .try_fold(current, |before, after| (before <= after).then_some(after))
+                .is_some()
+            {
+                Order::Ascending
+            } else {
+                Order::Unsorted
+            };
+        }
+        return keys
+            .try_fold((current, strict), |(before, strict), after| {
+                if before > after {
+                    Some((after, strict))
+                } else if before == after {
+                    Some((after, false))
+                } else {
+                    None
+                }
+            })
+            .map_or(Order::Unsorted, |(_, strict)| Order::Descending { strict });
+    }
     let mut ascending = true;
     let mut descending = true;
     for index in (stride..records.len()).step_by(stride) {
@@ -1270,6 +1319,111 @@ mod tests {
         check::<1>(fit_bytes, true);
         check::<1>(fit_bytes - 1, false);
         check::<257>(TILE_BYTES, false);
+    }
+
+    #[test]
+    fn unit_stride_visits_once() {
+        let lengths: &[usize] = if cfg!(miri) {
+            &[2, 3, 4, 49, 129]
+        } else {
+            &[2, 3, 4, 49, 129, 1000, 8191]
+        };
+        for &len in lengths {
+            for descending in [false, true] {
+                for ties in [false, true] {
+                    let mut records: Vec<_> = (0..len)
+                        .map(|index| (if ties { index / 2 } else { index }, index))
+                        .collect();
+                    if descending {
+                        records.reverse();
+                    }
+                    let mut visited = Vec::new();
+                    let order = probe_order(
+                        &records,
+                        &mut ByKey(|record: &(usize, usize)| {
+                            visited.push(record.1);
+                            record.0
+                        }),
+                    );
+                    assert!(if descending && (len > 2 || !ties) {
+                        matches!(order, Order::Descending { strict } if strict != ties)
+                    } else {
+                        matches!(order, Order::Ascending)
+                    });
+                    assert_eq!(
+                        visited,
+                        records.iter().map(|record| record.1).collect::<Vec<_>>()
+                    );
+                }
+            }
+            let mut calls = 0;
+            let order = probe_order(
+                &std::vec![7u64; len],
+                &mut ByKey(|record: &u64| {
+                    calls += 1;
+                    *record
+                }),
+            );
+            assert!(matches!(order, Order::Ascending));
+            assert_eq!(calls, len);
+        }
+    }
+
+    #[test]
+    fn unit_stride_rejects_directly() {
+        /// Records visits and rejects dispatch to the separate ascending scan.
+        #[derive(Default)]
+        struct AdjacentProbe {
+            visits: Vec<usize>,
+        }
+
+        impl Extract<(u64, usize)> for AdjacentProbe {
+            type Value = u64;
+
+            fn key(&mut self, record: &(u64, usize)) -> u64 {
+                self.visits.push(record.1);
+                record.0
+            }
+
+            fn confirm_ascending(&mut self, _: &[(u64, usize)], _: u64) -> bool {
+                panic!("unit stride dispatched a second scan");
+            }
+        }
+
+        for len in [47, 48, 49, 1000] {
+            for prefix in [
+                &[1, 2, 1][..],
+                &[2, 1, 2],
+                &[1, 1, 2, 2, 1],
+                &[2, 2, 1, 1, 2],
+                &[1, 1, 1, 2, 1],
+                &[2, 2, 2, 1, 2],
+            ] {
+                let records: Vec<_> = (0..len)
+                    .map(|id| (prefix[id.min(prefix.len() - 1)], id))
+                    .collect();
+                let mut extractor = AdjacentProbe::default();
+                assert!(probe_order(&records, &mut extractor) == Order::Unsorted);
+                assert_eq!(extractor.visits, (0..prefix.len()).collect::<Vec<_>>());
+            }
+        }
+    }
+
+    #[test]
+    fn unit_stride_rejects_inversions() {
+        for len in [3, 49, 129] {
+            for descending in [false, true] {
+                let mut records: Vec<_> = (0..len).collect();
+                if descending {
+                    records.reverse();
+                }
+                for index in 0..len - 1 {
+                    records.swap(index, index + 1);
+                    assert!(probe_order(&records, &mut Direct) == Order::Unsorted);
+                    records.swap(index, index + 1);
+                }
+            }
+        }
     }
 
     #[test]

@@ -61,9 +61,13 @@ for (const band of [0, 2]) {
 // A stable digit partition can expose monotone children anywhere in the
 // input. Confirming each child allows a return or a stable reversal without
 // assuming a short end run or reversing equal-key identities.
-for (const descending of [false, true]) {
+for (const direction of ["ascending", "descending", "constant"]) {
   const keys = Array.from({ length: 48 }, (_, id) =>
-    descending ? 15 - Math.floor(id / 3) : Math.floor(id / 3),
+    direction === "constant"
+      ? 7
+      : direction === "descending"
+        ? 15 - Math.floor(id / 3)
+        : Math.floor(id / 3),
   );
   keys.splice(16, 0, ...keys.splice(0, 8));
   const partition = simulate({ keys, buckets: 4, blockSize: 4, classify: (key) => key >> 2 });

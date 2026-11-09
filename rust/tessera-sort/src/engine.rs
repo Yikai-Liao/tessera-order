@@ -743,9 +743,9 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         if records.len() < 2 || candidate == 0 {
             return;
         }
-        // Partitions can expose ordered children inside an unordered input.
-        // Reuse the root gate instead of recognizing particular end runs.
-        match probe_order(records, self.extractor) {
+        // Partitions expose ordered and constant children. Confirm directly
+        // so either property finishes in one scan, without a preceding sample.
+        match confirm_order(records, self.extractor) {
             Order::Ascending => return,
             Order::Descending { strict: true } => {
                 reverse_strictly(records);
@@ -1728,6 +1728,25 @@ mod tests {
             assert_eq!(records, expected);
             assert!(scratch.tile.is_empty());
         }
+    }
+
+    #[test]
+    fn constant_children_read_once() {
+        let len = if cfg!(miri) { 129 } else { 3 * ORDER_SAMPLES };
+        let mut records = alloc::vec![7u64; len];
+        let mut calls = 0;
+        let mut scratch = Scratch::new();
+        Sorter::<_, _, true> {
+            scratch: &mut scratch,
+            extractor: &mut ByKey(|record: &u64| {
+                calls += 1;
+                *record
+            }),
+            tile_bytes: 128,
+        }
+        .sort_child(&mut records, u64::MAX as u128);
+        assert_eq!(calls, len);
+        assert!(scratch.tile.is_empty());
     }
 
     #[test]

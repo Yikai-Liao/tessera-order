@@ -68,7 +68,7 @@ const boxes: Box[] = [
     x: 200,
     y: 230,
     w: 280,
-    title: "Order probe on child",
+    title: "Confirm child order",
     detail: "confirm first; scan variation if needed",
     link: "/explain/routing#nodes-and-tiles",
   },

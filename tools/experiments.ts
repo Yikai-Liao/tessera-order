@@ -10,8 +10,7 @@ import { compareLocal } from "../bench/local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
 import { checkAlgorithms, compareAlgorithms, resumeComparison } from "../bench/release.ts";
 import { writeReport } from "../bench/report/index.ts";
-import { repositoryRoot } from "../bench/workspace.ts";
-import { resultDirectory, runTask } from "./tasks.ts";
+import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
 
 interface MeasurementOptions extends SelectionOptions {
   plan?: string;

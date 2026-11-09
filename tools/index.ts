@@ -3,11 +3,11 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Command, InvalidArgumentError } from "commander";
-import { repositoryRoot } from "../bench/workspace.ts";
 import { continuousCommands } from "./continuous.ts";
 import { experimentCommands } from "./experiments.ts";
 import { repositoryCommands } from "./repository.ts";
 import { formatStatus, readStatus } from "./status.ts";
+import { repositoryRoot } from "./tasks.ts";
 
 /** Construct the task-oriented command surface without executing an operation. */
 export function createProgram() {

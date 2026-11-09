@@ -5,7 +5,8 @@ import { test } from "node:test";
 import { VARIANTS } from "../catalog.ts";
 import { mockGitHub } from "./fixtures/github.ts";
 import { hash } from "./fixtures/report.ts";
-import { marker, publishComment, resolveSource, startReport } from "./github.ts";
+import { publishComment, resolveSource, startReport } from "./github.ts";
+import { marker } from "./marker.ts";
 
 const repo = { owner: "owner", repo: "tessera" };
 const fullName = "owner/tessera";

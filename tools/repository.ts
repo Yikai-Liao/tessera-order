@@ -6,7 +6,7 @@ import { runDcoCheck } from "../.github/scripts/check-dco.ts";
 import { routeChanges } from "../.github/scripts/ci_changes.ts";
 import { verifyRustRelease } from "../.github/scripts/release.ts";
 import { fetchNative } from "../bench/rust/native/fetch.ts";
-import { repositoryRoot } from "../bench/workspace.ts";
+import { repositoryRoot } from "./tasks.ts";
 
 /** Register repository checks and native-source operations, not CI scheduling policy. */
 export function repositoryCommands(program: Command) {

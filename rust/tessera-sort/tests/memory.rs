@@ -100,19 +100,26 @@ fn scratch_released_after_sort() {
 
 #[test]
 fn bucket_ordered_input_keeps_scratch_in_one_tile() {
-    // A sorted body followed by a run of keys above it is already in bucket
-    // order at the top bit, so splitting there needs no block partition. The
-    // wide digit that pass would choose reserves 2 * 2^12 blocks of records,
-    // which is 8 MiB for these keys.
+    // A sorted body with a run of keys above it is already in bucket order at
+    // the top bit, so splitting there needs no block partition. The run sits
+    // either side of the body: behind it after a rotation. The wide digit the
+    // partition would choose reserves 2 * 2^12 blocks of records, which is
+    // 8 MiB for these keys.
     let len = 65_536usize;
-    let tail = len / 128;
-    let mut keys: Vec<u64> = (0..(len - tail) as u64).collect();
-    keys.extend((0..tail as u64).rev().map(|id| 1 << 63 | id));
-    let ((allocations, net), peak) = measure_peak(|| stable_sort(&mut keys));
-    assert!(keys.is_sorted());
-    assert!(allocations > 0);
-    assert_eq!(net, 0);
-    assert!(peak <= 128 * 1024, "peak scratch {peak}");
+    let run = len / 128;
+    let above: Vec<u64> = (0..run as u64).rev().map(|id| 1 << 63 | id).collect();
+    let body: Vec<u64> = (0..(len - run) as u64).collect();
+    for keys in [
+        body.iter().chain(&above).copied().collect::<Vec<_>>(),
+        above.iter().chain(&body).copied().collect::<Vec<_>>(),
+    ] {
+        let mut keys = keys;
+        let ((allocations, net), peak) = measure_peak(|| stable_sort(&mut keys));
+        assert!(keys.is_sorted());
+        assert!(allocations > 0);
+        assert_eq!(net, 0);
+        assert!(peak <= 128 * 1024, "peak scratch {peak}");
+    }
 }
 
 #[test]

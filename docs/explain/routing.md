@@ -56,7 +56,7 @@ Records sorted by a key function keep their payloads: two records with key 7 may
 
 ### Already in bucket order
 
-A node that is already in bucket order needs no partition. One scan of adjacent keys finds the widest leading window of the varying span that no inversion crosses: an inversion crossing the highest differing bit of its pair rules out every window that contains that bit. Each bucket of the resulting window already holds one contiguous run, so those runs *are* the partition, and the recursion finishes them in place. This covers sorted data with a separated block of keys at either end, several such blocks, or any other arrangement the order already groups — with no detector, no sample and no length cap. The scan stops as soon as no window is left, which unordered records reach within a few keys, so the check costs a handful of key reads when it fails and one pass when it succeeds.
+A node whose records already sit in the two runs its top varying bit separates needs no partition. One scan reads that bit and reports whether the node is `0*1*` or `1*0*` in it; the second form is one rotation away from the first, and both runs keep their own order. Those runs *are* the partition, the bit leaves the candidate, and the recursion finishes each run in place — with no detector, no sample and no length cap. This covers sorted data with a separated block of keys at either end, several such blocks, or any other arrangement the order already groups. The scan stops at the first record that breaks the pattern, which unordered records reach within a few keys, so the check costs a handful of key reads when it fails and one pass when it succeeds.
 
 ### Block partition of the window
 
@@ -90,6 +90,6 @@ While the block partition writes its result back into the input, each child that
 | larger nearly sorted input | budgeted insertion | linear in n plus inversions |
 | one dominant key | equality partition | one partition, the equal band is done |
 | ordered or constant child exposed by a partition | full order confirmation, then return or stable reversal | at most linear work in that child |
-| node already in bucket order | split at the finest ordered window | one scan, no partition pass or scratch |
+| node already in two runs of its top varying bit | split at that bit | one scan, no partition pass or scratch |
 | at most 8 varying bits, record is its own key | counted window | one counting pass and one fill |
 | everything else | top-digit block partition, then tiles | one streaming pass per node level, then cache-resident tiles |

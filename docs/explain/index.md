@@ -24,7 +24,7 @@ The figure, as a list:
 2. **Budgeted insertion.** Unsorted inputs get an insertion pass with a swap budget. Nearly sorted inputs finish here.
 3. **Varying bits.** One scan finds the bits that differ between keys. If none do, the input is done. Later digits cover only the varying bits.
 4. **Child order, then node or tile.** A partition child reuses full order confirmation without sampling, returning for ascending or constant keys and reversing stably for descending keys. The root skips this second gate because it was already probed. An unfinished slice larger than 64 KiB of records is a *node*, and anything smaller is a *tile*.
-5. **Node partitions.** A node that is already in bucket order is split at its finest ordered window, which moves nothing. The rest are split by a repeated-key partition or a top-digit block partition. Larger children return to the shared order gate. Tile-sized digit buckets finish directly during block compaction.
+5. **Node partitions.** A node that already holds the two runs of its top varying bit is split there, which moves nothing (or one rotation when the upper run leads). The rest are split by a repeated-key partition or a top-digit block partition. Larger children return to the shared order gate. Tile-sized digit buckets finish directly during block compaction.
 6. **Tile leaves.** A tile is finished by insertion sort, a tile-local MSD partition or LSD counting passes.
 
 ## Reading order

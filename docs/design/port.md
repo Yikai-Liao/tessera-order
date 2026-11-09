@@ -332,9 +332,9 @@ A second screen after adding the tile-fit guard measured sorted and reverse `u64
 
 ### Ordered children and bucket order
 
-Partition children now reuse the root's full order confirmation before scanning their remaining candidate bits, and a node that is already in bucket order is split at its finest ordered window instead of being partitioned. Together these replace the specialized minority-bit/end-run detector, its 1,024-record cap and its rotation/insertion route. Tile-sized digit buckets still finish during compaction.
+Partition children scan their remaining candidate bits and then reuse the root's full order confirmation, and a node that already holds the two runs of its top varying bit is split there instead of being partitioned. Together these replace the specialized minority-bit/end-run detector, its 1,024-record cap and its rotation/insertion route. Tile-sized digit buckets still finish during compaction.
 
-The two general properties are cheaper than the detector they replace. Order confirmation stops at its first conflict, so an unordered child pays a few key reads and never a second scan. The bucket-order split scans adjacent keys once and reports the widest prefix of the varying span that no inversion crosses: an inversion crossing the highest differing bit of its pair rules out every window that contains that bit. The scan stops as soon as no window is left, and when it succeeds the runs it reports are the partition, so no records move and no block scratch is reserved. It has no sample, no threshold, no length cap and no rotation, and it applies to any arrangement the order already groups rather than to one end of the input.
+The two general properties are cheaper than the detector they replace. Both scans stop at their first conflict, so an unordered child pays a few key reads. The run split reads the top varying bit once: a node that is `0*1*` or `1*0*` in that bit already holds the two runs the partition would form, so one rotation at most puts them in order and no block scratch is reserved. It has no sample, no threshold and no length cap, and it applies to a block of keys at either end of the body rather than to one end.
 
 A maintained `pnpm tools compare commit fafaaa2` screen on this host (one pinned CPU, ten selected cases, nine blocks, paired process-level A/A) measured these current/baseline ratios:
 

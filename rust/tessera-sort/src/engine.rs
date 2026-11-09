@@ -740,26 +740,34 @@ fn choose_split_digit<T, E: Extract<T>>(
     }
 }
 
-/// Mask of `width` key bits starting at `shift`, with `1 <= width <= 128`.
-fn window_mask(width: usize, shift: usize) -> u128 {
-    (u128::MAX >> (u128::BITS as usize - width)) << shift
-}
-
-/// Returns where the run of records without `bit` ends, when no record
-/// without it follows one with it.
+/// Returns the two runs the top varying bit already holds, as the end of the
+/// first run and whether it holds the bit.
 ///
-/// An unordered input answers within a pair or two.
-fn ordered_top<T, E: Extract<T>>(records: &[T], bit: u128, extractor: &mut E) -> Option<usize> {
+/// A node is two runs when it reads `0*1*` or `1*0*` in that bit; the second
+/// form is one rotation away from the first. Any other arrangement answers at
+/// the first record that breaks the pattern, which unordered inputs reach
+/// within a pair or two.
+fn two_runs<T, E: Extract<T>>(
+    records: &[T],
+    bit: u128,
+    extractor: &mut E,
+) -> Option<(usize, bool)> {
+    let first = extractor.key(&records[0]).to_u128() & bit != 0;
     let mut boundary = 0;
-    while boundary < records.len() && extractor.key(&records[boundary]).to_u128() & bit == 0 {
+    while boundary < records.len()
+        && (extractor.key(&records[boundary]).to_u128() & bit != 0) == first
+    {
         boundary += 1;
     }
+    if boundary == 0 || boundary == records.len() {
+        return None;
+    }
     for record in &records[boundary..] {
-        if extractor.key(record).to_u128() & bit == 0 {
+        if (extractor.key(record).to_u128() & bit != 0) == first {
             return None;
         }
     }
-    Some(boundary)
+    Some((boundary, first))
 }
 
 impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
@@ -772,13 +780,19 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
     /// saves the partition pass the top bit would otherwise need and hands the
     /// bits below it to the recursion.
     fn split_ordered(&mut self, records: &mut [T], top: usize, varying: u128) -> bool {
-        let bit = varying & !window_mask(top - 1, 0);
-        let Some(boundary) = ordered_top(records, bit, self.extractor) else {
+        let bit = 1u128 << (top - 1);
+        let Some((boundary, set)) = two_runs(records, bit, self.extractor) else {
             return false;
         };
-        if boundary == 0 || boundary == records.len() {
-            return false;
-        }
+        // A run holding the bit in front belongs behind the clear one; the
+        // rotation keeps both runs in their own order.
+        let boundary = if set {
+            let len = records.len();
+            records.rotate_left(boundary);
+            len - boundary
+        } else {
+            boundary
+        };
         let candidate = varying & !bit;
         self.sort_child(&mut records[..boundary], candidate);
         self.sort_child(&mut records[boundary..], candidate);
@@ -1770,12 +1784,21 @@ mod tests {
         assert!(sorter.split_ordered(&mut records, bit_len(varying), varying));
         assert_eq!(records, expected);
 
-        // A record holding the top bit before the body ends blocks the split.
-        let mut inverted: Vec<u64> = alloc::vec![(1 << 63) | 5, 3, 4];
-        let varying = inverted
+        // A run holding the top bit in front is one rotation away from the
+        // split, and both runs keep their own order.
+        let mut lifted: Vec<u64> = alloc::vec![(1 << 63) | 5, (1 << 63) | 6, 3, 4];
+        let varying = lifted
             .iter()
             .fold(0u128, |mask, record| mask | u128::from(*record));
-        assert!(!sorter.split_ordered(&mut inverted, bit_len(varying), varying));
+        assert!(sorter.split_ordered(&mut lifted, bit_len(varying), varying));
+        assert_eq!(lifted, [3, 4, (1 << 63) | 5, (1 << 63) | 6]);
+
+        // Interleaved runs are not a split the top bit provides.
+        let mut interleaved: Vec<u64> = alloc::vec![3, (1 << 63) | 5, 4, (1 << 63) | 6];
+        let varying = interleaved
+            .iter()
+            .fold(0u128, |mask, record| mask | u128::from(*record));
+        assert!(!sorter.split_ordered(&mut interleaved, bit_len(varying), varying));
     }
 
     #[test]

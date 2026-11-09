@@ -22,7 +22,7 @@ const boxes: Box[] = [
     y: 10,
     w: 280,
     title: "Order probe",
-    detail: "unit stride: confirm once; otherwise sample",
+    detail: "unit stride: adjacent scan; otherwise sample",
     link: "/explain/routing#order-probe",
   },
   {

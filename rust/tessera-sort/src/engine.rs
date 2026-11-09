@@ -523,14 +523,33 @@ enum Order {
 /// Target pair count used to choose the order gate's stride.
 const ORDER_SAMPLES: usize = 4096;
 
-/// Rejects unordered input with strided adjacent pairs, then confirms order
-/// with a full scan.
+/// Classifies adjacent keys directly at unit stride, otherwise samples pairs
+/// before confirming candidate order with a full scan.
 #[inline(never)]
 fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     let stride = (records.len() / ORDER_SAMPLES).max(1);
-    // A unit stride would visit every pair before confirming them again.
     if stride == 1 {
-        return confirm_order(records, extractor);
+        // This is already a complete scan. Keep adjacent keys in the loop so
+        // mixed directions return without a second scan or backend dispatch.
+        let mut before = extractor.key(&records[0]);
+        let mut ascending = true;
+        let mut descending = true;
+        let mut strict = true;
+        for record in &records[1..] {
+            let after = extractor.key(record);
+            ascending &= before <= after;
+            descending &= before >= after;
+            strict &= before != after;
+            if !ascending && !descending {
+                return Order::Unsorted;
+            }
+            before = after;
+        }
+        return if ascending {
+            Order::Ascending
+        } else {
+            Order::Descending { strict }
+        };
     }
     let mut ascending = true;
     let mut descending = true;
@@ -1321,6 +1340,44 @@ mod tests {
             );
             assert!(matches!(order, Order::Ascending));
             assert_eq!(calls, len);
+        }
+    }
+
+    #[test]
+    fn unit_stride_rejects_directly() {
+        /// Records visits and rejects dispatch to the separate ascending scan.
+        #[derive(Default)]
+        struct AdjacentProbe {
+            visits: Vec<usize>,
+        }
+
+        impl Extract<(u64, usize)> for AdjacentProbe {
+            type Value = u64;
+
+            fn key(&mut self, record: &(u64, usize)) -> u64 {
+                self.visits.push(record.1);
+                record.0
+            }
+
+            fn confirm_ascending(&mut self, _: &[(u64, usize)], _: u64) -> bool {
+                panic!("unit stride dispatched a second scan");
+            }
+        }
+
+        for len in [47, 48, 49, 1000] {
+            for prefix in [
+                &[1, 2, 1][..],
+                &[2, 1, 2],
+                &[1, 1, 2, 2, 1],
+                &[2, 2, 1, 1, 2],
+            ] {
+                let records: Vec<_> = (0..len)
+                    .map(|id| (prefix[id.min(prefix.len() - 1)], id))
+                    .collect();
+                let mut extractor = AdjacentProbe::default();
+                assert!(probe_order(&records, &mut extractor) == Order::Unsorted);
+                assert_eq!(extractor.visits, (0..prefix.len()).collect::<Vec<_>>());
+            }
         }
     }
 

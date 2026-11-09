@@ -63,9 +63,10 @@ const SHORT = 1000;
 const LARGEST = 10000000;
 
 // Two significant digits, except that values near 1 keep two decimals so a
-// small difference does not print as "1×".
+// small difference does not print as "1×". Small positive values keep
+// significant digits rather than rounding to zero.
 const times = (v: number) =>
-  `${v >= 100 ? v.toFixed(0) : v < 1.095 ? v.toFixed(2) : Number(v.toPrecision(2))}×`;
+  `${v < 0.01 ? v.toPrecision(2) : v >= 100 ? v.toFixed(0) : v < 1.095 ? v.toFixed(2) : Number(v.toPrecision(2))}×`;
 const formatLength = (n: number) => n.toLocaleString("en-US");
 const formatNs = (v: number) => `${Number(v.toPrecision(3))} ns`;
 function formatBytes(n: number) {

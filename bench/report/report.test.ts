@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { figureContent } from "../svg-test-utils.ts";
+import { figureContent, parseSvg } from "../svg-test-utils.ts";
 import { renderFigures } from "./charts.ts";
 import { createFixture } from "./fixture.ts";
 import { collectWarnings, writeReport } from "./index.ts";
@@ -325,6 +325,8 @@ test("selected inputs retain overflowing ranges", () => {
     [0.01, 2],
     [0.5, 64],
     [0.01, 64],
+    [0.004, 64],
+    [0.0000004, 64],
   ]) {
     const dataset = createFixture();
     const manifest = dataset.manifests.get("default")!;
@@ -339,7 +341,7 @@ test("selected inputs retain overflowing ranges", () => {
     const [figure] = renderFigures(dataset, summaries);
     assert.match(figure.name, /^selected-/);
     assert.match(figure.table, /Time ratio \| Block range \| A\/A range/);
-    const range = `${low.toFixed(2)}×–${high}×`;
+    const range = `${low < 0.01 ? low.toPrecision(2) : low.toFixed(2)}×–${high}×`;
     assert.ok(figure.table.includes(range), range);
     assert.ok(figure.svg.includes(range), range);
     assert.equal(figure.svg.includes("rotate(270)"), low < 1 / 32);
@@ -391,6 +393,33 @@ test("field scales include SIMD rings", () => {
       // remain rings, not overflow triangles on a default-only scale.
       assert.match(figure.svg, />16×<\/text>/, `${name}, factor=${factor}`);
       assert.doesNotMatch(figure.svg, /rotate\((90|270)\)/, `${name}, factor=${factor}`);
+      const root = parseSvg(figure.svg);
+      const rings = [
+        ...root.querySelectorAll(
+          '[aria-label="dot"][fill="none"][stroke-width="2"] circle[r="5.5"]',
+        ),
+      ];
+      const defaults = [...root.querySelectorAll('[aria-label="dot"] circle[r="6.5"]')];
+      assert.equal(rings.length, defaults.length, name);
+      assert.ok(rings.length > 0, name);
+      const ticks = [...root.querySelectorAll('[aria-label="x-axis tick label"] text')];
+      const position = (label: string) =>
+        Number(
+          ticks
+            .find((tick) => tick.textContent === label)!
+            .getAttribute("transform")!
+            .match(/translate\(([^,]+)/)![1],
+        );
+      const pixelsPerDoubling = (position("16×") - position("slice::sort")) / 4;
+      for (const [index, ring] of rings.entries()) {
+        assert.equal(ring.getAttribute("cy"), defaults[index].getAttribute("cy"));
+        const displacement =
+          Number(ring.getAttribute("cx")) - Number(defaults[index].getAttribute("cx"));
+        assert.ok(
+          Math.abs(displacement / pixelsPerDoubling - Math.log2(1.25 / factor)) < 0.002,
+          name,
+        );
+      }
     }
   }
 });

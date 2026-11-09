@@ -90,7 +90,7 @@ test("leads with counts and call-outs, then both charts and the tables", () => {
   // Names link to history, with the benchmark ID as the link title.
   assert.match(
     body,
-    /\| \[random\]\(https:\/\/bencher\.dev\/perf\/proj\?[^ ]+ "rust\/u64\/random\/49\/s1\/api"\) \| u64 \| 49 \| stable \| 709 ns \| 736 ns \| \+3\.8% \|/,
+    /\| \[random\]\(https:\/\/bencher\.dev\/perf\/proj\?[^ ]+ "rust\/u64\/random\/49\/s1\/api"\) \| u64 \| 49 \| serial \| 709 ns \| 736 ns \| \+3\.8% \|/,
   );
   // Both directions read as the change in run time; 20% or more is bold.
   assert.match(body, /\| \*\*−29\.1%\*\* \|/);
@@ -104,7 +104,7 @@ test("leads with counts and call-outs, then both charts and the tables", () => {
   assert.match(folded, /All 5 cases/);
   assert.match(
     folded,
-    /\| all equal \| u64 \| 65,536 \| stable \| 26\.0 µs \| 23\.7 µs – 28\.4 µs \|.*\| `rust\/u64\/equal\/65536\/s1\/api` \|/,
+    /\| all equal \| u64 \| 65,536 \| serial \| 26\.0 µs \| 23\.7 µs – 28\.4 µs \|.*\| `rust\/u64\/equal\/65536\/s1\/api` \|/,
   );
   // New cases use one quiet count; details and metadata follow the tables.
   assert.match(body, /<sub>1 new case without a baseline\.<\/sub>/);

@@ -98,7 +98,7 @@ test("embeds both published charts in the summary, check and PR comment", async 
     chartSvg([{ name: "Default", summary: summarize(fixture()) }]),
   );
   assert.match(images.get("pr-7/rust/trend.svg")!, /<title id="t">PR benchmark history: Default /);
-  assert.match(action.summaries[0], /^### Benchmarks · rust · 2 slower, 1 faster$/m);
+  assert.match(action.summaries[0], /^### Benchmarks · rust · 2 slower, 1 faster, 1 new$/m);
   const raw = "https://raw.githubusercontent.com/o/r/image-commit/pr-7/rust";
   for (const [alt, file] of [
     ["Changes against main", "comparison"],
@@ -330,15 +330,15 @@ test("publishes one check per build and one comment with builds as columns", asy
   assert.equal(comments.length, 1);
   const body = String(comments[0].body.body);
   // Distinct cases: the sorted99 speedup in both builds counts once.
-  assert.match(body, /^### Benchmarks · rust · 2 slower, 1 faster$/m);
+  assert.match(body, /^### Benchmarks · rust · 2 slower, 1 faster, 1 new$/m);
   assert.equal(body.match(/^#{3,4} /gm)?.length, 1);
   assert.match(body, /^\| {2}\| Default \| Portable SIMD \|$/m);
   assert.match(
     body,
-    /^\| \*\*All cases\*\* \| −5\.1% · \*\*2 slower\*\* · 1 faster \| −12\.9% · 1 faster \|$/m,
+    /^\| \*\*All cases\*\* \| −5\.1% · \*\*2 slower\*\* · 1 faster · 1 new \| −12\.9% · 1 faster · 1 new \|$/m,
   );
   // A single mode needs no per-mode rows.
-  assert.doesNotMatch(body, /^\| stable \|/m);
+  assert.doesNotMatch(body, /^\| serial \|/m);
   assert.match(body, /> \*\*2 cases slower\*\*: 2 in Default only\./);
   assert.match(
     body,
@@ -355,7 +355,7 @@ test("publishes one check per build and one comment with builds as columns", asy
   assert.match(body, /^\| Input \| Type \| N \| Mode \| Default \| Portable SIMD \|$/m);
   assert.match(
     body,
-    /\| u64 \| 49 \| stable \| \*\*\+3\.8%\*\* <sub>736 ns<\/sub> \| −26\.4% <sub>736 ns<\/sub> \|/,
+    /\| u64 \| 49 \| serial \| \*\*\+3\.8%\*\* <sub>736 ns<\/sub> \| −26\.4% <sub>736 ns<\/sub> \|/,
   );
   assert.match(body, /1 new case without a baseline in each build/);
   assert.match(body, /\*\*Portable SIMD\*\* · `intel-v1-portable-simd-hybrid-v1`/);
@@ -380,7 +380,10 @@ test("groups the overview by API mode when the suite has several", async (t) => 
   });
   writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(input));
   await publishReport(action);
-  assert.match(action.summaries[0], /^\| stable \| −5\.1% · \*\*2 slower\*\* · 1 faster \|$/m);
+  assert.match(
+    action.summaries[0],
+    /^\| serial \| −5\.1% · \*\*2 slower\*\* · 1 faster · 1 new \|$/m,
+  );
   assert.match(action.summaries[0], /^\| unstable \| \+0\.0% \|$/m);
 });
 
@@ -416,12 +419,10 @@ for (const failed of [0, 1]) {
     assert.match(JSON.stringify(checks[failed].body.output), /measurement failed/);
     assert.doesNotMatch(JSON.stringify(checks[1 - failed].body.output), /measurement failed/);
     const name = VARIANTS[failed].name;
-    // The charts draw the measured build only.
+    // Failed builds keep their unavailable column instead of disappearing.
     assert.equal(publishedImages(action).size, 2);
-    assert.doesNotMatch(
-      publishedImages(action).get("pr-7/rust/comparison.svg")!,
-      new RegExp(`>${name}<`),
-    );
+    assert.match(publishedImages(action).get("pr-7/rust/comparison.svg")!, new RegExp(`>${name}<`));
+    assert.match(publishedImages(action).get("pr-7/rust/comparison.svg")!, /measurement failed/);
     assert.match(action.summaries[0], new RegExp(`, ${name} failed$`, "m"));
     assert.match(
       action.summaries[0],

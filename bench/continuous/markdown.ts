@@ -4,6 +4,7 @@ import {
   attribution,
   type CaseRow,
   type Configuration,
+  caseRows,
   changedRows,
   geomean,
   isSlower,
@@ -299,6 +300,10 @@ function combinedHeadline(configurations: ConfigurationResult[], rows: CaseRow[]
   if (!slower && !faster) {
     parts.push(measured.some((c) => c.summary!.compared) ? "no significant change" : "no baseline");
   }
+  const fresh = caseRows(configurations).filter((row) =>
+    row.cells.some((cell) => cell?.baseline === null),
+  ).length;
+  if (fresh) parts.push(`${fresh} new`);
   for (const c of configurations) {
     if (!c.summary) parts.push(`${c.name} ${c.outcome === "cancelled" ? "cancelled" : "failed"}`);
   }
@@ -310,7 +315,12 @@ function overviewCell(summary: ReportSummary, mode?: string) {
   const rows = summary.rows.filter((r) => mode === undefined || r.parts.mode === mode);
   const slower = rows.filter((r) => r.verdict === "regression").length;
   const faster = rows.filter((r) => r.verdict === "improvement").length;
-  const counts = [slower ? `**${slower} slower**` : "", faster ? `${faster} faster` : ""]
+  const fresh = rows.filter((r) => r.baseline === null).length;
+  const counts = [
+    slower ? `**${slower} slower**` : "",
+    faster ? `${faster} faster` : "",
+    fresh ? `${fresh} new` : "",
+  ]
     .filter(Boolean)
     .join(" · ");
   const value = g ? signed(g.change) : "—";

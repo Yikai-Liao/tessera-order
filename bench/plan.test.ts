@@ -24,6 +24,20 @@ test("parallel iteration defaults to eight workers only", async () => {
   ]);
 });
 
+test("continuous parallel coverage is explicit and independent of serial coverage", async () => {
+  const plan = await loadPlan("continuous");
+  assert.deepEqual(plan.parallel, [
+    {
+      types: ["u32", "row_u32", "u64", "row_u64"],
+      distributions: ["random"],
+      lengths: [10000000],
+    },
+  ]);
+  assert.equal(plan.algorithms.length, 1);
+  assert.throws(() => parsePlan({ ...plan, harness: "comparison" }), /smoke harness/);
+  assert.throws(() => parsePlan({ ...plan, parallel: [{ types: ["typo"] }] }));
+});
+
 test("the native selection fixture validates", () => {
   assert.equal(parsePlan(fixture.plan).harness, "smoke");
 });

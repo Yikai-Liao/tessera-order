@@ -169,6 +169,14 @@ jobs:
         if: steps.miri-cache.outputs.cache-hit != 'true'
       # Each test gets its own interpreter so the runner's cores can be used.
       - run: cargo miri nextest run -p tessera-sort ${{ matrix.args }} ${{ matrix.filter }}
+      # Sequential ownership fixtures cover the optional Rayon storage paths;
+      # native pool tests cover scheduling, which these Miri fixtures do not.
+      - if: matrix.features == 'std'
+        run: >-
+          cargo miri nextest run -p tessera-sort --features rayon
+          -E 'test(block::parallel::) | test(engine::parallel::bucket_borrow_tests::)'
+      - if: matrix.features == 'std'
+        run: cargo miri test -p tessera-sort --doc --features rayon
       # Nextest does not run doctests.
       - run: cargo miri test -p tessera-sort --doc ${{ matrix.args }}
 
@@ -181,6 +189,6 @@ jobs:
       - run: cargo test --release --target x86_64-unknown-linux-gnu --workspace --all-targets
         env:
           RUSTFLAGS: -Zsanitizer=address
-      - run: cargo test --release --target x86_64-unknown-linux-gnu --workspace --all-targets --features tessera-sort/portable-simd
+      - run: cargo test --release --target x86_64-unknown-linux-gnu --workspace --all-targets --features tessera-sort/portable-simd,tessera-sort/rayon
         env:
           RUSTFLAGS: -Zsanitizer=address

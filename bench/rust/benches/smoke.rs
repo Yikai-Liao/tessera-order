@@ -1,68 +1,96 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Smoke suite for continuous benchmarking on Bencher Bare Metal.
+//! Continuous Criterion measurements: serial API and exclusive four-thread API.
 //!
-//! Benchmark IDs are `rust/<case_id>/<mode>`, where `case_id` is
-//! `type/distribution/length/seed` as in `docs/development/benchmarking.md`.
-//! Runners in other languages use the same case IDs under their own prefix.
+//! IDs are `rust/<case_id>/<mode>`; input selection precedes generation.
 
 use criterion::{BatchSize, Criterion};
-use std::hint::black_box;
-use std::sync::OnceLock;
-use std::time::Duration;
-use tessera_bench::case::{Key, Row, generate};
-use tessera_bench::plan::Plan;
+use std::{hint::black_box, sync::OnceLock, time::Duration};
+use tessera_bench::{
+    case::{Key, Row, generate},
+    plan::{InputCase, Plan},
+};
 
-/// Elements prepared per Criterion batch, so the cache footprint of a batch
-/// is the same for every length and does not depend on measured timings.
+/// Fixed prepared element count, independent of measured execution time.
 const BATCH_ELEMENTS: usize = 1 << 18;
-
 /// Length used for measured engine decisions.
 const LARGE: usize = 1_000_000;
 /// Length exercising the out-of-cache block partition.
 const HUGE: usize = 10_000_000;
 
-/// Expands the experiment before generating any inputs.
+/// Expands both API selections without multiplying their coverage.
 fn suite(c: &mut Criterion) {
     for case in plan().inputs().expect("nonempty benchmark plan") {
-        let distribution = &case.distribution;
-        let len = case.len;
-        match case.ty.as_str() {
-            "u32" => keys::<u32>(c, distribution, len),
-            "u64" => keys::<u64>(c, distribution, len),
-            "u128" => keys::<u128>(c, distribution, len),
-            "f64" => keys::<f64>(c, distribution, len),
-            "row_u32" => rows::<u32>(c, distribution, len),
-            "row_u64" => rows::<u64>(c, distribution, len),
-            "rec128_u64" => records(c, distribution, len),
-            _ => unreachable!("validated record type"),
+        measure_case(c, &case, "api");
+    }
+    if parallel_enabled() {
+        for case in plan().parallel_inputs().expect("valid parallel selection") {
+            measure_case(c, &case, "par-4");
         }
     }
 }
 
-/// Measures a scalar-key case with the public API.
-fn keys<K: Key>(c: &mut Criterion, distribution: &str, len: usize) {
+/// Dispatches an input/API pair before allocating records or pool workers.
+fn measure_case(c: &mut Criterion, case: &InputCase, mode: &str) {
+    let distribution = &case.distribution;
+    let len = case.len;
+    match case.ty.as_str() {
+        "u32" => keys::<u32>(c, distribution, len, mode),
+        "u64" => keys::<u64>(c, distribution, len, mode),
+        "u128" => keys::<u128>(c, distribution, len, mode),
+        "f64" => keys::<f64>(c, distribution, len, mode),
+        "row_u32" => rows::<u32>(c, distribution, len, mode),
+        "row_u64" => rows::<u64>(c, distribution, len, mode),
+        "rec128_u64" => records(c, distribution, len, mode),
+        _ => unreachable!("validated record type"),
+    }
+}
+
+/// Old trusted supervisors retain serial-only coverage until explicitly upgraded.
+fn parallel_enabled() -> bool {
+    match std::env::var("TESSERA_BENCH_PARALLEL").as_deref() {
+        Ok("4") => cfg!(feature = "rayon"),
+        Err(std::env::VarError::NotPresent) => false,
+        _ => panic!("TESSERA_BENCH_PARALLEL must be 4"),
+    }
+}
+
+/// Measures keys against the same stable total-order reference for both APIs.
+fn keys<K: Key + Send + Sync>(c: &mut Criterion, distribution: &str, len: usize, mode: &str) {
     let id = format!("rust/{}/{distribution}/{len}/s1", K::NAME);
-    if !selected(&id) {
+    if !selected(&id, mode) {
         return;
     }
     let input = generate::<K>(distribution, len);
     let mut expected = input.clone();
     expected.sort_by(K::order);
-    measure(
-        c,
-        &id,
-        &input,
-        &expected,
-        K::same,
-        tessera_sort::stable_sort,
-    );
+    if mode == "api" {
+        measure(
+            c,
+            &id,
+            mode,
+            &input,
+            &expected,
+            K::same,
+            tessera_sort::stable_sort,
+        );
+    } else {
+        #[cfg(feature = "rayon")]
+        measure_parallel(
+            c,
+            &id,
+            &input,
+            &expected,
+            K::same,
+            tessera_sort::par_stable_sort,
+        );
+    }
 }
 
-/// Measures a keyed-row case while checking stable payload order.
-fn rows<K: Key>(c: &mut Criterion, distribution: &str, len: usize) {
+/// Measures keyed rows, including stable payload order.
+fn rows<K: Key + Send + Sync>(c: &mut Criterion, distribution: &str, len: usize, mode: &str) {
     let id = format!("rust/row_{}/{distribution}/{len}/s1", K::NAME);
-    if !selected(&id) {
+    if !selected(&id, mode) {
         return;
     }
     let input: Vec<Row<K>> = generate::<K>(distribution, len)
@@ -73,13 +101,19 @@ fn rows<K: Key>(c: &mut Criterion, distribution: &str, len: usize) {
     let mut expected = input.clone();
     expected.sort_by(|a, b| a.key.order(&b.key));
     let same = |a: &Row<K>, b: &Row<K>| a.key.same(&b.key) && a.row == b.row;
-    measure(c, &id, &input, &expected, same, |values| {
-        tessera_sort::stable_sort_by_key(values, |record| record.key);
-    });
+    if mode == "api" {
+        measure(c, &id, mode, &input, &expected, same, |values| {
+            tessera_sort::stable_sort_by_key(values, |record| record.key);
+        });
+    } else {
+        #[cfg(feature = "rayon")]
+        measure_parallel(c, &id, &input, &expected, same, |values| {
+            tessera_sort::par_stable_sort_by_key(values, |record| record.key);
+        });
+    }
 }
 
-/// A record of 128 bytes: a word key and a payload that carries the record's
-/// original index.
+/// A wide record whose payload carries its original index.
 #[derive(Clone, Copy)]
 struct Wide {
     key: u64,
@@ -87,7 +121,7 @@ struct Wide {
 }
 
 impl Wide {
-    /// Creates a wide record carrying its original index.
+    /// Creates a wide record with a stable identity.
     fn new(key: u64, index: usize) -> Self {
         let mut payload = [0u8; 120];
         payload[..8].copy_from_slice(&(index as u64).to_le_bytes());
@@ -95,11 +129,10 @@ impl Wide {
     }
 }
 
-/// Times records much wider than their key, so record size rather than key
-/// size decides the tile capacity and the block size.
-fn records(c: &mut Criterion, distribution: &str, len: usize) {
+/// Measures records much wider than their keys.
+fn records(c: &mut Criterion, distribution: &str, len: usize, mode: &str) {
     let id = format!("rust/rec128_u64/{distribution}/{len}/s1");
-    if !selected(&id) {
+    if !selected(&id, mode) {
         return;
     }
     let input: Vec<Wide> = generate::<u64>(distribution, len)
@@ -110,15 +143,43 @@ fn records(c: &mut Criterion, distribution: &str, len: usize) {
     let mut expected = input.clone();
     expected.sort_by_key(|record| record.key);
     let same = |a: &Wide, b: &Wide| a.key == b.key && a.payload == b.payload;
-    measure(c, &id, &input, &expected, same, |values| {
-        tessera_sort::stable_sort_by_key(values, |record| record.key);
+    if mode == "api" {
+        measure(c, &id, mode, &input, &expected, same, |values| {
+            tessera_sort::stable_sort_by_key(values, |record| record.key);
+        });
+    } else {
+        #[cfg(feature = "rayon")]
+        measure_parallel(c, &id, &input, &expected, same, |values| {
+            tessera_sort::par_stable_sort_by_key(values, |record| record.key);
+        });
+    }
+}
+
+/// Warms one pool before verification and joins it before the next case prepares.
+#[cfg(feature = "rayon")]
+fn measure_parallel<T: Copy + Send>(
+    c: &mut Criterion,
+    id: &str,
+    input: &[T],
+    expected: &[T],
+    same: impl Fn(&T, &T) -> bool,
+    sort: impl Fn(&mut [T]) + Sync,
+) {
+    assert!(
+        std::thread::available_parallelism().unwrap().get() >= 4,
+        "four allowed CPUs are required for par-4"
+    );
+    let pool = tessera_bench::pool::BenchmarkPool::new(4);
+    measure(c, id, "par-4", input, expected, same, |values| {
+        pool.install(|| sort(values))
     });
 }
 
-/// Checks a sort against the stable reference, then times it.
+/// Verifies a complete sort, then times calls without input restoration or teardown.
 fn measure<T: Copy>(
     c: &mut Criterion,
     id: &str,
+    mode: &str,
     input: &[T],
     expected: &[T],
     same: impl Fn(&T, &T) -> bool,
@@ -126,16 +187,13 @@ fn measure<T: Copy>(
 ) {
     let mut values = input.to_vec();
     sort(&mut values);
-    let ok = values.iter().zip(expected).all(|(a, b)| same(a, b));
-    assert!(ok, "{id}/api: output differs from the reference");
-
+    assert!(
+        values.iter().zip(expected).all(|(a, b)| same(a, b)),
+        "{id}/{mode}: output differs from the reference"
+    );
     let batch = (BATCH_ELEMENTS / input.len()).max(1) as u64;
     let mut group = c.benchmark_group(id);
-    // A sort of 10^6 keys takes milliseconds, so a 1.5 s window gives it only
-    // a few hundred sorts; it gets more time and samples to narrow its limits.
     let (warm_up, window, samples) = if input.len() >= HUGE {
-        // One sort takes about a fifth of a second, so 40 samples would need
-        // eight; 20 fill the same window and the spread per iteration is small.
         (1000, 4000, 20)
     } else if input.len() >= LARGE {
         (1000, 4000, 40)
@@ -146,8 +204,7 @@ fn measure<T: Copy>(
         .warm_up_time(Duration::from_millis(warm_up))
         .measurement_time(Duration::from_millis(window))
         .sample_size(samples);
-    group.bench_function("api", |b| {
-        // Restoring the input and dropping buffers are not timed.
+    group.bench_function(mode, |b| {
         b.iter_batched_ref(
             || input.to_vec(),
             |values| sort(black_box(values.as_mut_slice())),
@@ -157,7 +214,7 @@ fn measure<T: Copy>(
     group.finish();
 }
 
-/// Reads the compiled continuous preset unless a local caller supplies a plan.
+/// Reads the compiled suite unless a local reproduction supplies a saved plan.
 fn plan() -> &'static Plan {
     static PLAN: OnceLock<Plan> = OnceLock::new();
     PLAN.get_or_init(|| {
@@ -169,17 +226,21 @@ fn plan() -> &'static Plan {
     })
 }
 
-/// Selects groups before generation so idle workers create no memory traffic.
-fn selected(id: &str) -> bool {
+/// Selects exact timed IDs; legacy group selection supports the pre-upgrade tracker.
+fn selected(id: &str, mode: &str) -> bool {
+    let full = format!("{id}/{mode}");
     if std::env::var_os("TESSERA_BENCH_LIST").is_some() {
-        println!("{id}/api");
+        println!("{full}");
         return false;
+    }
+    if let Ok(ids) = std::env::var("TESSERA_BENCH_IDS") {
+        return ids.lines().any(|selected| selected == full);
     }
     std::env::var("TESSERA_BENCH_GROUPS")
         .map_or(true, |groups| groups.lines().any(|group| group == id))
 }
 
-/// Runs the Criterion suite with command-line case selection.
+/// Runs Criterion with its standard command-line controls.
 fn main() {
     let mut criterion = Criterion::default().without_plots().configure_from_args();
     suite(&mut criterion);

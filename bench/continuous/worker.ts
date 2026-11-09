@@ -9,11 +9,16 @@ import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { CommandCancelledError, command } from "../../tools/process.ts";
 
-/** Balance API cases across two small lanes; run large cases separately. */
+/** Keep serial lanes unchanged and reserve an exclusive four-thread phase. */
 export function partition(cases: string[]) {
   const small: string[][] = [[], []];
   const large: string[] = [];
+  const parallel: string[] = [];
   for (const id of cases.toSorted()) {
+    if (id.endsWith("/par-4")) {
+      parallel.push(id);
+      continue;
+    }
     const group = id.slice(0, id.lastIndexOf("/"));
     if (Number(group.split("/")[3]) >= 1_000_000) large.push(group);
     else {
@@ -21,15 +26,16 @@ export function partition(cases: string[]) {
       small[lane].push(group);
     }
   }
-  return { small, large };
+  return { small, large, parallel };
 }
 
 /** Start isolated workers and reap all children before returning or propagating failure. */
 export async function runWorkers(
   binary: string,
   lanes: string[][],
-  cpus: number[],
+  cpus: (number | string)[],
   directory: string,
+  ids?: string[][],
 ) {
   const children: { child: ChildProcess; done: Promise<Error | null>; output: string }[] = [];
   let cancelled: CommandCancelledError | undefined;
@@ -51,6 +57,8 @@ export async function runWorkers(
           env: {
             ...process.env,
             TESSERA_BENCH_GROUPS: groups.join("\n"),
+            TESSERA_BENCH_IDS: ids?.[lane].join("\n"),
+            TESSERA_BENCH_PARALLEL: "4",
             CRITERION_HOME: join(output, "criterion"),
           },
           stdio: ["ignore", log.fd, "inherit"],
@@ -99,18 +107,20 @@ export async function measuredCases(outputs: string[]) {
   return cases;
 }
 
-/** Reproduce the cloud protocol: two pinned small workers, then one exclusive large worker. */
+/** Reproduce serial lanes followed by strictly sequential exclusive parallel cases. */
 export async function supervise(binary: string) {
   if (process.platform !== "linux") throw new Error("Continuous scheduling requires Linux");
   if (
     process.env.TESSERA_BENCH_GROUPS !== undefined ||
-    process.env.TESSERA_BENCH_LIST !== undefined
+    process.env.TESSERA_BENCH_LIST !== undefined ||
+    process.env.TESSERA_BENCH_IDS !== undefined ||
+    process.env.TESSERA_BENCH_PARALLEL !== undefined
   )
     throw new Error("Worker selection variables must not be set on the supervisor");
   const cases = (
     await command(binary, ["--bench"], {
       capture: true,
-      env: { TESSERA_BENCH_LIST: "1" },
+      env: { TESSERA_BENCH_LIST: "1", TESSERA_BENCH_PARALLEL: "4" },
     })
   )
     .split("\n")
@@ -118,24 +128,66 @@ export async function supervise(binary: string) {
   if (!cases.length || new Set(cases).size !== cases.length)
     throw new Error("Expected distinct benchmark IDs");
   for (const id of cases)
-    if (!/^rust\/[^/]+\/[^/]+\/[1-9]\d*\/[^/]+\/api$/.test(id))
+    if (!/^rust\/[^/]+\/[^/]+\/[1-9]\d*\/[^/]+\/(?:api|par-4)$/.test(id))
       throw new Error(`Invalid benchmark ID: ${id}`);
   const allowed = (await readFile("/proc/self/status", "utf8")).match(
     /^Cpus_allowed_list:\s*(.+)$/m,
   )?.[1];
+  const { small, large, parallel } = partition(cases);
+  const required = parallel.length ? 4 : 2;
   const cpus: number[] = [];
   for (const range of (allowed ?? "").split(",")) {
     const [first, last = first] = range.split("-").map(Number);
-    for (let cpu = first; cpu <= last && cpus.length < 2; cpu++) cpus.push(cpu);
-    if (cpus.length === 2) break;
+    for (let cpu = first; cpu <= last && cpus.length < required; cpu++) cpus.push(cpu);
+    if (cpus.length === required) break;
   }
-  if (cpus.length !== 2) throw new Error("Two available CPUs are required");
-  const { small, large } = partition(cases);
+  if (cpus.length !== required) throw new Error(`${required} available CPUs are required`);
+  const topology = await Promise.all(
+    cpus.map(async (cpu) => ({
+      cpu,
+      siblings: await readFile(
+        `/sys/devices/system/cpu/cpu${cpu}/topology/thread_siblings_list`,
+        "utf8",
+      )
+        .then((value) => value.trim())
+        .catch(() => null),
+    })),
+  );
+  console.error(
+    JSON.stringify({
+      allowed_cpus: allowed,
+      parallel_threads: parallel.length ? 4 : 0,
+      selected_cpus: cpus,
+      topology,
+    }),
+  );
   const directory = await mkdtemp(join(tmpdir(), "tessera-bench-"));
   try {
-    const outputs = await runWorkers(binary, small, cpus, join(directory, "small"));
-    // Preparation and validation of large inputs must not overlap either small worker.
-    outputs.push(...(await runWorkers(binary, [large], cpus, join(directory, "large"))));
+    const serialIds = (lanes: string[][]) =>
+      lanes.map((groups) => groups.map((group) => `${group}/api`));
+    const outputs = await runWorkers(
+      binary,
+      small,
+      cpus,
+      join(directory, "small"),
+      serialIds(small),
+    );
+    // Each phase joins and reaps all workers before the next may prepare inputs.
+    outputs.push(
+      ...(await runWorkers(binary, [large], cpus, join(directory, "large"), serialIds([large]))),
+    );
+    for (const [index, id] of parallel.entries()) {
+      const groups = [[id.slice(0, id.lastIndexOf("/"))]];
+      outputs.push(
+        ...(await runWorkers(
+          binary,
+          groups,
+          [cpus.join(",")],
+          join(directory, "parallel", String(index)),
+          [[id]],
+        )),
+      );
+    }
     const measured = await measuredCases(outputs);
     if (measured.size !== cases.length || cases.some((id) => !measured.has(id)))
       throw new Error("Benchmark results differ from the declared suite");

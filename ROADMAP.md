@@ -22,7 +22,7 @@ An independent track that binds the Rust crate and does not wait for C++. See th
 
 ## Rayon parallel sorting
 
-An independent Rust track, described in the [Rayon proposal](docs/proposals/rayon-parallel-sort.md). The optional `rayon` feature scatters root shards and sorts completed buckets in the caller's pool. Bounded root buckets now sort before final-band writes, and narrow direct-key windows count in parallel. Local paired measurements use the shared `parallel` plan; the [eight-core results](docs/design/port.md#eight-core-parallel-completion) include cases above 5× but not universal fivefold scaling.
+An independent Rust track, described in the [Rayon proposal](docs/proposals/rayon-parallel-sort.md). The optional `rayon` feature scatters root shards and sorts completed buckets in the caller's pool. Bounded root buckets now sort before final-band writes, and narrow direct-key windows count in parallel. The existing two continuous configurations track four-thread cases sequentially after their serial phases, with new baselines seeded after the trusted tracker rollout. Local paired measurements use the shared `parallel` plan; the [eight-core results](docs/design/port.md#eight-core-parallel-completion) include cases above 5× but not universal fivefold scaling.
 
 | Deliverable | Done when |
 |---|---|

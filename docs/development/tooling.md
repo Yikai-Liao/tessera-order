@@ -56,7 +56,7 @@ A successful `status` exit means the read succeeded, not that every workflow pas
 
 ## Reproduce continuous work locally
 
-The local commands use the same implementation as CI, not a second script translating workflow steps. Static artifacts require Linux x86-64 with glibc, Cargo and GNU `ldd`. Scheduling requires Linux, `taskset` and two CPUs available to the process. Native checks additionally require the [native comparison toolchain](benchmarking.md#native-prerequisites). None of these operations needs Python.
+The local commands use the same implementation as CI, not a second script translating workflow steps. Static artifacts require Linux x86-64 with glibc, Cargo and GNU `ldd`. Scheduling requires Linux, `taskset` and two CPUs for serial-only artifacts or four CPUs when parallel IDs are listed. Four-thread cases run exclusively after serial workers exit; the supervisor records allowed masks and visible topology. Native checks additionally require the [native comparison toolchain](benchmarking.md#native-prerequisites). None of these operations needs Python.
 
 ```sh
 # One isolated build directory is shared by both configurations and removed afterward.

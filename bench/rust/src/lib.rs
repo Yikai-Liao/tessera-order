@@ -6,6 +6,8 @@ pub mod case;
 #[cfg(feature = "compare")]
 mod comparison;
 pub mod plan;
+#[cfg(feature = "rayon")]
+pub mod pool;
 #[cfg(feature = "compare")]
 pub use comparison::main;
 

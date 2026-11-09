@@ -60,6 +60,6 @@ Completed staging is released immediately. Jobs recycle serial scratch without h
 
 ## Measurements and remaining work
 
-Use `pnpm tools compare algorithms --plan parallel` with the host's physical-core CPU mask and explicit input overrides. The shared runner verifies outputs and records nine shuffled blocks, serial Tessera A/A, memory, executable provenance and resumable reports. Cloud continuous scheduling is unchanged.
+Use `pnpm tools compare algorithms --plan parallel` with the host's physical-core CPU mask and explicit input overrides. The shared runner verifies outputs and records nine shuffled blocks, serial Tessera A/A, memory, executable provenance and resumable reports. The two existing cloud configurations additionally measure the continuous plan's four-thread cases, strictly one case at a time after serial workers exit; see [continuous coverage and rollout](../development/continuous-benchmarks.md#pipeline).
 
 The [eight-core measurement record](../design/port.md#eight-core-parallel-completion) reports current whole-call results and limitations. They compare algorithms in the measured executable, not isolated source revisions. Broader host coverage, independent placement controls, larger records and faster skew/ordered paths remain work; fivefold speedup is not a guarantee for every type or input.

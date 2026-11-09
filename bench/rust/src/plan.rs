@@ -153,6 +153,9 @@ pub struct Plan {
     include: Vec<Rule>,
     #[serde(default)]
     exclude: Vec<Rule>,
+    /// Additional four-thread API inputs; serial coverage remains independent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    parallel: Vec<Rule>,
 }
 impl Plan {
     /// Reads a JSON or TOML experiment, retaining its protocol's controls.
@@ -189,7 +192,15 @@ impl Plan {
         {
             return Err("unknown or duplicate algorithm IDs".into());
         }
-        for rule in plan.include.iter().chain(&plan.exclude) {
+        if harness != "smoke" && !plan.parallel.is_empty() {
+            return Err("parallel API rules belong to the smoke harness".into());
+        }
+        for rule in plan
+            .include
+            .iter()
+            .chain(&plan.exclude)
+            .chain(&plan.parallel)
+        {
             for (values, supported, field) in [
                 (&rule.types, &inventory.types, "types"),
                 (&rule.distributions, &inventory.shapes, "distributions"),
@@ -234,6 +245,7 @@ impl Plan {
     }
 
     /// Includes matching products, then removes matching exclusions.
+    #[cfg(test)]
     fn selects(&self, ty: &str, distribution: &str, len: usize) -> bool {
         self.include
             .iter()
@@ -248,9 +260,22 @@ impl Plan {
     ///
     /// Omitted axes use the harness catalog. An empty experiment returns an error.
     pub fn inputs(&self) -> Result<Vec<InputCase>, String> {
+        self.expand(&self.include)
+    }
+
+    /// Expands only explicitly selected four-thread API inputs.
+    pub fn parallel_inputs(&self) -> Result<Vec<InputCase>, String> {
+        if self.parallel.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.expand(&self.parallel)
+    }
+
+    /// Applies one API selection and the shared exclusions before generation.
+    fn expand(&self, rules: &[Rule]) -> Result<Vec<InputCase>, String> {
         let inventory = self.inventory();
         let mut cases = BTreeSet::new();
-        for rule in &self.include {
+        for rule in rules {
             let types = rule
                 .types
                 .clone()
@@ -270,7 +295,11 @@ impl Plan {
                 for distribution in &shapes {
                     for length in &lengths {
                         let len = length.resolve(ty);
-                        if self.selects(ty, distribution, len) {
+                        if !self
+                            .exclude
+                            .iter()
+                            .any(|rule| rule.matches(ty, distribution, len))
+                        {
                             cases.insert(InputCase {
                                 ty: ty.clone(),
                                 distribution: distribution.clone(),
@@ -316,6 +345,20 @@ mod tests {
         let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
         let cases = continuous.inputs().unwrap();
         assert_eq!(cases.len(), 51);
+        let parallel = continuous.parallel_inputs().unwrap();
+        assert_eq!(parallel.len(), 4);
+        assert!(
+            parallel
+                .iter()
+                .all(|case| case.len == 10_000_000 && case.distribution == "random")
+        );
+        assert_eq!(
+            parallel
+                .iter()
+                .map(|case| case.ty.as_str())
+                .collect::<Vec<_>>(),
+            ["row_u32", "row_u64", "u32", "u64"]
+        );
         assert!(cases.iter().any(|case| {
             case.ty == "u32" && case.distribution == "sorted" && case.len == 65_536
         }));

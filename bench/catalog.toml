@@ -67,15 +67,16 @@ distributions = [
 ]
 
 modes = [
-  { id = "api", label = "stable" },
+  { id = "api", label = "serial" },
   { id = "unstable", label = "unstable" },
   { id = "par", label = "parallel" },
+  { id = "par-4", label = "parallel · 4 threads" },
   { id = "par_unstable", label = "parallel unstable" },
 ]
 
 configurations = [
-  { id = "default", name = "Default", testbed = "intel-v1-hybrid-v1", features = [] },
-  { id = "portable-simd", name = "Portable SIMD", testbed = "intel-v1-portable-simd-hybrid-v1", features = ["portable-simd"] },
+  { id = "default", name = "Default", testbed = "intel-v1-hybrid-v1", features = ["rayon"] },
+  { id = "portable-simd", name = "Portable SIMD", testbed = "intel-v1-portable-simd-hybrid-v1", features = ["portable-simd", "rayon"] },
 ]
 
 [comparison]

@@ -24,7 +24,7 @@ The comparison job builds the pinned native competitors, validates the smoke sui
 
 A cell's commands live in one composite action, [`rust-test`](../../.github/actions/rust-test/action.yml), which both the pull request cells and the extra `main` cells call. A job's `if` cannot branch on `matrix` — the matrix is expanded after the condition is evaluated — so the two sets of cells are two jobs over one action rather than one matrix with a skip per cell.
 
-Each cell tests the optional `rayon` entry points, including on Rust 1.85. Stable Linux also tests all features together, so Rayon and Portable SIMD are exercised in one build; stable macOS and Windows compile that combination. Rayon tests cover caller-pool bucket scheduling, the one-thread fallback, task panics and record preservation; root scatter remains serial.
+Each cell tests the optional `rayon` entry points, including on Rust 1.85. Stable Linux also tests all features together, so Rayon and Portable SIMD are exercised in one build; stable macOS and Windows compile that combination. Rayon tests cover sharded root scatter, caller-pool bucket scheduling, the one-thread fallback, task panics and record preservation. The existing std Miri job additionally interprets sequential ownership fixtures for parallel storage and bucket handoff; native tests cover threaded scheduling. The existing AddressSanitizer job enables Rayon with Portable SIMD. No test lane is added for the continuous benchmark's two API groups.
 
 ## Adding a language
 

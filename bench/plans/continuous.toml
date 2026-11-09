@@ -5,6 +5,11 @@ harness = "smoke"
 algorithms = [ "tessera" ]
 exclude = []
 
+[[parallel]]
+types = ["u32", "row_u32", "u64", "row_u64"]
+distributions = ["random"]
+lengths = [10000000]
+
 [[include]]
 types = [ "u64" ]
 distributions = [ "random" ]

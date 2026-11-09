@@ -147,9 +147,13 @@ async function measureBlock(
 export async function compareLocal(options: LocalOptions) {
   const { root, out, simd, cpu } = options;
   if (
-    ["TESSERA_BENCH_LIST", "TESSERA_BENCH_GROUPS", "TESSERA_BENCH_PLAN"].some(
-      (name) => name in process.env,
-    )
+    [
+      "TESSERA_BENCH_LIST",
+      "TESSERA_BENCH_GROUPS",
+      "TESSERA_BENCH_PLAN",
+      "TESSERA_BENCH_IDS",
+      "TESSERA_BENCH_PARALLEL",
+    ].some((name) => name in process.env)
   )
     throw new Error("Unset worker-selection variables before starting a local comparison");
   const baseline = await command("git", ["rev-parse", "--verify", `${options.baseline}^{commit}`], {

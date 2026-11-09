@@ -29,6 +29,7 @@ const schema = z.strictObject({
   algorithms: choices(ids(catalog.algorithms)),
   include: z.array(rule).min(1),
   exclude: z.array(rule).default([]),
+  parallel: z.array(rule).optional(),
 });
 
 /** A product of optional axes; omitted axes match every supported value. */
@@ -46,7 +47,9 @@ export function parsePlan(value: unknown): Plan {
       "The smoke harness measures Tessera only; use a comparison plan for algorithms",
     );
   const inventory = plan.harness === "smoke" ? catalog.smoke : catalog.comparison;
-  for (const entry of [...plan.include, ...plan.exclude]) {
+  if (plan.parallel?.length && plan.harness !== "smoke")
+    throw new Error("Parallel API rules belong to the smoke harness");
+  for (const entry of [...plan.include, ...plan.exclude, ...(plan.parallel ?? [])]) {
     if (
       entry.types?.some((id) => !inventory.types.includes(id)) ||
       entry.distributions?.some((id) => !inventory.shapes.includes(id))
@@ -68,6 +71,7 @@ export async function loadPlan(name: string, options: SelectionOptions = {}): Pr
     ...plan,
     algorithms: algorithms ?? plan.algorithms,
     include: plan.include.map((entry) => ({ ...entry, ...axes })),
+    ...(plan.parallel ? { parallel: plan.parallel.map((entry) => ({ ...entry, ...axes })) } : {}),
   });
 }
 

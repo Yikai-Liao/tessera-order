@@ -29,6 +29,37 @@ export async function buildContinuous(root: string, out: string) {
       const linkage = await command("ldd", [artifact.executable], { capture: true });
       if (!linkage.includes("statically linked"))
         throw new Error(`${variant.name} executable is not statically linked`);
+      // Exercise the new exact-ID contract in this unprivileged build job.
+      // --test verifies outputs without producing performance measurements.
+      const listed = (
+        await command(artifact.executable, ["--bench"], {
+          capture: true,
+          env: { TESSERA_BENCH_LIST: "1", TESSERA_BENCH_PARALLEL: "4" },
+        })
+      )
+        .split("\n")
+        .filter(Boolean);
+      const legacy = (
+        await command(artifact.executable, ["--bench"], {
+          capture: true,
+          env: { TESSERA_BENCH_LIST: "1", TESSERA_BENCH_PARALLEL: undefined },
+        })
+      )
+        .split("\n")
+        .filter(Boolean);
+      const parallel = listed.filter((id) => id.endsWith("/par-4"));
+      if (
+        parallel.length !== 4 ||
+        new Set(listed).size !== listed.length ||
+        listed.length !== legacy.length + parallel.length ||
+        legacy.some((id) => !id.endsWith("/api") || !listed.includes(id))
+      )
+        throw new Error("Expected serial-only legacy listing and four additional parallel cases");
+      const serial = legacy[0];
+      if (!serial) throw new Error("Expected serial API controls");
+      await command(artifact.executable, ["--bench", "--test"], {
+        env: { TESSERA_BENCH_PARALLEL: "4", TESSERA_BENCH_IDS: [serial, ...parallel].join("\n") },
+      });
       const directory = join(out, variant.id);
       await mkdir(directory);
       await copyFile(artifact.executable, join(directory, "bench"));

@@ -529,14 +529,33 @@ const ORDER_SAMPLES: usize = 4096;
 fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     let stride = (records.len() / ORDER_SAMPLES).max(1);
     if stride == 1 {
-        // This is a complete scan: determine direction once, then reject its
-        // first conflict without a second scan or ascending-backend dispatch.
+        // Three keys are the shortest mixed-direction witness. Reject it
+        // before selecting a directional continuation; each key is read once.
         let first = extractor.key(&records[0]);
         let mut keys = records[1..].iter().map(|record| extractor.key(record));
-        let Some(current) = keys.find(|&key| key != first) else {
+        let Some(mut current) = keys.next() else {
             return Order::Ascending;
         };
-        if first < current {
+        let mut ascending = first <= current;
+        let mut descending = first >= current;
+        let mut strict = first != current;
+        if let Some(after) = keys.next() {
+            ascending &= current <= after;
+            descending &= current >= after;
+            strict &= current != after;
+            if !ascending && !descending {
+                return Order::Unsorted;
+            }
+            current = after;
+        }
+        if ascending && descending {
+            let Some(after) = keys.find(|&key| key != current) else {
+                return Order::Ascending;
+            };
+            ascending = current < after;
+            current = after;
+        }
+        if ascending {
             return if keys
                 .try_fold(current, |before, after| (before <= after).then_some(after))
                 .is_some()
@@ -546,7 +565,6 @@ fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
                 Order::Unsorted
             };
         }
-        let strict = keys.len() == records.len() - 2;
         return keys
             .try_fold((current, strict), |(before, strict), after| {
                 if before > after {
@@ -1306,9 +1324,9 @@ mod tests {
     #[test]
     fn unit_stride_visits_once() {
         let lengths: &[usize] = if cfg!(miri) {
-            &[2, 49, 129]
+            &[2, 3, 4, 49, 129]
         } else {
-            &[2, 49, 129, 1000, 8191]
+            &[2, 3, 4, 49, 129, 1000, 8191]
         };
         for &len in lengths {
             for descending in [false, true] {
@@ -1378,6 +1396,8 @@ mod tests {
                 &[2, 1, 2],
                 &[1, 1, 2, 2, 1],
                 &[2, 2, 1, 1, 2],
+                &[1, 1, 1, 2, 1],
+                &[2, 2, 2, 1, 2],
             ] {
                 let records: Vec<_> = (0..len)
                     .map(|id| (prefix[id.min(prefix.len() - 1)], id))

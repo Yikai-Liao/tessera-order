@@ -4,7 +4,8 @@
 export function orderProbePlan(records: number): { kind: "sample" | "confirm"; pairs: number }[] {
   const stride = Math.max(1, Math.floor(records / 4096));
   const confirmation = { kind: "confirm" as const, pairs: Math.max(0, records - 1) };
-  // Unit stride determines direction once, then scans it; larger strides sample first.
+  // Unit stride rejects a minimal mixed prefix, then scans one direction.
+  // Larger strides sample first; both paths count a complete confirmation here.
   // The confirm stage counts the complete scan, not a separate backend dispatch.
   return stride === 1
     ? [confirmation]

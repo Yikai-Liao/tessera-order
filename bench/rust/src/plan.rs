@@ -317,6 +317,50 @@ impl Plan {
     }
 }
 
+/// Formats a seed-one Criterion group from a typed representation's format.
+///
+/// The representation format stays literal, so row prefixes and constant names
+/// use one allocation, without intermediate strings or formatting calls.
+/// Identity validation belongs to the plan, not this formatter.
+///
+/// ```
+/// assert_eq!(tessera_bench::plan::criterion_group!("{}", "u64"; "random", 1000),
+///            "rust/u64/random/1000/s1");
+/// assert_eq!(tessera_bench::plan::criterion_group!("row_{}", "u64"; "random", 1000),
+///            "rust/row_u64/random/1000/s1");
+/// assert_eq!(tessera_bench::plan::criterion_group!("rec128_u64"; "random", 1000),
+///            "rust/rec128_u64/random/1000/s1");
+/// ```
+#[macro_export]
+macro_rules! criterion_group {
+    ($ty:literal $(, $argument:expr)*; $distribution:expr, $len:expr) => {
+        ::std::format!(
+            ::std::concat!("rust/", $ty, "/{distribution}/{len}/s1"),
+            $($argument,)*
+            distribution = $distribution,
+            len = $len,
+        )
+    };
+}
+
+/// Joins a Criterion group and API mode for exact timed-ID selection.
+///
+/// This matches Criterion's identity without parsing or validating its fields.
+///
+/// ```
+/// assert_eq!(tessera_bench::plan::criterion_id!("rust/u64/random/1000/s1", "api"),
+///            "rust/u64/random/1000/s1/api");
+/// ```
+#[macro_export]
+macro_rules! criterion_id {
+    ($group:expr, $mode:expr) => {
+        ::std::format!("{id}/{mode}", id = $group, mode = $mode)
+    };
+}
+
+/// Criterion formatters share this owner with comparison input identities.
+pub use crate::{criterion_group, criterion_id};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,6 +381,27 @@ mod tests {
                 input["selected"].as_bool().unwrap(),
                 "{input}"
             );
+        }
+    }
+
+    #[test]
+    fn identities_match_shared_contract() {
+        let fixture: Value =
+            toml::from_str(include_str!("../../plans/selection.fixture.toml")).unwrap();
+        for entry in fixture["identities"].as_array().unwrap() {
+            let case = InputCase {
+                ty: entry["type"].as_str().unwrap().into(),
+                distribution: entry["distribution"].as_str().unwrap().into(),
+                len: entry["length"].as_u64().unwrap() as usize,
+            };
+            let group = criterion_group!("{}", &case.ty; &case.distribution, case.len);
+            assert_eq!(group, entry["criterion_group"].as_str().unwrap());
+            assert_eq!(
+                criterion_id!(&group, entry["mode"].as_str().unwrap()),
+                entry["criterion"].as_str().unwrap()
+            );
+            #[cfg(feature = "compare")]
+            assert_eq!(case.id(), entry["comparison"].as_str().unwrap());
         }
     }
 

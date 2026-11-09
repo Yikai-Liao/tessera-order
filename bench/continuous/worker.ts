@@ -9,6 +9,9 @@ import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { CommandCancelledError, command } from "../../tools/process.ts";
 
+// The trusted image contains only this file and tools/process.ts: local ID
+// decoding intentionally mirrors catalog.ts, checked by the runner's parity test.
+
 /** Keep serial lanes unchanged and reserve an exclusive four-thread phase. */
 export function partition(cases: string[]) {
   const small: string[][] = [[], []];

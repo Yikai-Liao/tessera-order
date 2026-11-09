@@ -33,7 +33,7 @@ Repository-authored selections use TOML; custom plans accept JSON too. Decode sy
 
 `local` and `continuous` use Criterion; `smoke` and `release` use the paired algorithm harness. This is a capability boundary, not a second selection language. Continuous defaults compile into the executable so trusted cloud supervision never evaluates a PR's configuration. Local results retain the normalized plan. [Plan tests](../../bench/plan.test.ts) and Rust tests protect selection counts and boundary behavior.
 
-Selection axes are type, distribution and length; there is no mode selector. Criterion IDs end in `/api`; comparison input IDs use `type/distribution/length/s1`. The [continuous plan](../../bench/plans/continuous.toml) owns regression coverage; comparison presets retain 125 smoke inputs and 381 release inputs.
+Selection axes are type, distribution and length; separate `parallel` rules add four-thread inputs without changing serial coverage. Criterion IDs use `rust/type/distribution/length/s1/mode` (`api` or `par-4`); comparison input IDs use `type/distribution/length/s1`. TypeScript's formatters, strict decoders and permissive historical labels live in [`catalog.ts`](../../bench/catalog.ts); Rust's formatters live in [`plan.rs`](../../bench/rust/src/plan.rs). Explicit IDs in the shared fixture check both languages. The trusted worker repeats only the decoding it needs, with an owner-parity test; other consumers do not parse positions or mode suffixes. The [continuous plan](../../bench/plans/continuous.toml) owns regression coverage; comparison presets retain 125 smoke inputs and 381 release inputs.
 
 ## Source comparison boundary
 

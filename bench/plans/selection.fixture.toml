@@ -80,3 +80,22 @@ type = "u32"
 distribution = "random"
 length = 65536
 selected = false
+
+# Both language implementations check these independent formatting examples.
+[[identities]]
+type = "u64"
+distribution = "random"
+length = 65536
+mode = "api"
+comparison = "u64/random/65536/s1"
+criterion_group = "rust/u64/random/65536/s1"
+criterion = "rust/u64/random/65536/s1/api"
+
+[[identities]]
+type = "row_u64"
+distribution = "random"
+length = 1000000
+mode = "par-4"
+comparison = "row_u64/random/1000000/s1"
+criterion_group = "rust/row_u64/random/1000000/s1"
+criterion = "rust/row_u64/random/1000000/s1/par-4"

@@ -6,6 +6,7 @@ import { arch, cpus, platform, release } from "node:os";
 import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
+import { criterionGroup } from "../catalog.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
 import {
   buildBenchmark,
@@ -147,7 +148,7 @@ async function measureBlock(
     [2, 0, 1],
     [1, 0, 2],
   ];
-  const groups = [...new Set(run.cases.map((id) => id.slice(0, id.lastIndexOf("/"))))].join("\n");
+  const groups = [...new Set(run.cases.map(criterionGroup))].join("\n");
   for (const index of orders[run.blocks.length % orders.length]) {
     const role = roles[index],
       binary = role === "current" ? binaries.current : binaries.baseline;

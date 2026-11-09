@@ -8,7 +8,7 @@ use criterion::{BatchSize, Criterion};
 use std::{hint::black_box, sync::OnceLock, time::Duration};
 use tessera_bench::{
     case::{Key, Row, generate},
-    plan::{InputCase, Plan},
+    plan::{InputCase, Plan, criterion_group, criterion_id},
 };
 
 /// Fixed prepared element count, independent of measured execution time.
@@ -57,7 +57,7 @@ fn parallel_enabled() -> bool {
 
 /// Measures keys against the same stable total-order reference for both APIs.
 fn keys<K: Key + Send + Sync>(c: &mut Criterion, distribution: &str, len: usize, mode: &str) {
-    let id = format!("rust/{}/{distribution}/{len}/s1", K::NAME);
+    let id = criterion_group!("{}", K::NAME; distribution, len);
     if !selected(&id, mode) {
         return;
     }
@@ -89,7 +89,7 @@ fn keys<K: Key + Send + Sync>(c: &mut Criterion, distribution: &str, len: usize,
 
 /// Measures keyed rows, including stable payload order.
 fn rows<K: Key + Send + Sync>(c: &mut Criterion, distribution: &str, len: usize, mode: &str) {
-    let id = format!("rust/row_{}/{distribution}/{len}/s1", K::NAME);
+    let id = criterion_group!("row_{}", K::NAME; distribution, len);
     if !selected(&id, mode) {
         return;
     }
@@ -131,7 +131,7 @@ impl Wide {
 
 /// Measures records much wider than their keys.
 fn records(c: &mut Criterion, distribution: &str, len: usize, mode: &str) {
-    let id = format!("rust/rec128_u64/{distribution}/{len}/s1");
+    let id = criterion_group!("rec128_u64"; distribution, len);
     if !selected(&id, mode) {
         return;
     }
@@ -235,7 +235,7 @@ fn plan() -> &'static Plan {
 
 /// Selects exact timed IDs; legacy group selection supports the pre-upgrade tracker.
 fn selected(id: &str, mode: &str) -> bool {
-    let full = format!("{id}/{mode}");
+    let full = criterion_id!(id, mode);
     if std::env::var_os("TESSERA_BENCH_LIST").is_some() {
         println!("{full}");
         return false;

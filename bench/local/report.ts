@@ -2,6 +2,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { rawCaseParts } from "../catalog.ts";
 import { renderRows } from "../plot/rows.ts";
 import { type LocalRun, summarizeLocal } from "./model.ts";
 
@@ -25,8 +26,7 @@ export async function renderLocalReport(directory: string, input?: LocalRun) {
         title: run.configuration,
         rows: summaries.map((s) => ({
           name: {
-            input: s.id.split("/").slice(1, 3).join(" · "),
-            sub: s.id.split("/").slice(3).join(" · "),
+            ...rawCaseParts(s.id),
             tag: "",
           },
           marks: [{ value: s.ratio, tone: "primary" }],

@@ -508,25 +508,18 @@ fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     confirm_order(records, extractor)
 }
 
-/// Confirms direction from the first unequal key, marking strict descent.
+/// Confirms ascending order first, then checks descent and its strictness.
 fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     let first = extractor.key(&records[0]);
-    let mut keys = records[1..].iter().map(|record| extractor.key(record));
-    let Some(current) = keys.find(|&key| key != first) else {
+    // Constant children need the same blocked/vector scan as ascending ones;
+    // searching for the first unequal key would leave that whole scan scalar.
+    if extractor.confirm_ascending(&records[1..], first) {
         return Order::Ascending;
-    };
-    if first < current {
-        // The iterator has already encoded the first unequal key.
-        let tail = &records[records.len() - keys.len()..];
-        if extractor.confirm_ascending(tail, current) {
-            Order::Ascending
-        } else {
-            Order::Unsorted
-        }
-    } else {
-        // Strict descent requires the first unequal key to be the second record.
-        let strict = keys.len() == records.len() - 2;
-        keys.try_fold((current, strict), |(before, strict), after| {
+    }
+    records[1..]
+        .iter()
+        .try_fold((first, true), |(before, strict), record| {
+            let after = extractor.key(record);
             if before > after {
                 Some((after, strict))
             } else if before == after {
@@ -536,7 +529,6 @@ fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
             }
         })
         .map_or(Order::Unsorted, |(_, strict)| Order::Descending { strict })
-    }
 }
 
 /// Confirms ascending keys after an already encoded predecessor.
@@ -1327,9 +1319,9 @@ mod tests {
     }
 
     #[test]
-    fn confirm_order_calls_key_in_order() {
-        for descending in [false, true] {
-            let mut records: Vec<_> = (0..129u64).map(|id| (id / 4, id)).collect();
+    fn confirmation_visits_each_stage() {
+        for (len, descending) in [(128, false), (128, true), (129, true)] {
+            let mut records: Vec<_> = (0..len).map(|id| (id / 4, id)).collect();
             if descending {
                 records.reverse();
             }
@@ -1350,11 +1342,46 @@ mod tests {
                         Order::Ascending
                     }
             );
-            assert_eq!(
-                visited,
-                records.iter().map(|record| record.1).collect::<Vec<_>>()
-            );
+            let mut expected = Vec::new();
+            if descending {
+                // Ascending confirmation crosses the leading ties, then descent
+                // restarts from the retained first key.
+                let prefix_len = records
+                    .iter()
+                    .position(|record| record.0 < records[0].0)
+                    .unwrap()
+                    + 1;
+                expected.extend(records[..prefix_len].iter().map(|record| record.1));
+                expected.extend(records[1..].iter().map(|record| record.1));
+            } else {
+                expected.extend(records.iter().map(|record| record.1));
+            }
+            assert_eq!(visited, expected);
         }
+    }
+
+    #[test]
+    fn constant_confirmation_reuses_backend() {
+        /// Records ascending backend dispatch on constant input.
+        struct Confirmation {
+            confirmed: bool,
+        }
+        impl Extract<u64> for Confirmation {
+            type Value = u64;
+            fn key(&mut self, record: &u64) -> u64 {
+                assert_eq!(*record, 7);
+                *record
+            }
+            fn confirm_ascending(&mut self, records: &[u64], previous: u64) -> bool {
+                assert_eq!(previous, 7);
+                assert_eq!(records, &[7; 128]);
+                self.confirmed = true;
+                true
+            }
+        }
+        let mut extractor = Confirmation { confirmed: false };
+        assert!(confirm_order(&[7; 129], &mut extractor) == Order::Ascending);
+        assert!(extractor.confirmed);
     }
 
     #[test]

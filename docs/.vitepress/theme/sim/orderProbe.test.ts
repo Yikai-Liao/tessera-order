@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: BSD-2-Clause
 import assert from "node:assert/strict";
-import { orderProbePlan } from "./orderProbe.ts";
+import { orderConfirmationPlan, orderProbePlan } from "./orderProbe.ts";
+
+for (const records of [2, 49, 129, 8192, 65536]) {
+  assert.deepEqual(orderConfirmationPlan(records, "ascending"), [
+    { direction: "ascending", pairs: records - 1 },
+  ]);
+  for (const leadingTies of [0, Math.floor(records / 2) - 1]) {
+    assert.deepEqual(orderConfirmationPlan(records, "descending", leadingTies), [
+      { direction: "ascending", pairs: leadingTies + 1 },
+      { direction: "descending", pairs: records - 1 },
+    ]);
+  }
+}
 
 for (const records of [2, 49, 129, 1000, 4096, 8191]) {
   assert.deepEqual(orderProbePlan(records), [{ kind: "confirm", pairs: records - 1 }]);

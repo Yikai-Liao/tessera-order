@@ -41,8 +41,13 @@ distributions = [ "random" ]
 lengths = [ "tile-next" ]
 
 [[include]]
-types = [ "u64" ]
+types = [ "u64", "u32", "f64", "row_u64" ]
 distributions = [ "sorted", "reverse" ]
+lengths = [ 1000 ]
+
+[[include]]
+types = [ "u64" ]
+distributions = [ "equal" ]
 lengths = [ 1000 ]
 
 [[include]]

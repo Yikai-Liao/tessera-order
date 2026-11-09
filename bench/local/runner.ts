@@ -16,7 +16,13 @@ import {
   withWorkspace,
 } from "../workspace.ts";
 import { readEstimates } from "./criterion.ts";
-import { type LayoutRun, parseLayoutSeeds, validateLayoutBuilds } from "./layout.ts";
+import {
+  engineOrderingSymbols,
+  type LayoutControl,
+  type LayoutRun,
+  parseLayoutSeeds,
+  validateLayoutBuilds,
+} from "./layout.ts";
 import { type LocalBlock, type LocalRun, summarizeLocal } from "./model.ts";
 import { renderLocalReport } from "./report.ts";
 
@@ -29,6 +35,23 @@ interface LocalOptions {
   simd: boolean;
   cpu?: string;
   layoutSeeds?: number[];
+  layoutControl?: LayoutControl;
+}
+
+/** Reject ambient worker controls that could change a requested experiment. */
+export function assertWorkerEnvironment() {
+  for (const name of [
+    "LIST",
+    "GROUPS",
+    "PLAN",
+    "IDS",
+    "PARALLEL",
+    "TIME_DIVISOR",
+    "STUDY_SETTINGS",
+    "FIXED_SORTS",
+  ])
+    if (`TESSERA_BENCH_${name}` in process.env)
+      throw new Error(`Unset TESSERA_BENCH_${name} before starting an experiment`);
 }
 
 /** Complete only unused optional metadata for pre-parallel serial baselines. */
@@ -54,6 +77,7 @@ export async function buildRevisions(
   baseline: string,
   features: string[],
   layout?: { baselineSeed: number; currentSeed: number; out: string },
+  control?: LayoutControl,
 ) {
   const { tree, directory, target } = workspace;
   const crate = join(tree, "rust/tessera-sort");
@@ -99,13 +123,61 @@ export async function buildRevisions(
           "-C",
           `link-arg=-Map=${map}`,
         ];
+  const extraFlags =
+    control === "cgu1"
+      ? ["-Ccodegen-units=1"]
+      : control === "aligned"
+        ? ["-Cllvm-args=-align-loops=64", "-Cllvm-args=-align-all-nofallthru-blocks=6"]
+        : [];
+  let env: NodeJS.ProcessEnv | undefined;
+  const build = async (role: "baseline" | "current", seed: number | undefined) => {
+    const args = rustcArgs(seed);
+    if (extraFlags.length && !env) {
+      // Cargo resolves target/build config flags before exposing them to the
+      // build script. Read that result before selecting its higher-precedence
+      // encoded environment source, which would otherwise discard config flags.
+      const reference = await buildBenchmark(tree, target, "smoke", features, { rustcArgs: args });
+      env = {
+        CARGO_ENCODED_RUSTFLAGS: [reference.provenance.cargo_encoded_rustflags, ...extraFlags]
+          .filter(Boolean)
+          .join("\x1f"),
+      };
+    }
+    let built = await buildBenchmark(tree, target, "smoke", features, { rustcArgs: args, env });
+    if (control === "engine-first") {
+      if (!layout || !args) throw new Error("Engine ordering requires layout seeds");
+      const views = await Promise.all(
+        [[], ["--demangle"]].map((extra) =>
+          command(
+            "nm",
+            ["--defined-only", "--no-sort", "--format=posix", ...extra, built.executable],
+            { capture: true },
+          ),
+        ),
+      );
+      const symbols = engineOrderingSymbols(views[0], views[1]);
+      if (!symbols.length) throw new Error("No out-of-line engine symbols to order");
+      const order = join(directory, "engine.order");
+      await writeFile(order, `${symbols.join("\n")}\n`);
+      await cp(order, join(layout.out, `layout-${seed}-${role}.order`));
+      built = await buildBenchmark(tree, target, "smoke", features, {
+        env,
+        rustcArgs: [
+          ...args,
+          "-C",
+          "link-arg=-Xlinker",
+          "-C",
+          `link-arg=--symbol-ordering-file=${order}`,
+        ],
+      });
+    }
+    return built;
+  };
   const binaries = {
     baseline: join(directory, `baseline-${layout?.baselineSeed ?? "default"}`),
     current: join(directory, `current-${layout?.currentSeed ?? "default"}`),
   };
-  const first = await buildBenchmark(tree, target, "smoke", features, {
-    rustcArgs: rustcArgs(layout?.baselineSeed),
-  });
+  const first = await build("baseline", layout?.baselineSeed);
   if (layout) {
     if (first.provenance.target !== "x86_64-unknown-linux-gnu")
       throw new Error("Layout experiments require the x86_64-unknown-linux-gnu target");
@@ -114,9 +186,7 @@ export async function buildRevisions(
   await cp(first.executable, binaries.baseline);
   await rm(crate, { recursive: true });
   await copySnapshot(saved, crate, directory);
-  const second = await buildBenchmark(tree, target, "smoke", features, {
-    rustcArgs: rustcArgs(layout?.currentSeed),
-  });
+  const second = await build("current", layout?.currentSeed);
   if (layout) await cp(map, join(layout.out, `layout-${layout.currentSeed}-current.map`));
   await cp(second.executable, binaries.current);
   for (const field of [
@@ -230,16 +300,9 @@ export async function readLayoutLinker(): Promise<LayoutRun["linker"]> {
 /** Compare an immutable working-tree snapshot with a commit, retaining only results. */
 export async function compareLocal(options: LocalOptions) {
   const { root, out, simd, cpu } = options;
-  if (
-    [
-      "TESSERA_BENCH_LIST",
-      "TESSERA_BENCH_GROUPS",
-      "TESSERA_BENCH_PLAN",
-      "TESSERA_BENCH_IDS",
-      "TESSERA_BENCH_PARALLEL",
-    ].some((name) => name in process.env)
-  )
-    throw new Error("Unset worker-selection variables before starting a local comparison");
+  assertWorkerEnvironment();
+  if (options.layoutControl && !options.layoutSeeds)
+    throw new Error("Layout controls require --layout-seeds");
   let linker: LayoutRun["linker"] | undefined;
   if (options.layoutSeeds) {
     parseLayoutSeeds(options.layoutSeeds.join(","));
@@ -267,6 +330,7 @@ export async function compareLocal(options: LocalOptions) {
         baseline,
         simd ? ["portable-simd"] : [],
         seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
+        options.layoutControl,
       );
       const run: LocalRun = {
         schema: 1,
@@ -294,7 +358,9 @@ export async function compareLocal(options: LocalOptions) {
       layouts.push({ seed: seed ?? 0, run });
       executables.push(binaries);
     }
-    const result: LocalRun | LayoutRun = linker ? { schema: 2, linker, layouts } : layouts[0].run;
+    const result: LocalRun | LayoutRun = linker
+      ? { schema: 2, linker, control: options.layoutControl, layouts }
+      : layouts[0].run;
     if (result.schema === 2) validateLayoutBuilds(result);
     const save = () => writeFile(join(out, "local.json"), `${JSON.stringify(result, null, 2)}\n`);
     await save();

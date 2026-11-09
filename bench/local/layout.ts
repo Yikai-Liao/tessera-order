@@ -3,9 +3,38 @@
 import { median } from "../statistics.ts";
 import { type LocalRun, summarizeLocal } from "./model.ts";
 
+export const LAYOUT_CONTROLS = ["cgu1", "aligned", "engine-first"] as const;
+export type LayoutControl = (typeof LAYOUT_CONTROLS)[number];
+
+/** Select engine-owned functions, keeping generic mentions in harness names out. */
+export function engineOrderingSymbols(raw: string, demangled: string) {
+  const symbols = raw
+      .trim()
+      .split("\n")
+      .map((line) => line.trimEnd()),
+    names = demangled
+      .trim()
+      .split("\n")
+      .map((line) => line.trimEnd());
+  if (symbols.length !== names.length) throw new Error("nm symbol views differ");
+  return symbols
+    .flatMap((line, index) => {
+      const symbol = /^(\S+) ([tT]) ([a-f\d]+)(?: ([a-f\d]+))?$/i.exec(line);
+      if (!symbol) return [];
+      const name = /^(.+) ([tT]) ([a-f\d]+)(?: ([a-f\d]+))?$/i.exec(names[index]);
+      if (!name || symbol.slice(2).join() !== name.slice(2).join())
+        throw new Error("nm symbol views differ");
+      return /^(?:tessera_sort::|<tessera_sort::|<[^<>]+ as tessera_sort::)/.test(name[1])
+        ? [symbol[1]]
+        : [];
+    })
+    .sort();
+}
+
 export interface LayoutRun {
   schema: 2;
   linker: { driver: string; version: string };
+  control?: LayoutControl;
   layouts: { seed: number; run: LocalRun }[];
 }
 

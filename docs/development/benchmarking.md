@@ -11,6 +11,9 @@ Run `pnpm tools` from the repository root with Node.js 24, the pinned pnpm and R
 | Compare working-tree code with a commit | `pnpm tools compare commit COMMIT` | Two revision builds, nine rotating baseline/control/current process blocks, paired process-level A/A, verification, provenance and a report |
 | Sample revision comparisons across layouts | `pnpm tools compare commit COMMIT --layout-seeds 1,2,3,4,5` | One revision pair per fixed LLD seed, nine blocks per seed, link maps and descriptive cross-layout ranges; Linux x86-64 GNU only |
 | Study candidate-only versus paired multi-layout budgets | `pnpm tools compare protocols COMMIT` | Nine held-out layout cohorts, fixed ±5% screens, effective timing settings, measured process costs and diagnostic wall times; local experiment only |
+| Compare fixed-work instruction counts | `pnpm tools compare counters COMMIT` | Verified serial sorts with Callgrind instruction, simulated cache and branch events; baseline/control/current totals and provenance |
+| Probe hardware counter access | `pnpm tools continuous probe-counters --out DIR` | Per-event Linux perf availability on the current host; no permission or remote changes |
+| Inspect adjacent main changes | `pnpm tools continuous history --project PROJECT --out DIR` | Read-only histories from both existing Testbeds, separated by hardware spec; descriptive mixed-change observations |
 | Compare algorithms | `pnpm tools compare algorithms` | Registered algorithms in one timing executable per configuration, nine shuffled blocks, two Tessera calls for A/A, output verification, allocation measurement and a report |
 | Local parallel comparison | `pnpm tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` | Serial controls, Tessera-8 and Rayon stable-8 in the shared paired harness; choose a CPU list appropriate to the host |
 | Full algorithm comparison | `pnpm tools compare algorithms --plan release --simd` | Release coverage, native opponents and a separate Portable SIMD build |
@@ -19,7 +22,7 @@ Run `pnpm tools` from the repository root with Node.js 24, the pinned pnpm and R
 | Regenerate a report | `pnpm tools report DIR` | Statistics and figures from retained results, without new measurements |
 | Read current main or PR feedback | `pnpm -s tools status main` or `pnpm -s tools status --pr NUMBER` | Exact-ref workflow and benchmark states; [read-only interpretation](continuous-benchmarks.md#read-feedback-from-a-pr) |
 
-`compare commit` and `compare protocols` default to `HEAD` and the `local` plan; `compare algorithms` defaults to the smoke algorithm plan. Replace uppercase placeholders. The [CLI reference](tooling.md) defines output, logs and CI commands. Use [plans and axis overrides](#experiment-plans) for custom coverage. `report` reads retained results without compiling or measuring; incomplete algorithm sessions require `--partial`, while local revision and protocol reports require all nine blocks or trials.
+`compare commit`, `compare protocols` and `compare counters` default to `HEAD` and the `local` plan; `compare algorithms` defaults to the smoke algorithm plan. Replace uppercase placeholders. The [CLI reference](tooling.md) defines output, logs and CI commands. Use [plans and axis overrides](#experiment-plans) for custom coverage. `report` reads retained results without compiling or measuring; incomplete algorithm sessions require `--partial`, while local revision and protocol reports require all nine blocks or trials. Counter reports require every selected case; history reports regenerate from their retained API responses.
 
 ## Run an experiment
 
@@ -89,6 +92,8 @@ Schema-2 `local.json` retains every seed's schema-1 revision run. Reports keep e
 
 Use `pnpm tools report DIR` for either local schema; every seed must have nine complete blocks. Layout sampling does not change continuous Testbeds, thresholds, sampling windows or submission behavior.
 
+`--layout-control cgu1|aligned|engine-first` requires layout seeds and applies one local build control to both revisions. `cgu1` appends `-Ccodegen-units=1` to Cargo's encoded flags for the whole build, including dependencies. `aligned` similarly appends `-Cllvm-args=-align-loops=64` and `-Cllvm-args=-align-all-nofallthru-blocks=6`. These are separate configurations, not the continuous compiler settings. `engine-first` pairs raw and demangled `nm --no-sort` views, selecting module functions, engine-type methods and key-trait implementations by their owning namespace. A harness function whose generic arguments merely mention `tessera_sort` is excluded. The selected raw names are sorted and passed to LLD's symbol-ordering file; each revision's order file is retained alongside its map. Inlined engine code inside harness functions is not isolated by this selection. Inspect maps to establish actual placement; ordering selected symbols does not fix internal blocks, all monomorphizations or branch-predictor conflicts. Compare the same sources, cases and seed list with and without a control, retain A/A ranges, and do not infer a deployed improvement from a smaller local spread.
+
 ### Candidate-budget protocol study
 
 `compare protocols [COMMIT]` tests whether three shorter layouts improve screening within the current candidate-only process budget. It does not change continuous behavior. The baseline library comes from the named commit; current library sources and the harness come from the working-tree snapshot. The default `--expect same` requires identical library source hashes. Use `--expect faster` or `--expect slower` to declare a changed-source hypothesis before measuring, and `--control REGEX` for unaffected timed IDs within that study. A control pattern must match at least one selected case. Preview the same plan first.
@@ -106,6 +111,29 @@ The single-layout score is current / baseline from full Criterion windows. The t
 Budget accounting charges one current process for the single-layout arm, treating the baseline as cached, versus three baseline and three current processes for the paired arm. Each recorded process cost includes startup, preparation, verification, warm-up, measurement, analysis and result collection. The prespecified gate is a median paired cost ratio no greater than 1.0000. Complete arm wall times separately include all diagnostic A/A processes and arm-specific setup/collection; builds and case listing are excluded. Dividing windows establishes a nominal allocation, not a guaranteed elapsed-time budget. A slower result is a cost/reliability tradeoff, not an equal-budget improvement. These local process costs do not measure an end-to-end Bencher job or its two-worker scheduling.
 
 Schema-3 `local.json` retains source/build provenance, assignments, effective settings, process observations and both cost measures, including incomplete trials. `pnpm tools report DIR` regenerates tables only after all nine trials finish. Reports count faster/slower alerts separately for same-source and unaffected controls, and expected-direction alerts for changed source. Nine cohorts give descriptive counts, not a population false-positive rate or calibrated confidence interval. A historical change's expected direction does not establish that it exceeds 5% on this host, and detection of that change does not establish sensitivity to arbitrary 5% or 10% regressions. Historical-machine drift and deployment acceptance require separate evidence.
+
+### Fixed-work counters
+
+`compare counters [COMMIT]` uses the current smoke harness for both library revisions, with the local-only `layout-study` feature and the default ISA build. It requires Linux x86-64 and Valgrind; `--simd` is rejected because a simulated ISA path is not the real host's dispatch. Select a small smoke plan with the usual axes, then run:
+
+```sh
+pnpm tools compare counters HEAD --types u32,u64 --distributions random --lengths 48,65536 \
+  --sorts 8 --out bench/results/counters-null
+```
+
+Each selected serial API case runs in three separate processes: baseline, a second baseline for A/A, and current. Their order reverses on alternate cases. Each process first verifies a complete sort, prepares `--sorts` independent copies (default 8, range 1..1024), calls the stable `tessera_counted_sorts` marker once and verifies every output afterwards. Callgrind collects that dynamic call tree with cache and branch simulation enabled. The batch loop and dispatch overhead are included; input generation, allocation of prepared copies, restoration and verification are outside collection. Counts describe this prepared-cache workload and simulator, not cold-cache execution or hardware PMU events. Large selections multiply both prepared memory and simulation cost; input count must remain practical for the host.
+
+`counters.json` retains both source hashes, executable hashes, compiler flags, Valgrind version, the fixed sort count and event totals. Every process's completion receipt is checked against its requested ID and sort count. Raw `callgrind-<case>-<role>.out` files allow annotation. `Ir` is instructions; `D1mr`/`D1mw` and `DLmr`/`DLmw` are simulated data-cache read/write misses; `Bcm`/`Bim` are simulated conditional/indirect mispredictions. Cache and predictor models can still depend on code and data addresses. Equal instructions and simulated events cannot prove that a time change is caused by layout, and changed counts need not explain the whole time change. The report is descriptive and does not submit a Bencher metric or change a verdict. A failed process or zero/malformed instruction summary fails the operation; incomplete results cannot regenerate as a complete report.
+
+Some host C libraries or loaders require instructions unsupported by Valgrind, even when the measured Rust code uses the default ISA. For such hosts, build the provided baseline-ISA container, then use `--valgrind-image tessera-callgrind`. `BASE_IMAGE` may select another compatible glibc image. The command records the local immutable image ID and Valgrind version, mounts temporary sources read-only and results writable, and runs without network access or extra capabilities. Version probes and measurements use uniquely named containers; after failure or cancellation, forced removal is awaited before returning control to workspace cleanup. A cleanup failure is logged with the owned name while preserving the original failure. The host builds the executable; an incompatible container libc or unsupported executable instruction fails visibly.
+
+```sh
+docker build -t tessera-callgrind -f bench/local/Callgrind.Dockerfile .
+pnpm tools compare counters HEAD --types u32 --distributions random --lengths 48 \
+  --valgrind-image tessera-callgrind --out bench/results/counters-container
+```
+
+`continuous probe-counters --out DIR` separately tries `instructions:u`, `branch-misses:u`, `idq.dsb_uops:u`, `idq.mite_uops:u` and `baclears.any:u` with the host's `perf`. `probe.json` preserves each success/failure and raw output; Intel-specific aliases may be unavailable on AMD. The probe does not change `perf_event_paranoid`, request capabilities or infer cloud access from local access. Use the actual measured host before integrating PMU reads into a timed run.
 
 ## Experiment plans
 

@@ -54,7 +54,7 @@ An independent Rust track, described in the [Rayon proposal](docs/proposals/rayo
 - Consolidate distribution-sensitive routing into general mechanisms. Child-order reuse and the bucket-order split replace the capped end-run route; evaluate both against current-head Default and Portable SIMD continuous feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
 
 - Extend the comparison to cold-cache experiments, additional seeds and threshold cases when an investigation needs them.
-- Add native-CPU and branch-aligned placement controls for source A/B studies.
+- Validate continuous layout stabilization on the measured Intel scheduler before proposing a rollout. The local three-layout/six-window pilot failed its cost gate and did not reduce false slowdowns; [diagnostics and deployment gates](docs/development/continuous-benchmarks.md#layout-diagnosis-and-deployment-gates) define the evidence still needed. Local CGU, loop/block alignment and engine-symbol ordering controls are available through `compare commit`; native-CPU controls remain future work.
 - Add hosted comparison groups using the existing Bencher queue after the local release report; retain complete per-type length groups for absolute scaling.
 
 ## Integrations

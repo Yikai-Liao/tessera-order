@@ -13,6 +13,9 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Compare local 8-worker sorting | `pnpm tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` (choose the host's physical-core mask) |
 | Sample local function-section layouts | `pnpm -s tools compare commit HEAD --layout-seeds 1,2,3,4,5` |
 | Study candidate-only and paired layout process costs | `pnpm -s tools compare protocols HEAD --expect same` |
+| Compare serial instruction and simulated event counts | `pnpm -s tools compare counters HEAD` |
+| Probe current-host PMU availability | `pnpm -s tools continuous probe-counters --out bench/results/pmu` |
+| Inspect adjacent main measurement changes | `pnpm -s tools continuous history --project yikai-liao-s-project --out bench/results/main-history` |
 | Compare sorting algorithms | `pnpm -s tools compare algorithms --plan smoke` |
 | Resume a prepared algorithm comparison | `pnpm -s tools compare resume bench/results/SESSION` |
 | Reproduce the native comparison CI job | `pnpm -s tools check --native` |

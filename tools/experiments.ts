@@ -5,7 +5,9 @@ import { join, resolve } from "node:path";
 import { type Command, InvalidArgumentError, Option } from "commander";
 import { stringify as stringifyToml } from "smol-toml";
 import { cpuListSchema } from "../bench/affinity.ts";
-import { parseLayoutSeeds } from "../bench/local/layout.ts";
+import { reportMainHistory } from "../bench/continuous/volatility.ts";
+import { compareCounters, reportCounters } from "../bench/local/counters.ts";
+import { LAYOUT_CONTROLS, type LayoutControl, parseLayoutSeeds } from "../bench/local/layout.ts";
 import { type ExpectedDirection, protocolSeeds } from "../bench/local/protocol.ts";
 import { compareProtocols } from "../bench/local/protocol-runner.ts";
 import { renderLocalReport } from "../bench/local/report.ts";
@@ -86,6 +88,24 @@ function selectAxes(options: MeasurementOptions): SelectionOptions {
 /** Regenerate a report from its persisted result format without rerunning measurements. */
 async function report(directories: string[], partial = false) {
   const paths = directories.map((path) => resolve(path));
+  try {
+    await access(join(paths[0], "history.json"));
+    if (paths.length !== 1 || partial)
+      throw new Error("History reports require one result directory");
+    await reportMainHistory(paths[0]);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  try {
+    await access(join(paths[0], "counters.json"));
+    if (paths.length !== 1 || partial)
+      throw new Error("Counter reports require one complete result directory");
+    await reportCounters(paths[0]);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   let local = false;
   try {
     await access(join(paths[0], "local.json"));
@@ -112,6 +132,12 @@ export function experimentCommands(program: Command) {
 
   measurement("commit [revision]", "Compare the working tree with a commit (default: HEAD)")
     .option("--filter <regex>", "additional case ID pattern", parseCasePattern)
+    .addOption(
+      new Option(
+        "--layout-control <control>",
+        "local-only build control; requires layout seeds",
+      ).choices(LAYOUT_CONTROLS),
+    )
     .option(
       "--layout-seeds <seeds>",
       "comma-separated fixed LLD layout seeds (Linux GNU)",
@@ -126,8 +152,14 @@ export function experimentCommands(program: Command) {
     .action(
       async (
         baseline: string | undefined,
-        options: MeasurementOptions & { filter?: string; layoutSeeds?: number[] },
+        options: MeasurementOptions & {
+          filter?: string;
+          layoutSeeds?: number[];
+          layoutControl?: LayoutControl;
+        },
       ) => {
+        if (options.layoutControl && !options.layoutSeeds)
+          throw new InvalidArgumentError("layout controls require --layout-seeds");
         const plan = await loadPlan(options.plan ?? "local", selectAxes(options));
         if (plan.harness !== "smoke")
           throw new Error("Commit comparisons require a smoke harness plan");
@@ -143,6 +175,7 @@ export function experimentCommands(program: Command) {
             simd: Boolean(options.simd),
             filter: options.filter,
             layoutSeeds: options.layoutSeeds,
+            layoutControl: options.layoutControl,
           }),
         );
       },
@@ -197,6 +230,44 @@ export function experimentCommands(program: Command) {
             expected: options.expect,
             control: options.control,
             firstSeed: options.seed,
+          }),
+        );
+      },
+    );
+
+  measurement(
+    "counters [revision]",
+    "Compare fixed-work serial instruction and simulated event counts",
+  )
+    .option(
+      "--valgrind-image <image>",
+      "run Valgrind in a prepared Docker image with a compatible libc",
+    )
+    .option(
+      "--sorts <number>",
+      "prepared sorts per collected batch (1..1024)",
+      parsePositiveInteger,
+      8,
+    )
+    .action(
+      async (
+        baseline: string | undefined,
+        options: MeasurementOptions & { sorts: number; valgrindImage?: string },
+      ) => {
+        if (options.simd) throw new Error("Valgrind comparisons use the default ISA build");
+        const plan = await loadPlan(options.plan ?? "local", selectAxes(options));
+        if (plan.harness !== "smoke") throw new Error("Counters require a smoke harness plan");
+        const root = await repositoryRoot();
+        const out = resultDirectory(root, options.out);
+        await runTask(out, Boolean(program.opts().verbose), () =>
+          compareCounters({
+            root,
+            out,
+            baseline: baseline ?? "HEAD",
+            plan,
+            sorts: options.sorts,
+            cpu: options.cpu,
+            valgrindImage: options.valgrindImage,
           }),
         );
       },

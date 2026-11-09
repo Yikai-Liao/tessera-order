@@ -8,6 +8,8 @@ import {
   measureContinuous,
   runContinuous,
 } from "../bench/continuous/runner.ts";
+import { readMainHistory } from "../bench/continuous/volatility.ts";
+import { probeCounters } from "../bench/local/counters.ts";
 import { loadPlan } from "../bench/plan.ts";
 import { repositoryRoot } from "../bench/workspace.ts";
 import { resultDirectory, runTask } from "./tasks.ts";
@@ -17,6 +19,27 @@ export function continuousCommands(program: Command) {
   const continuous = program
     .command("continuous")
     .description("Build, reproduce or explicitly submit the continuous benchmark protocol");
+
+  continuous
+    .command("probe-counters")
+    .description("Probe Linux PMU events on the current host; never changes permissions")
+    .requiredOption("--out <directory>", "new probe directory")
+    .action(async (options: { out: string }) => {
+      const out = resolve(options.out);
+      await runTask(out, Boolean(program.opts().verbose), () => probeCounters(out));
+    });
+
+  continuous
+    .command("history")
+    .description("Read adjacent main changes in both existing Testbeds without changing thresholds")
+    .requiredOption("--project <slug>", "public Bencher project")
+    .requiredOption("--out <directory>", "new retained history directory")
+    .action(async (options: { project: string; out: string }) => {
+      const out = resolve(options.out);
+      await runTask(out, Boolean(program.opts().verbose), () =>
+        readMainHistory(options.project, out),
+      );
+    });
 
   continuous
     .command("build")

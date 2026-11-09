@@ -17,7 +17,13 @@ import {
   validateProtocolSettings,
 } from "./protocol.ts";
 import { renderProtocolReport } from "./protocol-report.ts";
-import { buildRevisions, measureBlock, readLayoutLinker, selectedCases } from "./runner.ts";
+import {
+  assertWorkerEnvironment,
+  buildRevisions,
+  measureBlock,
+  readLayoutLinker,
+  selectedCases,
+} from "./runner.ts";
 
 interface ProtocolOptions {
   root: string;
@@ -55,16 +61,7 @@ async function readTimings(binary: string, planPath: string, divisor: number, cw
 /** Build all held-out layouts, then compare full and divided budgets in paired trials. */
 export async function compareProtocols(options: ProtocolOptions) {
   const { root, out, cpu } = options;
-  if (
-    [
-      "TESSERA_BENCH_LIST",
-      "TESSERA_BENCH_GROUPS",
-      "TESSERA_BENCH_PLAN",
-      "TESSERA_BENCH_TIME_DIVISOR",
-      "TESSERA_BENCH_STUDY_SETTINGS",
-    ].some((name) => name in process.env)
-  )
-    throw new Error("Unset worker-selection and timing variables before starting a protocol study");
+  assertWorkerEnvironment();
   const seeds = protocolSeeds(options.firstSeed);
   const linker = await readLayoutLinker();
   const baseline = await command("git", ["rev-parse", "--verify", `${options.baseline}^{commit}`], {

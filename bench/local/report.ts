@@ -152,7 +152,7 @@ This is a development screen, not an in-process source-attribution claim. Each p
 
 ${
   layoutSummaries
-    ? `Each fixed seed shuffles LLD's .text.* input sections for both revisions. Seeds rotate between blocks; every seed retains nine complete blocks and its own process-level A/A control. Equal seeds do not imply matching addresses between revisions. The cross-layout median and min/max describe only the observed sample, with no pooled regression verdict or confidence interval. Spreads are max/min minus one across each revision's per-layout median times; they include process and host variation. Link maps are retained as layout-<seed>-<revision>.map. Final rustc arguments are recorded separately from Cargo's dependency flags.
+    ? `Build control: ${result.schema === 2 ? (result.control ?? "none") : "none"}. Each fixed seed shuffles LLD's .text.* input sections for both revisions. Seeds rotate between blocks; every seed retains nine complete blocks and its own process-level A/A control. Equal seeds do not imply matching addresses between revisions. The cross-layout median and min/max describe only the observed sample, with no pooled regression verdict or confidence interval. Spreads are max/min minus one across each revision's per-layout median times; they include process and host variation. Link maps are retained as layout-<seed>-<revision>.map. Final rustc arguments are recorded separately from Cargo's dependency flags.
 
 ${layoutTable}
 

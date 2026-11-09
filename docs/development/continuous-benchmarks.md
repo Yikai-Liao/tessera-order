@@ -28,6 +28,8 @@ Use the [public dashboard](https://bencher.dev/perf/yikai-liao-s-project) and th
 
 For PR trends, use the report's [history](#pr-history): all points compare against the latest report's baseline over a fixed common case set, separately for each build. Coverage changes and aggregate means are not source-change attribution. `pnpm -s tools status main` reads current `main`; `--pr NUMBER` reads that PR’s current head. The commands do not replace dashboard history.
 
+For a retained adjacent-sample view, run `pnpm tools continuous history --project yikai-liao-s-project --out bench/results/main-history`. This reads both catalogued Testbeds, retains the expanded public API responses in `history.json` and produces `index.md` plus `summaries.json`. It pairs adjacent completed reports separately by branch, Testbed and hardware spec, using matching benchmark/measure identities with positive finite values. Cases missing from either report do not form a pair. Same-commit reruns remain in the record and have separate change arrays; they are not merged with a code-change-only estimate. `pnpm tools report DIR` regenerates the report offline. Absolute adjacent changes above 5% are descriptive counts, not new boundaries or evidence of layout causation.
+
 Read the sections below when changing tracking, investigating missing feedback or interpreting report details. Tracker changes need the [tooling source map](../design/benchmark-tooling.md); deployment and baseline seeding in [Setup](#setup) are remote changes, not part of reading existing evidence.
 
 ## Pipeline
@@ -79,6 +81,41 @@ A promised comparison fails its check if there is no unique parent, no start poi
 A rolling t-test was rejected because changing code is not one stationary population: after a step from about 190 µs to 124 µs, its window baseline stayed at 187 µs and called a 151 µs PR faster. The previous-sample rule follows code changes immediately. Cases noisier than 5% need their own boundary or a new ID; do not dismiss alerts as noise. Inspect the [public dashboard](https://bencher.dev/perf/yikai-liao-s-project), then use paired A/A and placement controls.
 
 For local layout investigation, [`compare commit --layout-seeds`](benchmarking.md#layout-sampling) retains a separate nine-block process-level A/A screen per fixed LLD section order. Its observed cross-layout range is not an alert threshold. Adjacent `main` samples mix source changes, placement and host variation, so history alone cannot estimate layout-only noise.
+
+### Layout diagnosis and deployment gates
+
+The local [candidate-budget study](benchmarking.md#candidate-budget-protocol-study) tests a concrete proposal: three layouts for each revision, six equally divided windows and a ratio of the two layout medians. A pilot on Rust 1.99.1 / AMD Ryzen 7 8845H, pinned to CPU 2, used two prespecified groups of nine held-out cohorts. Both arms used the same binaries for shared layouts, source roles and arm order alternated, and diagnostic A/A processes never supplied a score. The single-layout budget charged only current, treating baseline as cached; the proposed job charged all three baseline and three current processes. Builds completed before measurements.
+
+| Observation | One full-window layout | Three divided-window layouts |
+|---|---:|---:|
+| Same-source `u32/random/48`: faster / slower alerts | 3 / 2 of 9 | 1 / 2 of 9 |
+| Same-source `u64/random/65536`: faster / slower alerts | 0 / 0 of 9 | 0 / 0 of 9 |
+| Historical ordered-confirmation optimization, `u64/sorted/1000`: faster alerts | 9 of 9 | 9 of 9 |
+| Median paired process-cost ratio, same-source group | 1.0000 | 1.0552 |
+| Median paired process-cost ratio, historical-change group | 1.0000 | 1.1036 |
+
+The same-source group's A/A ranges reached about ±3.8%, while the three-layout score still produced false slowdowns above 20%. The fixed budget gate was at most 1.0000, so both cost groups failed. This configuration is not a deployment candidate: it did not reduce slow-direction false alerts and exceeded the observed candidate-only process budget. The historical change compares library revision `428dd315bc079ccd8e429c5aa05c250693fba132` with `6babe1a666342caba34af50086567ec9c45987d9` using a modified shared harness snapshot at that HEAD (`dirty: true`, harness SHA-256 `9dd3352d` prefix) with the study hooks. Its large speedup does not establish sensitivity to arbitrary 5% or 10% regressions. The retained schema-3 reports are `protocol-null` and `protocol-change`; raw measurements remain outside Git. These AMD observations do not reproduce the Intel cloud scheduler or historical baseline drift.
+
+Supplementary evidence follows separate contracts:
+
+- [Fixed-work Callgrind counts](benchmarking.md#fixed-work-counters) provide instructions and simulated events without Bencher runner time. A same-source check with eight prepared sorts on `u32,u64 × random × 48,65536` returned exactly equal instructions for baseline, control and current in all four cases. A separate changed-source comparison, revision `428dd315` against the library at `526e39c`, reduced the eight-sort `u64/sorted/1000` instruction count from 130,580 to 56,556 (−56.69%); the random/65536 control changed from 42,289,182 to 42,287,550 (−0.0039%). Repeated baseline counts were exact in both cases. This is a different source pair from the timing pilot and includes intervening changes; it demonstrates a responsive instruction signal, not attribution to one optimization. A compatible Debian container was needed because the local C library's loader executed AVX-512 instructions unsupported by host Valgrind. Neither comparison supplies a timing verdict or causal classification.
+- The local PMU probe could read instructions and branch misses on this AMD host; the Intel DSB/MITE/baclears aliases were unavailable. Bencher's actual Firecracker environment was not probed, so there is no evidence that its PMU or these aliases are accessible. Local access does not authorize integration into the cloud's timed region.
+- The public main-history snapshot on 2026-11-10 contained 18 complete reports per existing Testbed and 82 cases with adjacent observations. In each configuration, 20 cases had at least one absolute adjacent change above 5%; there were no same-commit pairs. Source changes therefore remain inseparable from placement and host effects in this snapshot. No case-specific threshold is derived from it.
+
+The [diagnostics workflow](../../.github/workflows/bench-diagnostics.yml) adds fixed-work evidence on affected PRs, weekly main sampling and manual placement investigations as Actions artifacts. It uses no Bencher credentials and publishes no benchmark metrics. Shared-runner timing is exploratory; weekly samples cannot define a cloud layout distribution. Automatic label-triggered cloud reruns and cloud calibration are not enabled because the tested protocol failed acceptance and the existing Testbeds must retain their measurement contracts. The [published Free plan](https://bencher.dev/pricing/) lists one concurrent remote job and a five-minute limit; it does not establish unused capacity for calibration, and scheduling must respect account rate limits.
+
+Any later deployment proposal needs a prespecified held-out comparison that reduces false slowdowns, preserves useful small-regression detection and meets measured end-to-end costs on the target scheduler. Keep current alerts actionable while using counters, source inspection, maps and paired controls to investigate. Neither a sample min/max noise band nor an unchanged instruction count is sufficient to discard a slowdown.
+
+A separate same-source placement pilot used the library at `526e39c`, one harness shared across all four build controls, seeds 201–205, the two random cases and nine rotating process blocks per seed on the same AMD host/CPU. Each spread below is max/min minus one across the five per-seed median times; baseline/current are separate process observations of identical source. The A/A columns show the largest per-seed process noise band. They are observed controls, not confidence intervals or cloud alert thresholds.
+
+| Local build control | `u32/random/48` spread: base / current | Process A/A | `u64/random/65536` spread: base / current | Process A/A |
+|---|---:|---:|---:|---:|
+| None | 34.91% / 32.61% | ±7.89% | 4.35% / 5.58% | ±1.79% |
+| CGU=1 | 32.51% / 33.30% | ±4.37% | 4.00% / 3.46% | ±3.42% |
+| Loop/block alignment | 2.28% / 4.77% | ±2.89% | 1.14% / 1.23% | ±2.79% |
+| Engine-owned symbols first | 1.17% / 2.40% | ±4.18% | 0.70% / 0.24% | ±1.86% |
+
+CGU=1 retained substantial section-placement sensitivity in this sample. Loop/block alignment and engine-symbol ordering produced smaller observed spreads, with residual process variation. The ordering files contain 195 selected engine functions; maps confirm that they lead `.text` and the `u32` insertion-sort function remains at the same address across all five seeds. Inlined engine code inside harness functions remains outside that control. The configurations ran sequentially and changed code generation or ordering; these observations do not establish isolated absolute-speed gains, behavior under source-driven CGU repartitioning, or a sufficient number of layouts for a cloud verdict. No combination of the two promising controls or changed-source detection study under those controls was tested.
 
 ## Reports
 

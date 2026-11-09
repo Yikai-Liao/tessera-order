@@ -60,6 +60,7 @@ fn prepare<T: NativeRecord>(algorithm: NativeAlgorithm, stable: bool, input: Rc<
 
 - `NativeAlgorithm` is an enum whose discriminants document the C++ row order. Catalog names are converted to it once.
 - One C++ type list generates both the kernel columns and the layout rows, so kernel lookup and layout lookup share the `NativeType` index. `bench_layout` covers all six types and rejects out-of-range indices.
+- The C++ registry also exports each row's algorithm name, and a test compares it with the `NativeAlgorithm` name for every row. Layout and output checks cannot catch a swapped algorithm row, because both algorithms sort correctly and the measurement would be filed under the wrong name. The name check runs in tests, not per sort.
 - Tests assert `size_of`, alignment and payload offset for every `T::TYPE`, and run every registered native kernel on small checked inputs, generalizing `duckdb_sorts_boundaries`. A null-pattern test alone is not enough: `u32`/`u64` and `row64`/`record128` have identical patterns, and several rows support all six types, so swaps must be caught by layout and output checks. These tests check the registry. It does not add a runtime support table, because `Variant::prepare` stays the only capability check, as the [comparison design](../design/comparison-benchmarks.md) requires.
 - The timed closure (`sort(values.as_mut_ptr().cast(), values.len())`) is unchanged. Lookup happens before timing.
 
@@ -79,7 +80,7 @@ fn prepare<T: NativeRecord>(algorithm: NativeAlgorithm, stable: bool, input: Rc<
 
 ### F4: dependency direction
 
-`repositoryRoot` moves next to `command` in `tools/process.ts`. The comment marker moves to a small module that both `status.ts` and `github.ts` import. Other code stays in place. Do not create `core/`, `shared/` or `utils/` layers.
+`repositoryRoot` moves to `tools/tasks.ts`, which already resolves result locations from the repository root for CLI tasks. Only `tools/` calls it, and `tools/process.ts` stays limited to running processes, logging and cancellation. The comment marker moves to a small module that both `status.ts` and `github.ts` import. Other code stays in place. Do not create `core/`, `shared/` or `utils/` layers.
 
 ## Sequence
 
@@ -89,20 +90,22 @@ Each PR changes one boundary, can be reverted on its own and passes an independe
 |---|---|---|---|
 | 1 | This proposal, the refactoring, review, duplication and identity rules, and links | Docs | Merged |
 | 2 | F4 | TypeScript | `tools` no longer imports `bench/workspace.ts` or `bench/continuous/github.ts`. CLI names, options, output and exit codes are unchanged |
-| 3 | F1, F7 | Comparison harness | A record type and a native index can no longer be combined freely. Layout and kernel output tests pass. Native comparison output is unchanged |
-| 4 | F2 | Comparison harness | Adding a `Row<K>`-like record or an algorithm changes one adapter location and the catalog. Comparison output and checks are unchanged |
-| 5 | F3 | Continuous binary | `TESSERA_BENCH_LIST=1` output, with and without `TESSERA_BENCH_PARALLEL=4`, is identical for both builds. Unit tests show that `partition` assigns the continuous plan to the same lanes. Outside the owning modules, only `worker.ts` parses an ID, and it is tested against them |
+| 3 | F1, F7 | Comparison harness | A record type and a native index can no longer be combined freely. Layout, kernel output and algorithm name tests pass. Native comparison output is unchanged |
+| 4 | F2 | Comparison harness | Each design decision (record semantics, capability exceptions, entry point per type, FFI layout) has one authoritative location, and necessary cross-language adapters are checked by types or tests. Adding a record type or algorithm does not restate one rule in several places; it may still touch input generation, record semantics, dispatch and FFI layout. Comparison output and checks are unchanged |
+| 5 | F3 | Continuous binary | For both builds, `TESSERA_BENCH_LIST=1` output is identical to the output before the change in each setting: without `TESSERA_BENCH_PARALLEL` it lists only the serial IDs, and with `TESSERA_BENCH_PARALLEL=4` it lists the same serial IDs plus the same `par-4` IDs, in the same order. `validateApiListings` passes unchanged. Unit tests show that `partition` assigns the continuous plan to the same lanes. Outside the owning modules, only `worker.ts` parses an ID, and it is tested against them |
 | 6 | F5 | TypeScript | The report fixture reads widths from the catalog. Report tests, including legacy figure content, pass unchanged |
-| 7 | F6 | Docs | Stale module names are removed. Current Rayon rationale lives in its topics, open work stays in the roadmap, the proposal is deleted and its links are updated |
-| 8 | F8, optional | CI | The same jobs, permissions, triggers and queue behavior remain |
+| 7 | F6 | Docs | Stale module names are removed. The Rayon proposal's API, memory and scheduling constraints that no other page states move into semantics, the engine reference or the roadmap; then the proposal is deleted and its links are updated |
+| 8 | F8, only with a shown maintenance cost | CI | The same jobs, permissions, triggers and queue behavior remain |
 
 ## Verification
 
 | Class | Touches | Evidence |
 |---|---|---|
-| Docs, TypeScript | No Rust source | `pnpm lint`, `pnpm tools:test`, `pnpm tools:typecheck`, and the site checks for docs. Benchmark checks still run. An alert on a PR without Rust changes is noise or infrastructure: report it and do not chase it in that PR |
+| Docs, TypeScript | No Rust source | `pnpm lint`, `pnpm tools:test`, `pnpm tools:typecheck`, and the site checks for docs. Benchmark checks run only when the diff matches the `.github/workflows/bench-build.yml` path filter. The filter includes TypeScript that builds or schedules the measured executable, such as `bench/continuous/runner.ts`, which sets build features and compiler flags, and `tools/tasks.ts`. When no check runs, the PR says so instead of citing one |
 | Comparison harness | `bench/rust/src/comparison/`, `bench/rust/native/` | These modules are compiled only with the `compare` feature (`bench/rust/src/lib.rs`), so continuous executables do not link them. Workspace tests, doctests and comparison tests, with the diff showing that timed regions call the same library functions with the same record types and key extractors, with no added indirection |
-| Continuous binary | `smoke.rs`, `plan.rs`, `case.rs` | Identical `TESSERA_BENCH_LIST=1` output, with and without `TESSERA_BENCH_PARALLEL=4`. `case.rs` generation and its identity test are untouched. Read both PR benchmark checks and investigate any alert under the [protocol](../development/benchmarking.md) before merging |
+| Continuous binary | `smoke.rs`, `plan.rs`, `case.rs` | `TESSERA_BENCH_LIST=1` output identical to the output before the change, per build and per `TESSERA_BENCH_PARALLEL` setting. `case.rs` generation and its identity test are untouched |
+
+When benchmark checks run, read both before merging. Investigate any alert under the [alert procedure](../development/continuous-benchmarks.md#alerts) and classify it from that evidence, not from which languages the diff touches.
 
 Use the [commands](../../AGENTS.md#commands) that apply to the touched area. No PR in this round adds measurements beyond the existing PR benchmark checks.
 

@@ -22,8 +22,8 @@ A repository-wide round that removes duplicated rules and narrows change surface
 
 | Deliverable | Done when |
 |---|---|
-| Typed native identity | A record type and a native registry index cannot be combined freely; layout and kernel output tests pass |
-| Benchmark IDs and records | Each ID grammar has one owner per language; adding a record type or algorithm changes one adapter location |
+| Typed native identity | A record type and a native registry index cannot be combined freely; layout, kernel output and algorithm name tests pass |
+| Benchmark IDs and records | Each ID grammar has one owner per language; each record and adapter rule has one authoritative location |
 | Tooling and documentation boundaries | `tools/` gets the repository root and comment marker without importing the workspace or GitHub publisher; stale statements and the implemented Rayon proposal are folded into their topics |
 
 The proposal also lists engine debt from the parallel engine for a separately measured round.

@@ -17,7 +17,7 @@ export interface Manifest {
   build: string;
   blocks: number;
   cases: Case[];
-  variants: { name: string; stable: boolean; threads?: number | null }[];
+  variants: { name: string; stable: boolean; adapter?: string; threads?: number | null }[];
   commit: string;
   dirty: boolean;
   rustc: string;

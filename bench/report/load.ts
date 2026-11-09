@@ -3,6 +3,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { algorithm } from "../catalog.ts";
 import {
   caseId,
   type Dataset,
@@ -77,6 +78,7 @@ function parseManifest(value: unknown): Manifest {
     assertString(v.name);
     if (typeof v.stable !== "boolean" || names.has(v.name)) throw new Error("invalid variant plan");
     if (v.threads !== undefined && v.threads !== null) assertInteger(v.threads, 1);
+    if (v.adapter !== undefined) assertString(v.adapter);
     names.add(v.name);
   }
   const ids = new Set<string>();
@@ -186,8 +188,10 @@ export function validateRun(dataset: Dataset): void {
     for (const c of m.cases) {
       if (dataset.partial && !samples.has(measurementId(build, caseId(c), "tessera"))) continue;
       for (const v of c.variants) {
+        const adapter =
+          m.variants.find((entry) => entry.name === v)?.adapter ?? algorithm(v).adapter;
         if (
-          (c.len <= 1000000 || c.ty === "u64" || v === "tessera") &&
+          (c.len <= 1000000 || c.ty === "u64" || v === "tessera" || adapter === "tessera-par") &&
           !memories.has(measurementId(build, caseId(c), v))
         )
           throw new Error(`missing memory sample ${build}/${caseId(c)}/${v}`);

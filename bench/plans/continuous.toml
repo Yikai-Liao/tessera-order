@@ -62,7 +62,8 @@ lengths = [ 65536 ]
 
 [[include]]
 types = [ "u64" ]
-distributions = [ "sorted", "reverse", "sorted99", "equal", "far_swaps", "d16", "zipf2", "skew99", "sorted_tail", "runs" ]
+# Specialized direct-key shapes stay at 65k to leave room for the parallel tail.
+distributions = [ "sorted", "reverse", "sorted99", "equal", "far_swaps", "d16", "d4096", "sparse_digits", "zipf2", "skew99", "sorted_tail", "runs" ]
 lengths = [ 65536 ]
 
 [[include]]
@@ -102,7 +103,7 @@ lengths = [ 65536 ]
 
 [[include]]
 types = [ "u64" ]
-distributions = [ "random", "zipf2", "skew99", "two_values", "sorted99", "sparse_digits", "bimodal", "hot50", "d4096" ]
+distributions = [ "random", "skew99", "two_values", "bimodal" ]
 lengths = [ 1000000 ]
 
 [[include]]
@@ -117,5 +118,5 @@ lengths = [ 1000000 ]
 
 [[include]]
 types = [ "u64" ]
-distributions = [ "random", "zipf2" ]
+distributions = [ "random" ]
 lengths = [ 10000000 ]

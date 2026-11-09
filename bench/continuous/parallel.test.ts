@@ -15,7 +15,7 @@ test("parallel selection does not multiply or duplicate serial groups", () => {
   const api = "rust/u64/random/49/s1/api";
   const par = "rust/u64/random/49/s1/par-4";
   const selection = partition([api, par, "rust/u32/random/10000000/s1/par-4"]);
-  assert.deepEqual(selection.small.flat(), [api.slice(0, api.lastIndexOf("/"))]);
+  assert.deepEqual(selection.small.flat(), [api]);
   assert.deepEqual(selection.large, []);
   assert.deepEqual(selection.parallel, [par, "rust/u32/random/10000000/s1/par-4"].sort());
 });

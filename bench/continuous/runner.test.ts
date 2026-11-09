@@ -137,14 +137,17 @@ test("scheduler balances API cases and excludes large cases from parallel lanes"
   ];
   const groups = partition(cases);
   assert.deepEqual(partition([...cases].reverse()), groups);
-  assert.deepEqual(groups.large, ["rust/u64/random/1000000/s1", "rust/u64/random/10000000/s1"]);
+  assert.deepEqual(groups.large, [
+    "rust/u64/random/1000000/s1/api",
+    "rust/u64/random/10000000/s1/api",
+  ]);
   assert.deepEqual(
     groups.small.map((lane) => lane.length),
     [3, 2],
   );
   const all = [...groups.small.flat(), ...groups.large];
   assert.equal(new Set(all).size, all.length);
-  assert.deepEqual(new Set(all), new Set(cases.map((id) => id.slice(0, id.lastIndexOf("/")))));
+  assert.deepEqual(new Set(all), new Set(cases));
 });
 
 test("supervisor rejects invalid IDs before starting workers", {
@@ -263,7 +266,9 @@ else {
 `,
     { mode: 0o755 },
   );
-  await assert.rejects(runWorkers(binary, [["fail"], ["hang"]], [cpu, cpu], join(root, "workers")));
+  await assert.rejects(
+    runWorkers(binary, [["fail/api"], ["hang/api"]], [cpu, cpu], join(root, "workers")),
+  );
   const pid = Number(await readFile(join(root, "pid"), "utf8"));
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
 });

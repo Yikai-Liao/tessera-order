@@ -90,6 +90,41 @@ test("parallel Tessera is an opponent, not an A/A control", () => {
   assert.ok(warnings.every((warning) => !warning.includes("recommended one logical CPU")));
 });
 
+test("large parallel memory is required with manifest metadata or catalog fallback", () => {
+  for (const [name, adapter] of [
+    ["tessera-par-8", undefined],
+    ["parallel-copy", "tessera-par"],
+  ] as const) {
+    const dataset = createFixture();
+    const manifest = dataset.manifests.get("default")!;
+    const selected = manifest.cases.find(
+      (c) => c.ty === "row_u32" && c.distribution === "random" && c.len === 10_000_000,
+    )!;
+    manifest.cases = [selected];
+    selected.variants.push(name);
+    manifest.variants.push({ name, stable: true, adapter });
+    const id = "row_u32/random/10000000/s1";
+    dataset.samples = dataset.samples.filter((sample) => sample.case_id === id);
+    dataset.samples.push(
+      ...dataset.samples
+        .filter((sample) => sample.variant === "std-stable")
+        .map((sample) => ({ ...sample, variant: name, slot: selected.variants.length })),
+    );
+    dataset.memory = dataset.memory.filter((sample) => sample.case_id === id);
+    const memory = { ...dataset.memory[0], variant: name };
+    dataset.memory.push(memory);
+    validateRun(dataset);
+    dataset.memory.pop();
+    for (const partial of [false, true]) {
+      dataset.partial = partial;
+      assert.throws(
+        () => validateRun(dataset),
+        /missing memory sample.*row_u32.*parallel|missing memory sample.*tessera-par/,
+      );
+    }
+  }
+});
+
 test("A/A verdicts use the paired mean and survive swapping control labels", () => {
   const dataset = createFixture();
   const id = "u64/random/1000/s1";

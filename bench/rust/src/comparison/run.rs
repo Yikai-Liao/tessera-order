@@ -72,7 +72,7 @@ pub(super) fn measure_case(
     let input = super::variant::CaseInput::new(case);
     let active: Vec<_> = variants
         .iter()
-        .filter(|v| v.prepare(&input, scratch_bytes).is_some())
+        .filter(|v| v.supports(&input))
         .copied()
         .chain(std::iter::once(variants[0]))
         .collect();

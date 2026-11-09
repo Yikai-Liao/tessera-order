@@ -19,11 +19,10 @@ export function partition(cases: string[]) {
       parallel.push(id);
       continue;
     }
-    const group = id.slice(0, id.lastIndexOf("/"));
-    if (Number(group.split("/")[3]) >= 1_000_000) large.push(group);
+    if (Number(id.split("/")[3]) >= 1_000_000) large.push(id);
     else {
       const lane = small[0].length <= small[1].length ? 0 : 1;
-      small[lane].push(group);
+      small[lane].push(id);
     }
   }
   return { small, large, parallel };
@@ -35,7 +34,6 @@ export async function runWorkers(
   lanes: string[][],
   cpus: (number | string)[],
   directory: string,
-  ids?: string[][],
 ) {
   const children: { child: ChildProcess; done: Promise<Error | null>; output: string }[] = [];
   let cancelled: CommandCancelledError | undefined;
@@ -46,8 +44,8 @@ export async function runWorkers(
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
   try {
-    for (const [lane, groups] of lanes.entries()) {
-      if (!groups.length) continue;
+    for (const [lane, ids] of lanes.entries()) {
+      if (!ids.length) continue;
       const output = join(directory, String(lane));
       await mkdir(output, { recursive: true });
       const log = await open(join(output, "stdout"), "wx");
@@ -56,8 +54,9 @@ export async function runWorkers(
         const child = spawn("taskset", ["-c", String(cpus[lane]), binary, "--bench"], {
           env: {
             ...process.env,
-            TESSERA_BENCH_GROUPS: groups.join("\n"),
-            TESSERA_BENCH_IDS: ids?.[lane].join("\n"),
+            // Exact IDs are authoritative; only old artifacts need group IDs.
+            TESSERA_BENCH_GROUPS: ids.map((id) => id.slice(0, id.lastIndexOf("/"))).join("\n"),
+            TESSERA_BENCH_IDS: ids.join("\n"),
             TESSERA_BENCH_PARALLEL: "4",
             CRITERION_HOME: join(output, "criterion"),
           },
@@ -163,28 +162,16 @@ export async function supervise(binary: string) {
   );
   const directory = await mkdtemp(join(tmpdir(), "tessera-bench-"));
   try {
-    const serialIds = (lanes: string[][]) =>
-      lanes.map((groups) => groups.map((group) => `${group}/api`));
-    const outputs = await runWorkers(
-      binary,
-      small,
-      cpus,
-      join(directory, "small"),
-      serialIds(small),
-    );
+    const outputs = await runWorkers(binary, small, cpus, join(directory, "small"));
     // Each phase joins and reaps all workers before the next may prepare inputs.
-    outputs.push(
-      ...(await runWorkers(binary, [large], cpus, join(directory, "large"), serialIds([large]))),
-    );
+    outputs.push(...(await runWorkers(binary, [large], cpus, join(directory, "large"))));
     for (const [index, id] of parallel.entries()) {
-      const groups = [[id.slice(0, id.lastIndexOf("/"))]];
       outputs.push(
         ...(await runWorkers(
           binary,
-          groups,
+          [[id]],
           [cpus.join(",")],
           join(directory, "parallel", String(index)),
-          [[id]],
         )),
       );
     }

@@ -20,7 +20,7 @@ Use a bounded number of lanes: the account has 20 concurrent slots, shared with 
 
 The Rust lint job checks all workspace features with Clippy and rustdoc, including the benchmark's native-facing Rust code. These commands do not link executables, so they set `TESSERA_BENCH_CHECK_ONLY=1` to skip the benchmark build script's native compilation and linker inputs. The lint runner needs neither fetched native sources nor native build tools. The comparison job leaves the variable unset and compiles, links and exercises the native competitors, including the sequential-linkage check. Cargo tracks changes to the variable so a check-only build cannot suppress a later executable build's native setup.
 
-The comparison job builds the pinned native competitors, validates the smoke suite and generates a partial report. The docs workflow checks task links, algorithm models and site types, then builds the shared Markdown sources.
+The comparison job builds the pinned native competitors, executes comparison tests with Rayon in both Default and Portable SIMD configurations, validates the smoke suite and generates a partial report. The docs workflow checks task links, algorithm models and site types, then builds the shared Markdown sources.
 
 A cell's commands live in one composite action, [`rust-test`](../../.github/actions/rust-test/action.yml), which both the pull request cells and the extra `main` cells call. A job's `if` cannot branch on `matrix` — the matrix is expanded after the condition is evaluated — so the two sets of cells are two jobs over one action rather than one matrix with a skip per cell.
 

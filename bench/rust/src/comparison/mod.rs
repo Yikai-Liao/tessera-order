@@ -204,7 +204,7 @@ fn create_manifest(options: &Options, cases: &[InputCase]) -> Value {
                 let input = variant::CaseInput::new(&probe);
                 let supported: Vec<_> = options.variants()
                     .iter()
-                    .filter(|v| v.prepare(&input, 0).is_some())
+                    .filter(|v| v.supports(&input))
                     .map(|v| v.name)
                     .collect();
                 json!({"ty":case.ty,"distribution":case.distribution,"len":case.len,"variants":supported})
@@ -449,15 +449,11 @@ pub fn main(memory: bool) -> Result<()> {
                     .iter()
                     .map(String::as_str)
                     .filter(|ty| {
-                        v.prepare(
-                            &variant::CaseInput::new(&InputCase {
-                                ty: (*ty).into(),
-                                distribution: "random".into(),
-                                len: 32,
-                            }),
-                            32_768,
-                        )
-                        .is_some()
+                        v.supports(&variant::CaseInput::new(&InputCase {
+                            ty: (*ty).into(),
+                            distribution: "random".into(),
+                            len: 32,
+                        }))
                     })
                     .collect();
                 println!(

@@ -344,7 +344,7 @@ mod tests {
     fn presets_preserve_case_counts() {
         let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
         let cases = continuous.inputs().unwrap();
-        assert_eq!(cases.len(), 65);
+        assert_eq!(cases.len(), 61);
         for ty in ["u64", "row_u64"] {
             for distribution in ["random", "sorted", "reverse", "equal"] {
                 assert!(cases.iter().any(|case| {
@@ -353,6 +353,11 @@ mod tests {
                         && case.len == tessera_sort::thresholds::INSERTION_MAX
                 }));
             }
+        }
+        for distribution in ["d4096", "sparse_digits"] {
+            assert!(cases.iter().any(|case| {
+                case.ty == "u64" && case.distribution == distribution && case.len == 65_536
+            }));
         }
         let parallel = continuous.parallel_inputs().unwrap();
         assert_eq!(parallel.len(), 8);

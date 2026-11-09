@@ -392,6 +392,13 @@ macro_rules! copy_adapter {
     }};
 }
 impl Variant {
+    /// Checks capabilities without starting workers for a parallel adapter.
+    pub(super) fn supports(self, input: &CaseInput) -> bool {
+        // Every CaseInput representation implements BenchmarkRecord's parallel
+        // operations. Preparing one here would warm and discard a real pool.
+        (cfg!(feature = "rayon") && self.threads.is_some()) || self.prepare(input, 0).is_some()
+    }
+
     /// Prepares an adapter for this input, or declines an unsupported combination.
     pub(super) fn prepare(
         self,
@@ -439,6 +446,25 @@ mod tests {
             names.contains(&"fluxsort"),
             cfg!(feature = "compare-native") && !cfg!(feature = "portable-simd")
         );
+    }
+
+    #[test]
+    fn capabilities_match_preparation() {
+        for ty in &crate::plan::catalog().comparison.types {
+            let input = CaseInput::new(&InputCase {
+                ty: ty.clone(),
+                distribution: "random".into(),
+                len: 32,
+            });
+            for variant in list_variants() {
+                assert_eq!(
+                    variant.supports(&input),
+                    variant.prepare(&input, 0).is_some(),
+                    "{} / {ty}",
+                    variant.name,
+                );
+            }
+        }
     }
 
     #[test]

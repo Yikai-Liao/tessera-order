@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { modeName, modeOrder } from "../catalog.ts";
 import type { Headline } from "../plot/matrix.ts";
 import { renderTrends } from "../plot/trends.ts";
 import { MIN_SWING, type TrendSeries, type TrendSummary } from "./history.ts";
@@ -42,12 +43,34 @@ export function trendSvg(configurations: ConfigurationTrend[], base = "main") {
           major: Math.abs(changes.at(-1)!) >= MAJOR,
         }
       : null;
-  const rows = [
-    {
-      name: { input: "Overall", tag: "", sub: "geometric mean", strong: true },
-      aggregate: true,
-      cells: configurations.map((configuration) => cell(configuration.trend?.overall)),
+  const apiModes = [...new Set(measured.flatMap((c) => c.trend!.modes))].sort(
+    (a, b) => modeOrder(a) - modeOrder(b) || a.localeCompare(b),
+  );
+  const aggregateModes = apiModes.length > 1 ? apiModes : [undefined];
+  const aggregate = (trend: TrendSummary | null, mode?: string) => {
+    if (!trend) return undefined;
+    if (mode === undefined) return trend.overall;
+    const series = trend.series.filter((entry) => caseParts(entry.name).mode === mode);
+    if (!series.length) return undefined;
+    return trend.runs.map(
+      (_, i) =>
+        Math.exp(
+          series.reduce((sum, entry) => sum + Math.log1p(entry.changes[i]), 0) / series.length,
+        ) - 1,
+    );
+  };
+  const aggregates = aggregateModes.map((mode) => ({
+    name: {
+      input: mode === undefined ? "Overall" : modeName(mode),
+      tag: "",
+      sub: "geometric mean",
+      strong: true,
     },
+    aggregate: true,
+    cells: configurations.map((configuration) => cell(aggregate(configuration.trend, mode))),
+  }));
+  const rows = [
+    ...aggregates,
     ...selected.map((name) => {
       const parts = caseParts(name);
       return {
@@ -56,7 +79,7 @@ export function trendSvg(configurations: ConfigurationTrend[], base = "main") {
           sub: [parts.type, parts.n].filter(Boolean).join(" · "),
           tag: [
             parts.seed && parts.seed !== "s1" ? `seed ${parts.seed.slice(1)}` : "",
-            parts.mode !== "api" ? parts.mode : "",
+            parts.mode !== "api" ? modeName(parts.mode) : "",
           ]
             .filter(Boolean)
             .join(", "),
@@ -101,16 +124,19 @@ export function trendSvg(configurations: ConfigurationTrend[], base = "main") {
       )
       .join("; ")}`,
     description: [
-      `Overall: ${configurations.map((configuration, index) => `${configuration.name} ${rows[0].cells[index]?.changes.map(formatChange).join(", ") ?? "—"}`).join("; ")}`,
+      ...aggregates.map(
+        (row) =>
+          `${row.name.input}: ${configurations.map((configuration, index) => `${configuration.name} ${row.cells[index]?.changes.map(formatChange).join(", ") ?? "—"}`).join("; ")}`,
+      ),
       ...selected.map(
         (name, index) =>
-          `${name}: ${configurations.map((configuration, column) => `${configuration.name} ${rows[index + 1].cells[column]?.changes.map(formatChange).join(", ") ?? "—"}`).join("; ")}`,
+          `${name}: ${configurations.map((configuration, column) => `${configuration.name} ${rows[index + aggregates.length].cells[column]?.changes.map(formatChange).join(", ") ?? "—"}`).join("; ")}`,
       ),
     ].join(" | "),
     columns,
     rows,
     minimumSpan: MIN_SWING,
     reference: `${base} ${bases.join(", ")} · runs ${ranges.join(", ")}`,
-    guide: `value: latest run against ${base} · one scale per row`,
+    guide: `value: latest run against ${base} · one scale per row · —: no comparable history`,
   });
 }

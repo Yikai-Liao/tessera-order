@@ -58,4 +58,3 @@ commit = "7521047beb89928cf7a1b56fec55be584c9b0916"
 sha256 = "46ba31678c2d30028517e2349c0c49182487bf1c8941da2241b276a19ae699e8"
 license = "BSD-3-Clause"
 license_files = ["LICENSE.md"]
-

@@ -73,6 +73,48 @@ test("title rules preserve accepted conventions and reject malformed summaries",
     );
 });
 
+test("platform test cells enable library features without native competitors", async () => {
+  const action = await readFile(
+    new URL("../actions/rust-test/action.yml", import.meta.url),
+    "utf8",
+  );
+  const validate = (action: string) => {
+    const commands = [...action.matchAll(/^\s+run: (cargo (?:test|build)[^\n]+)$/gm)].map(
+      (match) => match[1],
+    );
+    const workspace = commands.filter((command) => command.includes("--workspace"));
+    assert.ok(workspace.length);
+    for (const command of workspace) {
+      assert.doesNotMatch(command, /--all-features/, command);
+      const features = command.match(/--features\s+(\S+)/)?.[1].split(",") ?? [];
+      assert.ok(
+        features.every((feature) => feature.startsWith("tessera-sort/")),
+        command,
+      );
+    }
+    const combined = workspace.filter(
+      (command) =>
+        command.includes("tessera-sort/rayon") && command.includes("tessera-sort/portable-simd"),
+    );
+    assert.ok(
+      combined.some(
+        (command) => command.startsWith("cargo test") && command.includes("--lib --tests"),
+      ),
+    );
+    assert.ok(combined.some((command) => command.includes("--doc")));
+    assert.ok(combined.some((command) => command.startsWith("cargo build")));
+    assert.doesNotMatch(commands.join("\n"), /compare-native/);
+    assert.doesNotMatch(action, /TESSERA_BENCH_CHECK_ONLY=1/);
+  };
+  validate(action);
+  const regression = action.replaceAll(
+    "--features tessera-sort/portable-simd,tessera-sort/rayon",
+    "--all-features",
+  );
+  assert.notEqual(regression, action);
+  assert.throws(() => validate(regression), /all-features/);
+});
+
 test("language routing preserves independent and shared paths", () => {
   for (const paths of [
     ["rust/tessera-sort/src/lib.rs"],

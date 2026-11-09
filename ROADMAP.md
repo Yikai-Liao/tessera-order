@@ -20,6 +20,18 @@ Open questions for this milestone:
 
 An independent track that binds the Rust crate and does not wait for C++. See the [Python binding proposal](docs/proposals/python-binding.md).
 
+## Rayon parallel sorting
+
+An independent Rust track, described in the [Rayon proposal](docs/proposals/rayon-parallel-sort.md). The optional `rayon` feature scatters root shards and sorts completed buckets in the caller's pool. Bounded root buckets now sort before final-band writes, and narrow direct-key windows count in parallel. The existing two continuous configurations track four-thread cases sequentially after their serial phases, with new baselines seeded after the trusted tracker rollout. Local paired measurements use the shared `parallel` plan; the [eight-core results](docs/design/port.md#eight-core-parallel-completion) include cases above 5× but not universal fivefold scaling.
+
+| Deliverable | Done when |
+|---|---|
+| API and module scaffold | Feature-gated entry points preserve serial semantics and work inside caller-owned Rayon pools |
+| Concurrent bucket sorting | Disjoint root buckets run as Rayon tasks through shared engine stages, with bounded scratch and a serial fallback |
+| Parallel root scatter | Stable classification and scatter run in parallel without an n-record buffer, with panic recovery and documented memory bounds |
+| Portable bounded completion | Sort eligible buckets in O(√n)-bounded staging; protect unread sources before final writes and retain the materialized fallback |
+| Broader acceptance | Extend measured whole-call scaling and memory coverage to other hosts, wide records and expensive extraction, with source-attribution controls for causal claims |
+
 ## C++
 
 1. **C++ runner.** Measure the C++ implementation with the shared input specification and native-buffer timing. Add cross-language golden hashes in `conformance/vectors/` and verify them in both generators.
@@ -40,4 +52,4 @@ Rerun the StarRocks and ClickHouse benchmarks against a released crate and link 
 - A dedicated unstable kernel before 0.1.
 - vcpkg and Conan packages: after the first releases, on demand.
 - A `core`-only build that takes its scratch from the caller instead of `alloc`: only if a real use case without a global allocator appears.
-- Go and parallel sorting: only if a real use case appears.
+- Go: only if a real use case appears.

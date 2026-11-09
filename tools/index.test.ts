@@ -45,7 +45,8 @@ test("commands reject invalid input before running", async () => {
     ["continuous", "build"],
     ["continuous", "run"],
     ["continuous", "submit"],
-    ["compare", "algorithms", "--cpu", "1,2"],
+    ["compare", "algorithms", "--cpu", "2-1"],
+    ["compare", "algorithms", "--cpu", "1,,2"],
   ]) {
     await assert.rejects(
       createProgram()

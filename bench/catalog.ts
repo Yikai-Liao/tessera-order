@@ -20,6 +20,7 @@ export const catalog = z
         stable: z.boolean(),
         family: z.string(),
         adapter: z.string(),
+        threads: z.number().int().positive().optional(),
         detail: z.string().optional(),
         description: z.string().optional(),
       }),

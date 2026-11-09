@@ -4,6 +4,7 @@ import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { type Command, InvalidArgumentError, Option } from "commander";
 import { stringify as stringifyToml } from "smol-toml";
+import { cpuListSchema } from "../bench/affinity.ts";
 import { renderLocalReport } from "../bench/local/report.ts";
 import { compareLocal } from "../bench/local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
@@ -20,8 +21,8 @@ interface MeasurementOptions extends SelectionOptions {
 }
 
 function parseLogicalCpu(value: string) {
-  if (!/^\d+$/.test(value) || process.platform !== "linux")
-    throw new InvalidArgumentError("expected one logical CPU number on Linux");
+  if (!cpuListSchema.safeParse(value).success || process.platform !== "linux")
+    throw new InvalidArgumentError("expected a Linux CPU list, such as 2 or 0,2,4,6");
   return value;
 }
 
@@ -57,7 +58,10 @@ function parseLengths(value: string) {
 
 function addSelectionOptions(command: Command) {
   return command
-    .option("--plan <name-or-file>", "JSON/TOML plan or local/continuous/smoke/release preset")
+    .option(
+      "--plan <name-or-file>",
+      "JSON/TOML plan or local/continuous/smoke/release/parallel preset",
+    )
     .option(
       "--algorithms <ids>",
       "comma-separated algorithms (required controls are retained)",
@@ -100,7 +104,7 @@ export function experimentCommands(program: Command) {
     addSelectionOptions(compare.command(name))
       .description(description)
       .option("--out <directory>", "new result directory (default: bench/results/<timestamp>)")
-      .option("--cpu <number>", "pin measurement to one logical CPU (Linux)", parseLogicalCpu)
+      .option("--cpu <list>", "pin measurement to a CPU list or range (Linux)", parseLogicalCpu)
       .option("--simd", "include Portable SIMD");
 
   measurement("commit [revision]", "Compare the working tree with a commit (default: HEAD)")

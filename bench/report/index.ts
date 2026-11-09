@@ -25,9 +25,16 @@ export function collectWarnings(dataset: Dataset): string[] {
     if (dataset.host[field] !== expected)
       warnings.push(`${field}: ${formatCell(dataset.host[field])}; recommended ${expected}`);
   }
-  if (!/^\d+$/.test(String(dataset.host.affinity)))
+  const parallel = [...dataset.manifests.values()].some((manifest) =>
+    manifest.variants.some((v) => v.threads),
+  );
+  if (!parallel && !/^\d+$/.test(String(dataset.host.affinity)))
     warnings.push(
       `CPU affinity: ${formatCell(dataset.host.affinity)}; recommended one logical CPU`,
+    );
+  if (parallel)
+    warnings.push(
+      `Parallel run: affinity ${formatCell(dataset.host.affinity)} is shared by caller-owned pools; verify it covers the requested physical cores. Worker count is not physical-core count.`,
     );
   const observations = dataset.observations;
   const signals: [string, (o: Dataset["observations"][number]) => number | null, number][] = [
@@ -112,11 +119,12 @@ function renderCapabilities(dataset: Dataset) {
   const rows = manifest.variants.map((v) => [
     v.name,
     v.stable ? "stable" : "unstable",
+    v.threads ?? 0,
     ...types.map((ty) =>
       manifest.cases.some((c) => c.ty === ty && c.variants.includes(v.name)) ? "yes" : "—",
     ),
   ]);
-  return `## Capabilities\n\n${renderTable(["Variant", "Stability", ...types], rows)}\nUnstable sorts on records are listed as a separate task: their permutation check allows equal keys to change order. A dash means the adapter does not support the task.\n\n`;
+  return `## Capabilities\n\n${renderTable(["Variant", "Stability", "Pool workers", ...types], rows)}\nUnstable sorts on records are listed as a separate task: their permutation check allows equal keys to change order. A dash means the adapter does not support the task.\n\n`;
 }
 function renderProvenance(dataset: Dataset) {
   let out = `## Measurement environment\n\n${renderTable(["Condition", "Recorded value"], Object.entries(dataset.host))}\n`;
@@ -159,6 +167,9 @@ export async function writeReport(directories: string[], partial = false): Promi
   if (conditions.length)
     markdown += `## Observed conditions\n\n${conditions.map((w) => `- ${w}`).join("\n")}\n\n`;
   markdown += renderCapabilities(dataset);
+  if ([...dataset.manifests.values()].some((m) => m.variants.some((v) => v.threads)))
+    markdown +=
+      "## Parallel measurement scope\n\nPools are started and warmed before timing and allocation counting; each timed call includes pool dispatch and sort scratch allocation. Peak heap bytes exclude pre-existing pool/runtime storage and thread stacks. All workers exit before the next adapter. Ratios use the serial Tessera A/A pair, not a separate parallel A/A pair. The inverse ratio is whole-call speedup over serial Tessera, not source-change attribution or parallel-only noise control.\n\n";
   markdown +=
     "## Figure scope\n\nStandard panels show fixed slices and aggregates, not every measured case. The 1M input panels include all selected distributions for each type, including the new skew, key-structure, disorder and finite-float cases. Record panels rank stable sorts only. Ranking and cross-type aggregate panels retain the ten baseline distributions for a common comparison; they do not summarize the whole expanded suite. The memory panel takes the worst across all selected 10M u64 distributions. The selected-input panel is a fallback used only when no standard panel can be drawn. All completed cases, including custom lengths absent from the figures, remain in [Full results](#full-results) and [summaries.json](summaries.json).\n\n";
   for (const chart of charts) {

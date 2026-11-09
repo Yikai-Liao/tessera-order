@@ -47,26 +47,28 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
     throw new Error("Native linkage checks require Linux and ldd");
   await mkdir(out, { recursive: false });
   await withComparisonWorkspace(root, native, async ({ tree, target }) => {
-    const features = ["compare", ...(native ? ["compare-native"] : [])];
-    await command(
-      "cargo",
-      [
-        "test",
-        "--locked",
-        "-p",
-        "tessera-bench",
-        "--features",
-        features.join(","),
-        "--lib",
-        "--bin",
-        "memory",
-        "--test",
-        "comparison",
-        "--target-dir",
-        target,
-      ],
-      { cwd: tree },
-    );
+    const features = ["compare", "rayon", ...(native ? ["compare-native"] : [])];
+    for (const tested of [features, [...features, "portable-simd"]]) {
+      await command(
+        "cargo",
+        [
+          "test",
+          "--locked",
+          "-p",
+          "tessera-bench",
+          "--features",
+          tested.join(","),
+          "--lib",
+          "--bin",
+          "memory",
+          "--test",
+          "comparison",
+          "--target-dir",
+          target,
+        ],
+        { cwd: tree },
+      );
+    }
     const { executable } = await buildBenchmark(tree, target, "compare", features);
     if (native) {
       for (const name of ["compare", "memory"]) {
@@ -121,6 +123,11 @@ async function prepareComparison(options: ReleaseOptions) {
       const features = [
         "compare",
         ...(native && !portable ? ["compare-native"] : []),
+        ...(plan.algorithms.some((id) =>
+          catalog.algorithms.some((entry) => entry.id === id && entry.threads),
+        )
+          ? ["rayon"]
+          : []),
         ...(portable ? ["portable-simd"] : []),
       ];
       const name = portable ? "portable-simd" : "default";

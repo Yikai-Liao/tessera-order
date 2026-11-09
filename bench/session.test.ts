@@ -34,7 +34,7 @@ async function prepared(directory: string) {
     planSha256: await fileHash(join(directory, "plan.json")),
     sampleMs: 20,
     memoryMib: 64,
-    cpu: "2",
+    cpu: "0,2,4,6-8",
     group: "u64/random",
     builds: [build],
   };

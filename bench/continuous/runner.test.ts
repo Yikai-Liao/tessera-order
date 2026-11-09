@@ -7,10 +7,28 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { baselineArguments } from "./runner.ts";
+import { baselineArguments, validateApiListings } from "./runner.ts";
 import { measuredCases, partition, runWorkers } from "./worker.ts";
 
 const cli = fileURLToPath(new URL("../../tools/index.ts", import.meta.url));
+
+test("build listing validation follows coverage growth rather than a fixed case count", () => {
+  const legacy = ["rust/u64/random/10000000/s1/api"];
+  for (const count of [1, 4, 8, 12]) {
+    const parallel = Array.from(
+      { length: count },
+      (_, index) => `rust/u64/random/${10_000_000 + index}/s1/par-4`,
+    );
+    assert.deepEqual(validateApiListings([...legacy, ...parallel], legacy), {
+      serial: legacy[0],
+      parallel,
+    });
+    assert.throws(() => validateApiListings([...legacy, ...parallel, parallel[0]], legacy));
+    assert.throws(() => validateApiListings([...legacy, ...parallel], [...legacy, ...legacy]));
+  }
+  assert.throws(() => validateApiListings(legacy, legacy));
+  assert.throws(() => validateApiListings(["rust/u64/random/10000000/s1/par-2"], legacy));
+});
 
 test("baseline policy preserves main PR and stacked comparisons", () => {
   assert.ok(baselineArguments({}).includes("--thresholds-reset"));
@@ -119,14 +137,17 @@ test("scheduler balances API cases and excludes large cases from parallel lanes"
   ];
   const groups = partition(cases);
   assert.deepEqual(partition([...cases].reverse()), groups);
-  assert.deepEqual(groups.large, ["rust/u64/random/1000000/s1", "rust/u64/random/10000000/s1"]);
+  assert.deepEqual(groups.large, [
+    "rust/u64/random/1000000/s1/api",
+    "rust/u64/random/10000000/s1/api",
+  ]);
   assert.deepEqual(
     groups.small.map((lane) => lane.length),
     [3, 2],
   );
   const all = [...groups.small.flat(), ...groups.large];
   assert.equal(new Set(all).size, all.length);
-  assert.deepEqual(new Set(all), new Set(cases.map((id) => id.slice(0, id.lastIndexOf("/")))));
+  assert.deepEqual(new Set(all), new Set(cases));
 });
 
 test("supervisor rejects invalid IDs before starting workers", {
@@ -245,7 +266,9 @@ else {
 `,
     { mode: 0o755 },
   );
-  await assert.rejects(runWorkers(binary, [["fail"], ["hang"]], [cpu, cpu], join(root, "workers")));
+  await assert.rejects(
+    runWorkers(binary, [["fail/api"], ["hang/api"]], [cpu, cpu], join(root, "workers")),
+  );
   const pid = Number(await readFile(join(root, "pid"), "utf8"));
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
 });

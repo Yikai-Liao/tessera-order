@@ -108,7 +108,7 @@ impl Options {
                 && options.plan_path.is_some()
                 && !available.iter().any(|entry| entry.name == id)
             {
-                return Err(format!("algorithm {id} is unavailable; enable compare-native").into());
+                return Err(format!("algorithm {id} is unavailable; enable the required compare-native or rayon feature").into());
             }
         }
         Ok(options)
@@ -204,7 +204,7 @@ fn create_manifest(options: &Options, cases: &[InputCase]) -> Value {
                 let input = variant::CaseInput::new(&probe);
                 let supported: Vec<_> = options.variants()
                     .iter()
-                    .filter(|v| v.prepare(&input, 0).is_some())
+                    .filter(|v| v.supports(&input))
                     .map(|v| v.name)
                     .collect();
                 json!({"ty":case.ty,"distribution":case.distribution,"len":case.len,"variants":supported})
@@ -219,7 +219,9 @@ fn create_manifest(options: &Options, cases: &[InputCase]) -> Value {
         options
             .variants()
             .iter()
-            .map(|v| json!({"name":v.name,"stable":v.stable}))
+            .map(
+                |v| json!({"name":v.name,"stable":v.stable,"adapter":v.adapter,"threads":v.threads})
+            )
             .collect::<Vec<_>>()
     );
     #[cfg(feature = "compare-native")]
@@ -447,15 +449,11 @@ pub fn main(memory: bool) -> Result<()> {
                     .iter()
                     .map(String::as_str)
                     .filter(|ty| {
-                        v.prepare(
-                            &variant::CaseInput::new(&InputCase {
-                                ty: (*ty).into(),
-                                distribution: "random".into(),
-                                len: 32,
-                            }),
-                            32_768,
-                        )
-                        .is_some()
+                        v.supports(&variant::CaseInput::new(&InputCase {
+                            ty: (*ty).into(),
+                            distribution: "random".into(),
+                            len: 32,
+                        }))
                     })
                     .collect();
                 println!(
@@ -498,7 +496,11 @@ fn measure_memory(options: &Options, cases: &[InputCase]) -> Result<()> {
         );
         let input = variant::CaseInput::new(case);
         for v in options.variants() {
-            if case.len > 1_000_000 && case.ty != "u64" && v.name != "tessera" {
+            if case.len > 1_000_000
+                && case.ty != "u64"
+                && v.name != "tessera"
+                && v.adapter != "tessera-par"
+            {
                 continue;
             }
             if rows
@@ -514,7 +516,7 @@ fn measure_memory(options: &Options, cases: &[InputCase]) -> Result<()> {
                 let peak = super::allocation::end();
                 k.check()
                     .map_err(|e| format!("{} {}: {e}", case.id(), v.name))?;
-                host::check_threads()?;
+                host::check_threads(k.worker_threads())?;
                 let row = json!({"case_id":case.id(),"variant":v.name,"build":BUILD,"peak_extra_bytes":peak,"verified":true});
                 append_record(&mut file, &row)?;
                 rows.push(row);

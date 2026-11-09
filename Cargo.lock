@@ -709,6 +709,7 @@ dependencies = [
  "fs2",
  "glidesort",
  "radsort",
+ "rayon",
  "rdst",
  "serde",
  "serde_json",
@@ -723,6 +724,7 @@ name = "tessera-sort"
 version = "0.0.0"
 dependencies = [
  "fearless_simd",
+ "rayon",
 ]
 
 [[package]]

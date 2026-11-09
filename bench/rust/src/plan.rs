@@ -24,6 +24,9 @@ pub(crate) struct Algorithm {
     pub(crate) stable: bool,
     #[cfg(feature = "compare")]
     pub(crate) adapter: String,
+    #[cfg(feature = "compare")]
+    #[serde(default)]
+    pub(crate) threads: Option<usize>,
 }
 /// A record's identity and storage width.
 #[derive(Deserialize)]
@@ -150,6 +153,9 @@ pub struct Plan {
     include: Vec<Rule>,
     #[serde(default)]
     exclude: Vec<Rule>,
+    /// Additional four-thread API inputs; serial coverage remains independent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    parallel: Vec<Rule>,
 }
 impl Plan {
     /// Reads a JSON or TOML experiment, retaining its protocol's controls.
@@ -186,7 +192,15 @@ impl Plan {
         {
             return Err("unknown or duplicate algorithm IDs".into());
         }
-        for rule in plan.include.iter().chain(&plan.exclude) {
+        if harness != "smoke" && !plan.parallel.is_empty() {
+            return Err("parallel API rules belong to the smoke harness".into());
+        }
+        for rule in plan
+            .include
+            .iter()
+            .chain(&plan.exclude)
+            .chain(&plan.parallel)
+        {
             for (values, supported, field) in [
                 (&rule.types, &inventory.types, "types"),
                 (&rule.distributions, &inventory.shapes, "distributions"),
@@ -231,6 +245,7 @@ impl Plan {
     }
 
     /// Includes matching products, then removes matching exclusions.
+    #[cfg(test)]
     fn selects(&self, ty: &str, distribution: &str, len: usize) -> bool {
         self.include
             .iter()
@@ -245,9 +260,22 @@ impl Plan {
     ///
     /// Omitted axes use the harness catalog. An empty experiment returns an error.
     pub fn inputs(&self) -> Result<Vec<InputCase>, String> {
+        self.expand(&self.include)
+    }
+
+    /// Expands only explicitly selected four-thread API inputs.
+    pub fn parallel_inputs(&self) -> Result<Vec<InputCase>, String> {
+        if self.parallel.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.expand(&self.parallel)
+    }
+
+    /// Applies one API selection and the shared exclusions before generation.
+    fn expand(&self, rules: &[Rule]) -> Result<Vec<InputCase>, String> {
         let inventory = self.inventory();
         let mut cases = BTreeSet::new();
-        for rule in &self.include {
+        for rule in rules {
             let types = rule
                 .types
                 .clone()
@@ -267,7 +295,11 @@ impl Plan {
                 for distribution in &shapes {
                     for length in &lengths {
                         let len = length.resolve(ty);
-                        if self.selects(ty, distribution, len) {
+                        if !self
+                            .exclude
+                            .iter()
+                            .any(|rule| rule.matches(ty, distribution, len))
+                        {
                             cases.insert(InputCase {
                                 ty: ty.clone(),
                                 distribution: distribution.clone(),
@@ -312,7 +344,16 @@ mod tests {
     fn presets_preserve_case_counts() {
         let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
         let cases = continuous.inputs().unwrap();
-        assert_eq!(cases.len(), 65);
+        assert_eq!(cases.len(), 60);
+        assert_eq!(cases.iter().filter(|case| case.len >= 1_000_000).count(), 7);
+        for distribution in ["skew99", "two_values"] {
+            assert!(cases.iter().any(|case| {
+                case.ty == "u64" && case.distribution == distribution && case.len == 65_536
+            }));
+            assert!(!cases.iter().any(|case| {
+                case.ty == "u64" && case.distribution == distribution && case.len >= 1_000_000
+            }));
+        }
         for ty in ["u64", "row_u64"] {
             for distribution in ["random", "sorted", "reverse", "equal"] {
                 assert!(cases.iter().any(|case| {
@@ -322,6 +363,30 @@ mod tests {
                 }));
             }
         }
+        for distribution in ["d4096", "sparse_digits"] {
+            assert!(cases.iter().any(|case| {
+                case.ty == "u64" && case.distribution == distribution && case.len == 65_536
+            }));
+        }
+        let parallel = continuous.parallel_inputs().unwrap();
+        assert_eq!(parallel.len(), 8);
+        assert!(parallel.iter().all(|case| case.len == 10_000_000));
+        assert_eq!(
+            parallel
+                .iter()
+                .map(|case| (case.ty.as_str(), case.distribution.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("row_u32", "random"),
+                ("row_u32", "skew99"),
+                ("row_u64", "random"),
+                ("u32", "random"),
+                ("u64", "equal"),
+                ("u64", "random"),
+                ("u64", "reverse"),
+                ("u64", "sorted"),
+            ]
+        );
         for ty in ["u32", "f64", "row_u64"] {
             for distribution in ["sorted", "reverse"] {
                 assert!(cases.iter().any(|case| {
@@ -340,6 +405,7 @@ mod tests {
         for (text, expected) in [
             (include_str!("../../plans/smoke.toml"), 125),
             (include_str!("../../plans/release.toml"), 381),
+            (include_str!("../../plans/parallel.toml"), 16),
         ] {
             assert_eq!(
                 Plan::parse(text, "comparison")

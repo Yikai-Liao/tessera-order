@@ -53,7 +53,7 @@ test("draws one build as a column with its headline and one mark per alerted cas
   assert.match(svg, />−29\.1%</);
   assert.match(svg, />← less time</);
   assert.match(svg, />\{u32,u32\} · 48</);
-  assert.match(svg, />STABLE</);
+  assert.match(svg, />SERIAL</);
   assert.match(svg, /prefers-color-scheme: dark/);
   const quiet = fixture();
   quiet.alerts = [];
@@ -113,8 +113,8 @@ test("groups cases by API mode under one title each", () => {
   });
   input.alerts.push({ metric: { uuid: "m-unstable" }, limit: "upper" });
   const svg = chartSvg(one(input))!;
-  assert.ok(svg.indexOf(">STABLE<") < svg.indexOf(">UNSTABLE<"));
-  assert.equal((svg.match(/>STABLE</g) ?? []).length, 1);
+  assert.ok(svg.indexOf(">SERIAL<") < svg.indexOf(">UNSTABLE<"));
+  assert.equal((svg.match(/>SERIAL</g) ?? []).length, 1);
 });
 
 test("draws every alert when one direction has more than sixteen cases", () => {

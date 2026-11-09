@@ -32,33 +32,35 @@ Read the sections below when changing tracking, investigating missing feedback o
 
 ## Pipeline
 
-- [Build](../../.github/workflows/bench-build.yml): unprivileged, including forks; calls `pnpm tools continuous build` to compile Default and Portable SIMD sequentially in one job. Static glibc preserves allocator behavior in `api` mode. Artifacts are `bench-rust-default` and `bench-rust`.
+- [Build](../../.github/workflows/bench-build.yml): unprivileged, including forks; calls `pnpm tools continuous build` to compile Default and Portable SIMD sequentially in one job, both with Rayon enabled. The build verifies selected serial and parallel outputs with Criterion's untimed test mode. Static glibc preserves allocator behavior in `api` mode. Artifacts are `bench-rust-default` and `bench-rust`.
 - [Track](../../.github/workflows/bench-track.yml): trusted default-branch code resolves PR identity via the API, skips closed/superseded heads, wraps executables with the trusted [supervisor](../../bench/continuous/worker.ts), and uses `pnpm tools continuous submit` to submit image digests. Executables run only on Bencher without credentials. Each configuration has a separate timeout; failure of one does not skip the other.
 - Builds share compiler and flags; Portable SIMD adds runtime dispatch, not forced ISA or `target-cpu=native` (the build and measurement hosts differ). Both use `-C llvm-args=-x86-branches-within-32B-boundaries` for Intel JCC boundary hazards. This benchmark-only flag does not eliminate all placement effects.
-- Bencher Free has one remote slot and a five-minute job limit. Each run times out at 240 seconds; keep coverage below three minutes. The shared `bencher-bare-metal` concurrency group queues up to 100 tracking runs and holds its slot across both measurements. It does not coordinate other repositories in the organization.
+- Bencher Free has one remote slot and a five-minute job limit. Each run times out at 240 seconds; target at most 200–210 seconds including preparation, validation and statistics. The two configurations remain two sequential remote jobs, not four serial/parallel jobs. Do not overlap parallel cases to meet the budget; reduce coverage rather than weaken sampling or increase the timeout. The shared `bencher-bare-metal` concurrency group queues up to 100 tracking runs and holds its slot across both measurements. It does not coordinate other repositories in the organization.
 
-Tracker changes in a PR take effect only after merging: `workflow_run` uses default-branch code.
+Tracker changes in a PR take effect only after merging: `workflow_run` uses default-branch code. During this rollout, the executable lists only serial IDs unless the supervisor explicitly sets `TESSERA_BENCH_PARALLEL=4`. An old tracker can therefore measure the baseline PR without rejecting new IDs. After merge the trusted supervisor enables both APIs and the first real `main` run seeds the new parallel histories; the bootstrap PR has no cloud parallel comparison. Never label that missing comparison as a demonstrated parallel gain.
 
 ## Within-job scheduling
 
-The supervisor splits the plan’s distinct API timed IDs into small cases below 1,000,000 records and large cases. Small IDs balance across two single-threaded workers pinned to separate available CPUs. Both workers finish before one pinned worker prepares or measures larger inputs. Selection precedes generation; Criterion directories are independent. Failed workers, missing results and duplicate IDs fail the run. Direct binary execution remains serial.
+The supervisor runs the plan's serial API timed IDs: small cases below 1,000,000 records balance across two single-threaded workers pinned to separate available CPUs; both exit before one pinned worker prepares or measures larger serial inputs. After every serial worker has exited, four-thread cases run strictly one at a time on a four-CPU mask. No other case's preparation, warm-up, validation, timing or pool teardown overlaps a parallel case. Only the selected sort's four workers run concurrently. Each pool is warmed before verification/timing and joined before the next case prepares. Selection precedes generation; Criterion directories are independent. Failed workers and missing, extra or duplicate results fail the run.
+
+The `intel-v1` spec declares four vCPUs, not four proven exclusive physical cores. The supervisor selects available CPU IDs, fails if fewer than four are available for parallel cases, and logs masks and visible SMT topology. It preserves the serial phase's existing CPU selection. Exact `TESSERA_BENCH_IDS` selection distinguishes `/api` from `/par-4` for the same input; legacy group selection remains available to old artifacts. Direct binary invocation remains serial-only unless explicitly opted into the four-thread contract.
 
 The [catalog](../../bench/catalog.toml) is the authority for configuration identities:
 
 | Configuration | Features | Testbed | Hardware spec |
 |---|---|---|---|
-| Default | `std` | `intel-v1-hybrid-v1` | `intel-v1` |
-| Portable SIMD | `std`, `portable-simd` | `intel-v1-portable-simd-hybrid-v1` | `intel-v1` |
+| Default | `std`, `rayon` | `intel-v1-hybrid-v1` | `intel-v1` |
+| Portable SIMD | `std`, `portable-simd`, `rayon` | `intel-v1-portable-simd-hybrid-v1` | `intel-v1` |
 
 These Testbeds separate concurrent measurements from the older serial histories. A first `main` sample establishes each baseline; older-base PRs may need rebasing after that sample exists. Artifacts predating the listing/selection protocol must be rebuilt. Never seed one configuration with another's measurements. Changed compiler, flags or hardware need a new Testbed unless the transition is explicitly justified here. Changed inputs/batches need new IDs or reset thresholds; adding cases or changing sample counts retains the Testbed.
 
 ## Cases
 
-[`bench/plans/continuous.toml`](../../bench/plans/continuous.toml) defines coverage, compiled into each measured executable. Preview it with `pnpm -s tools plan continuous`; do not maintain a second case list here or in the supervisor. [Selection rules](benchmarking.md#experiment-plans) and the [case ID contract](benchmarking.md#cases-and-suites) apply. All timed IDs measure the two public sorting functions with per-call scratch allocation; there is no mode selector. IDs are `<language>/<case_id>/api`, such as `rust/u64/random/65536/s1/api`.
+[`bench/plans/continuous.toml`](../../bench/plans/continuous.toml) defines coverage, compiled into each measured executable. Preview it with `pnpm -s tools plan continuous`; do not maintain a second case list here or in the supervisor. [Selection rules](benchmarking.md#experiment-plans) and the [case ID contract](benchmarking.md#cases-and-suites) apply. The serial `include` rules retain the serial timed IDs ending in `/api`, such as `rust/u64/random/65536/s1/api`. Separate `parallel` rules add IDs ending in `/par-4`: 10M seed-one random keys and rows, plus representative ordered, equal-key and skewed inputs. Parallel timing targets large inputs rather than short or threshold-adjacent cases; those boundaries retain correctness-test coverage. These rules do not multiply the whole serial suite by the parallel API. Both APIs include per-call scratch allocation; the parallel clock also includes dispatch into a pre-warmed caller-owned pool. There is no thread-count sweep or general mode axis.
 
 Coverage must exercise insertion/tile boundaries, confirmed order, low-fanout tiles, each node route, key widths, floats, stable payloads and large working sets. Keep random controls beside targeted distributions. Small cases are placement-sensitive; their alerts need the same investigation as large ones. Insertion-threshold coverage includes random, sorted, reverse and equal inputs for direct `u64` keys and keyed rows. Ordered controls retain the root probe and reversal paths; only unsorted insertion-sized tiles take direct insertion finishing. Unit-stride order confirmation is covered by sorted and reverse keys and keyed rows at 1,000 records, with an equal-key input and the existing random controls. Added cases retain the same Testbeds and remain new measurements until comparative baselines exist.
 
-Direct-key ascending-confirmation coverage also includes `u32` and `u64` at 65,536 records.
+Direct-key ascending-confirmation coverage also includes `u32` and `u64` at 65,536 records. To budget the exclusive parallel phase, specialized direct-key `d4096` and sparse-digit screens run at 65,536 rather than 1M records; Zipf2 remains at 65,536 rather than 1M/10M. The 1M near-ordered and 50%-hot-key screens are omitted, retaining their 65,536-record representatives and all random type, insertion-boundary and unit-stride controls. The long serial screens retain random keys at all measured widths, keyed rows, sparse wide keys, two clusters, and a 10M random-key control. Skewed and two-value direct-key screens stay at 65,536 instead of 1M records. This reduces large-scale distribution coverage; the local comparison plans remain available for deeper sweeps. Sampling windows and counts are unchanged.
 
 | Length | Warm-up | Samples | Measurement window |
 |---|---|---|---|
@@ -84,7 +86,7 @@ Ownership: `report.ts` derives comparisons, `matrix.ts` aligns builds, `history.
 
 ### Builds are columns, cases are rows
 
-A separately compiled configuration has its own Testbed, check and column. Current runs have one API row group within each executable; historical mode groups remain reportable, not separate builds or charts. Compute geometric means within each build only; combining builds can hide a regression. Count a case once even if both builds alert. A failed build remains visible and must never be described as a clean opposite of a measured alert.
+A separately compiled configuration has its own Testbed, check and column. Current runs have serial and four-thread API row groups within each executable; historical mode groups remain reportable, not separate builds or charts. Compute geometric means within each build and API group; a secondary all-case mean must not hide parallel rows among the larger serial suite. New groups explicitly show missing baselines. Combining builds can also hide a regression. Count a case once even if both builds alert. A failed build remains visible and must never be described as a clean opposite of a measured alert.
 
 Minus means less run time. The summary gives per-build means and alerts; expanded tables give every changed case and baseline/limits/current values. Alert verdicts come only from thresholds, not chart emphasis.
 
@@ -100,7 +102,7 @@ The trusted tracker alone has `contents: write` and writes SVGs to `benchmark-im
 
 Load completed reports across reset heads and same-commit reruns, filtered by PR, Testbed and hardware spec, bounded by the current measurement time. Compare every point against the latest report's baseline over one fixed set of cases with a baseline and positive values in every run. Changes to coverage then affect the whole series, not one point.
 
-Overall is the per-build geometric mean. Include a case when its largest/smallest PR value minus one reaches 5% (`MIN_SWING`) or it still has an upper alert; show it in every build without a row cap. Rows share a vertical scale spanning at least 5%, with the base as the dashed axis. This preserves fixed regressions in history without changing today's alert verdict.
+A single-API history retains its overall geometric mean. Mixed-API histories show separate fixed-cohort serial and four-thread aggregate rows in the same two build columns; an API without comparable history shows an unavailable row, never a flat passing series. Failed builds remain unavailable columns in both figures. These are changes relative to the same API/thread-count baseline, not parallel speedups over serial. Include a case when its largest/smallest PR value minus one reaches 5% (`MIN_SWING`) or it still has an upper alert; show it in every build without a row cap. Rows share a vertical scale spanning at least 5%, with the base as the dashed axis. This preserves fixed regressions in history without changing today's alert verdict.
 
 ## Adding a language
 

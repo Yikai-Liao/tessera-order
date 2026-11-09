@@ -90,6 +90,8 @@ Schema-2 `local.json` retains every seed's schema-1 revision run. Reports keep e
 
 Use `pnpm tools report DIR` for either local schema; every seed must have nine complete blocks. Layout sampling does not change continuous Testbeds, thresholds, sampling windows or submission behavior.
 
+With layout seeds, `--layout-control cgu1` applies one code-generation unit to both revisions, `aligned` explicitly requests the shared 64-byte alignment defaults, and `engine-first` relinks after selecting engine-owned out-of-line functions from matching raw/demangled `nm` views. Inline code stays in its callers. Default CLI alignment also applies to CGU and symbol-order experiments; these options do not establish isolated or combined performance gains. The result retains the chosen control, actual flags, link maps and, for `engine-first`, per-role `.order` files. Controls preserve Cargo-resolved flags and require Linux x86-64 GNU, `cc`, LLD and (for engine ordering) `nm`.
+
 ## Experiment plans
 
 All three workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). Repository presets, the shared catalog and selection fixtures use TOML for comments and readable input rules; custom files may use either TOML or JSON. Both formats decode into the same configuration model and use the same validation and selection rules. Plans describe what to measure; the harness owns input generation and the measurement protocol.

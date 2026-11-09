@@ -5,11 +5,38 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { type LayoutRun, parseLayoutSeeds, summarizeLayouts } from "./layout.ts";
+import {
+  engineOrderingSymbols,
+  type LayoutRun,
+  parseLayoutSeeds,
+  summarizeLayouts,
+} from "./layout.ts";
 import type { LocalRun } from "./model.ts";
 import { renderLocalReport } from "./report.ts";
 
 const id = "rust/u32/random/48/s1/api";
+
+test("engine ordering uses function ownership, excluding harness generic mentions", () => {
+  const raw =
+    "engine t 10 8\nkey t 20 8\nharness t 30 8\npartition t 40 8\nnested t 50 8\nvalue r 60 8";
+  const names = [
+    "tessera_sort::engine::Sorter::<u64>::sort t 10 8",
+    "<u64 as tessera_sort::key::sealed::Sealed>::insertion_sort t 20 8",
+    "criterion::Bencher::iter::<tessera_sort::stable_sort<u64>> t 30 8",
+    "<tessera_sort::block::Partition<u64>>::new t 40 8",
+    "<harness::Wrapper<<u64 as tessera_sort::Key>::Repr> as core::Drop>::drop t 50 8",
+    "harness::value r 60 8",
+  ].join("\n");
+  assert.deepEqual(engineOrderingSymbols(raw, names), ["engine", "key", "partition"]);
+  assert.throws(
+    () => engineOrderingSymbols(raw, names.replace("t 10 8", "t 11 8")),
+    /views differ/,
+  );
+  assert.throws(
+    () => engineOrderingSymbols(raw, names.split("\n").slice(1).join("\n")),
+    /views differ/,
+  );
+});
 
 /** Model identical source with layout-dependent time and separate process noise. */
 function fixture(): LayoutRun {

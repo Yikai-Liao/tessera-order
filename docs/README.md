@@ -16,6 +16,6 @@ Choose a task and read its topic directly. Procedures, contracts and explanation
 | Change benchmark tooling | [Architecture](design/benchmark-tooling.md); [comparison harness](design/comparison-benchmarks.md) or [figures](development/benchmark-figures.md) when relevant |
 | Maintain documentation | [Contribution rules](../CONTRIBUTING.md#documentation), [site guide](development/docs-site.md) |
 | Contribute, change CI or release | [Contributing](../CONTRIBUTING.md), [CI](development/ci.md), [releases](../RELEASING.md) |
-| Work on future capabilities | [Roadmap](../ROADMAP.md), [Python proposal](proposals/python-binding.md) (not implemented), [Rayon proposal](proposals/rayon-parallel-sort.md) (experimental), [maintainability refactor](proposals/maintainability-refactor.md) (proposed) |
+| Work on future capabilities | [Roadmap](../ROADMAP.md), [Python proposal](proposals/python-binding.md) (not implemented) |
 
 Current rules and their rationale live together in these topics. Superseded decisions remain in Git history, not the active reading path.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { VARIANTS } from "../bench/catalog.ts";
-import { marker } from "../bench/continuous/github.ts";
+import { marker } from "../bench/continuous/marker.ts";
 import { command } from "./process.ts";
 
 interface Check {

@@ -2,6 +2,7 @@
 
 import type { context, getOctokit } from "@actions/github";
 import type { Variant } from "../catalog.ts";
+import { MARKER, marker } from "./marker.ts";
 
 export type GitHub = ReturnType<typeof getOctokit>;
 export type ActionContext = Pick<typeof context, "repo" | "serverUrl" | "runId" | "payload">;
@@ -157,12 +158,6 @@ export async function startReport({
 export function workflowUrl(context: ActionContext) {
   const { owner, repo } = context.repo;
   return `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
-}
-
-const MARKER = "tessera-bench-report";
-
-export function marker(language: string, hash: string) {
-  return `<!-- ${MARKER} language=${language} sha=${hash} -->`;
 }
 
 interface Comment {

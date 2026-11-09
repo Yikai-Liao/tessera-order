@@ -2,7 +2,12 @@
 
 import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { withCommandLog } from "./process.ts";
+import { command, withCommandLog } from "./process.ts";
+
+/** Resolve the checkout that supplies benchmark sources and configuration. */
+export function repositoryRoot() {
+  return command("git", ["rev-parse", "--show-toplevel"], { capture: true });
+}
 
 /** Resolve a new result location without creating the operation-owned directory. */
 export function resultDirectory(root: string, out?: string) {

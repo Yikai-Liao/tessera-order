@@ -9,8 +9,7 @@ import {
   runContinuous,
 } from "../bench/continuous/runner.ts";
 import { loadPlan } from "../bench/plan.ts";
-import { repositoryRoot } from "../bench/workspace.ts";
-import { resultDirectory, runTask } from "./tasks.ts";
+import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
 
 /** Register the continuous protocol's local and explicit remote operations. */
 export function continuousCommands(program: Command) {

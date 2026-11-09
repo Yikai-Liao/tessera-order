@@ -6,11 +6,6 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { command } from "../tools/process.ts";
 
-/** Resolve the checkout that supplies benchmark sources and configuration. */
-export function repositoryRoot() {
-  return command("git", ["rev-parse", "--show-toplevel"], { capture: true });
-}
-
 export interface Workspace {
   directory: string;
   tree: string;

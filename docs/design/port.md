@@ -153,7 +153,54 @@ The groups include the tile kernel plus fused output/protection when emitted sep
 
 A passed focused native and Miri ownership/panic tests and an independent static Agentic Review. B additionally passed the Rayon all-target tests, Rayon plus Portable SIMD tests, strict crate Clippy, and forced one/two/three-pass Miri cases. Tests covered stable equal keys, owned drop counts, inconsistent keys, exclusive non-`Sync` borrows, first/last histogram panics, adjacent bands, relocation, and a native 65,535-record three-byte tile with cache-tail IDs. A preliminary B Miri fixture was too small to select the intended three-pass route; it failed its route assertion, not an ownership check, and was replaced by a correctly sized fixture. No accepted engine change remains, so the current algorithm models and contracts are unchanged.
 
-Further work should first distinguish final-write locality, additional histogram work and protection costs within these two hypotheses. A ten-bit cap alone is not a distinct 24-bit plan: the existing balanced planner still produces 8+8+8. A mixed plan would require its own explicit experiment. Mixed radix, software write combining, new relocation policies and lock restructuring were not measured in this follow-up.
+Neither experiment establishes the dominant whole-call bottleneck. Further radix, final-scatter and relocation tuning is paused in favor of measurement identifiability and completion-path comparisons below. A ten-bit cap alone is not a distinct 24-bit plan: the existing balanced planner still produces 8+8+8. Mixed radix, software write combining, new relocation policies and lock restructuring were not measured in this follow-up.
+
+### Controlled completion-path diagnostics
+
+The next investigation compared bounded finishing with the existing block-permutation/compaction fallback, without changing the production engine. Evidence, temporary source copies, setup scripts and retained pipeline sessions are in `/home/lyk/code/tessera-research/materialization-paths-3b13726/`. This is a local diagnostic screen, not a production routing decision, a bandwidth roofline or a layout-causal performance claim.
+
+#### Controls and remaining variability
+
+Read-only topology checks confirmed that CPUs `0,2,4,6,8,10,12,14` cover eight distinct physical cores on the Ryzen 7 8845H. Governor, boost and SMT remained unchanged; desktop applications remained active. Each temporary worker optionally pinned itself to one of those CPUs and asserted its actual allowed mask before warm-up. Pinning commands and assertions are preserved with the experiment source; this temporary environment setting is not a standard session-manifest field. Group observations retain the maintained runner's boundary load, temperature and first-allowed-CPU frequency, not a per-core frequency timeline.
+
+Two separately compiled source copies per path, each with two registered calls, distinguished same-entry repetitions from between-copy observations. Distinct emitted entry addresses were checked, but instruction equivalence was not established; an entry may also inline. These copies are not samples of a randomized layout distribution. Same-entry A/A reflects execution variability; between-copy differences still mix execution, possible code-generation differences and placement sensitivity. Neither repeating one binary nor comparing two addresses isolates layout bias.
+
+All uninstrumented sessions used the maintained `pnpm tools compare algorithms` pipeline, nine shuffled blocks, verified seed-one random 10M inputs, the default 5 ms target and a 1 MiB prepared cap. The cap forces exactly one input buffer at every selected width, avoiding variant-dependent prepared working sets. Serial Tessera remained the first catalog entry and retained its normal A/A pair. Parallel summaries in `path-paired.json` separately reuse the maintained `summarizePaired` function; normal report denominators remain serial. All four acceptance-screen timing executables had the same SHA-256, `c4a6256c0d52fdef6ad37d2a9abb676ba5f589c2927f62a4124b1067c7701448`.
+
+| 8-worker 8-byte records | Bounded A same-entry A/A | Bounded B same-entry A/A | Bounded between-copy A/A |
+|---|---:|---:|---:|
+| Inherited CPU mask | 0.799–1.201 | 0.836–1.164 | 0.842–1.158 |
+| Per-worker pinning | 0.902–1.098 | 0.915–1.085 | 0.893–1.107 |
+| Per-worker pinning repeat | 0.851–1.149 | 0.897–1.103 | 0.782–1.218 |
+
+The sessions are `inherited-8-valid/`, `pinned-8/` and `pinned-8-repeat/`. An earlier CLI invocation failed before measurement because its redirected output occupied the CLI's reserved log path; it supplies no timing evidence. Pinning did not establish a stable small-effect detection window. These observed extrema are neither confidence intervals nor a minimum detectable effect estimate. Reliable identification of a 5–10% source gain remains unresolved; no CI threshold, compiler flags or machine policy was changed to hide it.
+
+#### Same root, different completion plans
+
+All diagnostic copies retained the root digit planner and bounded limit, forced eight scatter shards at pool widths 1/2/4/8, and kept the bounded route's factor-four root block size. Only the materialized copies declined bounded finishing after the common scatter and directory adoption. Setting the bounded limit to zero instead would also change the root block size and confound the comparison. One-worker diagnostic copies bypassed the public serial shortcut; stock `tessera-par-1` was measured separately and still used the serial engine.
+
+The materialized path retained its existing scoped jobs and 64-KiB tile budget; bounded finishing retained its larger bucket-local tile budget. Thus this compares complete completion plans, including their different leaf planning, rather than isolating a copy or holding leaf work constant. No new dataflow algorithm was implemented.
+
+The four-type `scaling/` session measured every width with both copies and repetitions, plus stock parallel adapters and serial controls. Entries below are independent absolute medians for copy A, in milliseconds, useful for describing scaling rather than paired verdicts:
+
+| 10M random input | Bounded, 1 / 2 / 4 / 8 workers | Materialized, 1 / 2 / 4 / 8 workers |
+|---|---|---|
+| `u32` | 38.16 / 20.67 / 12.08 / 7.67 | 49.06 / 26.96 / 15.93 / 11.08 |
+| 8-byte `{u32, u32}` | 52.21 / 29.35 / 17.65 / 13.96 | 65.71 / 35.83 / 22.80 / 16.84 |
+| `u64` | 80.51 / 44.38 / 25.39 / 18.33 | 71.91 / 40.05 / 25.41 / 17.01 |
+| 16-byte `{u64, u32}` | 110.66 / 65.68 / 42.94 / 35.54 | 101.00 / 58.53 / 41.41 / 31.71 |
+
+At eight workers, materialized copies A/B had paired median ratios of 1.334/1.337 for `u32`, 1.189/1.151 for 8-byte records, 0.977/0.970 for `u64`, and 0.864/0.905 for 16-byte records, relative to the mean of the bounded A/B first calls in each block. Only the `u32` direction passed that control rule for both copies; the 8-byte record verdict differed by copy, and both wide-key rows remained within those controls. Same-entry repeat envelopes provide additional execution-variability checks, not replacement denominators. These results do not justify switching production routes. They do show why a single record width cannot select an overall completion strategy.
+
+#### Overlap and the compaction chain
+
+A separate instrumented `trace-run/` recorded per-worker nested wall intervals into private buffers and flushed them after sorting joined. `trace-events/` retains timestamps, Linux thread IDs and worker indices; `trace-summary.json` separates process IDs and call counts, keeping one-call validation populations separate from the eighteen-call timing populations. The maintained memory policy skipped these temporary adapters on this non-`u64` large input; no diagnostic-path allocation result is claimed. Main-process aggregates include eighteen sorts per path and width: nine calibration and nine timed calls. They are diagnostic populations, not acceptance timings. Root layout markers confirmed eight shards, 256 buckets and 316 records per root block for both paths at every width on the 8-byte record input.
+
+At eight workers, bounded completion's median wall span was 9.31 ms after a 4.83 ms root scatter/adoption span. Gather, leaf sorting and protected writes overlap across workers: their wall unions were 7.58, 8.48 and 7.26 ms, respectively. A union measures coverage by at least one interval, not CPU work or an exclusive contribution; these values must not be added.
+
+For the materialized path, median root scatter/adoption was 5.26 ms, block permutation 5.07 ms and compaction-with-handoff 7.43 ms. Leaf intervals overlapped compaction for 7.32 ms; the post-compaction tail was only 0.19 ms. At one worker the corresponding compaction span was 6.82 ms, without concurrent leaf execution. Medians of separate intervals need not sum to the median whole call. The trace exposes a sequential compaction chain that remains near the end of this path despite concurrent leaf jobs; adding more leaf jobs alone cannot remove that chain. It does not isolate whether overlap, memory contention, scheduling or instruction work explains its duration.
+
+The next measurement priority remains repeated same-entry controls with per-core frequency and scheduler-state observations. RAPL energy reads were permission-denied, the uProf power driver was unavailable, and scheduler tracefs access was denied; none was changed. uProf Threading Analysis was not collected in this round. Wall spans include descheduling and are not on-CPU/off-CPU classifications. No hardware-memory-bandwidth limit or irreducible data dependency has been established. New materialization research should use these complete-path controls before adding ownership complexity; smaller radix, write-combining and relocation micro-tuning remain paused.
 
 ## What changed
 

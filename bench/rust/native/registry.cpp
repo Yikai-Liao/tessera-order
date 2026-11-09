@@ -1,48 +1,162 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 #include "layout.h"
+#include <array>
 #include <cstddef>
-#include <iterator>
+#include <tuple>
+
 using Sort = void (*)(void *, size_t);
-#define DECLARE(ALG, TYPE) extern "C" void bench_##ALG##_##TYPE(void *, size_t);
-#define ALL(ALG)                                                               \
-  DECLARE(ALG, u32)                                                            \
-  DECLARE(ALG, u64) DECLARE(ALG, f64) DECLARE(ALG, row32) DECLARE(ALG, row64)  \
-      DECLARE(ALG, record)
-DECLARE(duckdb, u32)
-DECLARE(duckdb, u64)
-DECLARE(duckdb, row32)
-DECLARE(duckdb, row64)
-DECLARE(duckdb, record)
-ALL(ips2ra)
-ALL(ips4o) ALL(fluxsort) ALL(crumsort) DECLARE(vqsort, u32) DECLARE(vqsort, u64)
-    DECLARE(x86simdsort, u32)
-        DECLARE(x86simdsort,
-                u64) extern "C" void bench_clausecker_row32(void *, size_t);
-#define ROW(ALG)                                                               \
-  {bench_##ALG##_u32,   bench_##ALG##_u64,   bench_##ALG##_f64,                \
-   bench_##ALG##_row32, bench_##ALG##_row64, bench_##ALG##_record}
-extern "C" Sort bench_kernel(unsigned algorithm, unsigned type) noexcept {
-  static const Sort table[][6] = {
-      {nullptr, nullptr, nullptr, bench_clausecker_row32, nullptr, nullptr},
-      ROW(fluxsort),
-      ROW(ips2ra),
-      ROW(ips4o),
-      {bench_vqsort_u32, bench_vqsort_u64, nullptr, nullptr, nullptr, nullptr},
-      {bench_x86simdsort_u32, bench_x86simdsort_u64, nullptr, nullptr, nullptr,
-       nullptr},
-      ROW(crumsort),
-      {bench_duckdb_u32, bench_duckdb_u64, nullptr, bench_duckdb_row32,
-       bench_duckdb_row64, bench_duckdb_record}};
-  return algorithm < std::size(table) && type < std::size(table[0])
-             ? table[algorithm][type]
-             : nullptr;
+
+struct Layout {
+  size_t size;
+  size_t alignment;
+  size_t payload_offset;
+};
+
+// Record suffix, C representation, payload offset. Order is the Rust NativeType
+// ABI.
+#define NATIVE_RECORDS(X)                                                      \
+  X(u32, uint32_t, 0)                                                          \
+  X(u64, uint64_t, 0)                                                          \
+  X(f64, double, 0)                                                            \
+  X(row32, BenchRow32, offsetof(BenchRow32, row))                              \
+  X(row64, BenchRow64, offsetof(BenchRow64, row))                              \
+  X(record, BenchRecord, offsetof(BenchRecord, payload))
+
+// Row order is checked against Rust's NativeAlgorithm ABI.
+#define NATIVE_ALGORITHMS(X)                                                   \
+  X(clausecker)                                                                \
+  X(fluxsort)                                                                  \
+  X(ips2ra)                                                                    \
+  X(ips4o)                                                                     \
+  X(vqsort)                                                                    \
+  X(x86simdsort)                                                               \
+  X(crumsort)                                                                  \
+  X(duckdb)
+
+// Supported algorithm/record pairs. One entry generates both the C declaration
+// and the typed binding; omitted pairs have no kernel.
+#define NATIVE_KERNELS(X)                                                      \
+  X(clausecker, row32)                                                         \
+  X(fluxsort, u32)                                                             \
+  X(fluxsort, u64)                                                             \
+  X(fluxsort, f64)                                                             \
+  X(fluxsort, row32)                                                           \
+  X(fluxsort, row64)                                                           \
+  X(fluxsort, record)                                                          \
+  X(ips2ra, u32)                                                               \
+  X(ips2ra, u64)                                                               \
+  X(ips2ra, f64)                                                               \
+  X(ips2ra, row32)                                                             \
+  X(ips2ra, row64)                                                             \
+  X(ips2ra, record)                                                            \
+  X(ips4o, u32)                                                                \
+  X(ips4o, u64)                                                                \
+  X(ips4o, f64)                                                                \
+  X(ips4o, row32)                                                              \
+  X(ips4o, row64)                                                              \
+  X(ips4o, record)                                                             \
+  X(vqsort, u32)                                                               \
+  X(vqsort, u64)                                                               \
+  X(x86simdsort, u32)                                                          \
+  X(x86simdsort, u64)                                                          \
+  X(crumsort, u32)                                                             \
+  X(crumsort, u64)                                                             \
+  X(crumsort, f64)                                                             \
+  X(crumsort, row32)                                                           \
+  X(crumsort, row64)                                                           \
+  X(crumsort, record)                                                          \
+  X(duckdb, u32)                                                               \
+  X(duckdb, u64)                                                               \
+  X(duckdb, row32)                                                             \
+  X(duckdb, row64)                                                             \
+  X(duckdb, record)
+
+namespace records {
+#define RECORD(NAME, TYPE, OFFSET)                                             \
+  struct NAME {                                                                \
+    static constexpr Layout layout{sizeof(TYPE), alignof(TYPE), OFFSET};       \
+  };
+NATIVE_RECORDS(RECORD)
+#undef RECORD
+} // namespace records
+
+namespace algorithms {
+#define ALGORITHM(NAME)                                                        \
+  struct NAME {                                                                \
+    static constexpr auto name = #NAME;                                        \
+  };
+NATIVE_ALGORITHMS(ALGORITHM)
+#undef ALGORITHM
+} // namespace algorithms
+
+template <typename Algorithm, typename Record> constexpr Sort kernel = nullptr;
+
+#define KERNEL(ALGORITHM, RECORD)                                              \
+  extern "C" void bench_##ALGORITHM##_##RECORD(void *, size_t);                \
+  template <>                                                                  \
+  constexpr Sort kernel<algorithms::ALGORITHM, records::RECORD> =              \
+      bench_##ALGORITHM##_##RECORD;
+NATIVE_KERNELS(KERNEL)
+#undef KERNEL
+
+#define RECORD_TAG(NAME, TYPE, OFFSET) records::NAME{},
+static constexpr auto record_types = std::tuple{NATIVE_RECORDS(RECORD_TAG)};
+#undef RECORD_TAG
+#define ALGORITHM_TAG(NAME) algorithms::NAME{},
+static constexpr auto algorithm_types =
+    std::tuple{NATIVE_ALGORITHMS(ALGORITHM_TAG)};
+#undef ALGORITHM_TAG
+#undef NATIVE_KERNELS
+#undef NATIVE_ALGORITHMS
+#undef NATIVE_RECORDS
+
+// std::apply preserves the type-list order for both layout rows and kernel
+// columns.
+static constexpr auto layouts = std::apply(
+    [](auto... record) { return std::array{decltype(record)::layout...}; },
+    record_types);
+
+struct RegistryRow {
+  const char *name;
+  std::array<Sort, layouts.size()> kernels;
+};
+
+template <typename Algorithm> constexpr RegistryRow registry_row(Algorithm) {
+  return {Algorithm::name,
+          std::apply(
+              [](auto... record) {
+                return std::array{kernel<Algorithm, decltype(record)>...};
+              },
+              record_types)};
 }
+
+static constexpr auto registry = std::apply(
+    [](auto... algorithm) { return std::array{registry_row(algorithm)...}; },
+    algorithm_types);
+
+extern "C" Sort bench_kernel(unsigned algorithm, unsigned type) noexcept {
+  if (algorithm >= registry.size() || type >= layouts.size())
+    return nullptr;
+  return registry[algorithm].kernels[type];
+}
+
+extern "C" const char *bench_algorithm_name(unsigned algorithm) noexcept {
+  return algorithm < registry.size() ? registry[algorithm].name : nullptr;
+}
+
 extern "C" size_t bench_layout(unsigned type, unsigned field) noexcept {
-  const size_t table[3][3] = {
-      {sizeof(BenchRow32), alignof(BenchRow32), offsetof(BenchRow32, row)},
-      {sizeof(BenchRow64), alignof(BenchRow64), offsetof(BenchRow64, row)},
-      {sizeof(BenchRecord), alignof(BenchRecord),
-       offsetof(BenchRecord, payload)}};
-  return table[type][field];
+  if (type >= layouts.size())
+    return 0;
+  const auto &layout = layouts[type];
+  switch (field) {
+  case 0:
+    return layout.size;
+  case 1:
+    return layout.alignment;
+  case 2:
+    return layout.payload_offset;
+  default:
+    return 0;
+  }
 }

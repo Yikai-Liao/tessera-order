@@ -375,7 +375,7 @@ fn try_prepare_common<T: BenchmarkRecord>(
 }
 /// Selects a typed copyable-record adapter without callbacks inside a sort.
 macro_rules! copy_adapter {
-    ($v:expr,$input:expr,$scratch_bytes:expr,$key:expr,$ty:expr) => {{
+    ($v:expr,$input:expr,$scratch_bytes:expr,$key:expr) => {{
         let v = $v;
         let input = $input;
         match v.name {
@@ -386,7 +386,7 @@ macro_rules! copy_adapter {
             "rdst" => Some(prepare_kernel(input, false, |v| v.radix_sort_unstable())),
             #[cfg(feature = "compare-native")]
             "clausecker" | "fluxsort" | "ips2ra" | "ips4o" | "vqsort" | "x86simdsort"
-            | "crumsort" | "duckdb" => $crate::comparison::native::prepare(v, input, $ty),
+            | "crumsort" | "duckdb" => $crate::comparison::native::prepare(v, input),
             _ => try_prepare_common(v, input, $scratch_bytes),
         }
     }};
@@ -409,13 +409,13 @@ impl Variant {
             return None;
         }
         match input {
-            CaseInput::U32(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k, 0),
-            CaseInput::U64(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k, 1),
-            CaseInput::F64(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k, 2),
-            CaseInput::Row32(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key, 3),
-            CaseInput::Row64(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key, 4),
+            CaseInput::U32(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
+            CaseInput::U64(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
+            CaseInput::F64(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
+            CaseInput::Row32(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key),
+            CaseInput::Row64(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key),
             CaseInput::WideRecord(v) => {
-                copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key, 5)
+                copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key)
             }
             CaseInput::OwnedRecord(v) => {
                 if self.name == "radsort" {

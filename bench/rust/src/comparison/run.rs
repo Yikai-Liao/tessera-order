@@ -69,7 +69,7 @@ pub(super) fn measure_case(
     build: &str,
     mut publish: impl FnMut(Sample) -> super::Result<()>,
 ) -> super::Result<()> {
-    let input = super::variant::CaseInput::new(case);
+    let input = super::record::CaseInput::new(case);
     let active: Vec<_> = variants
         .iter()
         .filter(|v| v.supports(&input))

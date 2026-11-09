@@ -6,6 +6,7 @@ mod check;
 mod host;
 #[cfg(feature = "compare-native")]
 mod native;
+mod record;
 mod run;
 mod variant;
 
@@ -201,7 +202,7 @@ fn create_manifest(options: &Options, cases: &[InputCase]) -> Value {
                     distribution: "random".into(),
                     ..case.clone()
                 };
-                let input = variant::CaseInput::new(&probe);
+                let input = record::CaseInput::new(&probe);
                 let supported: Vec<_> = options.variants()
                     .iter()
                     .filter(|v| v.supports(&input))
@@ -339,7 +340,7 @@ fn validate_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
             cases.len(),
             case.id()
         );
-        let input = variant::CaseInput::new(case);
+        let input = record::CaseInput::new(case);
         for v in options.variants() {
             if let Some(mut k) = v.prepare(&input, 32_768) {
                 run::measure_batch(&mut *k, 1)
@@ -449,7 +450,7 @@ pub fn main(memory: bool) -> Result<()> {
                     .iter()
                     .map(String::as_str)
                     .filter(|ty| {
-                        v.supports(&variant::CaseInput::new(&InputCase {
+                        v.supports(&record::CaseInput::new(&InputCase {
                             ty: (*ty).into(),
                             distribution: "random".into(),
                             len: 32,
@@ -494,7 +495,7 @@ fn measure_memory(options: &Options, cases: &[InputCase]) -> Result<()> {
             cases.len(),
             case.id()
         );
-        let input = variant::CaseInput::new(case);
+        let input = record::CaseInput::new(case);
         for v in options.variants() {
             if case.len > 1_000_000
                 && case.ty != "u64"

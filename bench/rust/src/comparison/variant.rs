@@ -1,158 +1,60 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Record representations, shared inputs and supported sorting adapters.
+//! Sorting adapters and restorable, verified batch kernels.
 
 #[cfg(feature = "rayon")]
 mod parallel;
 
-use super::{InputCase, check};
-use crate::case::{Key, Row, generate};
+use super::{
+    check,
+    record::{BenchmarkRecord, CaseInput, OwnedRecord, PreparedRecords, WideRecord},
+};
+use crate::case::Row;
 use rdst::RadixSort;
-use std::{cmp::Ordering, hint::black_box, mem::MaybeUninit, rc::Rc};
+use std::{hint::black_box, mem::MaybeUninit, rc::Rc};
 use voracious_radix_sort::{RadixSort as VoraciousSort, Radixable};
 
-/// Ordering, identity and sorting operations for one benchmark record representation.
-pub(super) trait BenchmarkRecord: Clone + Send + Sync + 'static {
-    /// Whether tie order and payload identity are observable.
-    const HAS_PAYLOAD: bool = false;
-    /// Compares sorting keys in the shared total order.
-    fn order(&self, other: &Self) -> Ordering;
-    /// Compares every observable bit of two records.
-    fn same(&self, other: &Self) -> bool;
-    /// Returns the original position encoded in a record payload.
-    fn index(&self) -> usize {
-        0
-    }
-    /// Sorts this record representation through Tessera's public API.
-    fn tessera(v: &mut [Self]);
-    /// Sorts this representation through Tessera's parallel API.
+/// Type-specific Tessera entry points, separate from record identity and ordering.
+pub(super) trait TesseraAdapter: BenchmarkRecord {
+    /// Sorts scalar keys directly and keyed records through the by-key API.
+    fn tessera(records: &mut [Self]);
+    /// Uses the same direct/by-key distinction for caller-owned parallel sorting.
     #[cfg(feature = "rayon")]
-    fn tessera_parallel(v: &mut [Self]);
-    /// Returns separately allocated payload capacity for one record.
-    fn extra_bytes(&self) -> usize {
-        0
-    }
-    /// Sorts this representation with glidesort's default buffer.
-    fn glidesort(v: &mut [Self]) {
-        glidesort::sort_by(v, Self::order);
-    }
-    /// Sorts with a heap buffer limited to the supplied scratch bytes.
-    fn glidesort_sqrt(records: &mut [Self], scratch_bytes: usize) {
-        let mut buffer = Vec::with_capacity(scratch_bytes / size_of::<Self>());
-        buffer.resize_with(buffer.capacity(), MaybeUninit::uninit);
-        glidesort::sort_with_buffer_by(records, &mut buffer, Self::order);
-    }
+    fn tessera_parallel(records: &mut [Self]);
 }
-/// Implements benchmark ordering and sorting for scalar keys.
-macro_rules! key_element {
-    ($t:ty) => {
-        impl BenchmarkRecord for $t {
-            fn order(&self, o: &Self) -> Ordering {
-                Key::order(self, o)
-            }
-            fn same(&self, o: &Self) -> bool {
-                Key::same(self, o)
-            }
-            fn tessera(v: &mut [Self]) {
-                tessera_sort::stable_sort(v);
+
+/// Keeps scalar adapters on Tessera's direct-key entry points.
+macro_rules! tessera_keys {
+    ($($t:ty),+ $(,)?) => {$(
+        impl TesseraAdapter for $t {
+            fn tessera(records: &mut [Self]) {
+                tessera_sort::stable_sort(records);
             }
             #[cfg(feature = "rayon")]
-            fn tessera_parallel(v: &mut [Self]) {
-                tessera_sort::par_stable_sort(v);
+            fn tessera_parallel(records: &mut [Self]) {
+                tessera_sort::par_stable_sort(records);
             }
         }
-    };
+    )+};
 }
-key_element!(u32);
-key_element!(u64);
-key_element!(f64);
+tessera_keys!(u32, u64, f64);
 
-/// A 128-byte C-layout record with a key and indexed payload.
-#[repr(C)]
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
-pub(super) struct WideRecord {
-    pub key: u64,
-    pub payload: [u8; 120],
-}
-/// A keyed record whose allocated string payload carries its original index.
-#[derive(Clone)]
-pub(super) struct OwnedRecord {
-    key: u64,
-    payload: String,
-}
-
-/// Implements benchmark operations for copyable keyed records.
-macro_rules! record_element {
-    ($t:ty, $index:expr, $same:expr) => {
-        impl BenchmarkRecord for $t {
-            const HAS_PAYLOAD: bool = true;
-            fn order(&self, o: &Self) -> Ordering {
-                self.key.cmp(&o.key)
-            }
-            fn same(&self, o: &Self) -> bool {
-                $same(self, o)
-            }
-            fn index(&self) -> usize {
-                $index(self)
-            }
-            fn tessera(v: &mut [Self]) {
-                tessera_sort::stable_sort_by_key(v, |r| r.key);
+/// Keeps keyed-record adapters on Tessera's by-key entry points.
+macro_rules! tessera_records {
+    ($($t:ty),+ $(,)?) => {$(
+        impl TesseraAdapter for $t {
+            fn tessera(records: &mut [Self]) {
+                tessera_sort::stable_sort_by_key(records, |r| r.key);
             }
             #[cfg(feature = "rayon")]
-            fn tessera_parallel(v: &mut [Self]) {
-                tessera_sort::par_stable_sort_by_key(v, |r| r.key);
+            fn tessera_parallel(records: &mut [Self]) {
+                tessera_sort::par_stable_sort_by_key(records, |r| r.key);
             }
         }
-    };
+    )+};
 }
-record_element!(
-    Row<u32>,
-    |r: &Row<u32>| r.row as usize,
-    |a: &Row<u32>, b: &Row<u32>| a.key == b.key && a.row == b.row
-);
-record_element!(
-    Row<u64>,
-    |r: &Row<u64>| r.row as usize,
-    |a: &Row<u64>, b: &Row<u64>| a.key == b.key && a.row == b.row
-);
-record_element!(
-    WideRecord,
-    |r: &WideRecord| u64::from_le_bytes(r.payload[..8].try_into().unwrap()) as usize,
-    |a: &WideRecord, b: &WideRecord| a == b
-);
-impl BenchmarkRecord for OwnedRecord {
-    const HAS_PAYLOAD: bool = true;
-    fn order(&self, other: &Self) -> Ordering {
-        self.key.cmp(&other.key)
-    }
-    fn same(&self, other: &Self) -> bool {
-        self.key == other.key && self.payload == other.payload
-    }
-    fn index(&self) -> usize {
-        usize::from_str_radix(&self.payload, 16).unwrap_or(usize::MAX)
-    }
-    fn tessera(values: &mut [Self]) {
-        tessera_sort::stable_sort_by_key(values, |r| r.key);
-    }
-    #[cfg(feature = "rayon")]
-    fn tessera_parallel(values: &mut [Self]) {
-        tessera_sort::par_stable_sort_by_key(values, |r| r.key);
-    }
-    fn extra_bytes(&self) -> usize {
-        self.payload.capacity()
-    }
-}
+tessera_records!(Row<u32>, Row<u64>, WideRecord, OwnedRecord);
 
-impl<K: Key> PartialEq for Row<K> {
-    fn eq(&self, o: &Self) -> bool {
-        self.key.same(&o.key)
-    }
-}
-impl<K: Key> PartialOrd for Row<K> {
-    fn partial_cmp(&self, o: &Self) -> Option<Ordering> {
-        Some(self.key.order(&o.key))
-    }
-}
 /// Connects keyed records to the external radix-crate interfaces.
 macro_rules! radix_record {
     ($t:ty, $key:ty) => {
@@ -174,93 +76,16 @@ radix_record!(Row<u32>, u32);
 radix_record!(Row<u64>, u64);
 radix_record!(WideRecord, u64);
 
-/// Immutable original records and their stable reference shared by all adapters.
-pub(super) struct PreparedRecords<T> {
-    original: Vec<T>,
-    reference: Vec<T>,
-    buffer_bytes: usize,
+/// Sorts records with glidesort's default buffer.
+fn glidesort<T: BenchmarkRecord>(records: &mut [T]) {
+    glidesort::sort_by(records, T::order);
 }
-impl<T: BenchmarkRecord> PreparedRecords<T> {
-    /// Prepares one immutable input, its reference order and buffer footprint.
-    fn new(original: Vec<T>) -> Rc<Self> {
-        let mut reference = original.clone();
-        reference.sort_by(T::order);
-        let buffer_bytes =
-            original.len() * size_of::<T>() + original.iter().map(T::extra_bytes).sum::<usize>();
-        Rc::new(Self {
-            original,
-            reference,
-            buffer_bytes,
-        })
-    }
-}
-/// A prepared case with its concrete record representation preserved.
-pub(super) enum CaseInput {
-    U32(Rc<PreparedRecords<u32>>),
-    U64(Rc<PreparedRecords<u64>>),
-    F64(Rc<PreparedRecords<f64>>),
-    Row32(Rc<PreparedRecords<Row<u32>>>),
-    Row64(Rc<PreparedRecords<Row<u64>>>),
-    WideRecord(Rc<PreparedRecords<WideRecord>>),
-    OwnedRecord(Rc<PreparedRecords<OwnedRecord>>),
-}
-impl CaseInput {
-    /// Generates and prepares the concrete record representation of a suite case.
-    pub(super) fn new(c: &InputCase) -> Self {
-        match c.ty.as_str() {
-            "u32" => Self::U32(PreparedRecords::new(generate::<u32>(
-                &c.distribution,
-                c.len,
-            ))),
-            "u64" => Self::U64(PreparedRecords::new(generate::<u64>(
-                &c.distribution,
-                c.len,
-            ))),
-            "f64" => Self::F64(PreparedRecords::new(generate::<f64>(
-                &c.distribution,
-                c.len,
-            ))),
-            "row_u32" => Self::Row32(PreparedRecords::new(
-                generate::<u32>(&c.distribution, c.len)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, key)| Row { key, row: i as u32 })
-                    .collect(),
-            )),
-            "row_u64" => Self::Row64(PreparedRecords::new(
-                generate::<u64>(&c.distribution, c.len)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, key)| Row { key, row: i as u32 })
-                    .collect(),
-            )),
-            "record128" => Self::WideRecord(PreparedRecords::new(
-                generate::<u64>(&c.distribution, c.len)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, key)| {
-                        let mut payload = [0u8; 120];
-                        for (j, p) in payload.iter_mut().enumerate() {
-                            *p = (i.wrapping_mul(31) + j) as u8;
-                        }
-                        payload[..8].copy_from_slice(&(i as u64).to_le_bytes());
-                        WideRecord { key, payload }
-                    })
-                    .collect(),
-            )),
-            "owned" => Self::OwnedRecord(PreparedRecords::new(
-                generate::<u64>(&c.distribution, c.len)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, key)| OwnedRecord {
-                        key,
-                        payload: format!("{i:016x}"),
-                    })
-                    .collect(),
-            )),
-            _ => unreachable!("suite contains an unknown type"),
-        }
-    }
+
+/// Sorts records with a heap buffer limited to the supplied scratch bytes.
+fn glidesort_sqrt<T: BenchmarkRecord>(records: &mut [T], scratch_bytes: usize) {
+    let mut buffer = Vec::with_capacity(scratch_bytes / size_of::<T>());
+    buffer.resize_with(buffer.capacity(), MaybeUninit::uninit);
+    glidesort::sort_with_buffer_by(records, &mut buffer, T::order);
 }
 
 /// Restorable batches with one adapter call and output verification per batch.
@@ -287,9 +112,9 @@ struct BatchKernel<T, F> {
 impl<T: BenchmarkRecord, F: FnMut(&mut [T])> Kernel for BatchKernel<T, F> {
     fn restore(&mut self, batch: usize) {
         self.buffers
-            .resize_with(batch, || self.input.original.clone());
+            .resize_with(batch, || self.input.original().clone());
         for v in &mut self.buffers {
-            v.clone_from(&self.input.original);
+            v.clone_from(self.input.original());
         }
     }
     fn run_batch(&mut self) {
@@ -299,12 +124,17 @@ impl<T: BenchmarkRecord, F: FnMut(&mut [T])> Kernel for BatchKernel<T, F> {
     }
     fn check(&self) -> Result<(), String> {
         for v in &self.buffers {
-            check::check(v, &self.input.original, &self.input.reference, self.stable)?;
+            check::check(
+                v,
+                self.input.original(),
+                self.input.reference(),
+                self.stable,
+            )?;
         }
         Ok(())
     }
     fn buffer_bytes(&self) -> usize {
-        self.input.buffer_bytes
+        self.input.buffer_bytes()
     }
     fn worker_threads(&self) -> usize {
         self.worker_threads
@@ -353,7 +183,7 @@ pub(super) fn list_variants() -> Vec<Variant> {
         .collect()
 }
 /// Prepares the standard or Tessera adapter for any benchmark record type.
-fn try_prepare_common<T: BenchmarkRecord>(
+fn try_prepare_common<T: TesseraAdapter>(
     v: Variant,
     input: Rc<PreparedRecords<T>>,
     scratch_bytes: usize,
@@ -366,10 +196,8 @@ fn try_prepare_common<T: BenchmarkRecord>(
         "tessera" => prepare_kernel(input, true, T::tessera),
         "std-stable" => prepare_kernel(input, true, |v| v.sort_by(T::order)),
         "std-unstable" => prepare_kernel(input, false, |v| v.sort_unstable_by(T::order)),
-        "glidesort" => prepare_kernel(input, true, T::glidesort),
-        "glidesort-sqrt" => {
-            prepare_kernel(input, true, move |v| T::glidesort_sqrt(v, scratch_bytes))
-        }
+        "glidesort" => prepare_kernel(input, true, glidesort::<T>),
+        "glidesort-sqrt" => prepare_kernel(input, true, move |v| glidesort_sqrt(v, scratch_bytes)),
         _ => return None,
     })
 }
@@ -385,8 +213,7 @@ macro_rules! copy_adapter {
             "voracious" => Some(prepare_kernel(input, true, |v| v.voracious_stable_sort())),
             "rdst" => Some(prepare_kernel(input, false, |v| v.radix_sort_unstable())),
             #[cfg(feature = "compare-native")]
-            "clausecker" | "fluxsort" | "ips2ra" | "ips4o" | "vqsort" | "x86simdsort"
-            | "crumsort" | "duckdb" => $crate::comparison::native::prepare(v, input),
+            _ if v.adapter == "native" => $crate::comparison::native::prepare(v, input),
             _ => try_prepare_common(v, input, $scratch_bytes),
         }
     }};
@@ -394,7 +221,7 @@ macro_rules! copy_adapter {
 impl Variant {
     /// Checks capabilities without starting workers for a parallel adapter.
     pub(super) fn supports(self, input: &CaseInput) -> bool {
-        // Every CaseInput representation implements BenchmarkRecord's parallel
+        // Every CaseInput representation implements TesseraAdapter's parallel
         // operations. Preparing one here would warm and discard a real pool.
         (cfg!(feature = "rayon") && self.threads.is_some()) || self.prepare(input, 0).is_some()
     }
@@ -405,26 +232,21 @@ impl Variant {
         input: &CaseInput,
         scratch_bytes: usize,
     ) -> Option<Box<dyn Kernel>> {
-        if self.name == "voracious" && !matches!(input, CaseInput::U32(_) | CaseInput::U64(_)) {
-            return None;
-        }
-        match input {
-            CaseInput::U32(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
-            CaseInput::U64(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
-            CaseInput::F64(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
-            CaseInput::Row32(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key),
-            CaseInput::Row64(v) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key),
-            CaseInput::WideRecord(v) => {
-                copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key)
+        match (self.name, input) {
+            ("voracious", input) if !matches!(input, CaseInput::U32(_) | CaseInput::U64(_)) => None,
+            ("radsort", CaseInput::OwnedRecord(v)) => {
+                Some(prepare_kernel(Rc::clone(v), true, |v| {
+                    radsort::sort_by_key(v, |r| r.key)
+                }))
             }
-            CaseInput::OwnedRecord(v) => {
-                if self.name == "radsort" {
-                    Some(prepare_kernel(Rc::clone(v), true, |v| {
-                        radsort::sort_by_key(v, |r| r.key)
-                    }))
-                } else {
-                    try_prepare_common(self, Rc::clone(v), scratch_bytes)
-                }
+            (_, CaseInput::OwnedRecord(v)) => try_prepare_common(self, Rc::clone(v), scratch_bytes),
+            (_, CaseInput::U32(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
+            (_, CaseInput::U64(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
+            (_, CaseInput::F64(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
+            (_, CaseInput::Row32(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key),
+            (_, CaseInput::Row64(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key),
+            (_, CaseInput::WideRecord(v)) => {
+                copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key)
             }
         }
     }
@@ -433,6 +255,7 @@ impl Variant {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plan::InputCase;
     #[test]
     fn adapters_follow_features() {
         let names: Vec<_> = list_variants().iter().map(|v| v.name).collect();

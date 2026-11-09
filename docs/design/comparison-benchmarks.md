@@ -8,7 +8,8 @@ The comparison is a local measurement pipeline: adapters produce verified block 
 |---|---|
 | `case.rs` | Key generation shared with the continuous suite |
 | `suite.rs` | Exact case matrix, case identity and resumable groups |
-| `variant.rs` | Supported tasks, record representations and sort adapters |
+| `record.rs` | Record semantics, input construction and immutable shared originals/references |
+| `variant.rs` | Capability exceptions, type-specific entry points and sort adapters |
 | `check.rs` | Ordering, exact record preservation and stable tie order |
 | `run.rs` | Clock boundaries, calibration, block order and sample fields |
 | `host.rs` | Read-only host fingerprints and changing observations |

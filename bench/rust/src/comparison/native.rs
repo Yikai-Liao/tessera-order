@@ -2,8 +2,9 @@
 
 //! Native sort entry points, record layouts and runtime dispatch.
 
-use super::variant::{
-    BenchmarkRecord, Kernel, PreparedRecords, Variant, WideRecord, prepare_kernel,
+use super::{
+    record::{BenchmarkRecord, PreparedRecords, WideRecord},
+    variant::{Kernel, Variant, prepare_kernel},
 };
 use crate::case::Row;
 use serde_json::{Value, json};
@@ -154,7 +155,7 @@ pub(super) fn check_layouts() {
 }
 #[cfg(test)]
 mod tests {
-    use super::super::variant::CaseInput;
+    use super::super::record::CaseInput;
     use super::*;
 
     #[test]

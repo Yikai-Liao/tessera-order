@@ -4,7 +4,7 @@
 export function orderProbePlan(records: number): { kind: "sample" | "confirm"; pairs: number }[] {
   const stride = Math.max(1, Math.floor(records / 4096));
   const confirmation = { kind: "confirm" as const, pairs: Math.max(0, records - 1) };
-  // Unit stride classifies adjacent keys in one loop; larger strides sample first.
+  // Unit stride determines direction once, then scans it; larger strides sample first.
   // The confirm stage counts the complete scan, not a separate backend dispatch.
   return stride === 1
     ? [confirmation]

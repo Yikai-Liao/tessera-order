@@ -529,27 +529,35 @@ const ORDER_SAMPLES: usize = 4096;
 fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     let stride = (records.len() / ORDER_SAMPLES).max(1);
     if stride == 1 {
-        // This is already a complete scan. Keep adjacent keys in the loop so
-        // mixed directions return without a second scan or backend dispatch.
-        let mut before = extractor.key(&records[0]);
-        let mut ascending = true;
-        let mut descending = true;
-        let mut strict = true;
-        for record in &records[1..] {
-            let after = extractor.key(record);
-            ascending &= before <= after;
-            descending &= before >= after;
-            strict &= before != after;
-            if !ascending && !descending {
-                return Order::Unsorted;
-            }
-            before = after;
-        }
-        return if ascending {
-            Order::Ascending
-        } else {
-            Order::Descending { strict }
+        // This is a complete scan: determine direction once, then reject its
+        // first conflict without a second scan or ascending-backend dispatch.
+        let first = extractor.key(&records[0]);
+        let mut keys = records[1..].iter().map(|record| extractor.key(record));
+        let Some(current) = keys.find(|&key| key != first) else {
+            return Order::Ascending;
         };
+        if first < current {
+            return if keys
+                .try_fold(current, |before, after| (before <= after).then_some(after))
+                .is_some()
+            {
+                Order::Ascending
+            } else {
+                Order::Unsorted
+            };
+        }
+        let strict = keys.len() == records.len() - 2;
+        return keys
+            .try_fold((current, strict), |(before, strict), after| {
+                if before > after {
+                    Some((after, strict))
+                } else if before == after {
+                    Some((after, false))
+                } else {
+                    None
+                }
+            })
+            .map_or(Order::Unsorted, |(_, strict)| Order::Descending { strict });
     }
     let mut ascending = true;
     let mut descending = true;

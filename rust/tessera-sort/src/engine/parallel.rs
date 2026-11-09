@@ -50,6 +50,21 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: b
     sort_root::<T, E, CACHED>(records, extractor, &mut scratch, varying, tile_bytes);
 }
 
+/// Keeps the parallel root's probe call context separate from serial callers.
+struct ParallelProbe<'a, E>(&'a mut E);
+
+impl<T, E: Extract<T>> Extract<T> for ParallelProbe<'_, E> {
+    type Value = E::Value;
+
+    fn key(&mut self, record: &T) -> Self::Value {
+        self.0.key(record)
+    }
+
+    fn confirm_ascending(&mut self, records: &[T], previous: Self::Value) -> bool {
+        self.0.confirm_ascending(records, previous)
+    }
+}
+
 /// Prepares a large root while preserving the serial entry's call geometry.
 fn prepare<T, E: Extract<T>>(
     records: &mut [T],
@@ -57,7 +72,9 @@ fn prepare<T, E: Extract<T>>(
     tile_bytes: usize,
 ) -> Option<u128> {
     let record_bytes = core::mem::size_of::<T>();
-    let sampled = probe_order(records, extractor);
+    // Sharing the serial instantiation also shares interprocedural assumptions;
+    // the parallel root has its own probe while retaining the same scan backend.
+    let sampled = probe_order(records, &mut ParallelProbe(extractor));
     match sampled {
         Order::Ascending => return None,
         Order::Descending { strict } => {
@@ -86,7 +103,7 @@ fn prepare<T, E: Extract<T>>(
     if sampled == Order::Flat {
         // An equal sampled pair rules out strictly descending order; confirmed
         // descending keys must therefore retain the stable reversal.
-        match confirm_order(records, extractor) {
+        match confirm_order(records, &mut ParallelProbe(extractor)) {
             Order::Ascending => return None,
             Order::Descending { .. } => {
                 reverse_stably(records, extractor);
@@ -370,3 +387,34 @@ fn spawn_job<
 
 #[cfg(test)]
 mod bucket_borrow_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn probe_preserves_confirmation_backend() {
+        struct Extractor(usize);
+        impl Extract<u64> for Extractor {
+            type Value = u64;
+
+            fn key(&mut self, record: &u64) -> u64 {
+                *record
+            }
+
+            fn confirm_ascending(&mut self, records: &[u64], previous: u64) -> bool {
+                self.0 += 1;
+                records.first().is_none_or(|&first| previous <= first)
+                    && records.windows(2).all(|pair| pair[0] <= pair[1])
+            }
+        }
+
+        let records: Vec<_> = (0..8192).collect();
+        let mut extractor = Extractor(0);
+        assert!(matches!(
+            probe_order(&records, &mut ParallelProbe(&mut extractor)),
+            Order::Ascending
+        ));
+        assert_eq!(extractor.0, 1);
+    }
+}

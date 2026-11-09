@@ -69,7 +69,7 @@ The materialized route permutes full blocks in parallel and compacts them. A buc
 
 ### Bounded staging
 
-For at least 2²¹ records of at most 16 bytes, offer bounded finishing with limit `L = 16 * floor(sqrt(n))`. Disable it if `L * R < n`, and decline after scatter if any actual bucket exceeds L. Eligible layouts use four times the balanced root block size `ceil(sqrt(20n / (2PRs)))`, with the existing 1,024-byte and 32-record floors. The multiplier amortizes per-source ownership work; the [measurements](port.md#eight-core-parallel-completion) cover the whole call, not an isolated causal attribution of this parameter.
+For at least 2²¹ records of at most 16 bytes, offer bounded finishing with limit `L = 16 * floor(sqrt(n))`. Disable it if `L * R < n`, and decline after scatter if any actual bucket exceeds L. Eligible layouts use four times the balanced root block size `ceil(sqrt(20n / (2PRs)))`, with the existing 1,024-byte and 32-record floors. The factor 20 accounts for local and adopted directories coexisting. The multiplier amortizes per-source ownership work; the [measurements](port.md#eight-core-parallel-completion) cover the whole call, not an isolated causal attribution of this parameter.
 
 A bounded bucket gathers all its prefixes into private `MaybeUninit<T>` staging in stable directory order. Each prefix is protected by its physical-owner mutex until the copy transfers ownership. Its source block is then free, and the staging slice becomes the unique live owner. The shared serial sorter finishes that slice, using a tile budget as large as the bucket but at most 65,535 records.
 

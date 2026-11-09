@@ -7,7 +7,7 @@ The comparison is a local measurement pipeline: adapters produce verified block 
 | Module | Owns |
 |---|---|
 | `case.rs` | Key generation shared with the continuous suite |
-| `suite.rs` | Exact case matrix, case identity and resumable groups |
+| `plan.rs` | Catalog-backed input expansion and comparison case identity |
 | `record.rs` | Record semantics, input construction and immutable shared originals/references |
 | `variant.rs` | Capability exceptions, type-specific entry points and sort adapters |
 | `check.rs` | Ordering, exact record preservation and stable tie order |

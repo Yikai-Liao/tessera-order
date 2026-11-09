@@ -84,10 +84,30 @@ assert!(values[4].is_nan());
 
 [Keys as unsigned integers](../explain/keys.md) shows how each key type is encoded.
 
+## Parallel sorting
+
+Enable the optional `rayon` feature for `par_stable_sort` and `par_stable_sort_by_key`. It enables `std` even with default features disabled. Add a direct Rayon dependency if the application configures a custom pool:
+
+```toml
+[dependencies]
+tessera-sort = { version = "0.1", features = ["rayon"] }
+rayon = "1.10"
+```
+
+The entry points use Rayon's current pool. A caller can select its own pool with `install`:
+
+```rust
+let pool = rayon::ThreadPoolBuilder::new().num_threads(8).build().unwrap();
+let mut records = [(2u32, "first"), (1, "middle"), (2, "last")];
+pool.install(|| tessera_sort::par_stable_sort_by_key(&mut records, |record| record.0));
+assert_eq!(records, [(1, "middle"), (2, "first"), (2, "last")]);
+```
+
+Records need `Send`; the by-key callback needs `Fn + Sync` because calls may overlap. Stability and record preservation remain unchanged. Small inputs and one-thread pools use the serial engine, and ordered/constant fast paths do not promise parallel acceleration. The [parallel contract](../../conformance/semantics.md#rust-rayon-entry-points) covers panic recovery and the O(P√n) auxiliary-space bound.
+
 ## When to use something else
 
 - **Orders defined by a comparator**, strings, or other variable-length keys: use `slice::sort_by`. A comparator cannot be turned into radix digits.
-- **Parallel sorting**: Tessera is single-threaded.
 - **No allocator**: Tessera needs O(√n) scratch memory, so it needs `alloc`.
 
 The exact guarantees are in the [ordering semantics](../../conformance/semantics.md).

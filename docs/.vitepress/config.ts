@@ -201,8 +201,6 @@ function developmentSidebar() {
       items: [
         { text: "Roadmap", link: "/ROADMAP" },
         { text: "Python binding proposal", link: "/proposals/python-binding" },
-        { text: "Rayon parallel sorting proposal", link: "/proposals/rayon-parallel-sort" },
-        { text: "Maintainability refactor proposal", link: "/proposals/maintainability-refactor" },
       ],
     },
   ];

@@ -16,33 +16,30 @@ Open questions for this milestone:
 - **Sample duration and prepared-memory cap.** Fix the defaults from the test machine's memory and the time a 10M-record case takes.
 - **Cost of cached bucket IDs on 8-byte rows.** Evaluate `{u32 key, u32 row}` results in the first complete release report. If the cost is large, consider an `unsafe` entry point that skips the cache ([rationale](docs/design/engine.md#record-handling)).
 
-## Maintainability refactor
-
-A repository-wide round that removes duplicated rules and narrows change surfaces without changing algorithm logic or performance. See the [maintainability refactor proposal](docs/proposals/maintainability-refactor.md).
-
-| Deliverable | Done when |
-|---|---|
-| Typed native identity | A record type and a native registry index cannot be combined freely; layout, kernel output and algorithm name tests pass |
-| Benchmark IDs and records | Each ID grammar has one owner per language; each record and adapter rule has one authoritative location |
-| Tooling and documentation boundaries | `tools/` gets the repository root and comment marker without importing the workspace or GitHub publisher; stale statements and the implemented Rayon proposal are folded into their topics |
-
-The proposal also lists engine debt from the parallel engine for a separately measured round.
-
 ## Python binding
 
 An independent track that binds the Rust crate and does not wait for C++. See the [Python binding proposal](docs/proposals/python-binding.md).
 
 ## Rayon parallel sorting
 
-An independent Rust track, described in the [Rayon proposal](docs/proposals/rayon-parallel-sort.md). The optional `rayon` feature scatters root shards and sorts completed buckets in the caller's pool. Bounded root buckets now sort before final-band writes, and narrow direct-key windows count in parallel. The existing two continuous configurations track four-thread cases sequentially after their serial phases, with new baselines seeded after the trusted tracker rollout. Local paired measurements use the shared `parallel` plan; the [eight-core results](docs/design/port.md#eight-core-parallel-completion) include cases above 5× but not universal fivefold scaling.
+The optional feature and bounded completion are implemented; current contracts belong in [semantics](conformance/semantics.md#rust-rayon-entry-points) and the [engine reference](docs/design/engine.md#parallel-root-completion). The [eight-core results](docs/design/port.md#eight-core-parallel-completion) compare whole calls, not isolated source revisions or universal fivefold scaling. Remaining acceptance and refactors require the [measurement protocol](docs/development/benchmarking.md#run-an-experiment), including A/A and source-attribution controls.
 
 | Deliverable | Done when |
 |---|---|
-| API and module scaffold | Feature-gated entry points preserve serial semantics and work inside caller-owned Rayon pools |
-| Concurrent bucket sorting | Disjoint root buckets run as Rayon tasks through shared engine stages, with bounded scratch and a serial fallback |
-| Parallel root scatter | Stable classification and scatter run in parallel without an n-record buffer, with panic recovery and documented memory bounds |
-| Portable bounded completion | Sort eligible buckets in O(√n)-bounded staging; protect unread sources before final writes and retain the materialized fallback |
 | Broader acceptance | Extend measured whole-call scaling and memory coverage to other hosts, wide records and expensive extraction, with source-attribution controls for causal claims |
+
+### Measured engine refactors
+
+These are the engine items E1–E6 deferred from the completed tooling refactor, not permission to change hot paths without measurements. Preserve ownership and panic recovery; keep invariant tests for any copies retained for code placement.
+
+| ID | Debt | Acceptance |
+|---|---|---|
+| E1 | Owned `Narrow` and borrowed `KeyHalf` repeat window shifting | Share the representation only with preserved window invariants and paired source/placement evidence |
+| E2 | Parallel preparation repeats serial tile geometry, probes and half dispatch | Consolidate only if separate serial inlining contexts retain their measured behavior |
+| E3 | Parallel direct-key counting repeats serial counting and fill | Constrain shared semantics and establish both configurations' performance before merging mechanisms |
+| E4 | Window operations require forwarding through `KeyHalf`, `Narrow` and `RootExtractor` | Reduce forwarding obligations without losing bit-offset or direct/user-extractor distinctions; validate code generation |
+| E5 | Serial block storage contains Rayon scratch-segment state and a branch | Decide layout and tracking protocol explicitly: both continuous builds enable Rayon; the default feature set is a separate configuration |
+| E6 | `engine.rs` combines routing, sampling, planning, node/tile sorting and scratch | Split along mechanism/invariant boundaries only with inlining and placement controls |
 
 ## C++
 

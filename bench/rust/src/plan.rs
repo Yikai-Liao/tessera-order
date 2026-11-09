@@ -355,18 +355,23 @@ mod tests {
             }
         }
         let parallel = continuous.parallel_inputs().unwrap();
-        assert_eq!(parallel.len(), 4);
-        assert!(
-            parallel
-                .iter()
-                .all(|case| case.len == 10_000_000 && case.distribution == "random")
-        );
+        assert_eq!(parallel.len(), 8);
+        assert!(parallel.iter().all(|case| case.len == 10_000_000));
         assert_eq!(
             parallel
                 .iter()
-                .map(|case| case.ty.as_str())
+                .map(|case| (case.ty.as_str(), case.distribution.as_str()))
                 .collect::<Vec<_>>(),
-            ["row_u32", "row_u64", "u32", "u64"]
+            [
+                ("row_u32", "random"),
+                ("row_u32", "skew99"),
+                ("row_u64", "random"),
+                ("u32", "random"),
+                ("u64", "equal"),
+                ("u64", "random"),
+                ("u64", "reverse"),
+                ("u64", "sorted"),
+            ]
         );
         assert!(cases.iter().any(|case| {
             case.ty == "u32" && case.distribution == "sorted" && case.len == 65_536

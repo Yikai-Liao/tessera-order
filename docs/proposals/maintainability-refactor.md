@@ -2,7 +2,7 @@
 
 # Proposal: Maintainability refactor
 
-Status: proposed, not started. Date: 2026-11-09. Findings verified against `main` at `8bd64d9`, which includes the Rayon entry points.
+Status: in progress. Date: 2026-11-09. Findings verified against `main` at `8bd64d9`, which includes the Rayon entry points.
 
 This round makes the repository cheaper to read and change. It does not change algorithm logic or performance. Each item below names a rule that several places currently restate, or a boundary that one change has to cross more often than necessary, and moves it to one owner. Success means fewer duplicated rules, constraints checked by types or tests instead of by convention, and smaller change surfaces for common tasks. More files, layers or abstractions are not a success measure, and neither are shorter files.
 
@@ -132,7 +132,7 @@ Each refactor PR replays the tasks its boundary affects, updates their entries a
 
 ### Baseline at `826e6ec`
 
-These are repository-only walkthroughs, not implemented additions. The [tooling ownership map](../design/benchmark-tooling.md#ownership) and [validation commands](../../AGENTS.md#commands) are the common starting points. The files below identify separate responsibilities as well as repeated decisions; touching several files is not by itself a defect.
+These are repository-only walkthroughs, not implemented additions. The CI-check entry is replayed for F4; the other entries retain the baseline. The [tooling ownership map](../design/benchmark-tooling.md#ownership) and [validation commands](../../AGENTS.md#commands) are the common starting points. The files below identify separate responsibilities as well as repeated decisions; touching several files is not by itself a defect.
 
 #### Add a record type
 
@@ -169,8 +169,8 @@ These are repository-only walkthroughs, not implemented additions. The [tooling 
 #### Add a CI check
 
 - Read [CI policy](../development/ci.md), [the aggregate workflow](../../.github/workflows/ci.yml) and [path routing with its tests](../../.github/scripts/ci_changes.ts). Add an existing language-cell command in its [composite action](../../.github/actions/rust-test/action.yml); a genuinely new job also needs explicit dependencies and aggregation in `ci-ok`. Routing, platform coverage and aggregate failure behavior are different obligations.
-- Reuse [CLI task support](../../tools/tasks.ts) and [process/logging/cancellation](../../tools/process.ts) for shared operations. Checkout discovery currently requires importing [the workspace builder](../../bench/workspace.ts), although a check need not build a workspace (F4).
-- A benchmark check additionally reaches the separate [build path filter](../../.github/workflows/bench-build.yml) and [trusted tracker](../../.github/workflows/bench-track.yml); the status reader currently imports the publisher just for marker formatting (F4). Do not widen credentials, image contents or event ownership while sharing code.
+- Reuse [CLI task support](../../tools/tasks.ts), including checkout discovery, and [process/logging/cancellation](../../tools/process.ts) for shared operations. A check that needs the checkout root no longer needs to import the workspace builder; snapshot/build behavior remains owned by that builder.
+- A benchmark check additionally reaches the separate [build path filter](../../.github/workflows/bench-build.yml) and [trusted tracker](../../.github/workflows/bench-track.yml). The [marker module](../../bench/continuous/marker.ts) owns report identity for both status and publication, so understanding the marker does not require reading the publisher's write policy. Credentials, image contents and event ownership are unchanged.
 - Router tests catch routing mistakes; command tests exercise behavior; CI proves the actual platforms and `ci-ok` dependencies. Local success does not prove an unselected job ran. During this round use existing cells/jobs rather than expanding the CI budget.
 
 ## Stop condition

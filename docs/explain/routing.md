@@ -8,7 +8,7 @@ Before any radix pass, Tessera checks whether the input needs one. Many real inp
 
 | Sampled pairs | Class | What happens |
 |---|---|---|
-| some ascending and some descending | **unsorted** | go on to budgeted insertion |
+| some ascending and some descending | **unsorted** | finish insertion-sized tiles; otherwise try budgeted insertion |
 | all equal | **flat** | decide after the varying-bit scan (below) |
 | all `≤`, or all `≥` | candidate order | a full scan, `confirm_order`, checks every pair |
 
@@ -18,7 +18,9 @@ The sample rejects most unsorted inputs within a few pairs. The full scan runs o
 
 ## Budgeted insertion
 
-An unsorted input may still be *nearly* sorted: a sorted log with a few late entries, for example. Insertion sort finishes such an input in linear time, but on a random input it is quadratic. Tessera therefore gives it a **swap budget** and abandons it when the budget runs out.
+An unsorted input that fits a tile and has at most 48 records is already small enough for the existing insertion leaf. It goes directly to insertion finishing: trying a budget and scanning varying bits would only lead back to the same algorithm. The order probe still runs first, so ascending and descending inputs keep their existing return and reversal paths. The [executable stage model](../.vitepress/theme/sim/rootInsertion.ts) mirrors this choice.
+
+A larger unsorted input may still be *nearly* sorted: a sorted log with a few late entries, for example. Insertion sort finishes such an input in linear time, but on a random input it is quadratic. Tessera therefore gives it a **swap budget** and abandons it when the budget runs out.
 
 - If the input fits in one tile, insertion runs on the records with a budget of n swaps.
 - Otherwise, the keys of a probe window (one tile's worth of records, at most 65,535) are copied into a buffer and insertion-sorted there first. The number of swaps on the window predicts the number on the whole input: the budget for the records is `floor(swaps × n / window)`. The product is computed in a wider integer type, so it cannot overflow before division on a 32-bit target; the resulting budget is at most n. A window that needed no swaps proves nothing, because the inversions are elsewhere, so the radix path continues.
@@ -88,7 +90,8 @@ While the block partition writes its result back into the input, each child that
 | sorted | probe + one confirming scan | ~1 read pass, no allocation |
 | reversed | probe + scan + stable reversal | ~2 passes, no allocation |
 | all keys equal | probe + varying-bit scan | ~1 read pass, no allocation |
-| nearly sorted | budgeted insertion | linear in n plus inversions |
+| unsorted tile, at most 48 records | insertion finish | bounded quadratic leaf, no allocation |
+| larger nearly sorted input | budgeted insertion | linear in n plus inversions |
 | one dominant key | equality partition | one partition, the equal band is done |
 | sorted with a short outlier run | rotate + insertion | the body is routed on fewer bits |
 | at most 8 varying bits, record is its own key | counted window | one counting pass and one fill |

@@ -6,8 +6,8 @@ algorithms = [ "tessera" ]
 exclude = []
 
 [[include]]
-types = [ "u64" ]
-distributions = [ "random" ]
+types = [ "u64", "row_u64" ]
+distributions = [ "random", "sorted", "reverse", "equal" ]
 lengths = [ "insertion-max" ]
 
 [[include]]

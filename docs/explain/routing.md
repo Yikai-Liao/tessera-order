@@ -54,13 +54,13 @@ A record sorted by its own key is interchangeable with every record of the same 
 
 Records sorted by a key function keep their payloads: two records with key 7 may hold different data and in a fixed order between them. Counting would drop that, so `stable_sort_by_key` takes the [block partition](block-partition.md) below instead.
 
-### Already in bucket order
-
-A node whose records already sit in the two runs its top varying bit separates needs no partition. One scan reads that bit and reports whether the node is `0*1*` or `1*0*` in it; the second form is one rotation away from the first, and both runs keep their own order. Those runs *are* the partition, the bit leaves the candidate, and the recursion finishes each run in place — with no detector, no sample and no length cap. This covers sorted data with a separated block of keys at either end, several such blocks, or any other arrangement the order already groups. The scan stops at the first record that breaks the pattern, which unordered records reach within a few keys, so the check costs a handful of key reads when it fails and one pass when it succeeds.
-
 ### Block partition of the window
 
-The remaining inputs get one [block partition](block-partition.md) on the window, which also finishes the node. Wider nodes have two ways to split. Equality sampling is checked only on nodes of at least four tiles, so its 64-key sample is paid for.
+A node that reaches this point gets a [block partition](block-partition.md) on the window, which also finishes the node. Wider nodes have two ways to split. Equality sampling is checked only on nodes of at least four tiles, so its 64-key sample is paid for, and it runs before the digit route below.
+
+### Already in bucket order
+
+A node that reaches its digit partition may already hold the two runs its top varying bit separates, and then it needs no pass. One scan reads that bit and reports whether the node is `0*1*` or `1*0*` in it; the second form is one rotation away from the first, and both runs keep their own order. Those runs *are* the partition, the bit leaves the candidate, and the recursion finishes each run in place — with no detector, no sample and no length cap. This covers sorted data with a separated block of keys at either end, several such blocks, or any other arrangement the order already groups, as long as the node was not already finished by the narrow window or by an equality partition. The scan stops at the first record that breaks the pattern, which unordered records reach within a few keys, so the check costs a handful of key reads when it fails and one pass when it succeeds.
 
 ### Repeated key
 

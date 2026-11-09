@@ -97,7 +97,7 @@ const boxes: Box[] = [
     y: 390,
     w: 190,
     title: "Bucket order",
-    detail: "split where order already is",
+    detail: "digit route: split where order is",
     link: "/explain/routing#already-in-bucket-order",
     kind: "node",
   },
@@ -200,7 +200,7 @@ const go = (link: string) => router.go(withBase(link));
 
       <!-- Larger partition children re-enter the shared order gate. -->
       <g stroke="#5CA4F8" stroke-width="1.5" stroke-dasharray="5 4" fill="none">
-        <path v-for="x in [125, 585]" :key="`child${x}`" :d="`M${x},436 V462`" />
+        <path v-for="x in [125, 355, 585]" :key="`child${x}`" :d="`M${x},436 V462`" />
         <path d="M585,462 H12 V253 H196" marker-end="url(#tsr-arrow-node)" />
       </g>
 

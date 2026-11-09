@@ -269,7 +269,8 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
     sample_keys(records, &mut keys, extractor);
     // A node the order already groups is finished sequentially: the
     // bucket-order split needs no partition pass, so there is nothing to share.
-    if sample_mode(&mut keys).is_some() || ordered_width(records, top, extractor).is_some() {
+    let top_bit = 1u128 << (top - 1);
+    if sample_mode(&mut keys).is_some() || ordered_top(records, top_bit, extractor).is_some() {
         Sorter::<T, E, CACHED> {
             scratch,
             extractor,

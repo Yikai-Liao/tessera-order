@@ -745,60 +745,43 @@ fn window_mask(width: usize, shift: usize) -> u128 {
     (u128::MAX >> (u128::BITS as usize - width)) << shift
 }
 
-/// Widest window below `top` that no adjacent inversion crosses, or `None` when
-/// the records are not in ascending order even at the single top bit.
+/// Returns where the run of records without `bit` ends, when no record
+/// without it follows one with it.
 ///
-/// An inversion crosses the highest differing bit `highest` of its pair, and
-/// every window containing that bit would put the two records in descending
-/// buckets, so the inversion caps the width at `top - 1 - highest`. The scan
-/// stops as soon as no window is left, which unordered records reach within a
-/// few records.
-fn ordered_width<T, E: Extract<T>>(records: &[T], top: usize, extractor: &mut E) -> Option<usize> {
-    let mut width = top;
-    let mut previous = extractor.key(&records[0]).to_u128();
-    for record in &records[1..] {
-        let key = extractor.key(record).to_u128();
-        if key < previous {
-            // The pair differs, so its highest differing bit is well defined.
-            let highest = (u128::BITS - 1 - (previous ^ key).leading_zeros()) as usize;
-            if highest >= top {
-                return None;
-            }
-            width = width.min(top - 1 - highest);
-            if width == 0 {
-                return None;
-            }
-        }
-        previous = key;
+/// An unordered input answers within a pair or two.
+fn ordered_top<T, E: Extract<T>>(records: &[T], bit: u128, extractor: &mut E) -> Option<usize> {
+    let mut boundary = 0;
+    while boundary < records.len() && extractor.key(&records[boundary]).to_u128() & bit == 0 {
+        boundary += 1;
     }
-    Some(width)
+    for record in &records[boundary..] {
+        if extractor.key(record).to_u128() & bit == 0 {
+            return None;
+        }
+    }
+    Some(boundary)
 }
 
 impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
-    /// Splits a node that is already in bucket order, without moving a record.
+    /// Splits a node whose first varying bit never falls, without moving a
+    /// record: the two runs the order already holds are the two buckets that
+    /// bit would form. Returns whether it split.
     ///
-    /// `ordered_width` reports the finest window the existing order already
-    /// resolves, so each bucket of that window is one run: splitting there
-    /// peels exactly the bits that are in order and the recursion inherits the
-    /// rest. Returns whether it split.
+    /// Records that are not ordered in that bit answer within a pair or two, so
+    /// an unordered node pays a few key reads for the check. An ordered node
+    /// saves the partition pass the top bit would otherwise need and hands the
+    /// bits below it to the recursion.
     fn split_ordered(&mut self, records: &mut [T], top: usize, varying: u128) -> bool {
-        let Some(width) = ordered_width(records, top, self.extractor) else {
+        let bit = varying & !window_mask(top - 1, 0);
+        let Some(boundary) = ordered_top(records, bit, self.extractor) else {
             return false;
         };
-        let shift = top - width;
-        let candidate = varying & !window_mask(width, shift);
-        let mut start = 0;
-        while start < records.len() {
-            let bucket = self.extractor.key(&records[start]).to_u128() >> shift;
-            let mut end = start + 1;
-            while end < records.len()
-                && self.extractor.key(&records[end]).to_u128() >> shift == bucket
-            {
-                end += 1;
-            }
-            self.sort_child(&mut records[start..end], candidate);
-            start = end;
+        if boundary == 0 || boundary == records.len() {
+            return false;
         }
+        let candidate = varying & !bit;
+        self.sort_child(&mut records[..boundary], candidate);
+        self.sort_child(&mut records[boundary..], candidate);
         true
     }
 
@@ -876,9 +859,9 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
 
     /// Partitions by digit, then sorts each unfinished child.
     fn partition_digit(&mut self, records: &mut [T], digit: Digit, varying: u128) {
-        // A node already in bucket order needs no pass: the partition would only
-        // move records inside their own bucket, and a wide digit would reserve
-        // block scratch for a split the order already provides.
+        // A node already ordered in its top varying bit needs no pass: that bit
+        // only separates runs the input holds, the recursion inherits the rest,
+        // and the check answers in a pair or two for unordered records.
         if self.split_ordered(records, bit_len(varying), varying) {
             return;
         }
@@ -1764,26 +1747,31 @@ mod tests {
     }
 
     #[test]
-    fn ordered_width_resolves_existing_buckets() {
-        // Two runs separated by the top bit resolve that bit alone: inside the
-        // upper run the next bit descends.
-        let mut split: Vec<u64> = (0..512).collect();
-        split.push((1 << 63) | (1 << 62) | 2);
-        split.push((1 << 63) | 1);
-        assert_eq!(ordered_width(&split, 64, &mut Direct), Some(1));
+    fn split_ordered_separates_the_runs_the_top_bit_holds() {
+        let mut scratch = Scratch::new();
+        let mut sorter = Sorter::<_, _, true> {
+            scratch: &mut scratch,
+            extractor: &mut Direct,
+            tile_bytes: 32,
+        };
+        // Ascending keys, then keys that only the top bit separates: the split
+        // needs no partition and both children inherit the bits below it.
+        let mut records: Vec<u64> = (0..300).collect();
+        records.extend((0..40).map(|index| (1 << 63) | (index * 7)));
+        let mut expected = records.clone();
+        expected.sort_unstable();
+        let varying = records
+            .iter()
+            .fold(0u128, |mask, record| mask | u128::from(*record));
+        assert!(sorter.split_ordered(&mut records, bit_len(varying), varying));
+        assert_eq!(records, expected);
 
-        // Keys already in block order resolve the prefix their blocks share.
-        let mut blocked = Vec::new();
-        for block in 0..8u64 {
-            blocked.push((block << 40) | (1 << 39));
-            blocked.push(block << 40);
-        }
-        assert_eq!(ordered_width(&blocked, 64, &mut Direct), Some(24));
-
-        // A key above the whole body leaves no window at all.
-        let mut inverted = split.clone();
-        inverted.swap(0, split.len() - 1);
-        assert_eq!(ordered_width(&inverted, 64, &mut Direct), None);
+        // A record holding the top bit before the body ends blocks the split.
+        let mut inverted: Vec<u64> = vec![(1 << 63) | 5, 3, 4];
+        let varying = inverted
+            .iter()
+            .fold(0u128, |mask, record| mask | u128::from(*record));
+        assert!(!sorter.split_ordered(&mut inverted, bit_len(varying), varying));
     }
 
     #[test]

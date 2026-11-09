@@ -105,7 +105,55 @@ Cache-line-padded physical owners did not demonstrate a benefit; that record scr
 
 Later unchanged-baseline repeats also shifted beyond earlier controls. Increasing the sample target to 100 ms and prepared cap to 1,024 MiB for both baseline and candidate did not settle the variation: the baseline record A/A envelope still spanned 0.831–1.169. That experiment also changed the prepared working set and is not directly comparable with the earlier 5 ms sessions. No serial gain or regression is attributed to these source changes; the serial core was not modified, and future candidates must preserve its performance rather than trade it for parallel speedup.
 
-The next unimplemented hypothesis is to scatter the final tile pass directly into its protected final input band, eliminating the subsequent staging-to-input copy without key/index indirection. It requires an explicit ownership handoff, no metadata locks across user callbacks, and restoration to staging if a key panics before the final scatter. Smaller digit fan-out is a separate hypothesis whose additional passes and restoration copies must be measured. No new algorithm or routing choice is settled by these diagnostics.
+These diagnostics motivated separate final-scatter fusion and smaller-fan-out experiments, recorded [below](#final-scatter-fusion-and-narrower-digits). Neither the diagnostics nor those follow-ups establish a new production algorithm or routing choice.
+
+### Final-scatter fusion and narrower digits
+
+A bounded follow-up implemented two portable prototypes against the `7ab58c9` sorting baseline. **A** retained the existing one/two-pass LSD plans but scattered the last pass directly into the final input band. **B** separately capped those eligible LSD plans at eight bits, producing three passes for contiguous remaining 24-bit variation. Insertion, longer baseline plans that may choose MSD, oversized buckets and public APIs were unchanged. Prototypes, source snapshots, test logs, retained binaries and raw observations live outside Git at `/home/lyk/code/tessera-research/final-scatter-fusion/`; its `README.md` indexes the experiments and `SHA256SUMS` checks their files. Neither prototype was retained in the production engine.
+
+Both prototypes completed the last histogram and cached user classifications before protecting the entire output band. No metadata lock spanned a user callback. A callback-free scatter then committed final ownership, disarmed tile restoration and suppressed the outer staging copy. A key panic before that transfer restored staging and used the existing recovery write. This reused the bounded allocations and preserved the O(P√n) space argument.
+
+The maintained comparison pipeline temporarily registered two independently compiled baseline crates, fixed A, and two calls to B in one executable. The serial Tessera entry remained first in the catalog, preserving the runner's serial A/A contract. The parallel pairs were additionally summarized with the maintained `summarizePaired` function, using the two baseline samples' mean per block; they must not be confused with the standard report's serial denominator. Independent baseline copies had distinct code addresses, but independent B placement copies were not tested. These are bounded development screens, not final source/placement attribution.
+
+The host and compiler conditions matched the preceding investigation: eight physical Ryzen 7 8845H cores, CPUs `0,2,4,6,8,10,12,14`, powersave governor, boost and SMT enabled, Arch Rust 1.99.1, release default target flags and `compare,rayon`. No power or kernel policy changed. Each acceptance session used 10M seed-one random records, nine shuffled blocks, the default 5 ms target and 256 MiB prepared cap; every timed output was verified. The valid-control primary screen is `A-screen-valid/`, followed by `B-screen/` and the four-type `AB-matrix/`. The initial `A-screen/` accidentally placed a parallel adapter first in the catalog, invalidating its serial A/A pair; it is explicitly excluded.
+
+| 10M random input | A / parallel baseline | B / parallel baseline, two calls | Baseline parallel A/A envelope | B parallel A/A envelope |
+|---|---:|---:|---:|---:|
+| 4-byte `u32` | 1.102 | 1.254 / 1.228 | 0.887–1.113 | 0.801–1.199 |
+| 8-byte `{u32, u32}` | 1.061 | 1.160 / 1.119 | 0.828–1.172 | 0.867–1.133 |
+| 8-byte `u64` | 0.994 | 0.957 / 1.039 | 0.897–1.103 | 0.899–1.101 |
+| 16-byte `{u64, u32}` | 0.982 | 0.980 / 0.990 | 0.875–1.125 | 0.923–1.077 |
+
+Lower ratios are faster; ratios are paired medians, not quotients of independent absolute medians. In the matrix's 8-byte record case, baseline absolute medians were 14.537/14.816 ms, A was 16.192 ms, and B was 17.143/17.767 ms. The earlier valid A screen measured A at 16.809/17.468 ms versus baseline 15.900/16.342 ms, with A's own A/A envelope 0.894–1.106. No session demonstrated an acceptable primary-input gain. B also showed a slower direction on `u32`; apparently faster wide-key rows remain within controls and mostly exercise unchanged longer-plan fallbacks. This does not justify changing the serial engine or claiming that either hypothesis is universally ineffective.
+
+A separate instrumented session (`movement/`) counted actual record transfers at the gather, relocation, tile-scatter, guard-restore and final-copy sites. It covered 19 baseline, 19 A and 20 B finishing invocations, including validation, calibration, timed calls and B's memory-worker call. Diagnostic counters alter scheduling; their times are not acceptance evidence.
+
+| Finishing payload moved per 80 MB input | Baseline | A | B |
+|---|---:|---:|---:|
+| Gather | 80 MB | 80 MB | 80 MB |
+| Ordinary tile scatters | 160 MB | 80 MB | 160 MB |
+| Fused final scatter | 0 | 80 MB | 80 MB |
+| Guard restoration | 0 | 0 | 0 |
+| Separate final copy | 80 MB | 0 | 0 |
+| Median source relocation | 62.733 MB | 64.521 MB | 63.713 MB |
+
+A therefore removed one real 80 MB transfer. B's three scatters moved the same 240 MB as the baseline's two scatters plus final copy. Relocation changed only slightly. These are logical payload bytes, excluding root scatter and metadata, not measured cache-link or DRAM traffic.
+
+Sorting-scoped IBS used one retained diagnostic executable with debug information, frame pointers and the installed uProf controller. Sampling was enabled only around the selected complete parallel sort. The main processes contributed eighteen baseline calls, eighteen A calls and thirty-six B calls; B's two registered calls share an adapter. Memory children were excluded. Working reports are `ibs-baseline/`, `ibs-a-sqlite/` and `ibs-b-sqlite/`, with aggregation in `ibs-summary.json`. Initial A/B DuckDB-backed translations yielded empty process/function reports and were excluded; SQLite-backed recollections supplied their tables. Kernel-symbol mismatch warnings remain, so this analysis concerns user-space functions.
+
+| Tile and fused-output function self samples | Baseline | A | B |
+|---|---:|---:|---:|
+| Store samples | 5,984 | 5,957 | 17,490 |
+| L1 store-miss samples | 1,648 | 1,676 | 1,502 |
+| Store-miss fraction | 27.54% | 28.13% | 8.59% |
+| Load L2-hit fraction | 6.65% | 4.41% | 2.72% |
+| Mean sampled L1 load-miss latency | 19.38 cycles | 28.27 cycles | 40.98 cycles |
+
+The groups include the tile kernel plus fused output/protection when emitted separately; they are not instruction-identical regions. A's final-output function alone had 745 misses among 1,430 store samples (52.10%). B's final-scatter function had 395 among 5,944 (6.65%). B showed a lower sampled store-miss fraction in these differing function populations; final-write locality and the timing causes remain unisolated. A removed a real copy without demonstrating a whole-call benefit. B also adds a full histogram/key-extraction round, and its combined tile/output op samples per profiled call increased. Neither operation samples nor their latency sums are wall-clock shares or cache bandwidth measurements; no single cause has been isolated for the timing outcome.
+
+A passed focused native and Miri ownership/panic tests and an independent static Agentic Review. B additionally passed the Rayon all-target tests, Rayon plus Portable SIMD tests, strict crate Clippy, and forced one/two/three-pass Miri cases. Tests covered stable equal keys, owned drop counts, inconsistent keys, exclusive non-`Sync` borrows, first/last histogram panics, adjacent bands, relocation, and a native 65,535-record three-byte tile with cache-tail IDs. A preliminary B Miri fixture was too small to select the intended three-pass route; it failed its route assertion, not an ownership check, and was replaced by a correctly sized fixture. No accepted engine change remains, so the current algorithm models and contracts are unchanged.
+
+Further work should first distinguish final-write locality, additional histogram work and protection costs within these two hypotheses. A ten-bit cap alone is not a distinct 24-bit plan: the existing balanced planner still produces 8+8+8. A mixed plan would require its own explicit experiment. Mixed radix, software write combining, new relocation policies and lock restructuring were not measured in this follow-up.
 
 ## What changed
 

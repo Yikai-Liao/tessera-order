@@ -80,7 +80,7 @@ fn prepare<T: NativeRecord>(algorithm: NativeAlgorithm, stable: bool, input: Rc<
 
 ### F4: dependency direction
 
-`repositoryRoot` moves to `tools/tasks.ts`, which already resolves result locations from the repository root for CLI tasks. Only `tools/` calls it, and `tools/process.ts` stays limited to running processes, logging and cancellation. The comment marker moves to a small module that both `status.ts` and `github.ts` import. Other code stays in place. Do not create `core/`, `shared/` or `utils/` layers.
+`repositoryRoot` moves to `tools/tasks.ts`, which already derives result locations from the repository root for CLI tasks. Only `tools/` calls it, and `tools/process.ts` stays limited to running processes, logging and cancellation. The comment marker moves to a small module that both `status.ts` and `github.ts` import. Other code stays in place. Do not create `core/`, `shared/` or `utils/` layers.
 
 ## Sequence
 

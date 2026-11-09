@@ -165,10 +165,17 @@ fn measure_parallel<T: Copy + Send>(
     same: impl Fn(&T, &T) -> bool,
     sort: impl Fn(&mut [T]) + Sync,
 ) {
-    assert!(
-        std::thread::available_parallelism().unwrap().get() >= 4,
-        "four allowed CPUs are required for par-4"
-    );
+    // Criterion uses test mode unless --bench is present without --test.
+    // Build verification may oversubscribe CPUs, but measured runs may not.
+    let args = std::env::args_os().collect::<Vec<_>>();
+    let test_mode =
+        !args.iter().any(|arg| arg == "--bench") || args.iter().any(|arg| arg == "--test");
+    if !test_mode {
+        assert!(
+            std::thread::available_parallelism().unwrap().get() >= 4,
+            "four allowed CPUs are required for par-4"
+        );
+    }
     let pool = tessera_bench::pool::BenchmarkPool::new(4);
     measure(c, id, "par-4", input, expected, same, |values| {
         pool.install(|| sort(values))

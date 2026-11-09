@@ -45,7 +45,7 @@ export async function buildContinuous(root: string, out: string) {
       if (!linkage.includes("statically linked"))
         throw new Error(`${variant.name} executable is not statically linked`);
       // Exercise the new exact-ID contract in this unprivileged build job.
-      // --test verifies outputs without producing performance measurements.
+      // --test verifies outputs without measurements or a four-CPU prerequisite.
       const listed = (
         await command(artifact.executable, ["--bench"], {
           capture: true,

@@ -92,9 +92,15 @@ test("insufficient CPUs fail before any benchmark work starts", {
 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "tessera-exclusive-cpus-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const cpu = (await readFile("/proc/self/status", "utf8"))
-    .match(/^Cpus_allowed_list:\s*(.+)$/m)![1]
-    .split(/[,-]/)[0];
+  const allowed = (await readFile("/proc/self/status", "utf8")).match(
+    /^Cpus_allowed_list:\s*(.+)$/m,
+  )![1];
+  const cpus: number[] = [];
+  for (const range of allowed.split(",")) {
+    const [first, last = first] = range.split("-").map(Number);
+    for (let cpu = first; cpu <= last && cpus.length < 2; cpu++) cpus.push(cpu);
+    if (cpus.length === 2) break;
+  }
   const binary = join(root, "bench");
   const started = join(root, "started");
   await writeFile(
@@ -106,15 +112,25 @@ else require("node:fs").writeFileSync(${JSON.stringify(started)}, "bad");
 `,
     { mode: 0o755 },
   );
-  const out = join(root, "results");
-  const result = spawnSync(
-    "taskset",
-    ["-c", cpu, process.execPath, cli, "continuous", "run", binary, "--out", out],
-    {
-      encoding: "utf8",
-    },
-  );
-  assert.equal(result.status, 1);
-  assert.match(await readFile(`${out}.log`, "utf8"), /4 available CPUs/);
-  await assert.rejects(readFile(started), { code: "ENOENT" });
+  for (let count = 1; count <= cpus.length; count++) {
+    const out = join(root, `results-${count}`);
+    const result = spawnSync(
+      "taskset",
+      [
+        "-c",
+        cpus.slice(0, count).join(","),
+        process.execPath,
+        cli,
+        "continuous",
+        "run",
+        binary,
+        "--out",
+        out,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status, 1);
+    assert.match(await readFile(`${out}.log`, "utf8"), /4 available CPUs/);
+    await assert.rejects(readFile(started), { code: "ENOENT" });
+  }
 });

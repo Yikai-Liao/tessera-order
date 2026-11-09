@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { figureContent } from "../svg-test-utils.ts";
+import { figureContent, parseSvg } from "../svg-test-utils.ts";
 import { renderFigures } from "./charts.ts";
 import { createFixture } from "./fixture.ts";
 import { collectWarnings, writeReport } from "./index.ts";
@@ -342,6 +342,36 @@ test("custom selections retain figures", () => {
   assert.doesNotMatch(figures[0].svg, /NaN|Infinity/);
 });
 
+test("selected inputs retain overflowing ranges", () => {
+  for (const [low, high] of [
+    [0.5, 2],
+    [0.01, 2],
+    [0.5, 64],
+    [0.01, 64],
+    [0.004, 64],
+    [0.0000004, 64],
+  ]) {
+    const dataset = createFixture();
+    const manifest = dataset.manifests.get("default")!;
+    manifest.cases = manifest.cases.filter(
+      (input) => input.ty === "u64" && input.distribution === "random" && input.len === 65536,
+    );
+    dataset.samples = dataset.samples.filter((sample) => sample.case_id === "u64/random/65536/s1");
+    dataset.memory = dataset.memory.filter((sample) => sample.case_id === "u64/random/65536/s1");
+    const summaries = summarize(dataset);
+    const summary = summaries.get(measurementId("default", "u64/random/65536/s1", "std-stable"))!;
+    Object.assign(summary, { ratio: 1, low, high });
+    const [figure] = renderFigures(dataset, summaries);
+    assert.match(figure.name, /^selected-/);
+    assert.match(figure.table, /Time ratio \| Block range \| A\/A range/);
+    const range = `${low < 0.01 ? low.toPrecision(2) : low.toFixed(2)}×–${high}×`;
+    assert.ok(figure.table.includes(range), range);
+    assert.ok(figure.svg.includes(range), range);
+    assert.equal(figure.svg.includes("rotate(270)"), low < 1 / 32);
+    assert.equal(figure.svg.includes("rotate(90)"), high > 32);
+  }
+});
+
 test("mixed plans disclose figure scope", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-mixed-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -370,6 +400,66 @@ test("mixed plans disclose figure scope", async (t) => {
   assert.match(report, /ranking.svg/);
   const summaries = JSON.parse(await readFile(join(directory, "report/summaries.json"), "utf8"));
   assert.ok(summaries.some((row: { caseId: string }) => row.caseId === "u64/random/1234/s1"));
+});
+
+test("field scales include SIMD rings", () => {
+  for (const factor of [1 / 8, 64]) {
+    const dataset = createFixture(true);
+    for (const sample of dataset.samples) {
+      if (sample.build === "portable-simd" && sample.variant !== "std-stable")
+        sample.elapsed_ns = Math.round(sample.elapsed_ns * factor);
+    }
+    const figures = renderFigures(dataset, summarize(dataset));
+    for (const name of ["inputs", "short", "types"]) {
+      const figure = figures.find((chart) => chart.name === name)!;
+      // SIMD speeds of 26x or 0.05x fit inside the 32x limit and must
+      // remain rings, not overflow triangles on a default-only scale.
+      assert.match(figure.svg, />16×<\/text>/, `${name}, factor=${factor}`);
+      assert.doesNotMatch(figure.svg, /rotate\((90|270)\)/, `${name}, factor=${factor}`);
+      const root = parseSvg(figure.svg);
+      const rings = [
+        ...root.querySelectorAll(
+          '[aria-label="dot"][fill="none"][stroke-width="2"] circle[r="5.5"]',
+        ),
+      ];
+      const defaults = [...root.querySelectorAll('[aria-label="dot"] circle[r="6.5"]')];
+      assert.equal(rings.length, defaults.length, name);
+      assert.ok(rings.length > 0, name);
+      const ticks = [...root.querySelectorAll('[aria-label="x-axis tick label"] text')];
+      const position = (label: string) =>
+        Number(
+          ticks
+            .find((tick) => tick.textContent === label)!
+            .getAttribute("transform")!
+            .match(/translate\(([^,]+)/)![1],
+        );
+      const pixelsPerDoubling = (position("16×") - position("slice::sort")) / 4;
+      for (const [index, ring] of rings.entries()) {
+        assert.equal(ring.getAttribute("cy"), defaults[index].getAttribute("cy"));
+        const displacement =
+          Number(ring.getAttribute("cx")) - Number(defaults[index].getAttribute("cx"));
+        assert.ok(
+          Math.abs(displacement / pixelsPerDoubling - Math.log2(1.25 / factor)) < 0.002,
+          name,
+        );
+      }
+    }
+  }
+});
+
+test("speed panels keep the stated overflow limit", () => {
+  const dataset = createFixture(true);
+  for (const sample of dataset.samples) {
+    if (sample.build === "portable-simd" && sample.variant !== "std-stable")
+      sample.elapsed_ns = Math.round(sample.elapsed_ns / 12);
+  }
+  for (const figure of renderFigures(dataset, summarize(dataset)).filter(
+    (chart) => chart.name !== "memory",
+  )) {
+    // A 39x speed exceeds the 32x cap even after axis padding.
+    assert.doesNotMatch(figure.svg, />64×<\/text>/, figure.name);
+    assert.match(figure.svg, /rotate\(90\)/, figure.name);
+  }
 });
 
 test("SIMD shares the anchor", () => {

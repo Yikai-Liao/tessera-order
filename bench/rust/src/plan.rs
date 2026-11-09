@@ -315,7 +315,10 @@ mod tests {
     fn presets_preserve_case_counts() {
         let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
         let cases = continuous.inputs().unwrap();
-        assert_eq!(cases.len(), 50);
+        assert_eq!(cases.len(), 51);
+        assert!(cases.iter().any(|case| {
+            case.ty == "u32" && case.distribution == "sorted" && case.len == 65_536
+        }));
         for (text, expected) in [
             (include_str!("../../plans/smoke.toml"), 125),
             (include_str!("../../plans/release.toml"), 381),

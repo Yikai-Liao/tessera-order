@@ -47,7 +47,9 @@ mod sealed {
         where
             Self: RadixKey,
         {
-            crate::engine::confirm_ascending(keys, &mut Direct, previous)
+            // Confirmation and insertion probes cross the same ordered runs.
+            keys.first().is_none_or(|key| previous <= key.encode())
+                && Self::first_inversion(keys).is_none()
         }
 
         #[inline(always)]
@@ -455,5 +457,58 @@ impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for KeyHalf<'_, E, SHIFT> 
     {
         self.0
             .try_count_window_parallel(records, low + SHIFT, width)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec::Vec;
+
+    /// Checks confirmation against scalar extraction at every adjacent pair.
+    fn check_confirmation<K: RadixKey>(mut keys: Vec<K>) {
+        keys.sort_by_key(|key| key.encode());
+        let zero = K::Encoded::from_usize(0);
+        for previous in [zero, !zero] {
+            let agrees = |records: &[K]| {
+                assert_eq!(
+                    Direct.confirm_ascending(records, previous),
+                    crate::engine::confirm_ascending(records, &mut ByKey(|key: &K| *key), previous,),
+                );
+            };
+            agrees(&keys);
+            for index in 1..keys.len() {
+                keys.swap(index - 1, index);
+                agrees(&keys);
+                keys.swap(index - 1, index);
+            }
+        }
+    }
+
+    #[test]
+    fn confirmation_matches_scalar() {
+        // Include peel, mask-block and SIMD boundaries, with an inversion on
+        // either side of each one. Duplicate keys exercise non-strict order.
+        let lengths: &[usize] = if cfg!(miri) {
+            &[0, 1, 5, 34]
+        } else {
+            &[0, 1, 2, 4, 5, 31, 32, 33, 34, 63, 64, 65, 66, 127, 128, 129]
+        };
+        for &len in lengths {
+            check_confirmation((0..len).map(|index| index as u32 / 2).collect());
+            check_confirmation((0..len).map(|index| index as i64 / 2 - 32).collect());
+            check_confirmation((0..len).map(|index| (index as u128) << 96).collect());
+            check_confirmation((0..len).map(|index| Reverse(index as u64 / 2)).collect());
+            check_confirmation(
+                (0..len)
+                    .map(|index| f32::from_bits((index as u32).wrapping_mul(0x9e37_79b9)))
+                    .collect(),
+            );
+            check_confirmation(
+                (0..len)
+                    .map(|index| f64::from_bits((index as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)))
+                    .collect(),
+            );
+        }
     }
 }

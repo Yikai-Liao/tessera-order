@@ -64,7 +64,7 @@ A new dataset does not require a new template. A genuinely different question ma
 - Labels form a left column; numbers form right-aligned value columns. Words do not repeat inside every plotted cell.
 - Blue emphasizes Tessera or less run time, orange identifies other radix sorts or more run time, and neutral grey provides context. A chart's legend states its meaning; colour alone does not carry the verdict.
 - Use dots and ranges for comparisons. A reference line makes the denominator visible. Ratio comparisons use logarithmic spacing; equal multiplicative changes occupy equal distances.
-- A Portable SIMD build is a hollow ring in algorithm-speed figures. Rings are drawn above dots, and Tessera is drawn above the competitor field.
+- A Portable SIMD build is a hollow ring in algorithm-speed figures. Rings are drawn above dots, and Tessera is drawn above the competitor field. The shared axis includes every plotted build; values outside 1/32×–32× use overflow triangles, with their numeric values retained in the accompanying tables. Selected-input figures also mark off-scale block-range endpoints, even when the median is in range, and print both bounds in the figure and table.
 - Thin rules separate groups. Titles and value columns carry hierarchy; avoid gradients, shadows, 3D effects and per-chart font choices.
 - Light and dark surfaces use the same semantic colours and separate neutral tokens. Every SVG includes a title and description.
 

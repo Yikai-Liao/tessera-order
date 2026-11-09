@@ -212,6 +212,22 @@ export function renderRows(spec: RowChart) {
               strokeWidth: 2,
               strokeLinecap: "round",
             }),
+            // A range can cross an axis limit while its median stays inside.
+            Plot.dot(
+              row.span.filter(
+                (value) => spec.scale.clamp && (value < spec.scale.low || value > spec.scale.high),
+              ),
+              {
+                x: (value: number) => value,
+                y: cy,
+                symbol: "triangle",
+                rotate: (value: number) => (value < spec.scale.low ? 270 : 90),
+                r: 4.5,
+                fill: ink[row.marks[0].tone],
+                stroke: ink.panel,
+                strokeWidth: 2,
+              },
+            ),
           ],
         });
       }

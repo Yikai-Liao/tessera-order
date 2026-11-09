@@ -18,7 +18,7 @@ This document describes the engine in `rust/tessera-sort`. It describes current 
 
 The engine samples adjacent pairs at a stride of `max(1, floor(n / 4,096))` to classify the input as ascending, descending, flat (every sampled pair equal) or unsorted. The 4,096-pair target determines the stride, not a hard sample limit. Unless unsortedness is found early, the loop visits `floor((n - 1) / stride)` pairs. An ascending or descending sample is confirmed by a full scan, which takes its direction from the first unequal key. A confirmed ascending input returns immediately. A confirmed descending input is reversed stably. Strictly descending keys need only the whole-slice reversal; otherwise each run of equal keys is reversed back. A flat sample is confirmed after the varying-bit scan below, since a constant input stops there.
 
-An unsorted input gets a budgeted stable insertion pass. When the probe window, one tile of records, is shorter than the input, the pass first runs on a buffered copy of the window's keys to estimate the number of swaps, and only then touches the records with a budget scaled to the whole input. Each call owns this encoded-key buffer and releases it before the radix path continues. If the budget runs out, the input is left as a stable permutation of itself and the radix path continues. See [Insertion and scans](#insertion-and-scans) for how the pass finds inversions.
+An unsorted input gets a budgeted stable insertion pass. When the probe window, one tile of records, is shorter than the input, the pass first runs on a buffered copy of the window's keys to estimate the number of swaps, and only then touches the records with a budget scaled to the whole input. The scaling uses a wide intermediate product so that a valid budget cannot overflow on 32-bit targets. Each call owns this encoded-key buffer and releases it before the radix path continues. If the budget runs out, the input is left as a stable permutation of itself and the radix path continues. See [Insertion and scans](#insertion-and-scans) for how the pass finds inversions.
 
 ### 2. Varying bits
 
@@ -30,7 +30,7 @@ A node whose remaining variation spans at most eight bits is one window away fro
 
 Otherwise the node is split by one of three partitions, all of them stable. The first two are tried only on nodes of at least four tiles, which amortize their 64-key sample:
 
-- **Repeated key.** The node samples 64 keys in runs of 8. If one value covers at least a quarter of the sample, an equality partition separates it from the rest, so heavily repeated keys stop costing passes.
+- **Repeated key.** The node samples 64 keys in runs of 8. If one value covers at least a quarter of the sample, an equality partition separates it from the rest, so heavily repeated keys stop costing passes. If changing keys leave the entire node below or above that sampled value, a digit partition consumes candidate bits instead of repeating an unchanged node.
 - **Outlier run.** If a short run at either end of the node (at most 1,024 records) disagrees with all other records on the highest varying bit, the run is split off and finished by insertion sort, and the rest of the node keeps a narrower set of varying bits.
 - **Top digit.** Otherwise [`choose_split_digit`](../../rust/tessera-sort/src/engine.rs) targets children of half a tile. It starts with enough bits for `n / target` children, clamped to 3–8 bits and the available key bits. A sample of 128 keys checks whether at least a quarter of the digit's buckets are occupied; a concentrated digit widens by two bits at a time, up to 12 or the available key bits.
 
@@ -93,7 +93,7 @@ The scan depends on the extractor and the build:
 | Key function (`stable_sort_by_key`) | One record at a time, keeping the previous key, so the key function runs once per scanned record | Same |
 | Direct keys, budgeted probe | Blocked scan of 32 pairs per mask update (`scan::first_inversion`); `f64` uses the scalar scan | Vector scan, with the instruction set selected once per pass |
 | Direct keys, insertion finish | Scalar scan: the short ordered runs a radix partition leaves do not amortize a block mask ([measurements](port.md#scalar-insertion-finishing)) | Vector scan, with the instruction set selected once per pass |
-| Direct keys, ascending confirmation | Scalar scan | The vector scan, dispatched once |
+| Direct keys, ascending confirmation | The same scan as a budgeted probe, after checking the encoded predecessor | The vector scan, dispatched once |
 
 With `portable-simd`, slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time, and `Reverse<K>` keys keep the default-build scans. The insertion loop is inlined into the dispatched function, so its scan runs with the selected target features.
 

@@ -121,94 +121,6 @@ fn sample_mode<V: Unsigned>(keys: &mut [V]) -> Option<V> {
     (best.len() * MODE_SHARE_DENOMINATOR >= len).then_some(best[0])
 }
 
-/// A side holding at most `1 / MINORITY_DENOMINATOR` of the sample is the minority.
-const MINORITY_DENOMINATOR: usize = 8;
-
-/// Whether `bit` separates a minority of the sample, and which side is the
-/// minority: `true` when the records with the bit set are the few.
-fn sample_minority_bit<V: Unsigned>(keys: &[V], bit: V) -> Option<bool> {
-    let zero = V::from_usize(0);
-    let set = keys.iter().filter(|key| (**key & bit) != zero).count();
-    let clear = keys.len() - set;
-    if set * MINORITY_DENOMINATOR <= keys.len() {
-        Some(true)
-    } else if clear * MINORITY_DENOMINATOR <= keys.len() {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-/// Records at one end that a split may waste a whole pass on. The run is
-/// finished by an insertion sort, which is quadratic, hence the cap.
-const OUTLIER_RUN_MAX: usize = 1024;
-
-/// A short run at one end of a node whose records disagree with every other
-/// record on the node's top bit, and the variation of the rest.
-struct OutlierRun {
-    /// The run sits at the start of the node (`true`) or at its end.
-    head: bool,
-    /// Whether the run is the side with the bit set.
-    set: bool,
-    len: usize,
-    body_varying: u128,
-}
-
-/// Finds a short end run separated by the top bit and scans the body
-/// for variation. A scattered minority stops the scan at its first occurrence.
-fn outlier_run<T, E: Extract<T>>(
-    records: &[T],
-    keys: &[KeyValue<T, E>],
-    bit: KeyValue<T, E>,
-    extractor: &mut E,
-) -> Option<OutlierRun> {
-    let minority_set = sample_minority_bit(keys, bit)?;
-    let zero = KeyValue::<T, E>::from_usize(0);
-    let is_minority = |key: KeyValue<T, E>| ((key & bit) != zero) == minority_set;
-    let cap = OUTLIER_RUN_MAX.min(records.len() / 2);
-    let mut head = 0;
-    while head < cap && is_minority(extractor.key(&records[head])) {
-        head += 1;
-    }
-    let mut tail = 0;
-    while tail < cap && is_minority(extractor.key(&records[records.len() - 1 - tail])) {
-        tail += 1;
-    }
-    // The minority must occupy exactly one end.
-    if (head == 0) == (tail == 0) {
-        return None;
-    }
-    let (head_run, len) = if head > 0 {
-        (true, head)
-    } else {
-        (false, tail)
-    };
-    if len == cap {
-        return None;
-    }
-    let (start, end) = if head_run {
-        (len, records.len())
-    } else {
-        (0, records.len() - len)
-    };
-    let mut union = extractor.key(&records[start]);
-    let mut intersection = union;
-    for record in &records[start + 1..end] {
-        let key = extractor.key(record);
-        if is_minority(key) {
-            return None;
-        }
-        union |= key;
-        intersection = intersection & key;
-    }
-    Some(OutlierRun {
-        head: head_run,
-        set: minority_set,
-        len,
-        body_varying: union.to_u128() ^ intersection.to_u128(),
-    })
-}
-
 /// Stably inserts inverted records until sorted or the swap budget runs out.
 /// A failed pass still leaves a stable permutation of the input.
 ///
@@ -828,7 +740,93 @@ fn choose_split_digit<T, E: Extract<T>>(
     }
 }
 
+/// Returns the two runs the top varying bit already holds, as the end of the
+/// first run and whether it holds the bit.
+///
+/// A node is two runs when it reads `0*1*` or `1*0*` in that bit; the second
+/// form is one rotation away from the first. Any other arrangement answers at
+/// the first record that breaks the pattern, which unordered inputs reach
+/// within a pair or two.
+fn two_runs<T, E: Extract<T>>(
+    records: &[T],
+    bit: u128,
+    extractor: &mut E,
+) -> Option<(usize, bool)> {
+    let first = extractor.key(&records[0]).to_u128() & bit != 0;
+    let mut boundary = 0;
+    while boundary < records.len()
+        && (extractor.key(&records[boundary]).to_u128() & bit != 0) == first
+    {
+        boundary += 1;
+    }
+    if boundary == 0 || boundary == records.len() {
+        return None;
+    }
+    for record in &records[boundary..] {
+        if (extractor.key(record).to_u128() & bit != 0) == first {
+            return None;
+        }
+    }
+    Some((boundary, first))
+}
+
 impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
+    /// Splits a node whose first varying bit never falls, without moving a
+    /// record: the two runs the order already holds are the two buckets that
+    /// bit would form. Returns whether it split.
+    ///
+    /// Records that are not ordered in that bit answer within a pair or two, so
+    /// an unordered node pays a few key reads for the check. An ordered node
+    /// saves the partition pass the top bit would otherwise need and hands the
+    /// bits below it to the recursion.
+    fn split_ordered(&mut self, records: &mut [T], top: usize, varying: u128) -> bool {
+        let bit = 1u128 << (top - 1);
+        let Some((boundary, set)) = two_runs(records, bit, self.extractor) else {
+            return false;
+        };
+        // A run holding the bit in front belongs behind the clear one; the
+        // rotation keeps both runs in their own order.
+        let boundary = if set {
+            let len = records.len();
+            records.rotate_left(boundary);
+            len - boundary
+        } else {
+            boundary
+        };
+        let candidate = varying & !bit;
+        self.sort_child(&mut records[..boundary], candidate);
+        self.sort_child(&mut records[boundary..], candidate);
+        true
+    }
+
+    /// Finishes an ordered child before scanning its remaining candidate bits.
+    fn sort_child(&mut self, records: &mut [T], candidate: u128) {
+        if records.len() < 2 || candidate == 0 {
+            return;
+        }
+        // A constant child finishes on the varying scan alone, as without this
+        // route. An ordered child is confirmed next so it skips the partition
+        // the digit would otherwise need.
+        let varying = scan_varying_bits(records, candidate, self.extractor);
+        if varying == 0 {
+            return;
+        }
+        match confirm_order(records, self.extractor) {
+            Order::Ascending => return,
+            Order::Descending { strict: true } => {
+                reverse_strictly(records);
+                return;
+            }
+            Order::Descending { strict: false } => {
+                reverse_stably(records, self.extractor);
+                return;
+            }
+            Order::Flat | Order::Unsorted => {}
+        }
+        self.sort_node(records, varying);
+    }
+
+    /// Routes a slice whose order has already been probed.
     fn sort_node(&mut self, records: &mut [T], varying: u128) {
         let len = records.len();
         if len < 2 || varying == 0 {
@@ -872,12 +870,6 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
                 self.partition_equal(records, equal, varying);
                 return;
             }
-            // Lift a short end run rather than move the whole node to separate it.
-            let bit = KeyValue::<T, E>::from_usize(1) << KeyValue::<T, E>::from_usize(top - 1);
-            if let Some(outlier) = outlier_run(records, &keys, bit, self.extractor) {
-                self.sort_outlier_run(records, outlier);
-                return;
-            }
         }
         let digit = choose_split_digit(records, top, self.tile_bytes, self.extractor);
         self.partition_digit(records, digit, varying);
@@ -885,6 +877,12 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
 
     /// Partitions by digit, then sorts each unfinished child.
     fn partition_digit(&mut self, records: &mut [T], digit: Digit, varying: u128) {
+        // A node already ordered in its top varying bit needs no pass: that bit
+        // only separates runs the input holds, the recursion inherits the rest,
+        // and the check answers in a pair or two for unordered records.
+        if self.split_ordered(records, bit_len(varying), varying) {
+            return;
+        }
         let record_bytes = core::mem::size_of::<T>();
         // Bucket boundaries come from the block engine. The split digit is
         // constant inside each child, so its bits are excluded from the next scan.
@@ -916,8 +914,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             if end > start {
                 let child = &mut records[start..end];
                 if child.len().saturating_mul(record_bytes) > tile_bytes {
-                    let varying = scan_varying_bits(child, candidate, self.extractor);
-                    self.sort_node(child, varying);
+                    self.sort_child(child, candidate);
                 }
             }
             start = end;
@@ -957,39 +954,10 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         for range in [0..ends[0], ends[1]..records.len()] {
             let child = &mut records[range];
             if child.len() > 1 {
-                let varying = scan_varying_bits(child, parent_varying, self.extractor);
-                self.sort_node(child, varying);
+                self.sort_child(child, parent_varying);
             }
         }
         self.scratch.block.recycle_ends(ends);
-    }
-
-    /// Moves a run of disagreeing records to the end its bit belongs to, then
-    /// finishes both parts: the body by the ordinary recursion, the run by
-    /// insertion.
-    fn sort_outlier_run(&mut self, records: &mut [T], outlier: OutlierRun) {
-        let len = records.len();
-        let run = outlier.len;
-        // The run belongs before the body when its bit is clear and after it when
-        // set: every record outside the run has the opposite bit.
-        let before = !outlier.set;
-        if outlier.head && !before {
-            records.rotate_left(run);
-        } else if !outlier.head && before {
-            records.rotate_right(run);
-        }
-        let body = if before {
-            &mut records[run..]
-        } else {
-            &mut records[..len - run]
-        };
-        self.sort_node(body, outlier.body_varying);
-        let lifted = if before {
-            &mut records[..run]
-        } else {
-            &mut records[len - run..]
-        };
-        self.extractor.finish_insertion(lifted);
     }
 
     /// Reserves `len` scratch records and, when bucket IDs are cached and do not
@@ -1666,11 +1634,14 @@ mod tests {
             // the stack.
             let mut extractor = ByKey(|_: &u16| -> u16 {
                 assert!(calls < 12_000, "node recursion did not make progress");
-                let phase = calls % (len + 65 + MODE_SAMPLE_LEN);
+                let phase = calls % (len + 4 + 65 + MODE_SAMPLE_LEN);
                 calls += 1;
                 if phase < len {
                     1
-                } else if phase < len + 65 {
+                } else if phase < len + 4 {
+                    // Reject order before the candidate scan and mode sample.
+                    [1, 0, 0, 1][phase - len]
+                } else if phase < len + 4 + 65 {
                     if phase % 2 == 0 { 0 } else { 0x1ff }
                 } else if greater {
                     0
@@ -1794,7 +1765,101 @@ mod tests {
     }
 
     #[test]
-    fn outlier_run_at_either_end() {
+    fn split_ordered_separates_the_runs_the_top_bit_holds() {
+        let mut scratch = Scratch::new();
+        let mut sorter = Sorter::<_, _, true> {
+            scratch: &mut scratch,
+            extractor: &mut Direct,
+            tile_bytes: 32,
+        };
+        // Ascending keys, then keys that only the top bit separates: the split
+        // needs no partition and both children inherit the bits below it.
+        let mut records: Vec<u64> = (0..300).collect();
+        records.extend((0..40).map(|index| (1 << 63) | (index * 7)));
+        let mut expected = records.clone();
+        expected.sort_unstable();
+        let varying = records
+            .iter()
+            .fold(0u128, |mask, record| mask | u128::from(*record));
+        assert!(sorter.split_ordered(&mut records, bit_len(varying), varying));
+        assert_eq!(records, expected);
+
+        // A run holding the top bit in front is one rotation away from the
+        // split, and both runs keep their own order.
+        let mut lifted: Vec<u64> = alloc::vec![(1 << 63) | 5, (1 << 63) | 6, 3, 4];
+        let varying = lifted
+            .iter()
+            .fold(0u128, |mask, record| mask | u128::from(*record));
+        assert!(sorter.split_ordered(&mut lifted, bit_len(varying), varying));
+        assert_eq!(lifted, [3, 4, (1 << 63) | 5, (1 << 63) | 6]);
+
+        // Interleaved runs are not a split the top bit provides.
+        let mut interleaved: Vec<u64> = alloc::vec![3, (1 << 63) | 5, 4, (1 << 63) | 6];
+        let varying = interleaved
+            .iter()
+            .fold(0u128, |mask, record| mask | u128::from(*record));
+        assert!(!sorter.split_ordered(&mut interleaved, bit_len(varying), varying));
+    }
+
+    #[test]
+    fn ordered_children_skip_scratch() {
+        for descending in [false, true] {
+            let mut records: Vec<_> = (0..129u64)
+                .map(|id| (if descending { (128 - id) / 4 } else { id / 4 }, id))
+                .collect();
+            let mut expected = records.clone();
+            expected.sort_by_key(|record| record.0);
+            let mut probe_calls = 0;
+            probe_order(
+                &records,
+                &mut ByKey(|record: &(u64, u64)| {
+                    probe_calls += 1;
+                    record.0
+                }),
+            );
+            let mut child_calls = 0;
+            let mut scratch = Scratch::new();
+            Sorter::<_, _, true> {
+                scratch: &mut scratch,
+                extractor: &mut ByKey(|record: &(u64, u64)| {
+                    child_calls += 1;
+                    record.0
+                }),
+                tile_bytes: 128,
+            }
+            .sort_child(&mut records, u64::MAX as u128);
+            // Ascending completion costs the varying scan and the confirming
+            // scan, both cheaper than the partition they replace; tied
+            // descending completion also scans equal runs during reversal.
+            if !descending {
+                assert_eq!(child_calls, 2 * probe_calls);
+            }
+            assert_eq!(records, expected);
+            assert!(scratch.tile.is_empty());
+        }
+    }
+
+    #[test]
+    fn constant_children_read_once() {
+        let len = if cfg!(miri) { 129 } else { 3 * ORDER_SAMPLES };
+        let mut records = alloc::vec![7u64; len];
+        let mut calls = 0;
+        let mut scratch = Scratch::new();
+        Sorter::<_, _, true> {
+            scratch: &mut scratch,
+            extractor: &mut ByKey(|record: &u64| {
+                calls += 1;
+                *record
+            }),
+            tile_bytes: 128,
+        }
+        .sort_child(&mut records, u64::MAX as u128);
+        assert_eq!(calls, len);
+        assert!(scratch.tile.is_empty());
+    }
+
+    #[test]
+    fn end_runs_sort_stably() {
         let len = if cfg!(miri) { 129 } else { 8193 };
         for high in [false, true] {
             let mut values: Vec<_> = (0..len)

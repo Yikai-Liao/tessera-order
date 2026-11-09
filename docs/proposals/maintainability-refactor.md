@@ -130,6 +130,49 @@ Before PR 2, walk through each common task on `main` without implementing it: ad
 
 Each refactor PR replays the tasks its boundary affects, updates their entries and states the difference in its description. A refactor that leaves its tasks' manual synchronization and required reading unchanged has not shown a benefit.
 
+### Baseline at `826e6ec`
+
+These are repository-only walkthroughs, not implemented additions. The [tooling ownership map](../design/benchmark-tooling.md#ownership) and [validation commands](../../AGENTS.md#commands) are the common starting points. The files below identify separate responsibilities as well as repeated decisions; touching several files is not by itself a defect.
+
+#### Add a record type
+
+- Start with [catalog type metadata and suite inventories](../../bench/catalog.toml), then [record semantics, input construction and adapter dispatch](../../bench/rust/src/comparison/variant.rs). A new scalar key also needs the [key and generator contract](../../bench/rust/src/case.rs). Comparison and continuous coverage are separate choices: [`smoke.rs`](../../bench/rust/benches/smoke.rs) has its own typed dispatch and wide-record payload; do not merge that representation with comparison `WideRecord`.
+- If native support is intended, read [Rust preparation and layout checks](../../bench/rust/src/comparison/native.rs), [C layouts](../../bench/rust/native/layout.h), [registry bindings](../../bench/rust/native/registry.cpp) and the selected native wrappers. The caller's numeric type argument, kernel column and separate payload-layout index must currently be kept consistent by hand. The same record semantics trait also requires algorithm entry points. These are the F1/F2 edit obligations, not catalog metadata.
+- A report-fixture extension also reaches [`fixture.ts`](../../bench/report/fixture.ts): its width expression restates catalog widths (F5). Its separate type/length exclusion is fixture coverage policy, to be kept consistent with the intended [release coverage](../../bench/plans/release.toml); widths alone do not determine that policy.
+- Layout checks cover the three existing payload-bearing native records; DuckDB boundary tests and normal output verification cover execution. They do not establish every native algorithm's identity or every new registration. Plan count/selection tests and preview catch inventory mistakes, but new types still need exercised output and ABI coverage.
+
+#### Add a distribution
+
+- Read [`case.rs::generate`](../../bench/rust/src/case.rs), [catalog distribution labels and suite inventories](../../bench/catalog.toml), and the intended [plans](../../bench/plans/). Generation, presentation and regression coverage are distinct decisions: adding a generator does not automatically add a continuous case.
+- TypeScript [plan validation](../../bench/plan.ts) and [Rust expansion](../../bench/rust/src/plan.rs) consume the catalog and plans. For the [shared selection fixture](../../bench/plans/selection.fixture.toml), TypeScript validates the plan and Rust checks the listed selection expectations; it does not compare both implementations' selection results. No third distribution parser is needed.
+- Manually choose which smoke/comparison inventories and plan inclusions exercise the distribution. Existing generator-identity assertions protect retained inputs, not an unselected new branch. Preview the selected inputs with `pnpm -s tools plan NAME` and validate their generated output through the maintained harness.
+
+#### Add an algorithm
+
+- Read [catalog algorithm metadata](../../bench/catalog.toml), [variant listing, feature selection and preparation](../../bench/rust/src/comparison/variant.rs), and [the comparison contract](../design/comparison-benchmarks.md). Metadata supplies identity, stability and adapter category; executable preparation supplies support, and the manifest derives its capability list from preparation.
+- A new native algorithm additionally needs its wrappers and [pinned acquisition/offline build](../../bench/rust/native/build.ts), plus [Rust row-name lookup](../../bench/rust/src/comparison/native.rs) and the [C++ registry row](../../bench/rust/native/registry.cpp). Function declarations, row order, supported columns and Rust names are manually coordinated; no existing test compares every C++ row name with Rust.
+- Capability exceptions are spread between the `voracious` guard, owned-record `radsort` arm, parallel `supports` shortcut and native null returns (F2). Listing/feature tests, capability-versus-preparation tests, linkage and output verification detect different mistakes; preparation-derived coverage alone cannot detect an accidentally omitted supported pair.
+
+#### Add a benchmark mode
+
+- Read [catalog modes](../../bench/catalog.toml), [Criterion dispatch and ID construction](../../bench/rust/benches/smoke.rs), [continuous build/list validation](../../bench/continuous/runner.ts) and the [trusted worker](../../bench/continuous/worker.ts). A label does not implement a new API or grant it a worker lane.
+- ID interpretation also reaches [catalog display helpers](../../bench/catalog.ts), [local report labels](../../bench/local/report.ts) and [comparison report IDs/length parsing](../../bench/report/model.ts). Criterion and comparison IDs are different grammars. Positional parsing and `api`/`par-4` suffix checks currently require coordinated edits (F3).
+- The worker's dependency-free copy is an intentional trust boundary: [the tracker](../../.github/workflows/bench-track.yml) packages only default-branch worker/process code. Keep its scheduling rule checked against the ID owner rather than importing the catalog into the image.
+- Runner tests protect additive listings; worker tests protect lane assignment. Build verification checks serial-only and parallel-enabled listings for both configurations. A mode change needs those checks together; an unchanged serial listing alone does not establish the new schedule.
+
+#### Add a figure
+
+- Start with the [figure guide](../development/benchmark-figures.md) and [figure boundary](../design/benchmark-tooling.md#figure-boundary). Reuse [row](../../bench/plot/rows.ts), [matrix](../../bench/plot/matrix.ts) or [trend](../../bench/plot/trends.ts) templates where the question fits; chart-value assembly stays in [offline reports](../../bench/report/charts.ts) or [continuous reports](../../bench/continuous/).
+- Shared [theme](../../bench/plot/theme.ts) and [SVG envelope](../../bench/plot/figure.ts) own appearance/accessibility; catalog helpers own labels. The caller chooses values and output location. A site figure uses [`BenchmarkFigure.vue`](../.vitepress/theme/components/BenchmarkFigure.vue); these are separate responsibilities, not duplicated rendering rules.
+- Content/geometry tests, retained SVG fixtures and site checks catch regression classes; light/dark rendering at actual width checks readability. The fixture's synthetic record widths remain a separate F5 synchronization point. No new renderer, statistics definition or measurement is needed just to add a dataset.
+
+#### Add a CI check
+
+- Read [CI policy](../development/ci.md), [the aggregate workflow](../../.github/workflows/ci.yml) and [path routing with its tests](../../.github/scripts/ci_changes.ts). Add an existing language-cell command in its [composite action](../../.github/actions/rust-test/action.yml); a genuinely new job also needs explicit dependencies and aggregation in `ci-ok`. Routing, platform coverage and aggregate failure behavior are different obligations.
+- Reuse [CLI task support](../../tools/tasks.ts) and [process/logging/cancellation](../../tools/process.ts) for shared operations. Checkout discovery currently requires importing [the workspace builder](../../bench/workspace.ts), although a check need not build a workspace (F4).
+- A benchmark check additionally reaches the separate [build path filter](../../.github/workflows/bench-build.yml) and [trusted tracker](../../.github/workflows/bench-track.yml); the status reader currently imports the publisher just for marker formatting (F4). Do not widen credentials, image contents or event ownership while sharing code.
+- Router tests catch routing mistakes; command tests exercise behavior; CI proves the actual platforms and `ci-ok` dependencies. Local success does not prove an unselected job ran. During this round use existing cells/jobs rather than expanding the CI budget.
+
 ## Stop condition
 
 Stop when the [task walkthroughs](#task-walkthroughs) touch a predictable, small set of files and no rule is restated in several places. Stop earlier if further restructuring adds interfaces instead of removing them.

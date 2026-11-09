@@ -23,7 +23,7 @@ The figure, as a list:
 1. **Order probe.** Sample adjacent pairs. Ascending inputs return at once. Strictly descending inputs reverse directly; other descending inputs reverse stably.
 2. **Budgeted insertion.** Unsorted inputs get an insertion pass with a swap budget. Nearly sorted inputs finish here.
 3. **Varying bits.** One scan finds the bits that differ between keys. If none do, the input is done. Later digits cover only the varying bits.
-4. **Child order, then node or tile.** A partition child first reuses the order probe, returning or reversing stably when confirmed ordered. The root skips this second gate because it was already probed. An unfinished slice larger than 64 KiB of records is a *node*, and anything smaller is a *tile*.
+4. **Child order, then node or tile.** A partition child reuses full order confirmation without sampling, returning for ascending or constant keys and reversing stably for descending keys. The root skips this second gate because it was already probed. An unfinished slice larger than 64 KiB of records is a *node*, and anything smaller is a *tile*.
 5. **Node partitions.** A node is split by a repeated-key partition or a top-digit block partition. Larger children return to the shared order gate. Tile-sized digit buckets finish directly during block compaction.
 6. **Tile leaves.** A tile is finished by insertion sort, a tile-local MSD partition or LSD counting passes.
 

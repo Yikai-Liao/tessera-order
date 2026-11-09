@@ -85,6 +85,6 @@ While the block partition writes its result back into the input, each child that
 | unsorted tile, at most 48 records | insertion finish | bounded quadratic leaf, no allocation |
 | larger nearly sorted input | budgeted insertion | linear in n plus inversions |
 | one dominant key | equality partition | one partition, the equal band is done |
-| ordered child exposed by a partition | order probe + confirmation, then return or stable reversal | at most linear work in that child |
+| ordered or constant child exposed by a partition | full order confirmation, then return or stable reversal | at most linear work in that child |
 | at most 8 varying bits, record is its own key | counted window | one counting pass and one fill |
 | everything else | top-digit block partition, then tiles | one streaming pass per node level, then cache-resident tiles |

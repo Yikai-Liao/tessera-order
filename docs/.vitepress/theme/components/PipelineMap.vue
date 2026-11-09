@@ -92,6 +92,16 @@ const boxes: Box[] = [
     link: "/explain/routing#nodes-and-tiles",
   },
   {
+    id: "bucket",
+    x: 260,
+    y: 390,
+    w: 190,
+    title: "Bucket order",
+    detail: "split where order already is",
+    link: "/explain/routing#already-in-bucket-order",
+    kind: "node",
+  },
+  {
     id: "mode",
     x: 30,
     y: 390,
@@ -180,8 +190,9 @@ const go = (link: string) => router.go(withBase(link));
         <path d="M480,253 H526" marker-end="url(#tsr-arrow)" />
         <path d="M340,276 V296" marker-end="url(#tsr-arrow)" />
         <!-- yes: node partitions -->
-        <path d="M300,346 C300,368 125,364 125,386" marker-end="url(#tsr-arrow)" />
-        <path d="M380,346 C380,368 585,364 585,386" marker-end="url(#tsr-arrow)" />
+        <path d="M280,346 C280,368 125,364 125,386" marker-end="url(#tsr-arrow)" />
+        <path d="M340,346 V386" marker-end="url(#tsr-arrow)" />
+        <path d="M400,346 C400,368 585,364 585,386" marker-end="url(#tsr-arrow)" />
         <!-- no: tile leaves -->
         <path d="M480,323 H690 V498 H125" />
         <path v-for="x in centers" :key="`leaf${x}`" :d="`M${x},498 V522`" marker-end="url(#tsr-arrow)" />

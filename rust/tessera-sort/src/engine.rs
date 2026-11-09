@@ -508,18 +508,25 @@ fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     confirm_order(records, extractor)
 }
 
-/// Confirms ascending order first, then checks descent and its strictness.
+/// Confirms direction from the first unequal key, marking strict descent.
 fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     let first = extractor.key(&records[0]);
-    // Constant children need the same blocked/vector scan as ascending ones;
-    // searching for the first unequal key would leave that whole scan scalar.
-    if extractor.confirm_ascending(&records[1..], first) {
+    let mut keys = records[1..].iter().map(|record| extractor.key(record));
+    let Some(current) = keys.find(|&key| key != first) else {
         return Order::Ascending;
-    }
-    records[1..]
-        .iter()
-        .try_fold((first, true), |(before, strict), record| {
-            let after = extractor.key(record);
+    };
+    if first < current {
+        // The iterator has already encoded the first unequal key.
+        let tail = &records[records.len() - keys.len()..];
+        if extractor.confirm_ascending(tail, current) {
+            Order::Ascending
+        } else {
+            Order::Unsorted
+        }
+    } else {
+        // Strict descent requires the first unequal key to be the second record.
+        let strict = keys.len() == records.len() - 2;
+        keys.try_fold((current, strict), |(before, strict), after| {
             if before > after {
                 Some((after, strict))
             } else if before == after {
@@ -529,6 +536,7 @@ fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
             }
         })
         .map_or(Order::Unsorted, |(_, strict)| Order::Descending { strict })
+    }
 }
 
 /// Confirms ascending keys after an already encoded predecessor.
@@ -729,7 +737,68 @@ fn choose_split_digit<T, E: Extract<T>>(
     }
 }
 
+/// Mask of `width` key bits starting at `shift`, with `1 <= width <= 128`.
+fn window_mask(width: usize, shift: usize) -> u128 {
+    (u128::MAX >> (u128::BITS as usize - width)) << shift
+}
+
+/// Widest window below `top` that no adjacent inversion crosses, or `None` when
+/// the records are not in ascending order even at the single top bit.
+///
+/// An inversion crosses the highest differing bit `highest` of its pair, and
+/// every window containing that bit would put the two records in descending
+/// buckets, so the inversion caps the width at `top - 1 - highest`. The scan
+/// stops as soon as no window is left, which unordered records reach within a
+/// few records.
+fn ordered_width<T, E: Extract<T>>(records: &[T], top: usize, extractor: &mut E) -> Option<usize> {
+    let mut width = top;
+    let mut previous = extractor.key(&records[0]).to_u128();
+    for record in &records[1..] {
+        let key = extractor.key(record).to_u128();
+        if key < previous {
+            // The pair differs, so its highest differing bit is well defined.
+            let highest = (u128::BITS - 1 - (previous ^ key).leading_zeros()) as usize;
+            if highest >= top {
+                return None;
+            }
+            width = width.min(top - 1 - highest);
+            if width == 0 {
+                return None;
+            }
+        }
+        previous = key;
+    }
+    Some(width)
+}
+
 impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
+    /// Splits a node that is already in bucket order, without moving a record.
+    ///
+    /// `ordered_width` reports the finest window the existing order already
+    /// resolves, so each bucket of that window is one run: splitting there
+    /// peels exactly the bits that are in order and the recursion inherits the
+    /// rest. Returns whether it split.
+    fn split_ordered(&mut self, records: &mut [T], top: usize, varying: u128) -> bool {
+        let Some(width) = ordered_width(records, top, self.extractor) else {
+            return false;
+        };
+        let shift = top - width;
+        let candidate = varying & !window_mask(width, shift);
+        let mut start = 0;
+        while start < records.len() {
+            let bucket = self.extractor.key(&records[start]).to_u128() >> shift;
+            let mut end = start + 1;
+            while end < records.len()
+                && self.extractor.key(&records[end]).to_u128() >> shift == bucket
+            {
+                end += 1;
+            }
+            self.sort_child(&mut records[start..end], candidate);
+            start = end;
+        }
+        true
+    }
+
     /// Finishes an ordered child before scanning its remaining candidate bits.
     fn sort_child(&mut self, records: &mut [T], candidate: u128) {
         if records.len() < 2 || candidate == 0 {
@@ -804,6 +873,12 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
 
     /// Partitions by digit, then sorts each unfinished child.
     fn partition_digit(&mut self, records: &mut [T], digit: Digit, varying: u128) {
+        // A node already in bucket order needs no pass: the partition would only
+        // move records inside their own bucket, and a wide digit would reserve
+        // block scratch for a split the order already provides.
+        if self.split_ordered(records, bit_len(varying), varying) {
+            return;
+        }
         let record_bytes = core::mem::size_of::<T>();
         // Bucket boundaries come from the block engine. The split digit is
         // constant inside each child, so its bits are excluded from the next scan.
@@ -1319,9 +1394,9 @@ mod tests {
     }
 
     #[test]
-    fn confirmation_visits_each_stage() {
-        for (len, descending) in [(128, false), (128, true), (129, true)] {
-            let mut records: Vec<_> = (0..len).map(|id| (id / 4, id)).collect();
+    fn confirm_order_calls_key_in_order() {
+        for descending in [false, true] {
+            let mut records: Vec<_> = (0..129u64).map(|id| (id / 4, id)).collect();
             if descending {
                 records.reverse();
             }
@@ -1342,46 +1417,11 @@ mod tests {
                         Order::Ascending
                     }
             );
-            let mut expected = Vec::new();
-            if descending {
-                // Ascending confirmation crosses the leading ties, then descent
-                // restarts from the retained first key.
-                let prefix_len = records
-                    .iter()
-                    .position(|record| record.0 < records[0].0)
-                    .unwrap()
-                    + 1;
-                expected.extend(records[..prefix_len].iter().map(|record| record.1));
-                expected.extend(records[1..].iter().map(|record| record.1));
-            } else {
-                expected.extend(records.iter().map(|record| record.1));
-            }
-            assert_eq!(visited, expected);
+            assert_eq!(
+                visited,
+                records.iter().map(|record| record.1).collect::<Vec<_>>()
+            );
         }
-    }
-
-    #[test]
-    fn constant_confirmation_reuses_backend() {
-        /// Records ascending backend dispatch on constant input.
-        struct Confirmation {
-            confirmed: bool,
-        }
-        impl Extract<u64> for Confirmation {
-            type Value = u64;
-            fn key(&mut self, record: &u64) -> u64 {
-                assert_eq!(*record, 7);
-                *record
-            }
-            fn confirm_ascending(&mut self, records: &[u64], previous: u64) -> bool {
-                assert_eq!(previous, 7);
-                assert_eq!(records, &[7; 128]);
-                self.confirmed = true;
-                true
-            }
-        }
-        let mut extractor = Confirmation { confirmed: false };
-        assert!(confirm_order(&[7; 129], &mut extractor) == Order::Ascending);
-        assert!(extractor.confirmed);
     }
 
     #[test]
@@ -1718,6 +1758,29 @@ mod tests {
                 assert_eq!(mask & varying, varying);
             }
         }
+    }
+
+    #[test]
+    fn ordered_width_resolves_existing_buckets() {
+        // Two runs separated by the top bit resolve that bit alone: inside the
+        // upper run the next bit descends.
+        let mut split: Vec<u64> = (0..512).collect();
+        split.push((1 << 63) | (1 << 62) | 2);
+        split.push((1 << 63) | 1);
+        assert_eq!(ordered_width(&split, 64, &mut Direct), Some(1));
+
+        // Keys already in block order resolve the prefix their blocks share.
+        let mut blocked = Vec::new();
+        for block in 0..8u64 {
+            blocked.push((block << 40) | (1 << 39));
+            blocked.push(block << 40);
+        }
+        assert_eq!(ordered_width(&blocked, 64, &mut Direct), Some(24));
+
+        // A key above the whole body leaves no window at all.
+        let mut inverted = split.clone();
+        inverted.swap(0, split.len() - 1);
+        assert_eq!(ordered_width(&inverted, 64, &mut Direct), None);
     }
 
     #[test]

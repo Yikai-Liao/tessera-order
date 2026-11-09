@@ -16,7 +16,7 @@ At larger strides, the adjacent-pair sample classifies the input below. The targ
 
 A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. Any leading equal keys skipped while finding the direction rule out strict descent. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
 
-At larger strides, the sample rejects most unsorted inputs within a few pairs. Full confirmation first checks ascending order, including constant keys. For direct keys it checks the encoded predecessor and reuses the scan that budgeted insertion uses: blocked adjacent pairs in the default build (`f64` keeps its scalar scan), or the vector backend with Portable SIMD. Key functions keep scalar confirmation. If ascending confirmation fails, a second scan checks descent and whether it is strict, retaining the first encoded key. Each scan stops at its first conflict; a leading equal run can be visited in both scans.
+At larger strides, the sample rejects most unsorted inputs within a few pairs. The full scan runs only on inputs that look ordered. It finds the first unequal key, which fixes the direction, and then continues in that direction. For an ascending input it reuses the scan that budgeted insertion uses: blocked adjacent pairs in the default build (`f64` keeps its scalar scan), or the vector backend with Portable SIMD. A descending input continues with a scan that also records whether any adjacent pair ties.
 
 ## Budgeted insertion
 
@@ -44,7 +44,7 @@ From here on, the engine works on slices of the input and sorts each one in plac
 - a **tile** is a slice of at most 64 KiB of records. It is finished in a scratch buffer of the same size, which stays in the L2 cache ([tiles](tiles.md));
 - a **node** is anything larger. It is split by a stable partition into children, and each child is routed again.
 
-Partition children entering `sort_child` reuse the full order confirmation described above, without first sampling adjacent pairs. Ascending confirmation finishes an ascending or constant slice with the existing scan backend; only a failure starts the descending check. A descending slice uses the same strict or stable reversal. Thus a radix partition can expose an ordered child even when the full input was not ordered. This applies equally to children from either end or the interior of the input, without a separate end-run detector or length cap. Only unordered children scan their remaining candidate bits and continue to the normal routes. Ordered and constant children finish with one confirmation scan instead of paying a sample and another variation scan. The root goes directly to `sort_node`, since it was already probed. The extra check takes at most linear work in the slice length and allocates nothing; it does not run insertion or create a second key buffer.
+Partition children entering `sort_child` reuse the full order confirmation described above, without first sampling adjacent pairs. An ascending or constant child returns, and a descending child uses the same strict or stable reversal. Thus a radix partition can expose an ordered child even when the full input was not ordered. This applies equally to children from either end or the interior of the input, without an end-run detector or a length cap. Only unordered children scan their remaining candidate bits and continue to the normal routes. The root goes directly to `sort_node`, since it was already probed. The extra check takes at most linear work in the slice length and allocates nothing; it does not run insertion or create a second key buffer.
 
 A node then looks at its varying bits. If they span at most 8 bits, the node is one window away from sorted, and one of the routes below finishes it: every record is then in its final position.
 
@@ -53,6 +53,10 @@ A node then looks at its varying bits. If they span at most 8 bits, the node is 
 A record sorted by its own key is interchangeable with every record of the same key: equal encoded keys are equal bit patterns. For those inputs — `stable_sort`, not `stable_sort_by_key` — the engine counts the records of each value in the window, remembers one record per value, and fills each run with it. The runs come out in key order, and no block table or record move is needed.
 
 Records sorted by a key function keep their payloads: two records with key 7 may hold different data and in a fixed order between them. Counting would drop that, so `stable_sort_by_key` takes the [block partition](block-partition.md) below instead.
+
+### Already in bucket order
+
+A node that is already in bucket order needs no partition. One scan of adjacent keys finds the widest leading window of the varying span that no inversion crosses: an inversion crossing the highest differing bit of its pair rules out every window that contains that bit. Each bucket of the resulting window already holds one contiguous run, so those runs *are* the partition, and the recursion finishes them in place. This covers sorted data with a separated block of keys at either end, several such blocks, or any other arrangement the order already groups — with no detector, no sample and no length cap. The scan stops as soon as no window is left, which unordered records reach within a few keys, so the check costs a handful of key reads when it fails and one pass when it succeeds.
 
 ### Block partition of the window
 
@@ -86,5 +90,6 @@ While the block partition writes its result back into the input, each child that
 | larger nearly sorted input | budgeted insertion | linear in n plus inversions |
 | one dominant key | equality partition | one partition, the equal band is done |
 | ordered or constant child exposed by a partition | full order confirmation, then return or stable reversal | at most linear work in that child |
+| node already in bucket order | split at the finest ordered window | one scan, no partition pass or scratch |
 | at most 8 varying bits, record is its own key | counted window | one counting pass and one fill |
 | everything else | top-digit block partition, then tiles | one streaming pass per node level, then cache-resident tiles |

@@ -738,13 +738,11 @@ fn choose_split_digit<T, E: Extract<T>>(
 }
 
 impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
-    fn sort_node(&mut self, records: &mut [T], varying: u128) {
-        let len = records.len();
-        if len < 2 || varying == 0 {
+    /// Finishes an ordered partition child, or continues the radix route.
+    fn sort_child(&mut self, records: &mut [T], varying: u128) {
+        if records.len() < 2 || varying == 0 {
             return;
         }
-        let record_bytes = core::mem::size_of::<T>();
-        let node_bytes = len.saturating_mul(record_bytes);
         // Partitions can expose ordered children inside an unordered input.
         // Reuse the root gate instead of recognizing particular end runs.
         match probe_order(records, self.extractor) {
@@ -759,6 +757,17 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             }
             Order::Flat | Order::Unsorted => {}
         }
+        self.sort_node(records, varying);
+    }
+
+    /// Routes a slice whose order has already been probed.
+    fn sort_node(&mut self, records: &mut [T], varying: u128) {
+        let len = records.len();
+        if len < 2 || varying == 0 {
+            return;
+        }
+        let record_bytes = core::mem::size_of::<T>();
+        let node_bytes = len.saturating_mul(record_bytes);
         if node_bytes <= self.tile_bytes {
             self.sort_tile(records, varying);
             return;
@@ -834,7 +843,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
                 let child = &mut records[start..end];
                 if child.len().saturating_mul(record_bytes) > tile_bytes {
                     let varying = scan_varying_bits(child, candidate, self.extractor);
-                    self.sort_node(child, varying);
+                    self.sort_child(child, varying);
                 }
             }
             start = end;
@@ -875,7 +884,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             let child = &mut records[range];
             if child.len() > 1 {
                 let varying = scan_varying_bits(child, parent_varying, self.extractor);
-                self.sort_node(child, varying);
+                self.sort_child(child, varying);
             }
         }
         self.scratch.block.recycle_ends(ends);
@@ -1686,7 +1695,7 @@ mod tests {
     }
 
     #[test]
-    fn ordered_nodes_skip_scratch() {
+    fn ordered_children_skip_scratch() {
         for descending in [false, true] {
             let mut records: Vec<_> = (0..129u64)
                 .map(|id| (if descending { (128 - id) / 4 } else { id / 4 }, id))
@@ -1699,7 +1708,7 @@ mod tests {
                 extractor: &mut ByKey(|record: &(u64, u64)| record.0),
                 tile_bytes: 128,
             }
-            .sort_node(&mut records, u64::MAX as u128);
+            .sort_child(&mut records, u64::MAX as u128);
             assert_eq!(records, expected);
             assert!(scratch.tile.is_empty());
         }

@@ -209,21 +209,21 @@ fn changing_pivot_keeps_records() {
             // pivot. All records then enter one non-equal band; without the
             // digit fallback, the child scan restores the same candidate mask.
             let offset = call - prelude;
-            let phase = offset % (4 + 64 + len + 65);
-            if phase < 4 {
-                [1, 0, 0, 1][phase]
-            } else if phase < 4 + 64 {
+            // The root was already probed. Only subsequent children have
+            // the four-call gate at the end of this repeating cycle.
+            let phase = offset % (64 + len + 65 + 4);
+            if phase < 64 {
                 if greater { 0 } else { u64::MAX }
-            } else if phase < 4 + 64 + len {
-                if offset < 4 + 64 + len {
+            } else if phase < 64 + len {
+                if offset < 64 + len {
                     assert!(!first_band[record.id], "record classified twice");
                     first_band[record.id] = true;
                 }
                 1
-            } else if phase % 2 == 0 {
-                0
+            } else if phase < 64 + len + 65 {
+                if phase % 2 == 0 { 0 } else { u64::MAX }
             } else {
-                u64::MAX
+                [1, 0, 0, 1][phase - 64 - len - 65]
             }
         });
         // The absent sampled pivot and every classified key were different:

@@ -68,8 +68,8 @@ const boxes: Box[] = [
     x: 200,
     y: 230,
     w: 280,
-    title: "Order probe on routed slice",
-    detail: "reuse confirmation and stable reversal",
+    title: "Order probe on child",
+    detail: "root already probed; children reuse it",
     link: "/explain/routing#nodes-and-tiles",
   },
   {
@@ -175,7 +175,8 @@ const go = (link: string) => router.go(withBase(link));
         <path d="M480,103 C505,103 505,62 526,48" marker-end="url(#tsr-arrow)" />
         <path d="M340,126 V146" marker-end="url(#tsr-arrow)" />
         <path d="M480,173 H526" marker-end="url(#tsr-arrow)" />
-        <path d="M340,196 V226" marker-end="url(#tsr-arrow)" />
+        <!-- The root was already probed; only children use the second gate. -->
+        <path d="M340,196 H180 V323 H196" marker-end="url(#tsr-arrow)" />
         <path d="M480,253 H526" marker-end="url(#tsr-arrow)" />
         <path d="M340,276 V296" marker-end="url(#tsr-arrow)" />
         <!-- yes: node partitions -->

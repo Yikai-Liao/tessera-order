@@ -14,7 +14,7 @@ Before any radix pass, Tessera checks whether the input needs one. Many real inp
 
 A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. Any leading equal keys skipped while finding the direction rule out strict descent. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
 
-The sample rejects most unsorted inputs within a few pairs. The full scan runs only on inputs that look ordered.
+The sample rejects most unsorted inputs within a few pairs. The full scan runs only on inputs that look ordered. For direct keys, ascending confirmation checks the encoded predecessor and then reuses the scan that budgeted insertion uses: blocked adjacent pairs in the default build (`f64` keeps its scalar scan), or the vector backend with Portable SIMD. Key functions keep the scalar confirmation, evaluating each visited record once.
 
 ## Budgeted insertion
 

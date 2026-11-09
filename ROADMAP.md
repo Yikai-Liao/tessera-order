@@ -52,6 +52,7 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 
 - Extend the comparison to cold-cache experiments, additional seeds and threshold cases when an investigation needs them.
 - Add native-CPU and branch-aligned placement controls for source A/B studies.
+- Validate continuous alignment's dispersion and full-job budget on target Intel hardware.
 - Add hosted comparison groups using the existing Bencher queue after the local release report; retain complete per-type length groups for absolute scaling.
 
 ## Integrations

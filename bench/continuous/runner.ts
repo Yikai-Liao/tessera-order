@@ -38,6 +38,10 @@ export async function buildContinuous(root: string, out: string) {
             "target-feature=+crt-static",
             "-C",
             "llvm-args=-x86-branches-within-32B-boundaries",
+            "-C",
+            "llvm-args=-align-loops=64",
+            "-C",
+            "llvm-args=-align-all-nofallthru-blocks=6",
           ].join("\u001f"),
         },
       });

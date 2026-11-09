@@ -228,6 +228,14 @@ mod tests {
                 threads: None,
             };
             for case in &cases {
+                assert!(
+                    matches!(
+                        case.ty.as_str(),
+                        "u32" | "u64" | "f64" | "row_u32" | "row_u64" | "record128" | "owned"
+                    ),
+                    "missing support expectation for record type {}",
+                    case.ty
+                );
                 // This independent oracle preserves the pre-refactor capability matrix.
                 let expected = match variant.name {
                     "clausecker" => case.ty == "row_u32",

@@ -17,7 +17,7 @@ export interface Manifest {
   build: string;
   blocks: number;
   cases: Case[];
-  variants: { name: string; stable: boolean }[];
+  variants: { name: string; stable: boolean; adapter?: string; threads?: number | null }[];
   commit: string;
   dirty: boolean;
   rustc: string;
@@ -117,13 +117,13 @@ export function summarize(dataset: Dataset): Map<string, Summary> {
       paired.low = Math.min(...paired.ratios);
       paired.high = Math.max(...paired.ratios);
     }
-    if (variant.startsWith("tessera")) paired.verdict = "within noise";
+    if (variant === "tessera" || variant === "tessera-aa") paired.verdict = "within noise";
     result.set(measurementId(build, id, variant), {
       caseId: id,
       build,
       variant,
       stable:
-        variant.startsWith("tessera") ||
+        variant === "tessera-aa" ||
         dataset.manifests.get(build)!.variants.find((v) => v.name === variant)!.stable,
       ...paired,
       ns: median(samples.map((s) => time(s) / Number(id.split("/")[2]))),

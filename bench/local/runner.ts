@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { arch, cpus, platform, release } from "node:os";
 import { join } from "node:path";
+import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
 import {
@@ -28,6 +29,22 @@ interface LocalOptions {
   cpu?: string;
 }
 
+/** Complete only unused optional metadata for pre-parallel serial baselines. */
+export function serialBaselineManifest(baseline: string, current: string) {
+  const manifest = parse(baseline);
+  const features = manifest.features as Record<string, unknown>;
+  if ("rayon" in features) return baseline;
+  const dependencies = manifest.dependencies as Record<string, unknown>;
+  if ("rayon" in dependencies)
+    throw new Error("Historical Rayon dependencies require explicit review");
+  const reference = parse(current);
+  const dependency = (reference.dependencies as Record<string, { optional?: boolean }>).rayon;
+  if (!dependency?.optional) throw new Error("The serial baseline shim requires optional Rayon");
+  features.rayon = (reference.features as Record<string, unknown>).rayon;
+  dependencies.rayon = dependency;
+  return stringify(manifest);
+}
+
 /** Compile both revisions with one harness, lockfile, toolchain and build directory. */
 async function buildRevisions(root: string, workspace: Workspace, baseline: string, simd: boolean) {
   const { tree, directory, target } = workspace;
@@ -44,6 +61,16 @@ async function buildRevisions(root: string, workspace: Workspace, baseline: stri
   };
   await rm(crate, { recursive: true });
   await copyLibraryRevision(root, baseline, crate);
+  // Cargo validates inactive forwarding and locks optional dependency edges.
+  // Keep the shared harness/lockfile; this metadata never enables a parallel API.
+  const manifest = join(crate, "Cargo.toml");
+  await writeFile(
+    manifest,
+    serialBaselineManifest(
+      await readFile(manifest, "utf8"),
+      await readFile(join(saved, "Cargo.toml"), "utf8"),
+    ),
+  );
   source.baseline = await sourceHash(crate);
   const features = simd ? ["portable-simd"] : [];
   const binaries = { baseline: join(directory, "baseline"), current: join(directory, "current") };
@@ -147,9 +174,13 @@ async function measureBlock(
 export async function compareLocal(options: LocalOptions) {
   const { root, out, simd, cpu } = options;
   if (
-    ["TESSERA_BENCH_LIST", "TESSERA_BENCH_GROUPS", "TESSERA_BENCH_PLAN"].some(
-      (name) => name in process.env,
-    )
+    [
+      "TESSERA_BENCH_LIST",
+      "TESSERA_BENCH_GROUPS",
+      "TESSERA_BENCH_PLAN",
+      "TESSERA_BENCH_IDS",
+      "TESSERA_BENCH_PARALLEL",
+    ].some((name) => name in process.env)
   )
     throw new Error("Unset worker-selection variables before starting a local comparison");
   const baseline = await command("git", ["rev-parse", "--verify", `${options.baseline}^{commit}`], {

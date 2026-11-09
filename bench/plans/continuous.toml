@@ -5,6 +5,21 @@ harness = "smoke"
 algorithms = [ "tessera" ]
 exclude = []
 
+[[parallel]]
+types = ["u32", "row_u32", "u64", "row_u64"]
+distributions = ["random"]
+lengths = [10000000]
+
+[[parallel]]
+types = ["u64"]
+distributions = ["sorted", "reverse", "equal"]
+lengths = [10000000]
+
+[[parallel]]
+types = ["row_u32"]
+distributions = ["skew99"]
+lengths = [10000000]
+
 [[include]]
 types = [ "u64", "row_u64" ]
 distributions = [ "random", "sorted", "reverse", "equal" ]
@@ -47,7 +62,8 @@ lengths = [ 65536 ]
 
 [[include]]
 types = [ "u64" ]
-distributions = [ "sorted", "reverse", "sorted99", "equal", "far_swaps", "d16", "zipf2", "skew99", "sorted_tail", "runs" ]
+# Specialized direct-key shapes stay at 65k to leave room for the parallel tail.
+distributions = [ "sorted", "reverse", "sorted99", "equal", "far_swaps", "d16", "d4096", "sparse_digits", "zipf2", "skew99", "two_values", "sorted_tail", "runs" ]
 lengths = [ 65536 ]
 
 [[include]]
@@ -87,7 +103,7 @@ lengths = [ 65536 ]
 
 [[include]]
 types = [ "u64" ]
-distributions = [ "random", "zipf2", "skew99", "two_values", "sorted99", "sparse_digits", "bimodal", "hot50", "d4096", "sorted_tail" ]
+distributions = [ "random", "bimodal", "sorted_tail" ]
 lengths = [ 1000000 ]
 
 [[include]]
@@ -102,5 +118,5 @@ lengths = [ 1000000 ]
 
 [[include]]
 types = [ "u64" ]
-distributions = [ "random", "zipf2" ]
+distributions = [ "random" ]
 lengths = [ 10000000 ]

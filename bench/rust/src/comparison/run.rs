@@ -29,7 +29,7 @@ pub(super) fn measure_batch(k: &mut dyn Kernel, batch: usize) -> Result<u64, Str
     k.run_batch();
     let elapsed = start.elapsed().as_nanos() as u64;
     k.check()?;
-    super::host::check_threads()?;
+    super::host::check_threads(k.worker_threads())?;
     Ok(elapsed.max(1))
 }
 /// Chooses a batch from a warm-up timing and the prepared-memory limit.
@@ -72,7 +72,7 @@ pub(super) fn measure_case(
     let input = super::variant::CaseInput::new(case);
     let active: Vec<_> = variants
         .iter()
-        .filter(|v| v.prepare(&input, scratch_bytes).is_some())
+        .filter(|v| v.supports(&input))
         .copied()
         .chain(std::iter::once(variants[0]))
         .collect();

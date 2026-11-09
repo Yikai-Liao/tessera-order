@@ -49,6 +49,12 @@ Implementations document the scratch memory one call needs and fixed-size storag
 
 In Rust, the heap memory comes from `alloc`, so a `no_std` build needs a global allocator. One call needs O(√n) block scratch for a fixed record size and key width, a tile of up to 64 KiB of records (at least one record), up to two bytes of cached bucket ID per tile record, and at most 65,535 encoded probe keys of up to 16 bytes. Each tile-local MSD level holds up to 32 KiB of cursors on the stack, with at most 22 levels for 128-bit keys.
 
+## Rust Rayon entry points
+
+The optional `rayon` feature enables `std` and exposes `par_stable_sort` and `par_stable_sort_by_key`. Small inputs and one-thread pools use the serial engine; large inputs partition the root across disjoint shards and sort root buckets in the caller's pool. Bounded buckets may sort in private staging before final writes; other layouts retain block permutation and compaction. Both entry points preserve ordering, stability, records and panic recovery ([proposal](../docs/proposals/rayon-parallel-sort.md)).
+
+With pool width `P`, parallel calls use O(P√n) auxiliary space for fixed record size and key width. Root scratch uses O(√(nP)); bounded staging adds O(R√n) for root fan-out `R ≤ 4096`, including buckets suspended by reentrant callbacks. Direct-key counting adds O(PR) histogram storage. No contiguous n-record output buffer is allocated, though aggregate suspended staging can approach the input size at eligible finite lengths. Records require `Send` but do not require `Sync`. The by-key entry point requires `Fn + Sync` rather than `FnMut`; key evaluations may run concurrently and in any order. The serial APIs retain their existing bounds.
+
 ## Language adapters
 
 The rules above apply to Rust and C++. The [planned Python binding](../docs/proposals/python-binding.md) has its own contract: it sorts every NaN last in both directions, treats `-0.0` and `+0.0` as equal, keeps the original value bits, and calls a list's key function exactly once per element. These rules belong to the Python adapter and do not change the Rust encoding or key-extraction guarantees.

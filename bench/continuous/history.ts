@@ -34,6 +34,8 @@ export interface TrendSummary {
   // The base commit the latest report compared against.
   base: string | null;
   sharedCases: number;
+  // Current API groups, including groups without a comparable history yet.
+  modes: string[];
   runs: Measurement[];
   // Geometric mean of the changes against the base, one per PR run.
   overall: number[];
@@ -178,6 +180,13 @@ export function summarizeTrend(
     testbed: current.testbed.name,
     base: summary.baseHash,
     sharedCases: shared.length,
+    modes: [
+      ...new Set(
+        summary.rows
+          .filter((row) => row.name.startsWith(`${language}/`))
+          .map((row) => row.parts.mode),
+      ),
+    ],
     runs: runs.map(({ uuid, hash, time }) => ({ uuid, hash, time })),
     overall: runs.map(
       (run) =>

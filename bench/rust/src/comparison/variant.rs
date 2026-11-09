@@ -2,6 +2,9 @@
 
 //! Record representations, shared inputs and supported sorting adapters.
 
+#[cfg(feature = "rayon")]
+mod parallel;
+
 use super::{InputCase, check};
 use crate::case::{Key, Row, generate};
 use rdst::RadixSort;
@@ -9,7 +12,7 @@ use std::{cmp::Ordering, hint::black_box, mem::MaybeUninit, rc::Rc};
 use voracious_radix_sort::{RadixSort as VoraciousSort, Radixable};
 
 /// Ordering, identity and sorting operations for one benchmark record representation.
-pub(super) trait BenchmarkRecord: Clone + 'static {
+pub(super) trait BenchmarkRecord: Clone + Send + Sync + 'static {
     /// Whether tie order and payload identity are observable.
     const HAS_PAYLOAD: bool = false;
     /// Compares sorting keys in the shared total order.
@@ -22,6 +25,9 @@ pub(super) trait BenchmarkRecord: Clone + 'static {
     }
     /// Sorts this record representation through Tessera's public API.
     fn tessera(v: &mut [Self]);
+    /// Sorts this representation through Tessera's parallel API.
+    #[cfg(feature = "rayon")]
+    fn tessera_parallel(v: &mut [Self]);
     /// Returns separately allocated payload capacity for one record.
     fn extra_bytes(&self) -> usize {
         0
@@ -49,6 +55,10 @@ macro_rules! key_element {
             }
             fn tessera(v: &mut [Self]) {
                 tessera_sort::stable_sort(v);
+            }
+            #[cfg(feature = "rayon")]
+            fn tessera_parallel(v: &mut [Self]) {
+                tessera_sort::par_stable_sort(v);
             }
         }
     };
@@ -88,6 +98,10 @@ macro_rules! record_element {
             fn tessera(v: &mut [Self]) {
                 tessera_sort::stable_sort_by_key(v, |r| r.key);
             }
+            #[cfg(feature = "rayon")]
+            fn tessera_parallel(v: &mut [Self]) {
+                tessera_sort::par_stable_sort_by_key(v, |r| r.key);
+            }
         }
     };
 }
@@ -119,6 +133,10 @@ impl BenchmarkRecord for OwnedRecord {
     }
     fn tessera(values: &mut [Self]) {
         tessera_sort::stable_sort_by_key(values, |r| r.key);
+    }
+    #[cfg(feature = "rayon")]
+    fn tessera_parallel(values: &mut [Self]) {
+        tessera_sort::par_stable_sort_by_key(values, |r| r.key);
     }
     fn extra_bytes(&self) -> usize {
         self.payload.capacity()
@@ -255,6 +273,8 @@ pub(super) trait Kernel {
     fn check(&self) -> Result<(), String>;
     /// Returns the record and owned-payload bytes in one batch buffer.
     fn buffer_bytes(&self) -> usize;
+    /// Returns the number of persistent workers owned by this adapter.
+    fn worker_threads(&self) -> usize;
 }
 /// Batch buffers and a monomorphized sort over one shared prepared input.
 struct BatchKernel<T, F> {
@@ -262,6 +282,7 @@ struct BatchKernel<T, F> {
     buffers: Vec<Vec<T>>,
     sort: F,
     stable: bool,
+    worker_threads: usize,
 }
 impl<T: BenchmarkRecord, F: FnMut(&mut [T])> Kernel for BatchKernel<T, F> {
     fn restore(&mut self, batch: usize) {
@@ -285,6 +306,9 @@ impl<T: BenchmarkRecord, F: FnMut(&mut [T])> Kernel for BatchKernel<T, F> {
     fn buffer_bytes(&self) -> usize {
         self.input.buffer_bytes
     }
+    fn worker_threads(&self) -> usize {
+        self.worker_threads
+    }
 }
 /// Creates a typed batch kernel without cloning its shared reference.
 pub(super) fn prepare_kernel<T: BenchmarkRecord>(
@@ -297,6 +321,7 @@ pub(super) fn prepare_kernel<T: BenchmarkRecord>(
         buffers: Vec::new(),
         sort,
         stable,
+        worker_threads: 0,
     })
 }
 /// An adapter's public name and stability contract.
@@ -304,6 +329,8 @@ pub(super) fn prepare_kernel<T: BenchmarkRecord>(
 pub(super) struct Variant {
     pub name: &'static str,
     pub stable: bool,
+    pub adapter: &'static str,
+    pub threads: Option<usize>,
 }
 /// Lists the adapters measured in the selected executable configuration.
 pub(super) fn list_variants() -> Vec<Variant> {
@@ -312,12 +339,16 @@ pub(super) fn list_variants() -> Vec<Variant> {
         .iter()
         .filter(|algorithm| {
             algorithm.adapter == "common"
+                || (cfg!(feature = "rayon") && algorithm.threads.is_some())
                 || (!cfg!(feature = "portable-simd")
-                    && (algorithm.adapter == "rust" || cfg!(feature = "compare-native")))
+                    && (algorithm.adapter == "rust"
+                        || (algorithm.adapter == "native" && cfg!(feature = "compare-native"))))
         })
         .map(|algorithm| Variant {
             name: &algorithm.id,
             stable: algorithm.stable,
+            adapter: &algorithm.adapter,
+            threads: algorithm.threads,
         })
         .collect()
 }
@@ -327,6 +358,10 @@ fn try_prepare_common<T: BenchmarkRecord>(
     input: Rc<PreparedRecords<T>>,
     scratch_bytes: usize,
 ) -> Option<Box<dyn Kernel>> {
+    #[cfg(feature = "rayon")]
+    if let Some(threads) = v.threads {
+        return Some(parallel::prepare(input, v.adapter, threads));
+    }
     Some(match v.name {
         "tessera" => prepare_kernel(input, true, T::tessera),
         "std-stable" => prepare_kernel(input, true, |v| v.sort_by(T::order)),
@@ -357,6 +392,13 @@ macro_rules! copy_adapter {
     }};
 }
 impl Variant {
+    /// Checks capabilities without starting workers for a parallel adapter.
+    pub(super) fn supports(self, input: &CaseInput) -> bool {
+        // Every CaseInput representation implements BenchmarkRecord's parallel
+        // operations. Preparing one here would warm and discard a real pool.
+        (cfg!(feature = "rayon") && self.threads.is_some()) || self.prepare(input, 0).is_some()
+    }
+
     /// Prepares an adapter for this input, or declines an unsupported combination.
     pub(super) fn prepare(
         self,
@@ -392,6 +434,40 @@ impl Variant {
 mod tests {
     use super::*;
     #[test]
+    fn adapters_follow_features() {
+        let names: Vec<_> = list_variants().iter().map(|v| v.name).collect();
+        for id in ["tessera-par-8", "rayon-stable-8"] {
+            assert_eq!(names.contains(&id), cfg!(feature = "rayon"), "{id}");
+        }
+        assert!(names.contains(&"tessera"));
+        assert!(names.contains(&"std-stable"));
+        assert_eq!(names.contains(&"radsort"), !cfg!(feature = "portable-simd"));
+        assert_eq!(
+            names.contains(&"fluxsort"),
+            cfg!(feature = "compare-native") && !cfg!(feature = "portable-simd")
+        );
+    }
+
+    #[test]
+    fn capabilities_match_preparation() {
+        for ty in &crate::plan::catalog().comparison.types {
+            let input = CaseInput::new(&InputCase {
+                ty: ty.clone(),
+                distribution: "random".into(),
+                len: 32,
+            });
+            for variant in list_variants() {
+                assert_eq!(
+                    variant.supports(&input),
+                    variant.prepare(&input, 0).is_some(),
+                    "{} / {ty}",
+                    variant.name,
+                );
+            }
+        }
+    }
+
+    #[test]
     fn batches_restore_shared_input() {
         let input = PreparedRecords::new(vec![3u64, 1, 2]);
         let mut k = prepare_kernel(Rc::clone(&input), true, |v| {
@@ -408,6 +484,7 @@ mod tests {
                 v.sort();
             },
             stable: true,
+            worker_threads: 0,
         };
         for _ in 0..9 {
             k.restore(3);

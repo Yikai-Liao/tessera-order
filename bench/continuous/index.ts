@@ -98,11 +98,8 @@ export async function publishReport(options: ReportOptions) {
   // One comparison and one history chart hold every configuration as a
   // column, so a build adds a column rather than another pair of images.
   const images: ChartImage[] = [];
-  // Charts draw measured builds only; the overview names a failed one.
-  const comparison = chartSvg(
-    configurations.filter((c) => c.summary),
-    baseRef,
-  );
+  // Keep failed builds visible as unavailable columns in both figures.
+  const comparison = chartSvg(configurations, baseRef);
   if (comparison) images.push({ kind: "comparison", svg: comparison });
   let trendUnavailable = false;
   // The trend follows a PR branch; main has no PR history to draw.
@@ -122,10 +119,7 @@ export async function publishReport(options: ReportOptions) {
         }
       }),
     );
-    const trend = trendSvg(
-      trends.filter((c) => c.trend),
-      baseRef,
-    );
+    const trend = trendSvg(trends, baseRef);
     if (trend) images.push({ kind: "trend", svg: trend });
   }
   // Charts are supplemental. A history or image failure must not change the

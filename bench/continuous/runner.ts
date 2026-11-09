@@ -7,6 +7,21 @@ import { VARIANTS } from "../catalog.ts";
 import type { Plan } from "../plan.ts";
 import { buildBenchmark, withWorkspace } from "../workspace.ts";
 
+/** Validate an additive API listing without duplicating the plan's case count. */
+export function validateApiListings(listed: string[], legacy: string[]) {
+  const parallel = listed.filter((id) => id.endsWith("/par-4"));
+  if (
+    !legacy.length ||
+    !parallel.length ||
+    new Set(listed).size !== listed.length ||
+    new Set(legacy).size !== legacy.length ||
+    listed.length !== legacy.length + parallel.length ||
+    legacy.some((id) => !id.endsWith("/api") || !listed.includes(id))
+  )
+    throw new Error("Expected serial-only legacy IDs and additional four-thread parallel cases");
+  return { serial: legacy[0], parallel };
+}
+
 /** Build and verify the same static artifacts uploaded by the unprivileged CI job. */
 export async function buildContinuous(root: string, out: string) {
   if (process.platform !== "linux" || process.arch !== "x64")
@@ -29,6 +44,28 @@ export async function buildContinuous(root: string, out: string) {
       const linkage = await command("ldd", [artifact.executable], { capture: true });
       if (!linkage.includes("statically linked"))
         throw new Error(`${variant.name} executable is not statically linked`);
+      // Exercise the new exact-ID contract in this unprivileged build job.
+      // --test verifies outputs without measurements or a four-CPU prerequisite.
+      const listed = (
+        await command(artifact.executable, ["--bench"], {
+          capture: true,
+          env: { TESSERA_BENCH_LIST: "1", TESSERA_BENCH_PARALLEL: "4" },
+        })
+      )
+        .split("\n")
+        .filter(Boolean);
+      const legacy = (
+        await command(artifact.executable, ["--bench"], {
+          capture: true,
+          env: { TESSERA_BENCH_LIST: "1", TESSERA_BENCH_PARALLEL: undefined },
+        })
+      )
+        .split("\n")
+        .filter(Boolean);
+      const { serial, parallel } = validateApiListings(listed, legacy);
+      await command(artifact.executable, ["--bench", "--test"], {
+        env: { TESSERA_BENCH_PARALLEL: "4", TESSERA_BENCH_IDS: [serial, ...parallel].join("\n") },
+      });
       const directory = join(out, variant.id);
       await mkdir(directory);
       await copyFile(artifact.executable, join(directory, "bench"));

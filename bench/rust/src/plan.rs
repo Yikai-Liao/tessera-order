@@ -139,30 +139,6 @@ impl InputCase {
     }
 }
 
-/// Formats the seed-one Criterion group for validated input identities.
-///
-/// The mode remains separate because Criterion takes a group and a function name.
-///
-/// ```
-/// assert_eq!(tessera_bench::plan::criterion_group("u64", "random", 1000),
-///            "rust/u64/random/1000/s1");
-/// ```
-pub fn criterion_group(ty: &str, distribution: &str, len: usize) -> String {
-    format!("rust/{ty}/{distribution}/{len}/s1")
-}
-
-/// Joins a formatted Criterion group and the selected API mode for exact selection.
-///
-/// This matches Criterion's timed ID without parsing it or validating identities.
-///
-/// ```
-/// assert_eq!(tessera_bench::plan::criterion_id("rust/u64/random/1000/s1", "api"),
-///            "rust/u64/random/1000/s1/api");
-/// ```
-pub fn criterion_id(group: &str, mode: &str) -> String {
-    format!("{group}/{mode}")
-}
-
 /// A versioned experiment selection, independent of its measurement protocol.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -341,6 +317,50 @@ impl Plan {
     }
 }
 
+/// Formats a seed-one Criterion group from a typed representation's format.
+///
+/// The representation format stays literal, so row prefixes and constant names
+/// use one allocation, without intermediate strings or formatting calls.
+/// Identity validation belongs to the plan, not this formatter.
+///
+/// ```
+/// assert_eq!(tessera_bench::plan::criterion_group!("{}", "u64"; "random", 1000),
+///            "rust/u64/random/1000/s1");
+/// assert_eq!(tessera_bench::plan::criterion_group!("row_{}", "u64"; "random", 1000),
+///            "rust/row_u64/random/1000/s1");
+/// assert_eq!(tessera_bench::plan::criterion_group!("rec128_u64"; "random", 1000),
+///            "rust/rec128_u64/random/1000/s1");
+/// ```
+#[macro_export]
+macro_rules! criterion_group {
+    ($ty:literal $(, $argument:expr)*; $distribution:expr, $len:expr) => {
+        ::std::format!(
+            ::std::concat!("rust/", $ty, "/{distribution}/{len}/s1"),
+            $($argument,)*
+            distribution = $distribution,
+            len = $len,
+        )
+    };
+}
+
+/// Joins a Criterion group and API mode for exact timed-ID selection.
+///
+/// This matches Criterion's identity without parsing or validating its fields.
+///
+/// ```
+/// assert_eq!(tessera_bench::plan::criterion_id!("rust/u64/random/1000/s1", "api"),
+///            "rust/u64/random/1000/s1/api");
+/// ```
+#[macro_export]
+macro_rules! criterion_id {
+    ($group:expr, $mode:expr) => {
+        ::std::format!("{id}/{mode}", id = $group, mode = $mode)
+    };
+}
+
+/// Criterion formatters share this owner with comparison input identities.
+pub use crate::{criterion_group, criterion_id};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,10 +394,10 @@ mod tests {
                 distribution: entry["distribution"].as_str().unwrap().into(),
                 len: entry["length"].as_u64().unwrap() as usize,
             };
-            let group = criterion_group(&case.ty, &case.distribution, case.len);
+            let group = criterion_group!("{}", &case.ty; &case.distribution, case.len);
             assert_eq!(group, entry["criterion_group"].as_str().unwrap());
             assert_eq!(
-                criterion_id(&group, entry["mode"].as_str().unwrap()),
+                criterion_id!(&group, entry["mode"].as_str().unwrap()),
                 entry["criterion"].as_str().unwrap()
             );
             #[cfg(feature = "compare")]

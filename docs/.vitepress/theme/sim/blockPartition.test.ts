@@ -2,6 +2,7 @@
 // Run with `pnpm docs:test`: the model must produce the stable order and
 // conserve every record for every small configuration.
 import { simulate } from "./blockPartition.ts";
+import { topWindow } from "./digits.ts";
 
 let seed = 12345;
 const random = () => {
@@ -35,6 +36,26 @@ for (const R of [2, 4, 8]) {
         cases++;
       }
     }
+  }
+}
+// Changing keys can leave all records below or above an absent equality
+// pivot. A digit fallback must consume bits even if its bucket is unchanged.
+for (const band of [0, 2]) {
+  const keys = Array.from({ length: 33 }, (_, id) => id);
+  const equal = simulate({ keys, buckets: 4, blockSize: 4, classify: () => band });
+  if (equal.output.some((record, id) => record.id !== id || record.bucket !== band))
+    throw new Error("unchanged equality band lost records");
+  let candidate = 0xffffn;
+  let passes = 0;
+  while (candidate) {
+    const { digit, window } = topWindow(candidate, 3, 16);
+    const fallback = simulate({ keys, buckets: 2 ** digit.width, blockSize: 4, classify: () => 0 });
+    if (fallback.output.some((record, id) => record.id !== id))
+      throw new Error("digit fallback lost records");
+    const remaining = candidate & ~window;
+    if (remaining === candidate) throw new Error("digit fallback did not consume bits");
+    candidate = remaining;
+    if (++passes > 6) throw new Error("digit fallback did not terminate");
   }
 }
 console.log(`block partition model: ${cases} cases ok`);

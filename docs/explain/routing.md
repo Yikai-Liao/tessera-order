@@ -21,7 +21,7 @@ The sample rejects most unsorted inputs within a few pairs. The full scan runs o
 An unsorted input may still be *nearly* sorted: a sorted log with a few late entries, for example. Insertion sort finishes such an input in linear time, but on a random input it is quadratic. Tessera therefore gives it a **swap budget** and abandons it when the budget runs out.
 
 - If the input fits in one tile, insertion runs on the records with a budget of n swaps.
-- Otherwise, the keys of a probe window (one tile's worth of records, at most 65,535) are copied into a buffer and insertion-sorted there first. The number of swaps on the window predicts the number on the whole input: the budget for the records is `swaps × n / window`. A window that needed no swaps proves nothing, because the inversions are elsewhere, so the radix path continues.
+- Otherwise, the keys of a probe window (one tile's worth of records, at most 65,535) are copied into a buffer and insertion-sorted there first. The number of swaps on the window predicts the number on the whole input: the budget for the records is `floor(swaps × n / window)`. The product is computed in a wider integer type, so it cannot overflow before division on a 32-bit target; the resulting budget is at most n. A window that needed no swaps proves nothing, because the inversions are elsewhere, so the radix path continues.
 
 An abandoned insertion pass leaves the records in a different order, but every swap exchanged two adjacent out-of-order records, so equal keys never crossed. The input is still a *stable permutation* of itself, and the radix path sorts it correctly.
 
@@ -57,6 +57,8 @@ The remaining inputs get one [block partition](block-partition.md) on the window
 The node samples 64 keys in 8 runs of 8 consecutive keys. Runs rather than single keys avoid aliasing with periodic data. If one value fills at least a quarter of the sample, an **equality partition** splits the node into three bands: keys below, equal to, and above that value. The equal band is finished, since all of its keys are the same. The other two are routed again.
 
 A heavily skewed distribution (Zipf, a default value, a null marker) would otherwise put most records in one bucket on every digit, and that bucket would cost one pass per digit.
+
+A changing key function can make the sampled value disappear: every record then enters the same non-equal band, leaving the node unchanged. In that case the engine uses a top-digit partition instead. Its digit bits are removed from the next candidate mask even if the records again enter one bucket, so changing keys cannot repeat this node indefinitely.
 
 ### Outlier run
 

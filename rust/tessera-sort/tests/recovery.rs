@@ -166,6 +166,67 @@ fn changing_keys_owned_records() {
 }
 
 #[test]
+#[cfg(not(miri))]
+fn changing_pivot_keeps_records() {
+    let len = 20_000;
+    for greater in [false, true] {
+        let drops = Rc::new(RefCell::new(Vec::new()));
+        let mut records: Vec<_> = (0..len)
+            .map(|id| Owned {
+                id,
+                text: format!("record {id}"),
+                edited: Cell::new(false),
+                drops: drops.clone(),
+            })
+            .collect();
+        let probe_len = 65_536 / std::mem::size_of::<Owned>();
+        let prelude = 4 + probe_len + 1025;
+        let mut calls = 0;
+        stable_sort_by_key(&mut records, |record| {
+            assert!(
+                calls < 2_000_000,
+                "equality recursion did not make progress"
+            );
+            let call = calls;
+            calls += 1;
+            record.edited.set(true);
+            // Reject the order and insertion probes, then expose all key bits.
+            if call < 4 {
+                return [1, 0, 0, 1][call];
+            }
+            if call < 4 + probe_len {
+                return u64::from(call % 2 == 0);
+            }
+            if call < prelude {
+                return if call % 2 == 0 { 0 } else { u64::MAX };
+            }
+            // Each mode sample picks an absent pivot; all records enter one
+            // non-equal band, and its scan restores the same candidate mask.
+            let phase = (call - prelude) % (64 + len + 65);
+            if phase < 64 {
+                if greater { 0 } else { u64::MAX }
+            } else if phase < 64 + len {
+                1
+            } else if phase % 2 == 0 {
+                0
+            } else {
+                u64::MAX
+            }
+        });
+        assert!(drops.borrow().is_empty());
+        records.sort_by_key(|record| record.id);
+        for (id, record) in records.iter().enumerate() {
+            assert_eq!(record.id, id);
+            assert_eq!(record.text, format!("record {id}"));
+            assert!(record.edited.get());
+        }
+        drop(records);
+        drops.borrow_mut().sort_unstable();
+        assert_eq!(*drops.borrow(), (0..len).collect::<Vec<_>>());
+    }
+}
+
+#[test]
 fn changing_keys_borrowed_records() {
     struct Borrowed<'a> {
         id: usize,

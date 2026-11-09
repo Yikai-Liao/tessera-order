@@ -47,8 +47,9 @@ if (process.env.TESSERA_BENCH_LIST) {
 const selected = process.env.TESSERA_BENCH_IDS.split("\\n");
 const parallel = selected.some(id => id.endsWith("/par-4"));
 if (parallel) assert.equal(selected.length, 1, "one parallel case per process");
-const token = path.join(root, "active", String(process.pid));
-fs.writeFileSync(token, parallel ? "parallel" : "serial");
+// A sibling may unlink its token after the directory snapshot.
+const token = path.join(root, "active", (parallel ? "parallel-" : "serial-") + process.pid);
+fs.writeFileSync(token, "");
 const active = fs.readdirSync(path.join(root, "active"));
 if (parallel) {
   assert.equal(active.length, 1, "parallel preparation overlapped other work");
@@ -58,7 +59,7 @@ if (parallel) {
   }, 0);
   assert.equal(cpus, 4, "exactly four allowed CPUs");
 } else {
-  assert.ok(!active.some(name => fs.readFileSync(path.join(root, "active", name), "utf8") === "parallel"));
+  assert.ok(!active.some(name => name.startsWith("parallel-")));
 }
 fs.appendFileSync(path.join(root,"events"), "start " + selected.join(",") + "\\n");
 Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
@@ -77,7 +78,11 @@ fs.unlinkSync(token);
   const result = spawnSync(process.execPath, [cli, "continuous", "run", binary, "--out", out], {
     encoding: "utf8",
   });
-  assert.equal(result.status, 0, result.stderr + (result.stdout ?? ""));
+  assert.equal(
+    result.status,
+    0,
+    result.stderr + (result.stdout ?? "") + (await readFile(`${out}.log`, "utf8").catch(String)),
+  );
   const events = (await readFile(join(root, "events"), "utf8")).trim().split("\n");
   const firstParallel = events.findIndex((line) => line.includes("/par-4"));
   assert.ok(events.slice(firstParallel).every((line) => line.includes("/par-4")));

@@ -312,6 +312,14 @@ The equal-key case did not show a consistent revised-candidate loss across the p
 
 Two Rust tests check that scanned variation stays within the candidate and that an adversarial changing-key tile terminates while preserving records. Removing the mask makes the latter fail at a finite callback limit rather than overflowing the test process's stack. The model tests cover low fan-out, the strict cost comparison, saturated sampling, short plans and terminal leaves.
 
+### Direct finishing for insertion-sized roots
+
+An unordered root that already fits an insertion leaf can finish there instead of first exhausting a swap budget and scanning varying bits. The candidate keeps the order probe and the 48-record threshold, so confirmed ascending and descending inputs retain their existing return and reversal paths. The tile-fit guard preserves node routing for records whose total size exceeds a tile.
+
+A Default-build process screen against `e26cd29`, using the maintained `compare commit` command, measured random `u64` keys and keyed rows at 48 records on CPU 2 with nine rotating baseline/control/current blocks. The initial candidate, before the explicit tile-fit guard, had current/baseline medians of 0.8894 for direct keys and 0.9426 for rows, with paired A/A ranges of 0.9894–1.0106 and 0.9864–1.0136. Both tested inputs fit a tile; this is preliminary evidence for the candidate, not exact-head or placement-controlled acceptance.
+
+A second screen after adding the tile-fit guard measured sorted and reverse `u64` inputs at 48 records. Their medians, 0.9958 and 0.9990, were inside the respective A/A ranges, 0.9923–1.0077 and 0.9953–1.0047. The sorted case nevertheless had a block ratio of 1.1321; its cause remains unresolved. These local screens do not establish a general gain or explain the placement-sensitive alerts of other revisions. Raw results remain outside the repository under `short-insertion-random48` and `short-insertion-ordered48`; exact-head continuous results remain the performance acceptance gate.
+
 ### Exploratory SIMD constraints
 
 The optional backend experiments used AVX2, seven interleaved rounds of separate binaries summarized by per-round minimum times, and a separate A/A run. They did not use the [protocol](../development/benchmarking.md#timing-and-statistics)'s nine-block paired timing or independently placed baseline copies, and did not record output-hash checks. These observations preserve design constraints, not established speedup or regression claims.

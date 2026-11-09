@@ -457,6 +457,14 @@ fn prepare<T, E: Extract<T>>(
             return None;
         }
         Order::Unsorted => {
+            // This input already fits the insertion leaf; a budget and varying-bit
+            // scan cannot select a different finishing algorithm.
+            if records.len() <= INSERTION_MAX
+                && records.len().saturating_mul(record_bytes) <= tile_bytes
+            {
+                extractor.finish_insertion(records);
+                return None;
+            }
             let probe_len = (tile_bytes / record_bytes).max(2).min(records.len());
             if insertion_probe(records, extractor, probe_len) {
                 return None;
@@ -1199,6 +1207,87 @@ mod tests {
     use super::*;
     use crate::key::ByKey;
     use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    #[test]
+    fn short_unordered_finishes_directly() {
+        for len in [INSERTION_MAX - 1, INSERTION_MAX] {
+            let mut records: Vec<_> = (0..len).map(|id| ((id * 17 % len) as u64, id)).collect();
+            let mut expected = records.clone();
+            let mut expected_visits = Vec::new();
+            let mut extractor = ByKey(|record: &(u64, usize)| {
+                expected_visits.push(record.1);
+                record.0
+            });
+            assert!(probe_order(&expected, &mut extractor) == Order::Unsorted);
+            extractor.finish_insertion(&mut expected);
+
+            let mut visits = Vec::new();
+            sort::<_, _, true>(
+                &mut records,
+                &mut ByKey(|record: &(u64, usize)| {
+                    visits.push(record.1);
+                    record.0
+                }),
+            );
+            assert_eq!(records, expected);
+            assert_eq!(visits, expected_visits);
+        }
+    }
+
+    #[test]
+    fn short_root_respects_tile() {
+        /// Records which insertion stage the root selected.
+        #[derive(Default)]
+        struct InsertionStages {
+            probes: usize,
+            finishes: usize,
+        }
+
+        impl<const WORDS: usize> Extract<[u64; WORDS]> for InsertionStages {
+            type Value = u64;
+
+            fn key(&mut self, record: &[u64; WORDS]) -> u64 {
+                record[0]
+            }
+
+            fn insertion_sort(
+                &mut self,
+                records: &mut [[u64; WORDS]],
+                budget: usize,
+            ) -> Option<usize> {
+                self.probes += 1;
+                insertion_loop(records, budget, self)
+            }
+
+            fn finish_insertion(&mut self, records: &mut [[u64; WORDS]]) {
+                self.finishes += 1;
+                finish_insertion(records, self);
+            }
+        }
+
+        /// Checks the root choice with one inversion that fits either budget.
+        fn check<const WORDS: usize>(tile_bytes: usize, direct: bool) {
+            let mut records: Vec<_> = (0..INSERTION_MAX)
+                .map(|id| {
+                    let mut record = [0u64; WORDS];
+                    record[0] = id as u64;
+                    record
+                })
+                .collect();
+            let expected = records.clone();
+            records.swap(0, 1);
+            let mut stages = InsertionStages::default();
+            sort_with_tile_bytes::<_, _, true>(&mut records, &mut stages, tile_bytes);
+            assert_eq!(records, expected);
+            assert_eq!(stages.finishes, usize::from(direct));
+            assert_eq!(stages.probes, usize::from(!direct));
+        }
+
+        let fit_bytes = INSERTION_MAX * core::mem::size_of::<u64>();
+        check::<1>(fit_bytes, true);
+        check::<1>(fit_bytes - 1, false);
+        check::<257>(TILE_BYTES, false);
+    }
 
     #[test]
     fn confirm_order_calls_key_in_order() {

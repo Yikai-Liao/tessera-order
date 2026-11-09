@@ -40,8 +40,8 @@ const boxes: Box[] = [
     x: 200,
     y: 80,
     w: 280,
-    title: "Budgeted insertion",
-    detail: "nearly sorted inputs finish here",
+    title: "Insertion",
+    detail: "finish small tiles · budget larger inputs",
     link: "/explain/routing#budgeted-insertion",
   },
   {

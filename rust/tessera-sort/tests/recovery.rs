@@ -84,9 +84,9 @@ fn exercise(len: usize, changing: bool) {
 #[test]
 fn key_panic_recovery() {
     for len in if cfg!(miri) {
-        vec![12, 80]
+        vec![12, 47, 48, 49, 80]
     } else {
-        vec![12, 80, 5000]
+        vec![12, 47, 48, 49, 80, 5000]
     } {
         exercise(len, false);
     }
@@ -160,7 +160,11 @@ fn no_std_block_panic_aborts() {
 
 #[test]
 fn changing_keys_owned_records() {
-    for len in if cfg!(miri) { vec![80] } else { vec![80, 5000] } {
+    for len in if cfg!(miri) {
+        vec![47, 48, 49, 80]
+    } else {
+        vec![47, 48, 49, 80, 5000]
+    } {
         exercise(len, true);
     }
 }
@@ -232,41 +236,63 @@ fn changing_keys_borrowed_records() {
         id: usize,
         value: &'a mut usize,
     }
-    let len = if cfg!(miri) { 96 } else { 9000 };
-    for panic in [false, true] {
-        if panic && !cfg!(feature = "std") {
-            continue;
-        }
-        for at in [1, 24, 180, 500, 1200] {
+    let original_key = |id: usize| (id as u64).wrapping_mul(0x9e3779b97f4a7c15);
+    for len in [47, 48, 49, if cfg!(miri) { 96 } else { 9000 }] {
+        // Match the borrowed record shape so the probe takes the same tile route.
+        let mut total = 0;
+        {
             let mut backing: Vec<_> = (0..len).collect();
-            let mut records: Vec<_> = backing
+            let mut probe: Vec<_> = backing
                 .iter_mut()
                 .enumerate()
                 .map(|(id, value)| Borrowed { id, value })
                 .collect();
-            let mut calls = 0;
-            let _ = catch_unwind(AssertUnwindSafe(|| {
-                stable_sort_by_key(&mut records, |x| {
-                    calls += 1;
-                    if panic && calls == at {
-                        panic!("borrowed key");
-                    }
-                    if calls >= at {
-                        calls as u64 % 3
-                    } else {
-                        (x.id as u64).wrapping_mul(0x9e3779b97f4a7c15)
-                    }
-                });
-            }));
-            let mut ids: Vec<_> = records.iter().map(|x| x.id).collect();
-            ids.sort_unstable();
-            assert_eq!(ids, (0..len).collect::<Vec<_>>());
-            for record in &mut records {
-                assert_eq!(*record.value, record.id);
-                *record.value += len;
+            stable_sort_by_key(&mut probe, |record| {
+                total += 1;
+                original_key(record.id)
+            });
+        }
+        for panic in [false, true] {
+            if panic && !cfg!(feature = "std") {
+                continue;
             }
-            drop(records);
-            assert_eq!(backing, (len..2 * len).collect::<Vec<_>>());
+            for at in [1, 24, 180, 500, 1200] {
+                let mut backing: Vec<_> = (0..len).collect();
+                let mut records: Vec<_> = backing
+                    .iter_mut()
+                    .enumerate()
+                    .map(|(id, value)| Borrowed { id, value })
+                    .collect();
+                let mut calls = 0;
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    stable_sort_by_key(&mut records, |x| {
+                        calls += 1;
+                        if panic && calls == at {
+                            std::panic::panic_any(0x72u32);
+                        }
+                        if calls >= at {
+                            calls as u64 % 3
+                        } else {
+                            original_key(x.id)
+                        }
+                    });
+                }));
+                if panic && at <= total {
+                    assert_eq!(*result.unwrap_err().downcast::<u32>().unwrap(), 0x72);
+                    assert_eq!(calls, at, "called key after it panicked");
+                } else {
+                    assert!(result.is_ok(), "unexpected sort panic");
+                }
+                let mut ids: Vec<_> = records.iter().map(|x| x.id).collect();
+                ids.sort_unstable();
+                assert_eq!(ids, (0..len).collect::<Vec<_>>());
+                for record in &mut records {
+                    assert_eq!(*record.value, record.id);
+                    *record.value += len;
+                }
+                drop(records);
+                assert_eq!(backing, (len..2 * len).collect::<Vec<_>>());
+            }
         }
     }
 }

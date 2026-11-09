@@ -16,7 +16,7 @@ At larger strides, the adjacent-pair sample classifies the input below. The targ
 
 A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. Any leading equal keys skipped while finding the direction rule out strict descent. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
 
-At larger strides, the sample rejects most unsorted inputs within a few pairs. The full scan runs only on inputs that look ordered. For direct keys, this separate ascending confirmation checks the encoded predecessor and then reuses the scan that budgeted insertion uses: blocked adjacent pairs in the default build (`f64` keeps its scalar scan), or the vector backend with Portable SIMD. Key functions keep the scalar confirmation, evaluating each visited record once.
+At larger strides, the sample rejects most unsorted inputs within a few pairs. The full scan runs only on inputs that look ordered. It finds the first unequal key, which fixes the direction, and then continues in that direction. For an ascending input it reuses the scan that budgeted insertion uses: blocked adjacent pairs in the default build (`f64` keeps its scalar scan), or the vector backend with Portable SIMD. A descending input continues with a scan that also records whether any adjacent pair ties.
 
 ## Budgeted insertion
 
@@ -44,7 +44,9 @@ From here on, the engine works on slices of the input and sorts each one in plac
 - a **tile** is a slice of at most 64 KiB of records. It is finished in a scratch buffer of the same size, which stays in the L2 cache ([tiles](tiles.md));
 - a **node** is anything larger. It is split by a stable partition into children, and each child is routed again.
 
-A node first looks at its varying bits. If they span at most 8 bits, the node is one window away from sorted, and one of the routes below finishes it: every record is then in its final position.
+Partition children entering `sort_child` reuse the full order confirmation described above, without first sampling adjacent pairs. An ascending or constant child returns, and a descending child uses the same strict or stable reversal. Thus a radix partition can expose an ordered child even when the full input was not ordered. This applies equally to children from either end or the interior of the input, without an end-run detector or a length cap. Only unordered children scan their remaining candidate bits and continue to the normal routes. The root goes directly to `sort_node`, since it was already probed. The extra check takes at most linear work in the slice length and allocates nothing; it does not run insertion or create a second key buffer.
+
+A node then looks at its varying bits. If they span at most 8 bits, the node is one window away from sorted, and one of the routes below finishes it: every record is then in its final position.
 
 ### Counted window
 
@@ -54,7 +56,11 @@ Records sorted by a key function keep their payloads: two records with key 7 may
 
 ### Block partition of the window
 
-The remaining inputs get one [block partition](block-partition.md) on the window, which also finishes the node. Wider nodes have three ways to split. The first two are checked only on nodes of at least four tiles, so their 64-key sample is paid for.
+A node that reaches this point gets a [block partition](block-partition.md) on the window, which also finishes the node. Wider nodes have two ways to split. Equality sampling is checked only on nodes of at least four tiles, so its 64-key sample is paid for, and it runs before the digit route below.
+
+### Already in bucket order
+
+A node that reaches its digit partition may already hold the two runs its top varying bit separates, and then it needs no pass. One scan reads that bit and reports whether the node is `0*1*` or `1*0*` in it; the second form is one rotation away from the first, and both runs keep their own order. Those runs *are* the partition, the bit leaves the candidate, and the recursion finishes each run in place — with no detector, no sample and no length cap. This covers sorted data with a separated block of keys at either end, several such blocks, or any other arrangement the order already groups, as long as the node was not already finished by the narrow window or by an equality partition. The scan stops at the first record that breaks the pattern, which unordered records reach within a few keys, so the check costs a handful of key reads when it fails and one pass when it succeeds.
 
 ### Repeated key
 
@@ -63,18 +69,6 @@ The node samples 64 keys in 8 runs of 8 consecutive keys. Runs rather than singl
 A heavily skewed distribution (Zipf, a default value, a null marker) would otherwise put most records in one bucket on every digit, and that bucket would cost one pass per digit.
 
 A changing key function can make the sampled value disappear: every record then enters the same non-equal band, leaving the node unchanged. In that case the engine uses a top-digit partition instead. Its digit bits are removed from the next candidate mask even if the records again enter one bucket, so changing keys cannot repeat this node indefinitely.
-
-### Outlier run
-
-Some inputs are sorted data with a few records appended or prepended: a sentinel, a late batch, a `u64::MAX` marker. A digit partition would move the whole node to separate them.
-
-Tessera looks at the top varying bit. If at most an eighth of the sample disagrees with the majority on that bit, and those records form one run of at most 1,024 records at the start or end of the node, then:
-
-1. the run is rotated to the end it belongs to (records with the bit clear go first);
-2. the rest of the node, which no longer contains the top bit's minority, is routed again with a narrower set of varying bits;
-3. the run is finished by insertion sort.
-
-If the minority also appears anywhere outside the run, the check gives up at the first such record and the node takes the top-digit split.
 
 ### Top digit
 
@@ -95,6 +89,7 @@ While the block partition writes its result back into the input, each child that
 | unsorted tile, at most 48 records | insertion finish | bounded quadratic leaf, no allocation |
 | larger nearly sorted input | budgeted insertion | linear in n plus inversions |
 | one dominant key | equality partition | one partition, the equal band is done |
-| sorted with a short outlier run | rotate + insertion | the body is routed on fewer bits |
+| ordered or constant child exposed by a partition | full order confirmation, then return or stable reversal | at most linear work in that child |
+| node already in two runs of its top varying bit | split at that bit | one scan, no partition pass or scratch |
 | at most 8 varying bits, record is its own key | counted window | one counting pass and one fill |
 | everything else | top-digit block partition, then tiles | one streaming pass per node level, then cache-resident tiles |

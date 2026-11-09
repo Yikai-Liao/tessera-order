@@ -275,3 +275,46 @@ fn unusual_record_layouts() {
     let mut empty = [(); 100];
     stable_sort_by_key(&mut empty, |_| 0u8);
 }
+
+#[test]
+fn perturbed_order_stays_stable() {
+    // Vary the structure rather than reproducing a named benchmark: both
+    // directions, ties, moving a distant record, reversing an interior run,
+    // and local exchanges, with disturbances near either end and the middle.
+    let lengths: &[usize] = if cfg!(miri) {
+        &[65]
+    } else {
+        &[129, 8193, 65_537]
+    };
+    for &len in lengths {
+        for descending in [false, true] {
+            for divisor in [1, 4] {
+                let ordered: Vec<_> = (0..len)
+                    .map(|id| {
+                        let rank = if descending { len - 1 - id } else { id };
+                        (rank as u64 / divisor, id)
+                    })
+                    .collect();
+                for start in [0, len / 2, len - len / 8] {
+                    for disturbance in 0..3 {
+                        let mut records = ordered.clone();
+                        let end = (start + len / 8).min(len);
+                        match disturbance {
+                            0 => records[start..end].rotate_left(1),
+                            1 => records[start..end].reverse(),
+                            _ => {
+                                for index in (start..end - 1).step_by(7) {
+                                    records.swap(index, index + 1);
+                                }
+                            }
+                        }
+                        let mut expected = records.clone();
+                        expected.sort_by_key(|record| record.0);
+                        stable_sort_by_key(&mut records, |record| record.0);
+                        assert_eq!(records, expected);
+                    }
+                }
+            }
+        }
+    }
+}

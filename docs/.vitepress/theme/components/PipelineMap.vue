@@ -22,7 +22,7 @@ const boxes: Box[] = [
     y: 10,
     w: 280,
     title: "Order probe",
-    detail: "ascending · descending · flat · unsorted",
+    detail: "unit stride: confirm once; otherwise sample",
     link: "/explain/routing#order-probe",
   },
   {

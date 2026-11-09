@@ -528,6 +528,10 @@ const ORDER_SAMPLES: usize = 4096;
 #[inline(never)]
 fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     let stride = (records.len() / ORDER_SAMPLES).max(1);
+    // A unit stride would visit every pair before confirming them again.
+    if stride == 1 {
+        return confirm_order(records, extractor);
+    }
     let mut ascending = true;
     let mut descending = true;
     for index in (stride..records.len()).step_by(stride) {
@@ -1270,6 +1274,71 @@ mod tests {
         check::<1>(fit_bytes, true);
         check::<1>(fit_bytes - 1, false);
         check::<257>(TILE_BYTES, false);
+    }
+
+    #[test]
+    fn unit_stride_visits_once() {
+        let lengths: &[usize] = if cfg!(miri) {
+            &[2, 49, 129]
+        } else {
+            &[2, 49, 129, 1000, 8191]
+        };
+        for &len in lengths {
+            for descending in [false, true] {
+                for ties in [false, true] {
+                    let mut records: Vec<_> = (0..len)
+                        .map(|index| (if ties { index / 2 } else { index }, index))
+                        .collect();
+                    if descending {
+                        records.reverse();
+                    }
+                    let mut visited = Vec::new();
+                    let order = probe_order(
+                        &records,
+                        &mut ByKey(|record: &(usize, usize)| {
+                            visited.push(record.1);
+                            record.0
+                        }),
+                    );
+                    assert!(if descending && (len > 2 || !ties) {
+                        matches!(order, Order::Descending { strict } if strict != ties)
+                    } else {
+                        matches!(order, Order::Ascending)
+                    });
+                    assert_eq!(
+                        visited,
+                        records.iter().map(|record| record.1).collect::<Vec<_>>()
+                    );
+                }
+            }
+            let mut calls = 0;
+            let order = probe_order(
+                &std::vec![7u64; len],
+                &mut ByKey(|record: &u64| {
+                    calls += 1;
+                    *record
+                }),
+            );
+            assert!(matches!(order, Order::Ascending));
+            assert_eq!(calls, len);
+        }
+    }
+
+    #[test]
+    fn unit_stride_rejects_inversions() {
+        for len in [3, 49, 129] {
+            for descending in [false, true] {
+                let mut records: Vec<_> = (0..len).collect();
+                if descending {
+                    records.reverse();
+                }
+                for index in 0..len - 1 {
+                    records.swap(index, index + 1);
+                    assert!(probe_order(&records, &mut Direct) == Order::Unsorted);
+                    records.swap(index, index + 1);
+                }
+            }
+        }
     }
 
     #[test]

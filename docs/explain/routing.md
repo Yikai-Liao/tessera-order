@@ -4,7 +4,9 @@ Before any radix pass, Tessera checks whether the input needs one. Many real inp
 
 ## Order probe
 
-`probe_order` samples adjacent pairs with a stride of `max(1, floor(n / 4,096))` and classifies the input below. The target of 4,096 determines the stride, not a hard limit: for example, 8,191 records use stride 1 and can visit 8,190 pairs before the confirmation scan.
+`probe_order` chooses a stride of `max(1, floor(n / 4,096))`. At stride 1 — fewer than 8,192 records — it calls the complete `confirm_order` scan directly: sampling every adjacent pair first would repeat the same work. This scan rejects an inversion as soon as it sees one, returns immediately for ascending or constant keys, and distinguishes strict descent from descent with ties.
+
+At larger strides, the adjacent-pair sample classifies the input below. The target of 4,096 determines the stride, not a hard sample limit. An ordered, non-flat candidate takes the stages modeled in [`orderProbe.ts`](../.vitepress/theme/sim/orderProbe.ts).
 
 | Sampled pairs | Class | What happens |
 |---|---|---|

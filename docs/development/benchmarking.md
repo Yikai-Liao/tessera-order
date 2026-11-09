@@ -9,6 +9,7 @@ Run `pnpm tools` from the repository root with Node.js 24, the pinned pnpm and R
 | Task | Command | What it provides |
 |---|---|---|
 | Compare working-tree code with a commit | `pnpm tools compare commit COMMIT` | Two revision builds, nine rotating baseline/control/current process blocks, paired process-level A/A, verification, provenance and a report |
+| Attribute a revision change | `pnpm tools compare revisions BASE --current HEAD --simd` | Both revisions and independent linked copies in one process per configuration; paired A/A, verification, allocation, retained executables and reports |
 | Compare algorithms | `pnpm tools compare algorithms` | Registered algorithms in one timing executable per configuration, nine shuffled blocks, two Tessera calls for A/A, output verification, allocation measurement and a report |
 | Full algorithm comparison | `pnpm tools compare algorithms --plan release --simd` | Release coverage, native opponents and a separate Portable SIMD build |
 | Resume an interrupted algorithm comparison | `pnpm tools compare resume DIR` | Recorded selection, settings and exact retained builds; no rebuilding |
@@ -50,9 +51,19 @@ Run `pnpm tools` from the repository root with Node.js 24, the pinned pnpm and R
 
 Algorithm comparisons from `compare algorithms` use the [paired timing contract](#timing-and-statistics) and report results for the measured inputs and environment. Attributing a gain to a source change rather than code placement additionally needs in-process revision comparisons and independent placement controls, as in the [engine measurements](../design/port.md). Process-level `compare commit` and continuous alerts alone do not provide that attribution evidence.
 
-`compare algorithms` compares registered implementations from the current source snapshot, not a baseline commit. `compare commit` accepts a baseline commit but builds two executables; its A/A pair repeats the baseline executable rather than an independently linked copy. The CLI does not automatically register both revisions and independent layout copies in one timing executable.
+`compare algorithms` compares registered implementations from the current source snapshot, not a baseline commit. `compare commit` accepts a baseline commit but builds two executables; its A/A pair repeats the baseline executable rather than an independently linked copy. Use `compare revisions` for paired source-attribution controls. This is a different experiment from either the process-level screen or the continuous executable; it does not automatically explain an alert in another executable.
 
 Before adding a custom experiment, identify the exact unmet requirement, explain why existing plans, options or adapters cannot meet it, and obtain operator agreement. Prefer extending the maintained comparison pipeline so verification, provenance and reporting remain shared. Historical harnesses record past evidence, not the default procedure for new measurements.
+
+### Linked revision comparisons
+
+`pnpm tools compare revisions BASE --current CANDIDATE --plan PLAN --simd --cpu CPU` snapshots the current harness and links two independently named crates for each library revision into each timing executable. Omit `--current` to measure the working library snapshot, including dirty sources; omit `BASE` to use `HEAD` as baseline. `--simd` adds a second Portable SIMD executable, just as in algorithm comparisons. Both configurations use the same features for every library copy. Plans must use the comparison harness; input axes, `--sample-ms`, `--memory-mib` and `--out` work as in algorithm comparisons. Algorithm selection is fixed to Tessera current A/B, baseline A/B and the standard stable anchor. Input boundaries resolve from the primary current library.
+
+Each case runs nine shuffled blocks, with current A timed twice for A/A. Restoration, calibration, stable-reference verification and allocation measurements reuse the algorithm harness. The ordinary report retains every copy as a separate row. Ratios are **placement time / current A paired mean**: a baseline ratio below one indicates a slower current, while a baseline ratio above one indicates a faster current. Do not read baseline rows as current/baseline ratios. Compare both baseline copies and current B with the A/A range before attributing a direction to source changes. Independently named copies are placement controls, not guaranteed favorable or randomized layouts.
+
+Manifests include exact revision IDs, pre-renaming library hashes, the generated lockfile, compiler/features, complete linked-source and executable hashes, and per-type adapter entry offsets relative to current A. Copy generation changes only package names and dependency wiring, not library Rust sources. Registry and Git lock entries must stay unchanged; historical dependencies or APIs incompatible with the current harness fail before timing. Distinct adapter addresses are checked before writing a manifest, but attribution also requires inspecting the retained executable to check that the relevant internal functions were not folded together. Entry offsets alone do not prove internal separation.
+
+Outputs use the existing algorithm-session format: executable pairs under `bin/`, validation receipts, journals and offline reports. `compare resume DIR` resumes the same artifacts without rebuilding; a completed session does not generate fresh measurements. For a predeclared multi-process experiment, start each new session directory with only the retained `bin/`, `plan.json` and `session.json` from the first preparation, then invoke `compare resume` there. Do not copy journals, manifests or validation receipts; keep each process report separate.
 
 ## Working-tree comparisons
 

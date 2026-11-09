@@ -67,6 +67,22 @@ test("paired ratios respect noise", () => {
   );
 });
 
+test("revision placements retain measured verdicts", () => {
+  const dataset = createFixture();
+  for (const manifest of dataset.manifests.values()) {
+    for (const v of manifest.variants) if (v.name === "std-stable") v.name = "tessera-baseline";
+    for (const c of manifest.cases)
+      c.variants = c.variants.map((v) => (v === "std-stable" ? "tessera-baseline" : v));
+  }
+  for (const row of dataset.samples)
+    if (row.variant === "std-stable") row.variant = "tessera-baseline";
+  const result = summarize(dataset).get(
+    measurementId("default", "u64/random/1000/s1", "tessera-baseline"),
+  )!;
+  assert.equal(result.verdict, "slower");
+  assert.equal(result.stable, true);
+});
+
 test("A/A verdicts use the paired mean and survive swapping control labels", () => {
   const dataset = createFixture();
   const id = "u64/random/1000/s1";

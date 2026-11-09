@@ -63,6 +63,6 @@ test("task groups expose no legacy comparison aliases", () => {
   );
   assert.deepEqual(
     program.commands[0].commands.map((command) => command.name()),
-    ["commit", "algorithms", "resume"],
+    ["commit", "algorithms", "revisions", "resume"],
   );
 });

@@ -117,7 +117,7 @@ export function summarize(dataset: Dataset): Map<string, Summary> {
       paired.low = Math.min(...paired.ratios);
       paired.high = Math.max(...paired.ratios);
     }
-    if (variant.startsWith("tessera")) paired.verdict = "within noise";
+    if (variant === "tessera" || variant === "tessera-aa") paired.verdict = "within noise";
     result.set(measurementId(build, id, variant), {
       caseId: id,
       build,

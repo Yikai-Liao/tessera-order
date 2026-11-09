@@ -24,7 +24,7 @@ test("catalog identities are unique and references resolve", () => {
     for (const id of group.types) assert.ok(catalog.comparison.types.includes(id));
   for (const entry of catalog.algorithms) {
     assert.ok(["radix", "comparison", "SIMD"].includes(entry.family));
-    assert.ok(["common", "rust", "native"].includes(entry.adapter));
+    assert.ok(["common", "rust", "native", "revision"].includes(entry.adapter));
     assert.equal(typeof entry.stable, "boolean");
   }
 });

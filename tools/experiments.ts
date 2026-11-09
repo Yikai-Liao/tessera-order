@@ -164,6 +164,54 @@ export function experimentCommands(program: Command) {
       },
     );
 
+  measurement(
+    "revisions [baseline]",
+    "Compare revisions with independent linked copies in one process",
+  )
+    .option("--current <revision>", "current library commit (default: working snapshot)")
+    .option(
+      "--sample-ms <number>",
+      "minimum sample duration in milliseconds",
+      parsePositiveInteger,
+      5,
+    )
+    .option("--memory-mib <number>", "prepared-buffer cap in MiB", parsePositiveInteger, 256)
+    .action(
+      async (
+        baseline: string | undefined,
+        options: MeasurementOptions & { current?: string; sampleMs: number; memoryMib: number },
+      ) => {
+        const plan = await loadPlan(options.plan ?? "smoke", {
+          ...selectAxes(options),
+          algorithms: [
+            "tessera",
+            "std-stable",
+            "tessera-baseline",
+            "tessera-baseline-copy",
+            "tessera-copy",
+          ],
+        });
+        if (plan.harness !== "comparison")
+          throw new Error("Revision comparisons require a comparison harness plan");
+        if (options.algorithms)
+          throw new Error("Revision comparisons select their own linked controls");
+        const root = await repositoryRoot();
+        const out = resultDirectory(root, options.out);
+        await runTask(out, Boolean(program.opts().verbose), () =>
+          compareAlgorithms({
+            root,
+            out,
+            plan,
+            cpu: options.cpu,
+            simd: Boolean(options.simd),
+            sampleMs: options.sampleMs,
+            memoryMib: options.memoryMib,
+            revisions: { baseline: baseline ?? "HEAD", current: options.current },
+          }),
+        );
+      },
+    );
+
   compare
     .command("resume <directory>")
     .description("Resume retained builds with the recorded selection and settings")

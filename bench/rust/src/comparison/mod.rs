@@ -108,7 +108,12 @@ impl Options {
                 && options.plan_path.is_some()
                 && !available.iter().any(|entry| entry.name == id)
             {
-                return Err(format!("algorithm {id} is unavailable; enable compare-native").into());
+                let command = if id.starts_with("tessera-") {
+                    "use tools compare revisions"
+                } else {
+                    "enable compare-native"
+                };
+                return Err(format!("algorithm {id} is unavailable; {command}").into());
             }
         }
         Ok(options)
@@ -207,7 +212,14 @@ fn create_manifest(options: &Options, cases: &[InputCase]) -> Value {
                     .filter(|v| v.prepare(&input, 0).is_some())
                     .map(|v| v.name)
                     .collect();
-                json!({"ty":case.ty,"distribution":case.distribution,"len":case.len,"variants":supported})
+                let entry = json!({"ty":case.ty,"distribution":case.distribution,"len":case.len,"variants":supported});
+                #[cfg(tessera_bench_revisions)]
+                let entry = {
+                    let mut entry = entry;
+                    entry["revision_entry_offsets"] = json!(input.revision_entries());
+                    entry
+                };
+                entry
             })
             .collect::<Vec<_>>()
     );
@@ -311,6 +323,7 @@ fn verify_memory_build(options: &Options) -> Result<()> {
         "cxx",
         "native_build",
         "native_sources",
+        "revisions",
     ] {
         if memory[field] != timing[field] {
             return Err(

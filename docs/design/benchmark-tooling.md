@@ -12,6 +12,7 @@
 | `bench/plans/`, `plan.ts`, `config.ts` | Presets, strict schema, CLI overrides and syntax decoding |
 | `bench/workspace.ts` | Source snapshots, builds, temporary worktrees and cleanup |
 | `bench/local/` | Commit comparison, process-level blocks, A/A analysis and report |
+| `bench/revisions.ts` | Independent named library snapshots, dependency wiring and revision provenance for in-process comparison |
 | `bench/release.ts`, `bench/session.ts` | Preparation, retained builds, validation receipts and session recovery |
 | `bench/rust/` | Verified timing, allocation measurement and resumable journals |
 | `bench/report/` | Persisted-result validation, statistics, figures and BMF |
@@ -39,7 +40,7 @@ Selection axes are type, distribution and length; there is no mode selector. Cri
 
 The workspace materializes current staged, unstaged and untracked sources without changing the caller's checkout. Internal links become regular snapshot contents; dangling/escaping links and directory cycles fail before building. Baseline links resolve within that commit's archive, never against the live checkout. Source hashing, backup and compilation see the same materialized inputs.
 
-Both revisions use the current harness, lockfile, workspace and toolchain; only the baseline library is replaced. Incompatible historical APIs or selected timed IDs fail instead of silently substituting a baseline. Cargo JSON selects executables and matching build-script provenance, including configured targets and compiler overrides; incompatible settings fail before timing.
+Both revisions use the current harness, lockfile, workspace and toolchain; only the baseline library is replaced in process-level screens. Linked revision comparisons additionally materialize named baseline/current copies and wire their Cargo dependencies inside the temporary workspace. The generated lockfile may add path packages, but external dependency entries must remain unchanged. Build provenance includes these source copies and exact revision identities; the algorithm session owns retained binaries, validation, timing, allocation and reporting. Incompatible historical APIs or selected timed IDs fail instead of silently substituting a baseline. Cargo JSON selects executables and matching build-script provenance, including configured targets and compiler overrides; incompatible settings fail before timing.
 
 Temporary sources and builds belong to the workspace; result directories retain provenance, observations, summaries and figures. Interrupted local runs are inspectable, not resumable or reportable as complete. Algorithm sessions retain their executable pairs, selection and settings before measuring; `compare resume` uses these exact artifacts without rebuilding. TypeScript owns the session lease and validation receipts. Rust owns host/build compatibility, journal repair and worker kernel locks, so an orphaned worker cannot lose exclusivity merely because its parent lease expires. [The recovery procedure](../development/benchmarking.md#resuming-algorithm-comparisons) defines partial-state handling.
 

@@ -6,6 +6,7 @@ import { command, diagnostic } from "../tools/process.ts";
 import { catalog } from "./catalog.ts";
 import type { Plan } from "./plan.ts";
 import { writeReport } from "./report/index.ts";
+import { prepareRevisions, type Revisions } from "./revisions.ts";
 import { fetchNative } from "./rust/native/fetch.ts";
 import {
   type Build,
@@ -47,6 +48,8 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
     throw new Error("Native linkage checks require Linux and ldd");
   await mkdir(out, { recursive: false });
   await withComparisonWorkspace(root, native, async ({ tree, target }) => {
+    // Exercise generated dependency wiring and revision adapters in the CI smoke check.
+    await prepareRevisions(root, tree, { baseline: "HEAD" });
     const features = ["compare", ...(native ? ["compare-native"] : [])];
     await command(
       "cargo",
@@ -95,6 +98,7 @@ export interface ReleaseOptions {
   group?: string;
   sampleMs: number;
   memoryMib: number;
+  revisions?: Revisions;
 }
 
 /** Retain immutable builds, then validate, measure and report one experiment. */
@@ -117,6 +121,7 @@ async function prepareComparison(options: ReleaseOptions) {
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
   const builds: Build[] = [];
   await withComparisonWorkspace(root, native, async ({ tree, target }) => {
+    if (options.revisions) await prepareRevisions(root, tree, options.revisions);
     for (const portable of simd ? [false, true] : [false]) {
       const features = [
         "compare",

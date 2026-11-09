@@ -22,6 +22,33 @@ pub(super) trait BenchmarkRecord: Clone + 'static {
     }
     /// Sorts this record representation through Tessera's public API.
     fn tessera(v: &mut [Self]);
+    /// Sorts through the independently named baseline crate.
+    #[cfg(tessera_bench_revisions)]
+    fn baseline(v: &mut [Self]);
+    /// Sorts through the second baseline placement.
+    #[cfg(tessera_bench_revisions)]
+    fn baseline_copy(v: &mut [Self]);
+    /// Sorts through the second current placement.
+    #[cfg(tessera_bench_revisions)]
+    fn current_copy(v: &mut [Self]);
+    /// Reports relative adapter addresses, stable across process ASLR.
+    #[cfg(tessera_bench_revisions)]
+    fn revision_entries() -> Vec<String> {
+        let entries = [
+            Self::tessera as *const () as usize,
+            Self::baseline as *const () as usize,
+            Self::baseline_copy as *const () as usize,
+            Self::current_copy as *const () as usize,
+        ];
+        assert!(
+            (0..entries.len()).all(|i| !entries[..i].contains(&entries[i])),
+            "revision adapters were folded together"
+        );
+        entries
+            .iter()
+            .map(|entry| format!("{:#x}", entry.wrapping_sub(entries[0])))
+            .collect()
+    }
     /// Returns separately allocated payload capacity for one record.
     fn extra_bytes(&self) -> usize {
         0
@@ -37,6 +64,18 @@ pub(super) trait BenchmarkRecord: Clone + 'static {
         glidesort::sort_with_buffer_by(records, &mut buffer, Self::order);
     }
 }
+/// Keeps revision adapters symmetric and calls statically monomorphized public APIs.
+#[cfg(tessera_bench_revisions)]
+macro_rules! revision_sorts {
+    ($api:ident $(, $key:expr)?) => {
+        #[inline(never)]
+        fn baseline(v: &mut [Self]) { revision_baseline::$api(v $(, $key)?); }
+        #[inline(never)]
+        fn baseline_copy(v: &mut [Self]) { revision_baseline_copy::$api(v $(, $key)?); }
+        #[inline(never)]
+        fn current_copy(v: &mut [Self]) { revision_current_copy::$api(v $(, $key)?); }
+    };
+}
 /// Implements benchmark ordering and sorting for scalar keys.
 macro_rules! key_element {
     ($t:ty) => {
@@ -47,9 +86,12 @@ macro_rules! key_element {
             fn same(&self, o: &Self) -> bool {
                 Key::same(self, o)
             }
+            #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(v: &mut [Self]) {
                 tessera_sort::stable_sort(v);
             }
+            #[cfg(tessera_bench_revisions)]
+            revision_sorts!(stable_sort);
         }
     };
 }
@@ -85,9 +127,12 @@ macro_rules! record_element {
             fn index(&self) -> usize {
                 $index(self)
             }
+            #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(v: &mut [Self]) {
                 tessera_sort::stable_sort_by_key(v, |r| r.key);
             }
+            #[cfg(tessera_bench_revisions)]
+            revision_sorts!(stable_sort_by_key, |r| r.key);
         }
     };
 }
@@ -117,9 +162,12 @@ impl BenchmarkRecord for OwnedRecord {
     fn index(&self) -> usize {
         usize::from_str_radix(&self.payload, 16).unwrap_or(usize::MAX)
     }
+    #[cfg_attr(tessera_bench_revisions, inline(never))]
     fn tessera(values: &mut [Self]) {
         tessera_sort::stable_sort_by_key(values, |r| r.key);
     }
+    #[cfg(tessera_bench_revisions)]
+    revision_sorts!(stable_sort_by_key, |r| r.key);
     fn extra_bytes(&self) -> usize {
         self.payload.capacity()
     }
@@ -187,6 +235,19 @@ pub(super) enum CaseInput {
     OwnedRecord(Rc<PreparedRecords<OwnedRecord>>),
 }
 impl CaseInput {
+    /// Records distinct adapter offsets without persisting ASLR-dependent addresses.
+    #[cfg(tessera_bench_revisions)]
+    pub(super) fn revision_entries(&self) -> Vec<String> {
+        match self {
+            Self::U32(_) => u32::revision_entries(),
+            Self::U64(_) => u64::revision_entries(),
+            Self::F64(_) => f64::revision_entries(),
+            Self::Row32(_) => Row::<u32>::revision_entries(),
+            Self::Row64(_) => Row::<u64>::revision_entries(),
+            Self::WideRecord(_) => WideRecord::revision_entries(),
+            Self::OwnedRecord(_) => OwnedRecord::revision_entries(),
+        }
+    }
     /// Generates and prepares the concrete record representation of a suite case.
     pub(super) fn new(c: &InputCase) -> Self {
         match c.ty.as_str() {
@@ -313,7 +374,9 @@ pub(super) fn list_variants() -> Vec<Variant> {
         .filter(|algorithm| {
             algorithm.adapter == "common"
                 || (!cfg!(feature = "portable-simd")
-                    && (algorithm.adapter == "rust" || cfg!(feature = "compare-native")))
+                    && (algorithm.adapter == "rust"
+                        || (algorithm.adapter == "native" && cfg!(feature = "compare-native"))))
+                || (algorithm.adapter == "revision" && cfg!(tessera_bench_revisions))
         })
         .map(|algorithm| Variant {
             name: &algorithm.id,
@@ -329,6 +392,12 @@ fn try_prepare_common<T: BenchmarkRecord>(
 ) -> Option<Box<dyn Kernel>> {
     Some(match v.name {
         "tessera" => prepare_kernel(input, true, T::tessera),
+        #[cfg(tessera_bench_revisions)]
+        "tessera-baseline" => prepare_kernel(input, true, T::baseline),
+        #[cfg(tessera_bench_revisions)]
+        "tessera-baseline-copy" => prepare_kernel(input, true, T::baseline_copy),
+        #[cfg(tessera_bench_revisions)]
+        "tessera-copy" => prepare_kernel(input, true, T::current_copy),
         "std-stable" => prepare_kernel(input, true, |v| v.sort_by(T::order)),
         "std-unstable" => prepare_kernel(input, false, |v| v.sort_unstable_by(T::order)),
         "glidesort" => prepare_kernel(input, true, T::glidesort),
@@ -391,6 +460,41 @@ impl Variant {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(tessera_bench_revisions)]
+    #[test]
+    fn revisions_preserve_records() {
+        for ty in [
+            "u32",
+            "u64",
+            "f64",
+            "row_u32",
+            "row_u64",
+            "record128",
+            "owned",
+        ] {
+            for distribution in ["random", "equal", "reverse", "d16"] {
+                let input = CaseInput::new(&InputCase {
+                    ty: ty.into(),
+                    distribution: distribution.into(),
+                    len: 49,
+                });
+                assert_eq!(input.revision_entries().len(), 4);
+                for name in [
+                    "tessera",
+                    "tessera-baseline",
+                    "tessera-baseline-copy",
+                    "tessera-copy",
+                ] {
+                    let mut kernel = Variant { name, stable: true }.prepare(&input, 0).unwrap();
+                    kernel.restore(2);
+                    kernel.run_batch();
+                    kernel
+                        .check()
+                        .unwrap_or_else(|error| panic!("{ty}/{distribution}/{name}: {error}"));
+                }
+            }
+        }
+    }
     #[test]
     fn batches_restore_shared_input() {
         let input = PreparedRecords::new(vec![3u64, 1, 2]);

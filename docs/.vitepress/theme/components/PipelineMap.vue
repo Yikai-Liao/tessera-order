@@ -69,7 +69,7 @@ const boxes: Box[] = [
     y: 230,
     w: 280,
     title: "Order probe on child",
-    detail: "root already probed; children reuse it",
+    detail: "confirm first; scan variation if needed",
     link: "/explain/routing#nodes-and-tiles",
   },
   {

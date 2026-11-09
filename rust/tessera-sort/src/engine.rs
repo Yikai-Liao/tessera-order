@@ -738,9 +738,9 @@ fn choose_split_digit<T, E: Extract<T>>(
 }
 
 impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
-    /// Finishes an ordered partition child, or continues the radix route.
-    fn sort_child(&mut self, records: &mut [T], varying: u128) {
-        if records.len() < 2 || varying == 0 {
+    /// Finishes an ordered child before scanning its remaining candidate bits.
+    fn sort_child(&mut self, records: &mut [T], candidate: u128) {
+        if records.len() < 2 || candidate == 0 {
             return;
         }
         // Partitions can expose ordered children inside an unordered input.
@@ -757,6 +757,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             }
             Order::Flat | Order::Unsorted => {}
         }
+        let varying = scan_varying_bits(records, candidate, self.extractor);
         self.sort_node(records, varying);
     }
 
@@ -842,8 +843,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             if end > start {
                 let child = &mut records[start..end];
                 if child.len().saturating_mul(record_bytes) > tile_bytes {
-                    let varying = scan_varying_bits(child, candidate, self.extractor);
-                    self.sort_child(child, varying);
+                    self.sort_child(child, candidate);
                 }
             }
             start = end;
@@ -883,8 +883,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         for range in [0..ends[0], ends[1]..records.len()] {
             let child = &mut records[range];
             if child.len() > 1 {
-                let varying = scan_varying_bits(child, parent_varying, self.extractor);
-                self.sort_child(child, varying);
+                self.sort_child(child, parent_varying);
             }
         }
         self.scratch.block.recycle_ends(ends);
@@ -1564,15 +1563,15 @@ mod tests {
             // the stack.
             let mut extractor = ByKey(|_: &u16| -> u16 {
                 assert!(calls < 12_000, "node recursion did not make progress");
-                let phase = calls % (len + 65 + 4 + MODE_SAMPLE_LEN);
+                let phase = calls % (len + 4 + 65 + MODE_SAMPLE_LEN);
                 calls += 1;
                 if phase < len {
                     1
-                } else if phase < len + 65 {
+                } else if phase < len + 4 {
+                    // Reject order before the candidate scan and mode sample.
+                    [1, 0, 0, 1][phase - len]
+                } else if phase < len + 4 + 65 {
                     if phase % 2 == 0 { 0 } else { 0x1ff }
-                } else if phase < len + 65 + 4 {
-                    // Reject the node order gate before the next mode sample.
-                    [1, 0, 0, 1][phase - len - 65]
                 } else if greater {
                     0
                 } else {
@@ -1702,13 +1701,30 @@ mod tests {
                 .collect();
             let mut expected = records.clone();
             expected.sort_by_key(|record| record.0);
+            let mut probe_calls = 0;
+            probe_order(
+                &records,
+                &mut ByKey(|record: &(u64, u64)| {
+                    probe_calls += 1;
+                    record.0
+                }),
+            );
+            let mut child_calls = 0;
             let mut scratch = Scratch::new();
             Sorter::<_, _, true> {
                 scratch: &mut scratch,
-                extractor: &mut ByKey(|record: &(u64, u64)| record.0),
+                extractor: &mut ByKey(|record: &(u64, u64)| {
+                    child_calls += 1;
+                    record.0
+                }),
                 tile_bytes: 128,
             }
             .sort_child(&mut records, u64::MAX as u128);
+            // Ascending completion reads no keys beyond the order probe;
+            // tied descending completion also scans equal runs during reversal.
+            if !descending {
+                assert_eq!(child_calls, probe_calls);
+            }
             assert_eq!(records, expected);
             assert!(scratch.tile.is_empty());
         }

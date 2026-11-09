@@ -98,6 +98,35 @@ test("overflow symbols survive collision layout", () => {
       }
 });
 
+test("span endpoints disclose overflow", () => {
+  for (const [span, rotations] of [
+    [[0.5, 2], []],
+    [[0.25, 2], [270]],
+    [[0.5, 4], [90]],
+    [
+      [0.25, 4],
+      [270, 90],
+    ],
+  ] as [number[], number[]][]) {
+    const input = fixture();
+    const row = input.groups[0].rows[0];
+    row.swarm = false;
+    row.marks = [{ value: 1, tone: "primary" }];
+    row.span = [span[0], span[1]];
+    input.legend = { note: "" };
+    const root = parseSvg(renderRows(input));
+    const triangles = [...root.querySelectorAll('[aria-label="dot"] path')];
+    assert.deepEqual(
+      triangles.map((mark) =>
+        Number(mark.getAttribute("transform")?.match(/rotate\(([^)]+)\)/)?.[1]),
+      ),
+      rotations,
+      String(span),
+    );
+    assert.equal(root.querySelectorAll('[aria-label="dot"] circle').length, 1);
+  }
+});
+
 test("plotting modules have no host dependencies", async () => {
   const directory = new URL(".", import.meta.url);
   for (const file of await readdir(directory)) {

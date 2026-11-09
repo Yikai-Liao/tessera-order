@@ -319,6 +319,34 @@ test("custom selections retain figures", () => {
   assert.doesNotMatch(figures[0].svg, /NaN|Infinity/);
 });
 
+test("selected inputs retain overflowing ranges", () => {
+  for (const [low, high] of [
+    [0.5, 2],
+    [0.01, 2],
+    [0.5, 64],
+    [0.01, 64],
+  ]) {
+    const dataset = createFixture();
+    const manifest = dataset.manifests.get("default")!;
+    manifest.cases = manifest.cases.filter(
+      (input) => input.ty === "u64" && input.distribution === "random" && input.len === 65536,
+    );
+    dataset.samples = dataset.samples.filter((sample) => sample.case_id === "u64/random/65536/s1");
+    dataset.memory = dataset.memory.filter((sample) => sample.case_id === "u64/random/65536/s1");
+    const summaries = summarize(dataset);
+    const summary = summaries.get(measurementId("default", "u64/random/65536/s1", "std-stable"))!;
+    Object.assign(summary, { ratio: 1, low, high });
+    const [figure] = renderFigures(dataset, summaries);
+    assert.match(figure.name, /^selected-/);
+    assert.match(figure.table, /Time ratio \| Block range \| A\/A range/);
+    const range = `${low.toFixed(2)}×–${high}×`;
+    assert.ok(figure.table.includes(range), range);
+    assert.ok(figure.svg.includes(range), range);
+    assert.equal(figure.svg.includes("rotate(270)"), low < 1 / 32);
+    assert.equal(figure.svg.includes("rotate(90)"), high > 32);
+  }
+});
+
 test("mixed plans disclose figure scope", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-mixed-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

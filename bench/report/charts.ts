@@ -486,6 +486,7 @@ function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figu
               span: [summary.low, summary.high],
               cells: [
                 times(summary.ratio),
+                `${times(summary.low)}–${times(summary.high)}`,
                 `${summary.aaLow.toFixed(3)}–${summary.aaHigh.toFixed(3)}`,
               ],
             }),
@@ -507,16 +508,16 @@ function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figu
         svg: renderRows({
           title,
           guide: "Sort time / paired Tessera time · nine blocks per build",
-          columns: ["Time ratio", "A/A range"],
+          columns: ["Time ratio", "Block range", "A/A range"],
           groups,
           scale,
           legend: {
-            note: "dot: median · line: block range · each build has its own Tessera control",
+            note: "dot: median · line: block range · triangle: off-scale · per-build Tessera control",
           },
           axis: ["← less time", "more time →"],
         }),
         table: markdownTable(
-          ["Build", "Sort", "Time ratio", "A/A range"],
+          ["Build", "Sort", "Time ratio", "Block range", "A/A range"],
           groups.flatMap((group) =>
             group.rows.map((row) => [group.title, row.name.input, ...row.cells]),
           ),

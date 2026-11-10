@@ -38,8 +38,8 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 | E3 | Serial and parallel direct-key counting now share a reducible histogram and destination-run construction | Establish serial and Rayon performance against the pre-consolidation SIMD baseline; preserve bitwise representative and Send-only tests |
 | E4 | Half-key views share window operations; the root forwarding wrapper has been removed | Validate shared preparation code generation with the unified backend before performance acceptance |
 | E5 | Serial block storage contains Rayon scratch-segment state and a branch | Decide layout and tracking protocol explicitly: the continuous SIMD build enables Rayon; serial-only library builds remain a separate configuration |
-| E6 | Planning owns strategy estimates; tile finishing owns scratch, cached classification and restoration behind one operation | Validate the ownership boundaries and generated-code performance with inlining and placement controls |
-| E7 | Active measurement uses one backend and revision builds select historical SIMD explicitly; retained dual-build sessions remain readable | Local static artifact and comparison-harness checks pass; validate hosted deployment and actual historical SIMD provenance before final engine performance acceptance |
+| E6 | Planning owns strategy estimates; tile finishing owns scratch, cached classification and restoration behind one operation | Investigate the [required-SIMD screen](docs/design/port.md#shared-planning-and-required-simd-screen)'s 3.5–4.7% random-input losses; validate generated-code performance with inlining and placement controls |
+| E7 | Active measurement uses one backend and revision builds select historical SIMD explicitly; retained dual-build sessions remain readable | Local static artifacts, comparison harness and actual historical SIMD provenance pass validation; validate hosted tracker/artifact deployment before final engine performance acceptance |
 
 ## C++
 

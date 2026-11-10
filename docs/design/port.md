@@ -389,3 +389,28 @@ The broad run also found a small cost on `u64/sorted_tail/65536`: fix ratios 1.0
 Ordered-input timing also moves with code placement. The root `u64` sort bodies of main and the fix have the same instruction sequence after address relocations are normalized, and sorted inputs return before the changed finishing operation. Their apparent speedup is not attributed to the scan change. Raw samples, manifests, executable snapshots and disassembly stay outside the repository. These local results do not establish the size of an improvement on Bencher's Intel runner. A paired Portable SIMD check of `u64/random/65536/s1/api` remained within its controls; the changed default finishing body is overridden for that primitive SIMD path.
 
 At that revision, Default, no-std and Portable SIMD tests, doctests, Clippy, rustdoc and Miri passed. The local MSRV toolchain was unavailable; Rust 1.85 validation was left to CI.
+
+### Shared planning and required SIMD screen
+
+A maintained revision screen compares the pre-consolidation `b8968b6` library with clean checkpoint `383ddb7`. It covers six serial API cases at 65,536 records on an Intel Core i7-10875H, Linux x86-64, CPU 2, Rust 1.99.1 / LLVM 23.1.3, with the shared 64-byte loop and non-fallthrough block alignment flags. Both revisions use the current harness and lockfile. Resolved Cargo provenance records `[default, portable-simd, std]` for the historical library and `[]` for the current required-SIMD library, separately from the harness's empty feature lists. The baseline is not a scalar build.
+
+Reproduce the selection with:
+
+```sh
+pnpm tools compare commit b8968b6 --types u64,row_u64 \
+  --distributions random,d16,two_values --lengths 65536 --cpu 2 \
+  --out bench/results/shared-planning-screen
+```
+
+Each case ran nine rotating baseline/control/current process blocks. Ratios use the paired baseline mean; a screen direction requires eight of nine blocks and a median outside the paired A/A range.
+
+| Case | Current / baseline | Block range | A/A range | Screen |
+|---|---:|---|---|---|
+| `u64/d16/65536` | 0.8815 | 0.8799–0.9001 | 0.9978–1.0022 | faster |
+| `row_u64/d16/65536` | 0.8923 | 0.8843–0.8979 | 0.9882–1.0118 | faster |
+| `u64/random/65536` | 1.0350 | 0.9929–1.0448 | 0.9722–1.0278 | slower |
+| `row_u64/random/65536` | 1.0469 | 1.0024–1.0549 | 0.9539–1.0461 | slower |
+| `u64/two_values/65536` | 1.0000 | 0.9923–1.0113 | 0.9937–1.0063 | within A/A |
+| `row_u64/two_values/65536` | 0.9982 | 0.9955–1.0039 | 0.9951–1.0049 | within A/A |
+
+The random-input losses remain open. This process-level screen does not identify their cause among shared preparation, sampling, digit planning, tile finishing and generated-code placement. It supplies neither in-process source attribution nor whole-engine performance acceptance; parallel APIs, other lengths and key widths remain unmeasured here. No distribution or size exception is added to compensate. Raw results and provenance remain outside Git in the `one-backend-screen` session.

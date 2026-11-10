@@ -140,5 +140,4 @@ Add an unprivileged build artifact per configuration and a tracker using the sam
 
 ```sh
 cargo bench -p tessera-bench --bench smoke -- 'rust/u64/random/65536/s1/api' --exact
-cargo bench -p tessera-bench --bench smoke --features tessera-sort/portable-simd -- 'rust/u64/random/65536/s1/api' --exact
 ```

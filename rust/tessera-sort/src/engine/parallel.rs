@@ -3,7 +3,7 @@
 //! Parallel root partition and completion of materialized buckets.
 
 use super::*;
-use crate::key::OwnedKeyHalf;
+use crate::key::impl_key_half;
 use rayon::Scope;
 
 /// The archived experiment did not reliably win at 512 KiB; keep 1 MiB as a
@@ -38,12 +38,12 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: b
     // Keep the existing narrow kernels when only one half of a 128-bit key varies.
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
-            let mut key = OwnedKeyHalf::<E, 0>(extractor.clone());
+            let mut key = Narrow::<E, 0>(extractor.clone());
             sort_root::<T, _, CACHED>(records, &mut key, &mut scratch, varying, tile_bytes);
             return;
         }
         if varying & ((1u128 << 64) - 1) == 0 {
-            let mut key = OwnedKeyHalf::<E, 64>(extractor.clone());
+            let mut key = Narrow::<E, 64>(extractor.clone());
             sort_root::<T, _, CACHED>(records, &mut key, &mut scratch, varying >> 64, tile_bytes);
             return;
         }
@@ -121,6 +121,12 @@ fn prepare<T, E: Extract<T>>(
     }
     Some(varying)
 }
+
+/// Owns a half-key view so parallel jobs can clone the original extractor.
+#[derive(Clone)]
+struct Narrow<E, const SHIFT: usize>(E);
+
+impl_key_half!(Narrow<E, SHIFT>);
 
 /// A batch of retired root buckets, retained as separate exclusive borrows.
 ///
@@ -378,6 +384,25 @@ mod bucket_borrow_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owned_half_keys_keep_encoded_bits() {
+        let key = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210u128;
+        assert_eq!(Narrow::<_, 0>(Direct).key(&key), 0xfedc_ba98_7654_3210);
+        assert_eq!(Narrow::<_, 64>(Direct).key(&key), 0x0123_4567_89ab_cdef);
+    }
+
+    #[test]
+    fn owned_half_windows_keep_offsets_and_payloads() {
+        crate::key::tests::check_half_windows::<0>(
+            &mut Narrow::<_, 0>(Direct),
+            &mut Narrow::<_, 0>(crate::key::ByKey(|record: &(u128, usize)| record.0)),
+        );
+        crate::key::tests::check_half_windows::<64>(
+            &mut Narrow::<_, 64>(Direct),
+            &mut Narrow::<_, 64>(crate::key::ByKey(|record: &(u128, usize)| record.0)),
+        );
+    }
 
     #[test]
     fn preparation_preserves_backends() {

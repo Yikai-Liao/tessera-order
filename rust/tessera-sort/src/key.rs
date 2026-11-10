@@ -436,21 +436,16 @@ impl<K: RadixKey> Extract<K> for Direct {
 /// Borrows the 64 key bits starting at `SHIFT` when the other half is constant.
 pub(crate) struct KeyHalf<'a, E, const SHIFT: usize>(pub &'a mut E);
 
-/// Owns the same half-key view so parallel jobs can clone its extractor.
-#[cfg(feature = "rayon")]
-#[derive(Clone)]
-pub(crate) struct OwnedKeyHalf<E, const SHIFT: usize>(pub E);
-
-/// Keeps truncation and window translation identical for both ownership forms.
+/// Implements half-key rules for a tuple wrapper around the original extractor.
 /// Scans retain the defaults for the narrowed keys, not the inner key width.
 macro_rules! impl_key_half {
     ($half:ty) => {
-        impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for $half {
+        impl<T, E: $crate::key::Extract<T>, const SHIFT: usize> $crate::key::Extract<T> for $half {
             type Value = u64;
 
             #[inline]
             fn key(&mut self, record: &T) -> u64 {
-                (self.0.key(record).to_u128() >> SHIFT) as u64
+                ($crate::key::Unsigned::to_u128(self.0.key(record)) >> SHIFT) as u64
             }
 
             fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
@@ -478,10 +473,10 @@ macro_rules! impl_key_half {
 
 impl_key_half!(KeyHalf<'_, E, SHIFT>);
 #[cfg(feature = "rayon")]
-impl_key_half!(OwnedKeyHalf<E, SHIFT>);
+pub(crate) use impl_key_half;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use alloc::vec::Vec;
 
@@ -496,22 +491,13 @@ mod tests {
             KeyHalf::<_, 64>(&mut Direct).key(&key),
             0x0123_4567_89ab_cdef
         );
-        #[cfg(feature = "rayon")]
-        {
-            assert_eq!(
-                OwnedKeyHalf::<_, 0>(Direct).key(&key),
-                0xfedc_ba98_7654_3210
-            );
-            assert_eq!(
-                OwnedKeyHalf::<_, 64>(Direct).key(&key),
-                0x0123_4567_89ab_cdef
-            );
-        }
     }
 
-    /// Exercises both ownership forms against an independently sorted full key.
-    #[cfg(feature = "rayon")]
-    fn check_half_windows<const SHIFT: usize>() {
+    /// Checks shared window and decline rules against independently sorted keys.
+    pub(crate) fn check_half_windows<const SHIFT: usize>(
+        direct_half: &mut impl Extract<u128, Value = u64>,
+        keyed_half: &mut impl Extract<(u128, usize), Value = u64>,
+    ) {
         for (low, width) in [(0, 8), (9, 3), (57, 7)] {
             let mask = ((1u128 << width) - 1) << (low + SHIFT);
             let base = 0x73a5_491b_c621_d8e0_2b93_a3f7_1d05_0000u128 & !mask;
@@ -521,48 +507,36 @@ mod tests {
             let mut expected = input.clone();
             expected.sort();
 
-            // Interpret ownership and offsets sequentially; native runs also
-            // exercise Rayon's pool, as with the block-storage Miri fixtures.
-            let modes: &[bool] = if cfg!(miri) { &[false] } else { &[false, true] };
-            for &parallel in modes {
-                let mut borrowed = input.clone();
-                let mut owned = input.clone();
-                let mut direct = Direct;
-                let mut half = KeyHalf::<_, SHIFT>(&mut direct);
-                let mut owned_half = OwnedKeyHalf::<_, SHIFT>(Direct);
-                if parallel {
-                    assert!(half.try_count_window_parallel(&mut borrowed, low, width));
-                    assert!(owned_half.try_count_window_parallel(&mut owned, low, width));
-                } else {
-                    assert!(half.try_count_window(&mut borrowed, low, width));
-                    assert!(owned_half.try_count_window(&mut owned, low, width));
-                }
-                assert_eq!(borrowed, expected);
-                assert_eq!(owned, expected);
+            let mut keys = input.clone();
+            let mut records: Vec<_> = input.iter().copied().zip(0..input.len()).collect();
+            let original = records.clone();
+            assert!(direct_half.try_count_window(&mut keys, low, width));
+            assert!(!keyed_half.try_count_window(&mut records, low, width));
+            assert_eq!(keys, expected);
+            assert_eq!(records, original);
 
-                let mut records: Vec<_> = input.iter().copied().zip(0..input.len()).collect();
-                let original = records.clone();
-                let mut by_key = ByKey(|record: &(u128, usize)| record.0);
-                let mut half = KeyHalf::<_, SHIFT>(&mut by_key);
-                let mut owned_half =
-                    OwnedKeyHalf::<_, SHIFT>(ByKey(|record: &(u128, usize)| record.0));
-                if parallel {
-                    assert!(!half.try_count_window_parallel(&mut records, low, width));
-                    assert!(!owned_half.try_count_window_parallel(&mut records, low, width));
-                } else {
-                    assert!(!half.try_count_window(&mut records, low, width));
-                    assert!(!owned_half.try_count_window(&mut records, low, width));
-                }
+            // Miri interprets both storage forms without invoking Rayon's pool.
+            #[cfg(all(feature = "rayon", not(miri)))]
+            {
+                let mut keys = input;
+                assert!(direct_half.try_count_window_parallel(&mut keys, low, width));
+                assert!(!keyed_half.try_count_window_parallel(&mut records, low, width));
+                assert_eq!(keys, expected);
                 assert_eq!(records, original);
             }
         }
     }
 
-    #[cfg(feature = "rayon")]
     #[test]
     fn half_windows_keep_offsets_and_payloads() {
-        check_half_windows::<0>();
-        check_half_windows::<64>();
+        check_half_windows::<0>(
+            &mut KeyHalf::<_, 0>(&mut Direct),
+            &mut KeyHalf::<_, 0>(&mut ByKey(|record: &(u128, usize)| record.0)),
+        );
+        check_half_windows::<64>(
+            &mut KeyHalf::<_, 64>(&mut Direct),
+            &mut KeyHalf::<_, 64>(&mut ByKey(|record: &(u128, usize)| record.0)),
+        );
     }
 
     /// Checks confirmation against scalar extraction at every adjacent pair.

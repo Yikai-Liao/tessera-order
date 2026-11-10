@@ -1,4 +1,5 @@
 name: Track benchmarks
+run-name: Track benchmarks · ${{ inputs.build_id || github.event.workflow_run.id }}
 
 # Privileged: runs trusted default-branch code after a build. It packages the
 # untrusted executable without running it and submits it to Bencher.
@@ -6,13 +7,23 @@ on:
   workflow_run:
     workflows: [Build benchmarks]
     types: [completed]
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: Successful Build benchmarks run selected by the scheduler
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   rust:
-    if: github.event.workflow_run.conclusion == 'success'
+    # Drain pre-activation tickets with the legacy path; new tickets use dispatch.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+       (!vars.BENCHMARK_QUEUE_SINCE || github.event.workflow_run.created_at < vars.BENCHMARK_QUEUE_SINCE))
     runs-on: ubuntu-24.04
     environment: benchmark
     timeout-minutes: 30
@@ -32,23 +43,30 @@ jobs:
           # Never check out the triggering PR in this workflow.
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
-      - name: Resolve source commit and PR
-        id: source
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const { resolveSource } = require('./bench/continuous/github.ts');
-            await resolveSource({ github, context, core });
       - uses: pnpm/action-setup@v4
-        if: steps.source.outputs.eligible == 'true'
       - uses: actions/setup-node@v7
-        if: steps.source.outputs.eligible == 'true'
         with:
           node-version: 24
           cache: pnpm
       - name: Install trusted report dependencies
-        if: steps.source.outputs.eligible == 'true'
         run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Resolve source commit and PR
+        id: source
+        uses: actions/github-script@v9
+        env:
+          BUILD_ID: ${{ inputs.build_id }}
+          QUEUE_SINCE: ${{ vars.BENCHMARK_QUEUE_SINCE }}
+        with:
+          script: |
+            if (context.eventName === 'workflow_dispatch') {
+              const { prepareScheduledSource } = require('./bench/continuous/queue.ts');
+              await prepareScheduledSource({ github, context, core }, process.env.QUEUE_SINCE, process.env.BUILD_ID);
+            } else {
+              const { resolveSource } = require('./bench/continuous/github.ts');
+              await resolveSource({ github, context, core });
+              core.setOutput('build_id', String(context.payload.workflow_run.id));
+              core.setOutput('build_attempt', String(context.payload.workflow_run.run_attempt));
+            }
       - name: Start the report checks
         id: check
         if: steps.source.outputs.eligible == 'true'
@@ -69,21 +87,21 @@ jobs:
           name: bench-rust-default
           path: artifact/default
           github-token: ${{ github.token }}
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ steps.source.outputs.build_id }}
       - uses: actions/download-artifact@v8
         if: steps.source.outputs.eligible == 'true'
         with:
           name: bench-rust
           path: artifact/portable-simd
           github-token: ${{ github.token }}
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ steps.source.outputs.build_id }}
       - name: Package and push image
         if: steps.source.outputs.eligible == 'true'
         id: image
         env:
           BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
           BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
-          TAG: rust-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          TAG: rust-${{ steps.source.outputs.build_id }}-${{ steps.source.outputs.build_attempt }}
         run: |
           # The image definition is trusted; only the executable comes from the build.
           image="registry.bencher.dev/$BENCHER_PROJECT:$TAG"

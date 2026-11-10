@@ -27,6 +27,7 @@ function sourceFixture(
   const outputs: Record<string, string> = {};
   const mock = mockGitHub((request) => {
     if (request.path.endsWith("/actions/workflows/123")) return { path: workflowPath };
+    if (request.path.includes("/compare/")) return { merge_base_commit: { sha: "b".repeat(40) } };
     if (request.path.endsWith(`/commits/${hash}/pulls`)) return pulls;
     if (request.path.endsWith("/pulls") && parents) return parents;
     throw new Error(`Unexpected request: ${request.path}`);
@@ -70,6 +71,14 @@ test("fork named main uses PR identity, never the baseline", async () => {
     number: "7",
     eligible: "true",
   });
+});
+
+test("a moving target tip does not change the inherited PR baseline", async () => {
+  const pr = structuredClone(pull);
+  pr.base.sha = "c".repeat(40);
+  const fixture = sourceFixture("pull_request", [pr]);
+  await resolveSource(fixture);
+  assert.equal(fixture.outputs.base_hash, "b".repeat(40));
 });
 
 const stacked = {

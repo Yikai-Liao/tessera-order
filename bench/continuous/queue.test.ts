@@ -1,0 +1,250 @@
+// SPDX-License-Identifier: BSD-2-Clause
+
+import assert from "node:assert/strict";
+import { type TestContext, test } from "node:test";
+import { VARIANTS } from "../catalog.ts";
+import { mockGitHub } from "./fixtures/github.ts";
+import { fixture as reportFixture } from "./fixtures/report.ts";
+import {
+  baselineReady,
+  chooseBuild,
+  prepareScheduledSource,
+  type QueueBuild,
+  scheduleNext,
+} from "./queue.ts";
+
+const since = "2026-11-10T00:00:00Z";
+const hash = (id: number) => id.toString(16).padStart(40, "0");
+function build(id: number, event = "push", conclusion: string | null = "success"): QueueBuild {
+  return {
+    id,
+    head_sha: hash(id),
+    event,
+    head_branch: event === "push" ? "main" : "feature",
+    created_at: since,
+    status: conclusion ? "completed" : "in_progress",
+    conclusion,
+  };
+}
+
+test("priority keeps exact dependencies ahead, ready PRs next, and main starvation bounded", () => {
+  const main = build(1);
+  const pr = { build: build(2, "pull_request"), ready: true, needsMain: false };
+  assert.equal(chooseBuild(main, [pr], 0), pr.build);
+  assert.equal(chooseBuild(main, [pr], 3), main);
+  assert.equal(chooseBuild(main, [{ ...pr, ready: false, needsMain: true }], 0), main);
+  assert.equal(chooseBuild(main, [{ ...pr, ready: false }], 0), main);
+  assert.equal(chooseBuild(build(1, "push", null), [pr], 3), pr.build);
+  assert.equal(chooseBuild(build(1, "push", "failure"), [], 0), undefined);
+});
+
+function fixture(
+  t: TestContext,
+  options: {
+    builds?: QueueBuild[];
+    attempts?: number[];
+    busy?: boolean;
+    baseline?: number;
+    missing?: boolean;
+    wrongReport?: boolean;
+    closed?: boolean;
+  } = {},
+) {
+  const builds = options.builds ?? [build(1), build(2, "pull_request")];
+  const outputs: Record<string, string> = {};
+  const notices: string[] = [];
+  let dispatched = "";
+  const trackers = (options.attempts ?? []).map((id, index) => ({
+    id: 100 + index,
+    event: "workflow_dispatch",
+    status: "completed",
+    display_title: `Track benchmarks · ${id}`,
+  }));
+  const mock = mockGitHub((request) => {
+    const path = request.path;
+    if (request.method === "POST" && path.endsWith("/dispatches")) {
+      dispatched = (request.body.inputs as { build_id: string }).build_id;
+      return {};
+    }
+    if (path.endsWith("/workflows/bench-track.yml/runs"))
+      return {
+        total_count: trackers.length + 2,
+        workflow_runs: [
+          ...trackers,
+          ...(options.busy ? [{ id: 999, status: "in_progress" }] : []),
+          // Legacy skipped callbacks must not consume scheduled tickets.
+          {
+            id: 50,
+            event: "workflow_run",
+            status: "completed",
+            display_title: "Track benchmarks · 1",
+          },
+          ...(dispatched
+            ? [{ id: 1000, display_title: `Track benchmarks · ${dispatched}`, status: "queued" }]
+            : []),
+        ],
+      };
+    if (path.endsWith("/workflows/bench-build.yml/runs"))
+      return { total_count: builds.length, workflow_runs: builds };
+    const run = path.match(/\/actions\/runs\/(\d+)$/)?.[1];
+    if (run) {
+      const source = builds.find((build) => build.id === Number(run));
+      return source
+        ? {
+            ...source,
+            workflow_id: 123,
+            run_attempt: 1,
+            head_repository: { full_name: "owner/tessera" },
+          }
+        : { path: ".github/workflows/bench-track.yml" };
+    }
+    if (path.endsWith("/workflows/123")) return { path: ".github/workflows/bench-build.yml" };
+    if (path.includes("/compare/")) {
+      const [base, head] = path.split("/compare/")[1].split("...");
+      return {
+        status: base < head ? "ahead" : "behind",
+        merge_base_commit: { sha: hash(options.baseline ?? 0) },
+      };
+    }
+    if (path.endsWith("/pulls")) {
+      const commit = path.match(/\/commits\/([a-f0-9]+)\//)?.[1];
+      return [
+        {
+          number: 7,
+          state: options.closed ? "closed" : "open",
+          head: { sha: commit, ref: "feature", repo: { full_name: "fork/tessera" } },
+          base: { sha: hash(9), ref: "main", repo: { full_name: "owner/tessera" } },
+        },
+      ];
+    }
+    if (path.endsWith("/check-runs")) {
+      const commit = path.match(/\/commits\/([a-f0-9]+)\//)?.[1];
+      return {
+        total_count: options.missing ? 0 : VARIANTS.length,
+        check_runs: options.missing
+          ? []
+          : VARIANTS.map((variant) => ({
+              name: `Benchmarks (rust, ${variant.name})`,
+              app: { slug: "github-actions" },
+              status: "completed",
+              conclusion: "failure",
+              external_id: "200",
+              output: {
+                summary: `[JSON](https://api.bencher.dev/v0/projects/project/reports/${commit}-${variant.id === "default" ? "a" : "b"})`,
+              },
+            })),
+      };
+    }
+    throw new Error(`Unexpected request: ${request.method} ${path}`);
+  });
+  t.mock.method(globalThis, "fetch", async (url: string) => {
+    const match = url.match(/reports\/([a-f0-9]{40})-([ab])$/)!;
+    const report = reportFixture();
+    report.branch.name = "main";
+    report.branch.head.version = { hash: options.wrongReport ? hash(999) : match[1] };
+    report.testbed.name = VARIANTS[match[2] === "a" ? 0 : 1].testbed;
+    return new Response(JSON.stringify(report), { status: 200 });
+  });
+  return {
+    ...mock,
+    outputs,
+    notices,
+    dispatched: () => dispatched,
+    context: {
+      repo: { owner: "owner", repo: "tessera" },
+      runId: 300,
+      payload: {},
+      serverUrl: "https://github.com",
+    },
+    core: {
+      setOutput: (name: string, value: string) => {
+        outputs[name] = value;
+      },
+      notice: (message: string) => {
+        notices.push(message);
+      },
+    },
+  };
+}
+
+test("native dispatch chooses a ready PR ahead of unrelated main without writing queue state", async (t) => {
+  const f = fixture(t);
+  await scheduleNext(f, since);
+  assert.equal(f.dispatched(), "2");
+  assert.equal(f.requests.filter((r) => r.method !== "GET").length, 1);
+});
+
+test("a missing PR baseline promotes the oldest main ancestor, not the needed descendant", async (t) => {
+  const f = fixture(t, {
+    builds: [build(3), build(1), build(4, "pull_request")],
+    baseline: 3,
+    missing: true,
+  });
+  await scheduleNext(f, since);
+  assert.equal(f.dispatched(), "1");
+});
+
+test("failed and unfinished main builds block descendants without blocking ready PRs", async (t) => {
+  for (const conclusion of [null, "failure"]) {
+    const f = fixture(t, {
+      builds: [build(1, "push", conclusion), build(3), build(4, "pull_request")],
+    });
+    await scheduleNext(f, since);
+    assert.equal(f.dispatched(), "4");
+  }
+});
+
+test("a failed main measurement remains a barrier rather than silently skipping history", async (t) => {
+  const f = fixture(t, { builds: [build(1), build(3)], attempts: [1], missing: true });
+  await scheduleNext(f, since);
+  assert.equal(f.dispatched(), "");
+});
+
+test("three native PR attempts give the oldest pending main a turn", async (t) => {
+  const f = fixture(t, {
+    builds: [build(1), ...[2, 3, 4, 5].map((id) => build(id, "pull_request"))],
+    attempts: [2, 3, 4],
+  });
+  await scheduleNext(f, since);
+  assert.equal(f.dispatched(), "1");
+});
+
+test("active trackers exclude another dispatch, including legacy runs", async (t) => {
+  const f = fixture(t, { busy: true });
+  await scheduleNext(f, since);
+  assert.equal(f.dispatched(), "");
+});
+
+test("closed PRs and already attempted tickets are not submitted again", async (t) => {
+  const f = fixture(t, { builds: [build(2, "pull_request")], closed: true });
+  await scheduleNext(f, since);
+  assert.equal(f.dispatched(), "");
+  const attempted = fixture(t, { builds: [build(2, "pull_request")], attempts: [2] });
+  await scheduleNext(attempted, since);
+  assert.equal(attempted.dispatched(), "");
+});
+
+test("measured alerts are baselines, but missing or wrong exact-head evidence is not", async (t) => {
+  assert.equal(await baselineReady(fixture(t), "main", hash(0)), true);
+  assert.equal(await baselineReady(fixture(t, { missing: true }), "main", hash(0)), false);
+  assert.equal(await baselineReady(fixture(t, { wrongReport: true }), "main", hash(0)), false);
+});
+
+test("worker keeps a safe main ticket despite changed priority or queued dispatches", async (t) => {
+  const f = fixture(t, { busy: true });
+  await prepareScheduledSource(f, since, "1");
+  assert.equal(f.outputs.eligible, "true");
+  assert.equal(f.outputs.build_id, "1");
+  assert.equal(f.outputs.hash, hash(1));
+});
+
+test("worker refuses out-of-order main, duplicate attempts and invalid dispatch identities", async (t) => {
+  const f = fixture(t, { builds: [build(1), build(3)] });
+  await prepareScheduledSource(f, since, "3");
+  assert.equal(f.outputs.eligible, undefined);
+  const duplicate = fixture(t, { builds: [build(1)], attempts: [1] });
+  await prepareScheduledSource(duplicate, since, "1");
+  assert.equal(duplicate.outputs.eligible, undefined);
+  await assert.rejects(prepareScheduledSource(f, since, "bad"), /Invalid/);
+  await assert.rejects(scheduleNext(f, ""), /activation/);
+});

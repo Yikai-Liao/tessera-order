@@ -22,7 +22,7 @@ interface SourceRun {
   head_repository: { full_name: string };
 }
 
-interface ActionArguments {
+export interface ActionArguments {
   github: GitHub;
   context: ActionContext;
   core: Pick<ActionsCore, "notice" | "setOutput">;
@@ -51,7 +51,14 @@ async function baselineFor(
   pr: PullRequest,
 ): Promise<Baseline> {
   const repo = context.repo;
-  if (pr.base.ref === DEFAULT_BRANCH) return { startPoint: DEFAULT_BRANCH, hash: pr.base.sha };
+  // Compare the code actually inherited by this head, not a moving target tip.
+  const { data: comparison } = await github.rest.repos.compareCommits({
+    ...repo,
+    base: pr.base.sha,
+    head: pr.head.sha,
+  });
+  const hash = comparison.merge_base_commit.sha;
+  if (pr.base.ref === DEFAULT_BRANCH) return { startPoint: DEFAULT_BRANCH, hash };
   const { data: candidates } = await github.rest.pulls.list({
     ...repo,
     state: "all",
@@ -74,7 +81,7 @@ async function baselineFor(
     core.notice(`No baseline for the benchmark: ${reason}.`);
     return { reason };
   }
-  return { startPoint: `pr-${parent.number}`, hash: pr.base.sha };
+  return { startPoint: `pr-${parent.number}`, hash };
 }
 
 export async function resolveSource({ github, context, core }: ActionArguments) {

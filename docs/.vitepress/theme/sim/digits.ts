@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
-// `plan_digits` and `top_window` from `rust/tessera-sort/src/engine.rs`, on
+// `plan_digits` and `top_window` from `rust/tessera-sort/src/engine/plan.rs`, on
 // BigInt masks so that the explanation pages can plan keys of any width.
 
 /** Bounded clustered sample shared by the engine's mode and occupancy decisions. */
@@ -85,7 +85,7 @@ export function tileDigitBits(records: number, recordBytes: number): number {
 
 export type TileLeaf = "done" | "insertion" | "msd" | "lsd";
 
-/** Mirrors `sort_tile`'s leaf choice for one sampled top-digit fan-out. */
+/** Mirrors `plan_tile`'s leaf choice for one sampled top-digit fan-out. */
 export function chooseTileLeaf(
   records: number,
   varying: bigint,

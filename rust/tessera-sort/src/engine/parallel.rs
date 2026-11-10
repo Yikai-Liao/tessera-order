@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::key::impl_key_half;
+use crate::thresholds::MAX_TILE_RECORDS;
 use rayon::Scope;
 
 /// The archived experiment did not reliably win at 512 KiB; keep 1 MiB as a

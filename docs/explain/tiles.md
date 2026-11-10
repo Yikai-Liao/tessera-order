@@ -1,6 +1,6 @@
 # 5. Finishing tiles
 
-A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so that one `u16` can hold any position in it. Its scratch buffer is the same size and stays in the L2 cache. Inside a tile, a second buffer is cheap, so Tessera can use ordinary counting passes. The open questions are which digits to use and whether to finish with MSD or LSD. This page follows `Sorter::sort_tile` in [`engine.rs`](../../rust/tessera-sort/src/engine.rs).
+A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so that one `u16` can hold any position in it. Its scratch buffer is the same size and stays in the L2 cache. Inside a tile, a second buffer is cheap, so Tessera can use ordinary counting passes. The open questions are which digits to use and whether to finish with MSD or LSD. Strategy selection belongs to [`engine/plan.rs`](../../rust/tessera-sort/src/engine/plan.rs); [`engine/tile.rs`](../../rust/tessera-sort/src/engine/tile.rs) executes the selected leaf and owns its scratch and panic recovery.
 
 ## Three leaves
 
@@ -41,7 +41,7 @@ To estimate the depth, the engine uses the same bounded key sample as node plann
 
 For plans longer than two passes, a sample with at most two distinct buckets selects MSD directly. That small sample cannot estimate the largest child reliably: one stable split may leave a dominant bucket constant or small enough for insertion, even when the average-fan-out estimate predicts no win. Other samples select MSD only when `depth + 1 < passes`. Plans of one or two passes skip the sample: one MSD level plus its finish already costs two passes.
 
-Charging an MSD level as more than one pass kept three-pass plans on LSD, which was 11–38% slower for 32-bit keys at 1K–64K records (`MSD_FINISH_PASSES` in `engine.rs`).
+Charging an MSD level as more than one pass kept three-pass plans on LSD, which was 11–38% slower for 32-bit keys at 1K–64K records (`MSD_FINISH_PASSES` in `engine/plan.rs`).
 
 Three examples, for 8-byte records (`u64`):
 

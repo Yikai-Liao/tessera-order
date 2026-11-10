@@ -15,6 +15,33 @@ This document describes the engine in `rust/tessera-sort`. It describes current 
 | Tile | A subproblem that fits a resource-bounded record capacity. The byte budget is converted once to `clamp(floor(bytes / record size), 1, 65,535)` records; routing compares lengths rather than reinterpreting cursor limits or byte products. The default budget is 64 KiB. Tiles are finished in scratch memory. |
 | Cursor table | One `u16` position per bucket. At 14 bits it occupies 32 KiB. |
 
+## Knowledge boundaries
+
+| Owner | Complete responsibility | Consumers need to know |
+|---|---|---|
+| `engine.rs` | Root preparation, candidate-bit progress, recursive node execution | Public sort contracts and complete partition/finishing operations |
+| `engine/plan.rs` | Bounded sampling, node and tile decisions, digit work estimates | Records, candidate variation and effective tile capacity go in; an executable decision comes out |
+| `engine/tile.rs` | Capacity normalization, scratch allocation, cached classification, counting passes and restoration | Finish a cursor-bounded slice; no raw pointers, cursor layout or separately armed guard cross the boundary |
+| `block.rs` and `block/` | Physical block storage, stable partition, directory costs, compaction and recovery | Logical bucket boundaries and safe completion callbacks |
+| `engine/parallel.rs` | Task batching and scheduling of the shared decisions | Exclusive bucket borrows and the planner's decision, not a second cost model |
+
+A maintenance change to sampled occupancy or a leaf estimate stays in planning; it does not require changing record movement. A change to tile scratch layout stays with its counting and recovery operation. Block representation costs stay derived beside the physical representation, not copied into the strategy model.
+
+## Cost model
+
+The planner separates exact work from advisory estimates and empirical budgets. These are not interchangeable scores: a bucket-table entry, a record pass and a parallel task have different costs. The current model keeps their established decisions explicit rather than introducing unmeasured conversion weights.
+
+| Decision | Facts and constraints | Estimate or empirical policy |
+|---|---|---|
+| Flat digit plan | Varying positions and maximum width; exact number of passes and total bucket slots | Minimize passes, then slots; no fitted coefficient |
+| Tile table width | Two bytes per cursor and actual tile bytes; 14-bit table cap | Six-bit minimum; at most eight buckets per record, or four for records wider than eight bytes |
+| Tile MSD versus LSD | Exact minimum LSD pass count; observed top-digit groups | Estimate depth from fan-out, charge insertion as one pass; retain the low-fanout override because it accounts for children that become constant |
+| Node digit width | Effective tile capacity and block fan-out limit | Target half-tile children; widen a concentrated digit using sampled occupancy |
+| Equality partition | Repeated complete keys in the same bounded sample | A quarter-sample mode, sampled only when a node spans at least four tiles |
+| Block size | Descriptor bytes, bucket count, record size and input length | Storage owns its balanced-memory formula, scale and amortization floors |
+
+Samples choose work, never certify ownership, equality of actual records or recursion completion. Full child scans still restrict variation to the remaining candidate mask. The low-fanout rule and other empirical policies remain named model assumptions until a measured general mechanism takes over their benefits. Node execution and parallel scheduling consume decisions without reading these estimates or reproducing their thresholds.
+
 ## Pipeline
 
 ### 1. Order probe
@@ -38,7 +65,7 @@ A node that reaches its digit partition may already sit in the two runs its top 
 One shared `NodePlan` selects a narrow window, equality pivot, existing runs or digit for serial and parallel execution. The decision is consumed once: a parallel root taking an equality or existing-run route executes that decision serially without resampling. Both orientations of existing runs use this path. Run recognition precedes digit-width sampling, since a recognized run needs no digit table. Otherwise the node is split by one of two stable partitions. Equality sampling is tried only on nodes of at least four tiles, which amortize the bounded key sample:
 
 - **Repeated key.** The node samples up to 128 keys in runs of 8 and sorts those encoded keys. If one value covers at least a quarter of the sample, an equality partition separates it from the rest, so heavily repeated keys stop costing passes. If changing keys leave the entire node below or above that sampled value, a digit partition consumes candidate bits instead of repeating an unchanged node.
-- **Top digit.** Otherwise [`choose_split_digit`](../../rust/tessera-sort/src/engine.rs) targets children of half a tile. It starts with enough bits for `n / target` children, clamped to 3–8 bits and the available key bits. The same sorted key sample checks whether at least a quarter of the digit's buckets are occupied; a concentrated digit widens by two bits at a time, up to 12 or the available key bits. Every tested width projects this retained sample rather than extracting records again. Adjacent projected groups give occupancy without a radix-sized bitmap. Tile leaf selection uses this sampling mechanism too; plans of at most two passes still skip sampling.
+- **Top digit.** Otherwise [`choose_split_digit`](../../rust/tessera-sort/src/engine/plan.rs) targets children of half a tile. It starts with enough bits for `n / target` children, clamped to 3–8 bits and the available key bits. The same sorted key sample checks whether at least a quarter of the digit's buckets are occupied; a concentrated digit widens by two bits at a time, up to 12 or the available key bits. Every tested width projects this retained sample rather than extracting records again. Adjacent projected groups give occupancy without a radix-sized bitmap. Tile leaf selection uses this sampling mechanism too; plans of at most two passes still skip sampling.
 
 The digit partition uses the block LSD scheme of Clausecker and Schintke. Buckets are filled block by block, consumed input blocks are reused as output blocks, and permutation metadata records their logical order. Stability holds without a full-size output buffer, and the extra space is O(√n) for a fixed digit width and record size. The block size in records is
 

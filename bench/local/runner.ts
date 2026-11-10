@@ -6,7 +6,6 @@ import { arch, cpus, platform, release } from "node:os";
 import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
-import { criterionGroup, parseCriterionId } from "../catalog.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
@@ -17,7 +16,6 @@ import {
   type Workspace,
   withWorkspace,
 } from "../workspace.ts";
-import { readEstimates } from "./criterion.ts";
 import {
   engineOrderingSymbols,
   type LayoutControl,
@@ -25,8 +23,9 @@ import {
   parseLayoutSeeds,
   validateLayoutBuilds,
 } from "./layout.ts";
-import { type LocalBlock, type LocalRun, shardCases, summarizeLocal } from "./model.ts";
+import { type LocalRun, shardCases, summarizeLocal } from "./model.ts";
 import { renderLocalReport } from "./report.ts";
+import { measureSamples } from "./samples.ts";
 
 interface LocalOptions {
   root: string;
@@ -52,6 +51,7 @@ export function assertWorkerEnvironment() {
     "TIME_DIVISOR",
     "STUDY_SETTINGS",
     "FIXED_SORTS",
+    "PAIRED",
   ])
     if (`TESSERA_BENCH_${name}` in process.env)
       throw new Error(`Unset TESSERA_BENCH_${name} before starting an experiment`);
@@ -264,57 +264,6 @@ export async function comparisonCpus(parallel: boolean, requested?: string) {
   return [...selected].join(",");
 }
 
-/** Measure one process-level block, cycling through the six possible orders. */
-export async function measureBlock(
-  run: LocalRun,
-  binaries: { baseline: string; current: string },
-  workspace: Workspace,
-  options: LocalOptions,
-): Promise<LocalBlock> {
-  const values = {} as LocalBlock;
-  const roles = ["baseline", "control", "current"] as const;
-  const orders = [
-    [0, 1, 2],
-    [2, 1, 0],
-    [1, 2, 0],
-    [0, 2, 1],
-    [2, 0, 1],
-    [1, 0, 2],
-  ];
-  const parallel = Boolean(options.plan.parallel?.length);
-  const cpus = await comparisonCpus(parallel, options.cpu);
-  const phases = [
-    run.cases.filter((id) => parseCriterionId(id).mode !== "par-4"),
-    run.cases.filter((id) => parseCriterionId(id).mode === "par-4"),
-  ].filter((ids) => ids.length);
-  for (const index of orders[run.blocks.length % orders.length]) {
-    const role = roles[index],
-      binary = role === "current" ? binaries.current : binaries.baseline;
-    const criterion = join(workspace.directory, "criterion");
-    await rm(criterion, { recursive: true, force: true });
-    diagnostic(`Block ${run.blocks.length + 1}/9: ${role}`);
-    // Await every process: parallel preparation and pool teardown never overlap other cases.
-    for (const ids of phases) {
-      const isParallel = parseCriterionId(ids[0]).mode === "par-4";
-      const cpu = parallel && !isParallel ? cpus!.split(",")[0] : cpus;
-      const pattern = ids.map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-      const args = ["--bench", `^(?:${pattern})$`];
-      await command(cpu ? "taskset" : binary, cpu ? ["-c", cpu, binary, ...args] : args, {
-        cwd: workspace.tree,
-        env: {
-          CRITERION_HOME: criterion,
-          TESSERA_BENCH_GROUPS: [...new Set(ids.map(criterionGroup))].join("\n"),
-          TESSERA_BENCH_IDS: ids.join("\n"),
-          TESSERA_BENCH_PARALLEL: options.plan.parallel?.length ? "4" : undefined,
-          TESSERA_BENCH_PLAN: join(options.out, "plan.json"),
-        },
-      });
-    }
-    values[role] = await readEstimates(criterion);
-  }
-  return values;
-}
-
 /** Compare an immutable working-tree snapshot with a commit, retaining only results. */
 export async function compareLocal(options: LocalOptions) {
   const { root, out, simd } = options;
@@ -370,6 +319,7 @@ export async function compareLocal(options: LocalOptions) {
       );
       const run: LocalRun = {
         schema: 1,
+        protocol: "paired-samples-v1",
         baseline,
         head,
         dirty,
@@ -403,16 +353,10 @@ export async function compareLocal(options: LocalOptions) {
     if (result.schema === 2) validateLayoutBuilds(result);
     const save = () => writeFile(join(out, "local.json"), `${JSON.stringify(result, null, 2)}\n`);
     await save();
-    for (let block = 0; block < 9; block++) {
-      // Rotate layouts between blocks so one seed does not own one time interval.
-      for (let offset = 0; offset < layouts.length; offset++) {
-        const index = (block + offset) % layouts.length;
-        const { seed, run } = layouts[index];
-        if (linker) diagnostic(`Layout seed ${seed}`);
-        run.blocks.push(await measureBlock(run, executables[index], workspace, options));
-        if (run.blocks.length === 9) summarizeLocal(run);
-        await save();
-      }
+    for (const [index, { seed, run }] of layouts.entries()) {
+      if (linker) diagnostic(`Layout seed ${seed}`);
+      await measureSamples(run, executables[index], workspace.tree, planPath, cpu, save);
+      summarizeLocal(run);
     }
     await renderLocalReport(out, result);
   });

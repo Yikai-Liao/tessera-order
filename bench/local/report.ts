@@ -87,17 +87,22 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
         }))
       : [{ title: result.configuration, run: result }];
   const run = runs[0].run;
+  const paired = run.protocol === "paired-samples-v1";
+  const range = (low: number | undefined, high: number | undefined) =>
+    low === undefined || high === undefined ? "—" : `${low.toFixed(4)}–${high.toFixed(4)}`;
   const groups = runs.map(({ title, run }) => ({ title, summaries: summarizeLocal(run) }));
   const summaries = groups.flatMap(({ summaries }) => summaries);
-  const ratios = summaries.flatMap((s) => [s.low, s.high, s.aaLow, s.aaHigh]);
+  const ratios = summaries.flatMap((s) => [s.low, s.high, s.aaLow ?? 1, s.aaHigh ?? 1]);
   const reach = 2 ** Math.ceil(Math.log2(Math.max(2, ...ratios.map((v) => Math.max(v, 1 / v)))));
   const ticks = [];
   for (let k = -Math.log2(reach); k <= Math.log2(reach); k++)
     ticks.push({ value: 2 ** k, label: `${2 ** k}×` });
   const svg = renderRows({
     title: "Working tree against commit",
-    guide: "Current / baseline run time · lower is better · nine process-level blocks per layout",
-    columns: ["Time ratio", "A/A range"],
+    guide: paired
+      ? "Adjacent A/B sample ratios · lower is better · 99% median interval"
+      : "Current / baseline run time · lower is better · nine process-level blocks per layout",
+    columns: ["Time ratio", paired ? "Median interval" : "A/A range"],
     groups: groups.map(({ title, summaries }) => ({
       title,
       rows: summaries.map((s) => ({
@@ -107,21 +112,23 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
         },
         marks: [{ value: s.ratio, tone: "primary" }],
         span: [s.low, s.high],
-        cells: [`${s.ratio.toFixed(4)}×`, `${s.aaLow.toFixed(4)}–${s.aaHigh.toFixed(4)}`],
+        cells: [`${s.ratio.toFixed(4)}×`, paired ? range(s.low, s.high) : range(s.aaLow, s.aaHigh)],
         strong: true,
       })),
     })),
     scale: { low: 1 / reach, high: reach, ticks, origin: 1, clamp: false },
-    legend: { note: "dot: median · line: block range" },
+    legend: {
+      note: paired ? "dot: median · line: median interval" : "dot: median · line: block range",
+    },
     axis: ["← less time", "more time →"],
   });
   const table = [
-    "| Layout | Case | Current / baseline | Block range | A/A range | Screen |",
+    `| Layout | Case | Current / baseline | ${paired ? "Median interval" : "Block range"} | A/A range | Screen |`,
     "| --- | --- | --- | --- | --- | --- |",
     ...groups.flatMap(({ title, summaries }) =>
       summaries.map(
         (s) =>
-          `| ${title} | ${s.id} | ${s.ratio.toFixed(4)} | ${s.low.toFixed(4)}–${s.high.toFixed(4)} | ${s.aaLow.toFixed(4)}–${s.aaHigh.toFixed(4)} | ${s.verdict} |`,
+          `| ${title} | ${s.id} | ${s.ratio.toFixed(4)} | ${s.low.toFixed(4)}–${s.high.toFixed(4)} | ${range(s.aaLow, s.aaHigh)} | ${s.verdict} |`,
       ),
     ),
   ].join("\n");
@@ -139,7 +146,7 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
 
 Baseline: \`${run.baseline}\`. Working-tree HEAD: \`${run.head}\` (${run.dirty ? "modified" : "clean"}).
 
-This is a development screen, not an in-process source-attribution claim. Each process measures Criterion's mean time per sort. Each block runs the baseline executable twice and the current executable once; ratios use the paired baseline mean. A direction requires eight of nine blocks and a median outside the A/A range. All processes use the same input seed and current harness; they do not share an address space.
+${paired ? "Adjacent A/B samples alternate AB/BA order. The median ratio and its distribution-free 99% interval describe the paired samples; an alert requires the entire interval outside 0.95–1.05. Coverage assumes independent samples and does not include code-placement effects. Input restoration, verification and IPC are outside the sort clock. Raw pairs are retained; this is a regression screen, not proof of source-change causality." : "This is a development screen, not an in-process source-attribution claim. Each process measures Criterion’s mean time per sort. Each block runs baseline twice and current once; ratios use the paired baseline mean. A direction requires eight of nine blocks and a median outside the A/A range."}
 
 ${
   layoutSummaries

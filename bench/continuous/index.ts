@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { VARIANTS } from "../catalog.ts";
 import { chartSvg } from "./chart.ts";
 import {
@@ -20,8 +19,7 @@ import {
   renderCombined,
   renderFailure,
 } from "./markdown.ts";
-import { type PairedSource, pairedSummary, readPaired, validateCloud } from "./paired.ts";
-import type { BencherReport } from "./report.ts";
+import { type PairedSource, pairedSummary, readPaired } from "./paired.ts";
 
 interface PublicationOptions {
   github: GitHub;
@@ -43,7 +41,7 @@ interface PublicationOptions {
  * measurements into a pass or discard the other configuration's evidence.
  */
 export async function publishReport({ github, context, core, inputs }: PublicationOptions) {
-  const { hash, baseHash, number, baseRef = "main", artifacts, reports } = inputs;
+  const { hash, baseHash, number, baseRef = "main", artifacts } = inputs;
   const runUrl = workflowUrl(context);
   const measured = await Promise.all(
     VARIANTS.map(async (variant) => {
@@ -51,23 +49,14 @@ export async function publishReport({ github, context, core, inputs }: Publicati
       try {
         const expectedCases: string[] = JSON.parse(await readFile(inputs.inventory, "utf8"));
         const runs = await readPaired(artifacts, variant, { hash, baseHash }, expectedCases);
-        let cloud: BencherReport | undefined;
-        try {
-          cloud = JSON.parse(await readFile(join(reports, `bencher-${variant.id}.json`), "utf8"));
-          validateCloud(cloud!, runs, variant, number);
-        } catch (error) {
-          cloud = undefined;
-          core.notice(`Cloud upload unavailable (${variant.id}): ${String(error)}`);
-        }
         return {
           variant,
           checkId,
-          cloud,
-          summary: pairedSummary(runs, variant, cloud),
+          summary: pairedSummary(runs, variant),
           reason: undefined,
         };
       } catch (error) {
-        return { variant, checkId, cloud: undefined, summary: null, reason: String(error) };
+        return { variant, checkId, summary: null, reason: String(error) };
       }
     }),
   );
@@ -94,13 +83,9 @@ export async function publishReport({ github, context, core, inputs }: Publicati
     imagesUnavailable = true;
   }
   const note =
-    "Nine interleaved process blocks on each runner. Current / mean of two baseline calls, then median across blocks; a direction requires eight agreeing blocks and a median outside the A/A range. Ranges are observed, not confidence intervals. Each shard measures both revisions on its own runner. Cloud stores these ratios without comparing different runs' baselines.";
-  const uploadFailures = measured.filter((result) => result.summary && !result.cloud);
-  const footer = uploadFailures.length
-    ? "\n\n> Cloud upload failed: " +
-      uploadFailures.map((result) => result.variant.name).join(", ") +
-      ". Measurements remain in the Actions artifacts."
-    : "";
+    "Adjacent A/B samples alternate AB/BA order. Median ratios use a distribution-free 99% median interval; an alert requires the entire interval outside 0.95–1.05. Coverage assumes independent samples, not immunity to code placement or interference. Each shard measures both revisions on one runner. Cloud archives results; it does not decide verdicts. Baseline changes split PR history; main points describe individual parent-to-commit changes, not absolute or cumulative performance.";
+  const footer =
+    "\n\nCloud archival runs separately after these checks. See the workflow for upload status; raw measurements remain in the Actions artifacts.";
   const options = {
     language: "rust",
     hash,
@@ -120,13 +105,10 @@ export async function publishReport({ github, context, core, inputs }: Publicati
       ...context.repo,
       check_run_id: result.checkId,
       status: "completed",
-      conclusion:
-        !result.summary || !result.cloud || result.summary.regressions ? "failure" : "success",
+      conclusion: !result.summary || result.summary.regressions ? "failure" : "success",
       details_url: runUrl,
       output: {
-        title: result.summary
-          ? (!result.cloud ? "Cloud upload failed · " : "") + headline(result.summary)
-          : "Measurement failed",
+        title: result.summary ? headline(result.summary) : "Measurement failed",
         summary: body.slice(0, 65000),
       },
     });

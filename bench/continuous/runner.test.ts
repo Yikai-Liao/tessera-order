@@ -51,12 +51,15 @@ test("rejects a self-consistent but shortened inventory across every shard", asy
   for (const run of runs) {
     run.shard!.allCases = shortened;
     run.cases = shardCases(shortened, run.shard!.index, CONTINUOUS_SHARDS);
-    for (const block of run.blocks) {
-      const values = (value: number) => Object.fromEntries(run.cases.map((id) => [id, value]));
-      block.baseline = values(100);
-      block.control = values(102);
-      block.current = values(121.2);
-    }
+    run.samples = Object.fromEntries(
+      run.cases.map((id) => [
+        id,
+        Array.from({ length: id.includes("/10000000/") ? 20 : 30 }, () => ({
+          baseline: 100,
+          current: 120,
+        })),
+      ]),
+    );
     await writeFile(
       join(out, `paired-default-${run.shard!.index}`, "local.json"),
       JSON.stringify(run),
@@ -92,11 +95,11 @@ for (const damage of [
       if (damage === "duplicate") run.shard!.index = 2;
       if (damage === "head") run.head = "c".repeat(40);
       if (damage === "baseline") run.baseline = hash;
-      if (damage === "blocks") run.blocks.pop();
+      if (damage === "blocks") run.samples![run.cases[0]].pop();
       if (damage === "selection") run.cases.pop();
       if (damage === "settings") run.builds!.current.opt_level = "1";
       if (damage === "features") run.builds!.current.features = [];
-      if (damage === "invalid-time") run.blocks[0].current[run.cases[0]] = -1;
+      if (damage === "invalid-time") run.samples![run.cases[0]][0].current = -1;
       if (damage === "provenance") delete (run.source as Partial<typeof run.source>).current;
       await writeFile(path, JSON.stringify(run));
     }

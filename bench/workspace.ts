@@ -97,7 +97,11 @@ export async function sourceHash(directory: string): Promise<string> {
   return digest.digest("hex");
 }
 
-/** Own an isolated source snapshot, one build directory and all cleanup. */
+/** Own an isolated snapshot and clean it up, even on failure.
+ *
+ * TESSERA_BENCH_TARGET_DIR opts into a caller-owned Cargo cache (relative to
+ * root); never share it across trust boundaries. Otherwise builds are temporary.
+ */
 export async function withWorkspace<T>(
   root: string,
   operation: (workspace: Workspace) => Promise<T>,
@@ -129,7 +133,10 @@ export async function withWorkspace<T>(
       }
       await copySnapshot(join(root, path), join(tree, path), root);
     }
-    return await operation({ directory, tree, target: join(directory, "target") });
+    const target = process.env.TESSERA_BENCH_TARGET_DIR
+      ? resolve(root, process.env.TESSERA_BENCH_TARGET_DIR)
+      : join(directory, "target");
+    return await operation({ directory, tree, target });
   } finally {
     try {
       if (added) await command("git", ["worktree", "remove", "--force", tree], { cwd: root });

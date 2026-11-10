@@ -2,7 +2,7 @@
 
 name: Measure benchmarks
 # Retain the triggering target SHA even if a stacked parent is rewritten later.
-run-name: paired-v1 pr=${{ github.event.pull_request.number || '0' }} base=${{ github.event.pull_request.base.sha || 'parent' }} head=${{ github.event.pull_request.head.sha || github.sha }}
+run-name: paired-v2 pr=${{ github.event.pull_request.number || '0' }} base=${{ github.event.pull_request.base.sha || 'parent' }} head=${{ github.event.pull_request.head.sha || github.sha }}
 
 # Unprivileged: PR code runs only here, without Cloud credentials or write access.
 on:
@@ -53,7 +53,11 @@ jobs:
   measure:
     needs: plan
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 10
+    env:
+      TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/continuous
+      # Match CLI defaults up front instead of compiling twice to resolve flags.
+      RUSTFLAGS: -C llvm-args=-align-loops=64 -C llvm-args=-align-all-nofallthru-blocks=6
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -64,6 +68,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target/continuous"
+          shared-key: continuous-${{ matrix.configuration }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v7
         with:

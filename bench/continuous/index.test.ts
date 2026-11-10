@@ -97,7 +97,7 @@ test("raw paired blocks drive independent checks and the existing shared chart",
   const body = action.summaries[0];
   assert.match(body, /1.2000×/);
   assert.match(body, /0.8000×/);
-  assert.ok(body.includes("A/A range"));
+  assert.ok(body.includes("Median interval"));
   assert.doesNotMatch(body, /1.20 ns|0.800 ns/);
   assert.match(body, /serial/);
   assert.match(body, /4|Parallel/);
@@ -128,19 +128,20 @@ test("missing shards fail one build without hiding the completed build", async (
   assert.match(action.summaries[0], /Missing measurement shards/);
 });
 
-test("Cloud failure retains ratio tables but cannot pass the upload check", async (t) => {
+test("Cloud failure retains ratio tables and does not change performance checks", async (t) => {
   const action = await publication(t, false);
   await publishReport(action);
-  assert.match(action.summaries[0], /Cloud upload failed/);
+  assert.match(action.summaries[0], /Cloud archival runs separately/);
   assert.match(action.summaries[0], /0.8000×/);
-  assert.ok(
+  assert.deepEqual(
     action.requests
       .filter((request) => request.method === "PATCH")
-      .every((request) => request.body.conclusion === "failure"),
+      .map((request) => request.body.conclusion),
+    ["failure", "success"],
   );
 });
 
-test("empty or wrong Cloud results cannot pass a completed measurement", async (t) => {
+test("Cloud contents cannot override performance evidence", async (t) => {
   const action = await publication(t);
   const path = join(action.inputs.reports, "bencher-portable-simd.json");
   const report = fixture();
@@ -149,7 +150,7 @@ test("empty or wrong Cloud results cannot pass a completed measurement", async (
   report.results = [[]];
   await writeFile(path, JSON.stringify(report));
   await publishReport(action);
-  assert.match(action.summaries[0], /Cloud upload failed: Portable SIMD/);
+  assert.match(action.summaries[0], /Cloud archival runs separately/);
   assert.match(action.summaries[0], /0.8000×/);
 });
 

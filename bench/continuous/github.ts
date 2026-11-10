@@ -60,7 +60,7 @@ export async function resolveSource({ github, context, core }: ActionArguments) 
 
   // Native run metadata snapshots the event; live PR state only determines
   // eligibility. This also works when fork events omit pull_requests entirely.
-  const captured = /^paired-v1 pr=([1-9]\d*) base=([a-f0-9]{40}) head=([a-f0-9]{40})$/.exec(
+  const captured = /^paired-v2 pr=([1-9]\d*) base=([a-f0-9]{40}) head=([a-f0-9]{40})$/.exec(
     run.display_title,
   );
   if (!captured || captured[3] !== run.head_sha)

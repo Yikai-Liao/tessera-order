@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { parseCriterionId } from "../catalog.ts";
-import { summarizePaired } from "../statistics.ts";
+import { parseCriterionId, revisionSampling } from "../catalog.ts";
+import { summarizePaired, summarizeRatios } from "../statistics.ts";
 import type { BuildProvenance } from "../workspace.ts";
 
 export interface LocalBlock {
@@ -42,6 +42,8 @@ export function shardCases(cases: string[], index: number, count: number) {
 
 export interface LocalRun {
   schema: 1;
+  protocol?: "paired-samples-v1";
+  samples?: Record<string, { baseline: number; current: number }[]>;
   baseline: string;
   head: string;
   dirty: boolean;
@@ -62,13 +64,40 @@ export interface LocalSummary {
   ratio: number;
   low: number;
   high: number;
-  aaLow: number;
-  aaHigh: number;
+  aaLow?: number;
+  aaHigh?: number;
   verdict: "faster" | "slower" | "within noise";
 }
 
 /** Summarize nine process-level blocks with their paired A/A controls. */
-export function summarizeLocal(run: Pick<LocalRun, "cases" | "blocks">): LocalSummary[] {
+export function summarizeLocal(
+  run: Pick<LocalRun, "protocol" | "samples" | "cases" | "blocks">,
+): LocalSummary[] {
+  if (run.protocol === "paired-samples-v1") {
+    if (
+      run.blocks.length ||
+      !run.samples ||
+      !run.cases.length ||
+      new Set(run.cases).size !== run.cases.length ||
+      Object.keys(run.samples).sort().join("\n") !== [...run.cases].sort().join("\n")
+    )
+      throw new Error("Incomplete paired samples");
+    return run.cases.map((id) => {
+      const samples = run.samples![id];
+      const len = parseCriterionId(id).len;
+      const count = revisionSampling(len).samples;
+      if (
+        samples.length !== count ||
+        samples.some(
+          (s) => ![s.baseline, s.current].every((value) => Number.isFinite(value) && value > 0),
+        )
+      )
+        throw new Error("Invalid paired sample budget or observation");
+      return { id, ...summarizeRatios(samples.map((s) => s.current / s.baseline)) };
+    });
+  }
+  if (run.protocol !== undefined || run.samples !== undefined)
+    throw new Error("Unsupported comparison protocol");
   if (run.blocks.length !== 9 || !run.cases.length || new Set(run.cases).size !== run.cases.length)
     throw new Error("Expected nine complete blocks");
   for (const block of run.blocks) {

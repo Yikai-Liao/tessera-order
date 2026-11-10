@@ -2,60 +2,64 @@
 
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { availableParallelism, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { VARIANTS } from "../catalog.ts";
 import { pairedRun } from "../continuous/fixtures/paired.ts";
-import { loadPlan } from "../plan.ts";
-import { comparisonCpus, measureBlock } from "./runner.ts";
+import { summarizeLocal } from "./model.ts";
+import { renderLocalReport } from "./report.ts";
+import { measureSamples } from "./samples.ts";
 
-test("paired processes select exact API IDs, pin CPUs and never overlap preparations", {
-  skip: process.platform !== "linux" || availableParallelism() < 4,
-}, async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "tessera-process-pair-"));
+test("revision workers alternate adjacent samples, retain evidence and reap failures", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-samples-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const plan = await loadPlan("continuous");
-  await writeFile(join(directory, "plan.json"), JSON.stringify(plan));
-  const binary = join(directory, "bench");
-  const run = pairedRun(VARIANTS[0]);
-  run.cases = ["rust/u64/random/49/s1/api", "rust/u64/random/49/s1/par-4"];
-  run.blocks = [];
-  await writeFile(
-    binary,
-    String.raw`#!/usr/bin/env node
-// SPDX-License-Identifier: BSD-2-Clause
-const fs = require("node:fs"), path = require("node:path"), assert = require("node:assert/strict");
-const directory = ${JSON.stringify(directory)};
-const lock = path.join(directory, "active");
-const fd = fs.openSync(lock, "wx");
-const ids = process.env.TESSERA_BENCH_IDS.split("\n");
-assert.equal(ids.length, 1);
-assert.equal(process.env.TESSERA_BENCH_PARALLEL, "4");
-const allowed = fs.readFileSync("/proc/self/status", "utf8").match(/^Cpus_allowed_list:\s*(.+)$/m)[1];
-const cpus = allowed.split(",").reduce((sum, range) => { const [a, b = a] = range.split("-").map(Number); return sum + b-a+1; }, 0);
-assert.equal(cpus, ids[0].endsWith("/par-4") ? 4 : 1);
-fs.appendFileSync(path.join(directory, "events"), ids[0] + "\n");
-for (const id of ids) {
- const output = path.join(process.env.CRITERION_HOME, id, "new");
- fs.mkdirSync(output, {recursive:true});
- fs.writeFileSync(path.join(output, "benchmark.json"), JSON.stringify({full_id:id}));
- fs.writeFileSync(path.join(output, "estimates.json"), JSON.stringify({mean:{point_estimate:100}}));
-}
-fs.closeSync(fd); fs.unlinkSync(lock);
+  const binaries = { baseline: join(directory, "a"), current: join(directory, "b") };
+  for (const [role, file] of Object.entries(binaries))
+    await writeFile(
+      file,
+      String.raw`#!/usr/bin/env node
+const fs = require("node:fs"), readline = require("node:readline");
+const role = ${JSON.stringify(role)}, dir = ${JSON.stringify(directory)};
+fs.writeFileSync(dir + "/" + role + ".pid", String(process.pid));
+const id = process.env.TESSERA_BENCH_IDS;
+const rl = readline.createInterface({input:process.stdin});
+rl.on("line", request => {
+ const lock = fs.openSync(dir + "/active", "wx");
+ fs.appendFileSync(dir + "/events", role + ":" + request + "\n");
+ fs.closeSync(lock); fs.unlinkSync(dir + "/active");
+ if (fs.existsSync(dir + "/fail") && role === "current") process.exit(2);
+ if (request === "start") console.log(JSON.stringify({id}));
+ if (request === "warm") console.log(JSON.stringify({id,samples:30}));
+ if (request === "sample") console.log(JSON.stringify({elapsed_ns:role === "baseline" ? 1000 : 1200,sorts:10}));
+ if (request === "stop") {console.log("{}");process.exit(0)}
+});
 `,
-    { mode: 0o755 },
-  );
-  const binaries = { baseline: binary, current: binary };
-  const workspace = { directory, tree: directory, target: join(directory, "target") };
-  const options = { root: directory, baseline: "HEAD", out: directory, simd: false, plan };
-  const block = await measureBlock(run, binaries, workspace, options);
-  for (const values of Object.values(block))
-    assert.deepEqual(Object.keys(values).sort(), run.cases);
+      { mode: 0o755 },
+    );
+  const run = pairedRun(VARIANTS[0]);
+  run.cases = ["rust/u64/random/48/s1/api"];
+  await measureSamples(run, binaries, directory, "unused", undefined, async () => {});
   const events = (await readFile(join(directory, "events"), "utf8")).trim().split("\n");
-  assert.deepEqual(events, Array.from({ length: 3 }, () => run.cases).flat());
-  // A serial-only shard of a parallel plan must still pin serial calls to one CPU.
-  run.cases = run.cases.slice(0, 1);
-  await measureBlock(run, binaries, workspace, options);
-  await assert.rejects(comparisonCpus(true, "0"), /four available CPUs/);
+  assert.deepEqual(
+    events.filter((s) => s.endsWith(":sample")),
+    Array.from({ length: 30 }, (_, i) =>
+      i % 2 ? ["current:sample", "baseline:sample"] : ["baseline:sample", "current:sample"],
+    ).flat(),
+  );
+  assert.equal(summarizeLocal(run)[0].verdict, "slower");
+  await writeFile(join(directory, "local.json"), JSON.stringify(run));
+  await renderLocalReport(directory);
+  assert.match(await readFile(join(directory, "index.md"), "utf8"), /Adjacent A\/B/);
+  delete run.protocol;
+  assert.throws(() => summarizeLocal(run), /Unsupported/);
+  run.protocol = "paired-samples-v1";
+  await writeFile(join(directory, "fail"), "");
+  await assert.rejects(
+    measureSamples(run, binaries, directory, "unused", undefined, async () => {}),
+  );
+  for (const role of ["baseline", "current"]) {
+    const pid = Number(await readFile(join(directory, `${role}.pid`), "utf8"));
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  }
 });

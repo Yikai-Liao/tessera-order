@@ -4,6 +4,9 @@
 //!
 //! IDs are `rust/<case_id>/<mode>`; input selection precedes generation.
 
+#[path = "support/paired.rs"]
+mod paired;
+
 use criterion::{BatchSize, Criterion};
 use std::{hint::black_box, sync::OnceLock, time::Duration};
 use tessera_bench::{
@@ -13,10 +16,6 @@ use tessera_bench::{
 
 /// Fixed prepared element count, independent of measured execution time.
 const BATCH_ELEMENTS: usize = 1 << 18;
-/// Length used for measured engine decisions.
-const LARGE: usize = 1_000_000;
-/// Length exercising the out-of-cache block partition.
-const HUGE: usize = 10_000_000;
 
 /// Expands both API selections without multiplying their coverage.
 fn suite(c: &mut Criterion) {
@@ -226,17 +225,22 @@ fn measure<T: Copy>(
     }
     let batch = (BATCH_ELEMENTS / input.len()).max(1) as u64;
     let mut group = c.benchmark_group(id);
-    let (warm_up, window, samples) = if input.len() >= HUGE {
-        (1000, 4000, 20)
-    } else if input.len() >= LARGE {
-        (1000, 4000, 40)
-    } else {
-        (500, 1500, 30)
-    };
+    let settings = tessera_bench::plan::revision_sampling(input.len());
+    if std::env::var_os("TESSERA_BENCH_PAIRED").is_some() {
+        paired::serve(
+            &criterion_id!(id, mode),
+            input,
+            expected,
+            same,
+            sort,
+            settings,
+        );
+        return;
+    }
     group
-        .warm_up_time(Duration::from_millis(warm_up))
-        .measurement_time(Duration::from_millis(window))
-        .sample_size(samples);
+        .warm_up_time(Duration::from_millis(settings.warm_ms))
+        .measurement_time(Duration::from_millis(settings.window_ms))
+        .sample_size(settings.samples);
     group.bench_function(mode, |b| {
         b.iter_batched_ref(
             || input.to_vec(),
@@ -284,6 +288,13 @@ fn selected(id: &str, mode: &str) -> bool {
 
 /// Runs Criterion with its standard command-line controls.
 fn main() {
+    if std::env::var_os("TESSERA_BENCH_PAIRED").is_some() {
+        let mut request = String::new();
+        std::io::stdin()
+            .read_line(&mut request)
+            .expect("read start request");
+        assert_eq!(request.trim(), "start");
+    }
     let mut criterion = Criterion::default().without_plots().configure_from_args();
     suite(&mut criterion);
     criterion.final_summary();

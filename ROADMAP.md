@@ -47,7 +47,7 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 
 ## Benchmark investigations
 
-- Validate the hosted paired pipeline on Actions: retain full-suite duration, queue wait, A/A ranges, same-source false alerts and held-out detection evidence for both configurations before claiming faster feedback or tuning sampling/shard count. Verify Cloud upload, fork PR publication, partial-job reruns and the main first-parent comparison. Current local smoke coverage is not hosted acceptance.
+- Validate the hosted paired pipeline on Actions: retain cold/warm-cache full-suite duration, queue wait, paired median intervals, same-source false alerts and held-out detection evidence for both configurations before claiming hosted stability or tuning the per-case sample budget. Verify Cloud upload, fork PR publication, partial-job reruns and the main first-parent comparison. Current local smoke coverage is not hosted acceptance.
 
 - Support intended PR changes to continuous plans or resolved boundary inventories without trusting PR-declared completeness or executing PR code in the publisher. Current publication requires the trusted default-branch inventory; validate changed selections locally until that authority is updated. Keep Rust as the sole case-expansion owner.
 

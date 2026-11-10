@@ -10,7 +10,7 @@ import { buildBenchmark, withWorkspace } from "../workspace.ts";
 import { type BencherReport, type Row, summarizeRows } from "./report.ts";
 
 /** Hosted matrix width; workflows obtain their matrix from this owner. */
-export const CONTINUOUS_SHARDS = 4;
+export const CONTINUOUS_SHARDS = 2;
 
 /** Exact source identity resolved independently by the trusted publisher. */
 export interface PairedSource {
@@ -81,6 +81,7 @@ export async function readPaired(
     const shard = run.shard;
     if (
       run.schema !== 1 ||
+      run.protocol !== "paired-samples-v1" ||
       run.dirty ||
       run.head !== source.hash ||
       run.baseline !== source.baseHash ||
@@ -170,8 +171,8 @@ export function pairedSummary(runs: LocalRun[], variant: Variant, cloud?: Benche
     measure: "paired-time-ratio",
     value: result.ratio,
     baseline: 1,
-    lower: result.aaLow,
-    upper: result.aaHigh,
+    lower: result.low,
+    upper: result.high,
     change: result.ratio - 1,
     verdict:
       result.verdict === "slower"
@@ -191,7 +192,7 @@ export function pairedSummary(runs: LocalRun[], variant: Variant, cloud?: Benche
   });
 }
 
-/** Retain only per-run ratios in a new Measure, never absolute-latency history. */
+/** Retain screen ratios and baseline brackets, never absolute-latency history. */
 export function pairedBmf(runs: LocalRun[]) {
   return Object.fromEntries(
     runs.flatMap(summarizeLocal).map((result) => [

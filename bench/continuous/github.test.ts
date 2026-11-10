@@ -40,7 +40,7 @@ function sourceFixture(event = "pull_request") {
           event,
           workflow_id: 123,
           head_sha: hash,
-          display_title: `paired-v1 pr=7 base=${baseHash} head=${hash}`,
+          display_title: `paired-v2 pr=7 base=${baseHash} head=${hash}`,
           head_branch: "main",
           head_repository: { full_name: fullName },
           pull_requests: [],
@@ -85,8 +85,8 @@ for (const scenario of ["parent rewritten", "PR retargeted", "native rerun"] as 
 for (const title of [
   "",
   "old workflow",
-  `paired-v1 pr=0 base=${baseHash} head=${hash}`,
-  `paired-v1 pr=7 base=${baseHash} head=${"c".repeat(40)}`,
+  `paired-v2 pr=0 base=${baseHash} head=${hash}`,
+  `paired-v2 pr=7 base=${baseHash} head=${"c".repeat(40)}`,
 ]) {
   test(`rejects missing or mismatched captured event identity: ${title.slice(0, 30)}`, async () => {
     const action = sourceFixture();

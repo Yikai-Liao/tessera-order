@@ -19,7 +19,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Resume a prepared algorithm comparison | `pnpm -s tools compare resume bench/results/SESSION` |
 | Reproduce the native comparison CI job | `pnpm -s tools check --native` |
 | Preview hosted benchmark jobs | `pnpm -s tools continuous matrix` |
-| Reproduce one paired shard | `pnpm -s tools compare commit main --plan continuous --shard 1/4` |
+| Reproduce one paired shard | `pnpm -s tools compare commit main --plan continuous --shard 1/2` |
 | Upload completed paired JSON | `pnpm -s tools continuous submit --help` |
 | Regenerate an existing result | `pnpm -s tools report bench/results/SESSION` |
 | Read current main feedback | `pnpm -s tools status main` |
@@ -64,18 +64,18 @@ The hosted jobs call the maintained revision comparison command, with the comple
 
 ```sh
 # New output directories; baseline can be any compatible local commit.
-pnpm tools compare commit main --plan continuous --shard 1/4 \
+pnpm tools compare commit main --plan continuous --shard 1/2 \
   --out bench/results/paired-default-1
-pnpm tools compare commit main --plan continuous --simd --shard 1/4 \
+pnpm tools compare commit main --plan continuous --simd --shard 1/2 \
   --out bench/results/paired-portable-simd-1
 
 # Regenerate one completed shard without building or measuring.
 pnpm tools report bench/results/paired-default-1
 ```
 
-Each shard keeps nine complete process-level blocks and the full sampling budget for its selected cases. Omit `--shard` to run all cases on one host. `--shard INDEX/COUNT` partitions a resolved listing deterministically; it does not shorten samples. Results record the full inventory and selected subset. Directories must be new; temporary snapshots and builds are cleaned, retained results and adjacent logs remain.
+Each shard keeps adjacent A/B sample pairs and the full catalogued sampling budget for its selected cases, without outer repetition. Omit `--shard` to run all cases on one host. `--shard INDEX/COUNT` partitions a resolved listing deterministically; it does not shorten samples. Results record the full inventory and selected subset. Directories must be new; temporary snapshots and default builds are cleaned, retained results and adjacent logs remain. Set `TESSERA_BENCH_TARGET_DIR` to a caller-owned Cargo cache to retain builds across runs; do not share it across trust boundaries. CI caches this exact target directory by configuration and sets the CLI alignment defaults before building.
 
-Upload is explicit and never executes code. Install the pinned Bencher CLI, download all eight `paired-*` artifacts into separate directories under `ARTIFACTS`, and provide `BENCHER_API_KEY` through the environment:
+Upload is explicit and never executes code. Install the pinned Bencher CLI, download all four `paired-*` artifacts into separate directories under `ARTIFACTS`, and provide `BENCHER_API_KEY` through the environment:
 
 ```sh
 # Run from a trusted checkout; this builds/lists, without timing any cases.
@@ -86,7 +86,7 @@ pnpm tools continuous submit --project PROJECT \
   --artifacts ARTIFACTS --out bench/results/submission
 ```
 
-Omit `--pr` for main. The command validates the complete continuous plan, exact trusted inventory, disjoint shard coverage, exact revision pair, common source/build settings and positive complete blocks before uploading each configuration. Local dirty-tree or custom-plan results are reportable locally, not accepted as continuous publication evidence. New relative Testbeds and the `paired-time-ratio` Measure keep old latency history untouched. Cloud receives median ratios and observed block ranges, not raw process observations. Artifact source metadata is self-reported by the unprivileged measurement job: validation catches inconsistent or incomplete evidence but cannot prove that malicious PR-authored code measured honestly. The publisher never evaluates artifact scripts or configuration as code.
+Omit `--pr` for main. The command validates the complete continuous plan, exact trusted inventory, disjoint shard coverage, exact revision pair, common source/build settings and positive complete blocks before uploading each configuration. Local dirty-tree or custom-plan results are reportable locally, not accepted as continuous publication evidence. New relative Testbeds and the `paired-time-ratio` Measure keep old latency history untouched. Cloud receives paired median ratios and their median intervals, not raw samples. Performance checks are published first and do not depend on archival success; upload failures remain explicit in the workflow. Baseline changes split PR history; main points are individual parent-to-commit effects, not a cumulative trend. Artifact source metadata is self-reported by the unprivileged measurement job: validation catches inconsistent or incomplete evidence but cannot prove that malicious PR-authored code measured honestly. The publisher never evaluates artifact scripts or configuration as code.
 
 ## CI boundary
 

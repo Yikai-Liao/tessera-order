@@ -113,7 +113,9 @@ async function report(directories: string[], partial = false) {
   }
   if (local) {
     if (paths.length !== 1 || partial)
-      throw new Error("Local reports require one directory and nine complete blocks per layout");
+      throw new Error(
+        "Revision reports require one directory and complete recorded samples per layout",
+      );
     await renderLocalReport(paths[0]);
   } else await writeReport(paths, partial);
 }

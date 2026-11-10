@@ -25,9 +25,9 @@ export function pairedRun(variant: Variant, index = 1, ratio = 1.2): LocalRun {
       .map((feature) => `CARGO_FEATURE_${feature.toUpperCase().replaceAll("-", "_")}`)
       .sort(),
   };
-  const values = (value: number) => Object.fromEntries(cases.map((id) => [id, value]));
   return {
     schema: 1,
+    protocol: "paired-samples-v1",
     head: hash,
     baseline: baseHash,
     dirty: false,
@@ -51,11 +51,16 @@ export function pairedRun(variant: Variant, index = 1, ratio = 1.2): LocalRun {
     },
     cases,
     shard: { index, count: CONTINUOUS_SHARDS, allCases },
-    blocks: Array.from({ length: 9 }, () => ({
-      baseline: values(100),
-      control: values(102),
-      current: values(101 * ratio),
-    })),
+    blocks: [],
+    samples: Object.fromEntries(
+      cases.map((id) => [
+        id,
+        Array.from({ length: id.includes("/10000000/") ? 20 : 30 }, () => ({
+          baseline: 100,
+          current: 100 * ratio,
+        })),
+      ]),
+    ),
   };
 }
 

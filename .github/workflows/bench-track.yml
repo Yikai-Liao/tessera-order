@@ -16,7 +16,10 @@ jobs:
     if: github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-24.04
     environment: benchmark
-    timeout-minutes: 15
+    timeout-minutes: 10
+    env:
+      TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/continuous
+      RUSTFLAGS: -C llvm-args=-align-loops=64 -C llvm-args=-align-all-nofallthru-blocks=6
     # Only the short publication phase serializes image-branch writes.
     concurrency:
       group: benchmark-publication
@@ -47,6 +50,12 @@ jobs:
             await resolveSource({ github, context, core });
       - uses: dtolnay/rust-toolchain@stable
         if: steps.source.outputs.eligible == 'true'
+      # workflow_run restores only trusted default-branch caches, never PR artifacts.
+      - uses: Swatinem/rust-cache@v2
+        if: steps.source.outputs.eligible == 'true'
+        with:
+          workspaces: ". -> target/continuous"
+          shared-key: continuous-default
       - name: Resolve trusted case inventory without measurements
         if: steps.source.outputs.eligible == 'true'
         run: pnpm tools continuous inventory --out "$RUNNER_TEMP/inventory"
@@ -58,6 +67,25 @@ jobs:
           path: ${{ runner.temp }}/paired
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
+      - name: Publish paired checks and PR report
+        if: always() && steps.source.outputs.eligible == 'true'
+        uses: actions/github-script@v9
+        env:
+          HASH: ${{ steps.source.outputs.hash }}
+          BASE_HASH: ${{ steps.source.outputs.base_hash }}
+          PR_NUMBER: ${{ steps.source.outputs.number }}
+          BASE: ${{ steps.source.outputs.base }}
+        with:
+          script: |
+            const { publishReport } = require('./bench/continuous/index.ts');
+            const path = require('node:path');
+            await publishReport({ github, context, core, inputs: {
+              hash: process.env.HASH, baseHash: process.env.BASE_HASH,
+              number: process.env.PR_NUMBER, baseRef: process.env.BASE || 'main',
+              artifacts: path.join(process.env.RUNNER_TEMP, 'paired'),
+              inventory: path.join(process.env.RUNNER_TEMP, 'inventory/cases.json'),
+              reports: path.join(process.env.RUNNER_TEMP, 'submission'),
+            } });
       - uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d # v0.6.16
         if: steps.source.outputs.eligible == 'true'
         with:
@@ -79,25 +107,6 @@ jobs:
             --hash "$HASH" --base-hash "$BASE_HASH" \
             --inventory "$RUNNER_TEMP/inventory/cases.json" \
             --artifacts "$RUNNER_TEMP/paired" --out "$RUNNER_TEMP/submission" "${args[@]}"
-      - name: Publish paired checks and PR report
-        if: always() && steps.source.outputs.eligible == 'true'
-        uses: actions/github-script@v9
-        env:
-          HASH: ${{ steps.source.outputs.hash }}
-          BASE_HASH: ${{ steps.source.outputs.base_hash }}
-          PR_NUMBER: ${{ steps.source.outputs.number }}
-          BASE: ${{ steps.source.outputs.base }}
-        with:
-          script: |
-            const { publishReport } = require('./bench/continuous/index.ts');
-            const path = require('node:path');
-            await publishReport({ github, context, core, inputs: {
-              hash: process.env.HASH, baseHash: process.env.BASE_HASH,
-              number: process.env.PR_NUMBER, baseRef: process.env.BASE || 'main',
-              artifacts: path.join(process.env.RUNNER_TEMP, 'paired'),
-              inventory: path.join(process.env.RUNNER_TEMP, 'inventory/cases.json'),
-              reports: path.join(process.env.RUNNER_TEMP, 'submission'),
-            } });
       - uses: actions/upload-artifact@v7
         if: always() && steps.source.outputs.eligible == 'true'
         with:

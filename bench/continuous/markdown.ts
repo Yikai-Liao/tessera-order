@@ -72,7 +72,7 @@ export function headline(s: ReportSummary, unavailable = false) {
   if (s.missing) parts.push(`${s.missing} new`);
   // Without a single compared case there is nothing to call unchanged.
   if (!s.regressions && !s.improvements)
-    parts.push(s.compared ? "no significant change" : "no baseline");
+    parts.push(s.compared ? "no regression alert" : "no baseline");
   return parts.join(", ");
 }
 
@@ -207,7 +207,7 @@ const STATUS = { regression: "slower", improvement: "faster", missing: "new", wi
 
 function fullTable(rows: Row[], relative = false) {
   const lines = [
-    `| Input | Type | N | Mode | Baseline | ${relative ? "A/A range" : "Limits"} | Current | Change | Alert | ID |`,
+    `| Input | Type | N | Mode | Baseline | ${relative ? "Median interval" : "Limits"} | Current | Change | Alert | ID |`,
     "|---|---|---:|---|---:|---:|---:|---:|---|---|",
   ];
   for (const r of rows) {

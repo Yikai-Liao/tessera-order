@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { CommandCancelledError, command, diagnostic } from "../../tools/process.ts";
 import { VARIANTS } from "../catalog.ts";
-import { type PairedSource, pairedBmf, readPaired } from "./paired.ts";
+import { type PairedSource, pairedBmf, readPaired, validateCloud } from "./paired.ts";
 
 export interface SubmissionOptions extends PairedSource {
   artifacts: string;
@@ -57,6 +57,7 @@ export async function submitContinuous(options: SubmissionOptions) {
         { capture: true },
       );
       await writeFile(join(options.out, `bencher-${variant.id}.json`), `${report}\n`);
+      validateCloud(JSON.parse(report), runs, variant, options.pr);
       outcomes[variant.id] = "success";
     } catch (error) {
       if (error instanceof CommandCancelledError) throw error;

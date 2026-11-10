@@ -6,7 +6,7 @@ Language files select their language. Shared contracts and unknown paths select 
 
 ## Lanes
 
-Use a bounded number of lanes: the account has 20 concurrent slots, shared with benchmark, DCO and title checks. Full language/platform/compiler Cartesian products would exhaust that budget. Rust’s platform matrix runs at most two cells, Miri one; extra main platform cells follow the first matrix, while comparison/Miri/sanitizer jobs follow lint without requiring lint success. This bounds one Rust workflow to six simultaneous jobs and leaves room for eight benchmark shards plus repository checks. There is no benchmark-to-test dependency or account-wide priority/preemption guarantee; multiple PRs and other repositories can still consume the account. See [continuous capacity](continuous-benchmarks.md#capacity-and-recovery).
+Use a bounded number of lanes: the account has 20 concurrent slots shared with benchmarks and repository checks. Continuous measurement uses four jobs; ordinary Rust CI keeps its independent platform, comparison, Miri and sanitizer lanes. There is no benchmark-to-test dependency or account-wide priority/preemption guarantee; multiple PRs and other repositories can still consume the account. See [continuous capacity](continuous-benchmarks.md#capacity-and-recovery).
 
 | Check | Pull request | `main` |
 |---|---|---|
@@ -15,7 +15,7 @@ Use a bounded number of lanes: the account has 20 concurrent slots, shared with 
 | Miri: std, no-std, Portable SIMD | three jobs | the same |
 | AddressSanitizer | `asan` | the same |
 | `cargo package` and the no-std target | in `rust / lint` | the same |
-| Paired continuous measurement | eight hosted jobs: two configurations × four complete-case shards | the same, against the first parent |
+| Paired continuous measurement | four hosted jobs: two configurations × two complete-case shards | the same, against the first parent |
 | Native comparison smoke checks and report generation | `comparison`, using Clang | the same |
 
 The Rust lint job checks all workspace features with Clippy and rustdoc, including the benchmark's native-facing Rust code. These commands do not link executables, so they set `TESSERA_BENCH_CHECK_ONLY=1` to skip the benchmark build script's native compilation and linker inputs. The lint runner needs neither fetched native sources nor native build tools. The comparison job leaves the variable unset and compiles, links and exercises the native competitors, including the sequential-linkage check. Cargo tracks changes to the variable so a check-only build cannot suppress a later executable build's native setup.

@@ -127,9 +127,10 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
     status.workflows.map((w: { id: number }) => w.id),
     [11, 70],
   );
-  assert.equal(status.benchmarks[0].state, "failure");
-  assert.equal(status.benchmarks[0].title, "Measurement failed");
-  assert.equal(status.benchmarks[1].state, "missing");
+  assert.deepEqual(
+    status.benchmarks.map((b: { state: string; title: string | null }) => [b.state, b.title]),
+    [["failure", "Measurement failed"]],
+  );
   assert.equal(status.report, null);
   assert.equal(status.details, undefined);
   assert.ok(JSON.stringify(status).length < 2000);

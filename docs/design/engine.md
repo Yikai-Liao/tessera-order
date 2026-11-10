@@ -1,130 +1,247 @@
 # Design
 
-This document describes the engine in `rust/tessera-sort`. It describes current routing and invariants; the [measurement record](port.md) covers the initial port and subsequent measured changes.
+Tessera sorts by key bits. Each pass removes bits from the keys, so the recursion is a
+multi-digit radix sort whose remaining work shrinks with every split. This page
+describes the stages of one recursion and the reasons behind its thresholds;
+the [semantics](../conformance/semantics.md) page owns the contracts.
 
 ## Vocabulary
 
 | Term | Meaning |
 |---|---|
-| Key | The unsigned integer a record sorts by. Signed integers, floats and `Reverse` keys are encoded into unsigned keys whose integer order matches the requested order. |
-| Digit | A window of key bits handled by one pass, described by a shift and a width. |
-| Node | A slice larger than the tile budget. Nodes are split by a stable block partition. |
-| Tile | A slice that fits the tile budget, 64 KiB of records by default and at most 65,535 records. Tiles are finished in scratch memory. |
-| Cursor table | One `u16` position per bucket. At 14 bits it occupies 32 KiB. |
+| **record** | one element of the caller's slice, moved but never cloned or dropped |
+| **key** | the encoded unsigned integer of a record, read through an *extractor* |
+| **digit** | the window of key bits that one pass partitions by |
+| **node** | a slice larger than the tile budget; it splits through the block engine |
+| **tile** | a slice that fits the tile budget; it splits through counting scratch |
+| **plan** | the one split a slice needs next: rotate, pivot or digit |
+| **scratch** | the buffers one call owns and releases before returning |
+
+Names describe values and units: `records`, `keys`, `extractor`, `_bytes`,
+`_bits`, `_len`. Every stage works on the caller's slice; no stage copies the
+slice into a second buffer of its size.
 
 ## Pipeline
 
-### 1. Order probe
+One recursion sorts every slice. It learns the slice's order and its varying key
+bits in one pass, chooses one split, executes that split with the
+implementation the slice's size allows, and recurses into the buckets.
 
-The engine chooses a stride of `max(1, floor(n / 4,096))`. At unit stride it classifies order in one adjacent-key scan: first reject a mixed direction among up to three keys, the shortest possible witness, then find the direction past any leading ties and check it while retaining the previous encoded key. It returns unsorted at the first conflict without a separate ascending scan; a constant slice returns as ascending. At larger strides it samples adjacent pairs to classify the input as ascending, descending, flat (every sampled pair equal) or unsorted. The 4,096-pair target determines the stride, not a hard sample limit. Unless unsortedness is found early, the loop visits `floor((n - 1) / stride)` pairs. An ascending or descending sample is confirmed by a full scan, which takes its direction from the first unequal key. A confirmed ascending input returns immediately. A confirmed descending input is reversed stably. Strictly descending keys need only the whole-slice reversal; otherwise each run of equal keys is reversed back. A flat sample is confirmed after the varying-bit scan below, since a constant input stops there.
+### 1. Preparation
 
-An unsorted input that fits a tile and has at most 48 records goes directly to insertion finishing, using the existing leaf threshold without a budget or varying-bit scan. Confirmed ordered inputs still finish in the order probe. A larger unsorted input gets a budgeted stable insertion pass. When the probe window, one tile of records, is shorter than the input, the pass first runs on a buffered copy of the window's keys to estimate the number of swaps, and only then touches the records with a budget scaled to the whole input. The scaling uses a wide intermediate product so that a valid budget cannot overflow on 32-bit targets. Each call owns this encoded-key buffer and releases it before the radix path continues. If the budget runs out, the input is left as a stable permutation of itself and the radix path continues. See [Insertion and scans](#insertion-and-scans) for how the pass finds inversions.
+`engine::prepare` finishes a slice before any split is chosen.
 
-### 2. Varying bits
+- **Order probe.** The extractor scans adjacent pairs. A slice whose keys never
+  descend is sorted, and returns without a second scan, a key evaluation more
+  than the probe needs, or an allocation.
+- **Inspection.** `scan::inspect` reads keys in vector blocks and accumulates, per
+  record, the union and intersection of its adjacent scans. Their exclusive or
+  is the set of key bits that vary within one scan: the *varying bits* inside the
+  candidate mask a parent handed down. A key function that changes its answer
+  can hide every difference outside the candidate; the slice is then constant
+  by construction and makes no progress, so it ends there.
+- **Descending slices.** Keys that strictly decrease are one reversal away from
+  sorted. Keys that never increase but tie are reversed stably: the slice is
+  reversed, then each equal run is reversed back.
 
-One scan computes the bitwise union and intersection of all keys. Bits that are equal in every key cannot change the order and are excluded from every later digit. A constant input returns at this point. Wide keys whose variation fits in one 64-bit half are sorted by that half as a 64-bit key. The borrowed `KeyHalf` in `key.rs` and cloneable `Narrow` in `engine/parallel.rs` share one implementation of truncation and counting-window translation; each representation stays in its owning module. Other operations retain the narrowed extractor's defaults instead of forwarding the original-width backend. Tile and block scratch are created only after these root fast paths; budgeted insertion may already have allocated probe keys. Confirmed ordered and constant inputs do not allocate.
+### 2. Insertion probe
 
-### 3. Node partitioning
+For a root larger than the insertion leaf, `insertion::probe` insertion-sorts a
+window of one tile within a budget of one swap per window record, then scales
+the swaps that window needed to the whole slice. Inputs within their moves of
+sorted finish here; anything else pays at most the window plus the budget that
+window implies before the radix route takes over. A window that needs no swaps
+says nothing about the records behind it, so the slice is left to the recursion.
 
-Partition children entering `sort_child` first scan their remaining candidate bits, as every child did before, and a constant child ends there. The varying ones then reuse the root's full order confirmation, without its preceding sample: ascending children end, and descending children take the same strict or stable reversal as the root. This includes children reached after digit and equality partitions. The root enters `sort_node` directly because its order has already been probed; it does not repeat the gate. Only unordered children continue to the existing tile and radix routes. Both scans stop at their first conflict, so a child that continues pays them in key reads, and neither scan allocates or moves records unless descending order has been confirmed. Tile-sized buckets finished during block compaction still go directly to the tile leaf.
+### 3. Split choice
 
-A node whose remaining variation spans at most eight bits is one window away from sorted. When the records are their own keys (`Direct`), it is finished by counting that window: one `usize` count and one remembered record per bucket, then each run is filled from its record. Every sealed encoding is a bijection on bit patterns, so equal keys mean equal records and a filled run is the same permutation the block partition would produce, without block tables or record moves. A user key function keeps payloads that its key does not identify, so `ByKey` declines and takes the partition. The eight-bit cap bounds the stack table to 256 counts and records. The window must cover every remaining key difference or filling would merge distinct records.
+`cost` is the only module that decides. It prices the routes a slice can take,
+and the engine executes the cheapest one, so a policy change is a change to the
+model and never a branch that names a distribution.
 
-A node that reaches its digit partition may already sit in the two runs its top varying bit separates, and then it needs no pass at all. One scan reads that bit and reports whether the node is `0*1*` or `1*0*` in it; the second form is one rotation away from the first, and both runs keep their own order. Splitting there hands the bits below the split to the recursion, so the node avoids the block partition, its tables and its scratch. The check belongs to the digit route: a node that the narrow window finished, or that an equality partition split because its sample repeated, never reaches it. The scan stops at the first record that breaks the pattern, which unordered records reach within a few keys. Inputs that keep a separated block of keys above or below the body, in any number of pieces, therefore need neither a detector nor a length cap.
+A plan is priced in estimated cycles per record from five measured terms: a key
+read (a load for a sealed key, several times that for a key function), a record
+move, a bucket slot, a prepared child and an insertion step. The routes are:
 
-Otherwise the node is split by one of two stable partitions. Equality sampling is tried only on nodes of at least four tiles, which amortize their 64-key sample:
+- **Rotate.** A slice that already reads `0*1*` or `1*0*` in its top varying bit
+  is two runs. One rotation puts the clear run in front, and both children are
+  ordered or nearly ordered slices that the order probe or the insertion probe
+  finishes, so the split costs one rotation and two scans with no scratch.
+- **Pivot.** A node samples 64 keys in runs of 8 and names the most repeated
+  value if it covers at least a quarter of the sample. The model prices the
+  band that value finishes against the rest of the slice; an equality partition
+  separates it, so heavily repeated keys stop costing one pass per bit. If
+  changing keys leave the whole node in one band, the digit route consumes
+  candidate bits instead of repeating an unchanged split.
+- **Split.** One counted pass by a window of key bits, then the recursion. The
+  model prices every width from one bit to the widest the caller allows and
+  takes the lowest: a wide window leaves children the leaf finishes, a narrow
+  one pays fewer table slots. Windows always start at the top varying bit, so
+  each pass removes the highest remaining difference. A node is bounded by 8
+  bits, where one write cursor, one count and one output block per bucket still
+  fit in L1.
+- **Flat.** A tile can also finish with one counting pass per window of varying
+  bits, least significant first, and no recursion. The model prices those
+  passes against a split: a spread tile splits once into leaves, while a
+  concentrated tile that would need a multi-level descent finishes flat.
 
-- **Repeated key.** The node samples 64 keys in runs of 8. If one value covers at least a quarter of the sample, an equality partition separates it from the rest, so heavily repeated keys stop costing passes. If changing keys leave the entire node below or above that sampled value, a digit partition consumes candidate bits instead of repeating an unchanged node.
-- **Top digit.** Otherwise [`choose_split_digit`](../../rust/tessera-sort/src/engine.rs) targets children of half a tile. It starts with enough bits for `n / target` children, clamped to 3–8 bits and the available key bits. A sample of 128 keys checks whether at least a quarter of the digit's buckets are occupied; a concentrated digit widens by two bits at a time, up to 12 or the available key bits.
+Two facts the model needs about the keys are measured, not assumed. A sample of
+evenly spaced keys names the buckets a window occupies. A sample that repeats
+buckets far more than a uniform spread would (about `buckets * (1 - (1 -
+1/buckets)^sampled)` occupied slots) is concentrated, and the buckets it names are
+the ones the slice occupies; otherwise the slice spreads over as many buckets
+as it has records. The same sample answers every candidate width, so pricing
+fourteen widths costs one pass over 128 keys.
 
-The digit partition uses the block LSD scheme of Clausecker and Schintke. Buckets are filled block by block, consumed input blocks are reused as output blocks, and permutation metadata records their logical order. Stability holds without a full-size output buffer, and the extra space is O(√n) for a fixed digit width and record size. The block size in records is
+Pricing a plan together with its consequences is what keeps the routes honest: a
+split pays for the children it prepares and the leaf it leaves behind, and a
+flat plan pays for its table. A recursion node also pays for planning itself,
+which is a fixed cost: a tile of a few hundred records spends more on its sample
+and prices than on its pass, so the model keeps slices large enough to amortise
+it. The model deliberately ignores branch prediction; when two plans price
+equal, it prefers the one that moves each record fewer times. [The port
+design](port.md) records the measurements behind the weights, and
+[semantics](../../conformance/semantics.md) owns the guarantees the routes keep.
+
+### 4. Split execution
+
+`engine::Sorter` executes the chosen split and recurses. The two partition
+implementations leave the records in the caller's slice and report each
+bucket's end, so the recursion is the same for either:
+
+- a node uses the block partition below, whose scratch is O(sqrt(n));
+- a tile uses a counting pass in one tile-sized buffer plus two bytes of cached
+  bucket id per record.
+
+Each bucket is then a contiguous slice, and the recursion repeats from
+preparation with the candidate bits reduced by the digit. A partition whose
+buckets are all at or below 48 records needs no recursion: their keys are
+ordered by bucket, so one insertion pass over the slice moves exactly what the
+separate bucket passes would move and skips the dispatch between them.
+
+### 5. Leaves
+
+A slice at or below 48 records is finished by insertion sort, which is the
+cheapest stable sort at that size. A window that covers every remaining key bit
+difference is finished even earlier: when a slice's variation spans at most
+eight bits, direct keys fill each run from one representative of that run, in
+place, without scratch and without moving a record twice.
+
+## Block partition
+
+The digit partition uses the block LSD scheme of Clausecker and Schintke.
+Buckets are filled block by block, consumed input blocks are reused as output
+blocks, and permutation metadata records their logical order. Stability holds
+without a full-size output buffer, and the extra space is O(sqrt(n)) for a fixed
+digit width and record size. The block size in records is
 
 ```
 max(1, 4 * ceil(sqrt(10n / (2 R s))), floor(1024 / s), 32)
 ```
 
-where `n` is the input length, `s` the record size and `R` the number of buckets. The no-std build computes the equivalent size with integer `isqrt` and ceiling correction; tests check square boundaries and agreement with the measured std formula.
+where `n` is the input length, `s` the record size and `R` the number of
+buckets.
 
-The root is the paper's trade-off evaluated for this implementation. A block size `b` costs `2 R b s` bytes of scratch — one output block per bucket, plus as many in reserve, because an input block may only be recycled once every record in it has been read — and `10 n / b` bytes of tables, because a block position owns two `u32` block-order entries and one `u16` bucket id. The two terms are equal at that root, so it is the minimum of the sum: substituting `b = c b*` multiplies the total by `(c + 1/c) / 2`, which grows in both directions. The engine takes four times that root: the minimum is where memory is smallest, not where the sort is fastest, and a larger block amortises the random read that compaction pays per block.
+The root is the paper's trade-off evaluated for this implementation. A block
+size `b` costs `2 R b s` bytes of scratch — one output block per bucket, plus
+as many in reserve, because an input block may only be recycled once every
+record in it has been read — and `10 n / b` bytes of tables, because a block
+position owns two `u32` block-order entries and one `u16` bucket id. The two
+terms are equal at that root, so it is the minimum of the sum: substituting
+`b = c b*` multiplies the total by `(c + 1/c) / 2`, which grows in both
+directions. The engine takes four times that root: the minimum is where memory
+is smallest, not where the sort is fastest, and a larger block amortises the
+random read that compaction pays per block.
 
-The lower bounds are not from the paper. The compaction pass moves a block with one copy, so a block holds at least a kilobyte of records; and the bookkeeping of a block does not shrink with the record, so a block holds at least 32 records whatever their width. Their cost does not depend on `n`, so the O(√n) bound holds for a fixed record size and digit width.
+The lower bounds are not from the paper. The compaction pass moves a block with
+one copy, so a block holds at least a kilobyte of records; and the bookkeeping
+of a block does not shrink with the record, so a block holds at least 32 records
+whatever their width. Their cost does not depend on `n`, so the O(sqrt(n)) bound
+holds for a fixed record size and digit width.
 
-Buckets that fit a tile are finished as tiles during compaction. Larger buckets become nodes and are partitioned again.
+One pass of this scheme is also the equality partition: the classifier compares
+the key with the sampled pivot instead of extracting a digit.
 
-### 4. Tile finishing
+## Tile counting
 
-A tile is finished by one of three leaves:
+A tile pass moves its records through one scratch buffer of at most 64 KiB of
+records and leaves them back in place. The histogram stores a two-byte bucket id
+per record for every record type, so the scatter runs without a key call:
 
-- **Insertion sort** for tiles and buckets of at most 48 records.
-- **Tile-local MSD partition**, recursing into buckets with a cursor table on the stack.
-- **LSD counting passes** over a scratch buffer, with digit widths between 6 and 14 bits.
+- a user key function runs once per record per pass, which keeps `String`, `Box<T>`
+  and `&mut T` records safe and every record type on one path;
+- the block scatter for direct keys is already the first read, so the cache costs
+  no code there, only bandwidth.
 
-The leaf and the digit widths are chosen by a cost model that counts passes and charges for bucket tables. For plans longer than two passes, a sample of at most two distinct top-digit buckets selects MSD directly; otherwise an MSD level is charged as one counting pass plus one pass for the insertion finish that ends the descent. Child variation scans return only bits in the remaining candidate mask, so even an inconsistent key function cannot restore a processed digit and prevent recursion from making progress.
+The pass writes to scratch only after the histogram finished, and never reads
+scratch as records, so a key panic leaves the slice untouched without a
+duplicated record pass.
 
 ## Parallel root completion
 
-With the optional `rayon` feature, inputs below 1 MiB and one-thread pools use the serial engine. Larger roots retain the order probes and digit planner, then scatter disjoint shards in the current pool. The shard count is at most the pool width and approximately one per 256 KiB of input. Directory adoption concatenates each bucket's prefixes in original shard order and retains shard scratch as separate allocations.
+A large root runs the serial preparation and one split, then distributes that
+split:
 
-The materialized route permutes full blocks in parallel and compacts them. A bucket is passed to a scoped sorting job only after compaction retires its range as both destination and copy source. Adjacent buckets remain distinct borrows even if their addresses touch. Jobs group at least 256 KiB of records when possible and reuse serial scratch.
+- the block scatter of a classifier spreads over disjoint shards, each with its
+  own block directory and extractor clone; adoption concatenates every bucket's
+  prefixes in bucket-major, original-shard order, which is what keeps equal keys
+  stable across shards;
+- a window that covers every remaining bit counts in parallel shards and then
+  fills the disjoint runs in bucket order, needing only `Send` records;
+- the buckets of the split are sorted on the caller's Rayon pool, each job with
+  its own tile scratch and extractor clone.
 
-### Bounded staging
-
-For at least 2²¹ records of at most 16 bytes, offer bounded finishing with limit `L = 16 * floor(sqrt(n))`. Disable it if `L * R < n`, and decline after scatter if any actual bucket exceeds L. Eligible layouts use four times the balanced root block size `ceil(sqrt(20n / (2PRs)))`, with the existing 1,024-byte and 32-record floors. The factor 20 accounts for local and adopted directories coexisting. The multiplier amortizes per-source ownership work; the [measurements](port.md#eight-core-parallel-completion) cover the whole call, not an isolated causal attribution of this parameter.
-
-A bounded bucket gathers all its prefixes into private `MaybeUninit<T>` staging in stable directory order. Each prefix is protected by its physical-owner mutex until the copy transfers ownership. Its source block is then free, and the staging slice becomes the unique live owner. The shared serial sorter finishes that slice, using a tile budget as large as the bucket but at most 65,535 records.
-
-Before writing a final band, a worker protects every full input block it touches. A block holds either a logical source, no source, or finalized fragments. An unread source moves to a free block under both physical-owner locks, acquired in increasing ID order; its atomic logical location is published before the locks release. Gather validates the owner after loading that location and retries if relocation won the race. A finalized block holds no unread source, so adjacent final bands can write disjoint fragments without overlapping record access. The input tail has no partition source.
-
-Every bucket's free cache is registered before jobs begin and survives until all jobs and recovery finish. Writers try their own cache, the reserve and peer caches; peer locks use nonblocking acquisition. They wait without physical-owner locks, and no cache or owner lock spans user code. If there are P shards and R buckets, adoption starts with at least PR free blocks. A bucket gathering k source prefixes frees k blocks and touches at most k + 1 destination blocks, so at least PR − R genuinely free blocks remain. Production bounded finishing has at least two shards, leaving at least R. A waiting bucket has no local candidate; at most R − 1 other buckets can each hold one unpublished or checked-out candidate. Usable blocks therefore remain discoverable or held only by callback-free work that can publish progress.
-
-A key panic is caught per staged bucket after the serial sorter restores its record set. That bucket still writes its band, and other buckets may continue sorting. All jobs join before a caught key panic is resumed. If the outer execution itself unwinds, recovery completes unfinished bands without further key calls before resuming that panic. Completed bands are not written twice. Stale staging and source bytes are never treated as live records.
-
-Staging is released after each completed band. Ordinary scheduling retains only active buffers, but reentrant key callbacks can suspend up to R staged buckets. Root scratch uses O(√(nP)) space and staging adds O(R√n); R is fixed by the twelve-bit root cap. Together with bounded histogram storage, the conservative public bound is O(P√n), not a promise of P simultaneous buffers.
-
-### Narrow direct keys
-
-When all remaining variation spans at most eight bits, direct keys use parallel local histograms. Each worker reads a disjoint mutable shard, retaining counts and one representative per bucket; the parent combines counts and sends disjoint runs and their copied representatives to filling tasks. Only `Send` is required. Equal sealed encodings mean identical record bits, so run filling preserves the exact multiset, including NaN payloads. User-key records decline this shortcut because equal keys do not identify their payloads. Narrowed 128-bit extractors delegate with the original bit offset. Histograms use O(PR) space; no n-record cache is built.
+Every bucket is a contiguous slice of the input once compaction finishes, so the
+serial recursion sorts it unchanged. A slice that already holds its two runs is
+finished by the rotate plan without a pass, so it is not distributed. Small
+roots and one-thread pools use the serial engine.
 
 ## Insertion and scans
 
-Every insertion pass, whether a budgeted probe or the finish of a tile or bucket, runs one loop, `insertion_loop`: it scans for the first adjacent pair whose keys descend, moves the later record left, and resumes the scan after it. A probe returns its swap count and may stop at its budget. A finishing pass, `finish_insertion`, has no budget and returns `()`, so the unused count is discarded inside the inlined loop rather than returned across a target-feature boundary.
+Every insertion pass runs one loop, `insertion::run`: it scans for the first
+adjacent pair whose keys descend, moves the later record left, and resumes the
+scan after it. The loop is inlined so a vector kernel selected for the pass also
+inlines its scan; expanding the inversion first and then shifting keeps the
+adjacency knowledge, so the pair it compared is swapped without re-reading keys.
 
-The scan depends on the extractor and the build:
+| Key source | Adjacency scan |
+|---|---|
+| Key function (`stable_sort_by_key`) | One record at a time, keeping the previous key, so the key function runs once per scanned record |
+| Direct keys, short slices | One record at a time below the vector length |
+| Direct keys, otherwise | Vector scan, with the instruction set selected once per pass |
 
-| Pass | Default build | `portable-simd` |
-|---|---|---|
-| Key function (`stable_sort_by_key`) | One record at a time, keeping the previous key, so the key function runs once per scanned record | Same |
-| Direct keys, budgeted probe | Blocked scan of 32 pairs per mask update (`scan::first_inversion`); `f64` uses the scalar scan | Vector scan, with the instruction set selected once per pass |
-| Direct keys, insertion finish | Scalar scan: the short ordered runs a radix partition leaves do not amortize a block mask ([measurements](port.md#scalar-insertion-finishing)) | Vector scan, with the instruction set selected once per pass |
-| Direct keys, ascending confirmation | The same scan as a budgeted probe, after checking the encoded predecessor | The vector scan, dispatched once |
-
-With `portable-simd`, slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time, and `Reverse<K>` keys keep the default-build scans. The insertion loop is inlined into the dispatched function, so its scan runs with the selected target features.
-
-Dispatch stays inside one insertion pass: per-scan dispatch repeats overhead on short runs, and moving a SIMD token outside its target-feature context loses the intended code generation. SIMD is optional and requires `std` (MSRV in the feature dependency); the default build keeps its lower MSRV and no-std support. User-key tiles retain scalar callbacks rather than materializing a second key array. The [exploratory SIMD measurements](port.md#exploratory-simd-constraints) preserve the evidence for these constraints but were not the full paired protocol and establish no formal speedup claim.
+`fearless_simd` selects a supported instruction set at run time on x86; other
+targets use their compile-time baseline. Same-width adjacent comparisons are
+the only vector kernel the engine needs, so one scan serves the order probe, the
+variation scan and insertion adjacency. Dispatch stays inside one insertion
+pass: per-scan dispatch repeats overhead on short runs, and moving a SIMD token
+outside its target-feature context loses the intended code generation.
 
 ## Record handling
 
-Records are moved by bitwise copies between the input and `MaybeUninit<T>` scratch. Every record has exactly one live owner at any time; other physical copies are stale bytes that are never dropped, borrowed or returned.
-
-Each counting pass reads the keys twice: once for the histogram and once to scatter the records. How the second read happens depends on who computes the key.
-
-- **User key functions** (`stable_sort_by_key`). The histogram stores a two-byte bucket number per record, and scatter reads it instead of calling the key function again. Bucket ranges are disjoint, so each output slot is written exactly once whatever the key function returns. This keeps `String`, `Box<T>` and `&mut T` records safe and every record type on one path.
-- **Library-encoded keys** (`stable_sort`). The keys are the records and are encoded by Tessera, so they are deterministic. Scatter recomputes them and stores nothing.
-
-The research prototype skipped the stored bucket numbers for `Copy` records. It filled scratch with valid records on the first pass, so a misbehaving key function could duplicate or drop records but never expose uninitialized memory. The cost of storing bucket numbers for every record type is measured in the [port record](port.md#performance).
+Records are moved by bitwise copies between the input and `MaybeUninit<T>`
+scratch. Every record has exactly one live owner at any time; other physical
+copies are stale bytes that are never dropped, borrowed or returned. Key
+extraction borrows only live records, and no user code runs while scratch holds
+a second copy of the records.
 
 ## Panic safety
 
 Key functions are user code and may panic. On a panic:
 
-- the block partition rebuilds each block's offsets from the bucket fill counts and the number of complete input blocks, then moves every live record back into the input slice;
-- a tile keeps a pointer to the complete record set from the last finished pass and copies it back if needed;
+- the block partition rebuilds each block's offsets from the bucket fill counts
+  and the number of complete input blocks, then moves every live record back
+  into the input slice;
+- a tile pass writes scratch only after its histogram finished, so the slice was
+  never modified;
 - the panic is then resumed.
 
-The slice holds every record afterwards, in an unspecified order. No record is dropped twice or leaked.
-
-Without the `std` feature, a panic cannot be caught. A key-function panic during block partitioning, where the input slice does not own every record, aborts through an unwind guard; panics elsewhere unwind with every record in place. A no-std library may run in an unwinding host; a documented abort requirement alone would not protect the safe API. The guard aborts before restoration can use an incomplete ownership directory.
+The slice holds every record afterwards, in an unspecified order. No record is
+dropped twice or leaked.
 
 ## Stack usage
 
-Each tile-local MSD level keeps a cursor table of up to 32 KiB on the stack. The depth is bounded by ⌈key bits / 6⌉, at most 22 levels for 128-bit keys. Actual frame sizes depend on the compiler.
+Each tile-local split keeps a cursor table of under 3 KiB on the stack: one
+`u16` cursor per bucket the tile digit can address, which is a full tile
+divided by the insertion leaf. The depth is bounded by the digit widths, so a
+128-bit key keeps a bounded frame. Actual frame sizes depend on the compiler.

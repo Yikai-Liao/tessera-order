@@ -137,7 +137,7 @@ export function baselineArguments(
 }
 
 /**
- * Measure both configurations, retaining each report and outcome even on failure.
+ * Measure every catalog configuration, retaining each report and outcome even on failure.
  *
  * The image must be an immutable digest. Credentials come from BENCHER_API_KEY;
  * only this explicit remote command submits jobs. Its result records per-build

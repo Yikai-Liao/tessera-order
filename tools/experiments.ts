@@ -20,7 +20,6 @@ interface MeasurementOptions extends SelectionOptions {
   plan?: string;
   out?: string;
   cpu?: string;
-  simd?: boolean;
 }
 
 function parseLogicalCpu(value: string) {
@@ -125,8 +124,7 @@ export function experimentCommands(program: Command) {
     addSelectionOptions(compare.command(name))
       .description(description)
       .option("--out <directory>", "new result directory (default: bench/results/<timestamp>)")
-      .option("--cpu <list>", "pin measurement to a CPU list or range (Linux)", parseLogicalCpu)
-      .option("--simd", "include Portable SIMD");
+      .option("--cpu <list>", "pin measurement to a CPU list or range (Linux)", parseLogicalCpu);
 
   measurement("commit [revision]", "Compare the working tree with a commit (default: HEAD)")
     .option("--filter <regex>", "additional case ID pattern", parseCasePattern)
@@ -170,7 +168,6 @@ export function experimentCommands(program: Command) {
             plan,
             out,
             cpu: options.cpu,
-            simd: Boolean(options.simd),
             filter: options.filter,
             layoutSeeds: options.layoutSeeds,
             layoutControl: options.layoutControl,
@@ -198,7 +195,6 @@ export function experimentCommands(program: Command) {
         baseline: string | undefined,
         options: MeasurementOptions & { sorts: number; valgrindImage?: string },
       ) => {
-        if (options.simd) throw new Error("Valgrind comparisons use the default ISA build");
         const plan = await loadPlan(options.plan ?? "local", selectAxes(options));
         if (plan.harness !== "smoke") throw new Error("Counters require a smoke harness plan");
         const root = await repositoryRoot();
@@ -247,7 +243,6 @@ export function experimentCommands(program: Command) {
             root,
             out,
             cpu: options.cpu,
-            simd: Boolean(options.simd),
             plan,
             group: options.group,
             sampleMs: options.sampleMs,

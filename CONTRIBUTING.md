@@ -27,7 +27,7 @@ Run the applicable [local checks](AGENTS.md#commands), including workspace tests
 
 ```sh
 cargo test -p tessera-sort --no-default-features
-cargo test -p tessera-sort --features portable-simd
+cargo test -p tessera-sort --no-default-features
 rustup +nightly component add miri
 cargo +nightly miri test -p tessera-sort
 cargo +nightly miri test -p tessera-sort --no-default-features

@@ -87,15 +87,14 @@ fn send_only_records_sort() {
 #[test]
 #[cfg(not(miri))]
 fn bounded_callback_can_reenter() {
-    // This crosses bounded finishing's production cutoff with Send-only
-    // records, a Sync-but-not-Send callback, and nested Rayon work from a
-    // private staged bucket rather than the original input or root tail.
+    // This crosses the production cutoff with Send-only records, a
+    // Sync-but-not-Send callback, and nested Rayon work from a worker thread
+    // while the pool is busy.
     let len = (1usize << 21) + 37;
     let mut rows: Vec<_> = (0..len as u32)
         .map(|id| (id.wrapping_mul(7919) % 8192, Cell::new(id)))
         .collect();
-    let begin = rows.as_ptr() as usize;
-    let end = begin + rows.len() * core::mem::size_of_val(&rows[0]);
+    let caller = std::thread::current().id();
     let entered = AtomicBool::new(false);
     let offset = Mutex::new(0u32);
     let pool = rayon::ThreadPoolBuilder::new()
@@ -106,8 +105,9 @@ fn bounded_callback_can_reenter() {
         let guard = offset.lock().unwrap();
         let entered = &entered;
         par_stable_sort_by_key(&mut rows, move |row| {
-            let address = core::ptr::from_ref(row) as usize;
-            if !(begin..end).contains(&address)
+            // Reenter only once, from a worker thread, and before the workers
+            // run out of records: nested work then queues behind the sort.
+            if std::thread::current().id() != caller
                 && row.1.get() < len as u32 - 1024
                 && !entered.swap(true, Ordering::Relaxed)
             {
@@ -150,7 +150,7 @@ fn large_sort_uses_workers_and_recovers_task_panics() {
     let workers = Mutex::new(HashSet::new());
     pool.install(|| {
         par_stable_sort_by_key(&mut rows, |row| {
-            if calls.fetch_add(1, Ordering::Relaxed) % 4096 == 0 {
+            if calls.fetch_add(1, Ordering::Relaxed).is_multiple_of(4096) {
                 workers
                     .lock()
                     .unwrap()

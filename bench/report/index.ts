@@ -62,18 +62,6 @@ export function collectWarnings(dataset: Dataset): string[] {
         );
     }
   }
-  for (const c of dataset.manifests.get("default")!.cases) {
-    const times = (build: string) =>
-      dataset.samples
-        .filter((s) => s.build === build && s.case_id === caseId(c) && s.variant === "std-stable")
-        .map((s) => s.elapsed_ns / s.batch);
-    const d = times("default"),
-      p = times("portable-simd");
-    if (p.length && d.length && Math.abs(median(p) / median(d) - 1) > 0.05)
-      warnings.push(
-        `${caseId(c)}: slice::sort anchor drift ${(100 * (median(p) / median(d) - 1)).toFixed(1)}% between builds`,
-      );
-  }
   return warnings;
 }
 function renderResults(dataset: Dataset, summaries: Map<string, Summary>): string {

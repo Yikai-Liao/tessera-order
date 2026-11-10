@@ -12,14 +12,14 @@ Tessera sorts slices by a primitive key: an integer up to 128 bits, an `f32` or 
 tessera-sort = "0.1"
 ```
 
-The crate has no required dependencies; the optional `portable-simd` feature adds `fearless_simd` (see the [Cargo feature documentation](../../rust/tessera-sort/src/lib.rs)). The `std` feature is on by default. Without it, the crate uses `core` and `alloc` and needs a global allocator:
+The crate needs `std` and Rust 1.89 or newer, and depends on `fearless_simd`, which selects a supported instruction set at run time (see the [Cargo feature documentation](../../rust/tessera-sort/src/lib.rs)). There is no feature that switches SIMD on or off; `rayon` is an optional feature that adds the parallel entry points.
 
 ```toml
 [dependencies]
 tessera-sort = { version = "0.1", default-features = false }
 ```
 
-Without `std`, a key-function panic during block partitioning aborts, even if the program unwinds on panic. Sorting, ordering and memory bounds are the same either way.
+Without the default features the crate is serial only; sorting, ordering and memory bounds are the same.
 
 ## Sort keys
 
@@ -86,7 +86,7 @@ assert!(values[4].is_nan());
 
 ## Parallel sorting
 
-Enable the optional `rayon` feature for `par_stable_sort` and `par_stable_sort_by_key`. It enables `std` even with default features disabled. Add a direct Rayon dependency if the application configures a custom pool:
+The optional `rayon` feature, on by default, adds `par_stable_sort` and `par_stable_sort_by_key`. Add a direct Rayon dependency if the application configures a custom pool:
 
 ```toml
 [dependencies]

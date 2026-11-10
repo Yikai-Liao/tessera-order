@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { planDigits } from "../sim/digits";
+import { planFlat } from "../sim/digits";
 
 // `varying_key_bits` in block.rs: a bit varies if it is set in the union of
 // all keys but not in their intersection.
@@ -26,7 +26,7 @@ const count = computed(
       .split("")
       .filter((c) => c === "1").length,
 );
-const passes = computed(() => planDigits(BigInt(varying.value), 8, BITS).length);
+const passes = computed(() => planFlat(BigInt(varying.value), 8, BITS).length);
 const bitsOf = (v: number) => v.toString(2).padStart(BITS, "0").split("");
 const isVarying = (i: number) => ((varying.value >> (BITS - 1 - i)) & 1) === 1;
 </script>

@@ -13,7 +13,7 @@ runs:
   using: composite
   steps:
     # Lints are enforced on stable only: older compilers report false positives,
-    # such as `unreachable_pub` on 1.85, so the MSRV only has to build and pass
+    # such as `unreachable_pub` on an older compiler, so the MSRV only has to build and pass
     # the tests.
     - name: Set RUSTFLAGS
       shell: bash
@@ -51,30 +51,9 @@ runs:
     # compiles on the stable Linux runner for every change that touches Rust.
     - shell: bash
       run: cargo test --workspace --lib --tests
-    # Benchmark dependencies would otherwise enable the crate's std feature.
+    # The serial engine must also build and pass without the optional Rayon
+    # entry points, which the workspace test above already covers with them.
     - shell: bash
       run: cargo test -p tessera-sort --lib --tests --no-default-features
     - shell: bash
       run: cargo test --workspace --doc
-    # Rayon keeps the crate's 1.85 MSRV. Exercise its public entry points on
-    # every platform, also when the implementation takes the serial fallback.
-    - shell: bash
-      run: cargo test -p tessera-sort --lib --tests --features rayon
-    - shell: bash
-      run: cargo test -p tessera-sort --doc --features rayon
-    # Portable SIMD needs Rust 1.89, so only stable compiles it. The backend is
-    # chosen by ISA, not by operating system, so on main the x86-64 and AArch64
-    # Linux runners already interpret what macOS and Windows would repeat; those
-    # platforms only have to compile the feature, which is the part a platform
-    # change can break. Select library features explicitly: workspace-wide
-    # --all-features also enables tessera-bench/compare-native, which requires
-    # the fetched sources and Linux x86-64 toolchain of the comparison job.
-    - shell: bash
-      if: inputs.toolchain == 'stable' && runner.os == 'Linux'
-      run: cargo test --workspace --lib --tests --features tessera-sort/portable-simd,tessera-sort/rayon
-    - shell: bash
-      if: inputs.toolchain == 'stable' && runner.os == 'Linux'
-      run: cargo test --workspace --doc --features tessera-sort/portable-simd,tessera-sort/rayon
-    - shell: bash
-      if: inputs.toolchain == 'stable' && runner.os != 'Linux'
-      run: cargo build --workspace --lib --features tessera-sort/portable-simd,tessera-sort/rayon

@@ -19,7 +19,7 @@ const schema = z.strictObject({
   builds: z
     .array(
       z.strictObject({
-        name: z.enum(["default", "portable-simd"]),
+        name: z.literal("default"),
         compareSha256: digest,
         memorySha256: digest,
       }),
@@ -90,7 +90,7 @@ export async function loadSession(out: string): Promise<Session> {
   const session = schema.parse(JSON.parse(document));
   const names = session.builds.map((build) => build.name);
   if (names[0] !== "default" || new Set(names).size !== names.length)
-    throw new Error("Session requires one default build and at most one Portable SIMD build");
+    throw new Error("Session requires one default build");
   if (session.platform !== process.platform)
     throw new Error("Session platform differs from this host");
   if ((await fileHash(join(out, "plan.json"))) !== session.planSha256)

@@ -30,7 +30,7 @@ export function continuousCommands(program: Command) {
 
   continuous
     .command("history")
-    .description("Read adjacent main changes in both existing Testbeds without changing thresholds")
+    .description("Read adjacent main changes in the existing Testbed without changing thresholds")
     .requiredOption("--project <slug>", "public Bencher project")
     .requiredOption("--out <directory>", "new retained history directory")
     .action(async (options: { project: string; out: string }) => {
@@ -42,7 +42,7 @@ export function continuousCommands(program: Command) {
 
   continuous
     .command("build")
-    .description("Build both static Linux x86-64 artifacts exactly as CI does")
+    .description("Build the static Linux x86-64 artifacts exactly as CI does")
     .requiredOption("--out <directory>", "new artifact directory")
     .action(async (options: { out: string }) => {
       const root = await repositoryRoot();
@@ -66,8 +66,8 @@ export function continuousCommands(program: Command) {
 
   continuous
     .command("submit")
-    .description("Submit both builds to Bencher; requires its CLI and BENCHER_API_KEY")
-    .requiredOption("--image <digest>", "immutable image reference containing both builds")
+    .description("Submit the build to Bencher; requires its CLI and BENCHER_API_KEY")
+    .requiredOption("--image <digest>", "immutable image reference containing the build")
     .requiredOption("--hash <sha>", "measured source commit")
     .requiredOption("--project <id>", "Bencher project")
     .requiredOption("--out <directory>", "new report directory")

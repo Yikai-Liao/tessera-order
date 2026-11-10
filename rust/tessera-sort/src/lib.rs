@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Stable radix sort with O(√n) auxiliary memory.
+//! Stable radix sort with O(sqrt(n)) auxiliary memory.
 //!
 //! Tessera sorts slices by a primitive key: an integer up to 128 bits, an
 //! `f32` or `f64`, or [`Reverse`](core::cmp::Reverse) of one of these. It runs
@@ -36,51 +36,39 @@
 //! # Memory
 //!
 //! Inputs larger than one 64 KiB tile are split by a stable block partition
-//! that needs O(√n) records of scratch for a fixed record size and key width.
-//! Each tile is then sorted in a scratch buffer of at most 64 KiB of records,
-//! plus up to two bytes per record of cached bucket IDs for
-//! [`stable_sort_by_key`]. Each tile-local MSD level also keeps a cursor table
-//! of up to 32 KiB on the stack, with at most 22 levels for 128-bit keys.
+//! that needs O(sqrt(n)) records of scratch for a fixed record size and digit
+//! width. Each tile is then finished in a scratch buffer of at most 64 KiB of
+//! records plus two bytes per record of cached bucket IDs, and each tile split
+//! keeps a cursor table of under 3 KiB on the stack. A tile-local window that
+//! covers every remaining key difference of a [`stable_sort`] input is filled
+//! in place instead, and needs no scratch at all.
 //!
 //! Each call allocates scratch as needed and frees it before returning.
 //!
 //! # Cargo features
 //!
-//! `std` is enabled by default. Disable it for `no_std`: the crate then uses
-//! `core` and `alloc`, so it needs a global allocator. A key-function panic
-//! during block partitioning aborts rather than exposing partially moved
-//! records, even when the host enables unwinding. Panics elsewhere may unwind
-//! safely. Sorting, ordering and the memory bounds above are the same either way.
-//!
-//! `portable-simd` is off by default and requires `std` and Rust 1.89 or newer.
-//! It adds [`fearless_simd`](https://docs.rs/fearless_simd) for adjacent-key
-//! scans, ascending-order confirmation and bucket-count prefix sums. On x86 it
-//! selects a supported instruction set at run time, once per insertion pass,
-//! ascending confirmation or prefix sum. Other targets use their compile-time
+//! The crate needs `std` and Rust 1.89 or newer. Adjacent-key scans use
+//! [`fearless_simd`](https://docs.rs/fearless_simd), which selects a supported
+//! instruction set at run time on x86; other targets use their compile-time
 //! baseline, including Arm Neon and WebAssembly SIMD when enabled for the
 //! target. Keys without a vector kernel use scalar scans. Results are the same
-//! with and without the feature.
+//! on every path.
 //!
-//! `rayon` is off by default and enables `par_stable_sort` and
-//! `par_stable_sort_by_key`. Large inputs partition the root across disjoint
-//! shards and adopt them in input order. Bounded buckets sort before their
-//! final writes; other layouts sort buckets while compaction proceeds. Small
-//! inputs and one-thread pools use the serial engine. The feature requires
-//! `std`, `Send` records and a shared (`Fn + Sync`) key function. It also
-//! enables `std` when default features are disabled.
-
-#![cfg_attr(not(feature = "std"), no_std)]
-
-extern crate alloc;
+//! `rayon` is enabled by default and adds [`par_stable_sort`] and
+//! [`par_stable_sort_by_key`]. Large inputs partition the root across disjoint
+//! shards, then sort the buckets of that split across Rayon's current pool.
+//! Small inputs and one-thread pools use the serial engine. The feature requires
+//! `Send` records and a shared (`Fn + Sync`) key function.
 
 mod block;
+mod cost;
 mod engine;
+mod insertion;
 mod key;
 #[cfg(feature = "rayon")]
 mod parallel;
-#[cfg(feature = "portable-simd")]
-mod portable_simd;
 mod scan;
+mod tile;
 mod unwind;
 
 pub use key::RadixKey;
@@ -109,7 +97,7 @@ pub use parallel::{par_stable_sort, par_stable_sort_by_key};
 /// assert_eq!(bits, expected);
 /// ```
 pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
-    engine::sort::<K, _, false>(values, &mut key::Direct);
+    engine::sort::<K, _>(values, &mut key::Direct);
 }
 
 /// Sorts records by a key, keeping records with equal keys in input order.
@@ -128,13 +116,12 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 ///
 /// If `key` panics, the panic propagates to the caller after every record has
 /// been moved back into `values`, in an unspecified order. No record is
-/// dropped or duplicated. Without the `std` feature, a panic during block
-/// partitioning aborts; panics elsewhere may unwind with every record preserved.
+/// dropped or duplicated.
 ///
 /// # Memory
 ///
-/// As [`stable_sort`], plus up to two bytes per tile record of cached bucket
-/// IDs.
+/// As [`stable_sort`]. The two bytes of cached bucket IDs per tile record apply
+/// to this entry point's tiles as well.
 ///
 /// # Examples
 ///
@@ -154,7 +141,7 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 /// assert_eq!(names, ["a", "c", "d"]);
 /// ```
 pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
-    engine::sort::<T, _, true>(values, &mut key::ByKey(key));
+    engine::sort::<T, _>(values, &mut key::ByKey(key));
 }
 
 /// Internal thresholds, exported for benchmarks that probe boundary sizes.
@@ -166,8 +153,6 @@ pub mod thresholds {
     pub const INSERTION_MAX: usize = 48;
     /// Default tile budget, in bytes of records.
     pub const TILE_BYTES: usize = 64 * 1024;
-    /// Most records in one tile, so that a `u16` cursor addresses any of them.
+    /// Most records in one tile, bounded by the width of its bucket cursor.
     pub const MAX_TILE_RECORDS: usize = u16::MAX as usize;
-    /// Largest cursor table of a tile-local pass, in bytes.
-    pub const MAX_CURSOR_BYTES: usize = 32 * 1024;
 }

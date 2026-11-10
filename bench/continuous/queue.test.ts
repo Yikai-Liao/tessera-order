@@ -270,16 +270,12 @@ test("measured alerts are baselines, but missing or wrong exact-head evidence is
   assert.equal(await baselineReady(fixture(t, { wrongReport: true }), "main", hash(0)), false);
 });
 
-test("main completion requires both configurations from its owner and current attempt", async (t) => {
+test("main completion requires the measured configuration from its owner and current attempt", async (t) => {
   const builds = [build(1), { ...build(2), head_sha: hash(1) }, build(3)];
   for (const samples of [
     [{ owner: 100, started: "2026-11-10T00:06:00Z" }],
     [{ owner: 101, started: "2026-11-10T00:01:00Z" }],
     [{ owner: 101, started: "2026-11-10T00:05:00Z" }],
-    [
-      { owner: 101, started: "2026-11-10T00:06:00Z", configuration: "default" },
-      { owner: 100, started: "2026-11-10T00:06:00Z", configuration: "portable-simd" },
-    ],
   ]) {
     const f = fixture(t, {
       builds,
@@ -361,7 +357,7 @@ test("idle and active sweeps batch superseded heads instead of resolving old bui
     );
     counts.push(active.requests.length);
   }
-  assert.deepEqual(counts, [12, 12, 12]);
+  assert.deepEqual(counts, [11, 11, 11]);
   for (const changed of [{ closed: true }, { superseded: true }]) {
     const f = fixture(t, {
       builds: [build(2, "pull_request")],

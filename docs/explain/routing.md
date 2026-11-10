@@ -16,7 +16,7 @@ At larger strides, the adjacent-pair sample classifies the input below. The targ
 
 A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. Any leading equal keys skipped while finding the direction rule out strict descent. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
 
-At larger strides, the sample rejects most unsorted inputs within a few pairs. The full scan runs only on inputs that look ordered. It finds the first unequal key, which fixes the direction, and then continues in that direction. For an ascending input it reuses the scan that budgeted insertion uses: blocked adjacent pairs in the default build (`f64` keeps its scalar scan), or the vector backend with Portable SIMD. A descending input continues with a scan that also records whether any adjacent pair ties.
+At larger strides, the sample rejects most unsorted inputs within a few pairs. The full scan runs only on inputs that look ordered. It finds the first unequal key, which fixes the direction, and then continues in that direction. For an ascending input it reuses the scan that budgeted insertion uses: the vector backend when the key has one, and one pair at a time otherwise. A descending input continues with a scan that also records whether any adjacent pair ties.
 
 ## Budgeted insertion
 
@@ -44,7 +44,7 @@ From here on, the engine works on slices of the input and sorts each one in plac
 - a **tile** is a slice of at most 64 KiB of records. It is finished in a scratch buffer of the same size, which stays in the L2 cache ([tiles](tiles.md));
 - a **node** is anything larger. It is split by a stable partition into children, and each child is routed again.
 
-Partition children entering `sort_child` reuse the full order confirmation described above, without first sampling adjacent pairs. An ascending or constant child returns, and a descending child uses the same strict or stable reversal. Thus a radix partition can expose an ordered child even when the full input was not ordered. This applies equally to children from either end or the interior of the input, without an end-run detector or a length cap. Only unordered children scan their remaining candidate bits and continue to the normal routes. The root goes directly to `sort_node`, since it was already probed. The extra check takes at most linear work in the slice length and allocates nothing; it does not run insertion or create a second key buffer.
+Partition children entering `sort_slice` reuse the full order confirmation described above: the order probe runs before the variation scan, so a child that is ordered or reversed returns without sampling adjacent pairs. An ascending or constant child returns, and a descending child uses the same strict or stable reversal. Thus a radix partition can expose an ordered child even when the full input was not ordered. This applies equally to children from either end or the interior of the input, without an end-run detector or a length cap. Only unordered children scan their remaining candidate bits and continue to the normal routes. The root goes directly to `sort_node`, since it was already probed. The extra check takes at most linear work in the slice length and allocates nothing; it does not run insertion or create a second key buffer.
 
 A node then looks at its varying bits. If they span at most 8 bits, the node is one window away from sorted, and one of the routes below finishes it: every record is then in its final position.
 
@@ -72,10 +72,11 @@ A changing key function can make the sampled value disappear: every record then 
 
 ### Top digit
 
-Otherwise the node is split on the digit under its highest varying bit, with the [stable block partition](block-partition.md). `choose_split_digit` picks the width:
+Otherwise the node is split on a window under its highest varying bit, with the [stable block partition](block-partition.md). The cost model, not a rule, picks the width: it prices every width from one bit to eight bits — beyond that the write cursors, counts and output blocks of the block partition stop fitting in L1 — and takes the cheapest. Each price is one counting pass plus the bucket table, the children the window prepares and the leaf it leaves behind; a wide window leaves children that finish themselves, a narrow one pays fewer table slots.
 
-1. Aim for children of half a tile: with `target = tile records / 2`, start with enough bits for `n / target` children, clamped to 3–8 bits. Wider splits measured slower on 10 million records because of page and TLB pressure.
-2. Sample 128 keys. If they hit fewer than a quarter of the digit's buckets, the keys are concentrated in a few buckets, so widen the digit by 2 bits and check again, up to 12 bits. Above 9 bits, 128 keys cannot fill a quarter of the buckets, so widening continues without a check.
+Two facts the model measures rather than assumes. A sample of 128 evenly spaced keys names the buckets the window occupies; if it repeats buckets far more than a uniform spread would, the keys are concentrated and the sampled buckets are the ones the slice occupies, otherwise the slice spreads over as many buckets as it has records. And the same sample answers every candidate width, so pricing eight widths costs one pass over 128 keys.
+
+Windows always start at the top varying bit, so each pass removes the highest remaining difference, and a split whose width the sample settled from the shape alone is remembered: the next node of the same size and varying bits reuses the answer.
 
 While the block partition writes its result back into the input, each child that fits a tile is finished **at once**, while its records are still in cache. Larger children are routed again after the partition.
 

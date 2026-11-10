@@ -10,6 +10,15 @@ import { mockGitHub } from "./fixtures/github.ts";
 import { baseHash, fixture, hash } from "./fixtures/report.ts";
 import { publishReport } from "./index.ts";
 
+// The catalog ships one configuration, so the per-variant publishing paths are
+// covered with a second one built here.
+const SECOND: Variant = {
+  ...VARIANTS[0],
+  id: "second",
+  name: "second",
+  testbed: "synthetic-second-testbed",
+};
+
 function publication(t: TestContext, outcome = "success") {
   const dir = mkdtempSync(join(tmpdir(), "tessera-report-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -88,12 +97,12 @@ function withoutBaseline(input: ReturnType<typeof fixture>) {
 test("build verdicts stay independent while one comment embeds shared images", async (t) => {
   const action = publication(t);
   const simd = fixture();
-  simd.testbed.name = VARIANTS[1].testbed;
+  simd.testbed.name = SECOND.testbed;
   simd.alerts = simd.alerts.filter((alert) => alert.limit === "lower");
   const reportPath = join(action.inputs.variants[0].reportPath, "..", "simd.json");
   writeFileSync(reportPath, JSON.stringify(simd));
   action.inputs.variants.push({
-    variant: VARIANTS[1],
+    variant: SECOND,
     outcome: "success",
     reportPath,
     checkId: "43",
@@ -151,7 +160,7 @@ for (const failure of [
         input.branch.head.version!.hash = "c".repeat(40);
         break;
       case "wrong build":
-        input.testbed.name = VARIANTS[1].testbed;
+        input.testbed.name = "unmeasured-testbed";
         break;
       case "empty report":
         input.results = [];

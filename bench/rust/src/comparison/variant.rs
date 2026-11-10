@@ -170,9 +170,8 @@ pub(super) fn list_variants() -> Vec<Variant> {
         .filter(|algorithm| {
             algorithm.adapter == "common"
                 || (cfg!(feature = "rayon") && algorithm.threads.is_some())
-                || (!cfg!(feature = "portable-simd")
-                    && (algorithm.adapter == "rust"
-                        || (algorithm.adapter == "native" && cfg!(feature = "compare-native"))))
+                || algorithm.adapter == "rust"
+                || (algorithm.adapter == "native" && cfg!(feature = "compare-native"))
         })
         .map(|algorithm| Variant {
             name: &algorithm.id,
@@ -264,10 +263,9 @@ mod tests {
         }
         assert!(names.contains(&"tessera"));
         assert!(names.contains(&"std-stable"));
-        assert_eq!(names.contains(&"radsort"), !cfg!(feature = "portable-simd"));
         assert_eq!(
             names.contains(&"fluxsort"),
-            cfg!(feature = "compare-native") && !cfg!(feature = "portable-simd")
+            cfg!(feature = "compare-native")
         );
     }
 

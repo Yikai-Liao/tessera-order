@@ -25,40 +25,37 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Stable block LSD radix sort adapted from Robert Clausecker's
-//! BSD-2-Clause C implementation, `radixsort_permuted.c`.
+//! Stable block partition adapted from Robert Clausecker's BSD-2-Clause C
+//! implementation, `radixsort_permuted.c`.
 //! Reference revision: f69e816c3cd79d312cd67aea5b9cf1c338c1b371.
 //! <https://github.com/clausecker/radsort/blob/f69e816c3cd79d312cd67aea5b9cf1c338c1b371/radixsort_permuted.c>
 //! <https://arxiv.org/abs/2607.05302>
 //!
-//! The engine uses one pass of this sort as a stable partition by one digit
-//! ([`partition_digit`]) or by a caller's classification ([`partition_by`]).
-//! Buckets are filled block by block, consumed input blocks are recycled as
-//! output blocks, and a block order records the logical sequence, so a pass
-//! needs O(√n) scratch instead of a second buffer of the input's size.
+//! The engine uses one pass of this sort as a stable partition by any
+//! classifier: a digit window, or a comparison against a pivot. Buckets are
+//! filled block by block, consumed input blocks are recycled as output blocks,
+//! and a block order records the logical sequence, so a pass needs O(sqrt(n))
+//! scratch instead of a second buffer of the input's size.
 //!
 //! Ownership: the active block sequence holds exactly one live copy of every
 //! record. Other physical copies are stale bytes that are never dropped or
 //! borrowed, and key extraction borrows only live records. Scratch is
 //! `MaybeUninit<T>`. Before returning, or before resuming a key-function panic,
-//! `compact` moves every live record back into the input slice, so records
-//! need neither `Copy` nor `Clone`.
+//! [`Partition::compact`] moves every live record back into the input slice, so
+//! records need neither `Copy` nor `Clone`.
 
-use crate::key::{Extract, Unsigned};
+use crate::key::Extract;
 use crate::unwind;
-use alloc::vec::Vec;
 use core::{marker::PhantomData, mem::MaybeUninit, ptr};
 
 /// Widest digit, in bits, that one pass accepts. Callers that choose their own
-/// digit width (the Tessera engine) bound it by this constant.
+/// digit width bound it by this constant.
 pub(crate) const MAX_RADIX_BITS: usize = 12;
 
 #[cfg(feature = "rayon")]
 mod parallel;
 #[cfg(feature = "rayon")]
-pub(crate) use parallel::{
-    BucketFinish, partition_digit_parallel_with_finish, partition_digit_parallel_with_visit,
-};
+pub(crate) use parallel::partition_parallel;
 
 /// Logical input and output block cursors for the current pass.
 struct ScatterPosition {
@@ -91,22 +88,19 @@ const BLOCK_SCALE: usize = 4;
 
 /// Smallest block, counted in records.
 ///
-/// The bookkeeping of a block — its order entry, its bucket id and one copy
-/// call — costs the same whatever the record width, so a floor in records keeps
-/// it amortised for wide records, where the byte floor alone would allow only a
-/// handful of records per block.
+/// The bookkeeping of a block costs the same whatever the record width, so a
+/// floor in records keeps it amortised for wide records, where the byte floor
+/// alone would allow only a handful of records per block.
 const BLOCK_RECORDS_FLOOR: usize = 32;
 
-/// Block size in records for a digit partition into `radix`-bit digits.
+/// Block size in records for a partition into `radix`-bit digits.
 ///
-/// The partition fills its buckets block by block, so it holds the records it
-/// moves in blocks of `b` records: `2 * R` of those blocks for `R` buckets, one
-/// output block per bucket and as many in reserve, because an input block may
-/// only be recycled as an output block once every record in it has been read.
-/// The tables are indexed by block position and cost
-/// [`DESCRIPTOR_BYTES_PER_POSITION`] bytes per position; records move by
-/// exchanging blocks, not by copying into a second buffer. For `n` records of
-/// `s` bytes, a block size `b` therefore costs
+/// The partition holds the records it moves in blocks of `b` records: `2 * R`
+/// of them for `R` buckets, one output block per bucket and as many in
+/// reserve, because an input block may only be recycled once every record in it
+/// has been read. The tables are indexed by block position and cost
+/// [`DESCRIPTOR_BYTES_PER_POSITION`] bytes per position. For `n` records of
+/// `s` bytes the scheme costs
 ///
 /// ```text
 /// 2 R b s + 10 n / b
@@ -116,7 +110,7 @@ const BLOCK_RECORDS_FLOOR: usize = 32;
 /// `b = sqrt(10 n / (2 R s))`. That root minimizes the sum: writing `b = c b*`
 /// turns the total into `(c + 1 / c) / 2` times the minimum, which grows in
 /// both directions. The engine takes [`BLOCK_SCALE`] times the root to amortise
-/// the per-block work, and the floors below bound the small inputs where the
+/// the per-block work, and the floors above bound the small inputs where the
 /// root alone would buy nothing.
 ///
 /// # Memory
@@ -124,8 +118,8 @@ const BLOCK_RECORDS_FLOOR: usize = 32;
 /// Two floors keep the per-block work amortised: a block holds at least
 /// [`BLOCK_BYTES_FLOOR`] bytes of records, and at least
 /// [`BLOCK_RECORDS_FLOOR`] records whatever their width. Their own cost does not
-/// depend on `n` — together they reserve at most `2 R max(1024, 32 s)` bytes of
-/// scratch and `O(R)` table entries — so the auxiliary memory stays
+/// depend on `n` -- together they reserve at most `2 R max(1024, 32 s)` bytes
+/// of scratch and `O(R)` table entries -- so the auxiliary memory stays
 /// `O(sqrt(n))` in `n` for a fixed record size and digit width.
 pub(crate) fn default_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
     let floors = (BLOCK_BYTES_FLOOR / record_bytes).max(BLOCK_RECORDS_FLOOR);
@@ -135,215 +129,12 @@ pub(crate) fn default_block_size(len: usize, record_bytes: usize, radix: usize) 
         .max(1)
 }
 
-/// The balanced block size, rounded up.
-///
-/// `std` computes it as `ceil(sqrt(10 n / (2 R s)))`. `core` has neither
-/// `f64::sqrt` nor `f64::ceil`, so an integer solve of
-/// `m * m * (2 R s) >= 10 n` stands in for it. Both forms agree wherever the
-/// caller can reach them, which `balanced_forms_agree` in this file's tests
-/// checks.
-#[cfg(feature = "std")]
+/// The balanced block size, `ceil(sqrt(10 n / (2 R s)))`, rounded up.
 fn balanced_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
     let range = 1usize << radix;
     let tables = DESCRIPTOR_BYTES_PER_POSITION as f64 * len as f64;
     let scratch_per_record = 2.0 * range as f64 * record_bytes as f64;
     (tables / scratch_per_record).sqrt().ceil() as usize
-}
-
-#[cfg(not(feature = "std"))]
-fn balanced_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
-    balanced_block_size_integer(len, record_bytes, radix)
-}
-
-/// The integer form of [`balanced_block_size`].
-///
-/// A standard build compiles it only to compare it against the floating-point
-/// form in tests.
-#[cfg(any(not(feature = "std"), test))]
-fn balanced_block_size_integer(len: usize, record_bytes: usize, radix: usize) -> usize {
-    let numerator = DESCRIPTOR_BYTES_PER_POSITION as u128 * len as u128;
-    let denominator = 2 * (1u128 << radix) * record_bytes as u128;
-    let mut balanced = (numerator / denominator).isqrt();
-    // `isqrt` floors, so at most one step moves the product to or past
-    // `numerator`. `record_bytes` is at least one, so no division by zero.
-    if balanced * balanced * denominator < numerator {
-        balanced += 1;
-    }
-    balanced as usize
-}
-
-/// Transfers a retired bucket borrow; later compaction never accesses it again.
-type Visit<'callback, 'records, T> = &'callback mut dyn FnMut(&'records mut [T]);
-
-/// Partitions `records` stably by the `radix`-bit digit of its keys at `shift`.
-///
-/// Digit bits above the key width count as zero.
-///
-/// # Panics
-///
-/// Panics if `radix` is not in `1..=MAX_RADIX_BITS` or `shift` is not below
-/// the key width. A key-function panic is resumed after every record is back
-/// in `records`.
-pub(crate) fn partition_digit<T, E: Extract<T>>(
-    records: &mut [T],
-    radix: usize,
-    shift: usize,
-    extractor: &mut E,
-    buffers: &mut Buffers<T>,
-) {
-    partition_digit_inner(records, radix, shift, extractor, buffers, None);
-}
-
-/// [`partition_digit`] that also returns each bucket's cumulative end in
-/// records, and calls `visit` on each bucket as soon as its records are
-/// contiguous in `records`, while they are still in cache.
-///
-/// Returns an empty vector for inputs of fewer than two records or zero-sized
-/// records. A `visit` panic is resumed after every record is back in `records`.
-pub(crate) fn partition_digit_with_ends<'records, T, E: Extract<T>>(
-    records: &'records mut [T],
-    radix: usize,
-    shift: usize,
-    extractor: &mut E,
-    buffers: &mut Buffers<T>,
-    visit: KeyVisit<'_, 'records, T, E>,
-) -> Vec<usize> {
-    partition_digit_inner(records, radix, shift, extractor, buffers, Some(visit))
-}
-
-/// A [`Visit`] that also receives the extractor, which classification has
-/// finished borrowing by the time buckets are visited.
-type KeyVisit<'callback, 'records, T, E> = &'callback mut dyn FnMut(&'records mut [T], &mut E);
-
-fn partition_digit_inner<'records, T, E: Extract<T>>(
-    records: &'records mut [T],
-    radix: usize,
-    shift: usize,
-    extractor: &mut E,
-    buffers: &mut Buffers<T>,
-    visit: Option<KeyVisit<'_, 'records, T, E>>,
-) -> Vec<usize> {
-    let record_bytes = core::mem::size_of::<T>();
-    if records.len() < 2 || record_bytes == 0 {
-        return Vec::new();
-    }
-    let bits = E::Value::BITS;
-    assert!((1..=MAX_RADIX_BITS).contains(&radix));
-    assert!(shift < bits);
-    let width = radix.min(bits - shift);
-    let shift = E::Value::from_usize(shift);
-    let mask = E::Value::from_usize((1usize << width) - 1) << shift;
-    partition_pass(
-        records,
-        1 << radix,
-        extractor,
-        buffers,
-        move |extractor, record| ((extractor.key(record) & mask) >> shift).to_usize(),
-        visit.is_some(),
-        visit,
-    )
-}
-
-/// Partitions `records` stably into `buckets` buckets chosen by `classify` and
-/// returns each bucket's cumulative end in records.
-///
-/// Classes at or above `buckets` go to the last bucket.
-///
-/// # Panics
-///
-/// Panics if `buckets` is not a power of two in `2..=1 << MAX_RADIX_BITS`. A
-/// key-function panic is resumed after every record is back in `records`.
-pub(crate) fn partition_by<T, E: Extract<T>>(
-    records: &mut [T],
-    buckets: usize,
-    extractor: &mut E,
-    buffers: &mut Buffers<T>,
-    mut classify: impl FnMut(&mut E, &T) -> usize,
-) -> Vec<usize> {
-    let record_bytes = core::mem::size_of::<T>();
-    if records.len() < 2 || record_bytes == 0 {
-        return alloc::vec![0; buckets];
-    }
-    assert!(buckets.is_power_of_two() && (2..=1 << MAX_RADIX_BITS).contains(&buckets));
-    partition_pass(
-        records,
-        buckets,
-        extractor,
-        buffers,
-        move |extractor, record| classify(extractor, record).min(buckets - 1),
-        true,
-        None,
-    )
-}
-
-/// Runs one block pass and compacts the result back into `records`.
-///
-/// Returns bucket ends when `want_ends` is set, and an empty vector otherwise.
-fn partition_pass<'records, T, E: Extract<T>>(
-    records: &'records mut [T],
-    buckets: usize,
-    extractor: &mut E,
-    buffers: &mut Buffers<T>,
-    mut classify: impl FnMut(&mut E, &T) -> usize,
-    want_ends: bool,
-    visit: Option<KeyVisit<'_, 'records, T, E>>,
-) -> Vec<usize> {
-    let radix = buckets.trailing_zeros() as usize;
-    let block_size = default_block_size(records.len(), core::mem::size_of::<T>(), radix);
-    let mut sorter = Partition::new(records, buckets, block_size, buffers);
-    let classify_extractor = &mut *extractor;
-    let (panic, ends) = sorter.step_with_ends(
-        move |record| classify(classify_extractor, record),
-        want_ends,
-    );
-    if let Some(payload) = panic {
-        sorter.compact();
-        unwind::resume(payload);
-    }
-    // Classification has finished borrowing the extractor before any tile
-    // callback starts; both phases use the same FnMut state in sequence.
-    let panic = if let Some(visit) = visit {
-        let mut callback = |child: &'records mut [T]| visit(child, extractor);
-        sorter.compact_with(&ends, Some(&mut callback))
-    } else {
-        sorter.compact_with(&ends, None)
-    };
-    if let Some(payload) = panic {
-        unwind::resume(payload);
-    }
-    ends
-}
-
-/// Returns the key bits that differ between at least two records of `records`.
-///
-/// # Panics
-///
-/// Panics if `records` is empty.
-pub(crate) fn varying_key_bits<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> u128 {
-    // The C reference scatters every digit, even digits that are constant in
-    // every key. The union and intersection of all keys find those digits
-    // without a histogram. A bit varies if it is set in the union but not in
-    // the intersection.
-    let mut union = extractor.key(&records[0]);
-    let mut intersection = union;
-    let full_mask = u128::MAX >> (128 - E::Value::BITS);
-    // Wide random keys vary in every bit within the first few records, so
-    // stop after a 1,025-record prefix if they already do. Otherwise finish
-    // with one uninterrupted, vectorizable scan.
-    let boundary = records.len().min(1025);
-    for item in &records[1..boundary] {
-        let key = extractor.key(item);
-        union |= key;
-        intersection = intersection & key;
-    }
-    if union.to_u128() ^ intersection.to_u128() != full_mask {
-        for item in &records[boundary..] {
-            let key = extractor.key(item);
-            union |= key;
-            intersection = intersection & key;
-        }
-    }
-    union.to_u128() ^ intersection.to_u128()
 }
 
 /// Branch hint for a condition that is almost never true, without a nightly
@@ -396,7 +187,7 @@ struct BlockStorage<'a, T> {
     scratch_blocks: usize,
     block_count: usize,
     scratch: Vec<MaybeUninit<T>>,
-    // Parallel root partitions adopt each shard's scratch allocation directly.
+    /// Parallel root partitions adopt each shard's scratch allocation directly.
     #[cfg(feature = "rayon")]
     scratch_segments: Vec<Vec<MaybeUninit<T>>>,
     input_borrow: PhantomData<&'a mut [T]>,
@@ -419,8 +210,8 @@ impl<'a, T> BlockStorage<'a, T> {
             .checked_mul(block_size)
             .expect("scratch size overflow");
         scratch.resize_with(scratch_len, MaybeUninit::<T>::uninit);
-        // The input tail has no full physical block. Start it in scratch;
-        // the first bucket_count scratch blocks remain free for output.
+        // The input tail has no full physical block. Start it in scratch; the
+        // first bucket_count scratch blocks remain free for output.
         let tail_len = input.len() % block_size;
         // SAFETY: the source has tail_len initialized records and the disjoint
         // scratch destination has room for at least that many records.
@@ -498,10 +289,10 @@ pub(crate) struct Buffers<T> {
     counts: Vec<usize>,
     #[cfg(debug_assertions)]
     seen: Vec<bool>,
-    ends: Vec<Vec<usize>>,
 }
 
 impl<T> Buffers<T> {
+    /// Creates empty buffers without allocating.
     pub(crate) fn new() -> Self {
         Self {
             scratch: Vec::new(),
@@ -513,20 +304,51 @@ impl<T> Buffers<T> {
             counts: Vec::new(),
             #[cfg(debug_assertions)]
             seen: Vec::new(),
-            ends: Vec::new(),
         }
-    }
-
-    /// Keeps the allocation of a bucket-end vector for a later pass.
-    pub(crate) fn recycle_ends(&mut self, mut ends: Vec<usize>) {
-        ends.clear();
-        self.ends.push(ends);
     }
 }
 
 impl<T> Default for Buffers<T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Partitions `records` stably into `buckets` buckets chosen by `classify`
+/// and writes each bucket's cumulative record end into `ends`.
+///
+/// Classes at or above `buckets` go to the last bucket. The records are back in
+/// place when this returns.
+///
+/// # Panics
+///
+/// Panics if `buckets` is not a power of two in `2..=1 << MAX_RADIX_BITS`. A
+/// key-function panic is resumed after every record is back in `records`.
+pub(crate) fn partition<T, E: Extract<T>>(
+    records: &mut [T],
+    buckets: usize,
+    mut classify: impl FnMut(&mut E, &T) -> usize,
+    extractor: &mut E,
+    buffers: &mut Buffers<T>,
+    ends: &mut Vec<usize>,
+) {
+    ends.clear();
+    let record_bytes = core::mem::size_of::<T>();
+    if records.len() < 2 || record_bytes == 0 {
+        return;
+    }
+    assert!(buckets.is_power_of_two() && (2..=1 << MAX_RADIX_BITS).contains(&buckets));
+    let radix = buckets.trailing_zeros() as usize;
+    let block_size = default_block_size(records.len(), record_bytes, radix);
+    let mut sorter = Partition::new(records, buckets, block_size, buffers);
+    let classify_extractor = &mut *extractor;
+    let panic = sorter.step(
+        move |record| classify(classify_extractor, record).min(buckets - 1),
+        ends,
+    );
+    sorter.compact();
+    if let Some(payload) = panic {
+        unwind::resume(payload);
     }
 }
 
@@ -543,7 +365,8 @@ struct Partition<'a, 'w, T> {
     block_order: Vec<u32>,
     next_block_order: Vec<u32>,
     /// Bucket ID of each output block, used to build `next_block_order` after
-    /// scatter. `u16` holds bucket IDs for digit widths up to `MAX_RADIX_BITS`.
+    /// scatter. `u16` holds bucket IDs for digit widths up to
+    /// [`MAX_RADIX_BITS`].
     bucket_ids: Vec<u16>,
     partial_blocks: Vec<PartialBlock>,
     active_blocks_end: usize,
@@ -649,12 +472,12 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         assert_eq!(total, self.blocks.input_len);
     }
 
-    /// Scatters one pass, optionally returning cumulative ends for recursion.
-    fn step_with_ends<F: FnMut(&T) -> usize>(
+    /// Scatters one pass and writes the resulting bucket ends.
+    fn step<F: FnMut(&T) -> usize>(
         &mut self,
         classify: F,
-        want_ends: bool,
-    ) -> (Option<unwind::Payload>, Vec<usize>) {
+        ends: &mut Vec<usize>,
+    ) -> Option<unwind::Payload> {
         let (mut buckets, mut counts) = self.begin_pass();
         let mut position = ScatterPosition {
             input: self.bucket_count,
@@ -690,11 +513,11 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             self.scatter(&mut buckets, &mut counts, &mut position, offset, |_| 0);
         }
         self.active_blocks_end = position.output;
-        let ends = self.finish_pass(&buckets, counts, want_ends);
+        self.finish_pass(&buckets, counts, ends);
         self.buffers.writers = buckets;
         #[cfg(debug_assertions)]
         self.validate();
-        (panic, ends)
+        panic
     }
 
     /// Reserves the first `bucket_count` free blocks, one per bucket, and gives
@@ -719,35 +542,26 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         (buckets, counts)
     }
 
-    /// Rebuilds the logical block order from the order the buckets filled,
-    /// records each bucket's partially filled last block, and returns each
-    /// bucket's cumulative record end.
+    /// Rebuilds the logical block order from the order the buckets filled, records
+    /// each bucket's partially filled last block, and writes each bucket's
+    /// cumulative record end.
     fn finish_pass(
         &mut self,
         buckets: &[BucketWriter<T>],
         counts: Vec<usize>,
-        want_ends: bool,
-    ) -> Vec<usize> {
+        ends: &mut Vec<usize>,
+    ) {
         // Record boundaries are not block boundaries: a bucket's last block is
-        // usually partial, and a caller that wants to recurse on bucket slices
-        // needs the record offsets. The cursor knows how much of that last
-        // block is free, so this is one pass over the bucket table, not a pass
-        // over the records.
-        let mut record_ends = if want_ends {
-            self.buffers.ends.pop().unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-        if want_ends {
-            record_ends.clear();
-            record_ends.reserve_exact(counts.len());
-            let mut total = 0usize;
-            for (bucket, &blocks) in buckets.iter().zip(counts.iter()) {
-                // SAFETY: both pointers delimit the same bucket's output block.
-                let free = unsafe { bucket.end.offset_from(bucket.next) as usize };
-                total += blocks * self.blocks.block_size - free;
-                record_ends.push(total);
-            }
+        // usually partial. The cursor knows how much of that last block is free,
+        // so this is one pass over the bucket table, not over the records.
+        ends.clear();
+        ends.reserve_exact(counts.len());
+        let mut total = 0usize;
+        for (bucket, &blocks) in buckets.iter().zip(counts.iter()) {
+            // SAFETY: both pointers delimit the same bucket's output block.
+            let free = unsafe { bucket.end.offset_from(bucket.next) as usize };
+            total += blocks * self.blocks.block_size - free;
+            ends.push(total);
         }
         // A separate starts Vec would allocate once per digit. Counts are dead
         // after scatter, so reuse their allocation for prefix offsets and then
@@ -783,7 +597,6 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         self.active_blocks_end += self.bucket_count;
         core::mem::swap(&mut self.block_order, &mut self.next_block_order);
         self.buffers.counts = starts;
-        record_ends
     }
 
     // Pass setup and block reordering need state that scatter does not.
@@ -813,8 +626,8 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 // it may own a String, Box, Rc, or other non-Copy payload.
                 // This borrow ends before the bitwise move below.
                 let b = classify(unsafe { &*source.add(offset) });
-                // SAFETY: bucket_count is 1 << radix and mask keeps the width
-                // bits below radix, so the index is in bounds; the check would
+                // SAFETY: bucket_count is 1 << radix and the classifier keeps the
+                // index below it, so the index is in bounds; the check would
                 // otherwise run once per record in the hot loop.
                 let bucket = unsafe { buckets.get_unchecked_mut(b) };
                 let next = bucket.next;
@@ -862,69 +675,25 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
 
     /// Moves every live record back into the input, without callbacks.
     fn compact(&mut self) {
-        let _ = self.compact_with(&[], None);
-    }
-
-    /// Materializes the active sequence into input. When bucket ends are given,
-    /// `visit` is called on each bucket as soon as its records are contiguous in
-    /// input, so a leaf can consume the bucket while it is still cache-hot.
-    /// A callback panic does not interrupt materialization: the remaining
-    /// buckets are copied without callbacks and the payload is returned after
-    /// the input slice is a complete permutation again.
-    fn compact_with(
-        &mut self,
-        ends: &[usize],
-        visit: Option<Visit<'_, 'a, T>>,
-    ) -> Option<unwind::Payload> {
         #[cfg(feature = "rayon")]
         if !self.blocks.scratch_segments.is_empty() {
-            return self.compact_with_access(ends, visit, |blocks, physical| {
-                blocks.block_ptr_segmented(physical)
-            });
+            self.compact_with(|blocks, physical| blocks.block_ptr_segmented(physical));
+            return;
         }
-        self.compact_with_access(ends, visit, |blocks, physical| blocks.block_ptr(physical))
+        self.compact_with(|blocks, physical| blocks.block_ptr(physical));
     }
 
-    fn compact_with_access(
+    /// Materializes the active sequence into input.
+    fn compact_with(
         &mut self,
-        ends: &[usize],
-        mut visit: Option<Visit<'_, 'a, T>>,
         mut block_ptr: impl FnMut(&mut BlockStorage<'a, T>, usize) -> *mut T,
-    ) -> Option<unwind::Payload> {
+    ) {
         // Sorting is finished. Reuse the output buffer as the inverse map:
         // physical block ID -> position in block_order.
         let mut block_positions = core::mem::take(&mut self.next_block_order);
         for i in 0..self.block_order.len() {
             block_positions[self.block_order[i] as usize] = i as u32;
         }
-        let input_ptr = self.blocks.input;
-        let mut remaining = ends;
-        let mut begin = 0;
-        let mut callback_panic = None;
-        let mut visit_due = |written: usize| {
-            let Some(callback) = visit.take() else {
-                return;
-            };
-            while let Some((&end, tail)) = remaining.split_first() {
-                if end > written {
-                    break;
-                }
-                if end > begin {
-                    // SAFETY: this bucket is fully materialized and no longer a
-                    // copy source; its input slice does not overlap scratch.
-                    let bucket = unsafe {
-                        core::slice::from_raw_parts_mut(input_ptr.add(begin), end - begin)
-                    };
-                    if let Err(payload) = unwind::catch(|| callback(bucket)) {
-                        callback_panic = Some(payload);
-                        return;
-                    }
-                }
-                begin = end;
-                remaining = tail;
-            }
-            visit = Some(callback);
-        };
         let mut start = 0;
         let mut partial = 0;
         let mut free_logical = 0;
@@ -971,7 +740,6 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             block_positions[source] = output as u32;
             block_positions[destination] = input as u32;
             start += length;
-            visit_due(start);
             if input != output {
                 free_physical = source;
                 free_logical = output;
@@ -989,14 +757,10 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 ptr::copy(from, self.blocks.input.add(start), length);
             }
             start += length;
-            visit_due(start);
         }
-        visit_due(start);
-        debug_assert!(visit.is_none() || remaining.is_empty());
         assert_eq!(start, self.blocks.input_len);
         self.input_materialized = true;
         self.next_block_order = block_positions;
-        callback_panic
     }
 }
 
@@ -1020,49 +784,42 @@ impl<T> Drop for Partition<'_, '_, T> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn integer_root_rounds_up() {
-        // With 5-byte records and one radix bit, the ratio is exactly len / 2.
-        let table = [
-            (0, 0),
-            (1, 1),
-            (2, 1),
-            (3, 2),
-            (7, 2),
-            (8, 2),
-            (9, 3),
-            (199, 10),
-            (200, 10),
-            (201, 11),
-        ];
-        for (len, expected) in table {
-            assert_eq!(balanced_block_size_integer(len, 5, 1), expected);
-        }
-        // A remainder must round up even when the integer quotient is a square.
-        assert_eq!(balanced_block_size_integer(20, 50, 1), 1);
-        assert_eq!(balanced_block_size_integer(21, 50, 1), 2);
-    }
-
     /// Records carry a unique id so a permutation check also proves that no
     /// record was lost or duplicated.
-    #[cfg(feature = "std")]
     fn numbered(len: usize) -> Vec<(u32, u32)> {
         (0..len as u32)
             .map(|id| (id.wrapping_mul(0x9e37_79b9), id))
             .collect()
     }
 
-    #[cfg(feature = "std")]
     fn ids(records: &[(u32, u32)]) -> Vec<u32> {
         let mut ids: Vec<u32> = records.iter().map(|record| record.1).collect();
         ids.sort_unstable();
         ids
     }
 
+    #[test]
+    fn balanced_block_size_rounds_up() {
+        // With 4-byte records and one radix bit the root is sqrt(10 n / 16),
+        // which is exactly 5 records at 40 records and crosses to 6 above it.
+        assert_eq!(balanced_block_size(0, 4, 1), 0);
+        assert_eq!(balanced_block_size(39, 4, 1), 5);
+        assert_eq!(balanced_block_size(40, 4, 1), 5);
+        assert_eq!(balanced_block_size(41, 4, 1), 6);
+        // The width floor keeps narrow records from getting tiny blocks, and
+        // the byte floor covers wide records.
+        assert_eq!(default_block_size(1, 4, 1), BLOCK_BYTES_FLOOR / 4);
+        assert_eq!(default_block_size(1, 128, 1), BLOCK_RECORDS_FLOOR);
+        assert_eq!(default_block_size(1, 1024, 1), BLOCK_RECORDS_FLOOR);
+        assert_eq!(
+            default_block_size(1 << 20, 4, 8),
+            BLOCK_SCALE * balanced_block_size(1 << 20, 4, 8)
+        );
+    }
+
     /// Scatters until the key function panics at call `at`, then checks the
     /// recovered pass: the key is not called again, the unread records land in
     /// bucket 0, and compaction restores the input slice.
-    #[cfg(feature = "std")]
     fn scatter_until_panic(len: usize, block_size: usize, at: usize) {
         let mut records = numbered(len);
         // A pass reads records in input order. Records before the panicking
@@ -1086,10 +843,11 @@ mod tests {
             })
             .collect();
         let mut buffers = Buffers::new();
+        let mut ends = Vec::new();
         let mut calls = 0;
         let panic = {
             let mut sorter = Partition::new(&mut records, 4, block_size, &mut buffers);
-            let (panic, ends) = sorter.step_with_ends(
+            let panic = sorter.step(
                 |record: &(u32, u32)| {
                     calls += 1;
                     if calls == at {
@@ -1097,14 +855,14 @@ mod tests {
                     }
                     (record.0 & 3) as usize
                 },
-                true,
+                &mut ends,
             );
             assert!(panic.is_some(), "panic at {at} of {len} was not caught");
             // The recovery re-scatters unread records without the failed
             // extractor, which must not run a second time.
             assert_eq!(calls, at, "key called after it panicked");
             assert_eq!(ends, expected, "recovered ends at panic {at}");
-            assert!(sorter.compact_with(&ends, None).is_none());
+            sorter.compact();
             // Drop also compacts, so the check must run before the sorter does.
             assert!(sorter.input_materialized, "compaction did not finish");
             panic
@@ -1114,11 +872,10 @@ mod tests {
     }
 
     /// `(len, block_size)` pairs. The short pair has a one-record tail over
-    /// tiny blocks, which Miri can afford; the floors in `default_block_size`
-    /// make a production block longer than the whole short input, so the short
-    /// case sets one. The long pairs are a production block with and without a
-    /// tail, and a longer input where the root formula picks the block size.
-    #[cfg(feature = "std")]
+    /// tiny blocks; the floors in [`default_block_size`] make a production
+    /// block longer than the whole short input, so the short case sets one. The
+    /// long pairs are a production block with and without a tail, and a longer
+    /// input where the root formula picks the block size.
     fn configs() -> Vec<(usize, usize)> {
         let record_bytes = core::mem::size_of::<(u32, u32)>();
         let mut configs = vec![(29, 4), (32, 4)];
@@ -1148,7 +905,6 @@ mod tests {
     /// A scatter panic can leave the pass read up to any record. The recovery
     /// reconstructs the read offset from the bucket cursors and consumed input
     /// blocks, so every offset near a block boundary is checked.
-    #[cfg(feature = "std")]
     #[test]
     fn scatter_panic_keeps_records() {
         for (len, block_size) in configs() {
@@ -1176,70 +932,22 @@ mod tests {
         }
     }
 
-    /// A callback panic must not interrupt materialization: the remaining
-    /// buckets are still copied back, and the payload is returned afterwards.
-    #[cfg(feature = "std")]
     #[test]
-    fn callback_panic_keeps_records() {
+    fn partition_keeps_records_in_bucket_order() {
         for (len, block_size) in configs() {
-            // Every bucket receives records, so each of the four callbacks exists.
-            for at in 1..=4 {
-                let mut records = numbered(len);
-                let mut buffers = Buffers::new();
-                let mut visited = 0;
-                let payload = {
-                    let mut sorter = Partition::new(&mut records, 4, block_size, &mut buffers);
-                    let (panic, ends) =
-                        sorter.step_with_ends(|record: &(u32, u32)| (record.0 & 3) as usize, true);
-                    assert!(panic.is_none());
-                    let mut callback = |bucket: &mut [(u32, u32)]| {
-                        // Buckets materialize in order, so the slice must hold
-                        // exactly the records of the bucket that just landed.
-                        assert!(
-                            bucket
-                                .iter()
-                                .all(|record| (record.0 & 3) as usize == visited)
-                        );
-                        visited += 1;
-                        if visited == at {
-                            std::panic::panic_any(0x71u32);
-                        }
-                    };
-                    let payload = sorter.compact_with(&ends, Some(&mut callback));
-                    // Drop also compacts, so the check must run before it does.
-                    assert!(sorter.input_materialized, "compaction did not finish");
-                    payload
-                };
-                assert_eq!(
-                    *payload
-                        .unwrap_or_else(|| panic!("callback {at} was not called"))
-                        .downcast::<u32>()
-                        .unwrap(),
-                    0x71
-                );
-                assert_eq!(visited, at, "callbacks continued after the panic");
-                assert_eq!(ids(&records), (0..len as u32).collect::<Vec<_>>());
+            let mut records = numbered(len);
+            let mut expected: Vec<_> = records.clone();
+            expected.sort_by_key(|record| record.0 & 3);
+            let mut buffers = Buffers::new();
+            let mut ends = Vec::new();
+            {
+                let mut sorter = Partition::new(&mut records, 4, block_size, &mut buffers);
+                let panic = sorter.step(|record: &(u32, u32)| (record.0 & 3) as usize, &mut ends);
+                assert!(panic.is_none());
+                sorter.compact();
             }
-        }
-    }
-
-    /// The integer form must reproduce the floating-point block size: a
-    /// different block size moves pass and tile boundaries, and so would leave
-    /// the measurements behind the constant.
-    #[cfg(feature = "std")]
-    #[test]
-    fn balanced_forms_agree() {
-        let lengths = (1..=600).chain([1 << 10, 4096, 10_000, 1 << 16, 1 << 20, 1 << 24]);
-        for len in lengths {
-            for record_bytes in [1, 2, 4, 8, 16, 24, 32, 64, 128] {
-                for radix in 1..=MAX_RADIX_BITS {
-                    assert_eq!(
-                        balanced_block_size(len, record_bytes, radix),
-                        balanced_block_size_integer(len, record_bytes, radix),
-                        "len {len}, {record_bytes}-byte records, {radix} bits"
-                    );
-                }
-            }
+            assert_eq!(records, expected);
+            assert_eq!(ends.last().copied(), Some(len));
         }
     }
 }

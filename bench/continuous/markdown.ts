@@ -28,7 +28,7 @@ const API = "https://api.bencher.dev/v0";
 
 interface RenderOptions {
   language: string;
-  // The build configuration, such as "Portable SIMD"; it names the check.
+  // The build configuration; it names the check.
   configuration?: string;
   runUrl: string;
   baseRef?: string;

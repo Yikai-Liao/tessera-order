@@ -8,7 +8,7 @@ The first crates.io release. It provides the stable sort only. Use the implement
 
 | Deliverable | Done when |
 |---|---|
-| First release comparison, default and Portable SIMD builds, on Stable | The complete local session regenerates from its raw directory; README and Performance page show the figures; the release attaches the archive |
+| First release comparison on Stable | The complete local session regenerates from its raw directory; README and Performance page show the figures; the release attaches the archive |
 | Release | Robert Clausecker has been told before publication; `rust/v0.1.0` follows [`RELEASING.md`](RELEASING.md) |
 
 Open questions for this milestone:
@@ -39,6 +39,7 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 | E4 | Half-key views share window operations, but `RootExtractor` retains independent forwarding | Reduce remaining forwarding only without losing backend choices or independent call contexts; validate code generation |
 | E5 | Serial block storage contains Rayon scratch-segment state and a branch | Decide layout and tracking protocol explicitly: both continuous builds enable Rayon; the default feature set is a separate configuration |
 | E6 | `engine.rs` combines routing, sampling, planning, node/tile sorting and scratch | Split along mechanism/invariant boundaries only with inlining and placement controls |
+| E7 | The cost model prices a block split's buckets only through their table, so at ten million records it keeps a 256-bucket node window that a 16-bucket window measured 18% faster | Add a term for the output blocks a block split keeps open, and re-run the paired screen |
 
 ## C++
 
@@ -51,7 +52,7 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 
 - Validate the opt-in baseline-aware queue on hosted Actions without changing coverage or sampling. Retain arrival, queue-wait, measurement-duration and superseded-work evidence before claiming a latency improvement or choosing more measurement capacity. Queue recovery and archival must stay within Actions/API and artifact retention limits; no automatic sample reuse or cross-machine baseline equivalence is assumed.
 
-- Consolidate distribution-sensitive routing into general mechanisms. Child-order reuse and the bucket-order split replace the capped end-run route; evaluate both against current-head Default and Portable SIMD continuous feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
+- Consolidate distribution-sensitive routing into general mechanisms. The two-run rotation, the sampled pivot and the derived digit window replace the per-distribution routes; measure them against current-head continuous feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
 
 - Extend the comparison to cold-cache experiments, additional seeds and threshold cases when an investigation needs them.
 - Add native-CPU placement controls for source A/B studies; existing CGU, alignment and engine-order screens remain process-level evidence.

@@ -1,180 +1,249 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Parallel root partition and completion of materialized buckets.
+//! Parallel root completion.
+//!
+//! A large root runs the serial preparation and split policy, then distributes
+//! the work of one split: the block scatter of a classifier spreads over
+//! disjoint shards, an in-place window fill counts in parallel, and the buckets
+//! the split produces are sorted on the caller's Rayon pool. Each bucket is a
+//! contiguous slice of the input once compaction finishes, so the same serial
+//! recursion sorts it. Small roots and one-thread pools never leave the serial
+//! engine.
 
 use super::*;
-use crate::key::impl_key_half;
-use rayon::Scope;
+use crate::key::Narrowed;
+use rayon::prelude::*;
 
-/// The archived experiment did not reliably win at 512 KiB; keep 1 MiB as a
-/// starting cutoff until controlled measurements retune it.
-const MIN_PARALLEL_BYTES: usize = 1 << 20;
-/// Nearby sizes showed no reliable win in controlled 10M random A/B screens.
-const MIN_TASK_BYTES: usize = 256 * 1024;
+/// Smallest root worth distributing: below sixteen tiles the serial engine wins.
+const MIN_PARALLEL_BYTES: usize = 16 * TILE_BYTES;
 
-/// Sorts large inputs by handing complete root buckets to Rayon's current pool.
-pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: bool>(
-    records: &mut [T],
-    extractor: &mut E,
-) {
+/// Bytes one worker receives before a wider shard count pays off.
+const MIN_SHARD_BYTES: usize = 4 * TILE_BYTES;
+
+/// Sorts a large root by distributing the buckets of one split.
+pub(crate) fn sort<T, E>(records: &mut [T], extractor: &mut E)
+where
+    T: Send,
+    E: Extract<T> + Clone + Send,
+{
     let record_bytes = core::mem::size_of::<T>();
-    let bytes = records.len().saturating_mul(record_bytes);
     if records.len() < 2 || record_bytes == 0 {
         return;
     }
+    let bytes = records.len().saturating_mul(record_bytes);
     if bytes < MIN_PARALLEL_BYTES || rayon::current_num_threads() == 1 {
-        super::sort::<T, E, CACHED>(records, extractor);
-        return;
+        return super::sort(records, extractor);
     }
-
     let tile_bytes = TILE_BYTES
         .max(record_bytes)
         .min(MAX_TILE_RECORDS.saturating_mul(record_bytes));
-    let mut scratch = Scratch::new();
-    let Some(varying) = prepare(records, extractor, tile_bytes) else {
+    let Some(varying) = prepare(records, u128::MAX, extractor) else {
         return;
     };
-
-    // Keep the existing narrow kernels when only one half of a 128-bit key varies.
+    if adaptive(records, tile_bytes, extractor) {
+        return;
+    }
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
-            let mut key = Narrow::<E, 0>(extractor.clone());
-            sort_root::<T, _, CACHED>(records, &mut key, &mut scratch, varying, tile_bytes);
-            return;
+            return sort_narrowed::<T, E, 0>(records, extractor, varying, tile_bytes);
         }
-        if varying & ((1u128 << 64) - 1) == 0 {
-            let mut key = Narrow::<E, 64>(extractor.clone());
-            sort_root::<T, _, CACHED>(records, &mut key, &mut scratch, varying >> 64, tile_bytes);
-            return;
+        if varying & u64::MAX as u128 == 0 {
+            return sort_narrowed::<T, E, 64>(records, extractor, varying >> 64, tile_bytes);
         }
     }
-    sort_root::<T, E, CACHED>(records, extractor, &mut scratch, varying, tile_bytes);
+    sort_varying(records, extractor, varying, tile_bytes);
 }
 
-/// Keeps parallel preparation's helper call contexts separate from serial callers.
-struct RootExtractor<'a, E>(&'a mut E);
-
-impl<T, E: Extract<T>> Extract<T> for RootExtractor<'_, E> {
-    type Value = E::Value;
-
-    fn key(&mut self, record: &T) -> Self::Value {
-        self.0.key(record)
-    }
-
-    fn confirm_ascending(&mut self, records: &[T], previous: Self::Value) -> bool {
-        self.0.confirm_ascending(records, previous)
-    }
-
-    fn insertion_sort(&mut self, records: &mut [T], budget: usize) -> Option<usize> {
-        self.0.insertion_sort(records, budget)
-    }
-}
-
-/// Prepares a large root while preserving the serial entry's call geometry.
-fn prepare<T, E: Extract<T>>(
+/// Continues a large root on the 64-bit half of its key that varies.
+fn sort_narrowed<T, E, const SHIFT: usize>(
     records: &mut [T],
-    extractor: &mut E,
+    extractor: &E,
+    varying: u128,
     tile_bytes: usize,
-) -> Option<u128> {
-    // A separate instantiation preserves the serial helpers' caller ranges and
-    // inlining contexts. Backend methods still delegate to the original extractor.
-    let mut root = RootExtractor(extractor);
-    let extractor = &mut root;
-    let record_bytes = core::mem::size_of::<T>();
-    let sampled = probe_order(records, extractor);
-    match sampled {
-        Order::Ascending => return None,
-        Order::Descending { strict } => {
-            if strict {
-                reverse_strictly(records);
+) where
+    T: Send,
+    E: Extract<T> + Clone + Send,
+{
+    let mut narrow = Narrowed::<E, SHIFT>(extractor.clone());
+    sort_varying(records, &mut narrow, varying, tile_bytes);
+}
+
+/// Distributes the buckets of one root split on the current pool.
+fn sort_varying<T, E>(records: &mut [T], extractor: &mut E, varying: u128, tile_bytes: usize)
+where
+    T: Send,
+    E: Extract<T> + Clone + Send,
+{
+    let bytes = records.len().saturating_mul(core::mem::size_of::<T>());
+    let low = varying.trailing_zeros() as usize;
+    let span = bit_len(varying) - low;
+    // One window over the whole span finishes a narrow root: counts come from
+    // disjoint shards and the runs are then filled in parallel.
+    if span <= FILL_BITS {
+        let digit = Digit {
+            shift: low,
+            width: span,
+        };
+        if extractor.fill_window_parallel(records, digit) {
+            return;
+        }
+    }
+    let shards = rayon::current_num_threads().min((bytes / MIN_SHARD_BYTES).max(1));
+    let mut scratch = Scratch::new();
+    let mut ends = Vec::new();
+    let choice = choose_node(records, varying, &mut scratch.planner, extractor);
+    let (ranges, candidate) = match choice.route {
+        // A slice that already holds its two runs needs no pass at all: one
+        // rotation and two scans finish it, so there is nothing to distribute.
+        cost::Route::Rotate => {
+            let top_bit = 1u128 << (bit_len(varying) - 1);
+            let (boundary, front_set) =
+                two_runs(records, top_bit, extractor).expect("rotation was priced from this slice");
+            Sorter {
+                scratch: &mut scratch,
+                extractor: &mut *extractor,
+                tile_bytes,
+            }
+            .rotate(records, varying, boundary, front_set);
+            return;
+        }
+        cost::Route::Pivot => {
+            let pivot = sample_pivot(records, extractor).expect("pivot was priced from this slice");
+            let classify = move |extractor: &mut E, record: &T| {
+                let key = extractor.key(record);
+                usize::from(key >= pivot) + usize::from(key > pivot)
+            };
+            block::partition_parallel(
+                records,
+                4,
+                classify,
+                extractor.clone(),
+                &mut scratch.block,
+                shards,
+                &mut ends,
+            );
+            let (below, equal_end) = (ends[0], ends[1]);
+            if below == records.len() || equal_end == below {
+                // A changing key left the whole slice in one band; a digit
+                // partition removes candidate bits instead of repeating it.
+                let digit = choose_node(records, varying, &mut scratch.planner, extractor)
+                    .route
+                    .digit()
+                    .expect("a node route falls back to a split");
+                partition_root(records, digit, extractor, &mut scratch, shards, &mut ends);
+                (
+                    ranges_from(&ends),
+                    varying & !digit.mask::<E::Value>().to_u128(),
+                )
             } else {
-                reverse_stably(records, extractor);
-            }
-            return None;
-        }
-        Order::Unsorted => {
-            // The parallel entry already rejected roots below 1 MiB, so this
-            // root cannot fit the serial insertion leaf's one-tile budget.
-            let probe_len = (tile_bytes / record_bytes).max(2).min(records.len());
-            if insertion_probe(records, extractor, probe_len) {
-                return None;
-            }
-        }
-        Order::Flat => {}
-    }
-
-    let varying = block::varying_key_bits(records, extractor);
-    if varying == 0 {
-        return None;
-    }
-    if sampled == Order::Flat {
-        // An equal sampled pair rules out strictly descending order; confirmed
-        // descending keys must therefore retain the stable reversal.
-        match confirm_order(records, extractor) {
-            Order::Ascending => return None,
-            Order::Descending { .. } => {
-                reverse_stably(records, extractor);
-                return None;
-            }
-            Order::Unsorted | Order::Flat => {}
-        }
-    }
-    Some(varying)
-}
-
-/// Owns a half-key view so parallel jobs can clone the original extractor.
-#[derive(Clone)]
-struct Narrow<E, const SHIFT: usize>(E);
-
-impl_key_half!(Narrow<E, SHIFT>);
-
-/// A batch of retired root buckets, retained as separate exclusive borrows.
-///
-/// Compaction transfers each borrow only after retiring its destination and
-/// copy sources. The Rayon scope joins every job before the input is reused.
-struct Job<'records, T> {
-    records: usize,
-    buckets: Vec<&'records mut [T]>,
-}
-
-impl<'records, T> Job<'records, T> {
-    fn new() -> Self {
-        Self {
-            records: 0,
-            buckets: Vec::new(),
-        }
-    }
-
-    fn push(&mut self, bucket: &'records mut [T]) {
-        self.records += bucket.len();
-        self.buckets.push(bucket);
-    }
-
-    fn bytes(&self) -> usize {
-        self.records.saturating_mul(core::mem::size_of::<T>())
-    }
-
-    fn run<E: Extract<T> + Clone + Send, const CACHED: bool>(
-        &mut self,
-        mut extractor: E,
-        candidate: u128,
-        tile_bytes: usize,
-        pool: &Pool<T>,
-    ) {
-        let mut scratch = pool.take();
-        for child in &mut self.buckets {
-            if child.len() > 1 {
-                let varying = scan_varying_bits(child, candidate, &mut extractor);
-                Sorter::<T, E, CACHED> {
-                    scratch: &mut scratch,
-                    extractor: &mut extractor,
-                    tile_bytes,
+                // The equal band is finished; both outer bands keep every bit.
+                let mut ranges = Vec::with_capacity(2);
+                for (start, end) in [(0, below), (equal_end, records.len())] {
+                    if end > start + 1 {
+                        ranges.push((start, end));
+                    }
                 }
-                .sort_node(child, varying);
+                (ranges, varying)
             }
         }
-        pool.give(scratch);
+        cost::Route::Split { digit, .. } => {
+            partition_root(records, digit, extractor, &mut scratch, shards, &mut ends);
+            (
+                ranges_from(&ends),
+                varying & !digit.mask::<E::Value>().to_u128(),
+            )
+        }
+        cost::Route::Flat { .. } => unreachable!("a root range never finishes flat"),
+    };
+    sort_ranges(records, &ranges, candidate, extractor, tile_bytes);
+}
+
+/// Partitions a root range by one digit window through the sharded block engine.
+fn partition_root<T, E>(
+    records: &mut [T],
+    digit: Digit,
+    extractor: &E,
+    scratch: &mut Scratch<T>,
+    shards: usize,
+    ends: &mut Vec<usize>,
+) where
+    T: Send,
+    E: Extract<T> + Clone + Send,
+{
+    let classify = |extractor: &mut E, record: &T| digit.classify(extractor, record);
+    block::partition_parallel(
+        records,
+        1 << digit.width,
+        classify,
+        extractor.clone(),
+        &mut scratch.block,
+        shards,
+        ends,
+    );
+}
+/// The ranges worth sorting out of a set of bucket ends.
+fn ranges_from(ends: &[usize]) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::with_capacity(ends.len());
+    let mut start = 0;
+    for &end in ends {
+        if end > start + 1 {
+            ranges.push((start, end));
+        }
+        start = end;
     }
+    ranges
+}
+
+/// Sorts disjoint ranges of `records` on the current pool.
+fn sort_ranges<T, E>(
+    records: &mut [T],
+    ranges: &[(usize, usize)],
+    candidate: u128,
+    extractor: &E,
+    tile_bytes: usize,
+) where
+    T: Send,
+    E: Extract<T> + Clone + Send,
+{
+    if ranges.is_empty() {
+        return;
+    }
+    let pool = Pool::new();
+    let mut jobs = Vec::with_capacity(ranges.len());
+    let mut rest = records;
+    let mut position = 0;
+    for &(start, end) in ranges {
+        let (_, tail) = rest.split_at_mut(start - position);
+        let (child, tail) = tail.split_at_mut(end - start);
+        rest = tail;
+        position = end;
+        jobs.push((child, extractor.clone()));
+    }
+    // Miri interprets the same handoff without Rayon's scheduler.
+    if cfg!(miri) {
+        for (child, mut extractor) in jobs {
+            let mut scratch = pool.take();
+            Sorter {
+                scratch: &mut scratch,
+                extractor: &mut extractor,
+                tile_bytes,
+            }
+            .sort_slice(child, candidate);
+            pool.give(scratch);
+        }
+        return;
+    }
+    let pool = &pool;
+    jobs.into_par_iter().for_each(|(child, mut extractor)| {
+        let mut scratch = pool.take();
+        Sorter {
+            scratch: &mut scratch,
+            extractor: &mut extractor,
+            tile_bytes,
+        }
+        .sort_slice(child, candidate);
+        pool.give(scratch);
+    });
 }
 
 /// Recycles scratch between jobs without holding the lock during user code.
@@ -205,202 +274,29 @@ impl<T> Pool<T> {
     }
 }
 
-/// Partitions the root and sorts each bucket as soon as compaction releases it.
-fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: bool>(
-    records: &'records mut [T],
-    extractor: &mut E,
-    scratch: &mut Scratch<T>,
-    varying: u128,
-    tile_bytes: usize,
-) {
-    let node_bytes = records.len().saturating_mul(core::mem::size_of::<T>());
-    let low = varying.trailing_zeros() as usize;
-    let top = bit_len(varying);
-    if node_bytes < 4 * tile_bytes {
-        Sorter::<T, E, CACHED> {
-            scratch,
-            extractor,
-            tile_bytes,
-        }
-        .sort_node(records, varying);
-        return;
-    }
-    let shards = rayon::current_num_threads().min((node_bytes / MIN_TASK_BYTES).max(1));
-    if top - low <= SPLIT_BITS {
-        if extractor.try_count_window_parallel(records, low, top - low) {
-            return;
-        }
-        let limit = bucket_limit::<T>(records.len(), top - low);
-        let ends = block::partition_digit_parallel_with_finish(
-            records,
-            top - low,
-            low,
-            extractor.clone(),
-            &mut scratch.block,
-            shards,
-            block::BucketFinish {
-                limit,
-                sort: &|_| {},
-                visit: &mut |_| {},
-            },
-        );
-        scratch.block.recycle_ends(ends);
-        return;
-    }
-
-    let mut keys = [KeyValue::<T, E>::from_usize(0); MODE_SAMPLE_LEN];
-    sample_keys(records, &mut keys, extractor);
-    // A node the order already groups is finished sequentially: the run split
-    // needs no partition pass, so there is nothing to share.
-    let top_bit = 1u128 << (top - 1);
-    if sample_mode(&mut keys).is_some()
-        || two_runs(records, top_bit, extractor).is_some_and(|(_, set)| !set)
-    {
-        Sorter::<T, E, CACHED> {
-            scratch,
-            extractor,
-            tile_bytes,
-        }
-        .sort_node(records, varying);
-        return;
-    }
-
-    let digit = choose_split_digit(records, top, tile_bytes, extractor);
-    let candidate = varying & !digit.mask::<E::Value>().to_u128();
-    if candidate == 0 {
-        let ends = block::partition_digit_parallel_with_visit(
-            records,
-            digit.width,
-            digit.shift,
-            extractor.clone(),
-            &mut scratch.block,
-            shards,
-            &mut |_| {},
-        );
-        scratch.block.recycle_ends(ends);
-        return;
-    }
-
-    let pool = Pool::new();
-    let pool_ref = &pool;
-    let root_extractor = extractor.clone();
-    let child_extractor = extractor.clone();
-    rayon::scope(move |scope| {
-        let mut pending: Option<Job<'records, T>> = None;
-        let mut visit = |bucket: &'records mut [T]| {
-            let mut job = pending.take().unwrap_or_else(Job::new);
-            job.push(bucket);
-            if job.bytes() >= MIN_TASK_BYTES {
-                spawn_job::<T, E, CACHED>(
-                    scope,
-                    job,
-                    candidate,
-                    child_extractor.clone(),
-                    tile_bytes,
-                    pool_ref,
-                );
-            } else {
-                pending = Some(job);
-            }
-        };
-        let finish = |child: &mut [T]| {
-            let mut key = child_extractor.clone();
-            let mut scratch = pool_ref.take();
-            let varying = scan_varying_bits(child, candidate, &mut key);
-            let tile_bytes = tile_bytes
-                .max(child.len().saturating_mul(core::mem::size_of::<T>()))
-                .min(MAX_TILE_RECORDS.saturating_mul(core::mem::size_of::<T>()));
-            Sorter::<T, E, CACHED> {
-                scratch: &mut scratch,
-                extractor: &mut key,
-                tile_bytes,
-            }
-            .sort_node(child, varying);
-            pool_ref.give(scratch);
-        };
-        let limit = bucket_limit::<T>(records.len(), digit.width);
-        let ends = block::partition_digit_parallel_with_finish(
-            records,
-            digit.width,
-            digit.shift,
-            root_extractor,
-            &mut scratch.block,
-            shards,
-            block::BucketFinish {
-                limit,
-                sort: &finish,
-                visit: &mut visit,
-            },
-        );
-        drop(visit);
-        if let Some(job) = pending {
-            spawn_job::<T, E, CACHED>(
-                scope,
-                job,
-                candidate,
-                child_extractor.clone(),
-                tile_bytes,
-                pool_ref,
-            );
-        }
-        scratch.block.recycle_ends(ends);
-    });
-}
-
-/// Bounds staging to square-root space and declines infeasible root layouts.
-///
-/// The 1M/10M paired screens keep the existing small-input route. The cap
-/// admits balanced 10M roots with 256 buckets while bounding suspended
-/// staging; it deliberately declines larger or concentrated buckets.
-fn bucket_limit<T>(len: usize, width: usize) -> usize {
-    let limit = len.isqrt().saturating_mul(16);
-    if len < (1 << 21) || core::mem::size_of::<T>() > 16 || limit.saturating_mul(1 << width) < len {
-        0
-    } else {
-        limit
-    }
-}
-
-/// Queues a group of complete buckets on the current Rayon scope.
-fn spawn_job<
-    'scope,
-    T: Send + 'scope,
-    E: Extract<T> + Clone + Send + 'scope,
-    const CACHED: bool,
->(
-    scope: &Scope<'scope>,
-    mut job: Job<'scope, T>,
-    candidate: u128,
-    extractor: E,
-    tile_bytes: usize,
-    pool: &'scope Pool<T>,
-) {
-    scope.spawn(move |_| job.run::<E, CACHED>(extractor, candidate, tile_bytes, pool));
-}
-
-#[cfg(test)]
-mod bucket_borrow_tests;
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::key::Direct;
 
     #[test]
-    fn owned_half_keys_keep_encoded_bits() {
-        let key = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210u128;
-        assert_eq!(Narrow::<_, 0>(Direct).key(&key), 0xfedc_ba98_7654_3210);
-        assert_eq!(Narrow::<_, 64>(Direct).key(&key), 0x0123_4567_89ab_cdef);
-    }
-
-    #[test]
-    fn owned_half_windows_keep_offsets_and_payloads() {
-        crate::key::tests::check_half_windows::<0>(
-            &mut Narrow::<_, 0>(Direct),
-            &mut Narrow::<_, 0>(crate::key::ByKey(|record: &(u128, usize)| record.0)),
-        );
-        crate::key::tests::check_half_windows::<64>(
-            &mut Narrow::<_, 64>(Direct),
-            &mut Narrow::<_, 64>(crate::key::ByKey(|record: &(u128, usize)| record.0)),
-        );
+    fn bucket_handoff_sorts_disjoint_ranges() {
+        // Sequential ownership fixture for the pool handoff: every range gets
+        // its own scratch and extractor, and no range reaches its neighbours.
+        let mut records: Vec<u64> = (0..if cfg!(miri) { 40 } else { 400 })
+            .map(|id| (id * 37) % 64)
+            .collect();
+        let ranges = [
+            (0, records.len() / 2),
+            (records.len() / 2 + 3, records.len()),
+        ];
+        // Every range sorts on its own: the records between ranges are not part
+        // of any job and keep their place.
+        let mut expected = records.clone();
+        for &(start, end) in &ranges {
+            expected[start..end].sort_unstable();
+        }
+        sort_ranges(&mut records, &ranges, u128::from(u64::MAX), &Direct, 64);
+        assert_eq!(records, expected);
     }
 }

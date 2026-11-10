@@ -90,13 +90,6 @@ jobs:
           path: artifact/default
           github-token: ${{ github.token }}
           run-id: ${{ steps.source.outputs.build_id }}
-      - uses: actions/download-artifact@v8
-        if: steps.source.outputs.eligible == 'true'
-        with:
-          name: bench-rust
-          path: artifact/portable-simd
-          github-token: ${{ github.token }}
-          run-id: ${{ steps.source.outputs.build_id }}
       - name: Package and push image
         if: steps.source.outputs.eligible == 'true'
         id: image
@@ -107,7 +100,7 @@ jobs:
         run: |
           # The image definition is trusted; only the executable comes from the build.
           image="registry.bencher.dev/$BENCHER_PROJECT:$TAG"
-          chmod +x artifact/default/bench artifact/portable-simd/bench
+          chmod +x artifact/default/bench
           mkdir -p artifact/bench/continuous artifact/tools
           cp bench/continuous/worker.ts artifact/bench/continuous/
           cp tools/process.ts artifact/tools/
@@ -125,7 +118,7 @@ jobs:
       - name: Measure on Bencher Bare Metal
         id: measure
         if: steps.source.outputs.eligible == 'true'
-        # Publication reads per-build outcomes even if one remote measurement fails.
+        # Publication records the measurement outcome even if it fails remotely.
         continue-on-error: true
         env:
           BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
@@ -144,7 +137,7 @@ jobs:
           pnpm --silent tools continuous submit --project "$BENCHER_PROJECT" \
             --image "$IMAGE" --hash "$HASH" --out "$RUNNER_TEMP/measurement" "${args[@]}"
       - name: Publish report
-        if: always() && (steps.check.outputs.default || steps.check.outputs['portable-simd'])
+        if: always() && steps.check.outputs.default
         uses: actions/github-script@v9
         env:
           HASH: ${{ steps.source.outputs.hash }}
@@ -154,7 +147,6 @@ jobs:
           BASE_HASH: ${{ steps.source.outputs.base_hash }}
           BASELINE_REASON: ${{ steps.source.outputs.baseline_reason }}
           CHECK_DEFAULT: ${{ steps.check.outputs.default }}
-          CHECK_SIMD: ${{ steps.check.outputs['portable-simd'] }}
           REPORT_DIR: ${{ runner.temp }}/measurement
           CANCELLED: ${{ job.status == 'cancelled' }}
         with:
@@ -175,7 +167,7 @@ jobs:
               baselineReason: env.BASELINE_REASON,
               variants: VARIANTS.map(variant => ({
                 variant,
-                checkId: variant.id === 'default' ? env.CHECK_DEFAULT : env.CHECK_SIMD,
+                checkId: env.CHECK_DEFAULT,
                 outcome: outcomes[variant.id] || (env.CANCELLED === 'true' ? 'cancelled' : 'failure'),
                 reportPath: `${env.REPORT_DIR}/bencher-${variant.id}.json`,
               })),

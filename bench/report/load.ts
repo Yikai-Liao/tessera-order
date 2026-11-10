@@ -53,7 +53,7 @@ function parseManifest(value: unknown): Manifest {
     !["smoke", "release", "custom"].includes(String(value.suite))
   )
     throw new Error("unsupported measurement schema or suite");
-  if (!["default", "portable-simd"].includes(String(value.build))) throw new Error("unknown build");
+  assertString(value.build);
   for (const name of [
     "commit",
     "rustc",
@@ -216,16 +216,9 @@ export async function loadRun(directories: string[], partial = false): Promise<D
       throw new Error("host fingerprints differ; cannot merge runs");
     dataset.host = host;
     first = false;
-    for (const build of ["default", "portable-simd"]) {
-      let value: unknown;
-      try {
-        value = await readJson(
-          join(directory, build === "default" ? "manifest.json" : `manifest-${build}.json`),
-        );
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
-        throw e;
-      }
+    {
+      const build = "default";
+      const value = await readJson(join(directory, "manifest.json"));
       const m = parseManifest(value);
       if (m.build !== build) throw new Error("manifest build disagrees with file name");
       if (dataset.manifests.has(build) && !isDeepStrictEqual(m, dataset.manifests.get(build)))
@@ -259,24 +252,6 @@ export async function loadRun(directories: string[], partial = false): Promise<D
       else throw new Error("unknown block record");
     }
     dataset.memory.push(...((await readJsonLines(join(directory, "memory.jsonl"))) as Memory[]));
-  }
-  const baseline = dataset.manifests.get("default"),
-    simd = dataset.manifests.get("portable-simd");
-  if (baseline && simd) {
-    for (const field of [
-      "commit",
-      "source_sha256",
-      "rustc",
-      "target",
-      "profile",
-      "opt_level",
-      "debug",
-      "cargo_encoded_rustflags",
-      "cargo_lock",
-    ]) {
-      if (!isDeepStrictEqual(baseline[field], simd[field]))
-        throw new Error(`builds do not share a source and compiler configuration: ${field}`);
-    }
   }
   validateRun(dataset);
   return dataset;

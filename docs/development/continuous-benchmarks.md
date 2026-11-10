@@ -1,6 +1,6 @@
 # Continuous benchmarks
 
-Rust changes and pushes to `main` run Default and Portable SIMD Criterion suites on [Bencher Bare Metal](https://bencher.dev/docs/explanation/images/). These measurements flag changes to investigate; they do not isolate source changes from code-placement effects. The [local measurement protocol](benchmarking.md#command-capabilities) provides paired experiments and defines their evidence limits.
+Rust changes and pushes to `main` run a Criterion suite on [Bencher Bare Metal](https://bencher.dev/docs/explanation/images/). These measurements flag changes to investigate; they do not isolate source changes from code-placement effects. The [local measurement protocol](benchmarking.md#command-capabilities) provides paired experiments and defines their evidence limits.
 
 ## Read feedback from a PR
 
@@ -15,7 +15,7 @@ pnpm -s tools status --pr 123 --details
 The command uses the authenticated GitHub CLI (`gh auth login`) and reads an exact remote commit's workflows and benchmark verdicts. Output is compact JSON by default: inspect `target.head`, `workflows[].state`, `benchmarks[].state` and `benchmarks[].title`. A current-head report URL appears in `report`. Add `--details` only when full `details.checks[].output.summary` or `details.comment.body` is needed. It does not submit jobs or change the PR. See [the tooling guide](tooling.md) for local reproduction, logging and command groups.
 
 1. Match the returned `target.head` to the PR's current commit. Read `benchmarks[].state` and `benchmarks[].title`; use `--details` for `details.checks[].output.summary` and the matching `details.comment.body`; stale-head feedback is not the current result.
-2. Check **both** `Benchmarks (rust, Default)` and `Benchmarks (rust, Portable SIMD)`. A green `Track benchmarks` workflow does not imply those checks passed. Distinguish a measured alert, a failed measurement and a missing comparable baseline.
+2. Check `Benchmarks (rust, Default)`. A green `Track benchmarks` workflow does not imply that check passed. Distinguish a measured alert, a failed measurement and a missing comparable baseline.
 3. A missing comment or pending check means feedback is not ready, not clean. If checks are absent, inspect the linked `Build benchmarks` run, then `Track benchmarks`. For baseline or queueing problems, use [Pipeline](#pipeline), [Testbeds](#within-job-scheduling) and [Alerts](#alerts) below.
 4. For stacked PRs, verify the comparison uses the parent at the resolved base commit, not the whole stack against `main`.
 5. Read each build summary and its alerted cases. Negative latency changes mean less run time. A failed or unmeasured build is not the clean opposite of a measured alert.
@@ -34,10 +34,10 @@ Read the sections below when changing tracking, investigating missing feedback o
 
 ## Pipeline
 
-- [Build](../../.github/workflows/bench-build.yml): unprivileged, including forks; calls `pnpm tools continuous build` to compile Default and Portable SIMD sequentially in one job, both with Rayon enabled. The build verifies selected serial and parallel outputs with Criterion's untimed test mode. Static glibc preserves allocator behavior in `api` mode. Artifacts are `bench-rust-default` and `bench-rust`.
+- [Build](../../.github/workflows/bench-build.yml): unprivileged, including forks; calls `pnpm tools continuous build` to compile the benchmark with Rayon enabled. The build verifies selected serial and parallel outputs with Criterion's untimed test mode. Static glibc preserves allocator behavior in `api` mode. The artifact is `bench-rust-default`.
 - [Track](../../.github/workflows/bench-track.yml): trusted default-branch code resolves PR identity via the API, skips closed/superseded heads, wraps executables with the trusted [supervisor](../../bench/continuous/worker.ts), and uses `pnpm tools continuous submit` to submit image digests. Executables run only on Bencher without credentials. Each configuration has a separate timeout; failure of one does not skip the other.
-- Builds share compiler and flags; Portable SIMD adds runtime dispatch, not forced ISA or `target-cpu=native` (the build and measurement hosts differ). Both use `-C llvm-args=-x86-branches-within-32B-boundaries` for Intel JCC boundary hazards and request 64-byte loop and non-fallthrough block alignment with `-C llvm-args=-align-loops=64` and `-C llvm-args=-align-all-nofallthru-blocks=6` to reduce placement sensitivity. These benchmark-only flags do not eliminate all placement effects.
-- Bencher Free has one remote slot and a five-minute job limit. Each run times out at 240 seconds; target at most 200–210 seconds including preparation, validation and statistics. The two configurations remain two sequential remote jobs, not four serial/parallel jobs. Do not overlap parallel cases to meet the budget; reduce coverage rather than weaken sampling or increase the timeout. The shared `bencher-bare-metal` concurrency group remains the safety lock across both measurements; after queue activation only the selected tracker should wait there, rather than using its FIFO order as scheduling policy. It does not coordinate other repositories in the organization.
+- The build shares compiler and flags across configurations; SIMD is selected at run time, not through forced ISA or `target-cpu=native` (the build and measurement hosts differ). Both use `-C llvm-args=-x86-branches-within-32B-boundaries` for Intel JCC boundary hazards and request 64-byte loop and non-fallthrough block alignment with `-C llvm-args=-align-loops=64` and `-C llvm-args=-align-all-nofallthru-blocks=6` to reduce placement sensitivity. These benchmark-only flags do not eliminate all placement effects.
+- Bencher Free has one remote slot and a five-minute job limit. Each run times out at 240 seconds; target at most 200–210 seconds including preparation, validation and statistics. Configuration and API group share one sequential remote job, never parallel jobs. Do not overlap parallel cases to meet the budget; reduce coverage rather than weaken sampling or increase the timeout. The shared `bencher-bare-metal` concurrency group remains the safety lock across both measurements; after queue activation only the selected tracker should wait there, rather than using its FIFO order as scheduling policy. It does not coordinate other repositories in the organization.
 
 Tracker changes in a PR take effect only after merging: `workflow_run` uses default-branch code. During this rollout, the executable lists only serial IDs unless the supervisor explicitly sets `TESSERA_BENCH_PARALLEL=4`. An old tracker can therefore measure the baseline PR without rejecting new IDs. After merge the trusted supervisor enables both APIs and the first real `main` run seeds the new parallel histories; the bootstrap PR has no cloud parallel comparison. Never label that missing comparison as a demonstrated parallel gain.
 
@@ -49,7 +49,7 @@ A separate [diagnostics workflow](../../.github/workflows/bench-diagnostics.yml)
 
 Priority is: pending main ancestors required by an active PR's exact baseline; ready latest-head PR builds; other main builds. Main tickets follow the freshly fetched trusted `origin/main` first-parent history (not the pinned code `HEAD`), with build-run ID breaking same-commit ties; build completion and dispatch order do not define main order. A completed ticket checkpoints the prefix previously validated by its worker. Rejected future dispatches cannot block older work, but need native reruns when their prefix is ready. The metadata-only history fetch avoids downloading historical blobs; a build newer than the fetched graph fails closed, and native reruns refresh the graph without changing the executable-code pin. Rewritten/non-first-parent main history needs reconciliation. After three PR attempts, an available main build gets a turn. A paginated open-PR snapshot filters closed/superseded heads, and older successful builds of the same head are excluded before per-build identity lookups. Candidates still pass full source validation, again in the worker, so that snapshot is only a request-budget filter, not submission authority. Every main build remains a ticket, including failed or unfinished builds that block later main samples. The first main-ref tracker dispatch owns each build ticket; later duplicate dispatches are ignored, while native reruns retain that owner. Failed main measurements require recovery rather than silently advancing history; unrelated PRs with existing baselines may continue.
 
-Baseline readiness reads both existing head-attached checks and their Bencher JSON reports, validating the tracker workflow, branch, hash, Testbed and nonempty measurements. A measured alert can supply a PR baseline; a green tracking workflow, missing report or a different hash cannot. Advancing main additionally requires both checks from the ticket owner, started after its current native attempt began; older same-hash samples and mixed attempts cannot complete that ticket. Ambiguous timestamps fail closed. The tracker revalidates its ticket and PR baseline before submission, and existing publication checks still reject missing or wrong-hash start points. Post-submission branch-identity validation remains a roadmap item; the publisher alone cannot distinguish baseline branches sharing a hash. Coverage, sampling, thresholds, build flags, two sequential remote measurements and exclusive parallel cases are unchanged. This prioritizes waiting work, not total throughput; no measured waiting-time reduction is claimed.
+Baseline readiness reads both existing head-attached checks and their Bencher JSON reports, validating the tracker workflow, branch, hash, Testbed and nonempty measurements. A measured alert can supply a PR baseline; a green tracking workflow, missing report or a different hash cannot. Advancing main additionally requires the measured check from the ticket owner, started after its current native attempt began; older same-hash samples and mixed attempts cannot complete that ticket. Ambiguous timestamps fail closed. The tracker revalidates its ticket and PR baseline before submission, and existing publication checks still reject missing or wrong-hash start points. Post-submission branch-identity validation remains a roadmap item; the publisher alone cannot distinguish baseline branches sharing a hash. Coverage, sampling, thresholds, build flags, two sequential remote measurements and exclusive parallel cases are unchanged. This prioritizes waiting work, not total throughput; no measured waiting-time reduction is claimed.
 
 ### Activation and recovery
 
@@ -67,8 +67,7 @@ The [catalog](../../bench/catalog.toml) is the authority for configuration ident
 
 | Configuration | Features | Testbed | Hardware spec |
 |---|---|---|---|
-| Default | `std`, `rayon` | `intel-v1-hybrid-v1` | `intel-v1` |
-| Portable SIMD | `std`, `portable-simd`, `rayon` | `intel-v1-portable-simd-hybrid-v1` | `intel-v1` |
+| Default | `rayon` | `intel-v1-hybrid-v1` | `intel-v1` |
 
 These Testbeds separate concurrent measurements from the older serial histories. A first `main` sample establishes each baseline; older-base PRs may need rebasing after that sample exists. Artifacts predating the listing/selection protocol must be rebuilt. Never seed one configuration with another's measurements. Changed compiler, flags or hardware need a new Testbed unless the transition is explicitly justified here. Changed inputs/batches need new IDs or reset thresholds; adding cases or changing sample counts retains the Testbed.
 
@@ -108,7 +107,7 @@ Ownership: `report.ts` derives comparisons, `matrix.ts` aligns builds, `history.
 
 ### Builds are columns, cases are rows
 
-A separately compiled configuration has its own Testbed, check and column. Current runs have serial and four-thread API row groups within each executable; historical mode groups remain reportable, not separate builds or charts. Compute geometric means within each build and API group; a secondary all-case mean must not hide parallel rows among the larger serial suite. New groups explicitly show missing baselines. Combining builds can also hide a regression. Count a case once even if both builds alert. A failed build remains visible and must never be described as a clean opposite of a measured alert.
+A separately compiled configuration would have its own Testbed, check and column; the catalog currently ships one. Current runs have serial and four-thread API row groups within each executable; historical mode groups remain reportable, not separate builds or charts. Compute geometric means within each build and API group; a secondary all-case mean must not hide parallel rows among the larger serial suite. New groups explicitly show missing baselines. Combining builds can also hide a regression. Count a case once even if both builds alert. A failed build remains visible and must never be described as a clean opposite of a measured alert.
 
 Minus means less run time. The summary gives per-build means and alerts; expanded tables give every changed case and baseline/limits/current values. Alert verdicts come only from thresholds, not chart emphasis.
 
@@ -124,7 +123,7 @@ The trusted tracker alone has `contents: write` and writes SVGs to `benchmark-im
 
 Load completed reports across reset heads and same-commit reruns, filtered by PR, Testbed and hardware spec, bounded by the current measurement time. Compare every point against the latest report's baseline over one fixed set of cases with a baseline and positive values in every run. Changes to coverage then affect the whole series, not one point.
 
-A single-API history retains its overall geometric mean. Mixed-API histories show separate fixed-cohort serial and four-thread aggregate rows in the same two build columns; an API without comparable history shows an unavailable row, never a flat passing series. Failed builds remain unavailable columns in both figures. These are changes relative to the same API/thread-count baseline, not parallel speedups over serial. Include a case when its largest/smallest PR value minus one reaches 5% (`MIN_SWING`) or it still has an upper alert; show it in every build without a row cap. Rows share a vertical scale spanning at least 5%, with the base as the dashed axis. This preserves fixed regressions in history without changing today's alert verdict.
+A single-API history retains its overall geometric mean. Mixed-API histories show separate fixed-cohort serial and four-thread aggregate rows in the same build columns; an API without comparable history shows an unavailable row, never a flat passing series. Failed builds remain unavailable columns in both figures. These are changes relative to the same API/thread-count baseline, not parallel speedups over serial. Include a case when its largest/smallest PR value minus one reaches 5% (`MIN_SWING`) or it still has an upper alert; show it in every build without a row cap. Rows share a vertical scale spanning at least 5%, with the base as the dashed axis. This preserves fixed regressions in history without changing today's alert verdict.
 
 ## Adding a language
 
@@ -134,12 +133,12 @@ Add an unprivileged build artifact per configuration and a tracker using the sam
 
 1. Claim a public Free-plan project (unclaimed jobs are limited to one minute).
 2. Configure the `benchmark` environment for `main` only, without reviewers; set `BENCHER_PROJECT` and secret `BENCHER_API_KEY`. Registry login uses the project slug.
-3. After merging tracker changes, run `Build benchmarks` on `main` to seed both baselines.
-4. Optionally require both named benchmark checks if alerts should block merging pending review; do not require only the green tracking workflow.
+3. After merging tracker changes, run `Build benchmarks` on `main` to seed the baseline.
+4. Optionally require the named benchmark check if alerts should block merging pending review; do not require only the green tracking workflow.
 
 ## Local use
 
 ```sh
 cargo bench -p tessera-bench --bench smoke -- 'rust/u64/random/65536/s1/api' --exact
-cargo bench -p tessera-bench --bench smoke --features tessera-sort/portable-simd -- 'rust/u64/random/65536/s1/api' --exact
+cargo bench -p tessera-bench --bench smoke -- 'rust/u64/random/65536/s1/api' --exact
 ```

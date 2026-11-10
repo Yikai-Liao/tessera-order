@@ -110,34 +110,23 @@ function speedScale(ratios: number[]): Chart["scale"] {
 
 // Speed of one variant relative to slice::sort in the same blocks: the
 // slice::sort time over the variant's, per block, then the median.
-function speedOnCase(
-  summaries: Map<string, Summary>,
-  id: string,
-  variant: string,
-  build = "default",
-) {
-  const std = summaries.get(measurementId(build, id, "std-stable")),
-    s = summaries.get(measurementId(build, id, variant));
+function speedOnCase(summaries: Map<string, Summary>, id: string, variant: string) {
+  const std = summaries.get(measurementId("default", id, "std-stable")),
+    s = summaries.get(measurementId("default", id, variant));
   if (!std || !s) return null;
   return variant === "tessera" ? std.ratio : median(std.ratios.map((r, i) => r / s.ratios[i]));
 }
 
 // The geometric mean of those speeds over cases, or null if one is missing.
-function speedOver(
-  summaries: Map<string, Summary>,
-  ids: string[],
-  variant: string,
-  build = "default",
-) {
-  const values = ids.map((id) => speedOnCase(summaries, id, variant, build));
+function speedOver(summaries: Map<string, Summary>, ids: string[], variant: string) {
+  const values = ids.map((id) => speedOnCase(summaries, id, variant));
   return values.every((v): v is number => v !== null) ? geomean(values) : null;
 }
 const u64Cases = (n: number) =>
   shapes.map((shape) => caseId({ ty: "u64", distribution: shape, len: n }));
 
-const kindLegend = (simd: boolean): [Swatch[], string][] => [
+const kindLegend = (): [Swatch[], string][] => [
   [["primary"], "Tessera"],
-  ...(simd ? [[["alternate"], "Tessera, Portable SIMD"] as [Swatch[], string]] : []),
   [["radix"], "other radix sorts"],
   [["comparison"], "comparison sorts"],
 ];
@@ -148,19 +137,9 @@ function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figur
     cell: sortName(v.name),
     kind: family(v.name),
     tone: toneOf(v.name),
-    simd: false,
     stable: v.stable,
     speeds: lengths.map((n) => speedOver(summaries, u64Cases(n), v.name)),
   }));
-  if (dataset.manifests.has("portable-simd"))
-    entries.push({
-      cell: { input: "Tessera, Portable SIMD", sub: "", tag: "", strong: true },
-      kind: "radix sort, SIMD build",
-      tone: "primary" as Tone,
-      simd: true,
-      stable: true,
-      speeds: lengths.map((n) => speedOver(summaries, u64Cases(n), "tessera", "portable-simd")),
-    });
   const at = lengths.indexOf(LARGE);
   const complete = entries
     .filter((e) => e.speeds.every((v) => v !== null))
@@ -172,7 +151,7 @@ function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figur
   const rank = 1 + others.filter((e) => e.speeds[at] > anchor.speeds[at]).length;
   const row = (e: (typeof complete)[number]): Row => ({
     name: e.cell,
-    marks: [{ value: e.speeds[at], tone: e.tone, hollow: e.simd }],
+    marks: [{ value: e.speeds[at], tone: e.tone }],
     cells: [times(e.speeds[at])],
     strong: e.cell.strong,
   });
@@ -194,7 +173,7 @@ function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figur
       ].filter((g) => g.rows.length),
       scale: speedScale(complete.map((e) => e.speeds[at])),
       axis: SPEED_AXIS,
-      legend: kindLegend(complete.some((e) => e.simd)),
+      legend: kindLegend(),
     }),
     table: markdownTable(
       [
@@ -216,8 +195,6 @@ function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figur
 interface Standing {
   speeds: { variant: string; speed: number }[];
   tessera: number;
-  // The Portable SIMD build, anchored to slice::sort in its own process.
-  simd: number | null;
   rank: number;
 }
 // Where Tessera stands among every eligible sort on one row, all measured
@@ -238,7 +215,6 @@ function standing(
   return {
     speeds,
     tessera,
-    simd: speedOver(summaries, ids, "tessera", "portable-simd"),
     rank: 1 + speeds.filter((v) => v.speed > tessera).length,
   };
 }
@@ -251,7 +227,6 @@ function fieldRow(name: NameCell, s: Standing): Row {
       ...s.speeds
         .filter((v) => v.variant !== "std-stable")
         .map((v): Mark => ({ value: v.speed, tone: toneOf(v.variant) })),
-      ...(s.simd === null ? [] : [{ value: s.simd, tone: "primary" as Tone, hollow: true }]),
       { value: s.tessera, tone: "primary" },
     ],
     cells: [times(s.tessera), ordinal(s.rank)],
@@ -270,14 +245,12 @@ function fieldTitle(standings: Standing[], unit: string) {
 }
 
 function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
-  const simd = rows.some(([, s]) => s.simd !== null);
   return markdownTable(
     [
       "Row",
       ...(nsPerKey ? ["Tessera time per key"] : []),
       "Tessera rank",
       "Tessera speed vs slice::sort",
-      ...(simd ? ["Portable SIMD speed"] : []),
       "Other sorts, fastest first",
     ],
     rows.map(([label, s], i) => [
@@ -285,7 +258,6 @@ function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
       ...(nsPerKey ? [formatNs(nsPerKey[i])] : []),
       `${ordinal(s.rank)} of ${s.speeds.length + 1}`,
       times(s.tessera),
-      ...(simd ? [s.simd === null ? "—" : times(s.simd)] : []),
       [...s.speeds]
         .sort((a, b) => b.speed - a.speed)
         .map((v) => `${displayName(v.variant)} ${times(v.speed)}`)
@@ -344,11 +316,9 @@ function renderInputs(
       guide: `${formatLength(n)} ${ty === "u64" ? "u64 keys" : record.label}; each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to slice::sort`,
       columns: ["Speed", "Rank"],
       groups,
-      scale: speedScale(
-        standings.flatMap((s) => [s.tessera, s.simd ?? s.tessera, ...s.speeds.map((v) => v.speed)]),
-      ),
+      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
       axis: SPEED_AXIS,
-      legend: kindLegend(standings.some((s) => s.simd !== null)),
+      legend: kindLegend(),
     }),
     table: fieldTable(plotted, nsPerKey),
   };
@@ -380,11 +350,9 @@ function renderTypes(dataset: Dataset, summaries: Map<string, Summary>): Figure 
       guide: `${formatLength(LARGE)} elements; speed relative to slice::sort, geometric mean over the 10 baseline input patterns`,
       columns: ["Speed", "Rank"],
       groups,
-      scale: speedScale(
-        standings.flatMap((s) => [s.tessera, s.simd ?? s.tessera, ...s.speeds.map((v) => v.speed)]),
-      ),
+      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
       axis: SPEED_AXIS,
-      legend: kindLegend(standings.some((s) => s.simd !== null)),
+      legend: kindLegend(),
     }),
     table: fieldTable(plotted),
   };
@@ -461,7 +429,7 @@ function renderMemory(dataset: Dataset): Figure | null {
       },
       marker: { value: input, label: "input size" },
       axis: ["← less memory", "more memory →"],
-      legend: [...kindLegend(false), [["hollow"], "random input"], [["reference"], "input size"]],
+      legend: [...kindLegend(), [["hollow"], "random input"], [["reference"], "input size"]],
     }),
     table: markdownTable(["Sort", "Random input", `Worst of ${patterns.length} inputs`], plotted),
   };

@@ -34,7 +34,6 @@ interface LocalOptions {
   out: string;
   filter?: string;
   plan: Plan;
-  simd: boolean;
   cpu?: string;
   layoutSeeds?: number[];
   layoutControl?: LayoutControl;
@@ -279,7 +278,7 @@ async function measureBlock(
 
 /** Compare an immutable working-tree snapshot with a commit, retaining only results. */
 export async function compareLocal(options: LocalOptions) {
-  const { root, out, simd, cpu } = options;
+  const { root, out, cpu } = options;
   if (options.layoutControl && !options.layoutSeeds)
     throw new Error("Layout controls require --layout-seeds");
   assertWorkerEnvironment();
@@ -317,7 +316,7 @@ export async function compareLocal(options: LocalOptions) {
         root,
         workspace,
         baseline,
-        simd ? ["portable-simd"] : [],
+        [],
         seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
         options.layoutControl,
       );
@@ -331,7 +330,7 @@ export async function compareLocal(options: LocalOptions) {
         builds,
         rustc: builds.current.rustc,
         flags: builds.current.cargo_encoded_rustflags,
-        configuration: simd ? "portable-simd" : "default",
+        configuration: "default",
         host: {
           platform: platform(),
           release: release(),

@@ -14,20 +14,13 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-default = ["std"]
-# Catch a key-function panic, move every record back into the caller's slice and
-# resume the panic. Without this feature the crate is `no_std`: it uses `core` and
-# `alloc`, needs a global allocator, and aborts on a panic during block partitioning.
-std = []
-# Vector scans and prefix sums through `fearless_simd`. Requires std and Rust
-# 1.89. Dispatches at run time on x86; other targets use their baseline ISA.
-portable-simd = ["std", "dep:fearless_simd"]
+default = ["rayon"]
 # Rayon entry points. Large roots scatter across disjoint shards and sort
-# completed buckets in the caller's pool. Requires std, even without defaults.
-rayon = ["std", "dep:rayon"]
+# completed buckets in the caller pool.
+rayon = ["dep:rayon"]
 
 [dependencies]
-fearless_simd = { version = "1.2", optional = true }
+fearless_simd = "1.2"
 rayon = { version = "1.12", optional = true }
 
 [package.metadata.docs.rs]

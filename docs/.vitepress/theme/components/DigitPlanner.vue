@@ -2,16 +2,18 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { bucketColor } from "../palette";
-import { chooseTileLeaf, type Digit, planDigits } from "../sim/digits";
+import { chooseTileRoute, type Digit, planFlat } from "../sim/digits";
 
 const BITS = 32;
 const varying = ref((1n << 32n) - 1n);
 const width = ref(14);
 const sampledDistinct = ref(2);
 
-const tileLeaf = computed(() => chooseTileLeaf(8192, varying.value, width.value, sampledDistinct.value, BITS));
-const tileLeafLabel = computed(() =>
-  ({ done: "already ordered", insertion: "insertion sort", msd: "MSD", lsd: "LSD" })[tileLeaf.value],
+const tileRoute = computed(() => chooseTileRoute(8192, varying.value, width.value, sampledDistinct.value, BITS));
+const tileRouteLabel = computed(() =>
+  ({ done: "already ordered", insertion: "insertion sort", flat: "flat plan", split: "counted split" })[
+    tileRoute.value
+  ],
 );
 const presets: [string, bigint][] = [
   ["all 32 bits", (1n << 32n) - 1n],
@@ -25,12 +27,11 @@ function toggle(bit: number) {
 }
 const isSet = (bit: number) => ((varying.value >> BigInt(bit)) & 1n) === 1n;
 
-const plan = computed(() => planDigits(varying.value, width.value, BITS));
-const tileLeafReason = computed(() => {
+const plan = computed(() => planFlat(varying.value, width.value, BITS));
+const tileRouteReason = computed(() => {
   if (varying.value === 0n) return "No key bits vary, so no pass is needed.";
-  if (plan.value.length <= 2) return "The plan needs at most two LSD passes, so the engine skips sampling.";
-  if (sampledDistinct.value <= 2) return "The low-fanout sample selects MSD directly.";
-  return "The estimated MSD cost is compared with the LSD pass count.";
+  if (plan.value.length <= 3) return "The flat plan needs few passes, so it wins without a sample.";
+  return "The model prices the flat passes against one split whose children a spread sample names.";
 });
 /** Fixed windows of the full width from the top bit down, for comparison. */
 const fixed = computed<Digit[]>(() => {
@@ -125,7 +126,7 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
     </svg>
     <table class="tsr-table">
       <thead>
-        <tr><th>Plan</th><th>Passes</th><th>Digit widths, in LSD order</th><th>Bucket slots cleared and scanned</th></tr>
+        <tr><th>Plan</th><th>Passes</th><th>Digit widths, lowest first</th><th>Bucket slots cleared and scanned</th></tr>
       </thead>
       <tbody>
         <tr>
@@ -148,8 +149,8 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
     </p>
     <p class="tsr-note">
       For 8,192 <code>u64</code> keys with the selected {{ width }}-bit table limit, this sample selects
-      <strong>{{ tileLeafLabel }}</strong>. The engine itself uses a 14-bit limit at this tile size.
-      {{ tileLeafReason }}
+      <strong>{{ tileRouteLabel }}</strong>. The engine itself uses a 14-bit limit at this tile size.
+      {{ tileRouteReason }}
     </p>
   </figure>
 </template>

@@ -5,13 +5,12 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { renderFigures } from "./charts.ts";
 import { createFixture } from "./fixture.ts";
 import { collectWarnings, writeReport } from "./index.ts";
 import { loadRun, validateRun } from "./load.ts";
 import { measurementId, summarize } from "./model.ts";
 
-async function writeFixture(directory: string, simd = false, dataset = createFixture(simd)) {
+async function writeFixture(directory: string, dataset = createFixture()) {
   await Promise.all([
     writeFile(join(directory, "host.json"), JSON.stringify(dataset.host)),
     ...[...dataset.manifests].flatMap(([build, manifest]) =>
@@ -185,10 +184,10 @@ test("raw results round trip", async () => {
   }
 });
 
-test("optimization and debug settings must agree across timing, memory and SIMD", async () => {
+test("optimization and debug settings must agree across timing and memory", async () => {
   const dir = await mkdtemp(join(tmpdir(), "tessera-build-config-"));
   try {
-    const dataset = await writeFixture(dir, true);
+    const dataset = await writeFixture(dir);
     await loadRun([dir]);
     for (const field of ["opt_level", "debug"]) {
       const different = field === "opt_level" ? "1" : "true";
@@ -201,26 +200,8 @@ test("optimization and debug settings must agree across timing, memory and SIMD"
         );
         await writeFile(memoryPath, JSON.stringify(manifest));
       }
-      const simd = dataset.manifests.get("portable-simd")!;
-      const simdPaths = ["manifest-portable-simd.json", "memory-manifest-portable-simd.json"];
-      for (const path of simdPaths)
-        await writeFile(join(dir, path), JSON.stringify({ ...simd, [field]: different }));
-      await assert.rejects(loadRun([dir]), new RegExp(`compiler configuration: ${field}`));
-      for (const path of simdPaths) await writeFile(join(dir, path), JSON.stringify(simd));
     }
   } finally {
     await rm(dir, { recursive: true });
   }
-});
-
-test("SIMD shares the anchor", () => {
-  const dataset = createFixture(true);
-  validateRun(dataset);
-  const charts = renderFigures(dataset, summarize(dataset));
-  assert.match(charts[0].table, /Tessera, Portable SIMD/);
-  const values = summarize(dataset);
-  const id = "u64/random/1000/s1";
-  const defaultStd = values.get(measurementId("default", id, "std-stable"))!.ratio;
-  const simdStd = values.get(measurementId("portable-simd", id, "std-stable"))!.ratio;
-  assert.ok(Math.abs(simdStd / defaultStd - 1.25) < 0.001);
 });

@@ -2,30 +2,27 @@
 
 //! Rayon entry points for stable sorting.
 //!
-//! The parallel engine shares the serial probes and node/tile sorting.
-//! Large inputs partition the root across disjoint shards. Bounded buckets
-//! sort in staging and write directly to final bands; other layouts retain
-//! parallel block permutation and overlapping materialized-bucket sorting.
-//! Small inputs and one-thread pools use the serial engine.
+//! The parallel engine shares the serial preparation, split policy and
+//! recursion. A large root splits once and hands the buckets of that split to
+//! the caller's pool; small inputs and one-thread pools use the serial engine.
 
+use crate::RadixKey;
+use crate::engine;
 use crate::key::{ByKey, Direct};
-use crate::{RadixKey, engine};
 
 /// Sorts keys stably through the Rayon entry point.
 ///
 /// Available with the `rayon` feature. Ordering and stability are the same as
 /// [`crate::stable_sort`], including floats and [`Reverse`](core::cmp::Reverse).
-/// Small inputs and one-thread pools use the serial engine; large inputs
-/// partition the root and sort completed buckets across Rayon's current pool.
+/// Small inputs and one-thread pools use the serial engine; large inputs split
+/// the root and sort its buckets across Rayon's current pool.
 ///
 /// # Memory
 ///
-/// For pool width `P`, auxiliary space is O(P√n) for fixed record size and
-/// key width. Root scratch and directories use O(√(nP)); bounded bucket
-/// staging adds O(R√n), where the fixed root fan-out `R` is at most 4096.
-/// Reentrant callbacks may suspend more staged buckets than there are workers.
-/// Direct counting uses O(PR) histogram storage. No contiguous n-record output
-/// buffer is allocated. Rayon runtime storage and thread stacks are separate.
+/// For pool width `P`, auxiliary space is O(P sqrt(n)) for fixed record size and
+/// key width: the sharded root keeps one block directory per shard, and each
+/// pool task owns one tile of scratch. No contiguous n-record output buffer is
+/// allocated. Rayon runtime storage and thread stacks are separate.
 ///
 /// # Examples
 ///
@@ -35,36 +32,34 @@ use crate::{RadixKey, engine};
 /// assert_eq!(keys, [3, 7, 7, 19, 42]);
 /// ```
 pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
-    engine::parallel::sort::<K, _, false>(values, &mut Direct);
+    engine::parallel::sort::<K, _>(values, &mut Direct);
 }
 
 /// Sorts records stably by a key through the Rayon entry point.
 ///
 /// Available with the `rayon` feature. Ordering, stability and record
 /// preservation are the same as [`crate::stable_sort_by_key`]. Records need
-/// `Send`, but do not need `Sync`, `Copy`, `Clone`, `Default` or `Ord`. Small
-/// inputs and one-thread pools use the serial engine.
+/// `Send`, but do not need `Sync`, `Copy`, `Clone`, `Default` or
+/// `Ord`. Small inputs and one-thread pools use the serial engine.
 ///
 /// # Key function
 ///
-/// `key` must implement `Fn + Sync` so Rayon jobs can borrow it concurrently.
+/// `key` must implement `Fn + Sync` so Rayon jobs can read it concurrently.
 /// It does not need `Send` or `Clone`. It may be called several times per
 /// record, in any order, and should return the same key for a record throughout
-/// the call. Inconsistent keys leave the result's
-/// order unspecified, with every record still present exactly once.
+/// the call. Inconsistent keys leave the result's order unspecified, with every
+/// record still present exactly once.
 ///
 /// # Panics
 ///
 /// If `key` panics, every record is restored to `values`, in an unspecified
 /// order, before the panic propagates to the caller. No record is dropped or
-/// duplicated. The `rayon` feature enables `std`, so recovery is available
-/// during block partitioning as well.
+/// duplicated.
 ///
 /// # Memory
 ///
-/// Uses the same O(P√n) auxiliary-space bound as [`par_stable_sort`] for
-/// pool width `P` and fixed record size and key width. Reentrant callbacks can
-/// retain staging for up to the fixed root fan-out, not just `P` buckets.
+/// Uses the same O(P sqrt(n)) auxiliary-space bound as [`par_stable_sort`] for
+/// pool width `P` and fixed record size and key width.
 ///
 /// # Examples
 ///
@@ -81,5 +76,5 @@ where
     K: RadixKey,
     F: Fn(&T) -> K + Sync,
 {
-    engine::parallel::sort::<T, _, true>(values, &mut ByKey(&key));
+    engine::parallel::sort::<T, _>(values, &mut ByKey(&key));
 }

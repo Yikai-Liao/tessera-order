@@ -133,19 +133,7 @@ fn permute_with_fault<T: Send>(
         }
     }
     let mut snapshots = Snapshots(cells(boundaries.len().checked_mul(block_size).unwrap()));
-    // Calling block_ptr repeatedly must not create fresh overlapping T borrows.
-    // It returns pointers from the original input ancestor or Vec allocations.
-    let addresses = Addresses(
-        (0..count)
-            .map(|id| {
-                if sorter.blocks.scratch_segments.is_empty() {
-                    sorter.blocks.block_ptr(id)
-                } else {
-                    sorter.blocks.block_ptr_segmented(id)
-                }
-            })
-            .collect(),
-    );
+    let addresses = Addresses(sorter.blocks.physical_addresses());
     if parallel {
         let _ = rayon::current_num_threads();
     }

@@ -464,6 +464,24 @@ impl<'a, T> BlockStorage<'a, T> {
         }
     }
 
+    /// Builds an ID-ordered address table for parallel completion.
+    ///
+    /// Addresses retain the original input or scratch allocation's provenance,
+    /// without forming initialized `T` references. The allocations must remain
+    /// alive and unresized while the table is used; callers own synchronization.
+    #[cfg(feature = "rayon")]
+    fn physical_addresses(&mut self) -> Vec<*mut T> {
+        (0..self.block_count)
+            .map(|physical| {
+                if self.scratch_segments.is_empty() {
+                    self.block_ptr(physical)
+                } else {
+                    self.block_ptr_segmented(physical)
+                }
+            })
+            .collect()
+    }
+
     /// Returns a block pointer when scratch is held in shard allocations.
     #[cfg(feature = "rayon")]
     fn block_ptr_segmented(&mut self, physical: usize) -> *mut T {

@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { type Command, InvalidArgumentError, Option } from "commander";
 import { stringify as stringifyToml } from "smol-toml";
 import { cpuListSchema } from "../bench/affinity.ts";
+import { parseLayoutSeeds } from "../bench/local/layout.ts";
 import { renderLocalReport } from "../bench/local/report.ts";
 import { compareLocal } from "../bench/local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
@@ -91,7 +92,7 @@ async function report(directories: string[], partial = false) {
   }
   if (local) {
     if (paths.length !== 1 || partial)
-      throw new Error("Local reports require one directory and nine complete blocks");
+      throw new Error("Local reports require one directory and nine complete blocks per layout");
     await renderLocalReport(paths[0]);
   } else await writeReport(paths, partial);
 }
@@ -108,8 +109,22 @@ export function experimentCommands(program: Command) {
 
   measurement("commit [revision]", "Compare the working tree with a commit (default: HEAD)")
     .option("--filter <regex>", "additional case ID pattern", parseCasePattern)
+    .option(
+      "--layout-seeds <seeds>",
+      "comma-separated fixed LLD layout seeds (Linux GNU)",
+      (value) => {
+        try {
+          return parseLayoutSeeds(value);
+        } catch (error) {
+          throw new InvalidArgumentError((error as Error).message);
+        }
+      },
+    )
     .action(
-      async (baseline: string | undefined, options: MeasurementOptions & { filter?: string }) => {
+      async (
+        baseline: string | undefined,
+        options: MeasurementOptions & { filter?: string; layoutSeeds?: number[] },
+      ) => {
         const plan = await loadPlan(options.plan ?? "local", selectAxes(options));
         if (plan.harness !== "smoke")
           throw new Error("Commit comparisons require a smoke harness plan");
@@ -124,6 +139,7 @@ export function experimentCommands(program: Command) {
             cpu: options.cpu,
             simd: Boolean(options.simd),
             filter: options.filter,
+            layoutSeeds: options.layoutSeeds,
           }),
         );
       },

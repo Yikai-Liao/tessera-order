@@ -28,6 +28,7 @@ export interface BuildProvenance {
   opt_level: string;
   debug: string;
   features: string[];
+  rustc_args?: string[];
 }
 
 /** Materialize repository-local links; reject escaping targets and directory cycles.
@@ -162,15 +163,19 @@ export async function buildBenchmark(
   target: string,
   name: "smoke" | "compare",
   features: string[],
-  options: { targetTriple?: string; env?: NodeJS.ProcessEnv } = {},
+  options: { targetTriple?: string; env?: NodeJS.ProcessEnv; rustcArgs?: string[] } = {},
 ) {
+  if (options.rustcArgs && name !== "smoke")
+    throw new Error("Final rustc arguments require a smoke benchmark build");
   const build = async (env = options.env) =>
     buildArtifact(
       await command(
         "cargo",
         [
           ...(name === "smoke"
-            ? ["bench", "--bench", name, "--no-run"]
+            ? options.rustcArgs
+              ? ["rustc", "--profile", "bench", "--bench", name]
+              : ["bench", "--bench", name, "--no-run"]
             : ["build", "--release", "--bin", name, "--bin", "memory"]),
           "--locked",
           "-p",
@@ -180,6 +185,7 @@ export async function buildBenchmark(
           target,
           ...(options.targetTriple ? ["--target", options.targetTriple] : []),
           ...(features.length ? ["--features", features.join(",")] : []),
+          ...(options.rustcArgs ? ["--", ...options.rustcArgs] : []),
         ],
         { cwd: tree, capture: true, env },
       ),
@@ -187,11 +193,15 @@ export async function buildBenchmark(
     );
   const reference = await build();
   const flags = reference.provenance.cargo_encoded_rustflags;
-  if (ALIGNMENT_RUSTFLAGS.every((flag) => flags.split("\x1f").includes(flag))) return reference;
+  const aligned = ALIGNMENT_RUSTFLAGS.every((flag) => flags.split("\x1f").includes(flag));
   // Cargo resolves string/array, target and environment settings itself. An
   // encoded override before this build would discard some of those settings.
-  return build({
-    ...options.env,
-    CARGO_ENCODED_RUSTFLAGS: [...ALIGNMENT_RUSTFLAGS, flags].filter(Boolean).join("\x1f"),
-  });
+  const result = aligned
+    ? reference
+    : await build({
+        ...options.env,
+        CARGO_ENCODED_RUSTFLAGS: [...ALIGNMENT_RUSTFLAGS, flags].filter(Boolean).join("\x1f"),
+      });
+  if (options.rustcArgs) result.provenance.rustc_args = options.rustcArgs;
+  return result;
 }

@@ -34,10 +34,9 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 
 | ID | Debt | Acceptance |
 |---|---|---|
-| E1 | Owned `Narrow` and borrowed `KeyHalf` repeat window shifting | Share the representation only with preserved window invariants and paired source/placement evidence |
 | E2 | Parallel preparation repeats serial tile geometry, probes and half dispatch | Consolidate only if separate serial inlining contexts retain their measured behavior |
 | E3 | Parallel direct-key counting repeats serial counting and fill | Constrain shared semantics and establish both configurations' performance before merging mechanisms |
-| E4 | Window operations require forwarding through `KeyHalf`, `Narrow` and `RootExtractor` | Reduce forwarding obligations without losing bit-offset or direct/user-extractor distinctions; validate code generation |
+| E4 | Half-key views share window operations, but `RootExtractor` retains independent forwarding | Reduce remaining forwarding only without losing backend choices or independent call contexts; validate code generation |
 | E5 | Serial block storage contains Rayon scratch-segment state and a branch | Decide layout and tracking protocol explicitly: both continuous builds enable Rayon; the default feature set is a separate configuration |
 | E6 | `engine.rs` combines routing, sampling, planning, node/tile sorting and scratch | Split along mechanism/invariant boundaries only with inlining and placement controls |
 

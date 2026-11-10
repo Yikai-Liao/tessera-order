@@ -415,6 +415,21 @@ Each case ran nine rotating baseline/control/current process blocks. Ratios use 
 
 The random-input losses remain open. This process-level screen does not identify their cause among shared preparation, sampling, digit planning, tile finishing and generated-code placement. It supplies neither in-process source attribution nor whole-engine performance acceptance; parallel APIs, other lengths and key widths remain unmeasured here. No distribution or size exception is added to compensate. Raw results and provenance remain outside Git in the `one-backend-screen` session.
 
+### Active block directory and shard adoption
+
+The structural checkpoint after `e4fea65` replaces the overloaded bucket-count field with an active block range and makes shard adoption a complete partition-guard operation. It preserves allocation and record-copy work, bounded staging, compaction overlap and callback recovery. Serial/Rayon tests and doctests, both Clippy configurations, site checks, four serial block Miri tests and thirteen parallel block Miri tests pass. Independent review accepted the structure after the unsafe adoption contract was made explicit about original shard offsets and recovery ownership.
+
+A maintained nine-block serial screen against `e4fea65` uses `--types u64,row_u64 --distributions random --lengths 65536,2097152 --cpu 2`, with the same host/compiler/alignment as the required-SIMD screen. Raw results and provenance remain outside Git in `block-directory-screen-v2`:
+
+| Case | Current / baseline | Block range | A/A range | Screen |
+|---|---:|---|---|---|
+| `u64/random/65536` | 1.0007 | 0.9974–1.1737 | 0.9968–1.0032 | within A/A |
+| `row_u64/random/65536` | 0.9991 | 0.9974–1.0077 | 0.9974–1.0026 | within A/A |
+| `u64/random/2097152` | 0.9976 | 0.9901–1.0066 | 0.9918–1.0082 | within A/A |
+| `row_u64/random/2097152` | 1.0014 | 0.9955–1.0055 | 0.9963–1.0037 | within A/A |
+
+The first attempt (`block-directory-screen`) timed out before nine blocks; it has no complete verdict and is not pooled with the second run. This screen neither measures parallel adoption latency nor establishes whole-engine performance acceptance; one direct 65,536-record block also had a 17.37% excursion despite the median remaining within A/A.
+
 ### Conditional tile-work candidate
 
 The candidate after `cb6be7f` replaces uniform-depth estimation and the two-bucket override with sample-weighted child work. Structural review found the replacement preserves the reason for constant-child finishing, but performance remains unaccepted. Serial/Rayon tests, Clippy, site checks and all 17 engine Miri tests pass. A fixed-work comparison of clean `e3da30a` against `b8968b6` already showed additional random-input instructions: 8.62% / 6.28% at 1,000 records and 1.99% / 3.32% at 65,536, for direct `u64` / keyed rows. Identical baseline repeats had identical instruction totals; simulated events do not establish a latency cause.

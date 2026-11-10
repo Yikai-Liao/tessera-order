@@ -70,7 +70,7 @@ fn permute_with_fault<T: Send>(
     fail_after: Option<usize>,
 ) {
     let count = sorter.block_order.len();
-    let head = sorter.bucket_count;
+    let head = sorter.active_blocks.start;
     let block_size = sorter.blocks.block_size;
     let workers = workers.max(1).min(count);
     // Each split cycle has at least cap blocks. There are at most count/cap

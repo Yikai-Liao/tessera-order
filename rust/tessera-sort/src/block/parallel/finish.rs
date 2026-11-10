@@ -245,7 +245,7 @@ pub(super) fn try_finish<T: Send>(
     }
     let block_size = sorter.blocks.block_size;
     let count = sorter.block_order.len();
-    let head = sorter.bucket_count;
+    let head = sorter.active_blocks.start;
     let input_len = sorter.blocks.input_len;
     let mut owners = vec![FREE; count];
     let mut locations = Vec::new();

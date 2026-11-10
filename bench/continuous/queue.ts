@@ -24,6 +24,9 @@ interface Tracker {
   event: string;
   display_title: string;
   status: string | null;
+  head_branch: string | null;
+  head_repository: { full_name: string };
+  run_attempt: number;
 }
 
 type Source = Record<string, string>;
@@ -50,8 +53,25 @@ async function sourceFor(args: ActionArguments, id: number) {
 }
 
 /** A measured alert is a usable sample; a green workflow alone is not proof. */
-export async function baselineReady(args: ActionArguments, branch: string, hash: string) {
+export async function baselineReady(
+  args: ActionArguments,
+  branch: string,
+  hash: string,
+  owner?: Pick<Tracker, "id" | "run_attempt">,
+) {
   const { github, context } = args;
+  const started = owner
+    ? Date.parse(
+        (
+          await github.rest.actions.getWorkflowRunAttempt({
+            ...context.repo,
+            run_id: owner.id,
+            attempt_number: owner.run_attempt,
+          })
+        ).data.run_started_at ?? "",
+      )
+    : 0;
+  if (owner && !Number.isFinite(started)) throw new Error("Tracker attempt has no start time");
   const checks = await github.paginate(github.rest.checks.listForRef, {
     ...context.repo,
     ref: hash,
@@ -65,14 +85,17 @@ export async function baselineReady(args: ActionArguments, branch: string, hash:
         check.name !== `Benchmarks (rust, ${variant.name})` ||
         check.app?.slug !== "github-actions" ||
         check.status !== "completed" ||
-        !/^[1-9]\d*$/.test(check.external_id ?? "")
+        !/^[1-9]\d*$/.test(check.external_id ?? "") ||
+        (owner &&
+          (check.external_id !== String(owner.id) ||
+            !(Date.parse(check.started_at ?? "") > started)))
       )
         continue;
       const { data: tracker } = await github.rest.actions.getWorkflowRun({
         ...context.repo,
         run_id: Number(check.external_id),
       });
-      if (tracker.path !== ".github/workflows/bench-track.yml") continue;
+      if (tracker.path.split("@")[0] !== ".github/workflows/bench-track.yml") continue;
       // Read the existing report link, not a second measurement-receipt format.
       const url = check.output.summary?.match(
         /\[JSON\]\((https:\/\/api\.bencher\.dev\/v0\/projects\/[^/()]+\/reports\/[a-f0-9-]+)\)/,
@@ -142,11 +165,25 @@ async function nextBuild(
     })
   ).filter((run) => Date.parse(run.created_at) >= Date.parse(since));
   const attempts = new Map<number, Tracker>();
+  // The first eligible dispatch owns the ticket, including all its native reruns.
+  // Queued duplicates neither invalidate that owner nor become independent attempts.
   for (const run of trackers
-    .filter((run) => run.id !== currentRun && run.event === "workflow_dispatch")
+    .filter(
+      (run) =>
+        run.event === "workflow_dispatch" &&
+        run.head_branch === "main" &&
+        run.head_repository.full_name === `${repo.owner}/${repo.repo}`,
+    )
     .sort((a, b) => a.id - b.id)) {
     const id = run.display_title.match(/^Track benchmarks · ([1-9]\d*)$/)?.[1];
-    if (id) attempts.set(Number(id), run);
+    if (id && !attempts.has(Number(id))) attempts.set(Number(id), run);
+  }
+  if (requested) {
+    if (attempts.get(requested)?.id !== currentRun) {
+      core.notice("Duplicate or ineligible tracker; only the original owner may measure or rerun.");
+      return;
+    }
+    attempts.delete(requested);
   }
   const ready = new Map<string, boolean>();
   const measured = async (branch: string, hash: string) => {
@@ -177,7 +214,10 @@ async function nextBuild(
   const lastMain = main
     .filter((run) => attempts.has(run.id))
     .sort((a, b) => attempts.get(b.id)!.id - attempts.get(a.id)!.id)[0];
-  if (lastMain && !(await measured("main", lastMain.head_sha))) {
+  if (
+    lastMain &&
+    !(await baselineReady(args, "main", lastMain.head_sha, attempts.get(lastMain.id)))
+  ) {
     core.notice(
       `Main build ${lastMain.id} has no complete sample; rerun its tracker before advancing main.`,
     );

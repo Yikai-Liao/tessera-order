@@ -102,6 +102,11 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
           run(10),
           run(90, { head_sha: "old" }),
           run(92, { event: "workflow_run", workflow_id: 2 }),
+          run(93, {
+            event: "workflow_dispatch",
+            workflow_id: 2,
+            path: ".github/workflows/bench-track.yml@refs/heads/main",
+          }),
         ],
       },
       { workflow_runs: [run(11, { status: "in_progress", conclusion: null, run_attempt: 2 })] },
@@ -157,7 +162,7 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
   assert.match(text, /Install Bencher: failure/);
   assert.match(text, /Measurement failed/);
   assert.match(text, /portable-simd: missing/);
-  assert.ok(!(await f.requests()).some((path) => path.includes("/92")));
+  assert.ok(!(await f.requests()).some((path) => /\/(92|93)(\/|$)/.test(path)));
 });
 
 test("PR status joins merge workflows without accepting stale comments", async (t) => {
@@ -197,7 +202,8 @@ test("PR status joins merge workflows without accepting stale comments", async (
     "actions/runs/70": run(70, {
       workflow_id: 2,
       name: "Track benchmarks",
-      event: "workflow_run",
+      event: "workflow_dispatch",
+      path: ".github/workflows/bench-track.yml",
       head_sha: "trusted",
     }),
     "issues/49/comments?per_page=100": [

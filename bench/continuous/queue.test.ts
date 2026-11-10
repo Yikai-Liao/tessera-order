@@ -38,11 +38,27 @@ test("priority keeps exact dependencies ahead, ready PRs next, and main starvati
   assert.equal(chooseBuild(build(1, "push", "failure"), [], 0), undefined);
 });
 
+function tracker(id: number, build: number, overrides: object = {}) {
+  return {
+    id,
+    event: "workflow_dispatch",
+    status: "completed",
+    run_attempt: 1,
+    head_branch: "main",
+    head_repository: { full_name: "owner/tessera" },
+    display_title: `Track benchmarks · ${build}`,
+    ...overrides,
+  };
+}
+
 function fixture(
   t: TestContext,
   options: {
     builds?: QueueBuild[];
     attempts?: number[];
+    trackers?: ReturnType<typeof tracker>[];
+    samples?: { owner: number; started: string; configuration?: string }[];
+    attemptStarted?: string;
     busy?: boolean;
     baseline?: number;
     missing?: boolean;
@@ -54,12 +70,8 @@ function fixture(
   const outputs: Record<string, string> = {};
   const notices: string[] = [];
   let dispatched = "";
-  const trackers = (options.attempts ?? []).map((id, index) => ({
-    id: 100 + index,
-    event: "workflow_dispatch",
-    status: "completed",
-    display_title: `Track benchmarks · ${id}`,
-  }));
+  const trackers =
+    options.trackers ?? (options.attempts ?? []).map((id, index) => tracker(100 + index, id));
   const mock = mockGitHub((request) => {
     const path = request.path;
     if (request.method === "POST" && path.endsWith("/dispatches")) {
@@ -86,6 +98,7 @@ function fixture(
       };
     if (path.endsWith("/workflows/bench-build.yml/runs"))
       return { total_count: builds.length, workflow_runs: builds };
+    if (/\/attempts\/\d+$/.test(path)) return { run_started_at: options.attemptStarted ?? since };
     const run = path.match(/\/actions\/runs\/(\d+)$/)?.[1];
     if (run) {
       const source = builds.find((build) => build.id === Number(run));
@@ -123,16 +136,21 @@ function fixture(
         total_count: options.missing ? 0 : VARIANTS.length,
         check_runs: options.missing
           ? []
-          : VARIANTS.map((variant) => ({
-              name: `Benchmarks (rust, ${variant.name})`,
-              app: { slug: "github-actions" },
-              status: "completed",
-              conclusion: "failure",
-              external_id: "200",
-              output: {
-                summary: `[JSON](https://api.bencher.dev/v0/projects/project/reports/${commit}-${variant.id === "default" ? "a" : "b"})`,
-              },
-            })),
+          : VARIANTS.flatMap((variant) =>
+              (options.samples ?? [{ owner: 200, started: "2026-11-10T00:01:00Z" }])
+                .filter((sample) => !sample.configuration || sample.configuration === variant.id)
+                .map((sample) => ({
+                  name: `Benchmarks (rust, ${variant.name})`,
+                  app: { slug: "github-actions" },
+                  status: "completed",
+                  conclusion: "failure",
+                  external_id: String(sample.owner),
+                  started_at: sample.started,
+                  output: {
+                    summary: `[JSON](https://api.bencher.dev/v0/projects/project/reports/${commit}-${variant.id === "default" ? "a" : "b"})`,
+                  },
+                })),
+            ),
       };
     }
     throw new Error(`Unexpected request: ${request.method} ${path}`);
@@ -230,8 +248,61 @@ test("measured alerts are baselines, but missing or wrong exact-head evidence is
   assert.equal(await baselineReady(fixture(t, { wrongReport: true }), "main", hash(0)), false);
 });
 
+test("main completion requires both configurations from its owner and current attempt", async (t) => {
+  const builds = [build(1), { ...build(2), head_sha: hash(1) }, build(3)];
+  for (const samples of [
+    [{ owner: 100, started: "2026-11-10T00:06:00Z" }],
+    [{ owner: 101, started: "2026-11-10T00:01:00Z" }],
+    [{ owner: 101, started: "2026-11-10T00:05:00Z" }],
+    [
+      { owner: 101, started: "2026-11-10T00:06:00Z", configuration: "default" },
+      { owner: 100, started: "2026-11-10T00:06:00Z", configuration: "portable-simd" },
+    ],
+  ]) {
+    const f = fixture(t, {
+      builds,
+      attempts: [1, 2],
+      samples,
+      attemptStarted: "2026-11-10T00:05:00Z",
+    });
+    await scheduleNext(f, since);
+    assert.equal(f.dispatched(), "");
+  }
+  const f = fixture(t, {
+    builds,
+    attempts: [1, 2],
+    samples: [{ owner: 101, started: "2026-11-10T00:06:00Z" }],
+    attemptStarted: "2026-11-10T00:05:00Z",
+  });
+  await scheduleNext(f, since);
+  assert.equal(f.dispatched(), "3");
+});
+
+test("duplicate dispatches preserve one main owner and its native recovery", async (t) => {
+  for (const attempt of [1, 2]) {
+    const f = fixture(t, {
+      builds: [build(1)],
+      trackers: [
+        tracker(298, 1, { head_repository: { full_name: "fork/tessera" } }),
+        tracker(299, 1, { head_branch: "feature" }),
+        tracker(300, 1, { run_attempt: attempt }),
+        tracker(301, 1, { status: "queued" }),
+      ],
+    });
+    await prepareScheduledSource(f, since, "1");
+    assert.equal(f.outputs.eligible, "true");
+    const duplicate = { ...f, context: { ...f.context, runId: 301 } };
+    delete f.outputs.eligible;
+    await prepareScheduledSource(duplicate, since, "1");
+    assert.equal(f.outputs.eligible, undefined);
+  }
+});
+
 test("worker keeps a safe main ticket despite changed priority or queued dispatches", async (t) => {
-  const f = fixture(t, { busy: true });
+  const f = fixture(t, {
+    busy: true,
+    trackers: [tracker(300, 1), tracker(301, 1, { status: "queued" })],
+  });
   await prepareScheduledSource(f, since, "1");
   assert.equal(f.outputs.eligible, "true");
   assert.equal(f.outputs.build_id, "1");
@@ -239,7 +310,7 @@ test("worker keeps a safe main ticket despite changed priority or queued dispatc
 });
 
 test("worker refuses out-of-order main, duplicate attempts and invalid dispatch identities", async (t) => {
-  const f = fixture(t, { builds: [build(1), build(3)] });
+  const f = fixture(t, { builds: [build(1), build(3)], trackers: [tracker(300, 3)] });
   await prepareScheduledSource(f, since, "3");
   assert.equal(f.outputs.eligible, undefined);
   const duplicate = fixture(t, { builds: [build(1)], attempts: [1] });

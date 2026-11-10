@@ -45,7 +45,7 @@ export function shardCases(cases: string[], index: number, count: number) {
 
 export interface LocalRun {
   schema: 1;
-  protocol?: "paired-samples-v1";
+  protocol?: "paired-samples-v1" | "paired-samples-v2";
   samples?: Record<string, { baseline: number; current: number }[]>;
   baseline: string;
   head: string;
@@ -79,11 +79,11 @@ export interface LocalSummary {
   verdict: "faster" | "slower" | "within noise";
 }
 
-/** Summarize nine process-level blocks with their paired A/A controls. */
+/** Summarize retained sample pairs, or historical nine-block A/A evidence. */
 export function summarizeLocal(
   run: Pick<LocalRun, "protocol" | "samples" | "cases" | "blocks">,
 ): LocalSummary[] {
-  if (run.protocol === "paired-samples-v1") {
+  if (run.protocol === "paired-samples-v1" || run.protocol === "paired-samples-v2") {
     if (
       run.blocks.length ||
       !run.samples ||

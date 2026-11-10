@@ -50,13 +50,13 @@ Rerun failed measurement jobs in their original Actions run, then the tracker if
 
 The partitioner balances complete cases by nominal sampling budgets. It does not shrink coverage or create a second inventory. Each job handles one case at a time and pins serial measurements to one allowed CPU, parallel measurements to exactly four. Fewer than four available CPUs fail before a parallel-plan build.
 
-For each case, two persistent processes hold the respective revision, original input and warmed pool. Start and warm-up requests are serialized. The coordinator requests A then B for one sample, B then A for the next. Only one process prepares, verifies or sorts at a time. Both processes stop before the next case starts. Cancellation kills and reaps workers; EOF or malformed/incomplete responses fail the comparison.
+Each sample pair uses two fresh processes, one per revision, with their own original input and warmed pool. The coordinator alternates AB/BA order for startup, warm-up and measurement. Only one process prepares, verifies or sorts at a time, and both stop before the next pair starts. Identical executable basenames keep the launch argument shape constant. Fresh workers make process-specific state vary across samples instead of treating repeated observations of one biased process pair as independent evidence. Cancellation kills and reaps workers; EOF or malformed/incomplete responses fail the comparison.
 
 Each sample restores bounded batches, times only sort calls, then checks their outputs against the stable reference. Copies, validation and IPC are outside the clock; per-sort scratch allocation remains inside. Parallel calls include entry into the warmed caller-owned pool. The prepared batch cap is the existing 2^18 elements, with at least one complete input. The sample wall-time budget includes restoration and verification; observed nanoseconds per sort divide timed duration by the executed sort count. This is an explicit change from Criterion’s calibration, not a claim that the old and new measurements are interchangeable.
 
 ## Cases
 
-The [continuous plan](../../bench/plans/continuous.toml) retains all 70 cases: 62 serial and eight four-thread. The [catalog](../../bench/catalog.toml) owns the per-revision warm-up, sample count and sampling budget, shared by Rust workers and trusted completeness checks:
+The [continuous plan](../../bench/plans/continuous.toml) retains all 70 cases: 62 serial and eight four-thread. The [catalog](../../bench/catalog.toml) owns the per-revision warm-up, sample count and sampling budget, shared by Rust workers and trusted completeness checks. Both time budgets are divided by the sample count for each fresh worker; startup/input preparation and at least one complete measured batch add overhead, not another full-case budget:
 
 | Length | Warm-up | Paired samples | Sampling budget per revision |
 |---|---|---|---|

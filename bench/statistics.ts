@@ -17,7 +17,8 @@ export function geomean(values: number[]) {
 /** Summarize adjacent A/B ratios with a distribution-free median interval.
  *
  * Exact binomial tails choose order statistics with at least 99% coverage under
- * independent samples. Correlation and code placement remain outside this model.
+ * independent samples. Fresh process pairs capture process-state variation;
+ * correlated host interference and source-dependent placement remain outside this model.
  * Require the entire interval to exceed the practical 5% regression threshold.
  */
 export function summarizeRatios(ratios: number[]) {

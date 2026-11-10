@@ -27,7 +27,7 @@ export function pairedRun(variant: Variant, index = 1, ratio = 1.2): LocalRun {
   };
   return {
     schema: 1,
-    protocol: "paired-samples-v1",
+    protocol: "paired-samples-v2",
     head: hash,
     baseline: baseHash,
     dirty: false,

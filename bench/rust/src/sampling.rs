@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! One case per process; stdin owns when preparation and timed samples may run.
+//! One sample per process; stdin owns when preparation and timing may run.
 
 use std::{
     hint::black_box,
@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Warms one case, then answers individual sample requests over stdin/stdout.
+/// Prepares one case and answers one warm/sample pair over stdin/stdout.
 ///
 /// Input copies and output checks are outside the clock. Prepared batches use
 /// the same element cap as Criterion; scratch allocation stays inside each sort.
@@ -51,13 +51,15 @@ pub fn serve<T: Copy>(
         let response = match request.as_str() {
             "warm" if !warmed => {
                 let start = Instant::now();
-                while start.elapsed() < Duration::from_millis(settings.warm_ms) {
+                while start.elapsed()
+                    < Duration::from_micros(settings.warm_ms * 1000 / settings.samples as u64)
+                {
                     measure();
                 }
                 warmed = true;
                 serde_json::json!({"id": id, "samples": settings.samples})
             }
-            "sample" if warmed && completed < settings.samples => {
+            "sample" if warmed && completed == 0 => {
                 let (elapsed_ns, sorts) = sample(
                     Duration::from_micros(settings.window_ms * 1000 / settings.samples as u64),
                     &mut measure,
@@ -65,7 +67,7 @@ pub fn serve<T: Copy>(
                 completed += 1;
                 serde_json::json!({"elapsed_ns": elapsed_ns, "sorts": sorts})
             }
-            "stop" if completed == settings.samples => {
+            "stop" if completed == 1 => {
                 println!("{{}}");
                 return;
             }

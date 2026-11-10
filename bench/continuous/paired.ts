@@ -81,7 +81,7 @@ export async function readPaired(
     const shard = run.shard;
     if (
       run.schema !== 1 ||
-      run.protocol !== "paired-samples-v1" ||
+      run.protocol !== "paired-samples-v2" ||
       run.host.aslr !== "disabled" ||
       run.dirty ||
       run.head !== source.hash ||

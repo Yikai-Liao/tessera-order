@@ -173,9 +173,11 @@ export async function buildRevisions(
     return built;
   };
   const binaries = {
-    baseline: join(directory, `baseline-${layout?.baselineSeed ?? "default"}`),
-    current: join(directory, `current-${layout?.currentSeed ?? "default"}`),
+    baseline: join(directory, "baseline", "worker"),
+    current: join(directory, "current", "worker"),
   };
+  await mkdir(join(directory, "baseline"), { recursive: true });
+  await mkdir(join(directory, "current"), { recursive: true });
   const first = await build("baseline", layout?.baselineSeed);
   if (layout) {
     if (first.provenance.target !== "x86_64-unknown-linux-gnu")
@@ -326,7 +328,7 @@ export async function compareLocal(options: LocalOptions) {
       );
       const run: LocalRun = {
         schema: 1,
-        protocol: "paired-samples-v1",
+        protocol: "paired-samples-v2",
         baseline,
         head,
         dirty,
@@ -363,7 +365,7 @@ export async function compareLocal(options: LocalOptions) {
     await save();
     for (const [index, { seed, run }] of layouts.entries()) {
       if (linker) diagnostic(`Layout seed ${seed}`);
-      await measureSamples(run, executables[index], workspace.tree, planPath, cpu, save);
+      await measureSamples(run, executables[index], planPath, cpu, save);
       summarizeLocal(run);
     }
     await renderLocalReport(out, result);

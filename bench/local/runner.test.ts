@@ -27,6 +27,7 @@ test("revision workers alternate adjacent samples, retain evidence and reap fail
 const fs = require("node:fs"), readline = require("node:readline");
 const role = ${JSON.stringify(role)}, dir = ${JSON.stringify(directory)};
 fs.writeFileSync(dir + "/" + role + ".pid", String(process.pid));
+fs.appendFileSync(dir + "/pids", process.pid + "\n");
 const id = process.env.TESSERA_BENCH_IDS;
 if (${JSON.stringify(process.platform)} === "linux") {
  const personality = parseInt(fs.readFileSync("/proc/self/personality", "utf8"),16);
@@ -53,7 +54,7 @@ rl.on("line", request => {
     );
   const run = pairedRun(VARIANTS[0]);
   run.cases = ["rust/u64/random/48/s1/api", ...(mask ? ["rust/u64/random/49/s1/par-4"] : [])];
-  await measureSamples(run, binaries, directory, "unused", mask, async () => {});
+  await measureSamples(run, binaries, "unused", mask, async () => {});
   if (mask) await assert.rejects(comparisonCpus(true, "0"), /four available CPUs/);
   const events = (await readFile(join(directory, "events"), "utf8")).trim().split("\n");
   assert.deepEqual(
@@ -62,15 +63,17 @@ rl.on("line", request => {
       i % 2 ? ["current:sample", "baseline:sample"] : ["baseline:sample", "current:sample"],
     ).flat(),
   );
+  const pids = (await readFile(join(directory, "pids"), "utf8")).trim().split("\n");
+  assert.equal(new Set(pids).size, 2 * 30 * run.cases.length);
   assert.equal(summarizeLocal(run)[0].verdict, "slower");
   await writeFile(join(directory, "local.json"), JSON.stringify(run));
   await renderLocalReport(directory);
   assert.match(await readFile(join(directory, "index.md"), "utf8"), /Adjacent A\/B/);
   delete run.protocol;
   assert.throws(() => summarizeLocal(run), /Unsupported/);
-  run.protocol = "paired-samples-v1";
+  run.protocol = "paired-samples-v2";
   await writeFile(join(directory, "fail"), "");
-  await assert.rejects(measureSamples(run, binaries, directory, "unused", mask, async () => {}));
+  await assert.rejects(measureSamples(run, binaries, "unused", mask, async () => {}));
   for (const role of ["baseline", "current"]) {
     const pid = Number(await readFile(join(directory, `${role}.pid`), "utf8"));
     assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });

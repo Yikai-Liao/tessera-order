@@ -87,7 +87,7 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
         }))
       : [{ title: result.configuration, run: result }];
   const run = runs[0].run;
-  const paired = run.protocol === "paired-samples-v1";
+  const paired = run.protocol === "paired-samples-v1" || run.protocol === "paired-samples-v2";
   const range = (low: number | undefined, high: number | undefined) =>
     low === undefined || high === undefined ? "—" : `${low.toFixed(4)}–${high.toFixed(4)}`;
   const groups = runs.map(({ title, run }) => ({ title, summaries: summarizeLocal(run) }));

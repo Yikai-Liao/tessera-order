@@ -83,7 +83,7 @@ Staging is released after each completed band. Ordinary scheduling retains only 
 
 ### Narrow direct keys
 
-When all remaining variation spans at most eight bits, direct keys use parallel local histograms. Each worker reads a disjoint mutable shard, retaining counts and one representative per bucket; the parent combines counts and sends disjoint runs and their copied representatives to filling tasks. Only `Send` is required. Equal sealed encodings mean identical record bits, so run filling preserves the exact multiset, including NaN payloads. User-key records decline this shortcut because equal keys do not identify their payloads. Narrowed 128-bit extractors delegate with the original bit offset. Histograms use O(PR) space; no n-record cache is built.
+When all remaining variation spans at most eight bits, direct keys use the same `KeyCounts` summary as serial counting: one count and one representative per bucket. Each worker summarizes a disjoint mutable shard, and a reduction combines the summaries. The summary pairs disjoint destination runs with their representatives; serial sorting fills them directly and parallel sorting schedules their fills. Only `Send` is required. Equal sealed encodings mean identical record bits, so run filling preserves the exact multiset, including NaN payloads. User-key records decline this shortcut because equal keys do not identify their payloads. Narrowed 128-bit extractors delegate with the original bit offset. Histograms use O(PR) space; no n-record cache is built.
 
 ## Insertion and scans
 

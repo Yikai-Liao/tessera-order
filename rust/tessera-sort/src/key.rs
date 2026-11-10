@@ -324,49 +324,18 @@ impl<K: RadixKey> Extract<K> for Direct {
         if records.is_empty() {
             return true;
         }
-        let buckets = 1usize << width;
         let shard_len = records.len().div_ceil(rayon::current_num_threads());
-        // Mutable shards need only Send, including when a sealed key type is
-        // not known to be Sync through the RadixKey trait.
-        let partials: Vec<_> = records
+        // Mutable shards need only Send; no shared record borrow crosses tasks.
+        let counts = records
             .par_chunks_mut(shard_len)
-            .map(|records| {
-                let mask = Self::Value::from_usize(buckets - 1);
-                let shift = Self::Value::from_usize(low);
-                let mut counts = [0usize; SMALL_WINDOW_BUCKETS];
-                let mut representatives = [records[0]; SMALL_WINDOW_BUCKETS];
-                for record in records {
-                    let bucket = ((record.encode() >> shift) & mask).to_usize();
-                    if counts[bucket] == 0 {
-                        representatives[bucket] = *record;
-                    }
-                    counts[bucket] += 1;
-                }
-                (counts, representatives)
-            })
-            .collect();
-        let mut counts = [0usize; SMALL_WINDOW_BUCKETS];
-        let mut representatives = [records[0]; SMALL_WINDOW_BUCKETS];
-        for (local_counts, local_representatives) in partials {
-            for bucket in 0..buckets {
-                if local_counts[bucket] != 0 {
-                    representatives[bucket] = local_representatives[bucket];
-                    counts[bucket] += local_counts[bucket];
-                }
-            }
-        }
-        // Equal sealed encodings imply identical record bits. Filling these
-        // disjoint runs therefore preserves both the records and stability.
-        let mut remaining = records;
-        let mut runs = Vec::with_capacity(buckets);
-        for bucket in 0..buckets {
-            let (run, rest) = remaining.split_at_mut(counts[bucket]);
-            remaining = rest;
-            if !run.is_empty() {
-                runs.push((run, representatives[bucket]));
-            }
-        }
-        runs.into_par_iter().for_each(|(run, key)| run.fill(key));
+            .map(|records| KeyCounts::count(records, low, width))
+            .reduce_with(KeyCounts::merge)
+            .unwrap();
+        counts
+            .runs(records)
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .for_each(|(run, key)| run.fill(key));
         true
     }
 
@@ -374,34 +343,11 @@ impl<K: RadixKey> Extract<K> for Direct {
         if width == 0 || width > SMALL_WINDOW_BITS {
             return false;
         }
-        // An empty slice and a single record are already sorted.
-        let Some(&first) = records.first() else {
-            return true;
-        };
-        let buckets = 1usize << width;
-        let mask = Self::Value::from_usize(buckets - 1);
-        let shift = Self::Value::from_usize(low);
-        let mut counts = [0usize; SMALL_WINDOW_BUCKETS];
-        let mut representatives = [first; SMALL_WINDOW_BUCKETS];
-        for record in records.iter() {
-            let key = self.key(record);
-            let bucket = ((key >> shift) & mask).to_usize();
-            if counts[bucket] == 0 {
-                representatives[bucket] = *record;
+        if !records.is_empty() {
+            for (run, key) in KeyCounts::count(records, low, width).runs(records) {
+                run.fill(key);
             }
-            counts[bucket] += 1;
         }
-        // Every sealed encoding is a bijection on bit patterns, so equal keys
-        // mean equal records: a run of one bucket is interchangeable, and one of
-        // its records stands for all of them, NaN payloads and signed zeros
-        // included.
-        let mut start = 0;
-        for (bucket, &count) in counts[..buckets].iter().enumerate() {
-            let end = start + count;
-            records[start..end].fill(representatives[bucket]);
-            start = end;
-        }
-        debug_assert_eq!(start, records.len());
         true
     }
 
@@ -430,6 +376,63 @@ impl<K: RadixKey> Extract<K> for Direct {
     #[inline]
     fn insertion_sort(&mut self, records: &mut [K], budget: usize) -> Option<usize> {
         K::insertion_sort(records, budget)
+    }
+}
+
+/// A histogram retaining one interchangeable record per encoded-key bucket.
+///
+/// Sealed encodings are bijective on bits, including NaN payloads and signed
+/// zeros. When the window covers all variation, a representative stands for
+/// every record counted in its bucket. Serial and parallel finishing share this
+/// ownership-free summary; only collection and filling are scheduled differently.
+struct KeyCounts<K> {
+    counts: [usize; SMALL_WINDOW_BUCKETS],
+    representatives: [K; SMALL_WINDOW_BUCKETS],
+}
+
+impl<K: RadixKey> KeyCounts<K> {
+    /// Counts a nonempty slice in a window of at most `SMALL_WINDOW_BITS` bits.
+    fn count(records: &[K], low: usize, width: usize) -> Self {
+        let mut result = Self {
+            counts: [0; SMALL_WINDOW_BUCKETS],
+            representatives: [records[0]; SMALL_WINDOW_BUCKETS],
+        };
+        let mask = K::Encoded::from_usize((1 << width) - 1);
+        let shift = K::Encoded::from_usize(low);
+        for &record in records {
+            let bucket = ((record.encode() >> shift) & mask).to_usize();
+            if result.counts[bucket] == 0 {
+                result.representatives[bucket] = record;
+            }
+            result.counts[bucket] += 1;
+        }
+        result
+    }
+
+    /// Combines disjoint shards counted with the same window.
+    #[cfg(feature = "rayon")]
+    fn merge(mut self, other: Self) -> Self {
+        for bucket in 0..SMALL_WINDOW_BUCKETS {
+            if other.counts[bucket] != 0 {
+                self.representatives[bucket] = other.representatives[bucket];
+                self.counts[bucket] += other.counts[bucket];
+            }
+        }
+        self
+    }
+
+    /// Pairs each nonempty destination run with its representative.
+    /// The slice must contain exactly the records summarized by this histogram.
+    fn runs(self, records: &mut [K]) -> impl Iterator<Item = (&mut [K], K)> {
+        self.counts
+            .into_iter()
+            .zip(self.representatives)
+            .scan(records, |remaining, (count, key)| {
+                let (run, rest) = core::mem::take(remaining).split_at_mut(count);
+                *remaining = rest;
+                Some((run, key))
+            })
+            .filter(|(run, _)| !run.is_empty())
     }
 }
 

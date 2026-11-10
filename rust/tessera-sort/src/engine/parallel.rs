@@ -143,8 +143,6 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
     tile_bytes: usize,
 ) {
     let node_bytes = records.len().saturating_mul(core::mem::size_of::<T>());
-    let low = varying.trailing_zeros() as usize;
-    let top = bit_len(varying);
     if node_bytes < 4 * tile_bytes {
         Sorter::<T, E, CACHED> {
             scratch,
@@ -155,46 +153,40 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
         return;
     }
     let shards = rayon::current_num_threads().min((node_bytes / MIN_TASK_BYTES).max(1));
-    if top - low <= SPLIT_BITS {
-        if extractor.try_count_window_parallel(records, low, top - low) {
+    let digit = match plan_node(records, varying, tile_bytes, extractor) {
+        NodePlan::Window(digit) => {
+            if extractor.try_count_window_parallel(records, digit.shift, digit.width) {
+                return;
+            }
+            let limit = bucket_limit::<T>(records.len(), digit.width);
+            let ends = block::partition_digit_parallel_with_finish(
+                records,
+                digit.width,
+                digit.shift,
+                extractor.clone(),
+                &mut scratch.block,
+                shards,
+                block::BucketFinish {
+                    limit,
+                    sort: &|_| {},
+                    visit: &mut |_| {},
+                },
+            );
+            scratch.block.recycle_ends(ends);
             return;
         }
-        let limit = bucket_limit::<T>(records.len(), top - low);
-        let ends = block::partition_digit_parallel_with_finish(
-            records,
-            top - low,
-            low,
-            extractor.clone(),
-            &mut scratch.block,
-            shards,
-            block::BucketFinish {
-                limit,
-                sort: &|_| {},
-                visit: &mut |_| {},
-            },
-        );
-        scratch.block.recycle_ends(ends);
-        return;
-    }
-
-    let mut keys = [KeyValue::<T, E>::from_usize(0); MODE_SAMPLE_LEN];
-    sample_keys(records, &mut keys, extractor);
-    // A node the order already groups is finished sequentially: the run split
-    // needs no partition pass, so there is nothing to share.
-    let top_bit = 1u128 << (top - 1);
-    if sample_mode(&mut keys).is_some()
-        || two_runs(records, top_bit, extractor).is_some_and(|(_, set)| !set)
-    {
-        Sorter::<T, E, CACHED> {
-            scratch,
-            extractor,
-            tile_bytes,
+        NodePlan::Digit(digit) => digit,
+        plan => {
+            Sorter::<T, E, CACHED> {
+                scratch,
+                extractor,
+                tile_bytes,
+            }
+            .execute_node(records, varying, plan);
+            return;
         }
-        .sort_node(records, varying);
-        return;
-    }
+    };
 
-    let digit = choose_split_digit(records, top, tile_bytes, extractor);
     let candidate = varying & !digit.mask::<E::Value>().to_u128();
     if candidate == 0 {
         let ends = block::partition_digit_parallel_with_visit(

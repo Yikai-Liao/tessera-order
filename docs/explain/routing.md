@@ -77,6 +77,8 @@ Otherwise the node is split on the digit under its highest varying bit, with the
 1. Aim for children of half a tile: with `target = tile records / 2`, start with enough bits for `n / target` children, clamped to 3–8 bits. Wider splits measured slower on 10 million records because of page and TLB pressure.
 2. Sample 128 keys. If they hit fewer than a quarter of the digit's buckets, the keys are concentrated in a few buckets, so widen the digit by 2 bits and check again, up to 12 bits. Above 9 bits, 128 keys cannot fill a quarter of the buckets, so widening continues without a check.
 
+Serial and parallel roots share this partition decision. If equality or existing runs make a serial operation preferable, the parallel entry executes that decision without repeating its sample. Existing runs are checked before digit-width sampling, so a successful split never plans an unused table. A narrow window uses its actual bit width in both engines.
+
 While the block partition writes its result back into the input, each child that fits a tile is finished **at once**, while its records are still in cache. Larger children are routed again after the partition.
 
 ## Summary

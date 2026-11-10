@@ -784,22 +784,59 @@ fn two_runs<T, E: Extract<T>>(
     Some((boundary, first))
 }
 
+/// A node's partition decision, consumed by either execution path.
+/// Sampling and ordered-run recognition belong here, not in the scheduler.
+enum NodePlan<V> {
+    Window(Digit),
+    Equal(V),
+    Runs { boundary: usize, set: bool },
+    Digit(Digit),
+}
+
+/// Chooses a partition for a nonconstant node larger than its tile budget.
+fn plan_node<T, E: Extract<T>>(
+    records: &[T],
+    varying: u128,
+    tile_bytes: usize,
+    extractor: &mut E,
+) -> NodePlan<E::Value> {
+    let low = varying.trailing_zeros() as usize;
+    let span = bit_len(varying) - low;
+    if span <= SPLIT_BITS {
+        return NodePlan::Window(Digit {
+            shift: low,
+            width: span,
+        });
+    }
+    if records.len().saturating_mul(core::mem::size_of::<T>()) >= 4 * tile_bytes {
+        let mut keys = [E::Value::from_usize(0); MODE_SAMPLE_LEN];
+        sample_keys(records, &mut keys, extractor);
+        if let Some(equal) = sample_mode(&mut keys) {
+            return NodePlan::Equal(equal);
+        }
+    }
+    plan_digit(records, varying, tile_bytes, extractor)
+}
+
+/// Consumes key bits even when an inconsistent extractor defeats an equality split.
+fn plan_digit<T, E: Extract<T>>(
+    records: &[T],
+    varying: u128,
+    tile_bytes: usize,
+    extractor: &mut E,
+) -> NodePlan<E::Value> {
+    let top = bit_len(varying);
+    if let Some((boundary, set)) = two_runs(records, 1u128 << (top - 1), extractor) {
+        NodePlan::Runs { boundary, set }
+    } else {
+        NodePlan::Digit(choose_split_digit(records, top, tile_bytes, extractor))
+    }
+}
+
 impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
-    /// Splits a node whose first varying bit never falls, without moving a
-    /// record: the two runs the order already holds are the two buckets that
-    /// bit would form. Returns whether it split.
-    ///
-    /// Records that are not ordered in that bit answer within a pair or two, so
-    /// an unordered node pays a few key reads for the check. An ordered node
-    /// saves the partition pass the top bit would otherwise need and hands the
-    /// bits below it to the recursion.
-    fn split_ordered(&mut self, records: &mut [T], top: usize, varying: u128) -> bool {
-        let bit = 1u128 << (top - 1);
-        let Some((boundary, set)) = two_runs(records, bit, self.extractor) else {
-            return false;
-        };
-        // A run holding the bit in front belongs behind the clear one; the
-        // rotation keeps both runs in their own order.
+    /// Consumes an ordered-run decision without probing or partitioning again.
+    fn split_ordered(&mut self, records: &mut [T], boundary: usize, set: bool, varying: u128) {
+        // Rotation preserves each run's internal order.
         let boundary = if set {
             let len = records.len();
             records.rotate_left(boundary);
@@ -807,10 +844,9 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         } else {
             boundary
         };
-        let candidate = varying & !bit;
+        let candidate = varying & !(1u128 << (bit_len(varying) - 1));
         self.sort_child(&mut records[..boundary], candidate);
         self.sort_child(&mut records[boundary..], candidate);
-        true
     }
 
     /// Finishes an ordered child before scanning its remaining candidate bits.
@@ -852,51 +888,35 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             self.sort_tile(records, varying);
             return;
         }
-        // One digit finishes a narrow span; wider spans benefit from tiled children.
-        let low = varying.trailing_zeros() as usize;
-        let top = bit_len(varying);
-        let span = top - low;
+        let plan = plan_node(records, varying, self.tile_bytes, self.extractor);
+        self.execute_node(records, varying, plan);
+    }
 
-        if span <= SPLIT_BITS {
-            // A record of its own key is interchangeable with every record of
-            // the same key, so counting the window and filling each run can
-            // finish the node without moving blocks. A user key function keeps
-            // its payloads and takes the partition below instead.
-            if self.extractor.try_count_window(records, low, span) {
-                return;
+    /// Executes an already selected partition; parallel fallbacks do not resample.
+    fn execute_node(&mut self, records: &mut [T], varying: u128, plan: NodePlan<E::Value>) {
+        match plan {
+            NodePlan::Window(digit) => {
+                if !self
+                    .extractor
+                    .try_count_window(records, digit.shift, digit.width)
+                {
+                    block::partition_digit(
+                        records,
+                        digit.width,
+                        digit.shift,
+                        self.extractor,
+                        &mut self.scratch.block,
+                    );
+                }
             }
-            // One block partition finishes the node without recursion.
-            block::partition_digit(
-                records,
-                SPLIT_BITS,
-                low,
-                self.extractor,
-                &mut self.scratch.block,
-            );
-            return;
+            NodePlan::Equal(equal) => self.partition_equal(records, equal, varying),
+            NodePlan::Runs { boundary, set } => self.split_ordered(records, boundary, set, varying),
+            NodePlan::Digit(digit) => self.partition_digit(records, digit, varying),
         }
-        // Amortize the key sample over at least four tiles.
-        if node_bytes >= 4 * self.tile_bytes {
-            let mut keys = [KeyValue::<T, E>::from_usize(0); MODE_SAMPLE_LEN];
-            sample_keys(records, &mut keys, self.extractor);
-            // An equality partition finishes the repeated key immediately.
-            if let Some(equal) = sample_mode(&mut keys) {
-                self.partition_equal(records, equal, varying);
-                return;
-            }
-        }
-        let digit = choose_split_digit(records, top, self.tile_bytes, self.extractor);
-        self.partition_digit(records, digit, varying);
     }
 
     /// Partitions by digit, then sorts each unfinished child.
     fn partition_digit(&mut self, records: &mut [T], digit: Digit, varying: u128) {
-        // A node already ordered in its top varying bit needs no pass: that bit
-        // only separates runs the input holds, the recursion inherits the rest,
-        // and the check answers in a pair or two for unordered records.
-        if self.split_ordered(records, bit_len(varying), varying) {
-            return;
-        }
         let record_bytes = core::mem::size_of::<T>();
         // Bucket boundaries come from the block engine. The split digit is
         // constant inside each child, so its bits are excluded from the next scan.
@@ -956,13 +976,8 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             // sampled pivot. Force a digit partition to remove candidate bits
             // rather than repeat the same equality partition indefinitely.
             self.scratch.block.recycle_ends(ends);
-            let digit = choose_split_digit(
-                records,
-                bit_len(parent_varying),
-                self.tile_bytes,
-                self.extractor,
-            );
-            self.partition_digit(records, digit, parent_varying);
+            let plan = plan_digit(records, parent_varying, self.tile_bytes, self.extractor);
+            self.execute_node(records, parent_varying, plan);
             return;
         }
         for range in [0..ends[0], ends[1]..records.len()] {

@@ -20,7 +20,14 @@ export interface LocalRun {
   rustc: string;
   flags: string;
   configuration: string;
-  host: { platform: string; release: string; arch: string; cpu: string; affinity: string };
+  host: {
+    platform: string;
+    release: string;
+    arch: string;
+    cpu: string;
+    affinity: string;
+    parallel?: { threads: number; allowed: number; affinity: string; topology: string };
+  };
   cases: string[];
   blocks: LocalBlock[];
 }

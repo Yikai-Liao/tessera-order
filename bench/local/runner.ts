@@ -6,7 +6,7 @@ import { arch, cpus, platform, release } from "node:os";
 import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
-import { criterionGroup } from "../catalog.ts";
+import { criterionGroup, parseCriterionId } from "../catalog.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
@@ -55,11 +55,20 @@ export function assertWorkerEnvironment() {
       throw new Error(`Unset TESSERA_BENCH_${name} before starting an experiment`);
 }
 
-/** Complete only unused optional metadata for pre-parallel serial baselines. */
-export function serialBaselineManifest(baseline: string, current: string) {
+/** Select the smoke harness's existing four-thread API protocol explicitly. */
+export function smokeEnvironment(planPath: string, parallel: boolean): NodeJS.ProcessEnv {
+  return {
+    TESSERA_BENCH_PLAN: planPath,
+    ...(parallel ? { TESSERA_BENCH_PARALLEL: "4" } : {}),
+  };
+}
+
+/** Complete inactive optional metadata only for pre-parallel serial comparisons. */
+export function serialBaselineManifest(baseline: string, current: string, parallel = false) {
   const manifest = parse(baseline);
   const features = manifest.features as Record<string, unknown>;
   if ("rayon" in features) return baseline;
+  if (parallel) throw new Error("Parallel revision comparisons require a Rayon-capable baseline");
   const dependencies = manifest.dependencies as Record<string, unknown>;
   if ("rayon" in dependencies)
     throw new Error("Historical Rayon dependencies require explicit review");
@@ -112,13 +121,14 @@ export async function buildRevisions(
   await rm(crate, { recursive: true });
   await copyLibraryRevision(root, baseline, crate);
   // Cargo validates inactive forwarding and locks optional dependency edges.
-  // Keep the shared harness/lockfile; this metadata never enables a parallel API.
+  // Only serial baselines may receive the inactive optional dependency shim.
   const manifest = join(crate, "Cargo.toml");
   await writeFile(
     manifest,
     serialBaselineManifest(
       await readFile(manifest, "utf8"),
       await readFile(join(saved, "Cargo.toml"), "utf8"),
+      features.includes("rayon"),
     ),
   );
   source.baseline = await sourceHash(crate);
@@ -237,19 +247,23 @@ export async function selectedCases(
   planPath: string,
   pattern: string | undefined,
   cwd: string,
+  parallel = false,
 ) {
   const list = async (binary: string) =>
     (
       await command(binary, ["--bench"], {
         cwd,
         capture: true,
-        env: { TESSERA_BENCH_LIST: "1", TESSERA_BENCH_PLAN: planPath },
+        env: { TESSERA_BENCH_LIST: "1", ...smokeEnvironment(planPath, parallel) },
       })
     )
       .split("\n")
       .filter(Boolean)
       .sort();
-  const cases = selectCaseIds(await list(binaries.current), pattern);
+  const current = await list(binaries.current);
+  if (parallel && !current.some((id) => parseCriterionId(id).mode === "par-4"))
+    throw new Error("Parallel plan did not list any four-thread cases");
+  const cases = selectCaseIds(current, pattern);
   if (
     !cases.length ||
     new Set(cases).size !== cases.length ||
@@ -291,12 +305,42 @@ async function measureBlock(
       env: {
         CRITERION_HOME: criterion,
         TESSERA_BENCH_GROUPS: groups,
-        TESSERA_BENCH_PLAN: join(options.out, "plan.json"),
+        ...smokeEnvironment(join(options.out, "plan.json"), Boolean(options.plan.parallel?.length)),
       },
     });
     values[role] = await readEstimates(criterion);
   }
   return values;
+}
+
+/** Probe the same inherited/requested affinity that measured child processes use. */
+export async function parallelExecution(cpu?: string) {
+  if (platform() !== "linux") throw new Error("Parallel revision screens require Linux");
+  const probe = `console.log(JSON.stringify({
+    allowed: require("node:os").availableParallelism(),
+    affinity: require("node:fs").readFileSync("/proc/self/status", "utf8")
+      .match(/^Cpus_allowed_list:(.+)$/m)[1].trim()
+  }))`;
+  const args = ["-e", probe];
+  const observed = JSON.parse(
+    await command(
+      cpu ? "taskset" : process.execPath,
+      cpu ? ["-c", cpu, process.execPath, ...args] : args,
+      { capture: true },
+    ),
+  );
+  if (
+    !Number.isSafeInteger(observed.allowed) ||
+    observed.allowed < 4 ||
+    typeof observed.affinity !== "string"
+  )
+    throw new Error("Four allowed CPUs are required for parallel revision screens");
+  return {
+    threads: 4,
+    allowed: observed.allowed as number,
+    affinity: observed.affinity as string,
+    topology: await command("lscpu", ["-p=CPU,CORE,SOCKET,NODE"], { capture: true }),
+  };
 }
 
 /** Compare an immutable working-tree snapshot with a commit, retaining only results. */
@@ -305,6 +349,7 @@ export async function compareLocal(options: LocalOptions) {
   if (options.layoutControl && !options.layoutSeeds)
     throw new Error("Layout controls require --layout-seeds");
   assertWorkerEnvironment();
+  const parallel = options.plan.parallel?.length ? await parallelExecution(cpu) : undefined;
   let linker: LayoutRun["linker"] | undefined;
   if (options.layoutSeeds) {
     parseLayoutSeeds(options.layoutSeeds.join(","));
@@ -339,7 +384,7 @@ export async function compareLocal(options: LocalOptions) {
         root,
         workspace,
         baseline,
-        [],
+        options.plan.parallel?.length ? ["rayon"] : [],
         seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
         options.layoutControl,
       );
@@ -360,8 +405,15 @@ export async function compareLocal(options: LocalOptions) {
           arch: arch(),
           cpu: cpus()[0]?.model ?? "unknown",
           affinity: cpu ?? "inherited",
+          ...(parallel ? { parallel } : {}),
         },
-        cases: await selectedCases(binaries, planPath, options.filter, workspace.tree),
+        cases: await selectedCases(
+          binaries,
+          planPath,
+          options.filter,
+          workspace.tree,
+          Boolean(options.plan.parallel?.length),
+        ),
         blocks: [],
       };
       if (layouts.length && run.cases.join("\n") !== layouts[0].run.cases.join("\n"))

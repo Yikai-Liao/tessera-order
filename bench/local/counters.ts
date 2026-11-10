@@ -127,6 +127,8 @@ export async function compareCounters(options: {
   dirty?: boolean;
 }) {
   assertWorkerEnvironment();
+  if (options.plan.parallel?.length)
+    throw new Error("Counter comparisons support serial API plans only");
   if (process.platform !== "linux" || process.arch !== "x64")
     throw new Error("Counter comparisons require Linux x86-64 and Valgrind");
   if (!Number.isSafeInteger(options.sorts) || options.sorts < 1 || options.sorts > 1024)

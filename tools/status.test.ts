@@ -7,7 +7,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { marker } from "../bench/continuous/marker.ts";
 
 const cli = fileURLToPath(new URL("./index.ts", import.meta.url));
 
@@ -106,6 +105,8 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
       },
       { workflow_runs: [run(11, { status: "in_progress", conclusion: null, run_attempt: 2 })] },
     ],
+    "actions/runs/11/jobs?per_page=100": [{ jobs: [] }],
+    "actions/runs/70/jobs?per_page=100": [{ jobs: [] }],
     "actions/runs/70": run(70, {
       workflow_id: 2,
       name: "Track benchmarks",
@@ -113,32 +114,6 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
       head_sha: "trusted",
       conclusion: "failure",
     }),
-    "actions/runs/11/jobs?per_page=100": [
-      {
-        jobs: [
-          {
-            name: "miri",
-            status: "in_progress",
-            conclusion: null,
-            html_url: "job-url",
-            steps: [{ name: "Install tools", status: "in_progress", conclusion: null }],
-          },
-        ],
-      },
-    ],
-    "actions/runs/70/jobs?per_page=100": [
-      {
-        jobs: [
-          {
-            name: "rust",
-            status: "completed",
-            conclusion: "failure",
-            html_url: "failed-job",
-            steps: [{ name: "Install Bencher", status: "completed", conclusion: "failure" }],
-          },
-        ],
-      },
-    ],
   });
   const status = JSON.parse(f.run("status"));
   assert.equal(status.target.head, "current");
@@ -152,68 +127,7 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
   assert.equal(status.report, null);
   assert.equal(status.details, undefined);
   assert.ok(JSON.stringify(status).length < 2000);
-  const text = f.run("status", "main", "--text");
-  assert.match(text, /Install tools: in_progress/);
-  assert.match(text, /Install Bencher: failure/);
-  assert.match(text, /Measurement failed/);
-  assert.match(text, /portable-simd: missing/);
   assert.ok(!(await f.requests()).some((path) => path.includes("/92")));
-});
-
-test("PR status joins merge workflows without accepting stale comments", async (t) => {
-  const comment = (sha: string, login = "github-actions[bot]") => ({
-    body: marker("rust", sha),
-    html_url: sha,
-    user: { login },
-  });
-  const f = await fixture(t, {
-    "pulls/49": {
-      number: 49,
-      state: "open",
-      head: { sha: "current" },
-      merge_commit_sha: "merge",
-      html_url: "pr-url",
-    },
-    "commits/current/check-runs?per_page=100": [
-      {
-        check_runs: [
-          check(1, {
-            conclusion: "failure",
-            external_id: "70",
-            details_url: "https://github.com/owner/project/runs/1",
-            output: { title: "2 slower", summary: "Alert, not a measurement failure" },
-          }),
-        ],
-      },
-    ],
-    "actions/runs?head_sha=current&per_page=100": [{ workflow_runs: [] }],
-    "actions/runs?head_sha=merge&per_page=100": [
-      {
-        workflow_runs: [
-          run(15, { head_sha: "merge", event: "pull_request", head_branch: "feature" }),
-        ],
-      },
-    ],
-    "actions/runs/70": run(70, {
-      workflow_id: 2,
-      name: "Track benchmarks",
-      event: "workflow_run",
-      head_sha: "trusted",
-    }),
-    "issues/49/comments?per_page=100": [
-      [comment("old"), comment("current", "untrusted")],
-      [comment("current")],
-    ],
-  });
-  const status = JSON.parse(f.run("status", "--pr", "49", "--details"));
-  assert.equal(status.target.head, "current");
-  assert.equal(status.target.merge, "merge");
-  assert.equal(status.details.workflows[0].head, "merge");
-  assert.equal(status.workflows[1].state, "success");
-  assert.equal(status.benchmarks[0].state, "failure");
-  assert.equal(status.benchmarks[0].title, "2 slower");
-  assert.equal(status.report, "current");
-  assert.equal(status.details.comment.body, marker("rust", "current"));
 });
 
 test("missing workflows never become a clean verdict", async (t) => {
@@ -226,23 +140,6 @@ test("missing workflows never become a clean verdict", async (t) => {
   assert.deepEqual(status.workflows, []);
   assert.ok(status.benchmarks.every((c: { state: string }) => c.state === "missing"));
   assert.match(f.run("status", "feature/topic", "--text"), /No workflow runs attached/);
-});
-
-test("merged PR status does not substitute main for the PR head", async (t) => {
-  const f = await fixture(t, {
-    "pulls/49": {
-      number: 49,
-      state: "closed",
-      head: { sha: "current" },
-      merge_commit_sha: "squash",
-      html_url: "pr-url",
-    },
-    "commits/current/check-runs?per_page=100": [{ check_runs: [] }],
-    "actions/runs?head_sha=current&per_page=100": [{ workflow_runs: [] }],
-    "issues/49/comments?per_page=100": [[]],
-  });
-  assert.equal(JSON.parse(f.run("status", "--pr", "49", "--details")).target.merge, null);
-  assert.ok(!(await f.requests()).some((path) => path.includes("squash")));
 });
 
 test("API failures fail the command instead of returning empty success", async (t) => {

@@ -87,6 +87,6 @@ Benchmark identifiers and human-readable names come from [the catalog](../../ben
 5. Render a reference example in light and dark appearance and inspect it at its actual display width. Check hierarchy, label fit, value alignment and whether the main finding is visible without reading every number.
 6. Keep the plotted-value table or equivalent accessible report alongside published figures.
 
-[`bench/report/fixtures/`](../../bench/report/fixtures/) holds five standard algorithm figures; [the PR fixture](../../bench/continuous/fixtures/chart.svg) covers the comparison matrix. The original SVG references are retained when changing rendering libraries. Tests compare their content and canvas dimensions and separately check values and layout invariants. Render both implementations from the same recorded dataset for visual inspection; synthetic fixtures exercise boundary cases and do not serve as performance evidence.
+Automated tests protect report generation, numeric summaries and unavailable builds. They do not pin SVG snapshots, exact wording or layout coordinates. When changing rendering, generate before-and-after figures from the same recorded dataset and inspect light and dark appearance; synthetic fixtures exercise boundary cases and do not serve as performance evidence.
 
 Run `pnpm tools:test`, `pnpm tools:typecheck`, `pnpm docs:typecheck` and `pnpm docs:build` when the shared figure layer changes.

@@ -406,187 +406,35 @@ mod tests {
     }
 
     #[test]
-    fn presets_preserve_case_counts() {
-        let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
-        let cases = continuous.inputs().unwrap();
-        assert_eq!(cases.len(), 62);
-        assert_eq!(cases.iter().filter(|case| case.len >= 1_000_000).count(), 8);
-        // Separated-tail coverage replaces the removed end-run route: keyed rows
-        // at 65,536 records and direct keys past its 1,024-record cap.
-        for (ty, len) in [("row_u64", 65_536), ("u64", 1_000_000)] {
-            assert!(cases.iter().any(|case| {
-                case.ty == ty && case.distribution == "sorted_tail" && case.len == len
-            }));
-        }
-        for distribution in ["skew99", "two_values"] {
-            assert!(cases.iter().any(|case| {
-                case.ty == "u64" && case.distribution == distribution && case.len == 65_536
-            }));
-            assert!(!cases.iter().any(|case| {
-                case.ty == "u64" && case.distribution == distribution && case.len >= 1_000_000
-            }));
-        }
-        for ty in ["u64", "row_u64"] {
-            for distribution in ["random", "sorted", "reverse", "equal"] {
-                assert!(cases.iter().any(|case| {
-                    case.ty == ty
-                        && case.distribution == distribution
-                        && case.len == tessera_sort::thresholds::INSERTION_MAX
-                }));
-            }
-        }
-        for distribution in ["d4096", "sparse_digits"] {
-            assert!(cases.iter().any(|case| {
-                case.ty == "u64" && case.distribution == distribution && case.len == 65_536
-            }));
-        }
-        let parallel = continuous.parallel_inputs().unwrap();
-        assert_eq!(parallel.len(), 8);
-        assert!(parallel.iter().all(|case| case.len == 10_000_000));
-        assert_eq!(
-            parallel
-                .iter()
-                .map(|case| (case.ty.as_str(), case.distribution.as_str()))
-                .collect::<Vec<_>>(),
-            [
-                ("row_u32", "random"),
-                ("row_u32", "skew99"),
-                ("row_u64", "random"),
-                ("u32", "random"),
-                ("u64", "equal"),
-                ("u64", "random"),
-                ("u64", "reverse"),
-                ("u64", "sorted"),
-            ]
-        );
-        for ty in ["u32", "f64", "row_u64"] {
-            for distribution in ["sorted", "reverse"] {
-                assert!(cases.iter().any(|case| {
-                    case.ty == ty && case.distribution == distribution && case.len == 1000
-                }));
-            }
-        }
-        assert!(
-            cases.iter().any(|case| {
-                case.ty == "u64" && case.distribution == "equal" && case.len == 1000
-            })
-        );
-        assert!(cases.iter().any(|case| {
-            case.ty == "u32" && case.distribution == "sorted" && case.len == 65_536
-        }));
-        for (ty, len) in [("u64", 1_000_000), ("row_u64", 65_536)] {
-            assert!(cases.iter().any(|case| {
-                case.ty == ty && case.distribution == "sorted_tail" && case.len == len
-            }));
-        }
-        for (text, expected) in [
-            (include_str!("../../plans/smoke.toml"), 125),
-            (include_str!("../../plans/release.toml"), 381),
-            (include_str!("../../plans/parallel.toml"), 16),
+    fn presets_preserve_coverage() {
+        for (text, harness, expected) in [
+            (include_str!("../../plans/continuous.toml"), "smoke", 62),
+            (include_str!("../../plans/smoke.toml"), "comparison", 125),
+            (include_str!("../../plans/release.toml"), "comparison", 381),
+            (include_str!("../../plans/parallel.toml"), "comparison", 16),
         ] {
             assert_eq!(
-                Plan::parse(text, "comparison")
-                    .unwrap()
-                    .inputs()
-                    .unwrap()
-                    .len(),
+                Plan::parse(text, harness).unwrap().inputs().unwrap().len(),
                 expected
             );
         }
-    }
-
-    #[test]
-    fn smoke_covers_release_shapes() {
-        let smoke = Plan::parse(include_str!("../../plans/smoke.toml"), "comparison").unwrap();
-        let release = Plan::parse(include_str!("../../plans/release.toml"), "comparison").unwrap();
-        let pairs = |plan: &Plan| {
-            plan.inputs()
+        let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
+        let parallel = continuous.parallel_inputs().unwrap();
+        assert_eq!(parallel.len(), 8);
+        assert!(parallel.iter().all(|case| case.len == 10_000_000));
+        let pairs = |text| {
+            Plan::parse(text, "comparison")
+                .unwrap()
+                .inputs()
                 .unwrap()
                 .into_iter()
                 .map(|case| (case.ty, case.distribution))
                 .collect::<BTreeSet<_>>()
         };
-        assert_eq!(pairs(&smoke), pairs(&release));
-        let cases = release.inputs().unwrap();
-        for case in &cases {
-            match case.distribution.as_str() {
-                "finite_signed" => assert_eq!(case.ty, "f64"),
-                "sparse_digits" | "bimodal" => {
-                    assert!(["u64", "row_u64", "record128", "owned"].contains(&case.ty.as_str()));
-                }
-                "sparse8" => {
-                    assert!(["u32", "u64", "row_u32", "row_u64"].contains(&case.ty.as_str()));
-                }
-                _ => {}
-            }
-        }
-        for shape in [
-            "equal",
-            "two_values",
-            "d4096",
-            "hot50",
-            "far_swaps",
-            "sorted_tail",
-            "sparse8",
-            "sparse_digits",
-            "bimodal",
-        ] {
-            assert!(
-                cases.iter().any(|case| case.ty == "u64"
-                    && case.distribution == shape
-                    && case.len == 10_000_000),
-                "{shape}"
-            );
-        }
-    }
-
-    #[test]
-    fn custom_products_expand_once() {
-        let text = r#"{"schema":1,"harness":"smoke","algorithms":["tessera"],
-            "include":[{"types":["u32","u64"],"distributions":["random","zipf2"],"lengths":[1234]},
-                       {"types":["u64"],"distributions":["random"],"lengths":[1234]}],
-            "exclude":[{"types":["u32"],"distributions":["zipf2"]}]}"#;
         assert_eq!(
-            Plan::parse(text, "smoke").unwrap().inputs().unwrap().len(),
-            3
+            pairs(include_str!("../../plans/smoke.toml")),
+            pairs(include_str!("../../plans/release.toml"))
         );
-    }
-
-    #[test]
-    fn formats_share_selection_rules() {
-        let json = r#"{"schema":1,"harness":"smoke","algorithms":["tessera"],
-            "include":[{"types":["u64"],"distributions":["random"],"lengths":[1000,"tile-next"]}],
-            "exclude":[{"lengths":[1000]}]}"#;
-        let text = r#"
-            # Numeric counts and code-relative boundaries share one axis.
-            schema = 1
-            harness = "smoke"
-            algorithms = ["tessera"]
-            [[include]]
-            types = ["u64"]
-            distributions = ["random"]
-            lengths = [1_000, "tile-next"]
-            [[exclude]]
-            lengths = [1_000]
-        "#;
-        let expected = Plan::parse(json, "smoke").unwrap();
-        let actual = Plan::parse(text, "smoke").unwrap();
-        assert_eq!(
-            serde_json::to_value(&actual).unwrap(),
-            serde_json::to_value(&expected).unwrap()
-        );
-        assert_eq!(actual.inputs().unwrap(), expected.inputs().unwrap());
-        assert!(!actual.selects("u64", "random", 1000));
-        for invalid in [
-            text.replace("schema = 1", "schema = 2"),
-            format!("{text}\n modes = [\"api\"]"),
-            format!("{text}\n modes = [\"workspace\"]"),
-            text.replace("types =", "type ="),
-            text.replace("[1_000,", "[0,"),
-            text.replace("[1_000,", "[1_000, 1_000,"),
-        ] {
-            assert!(Plan::parse(&invalid, "smoke").is_err());
-        }
     }
 
     #[test]

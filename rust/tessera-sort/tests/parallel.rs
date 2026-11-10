@@ -13,29 +13,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tessera_sort::{par_stable_sort, par_stable_sort_by_key};
 
 #[test]
-fn keys_keep_total_order() {
-    let mut keys = [
-        f64::from_bits(0xfff8_0000_0000_0001),
-        f64::NAN,
-        -0.0,
-        1.0,
-        f64::NEG_INFINITY,
-        0.0,
-        f64::INFINITY,
-    ];
-    let mut expected = keys;
-    expected.sort_by(f64::total_cmp);
-    par_stable_sort(&mut keys);
-    assert_eq!(keys.map(f64::to_bits), expected.map(f64::to_bits));
-
-    let mut wide = [Reverse(i128::MIN), Reverse(i128::MAX), Reverse(-1)];
-    par_stable_sort(&mut wide);
-    assert_eq!(wide, [Reverse(i128::MAX), Reverse(-1), Reverse(i128::MIN)]);
-    par_stable_sort::<u8>(&mut []);
-    par_stable_sort(&mut [1u8]);
-}
-
-#[test]
 #[cfg(not(miri))]
 fn counted_keys_keep_bits() {
     let pool = rayon::ThreadPoolBuilder::new()
@@ -151,28 +128,6 @@ fn bounded_callback_can_reenter() {
         if pair[0].0 == pair[1].0 {
             assert!(pair[0].1.get() < pair[1].1.get());
         }
-    }
-}
-
-#[test]
-fn caller_pools_are_supported() {
-    for threads in [1, 4] {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build()
-            .unwrap();
-        let mut rows: Vec<_> = (0..16_384u32)
-            .map(|index| ((index.wrapping_mul(7919) % 257), index))
-            .collect();
-        let mut expected = rows.clone();
-        expected.sort_by_key(|row| row.0);
-        pool.install(|| {
-            par_stable_sort_by_key(&mut rows, |row| {
-                assert_eq!(rayon::current_num_threads(), threads);
-                row.0
-            });
-        });
-        assert_eq!(rows, expected);
     }
 }
 

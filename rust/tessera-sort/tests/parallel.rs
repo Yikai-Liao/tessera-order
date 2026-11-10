@@ -10,7 +10,9 @@ use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use tessera_sort::{par_stable_sort, par_stable_sort_by_key};
+#[cfg(not(miri))]
+use tessera_sort::par_stable_sort;
+use tessera_sort::par_stable_sort_by_key;
 
 #[test]
 #[cfg(not(miri))]

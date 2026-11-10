@@ -193,10 +193,12 @@ async function nextBuild(
     return ready.get(key)!;
   };
 
-  // Trusted checkout history orders tickets, independent of dispatch or build completion.
+  // Checkout refreshes origin/main even when native reruns pin older executable code.
   const history = new Map(
     childProcess
-      .execFileSync("git", ["rev-list", "--first-parent", "HEAD"], { encoding: "utf8" })
+      .execFileSync("git", ["rev-list", "--first-parent", "refs/remotes/origin/main"], {
+        encoding: "utf8",
+      })
       .trim()
       .split("\n")
       .map((hash, index) => [hash, index]),

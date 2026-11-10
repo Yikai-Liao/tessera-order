@@ -318,6 +318,19 @@ test("worker keeps a safe main ticket despite changed priority or queued dispatc
   assert.equal(f.outputs.hash, hash(1));
 });
 
+test("native recovery keeps old code but uses the freshly fetched main graph", async (t) => {
+  const f = fixture(t, {
+    builds: [build(1), build(2)],
+    trackers: [tracker(300, 1, { run_attempt: 2 })],
+  });
+  t.mock.method(childProcess, "execFileSync", (_command: string, args: string[]) =>
+    args?.at(-1) === "HEAD" ? hash(1) : `${hash(2)}\n${hash(1)}`,
+  );
+  await prepareScheduledSource(f, since, "1");
+  assert.equal(f.outputs.eligible, "true");
+  assert.equal(f.outputs.build_id, "1");
+});
+
 test("main history, not build IDs or dispatch order, owns the prefix", async (t) => {
   const f = fixture(t, { builds: [build(1), build(3)], history: [hash(1), hash(3)] });
   await scheduleNext(f, since);

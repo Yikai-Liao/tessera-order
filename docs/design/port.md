@@ -465,3 +465,14 @@ A third candidate recursively projects the retained sample onto each nonterminal
 | `row_u64/skew99/1000` | 1.0107 | 0.9884–1.0441 | 0.9797–1.0203 | within A/A |
 
 The third candidate passes serial/Rayon tests, Clippy, site checks and all six affected planner tests under Miri. Independent source review found no issues but explicitly withheld performance acceptance. Fixed-work counters (`conditional-recursive-counters-v3`, one sort per process against `cb6be7f`) show additional instructions: 9.52% / 7.48% for `bimodal/1000` and 4.19% / 3.21% for `random/1000`, direct / keyed respectively; identical baseline repeats had identical instruction totals. These counts establish additional work, not its full latency contribution. These candidates remain performance-unaccepted; the residual model/planning work and broader coverage must be evaluated before adopting the trade-off.
+
+An equivalent group scan after `a208d15` holds the current digit fixed while finding its group end, rather than masking both keys at every adjacent comparison. It changes no sample, estimate or routing rule. The maintained counters (`conditional-fixed-group-counters`, one sort) reduce instructions by 1.50% / 1.20% on `bimodal/1000` and 0.83% / 0.64% on `random/1000`, direct / keyed respectively; baseline repeats have identical instruction totals. A nine-block screen (`conditional-fixed-group-screen`, `--types u64,row_u64 --distributions random,bimodal --lengths 1000 --cpu 2`, same conditions) reports:
+
+| Case | Current / baseline | Block range | A/A range | Screen |
+|---|---:|---|---|---|
+| `u64/bimodal/1000` | 0.9920 | 0.9887–0.9935 | 0.9978–1.0022 | faster |
+| `row_u64/bimodal/1000` | 0.9933 | 0.9865–1.0003 | 0.9956–1.0044 | faster |
+| `u64/random/1000` | 0.9919 | 0.9888–0.9979 | 0.9966–1.0034 | faster |
+| `row_u64/random/1000` | 0.9953 | 0.9920–0.9993 | 0.9972–1.0028 | faster |
+
+This reduces work in the candidate, but neither cancels the earlier regressions nor supplies the missing in-process and placement-controlled acceptance evidence.

@@ -89,7 +89,15 @@ impl<V: Unsigned> KeySample<V> {
         // All records pay a partition and either insertion or a confirming scan.
         // Only children with work beyond that minimum need further estimation.
         let mut work = 2 * sample.len();
-        for keys in sample.chunk_by(|a, b| (*a & mask) == (*b & mask)) {
+        let mut start = 0;
+        while start < sample.len() {
+            let bucket = sample[start] & mask;
+            let mut end = start + 1;
+            while end < sample.len() && sample[end] & mask == bucket {
+                end += 1;
+            }
+            let keys = &sample[start..end];
+            start = end;
             if keys.len() == 1 {
                 work += singleton_passes;
                 continue;

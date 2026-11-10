@@ -57,6 +57,8 @@ Optional local layout sampling uses the same workspace and Criterion block runne
 Optional local CGU, explicit alignment and engine-order controls reuse the revision builder and retain effective flags, maps and ordering evidence. `local/layout.ts` owns control identities and engine-symbol selection; CLI choices and the runner consume them.
 
 
+`local/counters.ts` owns fixed-work Callgrind comparisons and per-event PMU probes, reusing revision snapshots, builds and case selection. The opt-in Rust marker delimits a verified, prepared serial batch. Counts and simulator events retain provenance and regenerate offline; they do not change timing verdicts or Bencher settings.
+
 Temporary sources and builds belong to the workspace; result directories retain provenance, observations, summaries and figures. Interrupted local runs are inspectable, not resumable or reportable as complete. Algorithm sessions retain their executable pairs, selection and settings before measuring; `compare resume` uses these exact artifacts without rebuilding. TypeScript owns the session lease and validation receipts. Rust owns host/build compatibility, journal repair and worker kernel locks, so an orphaned worker cannot lose exclusivity merely because its parent lease expires. [The recovery procedure](../development/benchmarking.md#resuming-algorithm-comparisons) defines partial-state handling.
 
 ## Figure boundary

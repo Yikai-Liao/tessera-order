@@ -40,6 +40,22 @@ interface LocalOptions {
   layoutControl?: LayoutControl;
 }
 
+/** Reject ambient worker controls that could change a requested experiment. */
+export function assertWorkerEnvironment() {
+  for (const name of [
+    "LIST",
+    "GROUPS",
+    "PLAN",
+    "IDS",
+    "PARALLEL",
+    "TIME_DIVISOR",
+    "STUDY_SETTINGS",
+    "FIXED_SORTS",
+  ])
+    if (`TESSERA_BENCH_${name}` in process.env)
+      throw new Error(`Unset TESSERA_BENCH_${name} before starting an experiment`);
+}
+
 /** Complete only unused optional metadata for pre-parallel serial baselines. */
 export function serialBaselineManifest(baseline: string, current: string) {
   const manifest = parse(baseline);
@@ -194,7 +210,7 @@ export async function buildRevisions(
 }
 
 /** Select the same timed IDs in both executables before starting measurements. */
-async function selectedCases(
+export async function selectedCases(
   binaries: { baseline: string; current: string },
   planPath: string,
   pattern: string | undefined,
@@ -266,16 +282,7 @@ export async function compareLocal(options: LocalOptions) {
   const { root, out, simd, cpu } = options;
   if (options.layoutControl && !options.layoutSeeds)
     throw new Error("Layout controls require --layout-seeds");
-  if (
-    [
-      "TESSERA_BENCH_LIST",
-      "TESSERA_BENCH_GROUPS",
-      "TESSERA_BENCH_PLAN",
-      "TESSERA_BENCH_IDS",
-      "TESSERA_BENCH_PARALLEL",
-    ].some((name) => name in process.env)
-  )
-    throw new Error("Unset worker-selection variables before starting a local comparison");
+  assertWorkerEnvironment();
   let linker: LayoutRun["linker"] | undefined;
   if (options.layoutSeeds) {
     parseLayoutSeeds(options.layoutSeeds.join(","));

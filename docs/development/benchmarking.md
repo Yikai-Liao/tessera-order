@@ -12,6 +12,8 @@ CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment
 |---|---|---|
 | Compare working-tree code with a commit | `pnpm tools compare commit COMMIT` | Two revision builds, nine rotating baseline/control/current process blocks, paired process-level A/A, verification, provenance and a report |
 | Sample revision comparisons across layouts | `pnpm tools compare commit COMMIT --layout-seeds 1,2,3,4,5` | One revision pair per fixed LLD seed, nine blocks per seed, link maps and descriptive cross-layout ranges; Linux x86-64 GNU only |
+| Compare fixed-work counters | `pnpm tools compare counters COMMIT` | Verified serial batches, Callgrind instruction and simulated cache/branch counts, source/build provenance and offline reporting |
+| Probe local PMU access | `pnpm tools continuous probe-counters --out DIR` | Read-only, per-event `perf` availability on the current host |
 | Compare algorithms | `pnpm tools compare algorithms` | Registered algorithms in one timing executable per configuration, nine shuffled blocks, two Tessera calls for A/A, output verification, allocation measurement and a report |
 | Local parallel comparison | `pnpm tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` | Serial controls, Tessera-8 and Rayon stable-8 in the shared paired harness; choose a CPU list appropriate to the host |
 | Full algorithm comparison | `pnpm tools compare algorithms --plan release --simd` | Release coverage, native opponents and a separate Portable SIMD build |
@@ -92,9 +94,35 @@ Use `pnpm tools report DIR` for either local schema; every seed must have nine c
 
 With layout seeds, `--layout-control cgu1` applies one code-generation unit to both revisions, `aligned` explicitly requests the shared 64-byte alignment defaults, and `engine-first` relinks after selecting engine-owned out-of-line functions from matching raw/demangled `nm` views. Inline code stays in its callers. Default CLI alignment also applies to CGU and symbol-order experiments; these options do not establish isolated or combined performance gains. The result retains the chosen control, actual flags, link maps and, for `engine-first`, per-role `.order` files. Controls preserve Cargo-resolved flags and require Linux x86-64 GNU, `cc`, LLD and (for engine ordering) `nm`.
 
+### Fixed-work counters
+
+The command defaults to `HEAD` and the `local` plan.
+
+`compare counters [COMMIT]` uses the current smoke harness for both library revisions, with the local-only `layout-study` feature and the default ISA build. It requires Linux x86-64 and Valgrind; `--simd` is rejected because a simulated ISA path is not the real host's dispatch. Select a small smoke plan with the usual axes, then run:
+
+```sh
+pnpm tools compare counters HEAD --types u32,u64 --distributions random --lengths 48,65536 \
+  --sorts 8 --out bench/results/counters-null
+```
+
+Each selected serial API case runs in three separate processes: baseline, a second baseline for A/A, and current. Their order reverses on alternate cases. Each process first verifies a complete sort, prepares `--sorts` independent copies (default 8, range 1..1024), calls the stable `tessera_counted_sorts` marker once and verifies every output afterwards. Callgrind collects that dynamic call tree with cache and branch simulation enabled. The batch loop and dispatch overhead are included; input generation, allocation of prepared copies, restoration and verification are outside collection. Counts describe this prepared-cache workload and simulator, not cold-cache execution or hardware PMU events. Large selections multiply both prepared memory and simulation cost; input count must remain practical for the host.
+
+`counters.json` retains both source hashes, executable hashes, compiler flags, Valgrind version, the fixed sort count, event totals and whether the measured working tree was modified. Initial and regenerated reports display that state beside HEAD; older results without the field are labelled unrecorded. Every process's completion receipt is checked against its requested ID and sort count. Raw `callgrind-<case>-<role>.out` files allow annotation. `Ir` is instructions; `D1mr`/`D1mw` and `DLmr`/`DLmw` are simulated data-cache read/write misses; `Bcm`/`Bim` are simulated conditional/indirect mispredictions. Cache and predictor models can still depend on code and data addresses. Equal instructions and simulated events cannot prove that a time change is caused by layout, and changed counts need not explain the whole time change. The report is descriptive and does not submit a Bencher metric or change a verdict. A failed process or zero/malformed instruction summary fails the operation; incomplete results cannot regenerate as a complete report.
+
+Some host C libraries or loaders require instructions unsupported by Valgrind, even when the measured Rust code uses the default ISA. For such hosts, build the provided baseline-ISA container, then use `--valgrind-image tessera-callgrind`. `BASE_IMAGE` may select another compatible glibc image. The command records the local immutable image ID and Valgrind version, mounts temporary sources read-only and results writable, and runs without network access or extra capabilities. Version probes and measurements use uniquely named containers; after failure or cancellation, forced removal is awaited before returning control to workspace cleanup. A cleanup failure is logged with the owned name while preserving the original failure. The host builds the executable; an incompatible container libc or unsupported executable instruction fails visibly.
+
+```sh
+docker build -t tessera-callgrind -f bench/local/Callgrind.Dockerfile .
+pnpm tools compare counters HEAD --types u32 --distributions random --lengths 48 \
+  --valgrind-image tessera-callgrind --out bench/results/counters-container
+```
+
+`continuous probe-counters --out DIR` separately tries `instructions:u`, `branch-misses:u`, `idq.dsb_uops:u`, `idq.mite_uops:u` and `baclears.any:u` with the host's `perf`. `probe.json` preserves each success/failure and raw output; Intel-specific aliases may be unavailable on AMD. The probe does not change `perf_event_paranoid`, request capabilities or infer cloud access from local access. Use the actual measured host before integrating PMU reads into a timed run.
+
+
 ## Experiment plans
 
-All three workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). Repository presets, the shared catalog and selection fixtures use TOML for comments and readable input rules; custom files may use either TOML or JSON. Both formats decode into the same configuration model and use the same validation and selection rules. Plans describe what to measure; the harness owns input generation and the measurement protocol.
+Benchmark workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). Repository presets, the shared catalog and selection fixtures use TOML for comments and readable input rules; custom files may use either TOML or JSON. Both formats decode into the same configuration model and use the same validation and selection rules. Plans describe what to measure; the harness owns input generation and the measurement protocol.
 
 | Preset | Harness | Default selection |
 |---|---|---|

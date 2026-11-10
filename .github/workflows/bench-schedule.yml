@@ -1,0 +1,47 @@
+name: Schedule benchmarks
+
+# Actions records are the queue. This short selector never submits measurements.
+on:
+  workflow_run:
+    workflows: [Build benchmarks, Track benchmarks]
+    types: [completed]
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  checks: read
+  pull-requests: read
+
+concurrency:
+  group: benchmark-selector
+  cancel-in-progress: false
+
+jobs:
+  select:
+    if: vars.BENCHMARK_QUEUE_SINCE != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Select the next measurement
+        uses: actions/github-script@v9
+        env:
+          QUEUE_SINCE: ${{ vars.BENCHMARK_QUEUE_SINCE }}
+        with:
+          script: |
+            const { scheduleNext } = require('./bench/continuous/queue.ts');
+            await scheduleNext({ github, context, core }, process.env.QUEUE_SINCE);

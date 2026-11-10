@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { marker } from "../bench/continuous/marker.ts";
 
 const cli = fileURLToPath(new URL("./index.ts", import.meta.url));
 
@@ -101,6 +102,11 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
           run(10),
           run(90, { head_sha: "old" }),
           run(92, { event: "workflow_run", workflow_id: 2 }),
+          run(93, {
+            event: "workflow_dispatch",
+            workflow_id: 2,
+            path: ".github/workflows/bench-track.yml@refs/heads/main",
+          }),
         ],
       },
       { workflow_runs: [run(11, { status: "in_progress", conclusion: null, run_attempt: 2 })] },
@@ -127,7 +133,64 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
   assert.equal(status.report, null);
   assert.equal(status.details, undefined);
   assert.ok(JSON.stringify(status).length < 2000);
-  assert.ok(!(await f.requests()).some((path) => path.includes("/92")));
+  assert.ok(!(await f.requests()).some((path) => /\/(92|93)(\/|$)/.test(path)));
+});
+
+test("PR status joins merge workflows without accepting stale comments", async (t) => {
+  const comment = (sha: string, login = "github-actions[bot]") => ({
+    body: marker("rust", sha),
+    html_url: sha,
+    user: { login },
+  });
+  const f = await fixture(t, {
+    "pulls/49": {
+      number: 49,
+      state: "open",
+      head: { sha: "current" },
+      merge_commit_sha: "merge",
+      html_url: "pr-url",
+    },
+    "commits/current/check-runs?per_page=100": [
+      {
+        check_runs: [
+          check(1, {
+            conclusion: "failure",
+            external_id: "70",
+            details_url: "https://github.com/owner/project/runs/1",
+            output: { title: "2 slower", summary: "Alert, not a measurement failure" },
+          }),
+        ],
+      },
+    ],
+    "actions/runs?head_sha=current&per_page=100": [{ workflow_runs: [] }],
+    "actions/runs?head_sha=merge&per_page=100": [
+      {
+        workflow_runs: [
+          run(15, { head_sha: "merge", event: "pull_request", head_branch: "feature" }),
+        ],
+      },
+    ],
+    "actions/runs/70": run(70, {
+      workflow_id: 2,
+      name: "Track benchmarks",
+      event: "workflow_dispatch",
+      path: ".github/workflows/bench-track.yml",
+      head_sha: "trusted",
+    }),
+    "issues/49/comments?per_page=100": [
+      [comment("old"), comment("current", "untrusted")],
+      [comment("current")],
+    ],
+  });
+  const status = JSON.parse(f.run("status", "--pr", "49", "--details"));
+  assert.equal(status.target.head, "current");
+  assert.equal(status.target.merge, "merge");
+  assert.equal(status.details.workflows[0].head, "merge");
+  assert.equal(status.workflows[1].state, "success");
+  assert.equal(status.benchmarks[0].state, "failure");
+  assert.equal(status.benchmarks[0].title, "2 slower");
+  assert.equal(status.report, "current");
+  assert.equal(status.details.comment.body, marker("rust", "current"));
 });
 
 test("missing workflows never become a clean verdict", async (t) => {

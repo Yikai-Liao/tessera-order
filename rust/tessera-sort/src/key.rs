@@ -386,6 +386,7 @@ impl<K: RadixKey> Extract<K> for Direct {
 /// every record counted in its bucket. Serial and parallel finishing share this
 /// ownership-free summary; only collection and filling are scheduled differently.
 struct KeyCounts<K> {
+    buckets: usize,
     counts: [usize; SMALL_WINDOW_BUCKETS],
     representatives: [K; SMALL_WINDOW_BUCKETS],
 }
@@ -394,10 +395,11 @@ impl<K: RadixKey> KeyCounts<K> {
     /// Counts a nonempty slice in a window of at most `SMALL_WINDOW_BITS` bits.
     fn count(records: &[K], low: usize, width: usize) -> Self {
         let mut result = Self {
+            buckets: 1 << width,
             counts: [0; SMALL_WINDOW_BUCKETS],
             representatives: [records[0]; SMALL_WINDOW_BUCKETS],
         };
-        let mask = K::Encoded::from_usize((1 << width) - 1);
+        let mask = K::Encoded::from_usize(result.buckets - 1);
         let shift = K::Encoded::from_usize(low);
         for &record in records {
             let bucket = ((record.encode() >> shift) & mask).to_usize();
@@ -412,7 +414,8 @@ impl<K: RadixKey> KeyCounts<K> {
     /// Combines disjoint shards counted with the same window.
     #[cfg(feature = "rayon")]
     fn merge(mut self, other: Self) -> Self {
-        for bucket in 0..SMALL_WINDOW_BUCKETS {
+        debug_assert_eq!(self.buckets, other.buckets);
+        for bucket in 0..self.buckets {
             if other.counts[bucket] != 0 {
                 self.representatives[bucket] = other.representatives[bucket];
                 self.counts[bucket] += other.counts[bucket];
@@ -427,6 +430,7 @@ impl<K: RadixKey> KeyCounts<K> {
         self.counts
             .into_iter()
             .zip(self.representatives)
+            .take(self.buckets)
             .scan(records, |remaining, (count, key)| {
                 let (run, rest) = core::mem::take(remaining).split_at_mut(count);
                 *remaining = rest;

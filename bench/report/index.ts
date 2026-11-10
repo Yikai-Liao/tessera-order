@@ -163,6 +163,12 @@ export async function writeReport(directories: string[], partial = false): Promi
   markdown +=
     "Nine blocks reuse each case's seed-one input. Their range measures execution variability on that input; it does not measure variability across random inputs. Calibration can choose different batch sizes for different variants, changing the prepared-buffer working set and cache behavior.\n\n";
   markdown += renderProvenance(dataset);
+  const revisions = dataset.manifests.get("default")!.revisions;
+  if (revisions) {
+    markdown +=
+      "## Linked revision controls\n\nTwo named crates represent each revision, alongside the repeated primary-current A/A call. Ratios divide each placement by the current A/A mean: a slower baseline row indicates a current improvement. Compare both baseline copies and the second current copy, not only one favorable placement. Adapter entry offsets prove distinct call boundaries, not distinct internal sort bodies; inspect the retained executable before source attribution. This is a serial comparison; parallel revision process screens use smoke plans with parallel rules.\n\n";
+    markdown += "```json\n" + JSON.stringify(revisions, null, 2) + "\n```\n\n";
+  }
   const conditions = collectWarnings(dataset);
   if (conditions.length)
     markdown += `## Observed conditions\n\n${conditions.map((w) => `- ${w}`).join("\n")}\n\n`;

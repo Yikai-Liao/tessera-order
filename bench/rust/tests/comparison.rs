@@ -13,6 +13,9 @@ fn memory_resumes_missing_adapters() {
     fs::create_dir_all(&directory).unwrap();
     let plan = directory.join("plan.json");
     let mut algorithms = vec!["tessera", "std-stable"];
+    if cfg!(tessera_bench_revisions) {
+        algorithms.extend(["tessera-baseline", "tessera-baseline-copy", "tessera-copy"]);
+    }
     if cfg!(feature = "rayon") {
         algorithms.extend(["tessera-par-8", "rayon-stable-8"]);
     }

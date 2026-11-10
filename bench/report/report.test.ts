@@ -66,6 +66,20 @@ test("paired ratios respect noise", () => {
   );
 });
 
+test("revision placements retain their own measured verdict", () => {
+  const dataset = createFixture();
+  for (const manifest of dataset.manifests.values()) {
+    manifest.variants.push({ name: "tessera-baseline", stable: true, adapter: "revision" });
+  }
+  for (const row of dataset.samples)
+    if (row.variant === "std-stable") row.variant = "tessera-baseline";
+  const result = summarize(dataset).get(
+    measurementId("default", "u64/random/1000/s1", "tessera-baseline"),
+  )!;
+  assert.equal(result.verdict, "slower");
+  assert.equal(result.stable, true);
+});
+
 test("parallel Tessera is an opponent, not an A/A control", () => {
   const dataset = createFixture();
   const id = "u64/random/1000/s1";

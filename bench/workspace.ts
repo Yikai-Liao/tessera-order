@@ -4,7 +4,25 @@ import { createHash } from "node:crypto";
 import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { parse } from "smol-toml";
 import { command } from "../tools/process.ts";
+
+/** Select the same vector backend on historical opt-in and current required builds.
+ * Missing backends fail rather than silently comparing SIMD against scalar code.
+ */
+export function simdFeatures(manifest: string): string[] {
+  const parsed = parse(manifest);
+  const features = parsed.features as Record<string, unknown> | undefined;
+  if (features && "portable-simd" in features) return ["portable-simd"];
+  const dependencies = parsed.dependencies as Record<string, unknown> | undefined;
+  const backend = dependencies?.fearless_simd;
+  if (
+    typeof backend === "string" ||
+    (backend && typeof backend === "object" && !("optional" in backend && backend.optional))
+  )
+    return [];
+  throw new Error("Revision has no supported SIMD backend; choose a SIMD-capable baseline");
+}
 
 /** Align measured Rust code while retaining later, explicitly configured overrides. */
 export const ALIGNMENT_RUSTFLAGS = [
@@ -36,6 +54,7 @@ export interface BuildProvenance {
   /** Resolved library features from Cargo; absent in historical result files. */
   library_features?: string[];
   rustc_args?: string[];
+  revisions?: { libraries: Record<string, string[]> };
 }
 
 /** Materialize repository-local links; reject escaping targets and directory cycles.
@@ -174,6 +193,19 @@ export async function buildArtifact(output: string, name: string) {
     await readFile(join(script.out_dir, "provenance.json"), "utf8"),
   ) as BuildProvenance;
   provenance.library_features = [...libraries[0].features].sort();
+  for (const [library, features] of Object.entries(provenance.revisions?.libraries ?? {})) {
+    const matches = messages.filter(
+      (value) =>
+        value.reason === "compiler-artifact" &&
+        value.target.name === library.replaceAll("-", "_") &&
+        value.target.kind?.includes("lib"),
+    );
+    if (
+      matches.length !== 1 ||
+      JSON.stringify([...matches[0].features].sort()) !== JSON.stringify(features)
+    )
+      throw new Error("Revision library features differ from prepared metadata: " + library);
+  }
   return { executable: artifact.executable as string, provenance };
 }
 

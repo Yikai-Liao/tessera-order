@@ -13,6 +13,7 @@ import {
   buildBenchmark,
   copyLibraryRevision,
   copySnapshot,
+  simdFeatures,
   sourceHash,
   type Workspace,
   withWorkspace,
@@ -80,23 +81,6 @@ export function serialBaselineManifest(baseline: string, current: string, parall
   return stringify(manifest);
 }
 
-/** Select the same vector backend on historical opt-in and current required builds.
- * Missing backends fail rather than silently comparing SIMD against scalar code.
- */
-export function backendFeatures(manifest: string): string[] {
-  const parsed = parse(manifest);
-  const features = parsed.features as Record<string, unknown> | undefined;
-  if (features && "portable-simd" in features) return ["tessera-sort/portable-simd"];
-  const dependencies = parsed.dependencies as Record<string, unknown> | undefined;
-  const backend = dependencies?.fearless_simd;
-  if (
-    typeof backend === "string" ||
-    (backend && typeof backend === "object" && !("optional" in backend && backend.optional))
-  )
-    return [];
-  throw new Error("Revision has no supported SIMD backend; choose a SIMD-capable baseline");
-}
-
 /** Compile both revisions with one harness, lockfile, toolchain and build directory. */
 export async function buildRevisions(
   root: string,
@@ -155,7 +139,10 @@ export async function buildRevisions(
     control === "cgu1" ? ["-Ccodegen-units=1"] : control === "aligned" ? ALIGNMENT_RUSTFLAGS : [];
   let env: NodeJS.ProcessEnv | undefined;
   const build = async (role: "baseline" | "current", seed: number | undefined) => {
-    const selectedFeatures = [...features, ...backendFeatures(await readFile(manifest, "utf8"))];
+    const selectedFeatures = [
+      ...features,
+      ...simdFeatures(await readFile(manifest, "utf8")).map((feature) => `tessera-sort/${feature}`),
+    ];
     const args = rustcArgs(seed);
     if (extraFlags.length && !env) {
       // Cargo resolves target/build config flags before exposing them to the

@@ -5,6 +5,7 @@ The CLI is `pnpm tools --help` (Node.js 24; install with `pnpm install --frozen-
 | Task | Command | Read |
 |---|---|---|
 | Screen uncommitted code against a commit | `pnpm tools compare commit HEAD` | [Working-tree comparisons](../docs/development/benchmarking.md#working-tree-comparisons) |
+| Compare linked serial revisions and placement copies | `pnpm tools compare revisions BASE --current HEAD` | [Linked revisions](../docs/development/benchmarking.md#linked-revision-comparisons) |
 | Compare sorting algorithms | `pnpm tools compare algorithms --plan release` | [Capabilities and procedure](../docs/development/benchmarking.md#command-capabilities) |
 | Preview inputs without measuring | `pnpm -s tools plan local` | [Experiment plans](../docs/development/benchmarking.md#experiment-plans) |
 | Rebuild a report without measurements | `pnpm tools report bench/results/SESSION` | [Result format](../docs/development/benchmarking.md#results-and-provenance) |

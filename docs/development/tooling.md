@@ -15,6 +15,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Inspect adjacent main changes | `pnpm -s tools continuous history --project yikai-liao-s-project --out bench/results/main-history` |
 | Probe current-host PMU access | `pnpm -s tools continuous probe-counters --out bench/results/pmu` |
 | Sample local function-section layouts | `pnpm -s tools compare commit HEAD --layout-seeds 1,2,3,4,5` |
+| Compare linked serial revisions and placement copies | `pnpm -s tools compare revisions BASE --current HEAD` |
 | Compare sorting algorithms | `pnpm -s tools compare algorithms --plan smoke` |
 | Resume a prepared algorithm comparison | `pnpm -s tools compare resume bench/results/SESSION` |
 | Reproduce the native comparison CI job | `pnpm -s tools check --native` |
@@ -30,7 +31,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Fetch and verify pinned native sources | `pnpm -s tools native fetch` |
 | Validate a release tag | `pnpm -s tools release verify --tag rust/v0.1.0` |
 
-Use a task's `--help` for its options. Local comparisons accept a Linux CPU list or range with `--cpu`; the [parallel measurement contract](benchmarking.md#local-parallel-comparisons) explains pool timing, affinity and memory exclusions. `plan` and both comparison tasks share the [experiment selection model](benchmarking.md#experiment-plans). `check` is a functional smoke check with a one-millisecond sample target, not a performance experiment. It runs harness tests, validates the smoke suite, measures one `u64/random` group, verifies that native programs do not link parallel runtimes when `--native` is selected, and generates a partial report.
+Use a task's `--help` for its options. Local comparisons accept a Linux CPU list or range with `--cpu`; the [parallel measurement contract](benchmarking.md#local-parallel-comparisons) explains pool timing, affinity and memory exclusions. `plan` and both comparison tasks share the [experiment selection model](benchmarking.md#experiment-plans). `check` is a functional smoke check with a one-millisecond sample target, not a performance experiment. It materializes HEAD and working-tree revision copies, runs harness tests including generated adapters and memory-journal recovery, validates the smoke suite, measures one `u64/random` group, verifies that native programs do not link parallel runtimes when `--native` is selected, and generates a partial report.
 
 ## Agent output
 

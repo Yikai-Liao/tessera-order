@@ -6,6 +6,7 @@ import { command, diagnostic } from "../tools/process.ts";
 import { catalog } from "./catalog.ts";
 import type { Plan } from "./plan.ts";
 import { writeReport } from "./report/index.ts";
+import { prepareRevisions, type Revisions } from "./revisions.ts";
 import { fetchNative } from "./rust/native/fetch.ts";
 import {
   type Build,
@@ -48,6 +49,7 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
   await mkdir(out, { recursive: false });
   await withComparisonWorkspace(root, native, async ({ tree, target }) => {
     const features = ["compare", "rayon", ...(native ? ["compare-native"] : [])];
+    await prepareRevisions(root, tree, { baseline: "HEAD" }, features);
     await command(
       "cargo",
       [
@@ -94,6 +96,7 @@ export interface ReleaseOptions {
   group?: string;
   sampleMs: number;
   memoryMib: number;
+  revisions?: Revisions;
 }
 
 /** Retain immutable builds, then validate, measure and report one experiment. */
@@ -125,6 +128,7 @@ async function prepareComparison(options: ReleaseOptions) {
         ? ["rayon"]
         : []),
     ];
+    if (options.revisions) await prepareRevisions(root, tree, options.revisions, features);
     const name = "default";
     diagnostic(`Building ${name}`);
     const { executable } = await buildBenchmark(tree, target, "compare", features);

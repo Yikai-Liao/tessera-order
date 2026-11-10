@@ -6,8 +6,8 @@ import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { criterionId } from "../catalog.ts";
+import { simdFeatures } from "../workspace.ts";
 import {
-  backendFeatures,
   parallelExecution,
   selectedCases,
   serialBaselineManifest,
@@ -80,20 +80,20 @@ if (${withParallel} && process.env.TESSERA_BENCH_PARALLEL === "4") console.log($
 });
 
 test("revision comparison enables historical SIMD without changing current builds", () => {
-  assert.deepEqual(backendFeatures('[features]\nportable-simd = ["dep:fearless_simd"]\n'), [
-    "tessera-sort/portable-simd",
+  assert.deepEqual(simdFeatures('[features]\nportable-simd = ["dep:fearless_simd"]\n'), [
+    "portable-simd",
   ]);
   for (const dependency of [
     '"1.2"',
     '{ version = "1.2" }',
     '{ version = "1.2", optional = false }',
   ]) {
-    assert.deepEqual(backendFeatures("[dependencies]\nfearless_simd = " + dependency), []);
+    assert.deepEqual(simdFeatures("[dependencies]\nfearless_simd = " + dependency), []);
   }
   for (const manifest of [
     "[dependencies]\n",
     '[dependencies]\nfearless_simd = { version = "1.2", optional = true }',
   ]) {
-    assert.throws(() => backendFeatures(manifest), /no supported SIMD backend/);
+    assert.throws(() => simdFeatures(manifest), /no supported SIMD backend/);
   }
 });

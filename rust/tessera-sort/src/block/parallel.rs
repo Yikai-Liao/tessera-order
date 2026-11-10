@@ -146,10 +146,11 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     assert!(arr.len() >= 2);
     let bucket_count = 1usize << radix;
     let shards = config.shards.max(1).min(arr.len());
-    // Local and global directories coexist during adoption, so budget 20
-    // rather than 10 bytes per input block position.
+    // Local and global directories coexist during adoption. Keep this
+    // conservative two-directory budget derived from the block representation.
     let record_bytes = core::mem::size_of::<T>();
-    let balanced = ((20.0 * arr.len() as f64)
+    let table_bytes = 2 * DESCRIPTOR_BYTES_PER_POSITION;
+    let balanced = ((table_bytes as f64 * arr.len() as f64)
         / (2.0 * shards as f64 * bucket_count as f64 * record_bytes as f64))
         .sqrt()
         .ceil() as usize;
@@ -234,7 +235,6 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
         && finish::try_finish(
             &mut global,
             &ends,
-            shards,
             config.parallel,
             finisher.limit,
             finisher.sort,
@@ -300,6 +300,10 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         let bucket_ids = Vec::new();
         let mut partials = Vec::with_capacity(head);
         let mut ends = Vec::with_capacity(bucket_count);
+        // Reuse one shard's block-end table for the adopted bucket directory.
+        // Local boundaries are available from their trailing partials below;
+        // recovery uses the live block sequence, not this pass-local table.
+        let mut block_ends = core::mem::take(&mut tasks[0].sorter.buffers.counts);
         let mut output = head;
         let mut records = 0;
         let translate = |shard_index: usize, task: &Shard<'_, '_, T, E>, physical: u32| {
@@ -310,18 +314,17 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 scratch_blocks + task.first_block + physical - local_scratch
             }
         };
-        for bucket in 0..bucket_count {
+        for (bucket, block_end) in block_ends.iter_mut().enumerate() {
             // Bucket-major, then ORIGINAL shard order. Completion order is never
             // used, so equal keys retain their original cross-shard order.
             for (index, task) in tasks.iter().enumerate() {
                 let start = if bucket == 0 {
                     task.sorter.active_blocks.start
                 } else {
-                    task.sorter.buffers.counts[bucket - 1]
+                    task.sorter.partial_blocks[bucket - 1].order_index + 1
                 };
-                let end = task.sorter.buffers.counts[bucket];
                 let partial = task.sorter.partial_blocks[bucket];
-                assert_eq!(partial.order_index, end - 1);
+                let end = partial.order_index + 1;
                 for logical in start..end {
                     order[output] = translate(index, task, task.sorter.block_order[logical]) as u32;
                     output += 1;
@@ -333,6 +336,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 records += (end - start - 1) * block_size + partial.len;
             }
             ends.push(records);
+            *block_end = output;
         }
         assert_eq!(records, input_len);
         assert_eq!(output, active_end);
@@ -352,6 +356,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             free = active_end;
         }
         assert_eq!(free, block_count);
+        buffers.counts = block_ends;
         let mut global = Partition {
             buffers,
             blocks: BlockStorage {

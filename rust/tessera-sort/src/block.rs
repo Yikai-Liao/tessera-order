@@ -482,6 +482,8 @@ pub(crate) struct Buffers<T> {
     bucket_ids: Vec<u16>,
     partial_blocks: Vec<PartialBlock>,
     writers: Vec<BucketWriter<T>>,
+    /// Per-bucket block counts during scatter, cumulative logical block ends
+    /// after directory construction. Adoption produces the same end offsets.
     counts: Vec<usize>,
     #[cfg(debug_assertions)]
     seen: Vec<bool>,

@@ -446,7 +446,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         self.sort_child(&mut records[boundary..], candidate);
     }
 
-    /// Finishes an ordered child before scanning its remaining candidate bits.
+    /// Finishes a child using remaining variation, order and the shared node policy.
     fn sort_child(&mut self, records: &mut [T], candidate: u128) {
         if records.len() < 2 || candidate == 0 {
             return;
@@ -471,6 +471,21 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             Order::Flat | Order::Unsorted => {}
         }
         self.sort_node(records, varying);
+    }
+
+    /// Finishes a privately staged bucket, using its available record capacity.
+    /// The larger tile allowance is local to this operation and cursor-bounded.
+    #[cfg(feature = "rayon")]
+    fn sort_staged_child(&mut self, records: &mut [T], candidate: u128) {
+        Sorter::<T, E, CACHED> {
+            scratch: self.scratch,
+            extractor: self.extractor,
+            tile_len: self
+                .tile_len
+                .max(records.len())
+                .min(crate::thresholds::MAX_TILE_RECORDS),
+        }
+        .sort_child(records, candidate);
     }
 
     /// Routes a slice whose order has already been probed.

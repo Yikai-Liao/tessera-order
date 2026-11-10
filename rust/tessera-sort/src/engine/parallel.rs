@@ -4,7 +4,6 @@
 
 use super::*;
 use crate::key::impl_key_half;
-use crate::thresholds::MAX_TILE_RECORDS;
 use rayon::Scope;
 
 /// The archived experiment did not reliably win at 512 KiB; keep 1 MiB as a
@@ -90,16 +89,13 @@ impl<'records, T> Job<'records, T> {
         pool: &Pool<T>,
     ) {
         let mut scratch = pool.take();
+        let mut sorter = Sorter::<T, E, CACHED> {
+            scratch: &mut scratch,
+            extractor: &mut extractor,
+            tile_len,
+        };
         for child in &mut self.buckets {
-            if child.len() > 1 {
-                let varying = scan_varying_bits(child, candidate, &mut extractor);
-                Sorter::<T, E, CACHED> {
-                    scratch: &mut scratch,
-                    extractor: &mut extractor,
-                    tile_len,
-                }
-                .sort_node(child, varying);
-            }
+            sorter.sort_child(child, candidate);
         }
         pool.give(scratch);
     }
@@ -226,14 +222,12 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
         let finish = |child: &mut [T]| {
             let mut key = child_extractor.clone();
             let mut scratch = pool_ref.take();
-            let varying = scan_varying_bits(child, candidate, &mut key);
-            let tile_len = tile_len.max(child.len()).min(MAX_TILE_RECORDS);
             Sorter::<T, E, CACHED> {
                 scratch: &mut scratch,
                 extractor: &mut key,
                 tile_len,
             }
-            .sort_node(child, varying);
+            .sort_staged_child(child, candidate);
             pool_ref.give(scratch);
         };
         let limit = bucket_limit::<T>(records.len(), digit.width);

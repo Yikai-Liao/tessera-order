@@ -418,20 +418,6 @@ mod tests {
                 expected
             );
         }
-        let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
-        let cases = continuous.inputs().unwrap();
-        // Keep keyed and direct separated-tail screens even if the total stays fixed.
-        for (ty, len) in [("u64", 65_536), ("row_u64", 65_536), ("u64", 1_000_000)] {
-            assert!(
-                cases.iter().any(|case| {
-                    case.ty == ty && case.distribution == "sorted_tail" && case.len == len
-                }),
-                "missing required continuous workload: {ty}/sorted_tail/{len}/s1"
-            );
-        }
-        let parallel = continuous.parallel_inputs().unwrap();
-        assert_eq!(parallel.len(), 8);
-        assert!(parallel.iter().all(|case| case.len == 10_000_000));
         let pairs = |text| {
             Plan::parse(text, "comparison")
                 .unwrap()
@@ -445,6 +431,93 @@ mod tests {
             pairs(include_str!("../../plans/smoke.toml")),
             pairs(include_str!("../../plans/release.toml"))
         );
+    }
+
+    #[test]
+    fn continuous_preserves_required_screens() {
+        let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
+        let cases = continuous.inputs().unwrap();
+        let require = |inputs: &[InputCase], ty: &str, distribution: &str, len: usize| {
+            assert!(
+                inputs.iter().any(|case| {
+                    case.ty == ty && case.distribution == distribution && case.len == len
+                }),
+                "missing required continuous workload: {ty}/{distribution}/{len}/s1"
+            );
+        };
+        // Policy identities must survive equal-count substitutions in the plan.
+        for ty in ["u64", "row_u64"] {
+            for distribution in ["random", "sorted", "reverse", "equal"] {
+                require(&cases, ty, distribution, INSERTION_MAX);
+            }
+        }
+        for ty in ["u64", "row_u32"] {
+            require(&cases, ty, "random", INSERTION_MAX + 1);
+        }
+        for (ty, bytes) in [("u64", 8), ("row_u32", 8), ("row_u64", 16)] {
+            require(&cases, ty, "random", TILE_BYTES / bytes + 1);
+        }
+        for ty in ["u64", "u32", "f64", "row_u64"] {
+            for distribution in ["sorted", "reverse"] {
+                require(&cases, ty, distribution, 1_000);
+            }
+        }
+        require(&cases, "u64", "equal", 1_000);
+        for ty in ["u64", "row_u64"] {
+            for distribution in ["random", "skew99"] {
+                require(&cases, ty, distribution, 1_000);
+            }
+        }
+        for (ty, len) in [("u64", 65_536), ("row_u64", 65_536), ("u64", 1_000_000)] {
+            require(&cases, ty, "sorted_tail", len);
+        }
+        for ty in ["u32", "u64"] {
+            require(&cases, ty, "sorted", 65_536);
+        }
+        for distribution in [
+            "d16",
+            "d4096",
+            "sparse_digits",
+            "zipf2",
+            "skew99",
+            "two_values",
+        ] {
+            require(&cases, "u64", distribution, 65_536);
+        }
+        for (ty, distribution) in [
+            ("f64", "finite_signed"),
+            ("row_u64", "d16"),
+            ("row_u64", "hot50"),
+            ("rec128_u64", "sparse_digits"),
+        ] {
+            require(&cases, ty, distribution, 65_536);
+        }
+        for ty in ["u32", "u64", "u128", "f64", "row_u64", "rec128_u64"] {
+            require(&cases, ty, "random", 65_536);
+        }
+        for ty in ["u32", "u64", "u128", "row_u64"] {
+            require(&cases, ty, "random", 1_000_000);
+        }
+        require(&cases, "u128", "sparse8", 1_000_000);
+        require(&cases, "u64", "bimodal", 1_000_000);
+        require(&cases, "u64", "random", 10_000_000);
+        // Bound the expensive serial phase without locking input iteration order.
+        assert_eq!(cases.iter().filter(|case| case.len >= 1_000_000).count(), 8);
+        assert!(!cases.iter().any(|case| {
+            case.ty == "u64"
+                && ["skew99", "two_values"].contains(&case.distribution.as_str())
+                && case.len >= 1_000_000
+        }));
+
+        let parallel = continuous.parallel_inputs().unwrap();
+        assert_eq!(parallel.len(), 8);
+        for ty in ["u32", "row_u32", "u64", "row_u64"] {
+            require(&parallel, ty, "random", 10_000_000);
+        }
+        for distribution in ["sorted", "reverse", "equal"] {
+            require(&parallel, "u64", distribution, 10_000_000);
+        }
+        require(&parallel, "row_u32", "skew99", 10_000_000);
     }
 
     #[test]

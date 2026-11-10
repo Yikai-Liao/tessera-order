@@ -4,15 +4,22 @@
 //! Callers supply records, remaining variation and an extractor; raw pass pointers
 //! and the live-copy guard never cross this boundary.
 
-use super::plan::{Digit, MAX_DIGIT_BUCKETS, TilePlan, plan_tile};
+use super::plan::{Digit, TilePlan, plan_tile};
 use super::scan_varying_bits;
 use crate::key::{Extract, Unsigned};
-use crate::thresholds::{INSERTION_MAX, MAX_TILE_RECORDS};
+use crate::thresholds::{INSERTION_MAX, MAX_CURSOR_BYTES, MAX_TILE_RECORDS};
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 
+/// Positions and cached bucket IDs used by tile passes.
+pub(crate) type Cursor = u16;
+
+/// Largest power-of-two table fitting the cursor budget.
+pub(super) const MAX_DIGIT_BUCKETS: usize =
+    1 << (MAX_CURSOR_BYTES / core::mem::size_of::<Cursor>()).ilog2();
+
 /// Converts a byte budget once into the record capacity used by every route.
-/// A tile holds at least one record and all its cursors must fit in u16.
+/// A tile holds at least one record and all its cursors must fit in Cursor.
 pub(super) fn capacity<T>(tile_bytes: usize) -> usize {
     (tile_bytes / core::mem::size_of::<T>().max(1)).clamp(1, MAX_TILE_RECORDS)
 }
@@ -57,12 +64,12 @@ struct Tile<'a, T, E, const CACHED: bool> {
 ///
 /// # Safety
 ///
-/// - `0 < len <= u16::MAX`.
+/// - `0 < len <= Cursor::MAX`.
 /// - `source` holds `len` initialized records; `destination` has `len`
 ///   writable slots in a separate allocation.
-/// - `cursor` has `MAX_DIGIT_BUCKETS` writable `u16` slots.
+/// - `cursor` has `MAX_DIGIT_BUCKETS` writable `Cursor` slots.
 /// - When `CACHED` and the IDs do not fit after the cursor table, `cache_tail`
-///   has `len` aligned `u16` slots disjoint from both record buffers.
+///   has `len` aligned `Cursor` slots disjoint from both record buffers.
 /// - When not `CACHED`, `key` is a library encoder: deterministic and
 ///   panic-free.
 /// - If `key` panics, `destination` holds a partial copy that must be neither
@@ -73,10 +80,10 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
     destination: *mut T,
     len: usize,
     digit: Digit,
-    cursor: *mut u16,
-    cache_tail: *mut u16,
+    cursor: *mut Cursor,
+    cache_tail: *mut Cursor,
     extractor: &mut E,
-) -> u16 {
+) -> Cursor {
     // SAFETY: the caller supplies initialized source records, disjoint writable
     // output and cursor/cache storage as specified by this function's contract.
     unsafe {
@@ -92,17 +99,17 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
             // SAFETY: the caller guarantees room for `buckets` entries.
             *cursor.add(slot) = 0;
         }
-        let mut largest = 0u16;
+        let mut largest = 0 as Cursor;
         for index in 0..len {
             // SAFETY: the caller guarantees `len` initialized records.
             let key = extractor.key(&*source.add(index));
             let bucket = ((key & mask) >> shift).to_usize();
             if CACHED {
-                // SAFETY: the scratch tail has len aligned u16 slots.
-                *bucket_ids.add(index) = bucket as u16;
+                // SAFETY: the scratch tail has len aligned Cursor slots.
+                *bucket_ids.add(index) = bucket as Cursor;
             }
             // SAFETY: the digit mask keeps the index below `buckets`, and no bucket
-            // can hold more than `len <= u16::MAX` records.
+            // can hold more than `len <= Cursor::MAX` records.
             let count = *cursor.add(bucket) + 1;
             *cursor.add(bucket) = count;
             largest = largest.max(count);
@@ -115,7 +122,7 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
         }
         #[cfg(not(feature = "portable-simd"))]
         {
-            let mut offset = 0u16;
+            let mut offset = 0 as Cursor;
             for slot in 0..buckets {
                 // SAFETY: as above.
                 let count = *cursor.add(slot);
@@ -151,18 +158,20 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
 
 impl<T, E: Extract<T>, const CACHED: bool> Tile<'_, T, E, CACHED> {
     /// Reserves `len` scratch records and, when bucket IDs are cached and do not
-    /// fit after `buckets` cursors, `len` aligned `u16` slots after them.
+    /// fit after `buckets` cursors, `len` aligned `Cursor` slots after them.
     ///
     /// Returns the scratch records and the ID slots, or a null ID pointer when
     /// the IDs fit in the cursor table.
-    fn reserve_scratch(&mut self, len: usize, buckets: usize) -> (*mut T, *mut u16) {
+    fn reserve_scratch(&mut self, len: usize, buckets: usize) -> (*mut T, *mut Cursor) {
         // Cached IDs first use the unused suffix of the cursor table. Larger
         // caches share the record allocation, without another allocation or
         // zero initialization.
         let tail = CACHED && len + buckets > MAX_DIGIT_BUCKETS;
         if tail {
             let bytes = core::mem::size_of::<T>();
-            let extra = (len * core::mem::size_of::<u16>() + 1).div_ceil(bytes);
+            let extra = (len * core::mem::size_of::<Cursor>() + core::mem::align_of::<Cursor>()
+                - 1)
+            .div_ceil(bytes);
             let required = len
                 .checked_add(extra)
                 .expect("tile scratch capacity overflow");
@@ -177,12 +186,12 @@ impl<T, E: Extract<T>, const CACHED: bool> Tile<'_, T, E, CACHED> {
         let records = self.scratch.as_mut_ptr().cast::<T>();
         let ids = if tail {
             // SAFETY: capacity includes len records followed by 2*len+1 bytes.
-            // u16 alignment needs at most one byte; the regions do not overlap.
+            // The allocation includes worst-case alignment padding after records.
             unsafe {
                 let start = records.add(len).cast::<u8>();
                 start
-                    .add(start.align_offset(core::mem::align_of::<u16>()))
-                    .cast::<u16>()
+                    .add(start.align_offset(core::mem::align_of::<Cursor>()))
+                    .cast::<Cursor>()
             }
         } else {
             core::ptr::null_mut()
@@ -194,8 +203,8 @@ impl<T, E: Extract<T>, const CACHED: bool> Tile<'_, T, E, CACHED> {
     fn partition_tile(&mut self, records: &mut [T], digit: Digit, varying: u128) {
         let len = records.len();
         let (scratch, cache_tail) = self.reserve_scratch(len, 1 << digit.width);
-        let mut counts = MaybeUninit::<[u16; MAX_DIGIT_BUCKETS]>::uninit();
-        let counts_ptr = counts.as_mut_ptr().cast::<u16>();
+        let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
+        let counts_ptr = counts.as_mut_ptr().cast::<Cursor>();
         let tile = records.as_mut_ptr();
         let mut guard = RestoreTile {
             tile,
@@ -271,8 +280,8 @@ impl<T, E: Extract<T>, const CACHED: bool> Tile<'_, T, E, CACHED> {
         };
         let (scratch_ptr, cache_tail) = self.reserve_scratch(len, buckets);
         debug_assert!(len <= MAX_TILE_RECORDS);
-        let mut counts = MaybeUninit::<[u16; MAX_DIGIT_BUCKETS]>::uninit();
-        let counts_ptr = counts.as_mut_ptr().cast::<u16>();
+        let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
+        let counts_ptr = counts.as_mut_ptr().cast::<Cursor>();
         let tile = records.as_mut_ptr();
         let mut guard = RestoreTile {
             tile,
@@ -320,10 +329,10 @@ impl<T> RestoreTile<T> {
         &mut self,
         destination: &mut *mut T,
         digit: Digit,
-        cursor: *mut u16,
-        cache_tail: *mut u16,
+        cursor: *mut Cursor,
+        cache_tail: *mut Cursor,
         extractor: &mut E,
-    ) -> u16 {
+    ) -> Cursor {
         // SAFETY: the caller supplies initialized source records, disjoint writable
         // output and cursor/cache storage as specified by this function's contract.
         unsafe {

@@ -3,6 +3,7 @@
 //! Shared strategy decisions from key variation, bounded samples and work estimates.
 //! The executor receives a complete decision, not sample layout or cost-model steps.
 
+use super::tile::{Cursor, MAX_DIGIT_BUCKETS};
 use crate::block;
 use crate::key::{Extract, Unsigned};
 use crate::thresholds::INSERTION_MAX;
@@ -13,10 +14,8 @@ const SPLIT_BITS: usize = 8;
 /// Split fan-out is bounded by the block engine's widest digit.
 const MAX_SPLIT_BITS: usize = block::MAX_RADIX_BITS;
 
-/// At 14 bits the u16 cursor table occupies 32 KiB.
-const MAX_TILE_DIGIT_BITS: usize = 14;
-/// Maximum cursor table length.
-pub(super) const MAX_DIGIT_BUCKETS: usize = 1 << MAX_TILE_DIGIT_BITS;
+/// Widest digit supported by the tile cursor representation and budget.
+const MAX_TILE_DIGIT_BITS: usize = MAX_DIGIT_BUCKETS.ilog2() as usize;
 /// Narrowest digit a leaf may use.
 const MIN_TILE_DIGIT_BITS: usize = 6;
 /// Cost model: an MSD level is one counting pass, and the insertion finish that
@@ -181,8 +180,8 @@ fn plan_digits(varying: u128, width: usize, digits: &mut [Digit]) -> usize {
 /// record count to avoid clearing mostly empty buckets on wide records.
 fn tile_digit_bits(len: usize, record_bytes: usize) -> usize {
     let tile_bytes = len.saturating_mul(record_bytes);
-    // The widest table that still fits: `2 * 2^width` bytes of cursors.
-    let widest = (tile_bytes / 2).max(1).ilog2() as usize;
+    // The widest table that still fits beside the records.
+    let widest = (tile_bytes / core::mem::size_of::<Cursor>()).max(1).ilog2() as usize;
     // Limit empty-bucket work to at most eight times the record count, or four
     // for a record wider than a machine word: the same table then holds half as
     // many records, and the buckets it clears are mostly empty. 16-byte records,
@@ -322,6 +321,21 @@ fn plan_digit<T, E: Extract<T>>(
     }
 }
 
+/// Estimates record passes under uniform fan-out until insertion-sized children.
+/// The flat plan bounds the search: deeper descents cannot win this comparison.
+/// This is a strategy estimate, not a bound on actual child lengths or work.
+fn estimate_msd_passes(records: usize, fanout: usize, flat_passes: usize) -> usize {
+    debug_assert!(records > INSERTION_MAX && fanout > 0);
+    let mut largest = records;
+    let mut depth = 0;
+    while largest > INSERTION_MAX && depth < flat_passes {
+        depth += 1;
+        largest /= fanout;
+    }
+    // The loop runs at least once; keeping max(1) helps optimized code generation.
+    depth.max(1) + MSD_FINISH_PASSES
+}
+
 /// An executable tile decision; cursor layout and scratch remain private to tiles.
 #[allow(
     clippy::large_enum_variant,
@@ -370,17 +384,7 @@ pub(super) fn plan_tile<T, E: Extract<T>>(
         } else {
             distinct
         };
-        // Estimate the descent until the largest child fits insertion; each
-        // level is one counting pass and the finish is one more.
-        let mut largest = len;
-        let mut depth = 0;
-        while largest > INSERTION_MAX && depth < passes {
-            depth += 1;
-            largest /= fanout;
-        }
-        // The tile holds more than INSERTION_MAX records, so the loop ran.
-        // As above, `max(1)` is kept for the optimizer, not for the value.
-        let level_cost = depth.max(1) + MSD_FINISH_PASSES;
+        let level_cost = estimate_msd_passes(len, fanout, passes);
         // A low-fanout sample can hide a concentrated bucket that becomes
         // equal or insertion-sized after one split.
         if distinct <= 2 || level_cost < passes {
@@ -423,6 +427,15 @@ mod tests {
                 assert_eq!(sample.top_digit_occupancy(digit), buckets.len());
             }
         }
+    }
+
+    #[test]
+    fn uniform_descent_estimate_is_bounded_by_flat_work() {
+        assert_eq!(estimate_msd_passes(8192, 2, 5), 6);
+        assert_eq!(estimate_msd_passes(8192, 128, 5), 3);
+        assert_eq!(estimate_msd_passes(1000, 64, 5), 2);
+        assert_eq!(estimate_msd_passes(1000, 1, 5), 6);
+        assert_eq!(estimate_msd_passes(49, 2, 3), 2);
     }
 
     /// Exhaustively enumerates window partitions independently of the planner.

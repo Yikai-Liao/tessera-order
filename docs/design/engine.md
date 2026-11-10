@@ -25,7 +25,7 @@ This document describes the engine in `rust/tessera-sort`. It describes current 
 | `block.rs` and `block/` | Physical block storage, stable partition, directory costs, compaction and recovery | Logical bucket boundaries and safe completion callbacks |
 | `engine/parallel.rs` | Task batching and scheduling of the shared decisions | Exclusive bucket borrows and the planner's decision, not a second cost model |
 
-A maintenance change to sampled occupancy or a leaf estimate stays in planning; it does not require changing record movement. A change to tile scratch layout stays with its counting and recovery operation. Block representation costs stay derived beside the physical representation, not copied into the strategy model.
+A maintenance change to sampled occupancy or a leaf estimate stays in planning; it does not require changing record movement. A change to tile scratch layout stays with its counting and recovery operation. Tile cursor size, maximum record count, alignment padding and table capacity derive from its cursor type and the shared byte budget; planning consumes those facts rather than pricing an independent two-byte representation. Block representation costs stay derived beside the physical representation, not copied into the strategy model.
 
 ## Cost model
 

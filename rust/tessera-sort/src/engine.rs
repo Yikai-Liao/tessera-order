@@ -18,6 +18,7 @@ pub(crate) mod parallel;
 
 mod plan;
 mod tile;
+pub(crate) use tile::Cursor;
 
 use crate::thresholds::{INSERTION_MAX, TILE_BYTES};
 use plan::{Digit, NodePlan, bit_len, plan_node, plan_progress};

@@ -24,6 +24,7 @@ interface WorkflowRun {
   id: number;
   workflow_id: number;
   name: string;
+  path?: string;
   event: string;
   head_sha: string;
   head_branch: string | null;
@@ -184,12 +185,17 @@ export async function readStatus(
   const trackers = await Promise.all(
     trackerIds(attached, api.repo).map((id) => api.get<WorkflowRun>(`actions/runs/${id}`)),
   );
-  // A workflow_run's head SHA identifies its trusted code, not its measured source.
+  // Both tracker triggers identify trusted code, not the measured source.
   const runs = latestRuns([
     ...runPages
       .flat()
       .flatMap((page) => page.workflow_runs)
-      .filter((run) => heads.includes(run.head_sha) && run.event !== "workflow_run"),
+      .filter(
+        (run) =>
+          heads.includes(run.head_sha) &&
+          run.event !== "workflow_run" &&
+          run.path?.split("@")[0] !== ".github/workflows/bench-track.yml",
+      ),
     ...trackers,
   ]);
   const workflows = await Promise.all(

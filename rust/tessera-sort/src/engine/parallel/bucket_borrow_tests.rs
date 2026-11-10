@@ -30,7 +30,7 @@ fn sort_group<'records, T: Send, E: Extract<T> + Clone + Send>(
 
     let mut job = pending.expect("both output buckets are nonempty");
     assert_eq!(job.buckets.len(), 2);
-    job.run::<E, true>(extractor, 3, TILE_BYTES, &pool);
+    job.run::<E, true>(extractor, 3, tile_capacity::<T>(TILE_BYTES), &pool);
     scratch.block.recycle_ends(ends);
 }
 

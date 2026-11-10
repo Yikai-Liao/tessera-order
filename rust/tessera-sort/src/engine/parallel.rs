@@ -27,11 +27,9 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: b
         return;
     }
 
-    let tile_bytes = TILE_BYTES
-        .max(record_bytes)
-        .min(MAX_TILE_RECORDS.saturating_mul(record_bytes));
+    let tile_len = tile_capacity::<T>(TILE_BYTES);
     let mut scratch = Scratch::new();
-    let Some(varying) = prepare(records, extractor, tile_bytes) else {
+    let Some(varying) = prepare(records, extractor, tile_len) else {
         return;
     };
 
@@ -39,16 +37,16 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: b
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
             let mut key = Narrow::<E, 0>(extractor.clone());
-            sort_root::<T, _, CACHED>(records, &mut key, &mut scratch, varying, tile_bytes);
+            sort_root::<T, _, CACHED>(records, &mut key, &mut scratch, varying, tile_len);
             return;
         }
         if varying & ((1u128 << 64) - 1) == 0 {
             let mut key = Narrow::<E, 64>(extractor.clone());
-            sort_root::<T, _, CACHED>(records, &mut key, &mut scratch, varying >> 64, tile_bytes);
+            sort_root::<T, _, CACHED>(records, &mut key, &mut scratch, varying >> 64, tile_len);
             return;
         }
     }
-    sort_root::<T, E, CACHED>(records, extractor, &mut scratch, varying, tile_bytes);
+    sort_root::<T, E, CACHED>(records, extractor, &mut scratch, varying, tile_len);
 }
 
 /// Owns a half-key view so parallel jobs can clone the original extractor.
@@ -87,7 +85,7 @@ impl<'records, T> Job<'records, T> {
         &mut self,
         mut extractor: E,
         candidate: u128,
-        tile_bytes: usize,
+        tile_len: usize,
         pool: &Pool<T>,
     ) {
         let mut scratch = pool.take();
@@ -97,7 +95,7 @@ impl<'records, T> Job<'records, T> {
                 Sorter::<T, E, CACHED> {
                     scratch: &mut scratch,
                     extractor: &mut extractor,
-                    tile_bytes,
+                    tile_len,
                 }
                 .sort_node(child, varying);
             }
@@ -140,20 +138,20 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
     extractor: &mut E,
     scratch: &mut Scratch<T>,
     varying: u128,
-    tile_bytes: usize,
+    tile_len: usize,
 ) {
     let node_bytes = records.len().saturating_mul(core::mem::size_of::<T>());
-    if node_bytes < 4 * tile_bytes {
+    if records.len() < 4 * tile_len {
         Sorter::<T, E, CACHED> {
             scratch,
             extractor,
-            tile_bytes,
+            tile_len,
         }
         .sort_node(records, varying);
         return;
     }
     let shards = rayon::current_num_threads().min((node_bytes / MIN_TASK_BYTES).max(1));
-    let digit = match plan_node(records, varying, tile_bytes, extractor) {
+    let digit = match plan_node(records, varying, tile_len, extractor) {
         NodePlan::Window(digit) => {
             if extractor.try_count_window_parallel(records, digit.shift, digit.width) {
                 return;
@@ -180,7 +178,7 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
             Sorter::<T, E, CACHED> {
                 scratch,
                 extractor,
-                tile_bytes,
+                tile_len,
             }
             .execute_node(records, varying, plan);
             return;
@@ -217,7 +215,7 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
                     job,
                     candidate,
                     child_extractor.clone(),
-                    tile_bytes,
+                    tile_len,
                     pool_ref,
                 );
             } else {
@@ -228,13 +226,11 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
             let mut key = child_extractor.clone();
             let mut scratch = pool_ref.take();
             let varying = scan_varying_bits(child, candidate, &mut key);
-            let tile_bytes = tile_bytes
-                .max(child.len().saturating_mul(core::mem::size_of::<T>()))
-                .min(MAX_TILE_RECORDS.saturating_mul(core::mem::size_of::<T>()));
+            let tile_len = tile_len.max(child.len()).min(MAX_TILE_RECORDS);
             Sorter::<T, E, CACHED> {
                 scratch: &mut scratch,
                 extractor: &mut key,
-                tile_bytes,
+                tile_len,
             }
             .sort_node(child, varying);
             pool_ref.give(scratch);
@@ -260,7 +256,7 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
                 job,
                 candidate,
                 child_extractor.clone(),
-                tile_bytes,
+                tile_len,
                 pool_ref,
             );
         }
@@ -293,10 +289,10 @@ fn spawn_job<
     mut job: Job<'scope, T>,
     candidate: u128,
     extractor: E,
-    tile_bytes: usize,
+    tile_len: usize,
     pool: &'scope Pool<T>,
 ) {
-    scope.spawn(move |_| job.run::<E, CACHED>(extractor, candidate, tile_bytes, pool));
+    scope.spawn(move |_| job.run::<E, CACHED>(extractor, candidate, tile_len, pool));
 }
 
 #[cfg(test)]

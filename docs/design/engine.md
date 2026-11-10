@@ -8,8 +8,11 @@ This document describes the engine in `rust/tessera-sort`. It describes current 
 |---|---|
 | Key | The unsigned integer a record sorts by. Signed integers, floats and `Reverse` keys are encoded into unsigned keys whose integer order matches the requested order. |
 | Digit | A window of key bits handled by one pass, described by a shift and a width. |
-| Node | A slice larger than the tile budget. Nodes are split by a stable block partition. |
-| Tile | A slice that fits the tile budget, 64 KiB of records by default and at most 65,535 records. Tiles are finished in scratch memory. |
+| Subproblem | A record slice and a candidate mask of key bits still to be ordered. A completed digit leaves that mask even if a key function changes its answers. |
+| Bucket | A logical, stable classification group. It may span physical blocks; after materialization it is a contiguous subproblem, not necessarily a task or a tile. |
+| Block | A physical storage and ownership-transfer unit used by the stable partition. Its size and directory costs belong to the block mechanism. |
+| Node | A subproblem larger than the tile capacity. Nodes are split by a stable block partition or existing ordered runs. |
+| Tile | A subproblem that fits a resource-bounded record capacity. The byte budget is converted once to `clamp(floor(bytes / record size), 1, 65,535)` records; routing compares lengths rather than reinterpreting cursor limits or byte products. The default budget is 64 KiB. Tiles are finished in scratch memory. |
 | Cursor table | One `u16` position per bucket. At 14 bits it occupies 32 KiB. |
 
 ## Pipeline
@@ -71,7 +74,7 @@ The materialized route permutes full blocks in parallel and compacts them. A buc
 
 For at least 2²¹ records of at most 16 bytes, offer bounded finishing with limit `L = 16 * floor(sqrt(n))`. Disable it if `L * R < n`, and decline after scatter if any actual bucket exceeds L. Eligible layouts use four times the balanced root block size `ceil(sqrt(20n / (2PRs)))`, with the existing 1,024-byte and 32-record floors. The factor 20 accounts for local and adopted directories coexisting. The multiplier amortizes per-source ownership work; the [measurements](port.md#eight-core-parallel-completion) cover the whole call, not an isolated causal attribution of this parameter.
 
-A bounded bucket gathers all its prefixes into private `MaybeUninit<T>` staging in stable directory order. Each prefix is protected by its physical-owner mutex until the copy transfers ownership. Its source block is then free, and the staging slice becomes the unique live owner. The shared serial sorter finishes that slice, using a tile budget as large as the bucket but at most 65,535 records.
+A bounded bucket gathers all its prefixes into private `MaybeUninit<T>` staging in stable directory order. Each prefix is protected by its physical-owner mutex until the copy transfers ownership. Its source block is then free, and the staging slice becomes the unique live owner. The shared serial sorter finishes that slice, extending the effective tile capacity to the bucket length but at most 65,535 records. No byte-to-record conversion is repeated in the finishing job.
 
 Before writing a final band, a worker protects every full input block it touches. A block holds either a logical source, no source, or finalized fragments. An unread source moves to a free block under both physical-owner locks, acquired in increasing ID order; its atomic logical location is published before the locks release. Gather validates the owner after loading that location and retries if relocation won the race. A finalized block holds no unread source, so adjacent final bands can write disjoint fragments without overlapping record access. The input tail has no partition source.
 

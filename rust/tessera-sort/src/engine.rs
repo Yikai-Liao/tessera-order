@@ -301,7 +301,13 @@ impl<T> Scratch<T> {
 struct Sorter<'a, T, E, const CACHED: bool> {
     scratch: &'a mut Scratch<T>,
     extractor: &'a mut E,
-    tile_bytes: usize,
+    tile_len: usize,
+}
+
+/// Converts a byte budget once into the record capacity used by every route.
+/// A tile holds at least one record and all its cursors must fit in u16.
+fn tile_capacity<T>(tile_bytes: usize) -> usize {
+    (tile_bytes / core::mem::size_of::<T>().max(1)).clamp(1, MAX_TILE_RECORDS)
 }
 
 /// Sorts `records` stably by the keys `key` extracts.
@@ -323,10 +329,8 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
     if records.len() < 2 || record_bytes == 0 {
         return;
     }
-    let tile_bytes = tile_bytes
-        .max(record_bytes)
-        .min(MAX_TILE_RECORDS.saturating_mul(record_bytes));
-    let Some(varying) = prepare(records, extractor, tile_bytes) else {
+    let tile_len = tile_capacity::<T>(tile_bytes);
+    let Some(varying) = prepare(records, extractor, tile_len) else {
         return;
     };
     let mut scratch = Scratch::new();
@@ -336,7 +340,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
             Sorter::<T, _, CACHED> {
                 scratch,
                 extractor: &mut KeyHalf::<_, 0>(extractor),
-                tile_bytes,
+                tile_len,
             }
             .sort_node(records, varying);
             return;
@@ -345,7 +349,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
             Sorter::<T, _, CACHED> {
                 scratch,
                 extractor: &mut KeyHalf::<_, 64>(extractor),
-                tile_bytes,
+                tile_len,
             }
             .sort_node(records, varying >> 64);
             return;
@@ -354,7 +358,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
     Sorter::<T, E, CACHED> {
         scratch,
         extractor,
-        tile_bytes,
+        tile_len,
     }
     .sort_node(records, varying);
 }
@@ -364,9 +368,8 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
 fn prepare<T, E: Extract<T>>(
     records: &mut [T],
     extractor: &mut E,
-    tile_bytes: usize,
+    tile_len: usize,
 ) -> Option<u128> {
-    let record_bytes = core::mem::size_of::<T>();
     let sampled = probe_order(records, extractor);
     match sampled {
         Order::Ascending => return None,
@@ -381,13 +384,11 @@ fn prepare<T, E: Extract<T>>(
         Order::Unsorted => {
             // This input already fits the insertion leaf; a budget and varying-bit
             // scan cannot select a different finishing algorithm.
-            if records.len() <= INSERTION_MAX
-                && records.len().saturating_mul(record_bytes) <= tile_bytes
-            {
+            if records.len() <= INSERTION_MAX && records.len() <= tile_len {
                 extractor.finish_insertion(records);
                 return None;
             }
-            let probe_len = (tile_bytes / record_bytes).max(2).min(records.len());
+            let probe_len = tile_len.max(2).min(records.len());
             if insertion_probe(records, extractor, probe_len) {
                 return None;
             }
@@ -728,12 +729,11 @@ fn tile_digit_bits(len: usize, record_bytes: usize) -> usize {
 /// Chooses an initial width targeting half-tile children, then widens if needed.
 fn choose_split_digit<V: Unsigned>(
     len: usize,
-    record_bytes: usize,
     top: usize,
-    tile_bytes: usize,
+    tile_len: usize,
     sample: &KeySample<V>,
 ) -> Digit {
-    let tile_records = (tile_bytes / record_bytes).max(64);
+    let tile_records = tile_len.max(64);
     let target = (tile_records / 2).max(1);
     let children = (len / target).max(2);
     let bits = (children - 1).ilog2() + 1;
@@ -806,7 +806,7 @@ enum NodePlan<V> {
 fn plan_node<T, E: Extract<T>>(
     records: &[T],
     varying: u128,
-    tile_bytes: usize,
+    tile_len: usize,
     extractor: &mut E,
 ) -> NodePlan<E::Value> {
     let low = varying.trailing_zeros() as usize;
@@ -817,19 +817,18 @@ fn plan_node<T, E: Extract<T>>(
             width: span,
         });
     }
-    let sample = (records.len().saturating_mul(core::mem::size_of::<T>()) >= 4 * tile_bytes)
-        .then(|| KeySample::collect(records, extractor));
+    let sample = (records.len() >= 4 * tile_len).then(|| KeySample::collect(records, extractor));
     if let Some(equal) = sample.as_ref().and_then(KeySample::mode) {
         return NodePlan::Equal(equal);
     }
-    plan_digit(records, varying, tile_bytes, extractor, sample)
+    plan_digit(records, varying, tile_len, extractor, sample)
 }
 
 /// Consumes key bits even when an inconsistent extractor defeats an equality split.
 fn plan_digit<T, E: Extract<T>>(
     records: &[T],
     varying: u128,
-    tile_bytes: usize,
+    tile_len: usize,
     extractor: &mut E,
     sample: Option<KeySample<E::Value>>,
 ) -> NodePlan<E::Value> {
@@ -838,13 +837,7 @@ fn plan_digit<T, E: Extract<T>>(
         NodePlan::Runs { boundary, set }
     } else {
         let sample = sample.unwrap_or_else(|| KeySample::collect(records, extractor));
-        NodePlan::Digit(choose_split_digit(
-            records.len(),
-            core::mem::size_of::<T>(),
-            top,
-            tile_bytes,
-            &sample,
-        ))
+        NodePlan::Digit(choose_split_digit(records.len(), top, tile_len, &sample))
     }
 }
 
@@ -897,13 +890,11 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         if len < 2 || varying == 0 {
             return;
         }
-        let record_bytes = core::mem::size_of::<T>();
-        let node_bytes = len.saturating_mul(record_bytes);
-        if node_bytes <= self.tile_bytes {
+        if len <= self.tile_len {
             self.sort_tile(records, varying);
             return;
         }
-        let plan = plan_node(records, varying, self.tile_bytes, self.extractor);
+        let plan = plan_node(records, varying, self.tile_len, self.extractor);
         self.execute_node(records, varying, plan);
     }
 
@@ -932,19 +923,18 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
 
     /// Partitions by digit, then sorts each unfinished child.
     fn partition_digit(&mut self, records: &mut [T], digit: Digit, varying: u128) {
-        let record_bytes = core::mem::size_of::<T>();
         // Bucket boundaries come from the block engine. The split digit is
         // constant inside each child, so its bits are excluded from the next scan.
         let candidate = varying & !digit.mask::<E::Value>().to_u128();
-        let tile_bytes = self.tile_bytes;
+        let tile_len = self.tile_len;
         let mut block_buffers = core::mem::take(&mut self.scratch.block);
         let mut visit = |child: &mut [T], extractor: &mut E| {
-            if child.len().saturating_mul(record_bytes) <= tile_bytes {
+            if child.len() <= tile_len {
                 let varying = scan_varying_bits(child, candidate, extractor);
                 Sorter::<T, E, CACHED> {
                     scratch: self.scratch,
                     extractor,
-                    tile_bytes,
+                    tile_len,
                 }
                 .sort_tile(child, varying);
             }
@@ -962,7 +952,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         for &end in &ends {
             if end > start {
                 let child = &mut records[start..end];
-                if child.len().saturating_mul(record_bytes) > tile_bytes {
+                if child.len() > tile_len {
                     self.sort_child(child, candidate);
                 }
             }
@@ -991,13 +981,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             // sampled pivot. Force a digit partition to remove candidate bits
             // rather than repeat the same equality partition indefinitely.
             self.scratch.block.recycle_ends(ends);
-            let plan = plan_digit(
-                records,
-                parent_varying,
-                self.tile_bytes,
-                self.extractor,
-                None,
-            );
+            let plan = plan_digit(records, parent_varying, self.tile_len, self.extractor, None);
             self.execute_node(records, parent_varying, plan);
             return;
         }
@@ -1394,7 +1378,7 @@ mod tests {
         Sorter::<_, _, true> {
             scratch: &mut scratch,
             extractor: &mut extractor,
-            tile_bytes: TILE_BYTES,
+            tile_len: tile_capacity::<u64>(TILE_BYTES),
         }
         .sort_tile(&mut records, u64::MAX as u128);
         records.sort_unstable();
@@ -1432,7 +1416,7 @@ mod tests {
             Sorter::<_, _, true> {
                 scratch: &mut scratch,
                 extractor: &mut extractor,
-                tile_bytes: 32,
+                tile_len: tile_capacity::<u16>(32),
             }
             .partition_equal(&mut records, if greater { 0 } else { 0x1ff }, 0x1ff);
             records.sort_unstable();
@@ -1457,7 +1441,7 @@ mod tests {
         Sorter::<_, _, true> {
             scratch: &mut scratch,
             extractor: &mut key,
-            tile_bytes: TILE_BYTES,
+            tile_len: tile_capacity::<Odd>(TILE_BYTES),
         }
         .partition_tile(
             &mut records,

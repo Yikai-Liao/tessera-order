@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import childProcess from "node:child_process";
 import { setTimeout } from "node:timers/promises";
 import { VARIANTS } from "../catalog.ts";
 import { type ActionArguments, resolveSource } from "./github.ts";
@@ -192,45 +193,39 @@ async function nextBuild(
     return ready.get(key)!;
   };
 
-  // Only pending tickets need ancestry comparisons, not the whole retained history.
+  // Trusted checkout history orders tickets, independent of dispatch or build completion.
+  const history = new Map(
+    childProcess
+      .execFileSync("git", ["rev-list", "--first-parent", "HEAD"], { encoding: "utf8" })
+      .trim()
+      .split("\n")
+      .map((hash, index) => [hash, index]),
+  );
   const main = builds.filter(
     (run) =>
       (run.event === "push" || run.event === "workflow_dispatch") && run.head_branch === "main",
   );
-  let pendingMain: QueueBuild | undefined;
-  for (const build of main.filter((run) => !attempts.has(run.id)).sort((a, b) => a.id - b.id)) {
-    if (!pendingMain || build.head_sha === pendingMain.head_sha) {
-      pendingMain ??= build;
-      continue;
+  if (main.some((run) => !history.has(run.head_sha)))
+    throw new Error("Main build outside trusted history; refresh checkout or reconcile queue");
+  main.sort((a, b) => history.get(b.head_sha)! - history.get(a.head_sha)! || a.id - b.id);
+  // Every accepted main worker validates this prefix. Its newest complete ticket
+  // therefore checkpoints ancestors, without rereading every historical report.
+  let checkpoint = -1;
+  for (let index = main.length - 1; index >= 0; index--) {
+    const owner = attempts.get(main[index].id);
+    if (owner && (await baselineReady(args, "main", main[index].head_sha, owner))) {
+      checkpoint = index;
+      break;
     }
-    const { data } = await github.rest.repos.compareCommits({
-      ...repo,
-      base: pendingMain.head_sha,
-      head: build.head_sha,
-    });
-    if (data.status === "diverged") throw new Error("Main history diverged; reconcile queue");
-    if (data.status === "behind") pendingMain = build;
   }
-  const lastMain = main
-    .filter((run) => attempts.has(run.id))
-    .sort((a, b) => attempts.get(b.id)!.id - attempts.get(a.id)!.id)[0];
-  if (
-    lastMain &&
-    !(await baselineReady(args, "main", lastMain.head_sha, attempts.get(lastMain.id)))
-  ) {
+  if (main.slice(0, checkpoint + 1).some((run) => !attempts.has(run.id)))
+    throw new Error("Refusing to append an older main sample");
+  const first = main[checkpoint + 1];
+  const pendingMain = first && !attempts.has(first.id) ? first : undefined;
+  if (first && !pendingMain)
     core.notice(
-      `Main build ${lastMain.id} has no complete sample; rerun its tracker before advancing main.`,
+      `Main build ${first.id} has no complete sample; rerun its tracker before advancing main.`,
     );
-    pendingMain = undefined;
-  }
-  if (lastMain && pendingMain && lastMain.head_sha !== pendingMain.head_sha) {
-    const { data } = await github.rest.repos.compareCommits({
-      ...repo,
-      base: lastMain.head_sha,
-      head: pendingMain.head_sha,
-    });
-    if (data.status !== "ahead") throw new Error("Refusing to append an older main sample");
-  }
   if (pendingMain && pendingMain.conclusion !== "success")
     core.notice(
       `Main build ${pendingMain.id} is unfinished or failed; later main builds remain queued.`,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import assert from "node:assert/strict";
+import childProcess from "node:child_process";
 import { type TestContext, test } from "node:test";
 import { VARIANTS } from "../catalog.ts";
 import { mockGitHub } from "./fixtures/github.ts";
@@ -59,6 +60,7 @@ function fixture(
     trackers?: ReturnType<typeof tracker>[];
     samples?: { owner: number; started: string; configuration?: string }[];
     attemptStarted?: string;
+    history?: string[];
     busy?: boolean;
     baseline?: number;
     missing?: boolean;
@@ -67,6 +69,13 @@ function fixture(
   } = {},
 ) {
   const builds = options.builds ?? [build(1), build(2, "pull_request")];
+  t.mock.method(childProcess, "execFileSync", () =>
+    (
+      options.history ?? [
+        ...new Set(builds.toSorted((a, b) => b.id - a.id).map((run) => run.head_sha)),
+      ]
+    ).join("\n"),
+  );
   const outputs: Record<string, string> = {};
   const notices: string[] = [];
   let dispatched = "";
@@ -309,10 +318,46 @@ test("worker keeps a safe main ticket despite changed priority or queued dispatc
   assert.equal(f.outputs.hash, hash(1));
 });
 
+test("main history, not build IDs or dispatch order, owns the prefix", async (t) => {
+  const f = fixture(t, { builds: [build(1), build(3)], history: [hash(1), hash(3)] });
+  await scheduleNext(f, since);
+  assert.equal(f.dispatched(), "3");
+  const missing = fixture(t, { builds: [build(1)], history: [hash(9)] });
+  await assert.rejects(scheduleNext(missing, since), /trusted history/);
+  const blocked = fixture(t, {
+    builds: [build(1), build(2), build(3), build(4)],
+    trackers: [tracker(100, 3), tracker(101, 2), tracker(300, 1)],
+    samples: [{ owner: 300, started: "2026-11-10T00:01:00Z" }],
+  });
+  await scheduleNext(blocked, since);
+  assert.equal(blocked.dispatched(), "");
+  await prepareScheduledSource(
+    { ...blocked, context: { ...blocked.context, runId: 101 } },
+    since,
+    "2",
+  );
+  assert.equal(blocked.outputs.eligible, "true");
+});
+
 test("worker refuses out-of-order main, duplicate attempts and invalid dispatch identities", async (t) => {
   const f = fixture(t, { builds: [build(1), build(3)], trackers: [tracker(300, 3)] });
   await prepareScheduledSource(f, since, "3");
   assert.equal(f.outputs.eligible, undefined);
+  await scheduleNext(f, since);
+  assert.equal(f.dispatched(), "1");
+  const recovered = fixture(t, {
+    builds: [build(1), build(3)],
+    trackers: [tracker(100, 1), tracker(300, 3, { run_attempt: 2 })],
+    samples: [{ owner: 100, started: "2026-11-10T00:01:00Z" }],
+  });
+  await prepareScheduledSource(recovered, since, "3");
+  assert.equal(recovered.outputs.eligible, "true");
+  const backward = fixture(t, {
+    builds: [build(1), build(3)],
+    trackers: [tracker(300, 3)],
+    samples: [{ owner: 300, started: "2026-11-10T00:01:00Z" }],
+  });
+  await assert.rejects(scheduleNext(backward, since), /older main/);
   const duplicate = fixture(t, { builds: [build(1)], attempts: [1] });
   await prepareScheduledSource(duplicate, since, "1");
   assert.equal(duplicate.outputs.eligible, undefined);

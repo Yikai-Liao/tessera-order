@@ -48,6 +48,8 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 
 ## Benchmark investigations
 
+- Strengthen post-submission Bencher start-point validation to compare the intended branch identity as well as the exact commit hash. Queue preflight already checks the named baseline’s reports, but the publisher alone cannot distinguish two baseline branches sharing a hash.
+
 - Validate the opt-in baseline-aware queue on hosted Actions without changing coverage or sampling. Retain arrival, queue-wait, measurement-duration and superseded-work evidence before claiming a latency improvement or choosing more measurement capacity. Queue recovery and archival must stay within Actions/API and artifact retention limits; no automatic sample reuse or cross-machine baseline equivalence is assumed.
 
 - Consolidate distribution-sensitive routing into general mechanisms. Child-order reuse and the bucket-order split replace the capped end-run route; evaluate both against current-head Default and Portable SIMD continuous feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.

@@ -37,8 +37,8 @@ async function writeLayoutFigures(
     const filename = `layout-${index + 1}.svg`;
     const svg = renderRows({
       title: `Layout times · ${Object.values(rawCaseParts(summary.id)).filter(Boolean).join(" · ")}`,
-      guide: "Median time per sort · lines: observed nine-block ranges, not confidence intervals",
-      columns: [`Median (${label})`, `Block range (${label})`],
+      guide: "Median time per sort · lines: observed sample ranges, not confidence intervals",
+      columns: [`Median (${label})`, `Observed range (${label})`],
       groups: [
         {
           title: "Fixed shuffle seeds",
@@ -60,7 +60,7 @@ async function writeLayoutFigures(
         clamp: false,
       },
       legend: {
-        note: "baseline: median of paired baseline means · current: median of current processes",
+        note: "baseline and current: medians of their recorded time observations",
       },
       axis: ["← less time", `${label} per sort →`],
     });
@@ -150,7 +150,7 @@ ${paired ? "Adjacent A/B samples alternate AB/BA order. The median ratio and its
 
 ${
   layoutSummaries
-    ? `Each fixed seed shuffles LLD's .text.* input sections for both revisions. Seeds rotate between blocks; every seed retains nine complete blocks and its own process-level A/A control. Equal seeds do not imply matching addresses between revisions. The cross-layout median and min/max describe only the observed sample, with no pooled regression verdict or confidence interval. Spreads are max/min minus one across each revision's per-layout median times; they include process and host variation. Link maps are retained as layout-<seed>-<revision>.map. Final rustc arguments are recorded separately from Cargo's dependency flags.
+    ? `Each fixed seed shuffles LLD’s .text.* input sections for both revisions. Every seed retains a complete comparison under its recorded protocol. Equal seeds do not imply matching addresses between revisions. The cross-layout median and min/max describe only the observed sample, with no pooled regression verdict or confidence interval. Spreads are max/min minus one across each revision's per-layout median times; they include process and host variation. Link maps are retained as layout-<seed>-<revision>.map. Final rustc arguments are recorded separately from Cargo's dependency flags.
 
 ${layoutTable}
 
@@ -166,7 +166,7 @@ ${table}
 ## Provenance
 
 \`\`\`json
-${JSON.stringify(result.schema === 2 ? { ...result, layouts: result.layouts.map(({ seed, run }) => ({ seed, run: { ...run, blocks: undefined } })) } : { ...run, blocks: undefined }, null, 2)}
+${JSON.stringify(result.schema === 2 ? { ...result, layouts: result.layouts.map(({ seed, run }) => ({ seed, run: { ...run, blocks: undefined, samples: undefined } })) } : { ...run, blocks: undefined, samples: undefined }, null, 2)}
 \`\`\`
 `;
   await writeFile(join(directory, "local.svg"), svg);

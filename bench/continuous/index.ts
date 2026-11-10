@@ -34,7 +34,7 @@ interface PublicationOptions {
   };
 }
 
-/** Publish same-run comparisons from validated raw blocks using trusted code.
+/** Publish same-run comparisons from validated raw paired samples using trusted code.
  *
  * Only JSON is read from measurement artifacts. Missing shards and identity
  * mismatches fail their configuration; upload/image failures cannot turn absent

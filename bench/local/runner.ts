@@ -109,10 +109,16 @@ export async function buildRevisions(
   source.baseline = await sourceHash(crate);
   const map = join(directory, "layout.map");
   // Keep the map path out of -Wl's comma-separated argument list.
+  // Keep executable virtual addresses fixed on Linux x86-64. Same-source
+  // hosted pairs otherwise showed stable process-specific offsets despite identical binaries.
+  const addressArgs = platform() === "linux" && arch() === "x64" ? ["-C", "link-arg=-no-pie"] : [];
   const rustcArgs = (seed: number | undefined) =>
     seed === undefined
-      ? undefined
+      ? addressArgs.length
+        ? addressArgs
+        : undefined
       : [
+          ...addressArgs,
           "-C",
           "linker=cc",
           "-C",
@@ -185,7 +191,12 @@ export async function buildRevisions(
   await cp(first.executable, binaries.baseline);
   await rm(crate, { recursive: true });
   await copySnapshot(saved, crate, directory);
-  const second = await build("current", layout?.currentSeed);
+  // A tooling-only change has identical library inputs; rebuilding cannot add evidence.
+  // Layout experiments still retain their per-role link artifacts.
+  const second =
+    source.current === source.baseline && !layout
+      ? first
+      : await build("current", layout?.currentSeed);
   if (layout) await cp(map, join(layout.out, `layout-${layout.currentSeed}-current.map`));
   await cp(second.executable, binaries.current);
   for (const field of [

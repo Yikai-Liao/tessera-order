@@ -31,7 +31,10 @@ export function shardCases(cases: string[], index: number, count: number) {
     throw new Error("Invalid benchmark shard");
   const lanes: string[][] = Array.from({ length: count }, () => []);
   const weights = lanes.map(() => 0);
-  const weight = (id: string) => (parseCriterionId(id).len >= 1_000_000 ? 5 : 2);
+  const weight = (id: string) => {
+    const settings = revisionSampling(parseCriterionId(id).len);
+    return settings.warm_ms + settings.window_ms;
+  };
   for (const id of cases.toSorted((a, b) => weight(b) - weight(a) || a.localeCompare(b))) {
     const lane = weights.indexOf(Math.min(...weights));
     lanes[lane].push(id);

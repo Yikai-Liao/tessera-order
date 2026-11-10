@@ -6,7 +6,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { VARIANTS } from "../catalog.ts";
+import { parseCriterionId, revisionSampling, VARIANTS } from "../catalog.ts";
 import { shardCases } from "../local/model.ts";
 import { writePaired } from "./fixtures/paired.ts";
 import { baseHash, hash } from "./fixtures/report.ts";
@@ -54,7 +54,7 @@ test("rejects a self-consistent but shortened inventory across every shard", asy
     run.samples = Object.fromEntries(
       run.cases.map((id) => [
         id,
-        Array.from({ length: id.includes("/10000000/") ? 20 : 30 }, () => ({
+        Array.from({ length: revisionSampling(parseCriterionId(id).len).samples }, () => ({
           baseline: 100,
           current: 120,
         })),

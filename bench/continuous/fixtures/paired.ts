@@ -2,7 +2,7 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Variant } from "../../catalog.ts";
+import { parseCriterionId, revisionSampling, type Variant } from "../../catalog.ts";
 import { type LocalRun, shardCases } from "../../local/model.ts";
 import { loadPlan } from "../../plan.ts";
 import { CONTINUOUS_SHARDS } from "../paired.ts";
@@ -10,7 +10,7 @@ import { baseHash, hash } from "./report.ts";
 
 /** Synthetic blocks exercise protocol validation, not measured performance. */
 export function pairedRun(variant: Variant, index = 1, ratio = 1.2): LocalRun {
-  const allCases = [48, 49, 65536, 10000000]
+  const allCases = [48, 49, 65536, 1000000, 10000000]
     .flatMap((len) => ["api", "par-4"].map((mode) => `rust/u64/random/${len}/s1/${mode}`))
     .sort();
   const cases = shardCases(allCases, index, CONTINUOUS_SHARDS);
@@ -55,7 +55,7 @@ export function pairedRun(variant: Variant, index = 1, ratio = 1.2): LocalRun {
     samples: Object.fromEntries(
       cases.map((id) => [
         id,
-        Array.from({ length: id.includes("/10000000/") ? 20 : 30 }, () => ({
+        Array.from({ length: revisionSampling(parseCriterionId(id).len).samples }, () => ({
           baseline: 100,
           current: 100 * ratio,
         })),

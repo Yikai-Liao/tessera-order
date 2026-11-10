@@ -160,7 +160,7 @@ export function validateCloud(
     throw new Error("Cloud report does not match the paired measurement");
 }
 
-/** Derive ratios and verdicts from raw blocks, never from PR-authored summaries. */
+/** Derive ratios and verdicts from raw paired samples, never from PR-authored summaries. */
 export function pairedSummary(runs: LocalRun[], variant: Variant, cloud?: BencherReport) {
   const results = runs.flatMap(summarizeLocal);
   const rows: Row[] = results.map((result) => ({

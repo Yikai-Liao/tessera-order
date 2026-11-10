@@ -36,7 +36,7 @@ Legacy absolute-time Testbeds remain available. `pnpm tools continuous history -
 - [Track](../../.github/workflows/bench-track.yml) runs trusted default-branch code. It builds/lists its trusted harness and validates complete, disjoint shards against that independent inventory. It reads artifact JSON only, never artifact code. Performance checks and the same-head PR report are published before Cloud archival.
 - `continuous submit` uploads JSON using the existing Cloud credential and verifies the returned identity and values. Failure is explicit, per configuration, and does not change the already published measurement verdict. There is no OCI image, remote execution slot, baseline-readiness queue or scheduler.
 
-Both builds enable Rayon; SIMD additionally enables runtime dispatch. There is no forced ISA or `target-cpu=native`. New relative Testbeds do not compare against the old static-linking/JCC absolute-time samples.
+Both builds enable Rayon; SIMD additionally enables runtime dispatch. There is no forced ISA or `target-cpu=native`. Linux x86-64 revision executables link with `-no-pie` to fix executable virtual addresses: an initial hosted same-binary calibration showed stable process-specific offsets despite adjacent samples. This removes executable-base randomization, not heap/stack variation or source-dependent layout effects. The final linker arguments are retained with build provenance. New relative Testbeds do not compare against the old static-linking/JCC absolute-time samples.
 
 ### Capacity and recovery
 

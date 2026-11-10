@@ -8,17 +8,20 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Warm and calibrate once, then answer individual sample requests.
+/// Warms one case, then answers individual sample requests over stdin/stdout.
 ///
 /// Input copies and output checks are outside the clock. Prepared batches use
 /// the same element cap as Criterion; scratch allocation stays inside each sort.
-pub(super) fn serve<T: Copy>(
+///
+/// # Panics
+/// Panics on empty input, invalid requests, failed I/O or incorrect sort output.
+pub fn serve<T: Copy>(
     id: &str,
     input: &[T],
     expected: &[T],
     same: impl Fn(&T, &T) -> bool,
     mut sort: impl FnMut(&mut [T]),
-    settings: &tessera_bench::plan::RevisionSampling,
+    settings: &crate::plan::RevisionSampling,
 ) {
     let batch = ((1 << 18) / input.len()).max(1);
     let mut buffers = vec![input.to_vec(); batch];
@@ -55,16 +58,10 @@ pub(super) fn serve<T: Copy>(
                 serde_json::json!({"id": id, "samples": settings.samples})
             }
             "sample" if warmed && completed < settings.samples => {
-                let start = Instant::now();
-                let (mut elapsed_ns, mut sorts) = (0u64, 0u64);
-                // Budget includes restoration and verification, but reported time does not.
-                while start.elapsed()
-                    < Duration::from_micros(settings.window_ms * 1000 / settings.samples as u64)
-                {
-                    let (elapsed, count) = measure();
-                    elapsed_ns += elapsed;
-                    sorts += count;
-                }
+                let (elapsed_ns, sorts) = sample(
+                    Duration::from_micros(settings.window_ms * 1000 / settings.samples as u64),
+                    &mut measure,
+                );
                 completed += 1;
                 serde_json::json!({"elapsed_ns": elapsed_ns, "sorts": sorts})
             }
@@ -78,4 +75,30 @@ pub(super) fn serve<T: Copy>(
         io::stdout().flush().expect("flush paired response");
     }
     panic!("incomplete paired session");
+}
+
+/// Always records a batch, even when preemption has already exhausted the budget.
+fn sample(budget: Duration, mut measure: impl FnMut() -> (u64, u64)) -> (u64, u64) {
+    let start = Instant::now();
+    let (mut elapsed_ns, mut sorts) = (0, 0);
+    loop {
+        let (elapsed, count) = measure();
+        elapsed_ns += elapsed;
+        sorts += count;
+        // Wall budget includes restoration and verification; reported time does not.
+        if start.elapsed() >= budget {
+            return (elapsed_ns, sorts);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn expired_budget_still_measures_one_batch() {
+        assert_eq!(
+            super::sample(std::time::Duration::ZERO, || (123, 4)),
+            (123, 4)
+        );
+    }
 }

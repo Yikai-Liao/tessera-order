@@ -4,9 +4,6 @@
 //!
 //! IDs are `rust/<case_id>/<mode>`; input selection precedes generation.
 
-#[path = "support/paired.rs"]
-mod paired;
-
 use criterion::{BatchSize, Criterion};
 use std::{hint::black_box, sync::OnceLock, time::Duration};
 use tessera_bench::{
@@ -227,7 +224,7 @@ fn measure<T: Copy>(
     let mut group = c.benchmark_group(id);
     let settings = tessera_bench::plan::revision_sampling(input.len());
     if std::env::var_os("TESSERA_BENCH_PAIRED").is_some() {
-        paired::serve(
+        tessera_bench::sampling::serve(
             &criterion_id!(id, mode),
             input,
             expected,

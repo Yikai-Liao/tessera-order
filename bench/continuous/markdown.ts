@@ -304,7 +304,7 @@ function combinedHeadline(configurations: ConfigurationResult[], rows: CaseRow[]
   if (faster) parts.push(`${faster} faster`);
   const measured = configurations.filter((c) => c.summary);
   if (!slower && !faster) {
-    parts.push(measured.some((c) => c.summary!.compared) ? "no significant change" : "no baseline");
+    parts.push(measured.some((c) => c.summary!.compared) ? "no regression alert" : "no baseline");
   }
   const fresh = caseRows(configurations).filter((row) =>
     row.cells.some((cell) => cell?.baseline === null),

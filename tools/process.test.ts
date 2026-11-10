@@ -7,6 +7,30 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+test("cancellation reaps an interactive worker awaiting a response", {
+  skip: process.platform !== "linux",
+}, async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-interactive-cancel-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const pidPath = join(directory, "pid");
+  const worker = `process.on("SIGTERM",()=>{});
+    require("node:fs").writeFileSync(${JSON.stringify(pidPath)},String(process.pid));
+    process.stdin.once("data",()=>process.kill(process.ppid,"SIGINT"));
+    setInterval(()=>{},1000);`;
+  const script = `import {command} from ${JSON.stringify(new URL("./process.ts", import.meta.url).href)};
+    try { await command(process.execPath,["-e",${JSON.stringify(worker)}],{
+      interact: async exchange => {await exchange("sample");}
+    }); } catch(error) {console.error(error.message);process.exitCode=1;}`;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /cancelled by SIGINT/);
+  const pid = Number(await readFile(pidPath, "utf8"));
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+});
+
 for (const nested of [false, true]) {
   test(`cancellation kills logged descendants: nested=${nested}`, {
     skip: process.platform !== "linux",

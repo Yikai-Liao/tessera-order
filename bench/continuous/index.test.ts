@@ -12,11 +12,11 @@ import { baseHash, fixture, hash } from "./fixtures/report.ts";
 import { publishReport } from "./index.ts";
 import { pairedBmf } from "./paired.ts";
 
-async function publication(t: TestContext, cloud = true, moved = false) {
+async function publication(t: TestContext, cloud = true, moved = false, ratio?: number) {
   const dir = await mkdtemp(join(tmpdir(), "tessera-paired-report-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   for (const [index, variant] of VARIANTS.entries()) {
-    const runs = await writePaired(dir, variant, index ? 0.8 : 1.2);
+    const runs = await writePaired(dir, variant, ratio ?? (index ? 0.8 : 1.2));
     if (cloud) {
       const report = fixture();
       report.testbed.name = variant.relativeTestbed;
@@ -84,7 +84,14 @@ async function publication(t: TestContext, cloud = true, moved = false) {
   };
 }
 
-test("raw paired blocks drive independent checks and the existing shared chart", async (t) => {
+test("a precise sub-threshold change is no alert, not statistical equivalence", async (t) => {
+  const action = await publication(t, false, false, 1.04);
+  await publishReport(action);
+  assert.doesNotMatch(action.summaries[0], /no significant change/);
+  assert.match(action.summaries[0], /no regression alert/);
+});
+
+test("raw paired samples drive independent checks and the existing shared chart", async (t) => {
   const action = await publication(t);
   await publishReport(action);
   const checks = action.requests.filter(

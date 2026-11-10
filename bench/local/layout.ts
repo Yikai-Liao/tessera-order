@@ -57,7 +57,14 @@ export function validateLayoutBuilds(result: LayoutRun) {
   parseLayoutSeeds(result.layouts.map(({ seed }) => seed).join(","));
   const first = result.layouts[0].run;
   for (const { run } of result.layouts) {
-    for (const field of ["baseline", "head", "configuration", "rustc", "flags"] as const)
+    for (const field of [
+      "baseline",
+      "head",
+      "configuration",
+      "rustc",
+      "flags",
+      "protocol",
+    ] as const)
       if (run[field] !== first[field]) throw new Error(`Layout runs differ: ${field}`);
     if (JSON.stringify(run.source) !== JSON.stringify(first.source))
       throw new Error("Layout runs differ: sources");

@@ -625,9 +625,6 @@ mod tests {
         }
         let steps = if cfg!(miri) { 4 } else { 64 };
         for changing in [false, true] {
-            if !changing && !cfg!(feature = "std") {
-                continue;
-            }
             for step in 0..steps {
                 let at = 1 + step * total / steps;
                 let mut values: Vec<_> = (0..len).collect();
@@ -695,7 +692,7 @@ mod tests {
                     // Reject order before the candidate scan and mode sample.
                     [1, 0, 0, 1][phase - len]
                 } else if phase < len + 4 + 65 {
-                    if phase % 2 == 0 { 0 } else { 0x1ff }
+                    if phase.is_multiple_of(2) { 0 } else { 0x1ff }
                 } else if greater {
                     0
                 } else {

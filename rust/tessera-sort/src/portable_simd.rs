@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Vector scans for the `portable-simd` feature.
+//! Vector scans and prefix sums, with per-operation instruction-set dispatch.
 //!
 //! Kernels are written once against `fearless_simd`'s [`Simd`] trait;
 //! [`dispatch!`] picks the widest instruction set the CPU supports at run
@@ -91,8 +91,8 @@ fn prefix_sum_with<S: Simd>(simd: S, counts: &mut [u16]) {
     let shift2 = u8x16::<S>::from_slice(simd, &SHIFT2);
     let shift4 = u8x16::<S>::from_slice(simd, &SHIFT4);
     let mut carry = 0u16;
-    let mut chunks = counts.chunks_exact_mut(8);
-    for chunk in &mut chunks {
+    let (chunks, remainder) = counts.as_chunks_mut::<8>();
+    for chunk in chunks {
         let mut scan = u16x8::<S>::from_slice(simd, chunk);
         scan = scan + scan.swizzle_dyn_precise(shift1);
         scan = scan + scan.swizzle_dyn_precise(shift2);
@@ -102,7 +102,7 @@ fn prefix_sum_with<S: Simd>(simd: S, counts: &mut [u16]) {
         carry = carry.wrapping_add(scan.to_array()[7]);
     }
     let mut offset = carry;
-    for slot in chunks.into_remainder() {
+    for slot in remainder {
         let count = *slot;
         *slot = offset;
         offset = offset.wrapping_add(count);

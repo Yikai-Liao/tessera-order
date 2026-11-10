@@ -8,7 +8,7 @@ The first crates.io release. It provides the stable sort only. Use the implement
 
 | Deliverable | Done when |
 |---|---|
-| First release comparison, default and Portable SIMD builds, on Stable | The complete local session regenerates from its raw directory; README and Performance page show the figures; the release attaches the archive |
+| First release comparison of the always-enabled SIMD backend on Stable | The complete local session regenerates from its raw directory; README and Performance page show the figures; the release attaches the archive |
 | Release | Robert Clausecker has been told before publication; `rust/v0.1.0` follows [`RELEASING.md`](RELEASING.md) |
 
 Open questions for this milestone:
@@ -35,10 +35,11 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 | ID | Debt | Acceptance |
 |---|---|---|
 | E2 | Root preparation, capacity normalization and node planning are shared; half dispatch retains borrowed and owned extractor forms | Validate the shared paths against the pre-consolidation baseline with A/A and placement controls |
-| E3 | Serial and parallel direct-key counting now share a reducible histogram and destination-run construction | Establish both configurations' performance against the pre-consolidation baseline; preserve bitwise representative and Send-only tests |
-| E4 | Half-key views share window operations; the root forwarding wrapper has been removed | Validate shared preparation code generation and both backends before performance acceptance |
+| E3 | Serial and parallel direct-key counting now share a reducible histogram and destination-run construction | Establish serial and Rayon performance against the pre-consolidation SIMD baseline; preserve bitwise representative and Send-only tests |
+| E4 | Half-key views share window operations; the root forwarding wrapper has been removed | Validate shared preparation code generation with the unified backend before performance acceptance |
 | E5 | Serial block storage contains Rayon scratch-segment state and a branch | Decide layout and tracking protocol explicitly: both continuous builds enable Rayon; the default feature set is a separate configuration |
 | E6 | Planning owns strategy estimates; tile finishing owns scratch, cached classification and restoration behind one operation | Validate the ownership boundaries and generated-code performance with inlining and placement controls |
+| E7 | The library always uses SIMD; benchmark build names and forwarding-era adapters still describe two configurations | Migrate active measurement to one backend without losing retained-report readability or silently benchmarking a scalar historical baseline |
 
 ## C++
 

@@ -114,22 +114,9 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
             *cursor.add(bucket) = count;
             largest = largest.max(count);
         }
-        #[cfg(feature = "portable-simd")]
-        {
-            // SAFETY: the caller guarantees `buckets` writable cursor slots.
-            let starts = core::slice::from_raw_parts_mut(cursor, buckets);
-            crate::portable_simd::prefix_sum(starts);
-        }
-        #[cfg(not(feature = "portable-simd"))]
-        {
-            let mut offset = 0 as Cursor;
-            for slot in 0..buckets {
-                // SAFETY: as above.
-                let count = *cursor.add(slot);
-                *cursor.add(slot) = offset;
-                offset += count;
-            }
-        }
+        // SAFETY: the caller guarantees `buckets` writable cursor slots.
+        let starts = core::slice::from_raw_parts_mut(cursor, buckets);
+        crate::portable_simd::prefix_sum(starts);
         for index in 0..len {
             let record = source.add(index);
             let bucket = if !CACHED {
@@ -379,7 +366,7 @@ mod tests {
             assert!(calls < 12_000, "tile recursion did not make progress");
             let phase = calls % (constant_calls + 65);
             calls += 1;
-            if phase < constant_calls || phase % 2 == 0 {
+            if phase < constant_calls || phase.is_multiple_of(2) {
                 0
             } else {
                 u64::MAX

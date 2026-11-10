@@ -73,7 +73,7 @@ The digit partition uses the block LSD scheme of Clausecker and Schintke. Bucket
 max(1, 4 * ceil(sqrt(10n / (2 R s))), floor(1024 / s), 32)
 ```
 
-where `n` is the input length, `s` the record size and `R` the number of buckets. The no-std build computes the equivalent size with integer `isqrt` and ceiling correction; tests check square boundaries and agreement with the measured std formula.
+where `n` is the input length, `s` the record size and `R` the number of buckets. An integer reference in tests checks square boundaries and agreement with the floating-point formula.
 
 The root is the paper's trade-off evaluated for this implementation. A block size `b` costs `2 R b s` bytes of scratch — one output block per bucket, plus as many in reserve, because an input block may only be recycled once every record in it has been read — and `10 n / b` bytes of tables, because a block position owns two `u32` block-order entries and one `u16` bucket id. The two terms are equal at that root, so it is the minimum of the sum: substituting `b = c b*` multiplies the total by `(c + 1/c) / 2`, which grows in both directions. The engine takes four times that root: the minimum is where memory is smallest, not where the sort is fastest, and a larger block amortises the random read that compaction pays per block.
 
@@ -119,18 +119,18 @@ When all remaining variation spans at most eight bits, direct keys use the same 
 
 Every insertion pass, whether a budgeted probe or the finish of a tile or bucket, runs one loop, `insertion_loop`: it scans for the first adjacent pair whose keys descend, moves the later record left, and resumes the scan after it. A probe returns its swap count and may stop at its budget. A finishing pass, `finish_insertion`, has no budget and returns `()`, so the unused count is discarded inside the inlined loop rather than returned across a target-feature boundary.
 
-The scan depends on the extractor and the build:
+The scan depends on the extractor, not on a backend feature:
 
-| Pass | Default build | `portable-simd` |
-|---|---|---|
-| Key function (`stable_sort_by_key`) | One record at a time, keeping the previous key, so the key function runs once per scanned record | Same |
-| Direct keys, budgeted probe | Blocked scan of 32 pairs per mask update (`scan::first_inversion`); `f64` uses the scalar scan | Vector scan, with the instruction set selected once per pass |
-| Direct keys, insertion finish | Scalar scan: the short ordered runs a radix partition leaves do not amortize a block mask ([measurements](port.md#scalar-insertion-finishing)) | Vector scan, with the instruction set selected once per pass |
-| Direct keys, ascending confirmation | The same scan as a budgeted probe, after checking the encoded predecessor | The vector scan, dispatched once |
+| Pass | Implementation |
+|---|---|
+| Key function (`stable_sort_by_key`) | One record at a time, keeping the previous key, so the key function runs once per scanned record |
+| Primitive direct keys, budgeted probe and insertion finish | Vector scan, with the instruction set selected once per pass |
+| Primitive direct keys, ascending confirmation | The vector scan, dispatched once after checking the encoded predecessor |
+| `Reverse<K>` | Blocked scans for confirmation and probes; scalar scans for insertion finishing |
 
-With `portable-simd`, slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time, and `Reverse<K>` keys keep the default-build scans. The insertion loop is inlined into the dispatched function, so its scan runs with the selected target features.
+Slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time. The insertion loop is inlined into the dispatched function, so its scan runs with the selected target features.
 
-Dispatch stays inside one insertion pass: per-scan dispatch repeats overhead on short runs, and moving a SIMD token outside its target-feature context loses the intended code generation. SIMD is optional and requires `std` (MSRV in the feature dependency); the default build keeps its lower MSRV and no-std support. User-key tiles retain scalar callbacks rather than materializing a second key array. The [exploratory SIMD measurements](port.md#exploratory-simd-constraints) preserve the evidence for these constraints but were not the full paired protocol and establish no formal speedup claim.
+Dispatch stays inside one insertion pass: per-scan dispatch repeats overhead on short runs, and moving a SIMD token outside its target-feature context loses the intended code generation. Every build requires `std` and uses `fearless_simd`, with no backend feature switch. User-key tiles retain scalar callbacks rather than materializing a second key array. The [exploratory SIMD measurements](port.md#exploratory-simd-constraints) preserve historical evidence for these constraints but were not the full paired protocol and establish no formal speedup claim.
 
 ## Record handling
 
@@ -153,7 +153,7 @@ Key functions are user code and may panic. On a panic:
 
 The slice holds every record afterwards, in an unspecified order. No record is dropped twice or leaked.
 
-Without the `std` feature, a panic cannot be caught. A key-function panic during block partitioning, where the input slice does not own every record, aborts through an unwind guard; panics elsewhere unwind with every record in place. A no-std library may run in an unwinding host; a documented abort requirement alone would not protect the safe API. The guard aborts before restoration can use an incomplete ownership directory.
+Every build catches a key-function panic during block partitioning, restores the complete record set and resumes the panic. There is no alternate abort-only recovery implementation.
 
 ## Stack usage
 

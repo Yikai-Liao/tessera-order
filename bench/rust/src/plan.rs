@@ -205,10 +205,10 @@ impl Plan {
                 (&rule.types, &inventory.types, "types"),
                 (&rule.distributions, &inventory.shapes, "distributions"),
             ] {
-                if let Some(values) = values {
-                    if !unique(values) || values.iter().any(|id| !supported.contains(id)) {
-                        return Err(format!("unsupported, empty or duplicate {field} selector"));
-                    }
+                if let Some(values) = values
+                    && (!unique(values) || values.iter().any(|id| !supported.contains(id)))
+                {
+                    return Err(format!("unsupported, empty or duplicate {field} selector"));
                 }
             }
             if rule.lengths.as_ref().is_some_and(|values| {

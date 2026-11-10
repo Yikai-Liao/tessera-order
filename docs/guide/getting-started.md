@@ -12,14 +12,7 @@ Tessera sorts slices by a primitive key: an integer up to 128 bits, an `f32` or 
 tessera-sort = "0.1"
 ```
 
-The crate has no required dependencies; the optional `portable-simd` feature adds `fearless_simd` (see the [Cargo feature documentation](../../rust/tessera-sort/src/lib.rs)). The `std` feature is on by default. Without it, the crate uses `core` and `alloc` and needs a global allocator:
-
-```toml
-[dependencies]
-tessera-sort = { version = "0.1", default-features = false }
-```
-
-Without `std`, a key-function panic during block partitioning aborts, even if the program unwinds on panic. Sorting, ordering and memory bounds are the same either way.
+The crate requires `std`, Rust 1.89 or newer and `fearless_simd`. Vector scans and prefix sums automatically select supported instructions; keys without a vector kernel use scalar scans. There is no `portable-simd` or `std` feature, and disabling default features does not change these requirements. Rayon remains optional; see the [Cargo feature documentation](../../rust/tessera-sort/src/lib.rs).
 
 ## Sort keys
 

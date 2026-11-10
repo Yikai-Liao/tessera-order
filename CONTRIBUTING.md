@@ -23,14 +23,14 @@ Read the [engine reference](docs/design/engine.md) and [shared semantics](confor
 
 Keep tests focused on public contracts, unsafe ownership invariants, historical defects and external trust or recovery boundaries. Prefer one end-to-end check plus focused boundary cases to repeated assertions at every layer. Vary independent dimensions separately; combine them where their interaction can fail. Do not pin internal call counts, exact report wording, SVG snapshots or incidental layout. Keep ordering, stability, panic, inconsistent-key, owned-record and `&mut`-record coverage.
 
-Run the applicable [local checks](AGENTS.md#commands), including workspace tests and doctests. Engine changes also exercise both feature configurations and affected tests under Miri:
+Run the applicable [local checks](AGENTS.md#commands), including workspace tests and doctests. Engine changes exercise serial and Rayon builds and affected tests under Miri:
 
 ```sh
-cargo test -p tessera-sort --no-default-features
-cargo test -p tessera-sort --features portable-simd
+cargo test -p tessera-sort
+cargo test -p tessera-sort --features rayon
 rustup +nightly component add miri
 cargo +nightly miri test -p tessera-sort
-cargo +nightly miri test -p tessera-sort --no-default-features
+cargo +nightly miri test -p tessera-sort --lib --features rayon block::parallel::
 ```
 
 Run `pnpm docs:test` when simulation models change and the [site checks](docs/development/docs-site.md#commands) when their pages change. CI owns the remaining platform, MSRV and sanitizer lanes; the [Rust workflow](.github/workflows/rust-ci.yml) is the command source for reproducing a lane. It uses cargo-nextest for test processes and runs doctests separately.

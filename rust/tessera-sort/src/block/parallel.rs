@@ -8,6 +8,11 @@ use rayon::prelude::*;
 mod compact;
 mod finish;
 
+/// Conservative per-position budget while local and adopted directories coexist.
+/// The adopted directory omits bucket IDs; budget two full descriptors rather
+/// than treating this planning allowance as an exact allocation census.
+const ADOPTION_DESCRIPTOR_BYTES_PER_POSITION: usize = 2 * DESCRIPTOR_BYTES_PER_POSITION;
+
 /// Finishes one privately staged bucket without retaining its record borrow.
 type BucketSort<'a, T> = &'a (dyn Fn(&mut [T]) + Sync);
 
@@ -146,14 +151,13 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     assert!(arr.len() >= 2);
     let bucket_count = 1usize << radix;
     let shards = config.shards.max(1).min(arr.len());
-    // Local and global directories coexist during adoption, so budget 20
-    // rather than 10 bytes per input block position.
     let record_bytes = core::mem::size_of::<T>();
-    let balanced = ((20.0 * arr.len() as f64)
+    let balanced = (((ADOPTION_DESCRIPTOR_BYTES_PER_POSITION as f64) * arr.len() as f64)
         / (2.0 * shards as f64 * bucket_count as f64 * record_bytes as f64))
         .sqrt()
         .ceil() as usize;
     let block_size = config.block_size.unwrap_or_else(|| {
+        // This bounded-route scale is independent of the serial BLOCK_SCALE.
         let scale = if config
             .finish
             .as_ref()

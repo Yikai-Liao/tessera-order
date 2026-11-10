@@ -51,8 +51,8 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 - Consolidate distribution-sensitive routing into general mechanisms. Child-order reuse and the bucket-order split replace the capped end-run route; evaluate both against current-head Default and Portable SIMD continuous feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
 
 - Extend the comparison to cold-cache experiments, additional seeds and threshold cases when an investigation needs them.
-- Add native-CPU and branch-aligned placement controls for source A/B studies.
-- Validate continuous alignment's dispersion and full-job budget on target Intel hardware.
+- Add native-CPU placement controls for source A/B studies; existing CGU, alignment and engine-order screens remain process-level evidence.
+- Validate continuous alignment's dispersion and full-job budget on target Intel hardware. Revisit multi-layout cloud sampling only with held-out false-alert, detection and measured whole-job cost evidence.
 - Add hosted comparison groups using the existing Bencher queue after the local release report; retain complete per-type length groups for absolute scaling.
 
 ## Integrations

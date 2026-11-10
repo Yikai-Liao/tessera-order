@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+name: Benchmark diagnostics
+
+# Unprivileged evidence only: no Bencher credentials, submissions or thresholds.
+on:
+  pull_request:
+    paths:
+      - "rust/**"
+      - "!rust/**/*.md"
+      - "bench/**"
+      - "!bench/**/*.md"
+      - "tools/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "rust-toolchain"
+      - ".cargo/**"
+      - ".github/workflows/bench-diagnostics.yml"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Evidence to collect
+        type: choice
+        options: [counters, layout]
+        default: counters
+      baseline:
+        description: Baseline commit (empty uses the selected head)
+        type: string
+  schedule:
+    - cron: "23 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-diagnostics-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: sudo apt-get update -qq && sudo apt-get install -y valgrind lld
+      - name: Fixed-work attribution signals
+        if: github.event_name != 'workflow_dispatch' || inputs.mode == 'counters'
+        env:
+          BASELINE: ${{ inputs.baseline || github.event.pull_request.base.sha || github.sha }}
+        run: >-
+          pnpm tools compare counters "$BASELINE"
+          --plan bench/plans/diagnostics.toml
+          --sorts 8 --out out/counters
+      - name: Placement sample (shared runner; exploratory)
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'layout')
+        env:
+          BASELINE: ${{ inputs.baseline || github.sha }}
+        run: >-
+          pnpm tools compare commit "$BASELINE"
+          --plan bench/plans/diagnostics.toml
+          --layout-seeds 11,12,13,14,15 --out out/layout
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: benchmark-diagnostics-${{ github.run_id }}
+          path: out
+          retention-days: 14
+          if-no-files-found: warn

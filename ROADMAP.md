@@ -34,9 +34,9 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 
 | ID | Debt | Acceptance |
 |---|---|---|
-| E2 | Parallel preparation repeats serial tile geometry, probes and half dispatch | Consolidate only if separate serial inlining contexts retain their measured behavior |
+| E2 | Root preparation is shared; tile geometry and half dispatch still have two callers | Validate the shared preparation against the pre-consolidation baseline with A/A and placement controls, then consolidate the remaining geometry and dispatch rules |
 | E3 | Parallel direct-key counting repeats serial counting and fill | Constrain shared semantics and establish both configurations' performance before merging mechanisms |
-| E4 | Half-key views share window operations, but `RootExtractor` retains independent forwarding | Reduce remaining forwarding only without losing backend choices or independent call contexts; validate code generation |
+| E4 | Half-key views share window operations; the root forwarding wrapper has been removed | Validate shared preparation code generation and both backends before performance acceptance |
 | E5 | Serial block storage contains Rayon scratch-segment state and a branch | Decide layout and tracking protocol explicitly: both continuous builds enable Rayon; the default feature set is a separate configuration |
 | E6 | `engine.rs` combines routing, sampling, planning, node/tile sorting and scratch | Split along mechanism/invariant boundaries only with inlining and placement controls |
 

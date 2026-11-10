@@ -63,7 +63,7 @@ The leaf and the digit widths are chosen by a cost model that counts passes and 
 
 ## Parallel root completion
 
-With the optional `rayon` feature, inputs below 1 MiB and one-thread pools use the serial engine. Larger roots retain the order probes and digit planner, then scatter disjoint shards in the current pool. The shard count is at most the pool width and approximately one per 256 KiB of input. Directory adoption concatenates each bucket's prefixes in original shard order and retains shard scratch as separate allocations.
+With the optional `rayon` feature, inputs below 1 MiB and one-thread pools use the serial engine. Larger roots use the same `prepare` operation as serial sorting for order confirmation, stable reversal, budgeted insertion and root variation, then scatter disjoint shards in the current pool. Preparation returns either completion or the varying-bit mask; the parallel layer does not maintain its own extractor wrapper or copy of that routing. The shard count is at most the pool width and approximately one per 256 KiB of input. Directory adoption concatenates each bucket's prefixes in original shard order and retains shard scratch as separate allocations.
 
 The materialized route permutes full blocks in parallel and compacts them. A bucket is passed to a scoped sorting job only after compaction retires its range as both destination and copy source. Adjacent buckets remain distinct borrows even if their addresses touch. Jobs group at least 256 KiB of records when possible and reuse serial scratch.
 

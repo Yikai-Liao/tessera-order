@@ -54,6 +54,9 @@ Both revisions use the current harness, lockfile, workspace and toolchain; only 
 
 Optional local layout sampling uses the same workspace and Criterion block runner. Final benchmark rustc arguments select LLD and a fixed function-section shuffle seed without changing dependency compilation flags. `local/layout.ts` validates comparable sources and distinct executable hashes and summarizes observed cross-layout dispersion separately from process-level A/A verdicts. Link maps retain address evidence. Each seed keeps a complete local run; schema-1 reports remain readable, while schema 2 wraps the selected runs and linker provenance. Continuous scheduling and verdicts do not consume this local result format.
 
+Optional local CGU, explicit alignment and engine-order controls reuse the revision builder and retain effective flags, maps and ordering evidence. `local/layout.ts` owns control identities and engine-symbol selection; CLI choices and the runner consume them.
+
+
 Temporary sources and builds belong to the workspace; result directories retain provenance, observations, summaries and figures. Interrupted local runs are inspectable, not resumable or reportable as complete. Algorithm sessions retain their executable pairs, selection and settings before measuring; `compare resume` uses these exact artifacts without rebuilding. TypeScript owns the session lease and validation receipts. Rust owns host/build compatibility, journal repair and worker kernel locks, so an orphaned worker cannot lose exclusivity merely because its parent lease expires. [The recovery procedure](../development/benchmarking.md#resuming-algorithm-comparisons) defines partial-state handling.
 
 ## Figure boundary

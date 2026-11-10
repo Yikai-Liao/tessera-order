@@ -21,6 +21,8 @@ test("commands reject invalid input before running", async () => {
   for (const args of [
     ["compare", "commit", "HEAD", "--native"],
     ["compare", "commit", "HEAD", "--filter", "["],
+    ["compare", "commit", "--layout-control", "cgu1"],
+    ["compare", "commit", "--layout-seeds", "1", "--layout-control", "invalid"],
     ["compare", "commit", "--layout-seeds", "0,1"],
     ["compare", "commit", "--layout-seeds", "1,1"],
     ["compare", "commit", "--layout-seeds", "1,-2"],

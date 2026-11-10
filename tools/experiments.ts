@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { type Command, InvalidArgumentError, Option } from "commander";
 import { stringify as stringifyToml } from "smol-toml";
 import { cpuListSchema } from "../bench/affinity.ts";
-import { parseLayoutSeeds } from "../bench/local/layout.ts";
+import { LAYOUT_CONTROLS, type LayoutControl, parseLayoutSeeds } from "../bench/local/layout.ts";
 import { renderLocalReport } from "../bench/local/report.ts";
 import { compareLocal } from "../bench/local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
@@ -109,6 +109,12 @@ export function experimentCommands(program: Command) {
 
   measurement("commit [revision]", "Compare the working tree with a commit (default: HEAD)")
     .option("--filter <regex>", "additional case ID pattern", parseCasePattern)
+    .addOption(
+      new Option(
+        "--layout-control <control>",
+        "local build control; requires layout seeds",
+      ).choices(LAYOUT_CONTROLS),
+    )
     .option(
       "--layout-seeds <seeds>",
       "comma-separated fixed LLD layout seeds (Linux GNU)",
@@ -123,8 +129,14 @@ export function experimentCommands(program: Command) {
     .action(
       async (
         baseline: string | undefined,
-        options: MeasurementOptions & { filter?: string; layoutSeeds?: number[] },
+        options: MeasurementOptions & {
+          filter?: string;
+          layoutSeeds?: number[];
+          layoutControl?: LayoutControl;
+        },
       ) => {
+        if (options.layoutControl && !options.layoutSeeds)
+          throw new InvalidArgumentError("layout controls require --layout-seeds");
         const plan = await loadPlan(options.plan ?? "local", selectAxes(options));
         if (plan.harness !== "smoke")
           throw new Error("Commit comparisons require a smoke harness plan");
@@ -140,6 +152,7 @@ export function experimentCommands(program: Command) {
             simd: Boolean(options.simd),
             filter: options.filter,
             layoutSeeds: options.layoutSeeds,
+            layoutControl: options.layoutControl,
           }),
         );
       },

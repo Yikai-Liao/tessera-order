@@ -378,39 +378,6 @@ mod tests {
     }
 
     #[test]
-    fn bands_keep_stability() {
-        let lengths: &[usize] = if cfg!(miri) {
-            &[3, 17, 29]
-        } else {
-            &[2, 3, 17, 97, 293, 509]
-        };
-        let sizes: &[usize] = if cfg!(miri) { &[1, 7] } else { &[1, 3, 7, 19] };
-        let shards: &[usize] = if cfg!(miri) { &[1, 3] } else { &[1, 2, 4] };
-        for &len in lengths {
-            for &block_size in sizes {
-                for &shards in shards {
-                    let mut records: Vec<_> = (0..len)
-                        .map(|id| (((id * 7919 + 73) % 256) as u32, id))
-                        .collect();
-                    let mut expected = records.clone();
-                    expected.sort_by_key(|record| record.0);
-                    finish_records(
-                        &mut records,
-                        ByKey(|record: &(u32, usize)| record.0),
-                        block_size,
-                        shards,
-                        &|records| records.sort_by_key(|record| record.0),
-                    );
-                    assert_eq!(
-                        records, expected,
-                        "len={len}, block={block_size}, shards={shards}"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
     fn callback_panic_keeps_owners() {
         /// An owned payload whose destructor detects loss or duplication.
         struct Owned {

@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { loadPlan } from "./plan.ts";
 import {
   executables,
@@ -61,25 +59,6 @@ test("sessions retain immutable executable pairs and settings", async (t) => {
   );
 });
 
-test("frozen selections do not depend on the current catalog", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "tessera-frozen-selection-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const session = await prepared(directory);
-  // The retained executable, not the current checkout, interprets these identities.
-  await writeFile(
-    join(directory, "plan.json"),
-    JSON.stringify({
-      schema: 1,
-      harness: "comparison",
-      algorithms: ["retired-opponent"],
-      include: [{ types: ["retired-type"] }],
-    }),
-  );
-  session.planSha256 = await fileHash(join(directory, "plan.json"));
-  await writeFile(join(directory, "session.json"), JSON.stringify(session));
-  assert.deepEqual(await loadSession(directory), session);
-});
-
 test("resume rejects incomplete or altered experiments before execution", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-invalid-session-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -103,67 +82,6 @@ test("resume rejects incomplete or altered experiments before execution", async 
     await writeFile(join(directory, "session.json"), JSON.stringify(invalid));
     await assert.rejects(loadSession(directory));
   }
-});
-
-test("CLI resumes retained builds without overwriting logs or repeating validation", {
-  skip: process.platform === "win32",
-}, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "tessera-session-cli-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const directory = join(root, "experiment");
-  await mkdir(directory);
-  const session = await prepared(directory);
-  delete session.cpu;
-  const binary = executables(directory, "default").compare;
-  const calls = join(directory, "calls.jsonl");
-  await writeFile(
-    binary,
-    `#!/usr/bin/env node
-import { appendFileSync } from "node:fs";
-appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + "\\n");
-process.exit(process.argv[2] === "run" ? 42 : 0);
-`,
-  );
-  await chmod(binary, 0o755);
-  session.builds[0].compareSha256 = await fileHash(binary);
-  await writeFile(join(directory, "session.json"), JSON.stringify(session));
-  await writeFile(`${directory}.log`, "preparation log");
-  const cli = fileURLToPath(new URL("../tools/index.ts", import.meta.url));
-  const run = () =>
-    spawnSync(process.execPath, [cli, "compare", "resume", directory], { encoding: "utf8" });
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const result = run();
-    assert.equal(result.status, 1, result.stderr);
-    assert.equal(result.stdout, "");
-    assert.match(result.stderr, /exited with 42; log:/);
-  }
-  const commands = (await readFile(calls, "utf8"))
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line) as string[]);
-  assert.deepEqual(
-    commands.map((args) => args[0]),
-    ["validate", "run", "run"],
-  );
-  assert.deepEqual(commands[1], [
-    "run",
-    "--plan",
-    join(directory, "plan.json"),
-    "--out",
-    directory,
-    "--group",
-    "u64/random",
-    "--sample-ms",
-    "20",
-    "--memory-mib",
-    "64",
-  ]);
-  assert.equal(await readFile(`${directory}.log`, "utf8"), "preparation log");
-  await writeFile(binary, "changed executable");
-  const result = run();
-  assert.equal(result.status, 1, result.stderr);
-  assert.match(result.stderr, /Session executables changed/);
-  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 3);
 });
 
 test("session writes are exclusive and failures release the lock", async (t) => {

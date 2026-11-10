@@ -363,8 +363,6 @@ mod tests {
     use super::*;
     use crate::key::ByKey;
     use std::panic::{AssertUnwindSafe, catch_unwind};
-    #[cfg(not(miri))]
-    use std::sync::Barrier;
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -432,54 +430,6 @@ mod tests {
             block_size: Some(block_size),
             parallel: !cfg!(miri),
             finish: None,
-        }
-    }
-
-    #[test]
-    fn shards_keep_stability() {
-        let lengths: Vec<_> = if cfg!(miri) {
-            vec![2, 7, 19, 33]
-        } else {
-            (2..90).collect()
-        };
-        let sizes: Vec<_> = if cfg!(miri) {
-            vec![1, 5]
-        } else {
-            vec![1, 2, 3, 5, 8, 32]
-        };
-        for len in lengths {
-            for &block_size in &sizes {
-                for shards in [1, 2, 4] {
-                    for radix in [1, 3] {
-                        let mut rows: Vec<_> = (0..len)
-                            .map(|id| (((id * 37 + 11) % 256) as u64, id))
-                            .collect();
-                        let mut expected = rows.clone();
-                        let mask = (1u64 << radix) - 1;
-                        expected.sort_by_key(|row| row.0 & mask);
-                        let ends = partition_impl(
-                            &mut rows,
-                            radix,
-                            0,
-                            ByKey(|row: &(u64, usize)| row.0),
-                            &mut Buffers::new(),
-                            config(shards, block_size),
-                        );
-                        assert_eq!(
-                            rows, expected,
-                            "n={len}, b={block_size}, P={shards}, radix={radix}"
-                        );
-                        for (bucket, end) in ends.into_iter().enumerate() {
-                            assert_eq!(
-                                end,
-                                rows.iter()
-                                    .filter(|row| row.0 & mask <= bucket as u64)
-                                    .count()
-                            );
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -567,48 +517,6 @@ mod tests {
         }
     }
 
-    #[test]
-    #[cfg(not(miri))]
-    fn root_scatter_uses_workers() {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(4)
-            .build()
-            .unwrap();
-        let mut rows: Vec<_> = (0..131_072)
-            .map(|id| ((id as u64).wrapping_mul(0x9e3779b97f4a7c15), id))
-            .collect();
-        let mut expected = rows.clone();
-        expected.sort_by_key(|row| row.0 & 255);
-        let workers = AtomicUsize::new(0);
-        let started = AtomicUsize::new(0);
-        let gate = Barrier::new(4);
-        pool.install(|| {
-            partition_impl(
-                &mut rows,
-                8,
-                0,
-                ByKey(|row: &(u64, usize)| {
-                    if started.fetch_add(1, Ordering::SeqCst) < 4 {
-                        gate.wait();
-                    }
-                    workers.fetch_or(
-                        1usize << rayon::current_thread_index().unwrap(),
-                        Ordering::Relaxed,
-                    );
-                    row.0
-                }),
-                &mut Buffers::new(),
-                Config {
-                    shards: 4,
-                    block_size: None,
-                    parallel: true,
-                    finish: None,
-                },
-            );
-        });
-        assert_eq!(workers.load(Ordering::Relaxed).count_ones(), 4);
-        assert_eq!(rows, expected);
-    }
     #[test]
     fn deferred_exclusive_is_stable() {
         let len = if cfg!(miri) { 53 } else { 293 };

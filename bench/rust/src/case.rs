@@ -312,392 +312,58 @@ mod tests {
     }
     #[test]
     fn smoke_input_identity() {
+        // Pin both lengths and all four key representations with one digest
+        // of their canonical hashes per input, rather than four parallel tables.
         let pins = [
-            (
-                "random",
-                127,
-                [
-                    0x7f6817a2413fea1a,
-                    0xcbcadab83f300c9d,
-                    0xbced6f9334e69fc3,
-                    0xcbcadab83f300c9d,
-                ],
-            ),
-            (
-                "random",
-                4097,
-                [
-                    0x4bc287e322253b02,
-                    0x5ab7b7e4ec8d3771,
-                    0x7530fb09539b7747,
-                    0x5ab7b7e4ec8d3771,
-                ],
-            ),
-            (
-                "finite_signed",
-                127,
-                [
-                    0x7f6817a2413fea1a,
-                    0xcbcadab83f300c9d,
-                    0xbced6f9334e69fc3,
-                    0x089415b68b0b9350,
-                ],
-            ),
-            (
-                "finite_signed",
-                4097,
-                [
-                    0x4bc287e322253b02,
-                    0x5ab7b7e4ec8d3771,
-                    0x7530fb09539b7747,
-                    0x4899eade2fa74905,
-                ],
-            ),
-            (
-                "d16",
-                127,
-                [
-                    0x8bc7c35b703a0131,
-                    0x60dcf31766c85e41,
-                    0x111b9f88a44a5561,
-                    0x1a114d4fde5797d0,
-                ],
-            ),
-            (
-                "d16",
-                4097,
-                [
-                    0x0d53ba0be4e27e7d,
-                    0x78c19323a8ed9ecd,
-                    0xc6ba7e2d5bd5ee6d,
-                    0x8127ffe5c5a20fa2,
-                ],
-            ),
-            (
-                "d4096",
-                127,
-                [
-                    0xf094e8ef75c87218,
-                    0x59f464899ffe0248,
-                    0x0a42d80f27444928,
-                    0xf6c1174075e53b19,
-                ],
-            ),
-            (
-                "d4096",
-                4097,
-                [
-                    0xfe9bacc5d82611f9,
-                    0xf45445bdf2e3e549,
-                    0x2750df8f5d57c5a9,
-                    0x2b44174978604e8f,
-                ],
-            ),
-            (
-                "zipf2",
-                127,
-                [
-                    0x7ee841fe204cd02f,
-                    0x269690da0f3f4b2f,
-                    0x5d74c129248b6a6f,
-                    0xaafc7b01ff662d11,
-                ],
-            ),
-            (
-                "zipf2",
-                4097,
-                [
-                    0xf76adca29b349851,
-                    0xa716834913489cb1,
-                    0x6bf9ef76cdda3ab1,
-                    0xaa69800e192a523d,
-                ],
-            ),
-            (
-                "skew99",
-                127,
-                [
-                    0x0319015562663f55,
-                    0x28a6b7476058f085,
-                    0x2e2d39fb5bc3d1e5,
-                    0x28a6b7476058f085,
-                ],
-            ),
-            (
-                "skew99",
-                4097,
-                [
-                    0x43fd928e53fa2511,
-                    0xdc89d542eb17eaed,
-                    0x9a16038089101215,
-                    0x5b2159d324302a3d,
-                ],
-            ),
-            (
-                "hot50",
-                127,
-                [
-                    0x83a475a620110a3a,
-                    0x8ae6293ae539f9f7,
-                    0x8638936216b7800f,
-                    0x0b114450dd26793d,
-                ],
-            ),
-            (
-                "hot50",
-                4097,
-                [
-                    0xbe8f713e674fa160,
-                    0x24efa2fec6403544,
-                    0x6a4cbbd62974cdda,
-                    0x802d69c70b079b64,
-                ],
-            ),
-            (
-                "two_values",
-                127,
-                [
-                    0x1a1012df42610a52,
-                    0x3f450ea180587c82,
-                    0x18a0be3dbf73e462,
-                    0xc2f9ed80fd2d9f8a,
-                ],
-            ),
-            (
-                "two_values",
-                4097,
-                [
-                    0x6c6ea427cd3e4215,
-                    0xb6524b1ecf43c945,
-                    0xade4124e55f57e65,
-                    0x0623bec8a966e03d,
-                ],
-            ),
-            (
-                "sparse8",
-                127,
-                [
-                    0x248217bf732ba8f9,
-                    0xe166b56bb6e972e5,
-                    0xb62f9bfeb9d3f44b,
-                    0xe166b56bb6e972e5,
-                ],
-            ),
-            (
-                "sparse8",
-                4097,
-                [
-                    0xe9234f0d236efa45,
-                    0xf9dcd6d3cc34b40b,
-                    0x8882bc00c04d3d86,
-                    0xf9dcd6d3cc34b40b,
-                ],
-            ),
-            (
-                "sparse_digits",
-                127,
-                [
-                    0x53ff9ce330cf8058,
-                    0x405a0eb497f50c25,
-                    0x9d1f18cec4a03ca5,
-                    0x40d8484a5dd4fcc1,
-                ],
-            ),
-            (
-                "sparse_digits",
-                4097,
-                [
-                    0x4242aecfccb85938,
-                    0xc2b61542826c8549,
-                    0x68fcc8c3dffe8989,
-                    0x4e153a21b66ac696,
-                ],
-            ),
-            (
-                "bimodal",
-                127,
-                [
-                    0x436b7907d534c77f,
-                    0xb34a71203093b06b,
-                    0x978d7f61a388ddab,
-                    0x3e4265035648e995,
-                ],
-            ),
-            (
-                "bimodal",
-                4097,
-                [
-                    0x369858a2a295217b,
-                    0x5b94276285362065,
-                    0x261cb28288f80a65,
-                    0xc7ee2aab7aa2c046,
-                ],
-            ),
-            (
-                "sorted_tail",
-                127,
-                [
-                    0x7a0ef259907f2b2a,
-                    0xf13304768e75bcfa,
-                    0x95280bf4f145799a,
-                    0xb7ad1943be70f7c7,
-                ],
-            ),
-            (
-                "sorted_tail",
-                4097,
-                [
-                    0x923ffcc1351373ce,
-                    0x5c5e3e856c34dff7,
-                    0x017a0b0ed900e3f7,
-                    0xf367cf6329b43a58,
-                ],
-            ),
-            (
-                "runs",
-                127,
-                [
-                    0xc773203952b15086,
-                    0x254bca296b207835,
-                    0xa51f7a281959dab3,
-                    0x0dc0edfe6dcd8795,
-                ],
-            ),
-            (
-                "runs",
-                4097,
-                [
-                    0x1cad61acb8886886,
-                    0x496b83eec2d9c395,
-                    0x2a6e309c19526003,
-                    0x1f34a8c43e2b507d,
-                ],
-            ),
-            (
-                "sorted",
-                127,
-                [
-                    0x7a0ef259907f2b2a,
-                    0xf13304768e75bcfa,
-                    0x95280bf4f145799a,
-                    0xb7ad1943be70f7c7,
-                ],
-            ),
-            (
-                "sorted",
-                4097,
-                [
-                    0x14ac3b6d2b9e9945,
-                    0x7a574ec056c9b415,
-                    0x31998a6e58600ab5,
-                    0x4b922f92a82d9060,
-                ],
-            ),
-            (
-                "reverse",
-                127,
-                [
-                    0xcfca5a7ed0b7812a,
-                    0x043bada1fdfde4fa,
-                    0x013b6939a618d99a,
-                    0x24b3797977274ea3,
-                ],
-            ),
-            (
-                "reverse",
-                4097,
-                [
-                    0x9f2f36182c0f1b45,
-                    0xe63a08b87acccc15,
-                    0x1e00dc83a7c388b5,
-                    0x61ef5b902a0c9bf0,
-                ],
-            ),
-            (
-                "sorted99",
-                127,
-                [
-                    0x6ed578a8cfb99aba,
-                    0xc07d9bedcad5861a,
-                    0x3b584c50c1b471da,
-                    0x410a81d67f6b4027,
-                ],
-            ),
-            (
-                "sorted99",
-                4097,
-                [
-                    0x8a582303250841e5,
-                    0xb6ed6074b4bbd605,
-                    0xda3faf098d294745,
-                    0xbcc72fd635838090,
-                ],
-            ),
-            (
-                "far_swaps",
-                127,
-                [
-                    0x4a8260e2142abbfa,
-                    0xee9dd32740a88e1a,
-                    0xd607392b853894da,
-                    0x30191c5ea434f667,
-                ],
-            ),
-            (
-                "far_swaps",
-                4097,
-                [
-                    0xfb038fa50c7586a9,
-                    0x81791730e52b76d9,
-                    0xae3fbe5106731fb9,
-                    0x9f6f51cf1cad88e8,
-                ],
-            ),
-            (
-                "equal",
-                127,
-                [
-                    0x8d4f42e3bcdd5b54,
-                    0x0e046911cf776884,
-                    0x30f747e34d01c1e4,
-                    0x895d76d6f5d74798,
-                ],
-            ),
-            (
-                "equal",
-                4097,
-                [
-                    0x35c610ce9520d764,
-                    0xcc9834c872c3efa4,
-                    0xf398983b5b3c4c24,
-                    0xe6b368c0c14b1db8,
-                ],
-            ),
+            ("random", [0xfae2bab137758ce4, 0xd124d0b0b47c4bbb]),
+            ("finite_signed", [0x1dc0714c9161ce23, 0xa5e75273fe9d77fb]),
+            ("d16", [0xeeedb599db424e0c, 0x689fc3f3cc1fdd9e]),
+            ("d4096", [0xec9ed84b8bf21ec1, 0x051fbab4d83079c9]),
+            ("zipf2", [0x1656a17ef6a1927f, 0x29d60cf987a88dad]),
+            ("skew99", [0xaad0681ba129d310, 0x49de4a74159baad7]),
+            ("hot50", [0x2b2d2e6113113927, 0x4ae1c1d2a89025fb]),
+            ("two_values", [0xee18ce4c3edd238e, 0x6682271a50050688]),
+            ("sparse8", [0xcab500b74098d84f, 0x8ed4db5e6159508f]),
+            ("sparse_digits", [0x1f91201da32c34fd, 0xb8c5581c7f648838]),
+            ("bimodal", [0x2a53aadcecc3ad7f, 0x874ed5918561b1b5]),
+            ("sorted_tail", [0x085d570ac2c7d1f8, 0x49d7594e21657e7b]),
+            ("runs", [0xbf958b207124101d, 0xe14e33b2d463f08e]),
+            ("sorted", [0x085d570ac2c7d1f8, 0x3b3cf5f92a0e05a9]),
+            ("reverse", [0x70166dae4e23636a, 0xa96a8c2732010185]),
+            ("sorted99", [0xcd00fbac35f3b402, 0x9a342e9c307636ac]),
+            ("far_swaps", [0xa6f1af7f1c7377c1, 0x45929e88c3f68195]),
+            ("equal", [0x9511ccb52fbcbbc5, 0x3566978fb7171531]),
         ];
-        for (distribution, len, expected) in pins {
-            let actual = [
-                hash(
-                    generate::<u32>(distribution, len)
-                        .into_iter()
-                        .flat_map(u32::to_le_bytes),
-                ),
-                hash(
-                    generate::<u64>(distribution, len)
-                        .into_iter()
-                        .flat_map(u64::to_le_bytes),
-                ),
-                hash(
-                    generate::<u128>(distribution, len)
-                        .into_iter()
-                        .flat_map(u128::to_le_bytes),
-                ),
-                hash(
-                    generate::<f64>(distribution, len)
-                        .into_iter()
-                        .flat_map(|x| x.to_bits().to_le_bytes()),
-                ),
-            ];
-            assert_eq!(actual, expected, "{distribution}/{len}");
+        for (distribution, expected) in pins {
+            for (len, expected) in [127, 4097].into_iter().zip(expected) {
+                let actual = [
+                    hash(
+                        generate::<u32>(distribution, len)
+                            .into_iter()
+                            .flat_map(u32::to_le_bytes),
+                    ),
+                    hash(
+                        generate::<u64>(distribution, len)
+                            .into_iter()
+                            .flat_map(u64::to_le_bytes),
+                    ),
+                    hash(
+                        generate::<u128>(distribution, len)
+                            .into_iter()
+                            .flat_map(u128::to_le_bytes),
+                    ),
+                    hash(
+                        generate::<f64>(distribution, len)
+                            .into_iter()
+                            .flat_map(|x| x.to_bits().to_le_bytes()),
+                    ),
+                ];
+                assert_eq!(
+                    hash(actual.into_iter().flat_map(u64::to_le_bytes)),
+                    expected,
+                    "{distribution}/{len}"
+                );
+            }
         }
     }
 }

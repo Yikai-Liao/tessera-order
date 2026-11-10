@@ -21,6 +21,8 @@ Read the [engine reference](docs/design/engine.md) and [shared semantics](confor
 
 ### Validation
 
+Keep tests focused on public contracts, unsafe ownership invariants, historical defects and external trust or recovery boundaries. Prefer one end-to-end check plus focused boundary cases to repeated assertions at every layer. Vary independent dimensions separately; combine them where their interaction can fail. Do not pin internal call counts, exact report wording, SVG snapshots or incidental layout. Keep ordering, stability, panic, inconsistent-key, owned-record and `&mut`-record coverage.
+
 Run the applicable [local checks](AGENTS.md#commands), including workspace tests and doctests. Engine changes also exercise both feature configurations and affected tests under Miri:
 
 ```sh

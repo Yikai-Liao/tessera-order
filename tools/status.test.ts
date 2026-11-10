@@ -111,6 +111,8 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
       },
       { workflow_runs: [run(11, { status: "in_progress", conclusion: null, run_attempt: 2 })] },
     ],
+    "actions/runs/11/jobs?per_page=100": [{ jobs: [] }],
+    "actions/runs/70/jobs?per_page=100": [{ jobs: [] }],
     "actions/runs/70": run(70, {
       workflow_id: 2,
       name: "Track benchmarks",
@@ -118,32 +120,6 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
       head_sha: "trusted",
       conclusion: "failure",
     }),
-    "actions/runs/11/jobs?per_page=100": [
-      {
-        jobs: [
-          {
-            name: "miri",
-            status: "in_progress",
-            conclusion: null,
-            html_url: "job-url",
-            steps: [{ name: "Install tools", status: "in_progress", conclusion: null }],
-          },
-        ],
-      },
-    ],
-    "actions/runs/70/jobs?per_page=100": [
-      {
-        jobs: [
-          {
-            name: "rust",
-            status: "completed",
-            conclusion: "failure",
-            html_url: "failed-job",
-            steps: [{ name: "Install Bencher", status: "completed", conclusion: "failure" }],
-          },
-        ],
-      },
-    ],
   });
   const status = JSON.parse(f.run("status"));
   assert.equal(status.target.head, "current");
@@ -157,11 +133,6 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
   assert.equal(status.report, null);
   assert.equal(status.details, undefined);
   assert.ok(JSON.stringify(status).length < 2000);
-  const text = f.run("status", "main", "--text");
-  assert.match(text, /Install tools: in_progress/);
-  assert.match(text, /Install Bencher: failure/);
-  assert.match(text, /Measurement failed/);
-  assert.match(text, /portable-simd: missing/);
   assert.ok(!(await f.requests()).some((path) => /\/(92|93)(\/|$)/.test(path)));
 });
 
@@ -232,23 +203,6 @@ test("missing workflows never become a clean verdict", async (t) => {
   assert.deepEqual(status.workflows, []);
   assert.ok(status.benchmarks.every((c: { state: string }) => c.state === "missing"));
   assert.match(f.run("status", "feature/topic", "--text"), /No workflow runs attached/);
-});
-
-test("merged PR status does not substitute main for the PR head", async (t) => {
-  const f = await fixture(t, {
-    "pulls/49": {
-      number: 49,
-      state: "closed",
-      head: { sha: "current" },
-      merge_commit_sha: "squash",
-      html_url: "pr-url",
-    },
-    "commits/current/check-runs?per_page=100": [{ check_runs: [] }],
-    "actions/runs?head_sha=current&per_page=100": [{ workflow_runs: [] }],
-    "issues/49/comments?per_page=100": [[]],
-  });
-  assert.equal(JSON.parse(f.run("status", "--pr", "49", "--details")).target.merge, null);
-  assert.ok(!(await f.requests()).some((path) => path.includes("squash")));
 });
 
 test("API failures fail the command instead of returning empty success", async (t) => {

@@ -21,7 +21,7 @@ Run these from the repository root, with Node.js 24 or later. The pnpm project s
 ```sh
 pnpm install --frozen-lockfile  # install the pinned toolchain
 pnpm docs:dev                   # local server with hot reload
-pnpm docs:test                  # check task links, page links and algorithm models
+pnpm docs:test                  # check algorithm ownership models
 pnpm docs:typecheck             # type-check the config, theme and components
 pnpm docs:build                 # build into docs/.vitepress/dist; fails on dead links
 ```
@@ -35,7 +35,7 @@ Pull requests that touch the site or its pages run the same checks in `docs.yml`
 - Write plain Markdown with relative links, as for GitHub. The site turns a link to another page into a site link, and a link to source code, a directory or a file outside the site into a GitHub link.
 - A figure is a Vue component placed on its own line, for example `<BlockPartitionDemo />`. Register new components in `docs/.vitepress/theme/index.ts`.
 - The text around a figure must say everything the figure shows. Readers of the Markdown source, including agents, do not see the figures.
-- A figure that shows an algorithm runs a model in `theme/sim/` rather than scripted frames. The model follows the Rust source's index arithmetic, names the functions it follows, and has a test that compares it against a reference. When the engine changes, update the model and its page in the same change.
+- A figure that shows an algorithm runs a model in `theme/sim/` rather than scripted frames. The model follows the Rust source's index arithmetic and names the functions it follows. Focus reference tests on models that move records: check stable output and one live owner throughout partitioning and relocation. When the engine changes, update the model and its page in the same change.
 - Formulas use `$…$` and `$$…$$` (MathJax).
 - New source files start with an SPDX header, as everywhere in the repository.
 

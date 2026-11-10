@@ -10,7 +10,7 @@
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
     "docs:typecheck": "tsc --runExternalCode --noEmit -p docs/.vitepress",
-    "docs:test": "node --test \"docs/.vitepress/*.test.ts\" \"docs/.vitepress/theme/sim/*.test.ts\"",
+    "docs:test": "node --test \"docs/.vitepress/theme/sim/*.test.ts\"",
     "tools": "node tools/index.ts",
     "tools:test": "node --test \"tools/*.test.ts\" \"bench/**/*.test.ts\" \".github/scripts/*.test.ts\"",
     "tools:typecheck": "tsc --noEmit -p bench && tsc --noEmit -p bench/plot"

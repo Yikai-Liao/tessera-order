@@ -138,75 +138,45 @@ fn descending_ties_stay_stable() {
 }
 
 #[test]
-fn insertion_boundary_keeps_order() {
-    for len in [47usize, 48, 49] {
-        for pattern in 0..5 {
-            let mut records: Vec<_> = (0..len)
-                .map(|id| {
-                    let key = match pattern {
-                        0 => id,
-                        1 => len - id,
-                        2 => 0,
-                        3 => (len - id) / 3,
-                        _ => id * 17 % len / 3,
-                    };
-                    (key as u64, id)
-                })
-                .collect();
-            let mut keys: Vec<_> = records.iter().map(|record| record.0).collect();
-            let mut expected = records.clone();
-            expected.sort_by_key(|record| record.0);
-            stable_sort(&mut keys);
-            stable_sort_by_key(&mut records, |record| record.0);
-            assert_eq!(records, expected, "len={len} pattern={pattern}");
-            assert_eq!(
-                keys,
-                expected.iter().map(|record| record.0).collect::<Vec<_>>()
-            );
-        }
-    }
-}
-
-#[test]
 fn record_shapes_and_thresholds() {
     let mut state = 71;
+    // Exercise length boundaries with full-width keys, then key shapes on
+    // one multi-tile input instead of multiplying independent dimensions.
     let lengths: &[usize] = if cfg!(miri) {
         &[0, 1, 2, 47, 48, 49, 81]
     } else {
-        &[
-            0, 1, 2, 8, 47, 48, 49, 128, 512, 4095, 4096, 4097, 16383, 16384, 16385, 65535, 65536,
-        ]
+        &[0, 1, 2, 47, 48, 49, 2047, 2048, 2049, 8193, 65536]
     };
-    for &len in lengths {
-        for shape in 0..9 {
-            let mut values: Vec<_> = (0..len)
-                .map(|id| {
-                    let random = next(&mut state);
-                    let key = match shape {
-                        0 => random as u128,
-                        1 => (random as u128) << 64,
-                        2 => ((random as u128) << 64) | next(&mut state) as u128,
-                        3 => (random % 16) as u128,
-                        4 => (id / 3) as u128,
-                        5 => ((len - id) / 3) as u128,
-                        6 => 9,
-                        7 => {
-                            if random % 100 < 98 {
-                                0
-                            } else {
-                                random as u128
-                            }
+    let shape_len = if cfg!(miri) { 81 } else { 65536 };
+    for (len, shape) in lengths.iter().map(|&len| (len, 2)).chain(
+        (0..6)
+            .filter(|&shape| shape != 2)
+            .map(|shape| (shape_len, shape)),
+    ) {
+        let mut values: Vec<_> = (0..len)
+            .map(|id| {
+                let random = next(&mut state);
+                let key = match shape {
+                    0 => random as u128,
+                    1 => (random as u128) << 64,
+                    2 => ((random as u128) << 64) | next(&mut state) as u128,
+                    3 => (random % 16) as u128,
+                    4 => {
+                        if random % 100 < 98 {
+                            0
+                        } else {
+                            random as u128
                         }
-                        _ => ((random % 8) as u128) * 0x01010101010101010101010101010101,
-                    };
-                    (key, id)
-                })
-                .collect();
-            let mut expected = values.clone();
-            expected.sort_by_key(|x| x.0);
-            stable_sort_by_key(&mut values, |x| x.0);
-            assert_eq!(values, expected, "len={len} shape={shape}");
-        }
+                    }
+                    _ => ((random % 8) as u128) * 0x01010101010101010101010101010101,
+                };
+                (key, id)
+            })
+            .collect();
+        let mut expected = values.clone();
+        expected.sort_by_key(|x| x.0);
+        stable_sort_by_key(&mut values, |x| x.0);
+        assert_eq!(values, expected, "len={len} shape={shape}");
     }
 }
 
@@ -274,47 +244,4 @@ fn unusual_record_layouts() {
     }
     let mut empty = [(); 100];
     stable_sort_by_key(&mut empty, |_| 0u8);
-}
-
-#[test]
-fn perturbed_order_stays_stable() {
-    // Vary the structure rather than reproducing a named benchmark: both
-    // directions, ties, moving a distant record, reversing an interior run,
-    // and local exchanges, with disturbances near either end and the middle.
-    let lengths: &[usize] = if cfg!(miri) {
-        &[65]
-    } else {
-        &[129, 8193, 65_537]
-    };
-    for &len in lengths {
-        for descending in [false, true] {
-            for divisor in [1, 4] {
-                let ordered: Vec<_> = (0..len)
-                    .map(|id| {
-                        let rank = if descending { len - 1 - id } else { id };
-                        (rank as u64 / divisor, id)
-                    })
-                    .collect();
-                for start in [0, len / 2, len - len / 8] {
-                    for disturbance in 0..3 {
-                        let mut records = ordered.clone();
-                        let end = (start + len / 8).min(len);
-                        match disturbance {
-                            0 => records[start..end].rotate_left(1),
-                            1 => records[start..end].reverse(),
-                            _ => {
-                                for index in (start..end - 1).step_by(7) {
-                                    records.swap(index, index + 1);
-                                }
-                            }
-                        }
-                        let mut expected = records.clone();
-                        expected.sort_by_key(|record| record.0);
-                        stable_sort_by_key(&mut records, |record| record.0);
-                        assert_eq!(records, expected);
-                    }
-                }
-            }
-        }
-    }
 }

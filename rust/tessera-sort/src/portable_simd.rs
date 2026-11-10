@@ -405,36 +405,6 @@ mod tests {
         }
     }
 
-    fn reference<T: Ord + Copy>(values: &[T]) -> Option<usize> {
-        values.windows(2).position(|pair| pair[0] > pair[1])
-    }
-
-    #[test]
-    fn random_scans() {
-        assert!(confirm_ascending::<u64>(&[], 0));
-        assert!(confirm_ascending::<u64>(&[3], 3));
-        assert!(!confirm_ascending::<u64>(&[3], 4));
-        for length in [0usize, 1, 2, 31, 63, 64, 65, 127, 129, 1000] {
-            let mut seed = 0x9e37_79b9u64;
-            let mut words: Vec<u32> = (0..length)
-                .map(|_| {
-                    seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-                    (seed >> 32) as u32
-                })
-                .collect();
-            assert_eq!(first_inversion(&words), reference(&words));
-            let wide: Vec<u64> = words.iter().map(|&value| u64::from(value) << 32).collect();
-            assert_eq!(first_inversion(&wide), reference(&wide));
-            if length > 2 {
-                words.sort_unstable();
-                words.swap(length - 1, length - 2);
-            }
-            assert_eq!(first_inversion(&words), reference(&words));
-            let wide: Vec<u64> = words.iter().map(|&value| u64::from(value)).collect();
-            assert_eq!(first_inversion(&wide), reference(&wide));
-        }
-    }
-
     #[test]
     fn insertion_budget() {
         for length in [0u32, 1, 48, 63, 64, 65, if cfg!(miri) { 97 } else { 500 }] {

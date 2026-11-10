@@ -162,14 +162,9 @@ signed!(
 );
 
 macro_rules! float {
-    ($(($f:ty, $u:ty, $scan:path)),* $(,)?) => {$(
+    ($(($f:ty, $u:ty)),* $(,)?) => {$(
         impl sealed::Sealed for $f {
             vector_backend!();
-
-            #[inline(always)]
-            fn first_inversion(keys: &[Self]) -> Option<usize> {
-                $scan(keys)
-            }
         }
         impl RadixKey for $f {
             type Encoded = $u;
@@ -181,12 +176,7 @@ macro_rules! float {
         }
     )*};
 }
-// The default build's blocked scan compares 64-bit lanes poorly at the
-// baseline vector width, so `f64` scans one pair at a time.
-float!(
-    (f32, u32, crate::scan::first_inversion),
-    (f64, u64, crate::scan::scalar)
-);
+float!((f32, u32), (f64, u64));
 
 impl<K: RadixKey> sealed::Sealed for Reverse<K> {}
 impl<K: RadixKey> RadixKey for Reverse<K> {

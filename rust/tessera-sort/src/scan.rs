@@ -2,10 +2,10 @@
 
 //! Scalar and blocked adjacent-pair scans.
 //!
-//! Direct extraction uses the blocked scan for order confirmation and budgeted
-//! insertion probes in the default build; the compiler auto-vectorizes it at the target's baseline
-//! width. The scalar scan serves `f64`, which that width compares poorly, and
-//! keys for which the vector backend has no kernel.
+//! `Reverse<K>` uses the blocked scan for order confirmation and budgeted
+//! insertion probes; the compiler auto-vectorizes it at the target's baseline
+//! width. Primitive operations dispatch through `portable_simd`; its short
+//! scans and key types without a vector kernel use the scalar scan.
 
 use crate::RadixKey;
 

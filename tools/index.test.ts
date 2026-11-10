@@ -31,6 +31,7 @@ test("commands reject invalid input before running", async () => {
     ["compare", "counters", "--simd"],
     ["compare", "counters", "--sorts", "0"],
     ["continuous", "probe-counters"],
+    ["continuous", "history"],
     ["compare", "algorithms", "--suite", "release"],
     ["compare", "algorithms", "--lengths", "0"],
     ["compare", "algorithms", "--sample-ms", "0"],

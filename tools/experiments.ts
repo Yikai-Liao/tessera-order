@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { type Command, InvalidArgumentError, Option } from "commander";
 import { stringify as stringifyToml } from "smol-toml";
 import { cpuListSchema } from "../bench/affinity.ts";
+import { reportMainHistory } from "../bench/continuous/volatility.ts";
 import { compareCounters, reportCounters } from "../bench/local/counters.ts";
 import { LAYOUT_CONTROLS, type LayoutControl, parseLayoutSeeds } from "../bench/local/layout.ts";
 import { renderLocalReport } from "../bench/local/report.ts";
@@ -85,6 +86,15 @@ function selectAxes(options: MeasurementOptions): SelectionOptions {
 /** Regenerate a report from its persisted result format without rerunning measurements. */
 async function report(directories: string[], partial = false) {
   const paths = directories.map((path) => resolve(path));
+  try {
+    await access(join(paths[0], "history.json"));
+    if (paths.length !== 1 || partial)
+      throw new Error("History reports require one result directory");
+    await reportMainHistory(paths[0]);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   try {
     await access(join(paths[0], "counters.json"));
     if (paths.length !== 1 || partial)

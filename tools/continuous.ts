@@ -8,6 +8,7 @@ import {
   measureContinuous,
   runContinuous,
 } from "../bench/continuous/runner.ts";
+import { readMainHistory } from "../bench/continuous/volatility.ts";
 import { probeCounters } from "../bench/local/counters.ts";
 import { loadPlan } from "../bench/plan.ts";
 import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
@@ -25,6 +26,18 @@ export function continuousCommands(program: Command) {
     .action(async (options: { out: string }) => {
       const out = resolve(options.out);
       await runTask(out, Boolean(program.opts().verbose), () => probeCounters(out));
+    });
+
+  continuous
+    .command("history")
+    .description("Read adjacent main changes in both existing Testbeds without changing thresholds")
+    .requiredOption("--project <slug>", "public Bencher project")
+    .requiredOption("--out <directory>", "new retained history directory")
+    .action(async (options: { project: string; out: string }) => {
+      const out = resolve(options.out);
+      await runTask(out, Boolean(program.opts().verbose), () =>
+        readMainHistory(options.project, out),
+      );
     });
 
   continuous

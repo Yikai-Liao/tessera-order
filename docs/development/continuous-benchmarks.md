@@ -28,6 +28,8 @@ Use the [public dashboard](https://bencher.dev/perf/yikai-liao-s-project) and th
 
 For PR trends, use the report's [history](#pr-history): all points compare against the latest report's baseline over a fixed common case set, separately for each build. Coverage changes and aggregate means are not source-change attribution. `pnpm -s tools status main` reads current `main`; `--pr NUMBER` reads that PR’s current head. The commands do not replace dashboard history.
 
+For descriptive adjacent-run changes, use `pnpm tools continuous history --project yikai-liao-s-project --out bench/results/main-history`. It reads both catalogued Testbeds and restricts each summary to the latest report's hardware spec; retained `history.json` regenerates locally with `pnpm tools report DIR`. Summaries retain same-commit pairs separately. Changes mix source, placement and host variation and cannot estimate layout-only noise or justify automatic threshold changes.
+
 Read the sections below when changing tracking, investigating missing feedback or interpreting report details. Tracker changes need the [tooling source map](../design/benchmark-tooling.md); deployment and baseline seeding in [Setup](#setup) are remote changes, not part of reading existing evidence.
 
 ## Pipeline

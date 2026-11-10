@@ -13,6 +13,7 @@ CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment
 | Compare working-tree code with a commit | `pnpm tools compare commit COMMIT` | Two revision builds, nine rotating baseline/control/current process blocks, paired process-level A/A, verification, provenance and a report |
 | Sample revision comparisons across layouts | `pnpm tools compare commit COMMIT --layout-seeds 1,2,3,4,5` | One revision pair per fixed LLD seed, nine blocks per seed, link maps and descriptive cross-layout ranges; Linux x86-64 GNU only |
 | Compare fixed-work counters | `pnpm tools compare counters COMMIT` | Verified serial batches, Callgrind instruction and simulated cache/branch counts, source/build provenance and offline reporting |
+| Inspect adjacent main changes | `pnpm tools continuous history --project PROJECT --out DIR` | Read-only existing Testbed histories restricted to each latest report's hardware spec, with retained responses for offline reporting |
 | Probe local PMU access | `pnpm tools continuous probe-counters --out DIR` | Read-only, per-event `perf` availability on the current host |
 | Compare algorithms | `pnpm tools compare algorithms` | Registered algorithms in one timing executable per configuration, nine shuffled blocks, two Tessera calls for A/A, output verification, allocation measurement and a report |
 | Local parallel comparison | `pnpm tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` | Serial controls, Tessera-8 and Rayon stable-8 in the shared paired harness; choose a CPU list appropriate to the host |

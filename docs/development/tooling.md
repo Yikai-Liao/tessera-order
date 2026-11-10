@@ -12,6 +12,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Compare uncommitted sources with a commit | `pnpm -s tools compare commit HEAD` |
 | Compare local 8-worker sorting | `pnpm tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` (choose the host's physical-core mask) |
 | Compare fixed-work serial counters | `pnpm -s tools compare counters HEAD` |
+| Inspect adjacent main changes | `pnpm -s tools continuous history --project yikai-liao-s-project --out bench/results/main-history` |
 | Probe current-host PMU access | `pnpm -s tools continuous probe-counters --out bench/results/pmu` |
 | Sample local function-section layouts | `pnpm -s tools compare commit HEAD --layout-seeds 1,2,3,4,5` |
 | Compare sorting algorithms | `pnpm -s tools compare algorithms --plan smoke` |

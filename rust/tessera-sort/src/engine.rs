@@ -451,9 +451,8 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         if records.len() < 2 || candidate == 0 {
             return;
         }
-        // A constant child finishes on the varying scan alone, as without this
-        // route. An ordered child is confirmed next so it skips the partition
-        // the digit would otherwise need.
+        // Constant children finish after the varying scan; confirming order
+        // lets ordered children skip partitioning.
         let varying = scan_varying_bits(records, candidate, self.extractor);
         if varying == 0 {
             return;

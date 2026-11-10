@@ -75,8 +75,8 @@ modes = [
 ]
 
 configurations = [
-  { id = "default", name = "Default", testbed = "intel-v1-hybrid-v1", features = ["rayon"] },
-  { id = "portable-simd", name = "Portable SIMD", testbed = "intel-v1-portable-simd-hybrid-v1", features = ["portable-simd", "rayon"] },
+  { id = "default", name = "Default", testbed = "intel-v1-hybrid-v1", relativeTestbed = "actions-paired-default-v1", features = ["rayon"] },
+  { id = "portable-simd", name = "Portable SIMD", testbed = "intel-v1-portable-simd-hybrid-v1", relativeTestbed = "actions-paired-portable-simd-v1", features = ["portable-simd", "rayon"] },
 ]
 
 [comparison]

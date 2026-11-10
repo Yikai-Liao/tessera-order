@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { parseCriterionId } from "../catalog.ts";
 import { summarizePaired } from "../statistics.ts";
 import type { BuildProvenance } from "../workspace.ts";
 
@@ -7,6 +8,36 @@ export interface LocalBlock {
   baseline: Record<string, number>;
   control: Record<string, number>;
   current: Record<string, number>;
+}
+
+/** One deterministic partition of a complete timed-ID listing. */
+export interface Shard {
+  index: number;
+  count: number;
+  allCases: string[];
+}
+
+/** Balance complete cases across runners without changing their sampling protocol. */
+export function shardCases(cases: string[], index: number, count: number) {
+  if (
+    !Number.isInteger(count) ||
+    count < 1 ||
+    count > cases.length ||
+    !Number.isInteger(index) ||
+    index < 1 ||
+    index > count ||
+    new Set(cases).size !== cases.length
+  )
+    throw new Error("Invalid benchmark shard");
+  const lanes: string[][] = Array.from({ length: count }, () => []);
+  const weights = lanes.map(() => 0);
+  const weight = (id: string) => (parseCriterionId(id).len >= 1_000_000 ? 5 : 2);
+  for (const id of cases.toSorted((a, b) => weight(b) - weight(a) || a.localeCompare(b))) {
+    const lane = weights.indexOf(Math.min(...weights));
+    lanes[lane].push(id);
+    weights[lane] += weight(id);
+  }
+  return lanes[index - 1].sort();
 }
 
 export interface LocalRun {
@@ -22,6 +53,7 @@ export interface LocalRun {
   configuration: string;
   host: { platform: string; release: string; arch: string; cpu: string; affinity: string };
   cases: string[];
+  shard?: Shard;
   blocks: LocalBlock[];
 }
 
@@ -37,7 +69,7 @@ export interface LocalSummary {
 
 /** Summarize nine process-level blocks with their paired A/A controls. */
 export function summarizeLocal(run: Pick<LocalRun, "cases" | "blocks">): LocalSummary[] {
-  if (run.blocks.length !== 9 || !run.cases.length)
+  if (run.blocks.length !== 9 || !run.cases.length || new Set(run.cases).size !== run.cases.length)
     throw new Error("Expected nine complete blocks");
   for (const block of run.blocks) {
     for (const values of [block.baseline, block.control, block.current]) {

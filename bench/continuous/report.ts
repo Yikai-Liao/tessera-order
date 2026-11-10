@@ -78,7 +78,17 @@ interface NewRow extends CaseResult {
 
 export type Row = ComparedRow | NewRow;
 export type Verdict = Row["verdict"];
-export type ReportSummary = ReturnType<typeof summarize>;
+export type ReportSummary = ReturnType<typeof summarizeRows>;
+
+interface ReportIdentity {
+  hash: string | null;
+  baseHash: string | null;
+  history: { branch: string; head: string }[];
+  testbed: BencherReport["testbed"];
+  project: string;
+  uuid: string;
+  relative?: boolean;
+}
 
 export function short(hash: string | null) {
   return hash ? hash.slice(0, 7) : "unknown";
@@ -165,6 +175,23 @@ export function summarize(report: BencherReport) {
       });
     }
   }
+  const head = report.branch.head;
+  const history = [{ branch: report.branch.uuid, head: head.uuid }];
+  if (head.start_point) {
+    history.unshift({ branch: head.start_point.branch, head: head.start_point.head });
+  }
+  return summarizeRows(rows, {
+    hash: head.version?.hash ?? null,
+    baseHash: head.start_point?.version?.hash ?? null,
+    history,
+    testbed: report.testbed,
+    project: report.project?.slug,
+    uuid: report.uuid,
+  });
+}
+
+/** Order authoritative row verdicts and summarize each build independently. */
+export function summarizeRows(rows: Row[], identity: ReportIdentity) {
   // Worst first: the largest slowdowns, then the largest speedups.
   rows.sort(
     (a, b) =>
@@ -175,11 +202,6 @@ export function summarize(report: BencherReport) {
       a.name.localeCompare(b.name),
   );
   const count = (verdict: Verdict) => rows.filter((r) => r.verdict === verdict).length;
-  const head = report.branch.head;
-  const history = [{ branch: report.branch.uuid, head: head.uuid }];
-  if (head.start_point) {
-    history.unshift({ branch: head.start_point.branch, head: head.start_point.head });
-  }
   // The geometric mean of current/baseline weighs a 2× win on a 700 ns case
   // and on a 10 ms case equally, which an arithmetic mean of times would not.
   const compared = rows.filter((r): r is ComparedRow => r.baseline !== null && r.value > 0);
@@ -197,12 +219,7 @@ export function summarize(report: BencherReport) {
     regressions: count("regression"),
     improvements: count("improvement"),
     missing: count("missing"),
-    hash: head.version?.hash ?? null,
-    baseHash: head.start_point?.version?.hash ?? null,
-    history,
-    testbed: report.testbed,
-    project: report.project?.slug,
-    uuid: report.uuid,
+    ...identity,
   };
 }
 

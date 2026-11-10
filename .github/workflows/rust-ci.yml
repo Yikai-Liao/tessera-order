@@ -17,6 +17,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         include:
           - os: ubuntu-latest
@@ -37,10 +38,12 @@ jobs:
   # A pull request validates one cell per operating system and the MSRV on
   # Linux. The remaining cells run on main, which no pull request waits for.
   test-other-platforms:
-    if: github.event_name != 'pull_request'
+    needs: test
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - os: ubuntu-24.04-arm
@@ -97,6 +100,8 @@ jobs:
           RUSTFLAGS: ""
 
   comparison:
+    needs: lint
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -121,6 +126,8 @@ jobs:
           if-no-files-found: ignore
 
   miri:
+    needs: lint
+    if: ${{ !cancelled() }}
     name: miri (${{ matrix.features }})
     runs-on: ubuntu-latest
     env:
@@ -128,6 +135,7 @@ jobs:
       RUSTFLAGS: -D warnings
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - features: std
@@ -181,6 +189,8 @@ jobs:
       - run: cargo miri test -p tessera-sort --doc ${{ matrix.args }}
 
   asan:
+    needs: lint
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

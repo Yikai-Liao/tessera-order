@@ -45,6 +45,7 @@ export const catalog = z
         id: z.string(),
         name: z.string(),
         testbed: z.string(),
+        relativeTestbed: z.string(),
         features: z.array(z.string()),
       }),
     ),

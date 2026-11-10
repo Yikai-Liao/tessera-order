@@ -1,32 +1,25 @@
-name: Build benchmarks
+# SPDX-License-Identifier: BSD-2-Clause
 
-# Unprivileged: runs PR code, including forks, without secrets. The tracker
-# packages these artifacts without executing them on a credentialed runner.
+name: Measure benchmarks
+# Retain the triggering target SHA even if a stacked parent is rewritten later.
+run-name: paired-v1 pr=${{ github.event.pull_request.number || '0' }} base=${{ github.event.pull_request.base.sha || 'parent' }} head=${{ github.event.pull_request.head.sha || github.sha }}
+
+# Unprivileged: PR code runs only here, without Cloud credentials or write access.
 on:
   pull_request:
     paths:
       - "rust/**"
-      - "bench/rust/**"
+      - "bench/**"
+      - "tools/**"
       - "!rust/**/*.md"
-      - "!bench/rust/**/*.md"
-      - "bench/catalog.toml"
-      - "bench/catalog.ts"
-      - "bench/plans/continuous.toml"
-      - "bench/workspace.ts"
-      - "bench/continuous/runner.ts"
-      - "bench/continuous/worker.ts"
-      - "bench/continuous/Dockerfile"
-      - "tools/index.ts"
-      - "tools/continuous.ts"
-      - "tools/process.ts"
-      - "tools/tasks.ts"
+      - "!bench/**/*.md"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - "rust-toolchain"
+      - "rust-toolchain*"
       - ".cargo/**"
-      - ".github/workflows/bench-build.yml"
-      - ".github/workflows/bench-track.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/bench-*.yml"
   push:
     branches: [main]
   workflow_dispatch:
@@ -35,18 +28,40 @@ permissions:
   contents: read
 
 concurrency:
-  group: bench-build-${{ github.event.pull_request.number || github.ref }}
+  group: bench-measure-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  rust:
-    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+  plan:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    outputs:
+      matrix: ${{ steps.matrix.outputs.value }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - id: matrix
+        run: echo "value=$(pnpm -s tools continuous matrix)" >> "$GITHUB_OUTPUT"
+
+  measure:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: pnpm/action-setup@v4
@@ -55,23 +70,32 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      # One runner builds both configurations, sharing one isolated target.
-      - run: pnpm tools continuous build --out out
+      - name: Same-run revision comparison
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          SIMD: ${{ matrix.simd }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          if [ -n "$PR_BASE" ]; then
+            baseline=$(git merge-base "$PR_BASE" HEAD)
+          else
+            baseline=$(git rev-parse HEAD^)
+          fi
+          args=()
+          if [ "$SIMD" = true ]; then args+=(--simd); fi
+          pnpm tools compare commit "$baseline" --plan continuous --shard "$SHARD" \
+            --out bench/results/continuous "${args[@]}"
+      - name: Retain measurement log
+        if: always()
+        run: |
+          if [ -f bench/results/continuous.log ]; then
+            mkdir -p bench/results/continuous
+            cp bench/results/continuous.log bench/results/continuous/measurement.log
+          fi
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
-          name: bench-rust-default
-          path: out/default/bench
-          retention-days: 7
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v7
-        with:
-          name: bench-rust
-          path: out/portable-simd/bench
-          retention-days: 7
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: benchmark-build-log
-          path: out.log
-          if-no-files-found: ignore
+          name: ${{ matrix.artifact }}
+          path: bench/results/continuous/
+          retention-days: 14
+          if-no-files-found: warn

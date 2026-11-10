@@ -1,38 +1,28 @@
-name: Track benchmarks
-run-name: Track benchmarks · ${{ inputs.build_id || github.event.workflow_run.id }}
+# SPDX-License-Identifier: BSD-2-Clause
 
-# Privileged: runs trusted default-branch code after a build. It packages the
-# untrusted executable without running it and submits it to Bencher.
+name: Track benchmarks
+
+# Trusted default-branch code reads JSON artifacts; it never runs measured code.
 on:
   workflow_run:
-    workflows: [Build benchmarks]
+    workflows: [Measure benchmarks]
     types: [completed]
-  workflow_dispatch:
-    inputs:
-      build_id:
-        description: Successful Build benchmarks run selected by the scheduler
-        required: true
-        type: string
 
 permissions:
   contents: read
 
 jobs:
-  rust:
-    # Drain pre-activation tickets with the legacy path; new tickets use dispatch.
-    if: >-
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
-       (!vars.BENCHMARK_QUEUE_SINCE || github.event.workflow_run.created_at < vars.BENCHMARK_QUEUE_SINCE))
+  publish:
+    if: github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-24.04
     environment: benchmark
-    timeout-minutes: 30
-    # Bencher Free runs one job per organization; queue rather than replace.
+    timeout-minutes: 15
+    # Only the short publication phase serializes image-branch writes.
     concurrency:
-      group: bencher-bare-metal
+      group: benchmark-publication
+      # GitHub queues up to 100 publishers instead of replacing pending writes.
       queue: max
     permissions:
-      # Only this trusted workflow publishes generated SVGs to benchmark-images.
       contents: write
       actions: read
       checks: write
@@ -40,151 +30,82 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # Never check out the triggering PR in this workflow.
           ref: ${{ github.workflow_sha }}
-          fetch-depth: 0
-          filter: blob:none
           persist-credentials: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
-      - name: Install trusted report dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Resolve source commit and PR
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Resolve measured source independently
         id: source
         uses: actions/github-script@v9
-        env:
-          BUILD_ID: ${{ inputs.build_id }}
-          QUEUE_SINCE: ${{ vars.BENCHMARK_QUEUE_SINCE }}
         with:
           script: |
-            if (context.eventName === 'workflow_dispatch') {
-              const { prepareScheduledSource } = require('./bench/continuous/queue.ts');
-              await prepareScheduledSource({ github, context, core }, process.env.QUEUE_SINCE, process.env.BUILD_ID);
-            } else {
-              const { resolveSource } = require('./bench/continuous/github.ts');
-              await resolveSource({ github, context, core });
-              core.setOutput('build_id', String(context.payload.workflow_run.id));
-              core.setOutput('build_attempt', String(context.payload.workflow_run.run_attempt));
-            }
-      - name: Start the report checks
-        id: check
+            const { resolveSource } = require('./bench/continuous/github.ts');
+            await resolveSource({ github, context, core });
+      - uses: dtolnay/rust-toolchain@stable
         if: steps.source.outputs.eligible == 'true'
-        uses: actions/github-script@v9
-        env:
-          HASH: ${{ steps.source.outputs.hash }}
-        with:
-          script: |
-            const { startReport } = require('./bench/continuous/github.ts');
-            const { VARIANTS } = require('./bench/catalog.ts');
-            for (const variant of VARIANTS) {
-              await startReport({ github, context, core, hash: process.env.HASH, variant });
-            }
-            core.setOutput('variants', JSON.stringify(VARIANTS));
+      - name: Resolve trusted case inventory without measurements
+        if: steps.source.outputs.eligible == 'true'
+        run: pnpm tools continuous inventory --out "$RUNNER_TEMP/inventory"
       - uses: actions/download-artifact@v8
         if: steps.source.outputs.eligible == 'true'
+        continue-on-error: true
         with:
-          name: bench-rust-default
-          path: artifact/default
+          pattern: paired-*
+          path: ${{ runner.temp }}/paired
           github-token: ${{ github.token }}
-          run-id: ${{ steps.source.outputs.build_id }}
-      - uses: actions/download-artifact@v8
-        if: steps.source.outputs.eligible == 'true'
-        with:
-          name: bench-rust
-          path: artifact/portable-simd
-          github-token: ${{ github.token }}
-          run-id: ${{ steps.source.outputs.build_id }}
-      - name: Package and push image
-        if: steps.source.outputs.eligible == 'true'
-        id: image
-        env:
-          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
-          BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
-          TAG: rust-${{ steps.source.outputs.build_id }}-${{ steps.source.outputs.build_attempt }}
-        run: |
-          # The image definition is trusted; only the executable comes from the build.
-          image="registry.bencher.dev/$BENCHER_PROJECT:$TAG"
-          chmod +x artifact/default/bench artifact/portable-simd/bench
-          mkdir -p artifact/bench/continuous artifact/tools
-          cp bench/continuous/worker.ts artifact/bench/continuous/
-          cp tools/process.ts artifact/tools/
-          docker build --platform linux/amd64 -t "$image" -f bench/continuous/Dockerfile artifact
-          printf '%s' "$BENCHER_API_KEY" | docker login registry.bencher.dev \
-            --username "$BENCHER_PROJECT" --password-stdin
-          docker push "$image"
-          # Submit immutable content, not a tag.
-          echo "reference=$(docker inspect --format '{{index .RepoDigests 0}}' "$image")" >> "$GITHUB_OUTPUT"
-          docker logout registry.bencher.dev
+          run-id: ${{ github.event.workflow_run.id }}
       - uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d # v0.6.16
         if: steps.source.outputs.eligible == 'true'
         with:
           version: 0.6.16
-      - name: Measure on Bencher Bare Metal
-        id: measure
+      - name: Upload paired JSON to Bencher Cloud
+        id: upload
         if: steps.source.outputs.eligible == 'true'
-        # Publication reads per-build outcomes even if one remote measurement fails.
         continue-on-error: true
         env:
-          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
           BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
+          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
           HASH: ${{ steps.source.outputs.hash }}
-          START_POINT: ${{ steps.source.outputs.start_point }}
           BASE_HASH: ${{ steps.source.outputs.base_hash }}
           PR_NUMBER: ${{ steps.source.outputs.number }}
-          IMAGE: ${{ steps.image.outputs.reference }}
         run: |
           args=()
           if [ -n "$PR_NUMBER" ]; then args+=(--pr "$PR_NUMBER"); fi
-          if [ -n "$START_POINT" ]; then
-            args+=(--start-point "$START_POINT" --base-hash "$BASE_HASH")
-          fi
-          pnpm --silent tools continuous submit --project "$BENCHER_PROJECT" \
-            --image "$IMAGE" --hash "$HASH" --out "$RUNNER_TEMP/measurement" "${args[@]}"
-      - name: Publish report
-        if: always() && (steps.check.outputs.default || steps.check.outputs['portable-simd'])
+          pnpm tools continuous submit --project "$BENCHER_PROJECT" \
+            --hash "$HASH" --base-hash "$BASE_HASH" \
+            --inventory "$RUNNER_TEMP/inventory/cases.json" \
+            --artifacts "$RUNNER_TEMP/paired" --out "$RUNNER_TEMP/submission" "${args[@]}"
+      - name: Publish paired checks and PR report
+        if: always() && steps.source.outputs.eligible == 'true'
         uses: actions/github-script@v9
         env:
           HASH: ${{ steps.source.outputs.hash }}
+          BASE_HASH: ${{ steps.source.outputs.base_hash }}
           PR_NUMBER: ${{ steps.source.outputs.number }}
           BASE: ${{ steps.source.outputs.base }}
-          START_POINT: ${{ steps.source.outputs.start_point }}
-          BASE_HASH: ${{ steps.source.outputs.base_hash }}
-          BASELINE_REASON: ${{ steps.source.outputs.baseline_reason }}
-          CHECK_DEFAULT: ${{ steps.check.outputs.default }}
-          CHECK_SIMD: ${{ steps.check.outputs['portable-simd'] }}
-          REPORT_DIR: ${{ runner.temp }}/measurement
-          CANCELLED: ${{ job.status == 'cancelled' }}
         with:
           script: |
             const { publishReport } = require('./bench/continuous/index.ts');
-            const { VARIANTS } = require('./bench/catalog.ts');
-            const env = process.env;
-            let outcomes = {};
-            try {
-              outcomes = JSON.parse(require('node:fs').readFileSync(env.REPORT_DIR + '/outcomes.json', 'utf8'));
-            } catch {
-              core.notice('No remote outcome file; unfinished measurements will fail their checks.');
-            }
+            const path = require('node:path');
             await publishReport({ github, context, core, inputs: {
-              language: "rust", hash: env.HASH, number: env.PR_NUMBER,
-              baseRef: env.BASE || "main",
-              startPoint: env.START_POINT, baseHash: env.BASE_HASH,
-              baselineReason: env.BASELINE_REASON,
-              variants: VARIANTS.map(variant => ({
-                variant,
-                checkId: variant.id === 'default' ? env.CHECK_DEFAULT : env.CHECK_SIMD,
-                outcome: outcomes[variant.id] || (env.CANCELLED === 'true' ? 'cancelled' : 'failure'),
-                reportPath: `${env.REPORT_DIR}/bencher-${variant.id}.json`,
-              })),
+              hash: process.env.HASH, baseHash: process.env.BASE_HASH,
+              number: process.env.PR_NUMBER, baseRef: process.env.BASE || 'main',
+              artifacts: path.join(process.env.RUNNER_TEMP, 'paired'),
+              inventory: path.join(process.env.RUNNER_TEMP, 'inventory/cases.json'),
+              reports: path.join(process.env.RUNNER_TEMP, 'submission'),
             } });
       - uses: actions/upload-artifact@v7
         if: always() && steps.source.outputs.eligible == 'true'
         with:
-          name: continuous-measurement
+          name: continuous-submission
           path: |
-            ${{ runner.temp }}/measurement/
-            ${{ runner.temp }}/measurement.log
+            ${{ runner.temp }}/submission/
+            ${{ runner.temp }}/submission.log
           if-no-files-found: ignore
+      - name: Preserve upload failure
+        if: always() && steps.upload.outcome == 'failure'
+        run: exit 1

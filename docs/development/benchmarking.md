@@ -6,7 +6,7 @@ The comparison runner in `bench/rust` measures sorting algorithms on one machine
 
 Run `pnpm tools` from the repository root with Node.js 24, the pinned pnpm and Rust toolchains. Install JavaScript dependencies with `pnpm install --frozen-lockfile`.
 
-CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment (`-C llvm-args=-align-loops=64`, `-C llvm-args=-align-all-nofallthru-blocks=6`) for both revisions, Rust algorithm competitors and memory workers. The shared builder first lets Cargo resolve [its flag sources](https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags), then prepends the defaults to those resolved flags and rebuilds when needed; explicitly configured alignment values occur later and can override the defaults. This can add a compilation when the initial build lacks alignment. Retained provenance records the effective flags. Direct Cargo commands retain their own configuration; continuous builds already include alignment with their static/JCC flags.
+CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment (`-C llvm-args=-align-loops=64`, `-C llvm-args=-align-all-nofallthru-blocks=6`) for both revisions, Rust algorithm competitors and memory workers. The shared builder first lets Cargo resolve [its flag sources](https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags), then prepends the defaults to those resolved flags and rebuilds when needed; explicitly configured alignment values occur later and can override the defaults. This can add a compilation when the initial build lacks alignment. Retained provenance records the effective flags. Direct Cargo commands retain their own configuration; hosted continuous comparisons use the same CLI alignment defaults.
 
 | Task | Command | What it provides |
 |---|---|---|
@@ -68,6 +68,8 @@ Before adding a custom experiment, identify the exact unmet requirement, explain
 `compare commit [COMMIT]` defaults to `HEAD` and uses any resolvable local commit compatible with the current crate API, harness and lockfile. Both revisions are built from the current benchmark harness with one toolchain and the same features; the baseline substitutes only `rust/tessera-sort` from the named commit. Selected timed IDs must match. The `local` plan measures only `rust/u64/random/65536/s1/api`; override its axes or choose another plan explicitly, since each selected case runs 27 times across nine blocks. `--filter` optionally narrows the resulting timed IDs.
 
 Each block runs two baseline processes and one current process, rotating through the six possible orders. Criterion's mean nanoseconds per sort is the observation. The current/baseline ratio uses the mean of the block's baseline pair; the report gives its median and block range, plus the paired A/A range. A direction needs eight of nine blocks and a median outside that range. This is a development screen with process-level A/A controls, not an in-process or placement-controlled performance claim.
+
+`--shard INDEX/COUNT` optionally measures a deterministic partition of complete timed IDs, retaining their full nine-block sampling. The result records the complete inventory, shard identity and selected subset. Plans with `parallel` rules enable Rayon in both builds, select identical serial/four-thread IDs and require Linux with four allowed CPUs. Serial and parallel preparation never overlap; serial calls use one CPU, parallel calls four. Hosted CI uses this path with the continuous plan; layout sampling remains separate.
 
 The output contains the resolved `plan.json`, `local.json`, `summaries.json`, `index.md` and `local.svg`. The JSON records revision and source hashes, executable hashes, both builds' actual Cargo provenance, configuration, host information, selected IDs and block observations. Compiler and encoded flags come from the build script, including `.cargo` target-specific settings and explicit `RUSTC`; mismatched build settings fail before measurement. Interrupted comparisons retain completed blocks but cannot be resumed or reported as complete. Use `pnpm tools report DIR` to regenerate a completed report.
 
@@ -133,7 +135,7 @@ Benchmark workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). 
 | `release` | `comparison` | Rust and native competitors, 381 inputs across four lengths |
 | `parallel` | `comparison` | Serial controls, Tessera-8 and Rayon stable-8; 16 inputs at 1M records |
 
-`compare commit` defaults to `local`; `compare algorithms` defaults to `smoke`. The continuous executable embeds `continuous.toml` at build time, so its artifact carries the selection from the measured commit. Editing that file changes cloud coverage without editing the worker, publication workflow or case-registration code.
+`compare commit` defaults to `local`; `compare algorithms` defaults to `smoke`. The executable embeds `continuous.toml` at build time. Hosted comparisons additionally pass and retain the normalized plan. Editing coverage does not require another workflow case inventory; the trusted publisher must recognize the updated plan after merge.
 
 A custom plan contains a union of products, followed by exclusions. For example:
 
@@ -195,7 +197,7 @@ The lower-level Rust binaries also accept `--plan FILE`; `--suite smoke|release`
 
 ## Local parallel comparisons
 
-The `parallel` plan uses the same preparation, verification, nine shuffled blocks, serial Tessera A/A pair, memory worker, retained binaries, resume and reports as other algorithm comparisons. It automatically enables the benchmark's `rayon` feature. Cloud continuous scheduling uses its own four-thread cases in the [continuous plan](continuous-benchmarks.md#within-job-scheduling), not this eight-worker local comparison plan.
+The `parallel` plan uses the same preparation, verification, nine shuffled blocks, serial Tessera A/A pair, memory worker, retained binaries, resume and reports as other algorithm comparisons. It automatically enables the benchmark's `rayon` feature. Hosted continuous comparisons use their own four-thread cases in the [continuous plan](continuous-benchmarks.md#within-job-scheduling), not this eight-worker local comparison plan.
 
 Start with one representative input while iterating, using one logical CPU per physical core. CPU numbering varies by host; check `lscpu -e=CPU,CORE` before choosing a mask. On the Ryzen 7 8845H development host, adjacent CPU pairs are SMT siblings:
 
@@ -368,7 +370,7 @@ For each block, a variant's ratio is its time per sort divided by the mean of th
 
 The standard report panels show the 1M-key ranking, 1M and 1,000-key distribution comparisons, 1M element-type comparison, 1M per-type input panels and 10M-key peak heap. Ranking and cross-type geometric means use the ten common baseline distributions; per-type panels show every selected distribution at 1M, including targeted additions. Memory maxima include every selected 10M `u64` distribution. Keys admit stable and unstable opponents; record rankings admit stable opponents only. Speed panels anchor to `slice::sort` within the same blocks, with Portable SIMD shown separately. Every figure includes plotted values; [the figure guide](benchmark-figures.md) owns visual encoding and layout. Custom cases remain in full results even when no standard panel includes them.
 
-Continuous builds apply branch alignment to both feature configurations and use static linking, as described in the [continuous benchmark guide](continuous-benchmarks.md).
+Hosted continuous comparisons use the same CLI alignment defaults for both feature configurations, as described in the [continuous benchmark guide](continuous-benchmarks.md).
 
 The [port record](../design/port.md) describes separate placement controls for source A/B investigations. The release comparison measures lengths of at least 1,000 with the default target; native-CPU builds, branch alignment and cold-cache investigations remain separate work.
 

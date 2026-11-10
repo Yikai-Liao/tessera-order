@@ -6,7 +6,7 @@ import { arch, cpus, platform, release } from "node:os";
 import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
-import { criterionGroup } from "../catalog.ts";
+import { criterionGroup, parseCriterionId } from "../catalog.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
@@ -25,7 +25,7 @@ import {
   parseLayoutSeeds,
   validateLayoutBuilds,
 } from "./layout.ts";
-import { type LocalBlock, type LocalRun, summarizeLocal } from "./model.ts";
+import { type LocalBlock, type LocalRun, shardCases, summarizeLocal } from "./model.ts";
 import { renderLocalReport } from "./report.ts";
 
 interface LocalOptions {
@@ -38,6 +38,7 @@ interface LocalOptions {
   cpu?: string;
   layoutSeeds?: number[];
   layoutControl?: LayoutControl;
+  shard?: { index: number; count: number };
 }
 
 /** Reject ambient worker controls that could change a requested experiment. */
@@ -215,13 +216,18 @@ export async function selectedCases(
   planPath: string,
   pattern: string | undefined,
   cwd: string,
+  parallel = false,
 ) {
   const list = async (binary: string) =>
     (
       await command(binary, ["--bench"], {
         cwd,
         capture: true,
-        env: { TESSERA_BENCH_LIST: "1", TESSERA_BENCH_PLAN: planPath },
+        env: {
+          TESSERA_BENCH_LIST: "1",
+          TESSERA_BENCH_PLAN: planPath,
+          TESSERA_BENCH_PARALLEL: parallel ? "4" : undefined,
+        },
       })
     )
       .split("\n")
@@ -237,8 +243,29 @@ export async function selectedCases(
   return cases;
 }
 
+/** Select exactly four allowed CPUs for parallel calls and retain their actual mask. */
+export async function comparisonCpus(parallel: boolean, requested?: string) {
+  if (!parallel) return requested;
+  if (platform() !== "linux") throw new Error("Four-thread comparisons require Linux");
+  const allowed =
+    (await readFile("/proc/self/status", "utf8")).match(/^Cpus_allowed_list:\s*(.+)$/m)?.[1] ?? "";
+  const selected = new Set<number>();
+  for (const range of (requested ?? allowed).split(",")) {
+    const [first, last = first] = range.split("-").map(Number);
+    for (let cpu = first; cpu <= last && selected.size < 4; cpu++) selected.add(cpu);
+  }
+  const permits = (cpu: number) =>
+    allowed.split(",").some((range) => {
+      const [first, last = first] = range.split("-").map(Number);
+      return cpu >= first && cpu <= last;
+    });
+  if (selected.size !== 4 || [...selected].some((cpu) => !permits(cpu)))
+    throw new Error("Four-thread comparisons require four available CPUs");
+  return [...selected].join(",");
+}
+
 /** Measure one process-level block, cycling through the six possible orders. */
-async function measureBlock(
+export async function measureBlock(
   run: LocalRun,
   binaries: { baseline: string; current: string },
   workspace: Workspace,
@@ -254,24 +281,35 @@ async function measureBlock(
     [2, 0, 1],
     [1, 0, 2],
   ];
-  const groups = [...new Set(run.cases.map(criterionGroup))].join("\n");
+  const parallel = Boolean(options.plan.parallel?.length);
+  const cpus = await comparisonCpus(parallel, options.cpu);
+  const phases = [
+    run.cases.filter((id) => parseCriterionId(id).mode !== "par-4"),
+    run.cases.filter((id) => parseCriterionId(id).mode === "par-4"),
+  ].filter((ids) => ids.length);
   for (const index of orders[run.blocks.length % orders.length]) {
     const role = roles[index],
       binary = role === "current" ? binaries.current : binaries.baseline;
     const criterion = join(workspace.directory, "criterion");
     await rm(criterion, { recursive: true, force: true });
     diagnostic(`Block ${run.blocks.length + 1}/9: ${role}`);
-    const pattern = run.cases.map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-    const args = ["--bench", `^(?:${pattern})$`];
-    const { cpu } = options;
-    await command(cpu ? "taskset" : binary, cpu ? ["-c", cpu, binary, ...args] : args, {
-      cwd: workspace.tree,
-      env: {
-        CRITERION_HOME: criterion,
-        TESSERA_BENCH_GROUPS: groups,
-        TESSERA_BENCH_PLAN: join(options.out, "plan.json"),
-      },
-    });
+    // Await every process: parallel preparation and pool teardown never overlap other cases.
+    for (const ids of phases) {
+      const isParallel = parseCriterionId(ids[0]).mode === "par-4";
+      const cpu = parallel && !isParallel ? cpus!.split(",")[0] : cpus;
+      const pattern = ids.map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+      const args = ["--bench", `^(?:${pattern})$`];
+      await command(cpu ? "taskset" : binary, cpu ? ["-c", cpu, binary, ...args] : args, {
+        cwd: workspace.tree,
+        env: {
+          CRITERION_HOME: criterion,
+          TESSERA_BENCH_GROUPS: [...new Set(ids.map(criterionGroup))].join("\n"),
+          TESSERA_BENCH_IDS: ids.join("\n"),
+          TESSERA_BENCH_PARALLEL: options.plan.parallel?.length ? "4" : undefined,
+          TESSERA_BENCH_PLAN: join(options.out, "plan.json"),
+        },
+      });
+    }
     values[role] = await readEstimates(criterion);
   }
   return values;
@@ -279,7 +317,9 @@ async function measureBlock(
 
 /** Compare an immutable working-tree snapshot with a commit, retaining only results. */
 export async function compareLocal(options: LocalOptions) {
-  const { root, out, simd, cpu } = options;
+  const { root, out, simd } = options;
+  const cpu = await comparisonCpus(Boolean(options.plan.parallel?.length), options.cpu);
+  options = { ...options, cpu };
   if (options.layoutControl && !options.layoutSeeds)
     throw new Error("Layout controls require --layout-seeds");
   assertWorkerEnvironment();
@@ -317,9 +357,16 @@ export async function compareLocal(options: LocalOptions) {
         root,
         workspace,
         baseline,
-        simd ? ["portable-simd"] : [],
+        [...(simd ? ["portable-simd"] : []), ...(options.plan.parallel?.length ? ["rayon"] : [])],
         seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
         options.layoutControl,
+      );
+      const allCases = await selectedCases(
+        binaries,
+        planPath,
+        options.filter,
+        workspace.tree,
+        Boolean(options.plan.parallel?.length),
       );
       const run: LocalRun = {
         schema: 1,
@@ -339,7 +386,10 @@ export async function compareLocal(options: LocalOptions) {
           cpu: cpus()[0]?.model ?? "unknown",
           affinity: cpu ?? "inherited",
         },
-        cases: await selectedCases(binaries, planPath, options.filter, workspace.tree),
+        cases: options.shard
+          ? shardCases(allCases, options.shard.index, options.shard.count)
+          : allCases,
+        ...(options.shard ? { shard: { ...options.shard, allCases } } : {}),
         blocks: [],
       };
       if (layouts.length && run.cases.join("\n") !== layouts[0].run.cases.join("\n"))

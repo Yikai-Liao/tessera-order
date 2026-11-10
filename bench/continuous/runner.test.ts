@@ -6,98 +6,101 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { catalog, criterionId, parseCriterionId } from "../catalog.ts";
-import { partition, runWorkers } from "./worker.ts";
+import { VARIANTS } from "../catalog.ts";
+import { shardCases } from "../local/model.ts";
+import { writePaired } from "./fixtures/paired.ts";
+import { baseHash, hash } from "./fixtures/report.ts";
+import { CONTINUOUS_SHARDS, pairedBmf, readPaired } from "./paired.ts";
 
-const cli = fileURLToPath(new URL("../../tools/index.ts", import.meta.url));
+const source = { hash, baseHash };
 
-test("trusted partition agrees with the ID owner at lane and mode boundaries", () => {
-  // The catalog also names historical APIs; only the worker grants these phases.
-  const modes = catalog.modes.filter((mode) => ["api", "par-4"].includes(mode.id));
-  const lengths = [...new Set([...catalog.smoke.lengths, 999_999, 1_000_000, 1_000_001])];
-  const cases = catalog.smoke.types.flatMap((ty) =>
-    lengths.flatMap((len) =>
-      modes.map((mode) => criterionId({ ty, distribution: "random", len }, mode.id)),
-    ),
-  );
-  const expected: { small: string[][]; large: string[]; parallel: string[] } = {
-    small: [[], []],
-    large: [],
-    parallel: [],
-  };
-  for (const id of cases.toSorted()) {
-    const { len, mode } = parseCriterionId(id);
-    if (mode === "par-4") expected.parallel.push(id);
-    else if (len >= 1_000_000) expected.large.push(id);
-    else {
-      const lane = expected.small[0].length <= expected.small[1].length ? 0 : 1;
-      expected.small[lane].push(id);
+test("hosted matrix uses catalog configurations and the shared shard count", () => {
+  const result = spawnSync(process.execPath, ["tools/index.ts", "continuous", "matrix"], {
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const matrix = JSON.parse(result.stdout).include;
+  assert.equal(matrix.length, VARIANTS.length * CONTINUOUS_SHARDS);
+  for (const variant of VARIANTS)
+    assert.equal(
+      matrix.filter((entry: { configuration: string }) => entry.configuration === variant.id)
+        .length,
+      CONTINUOUS_SHARDS,
+    );
+});
+
+test("all shards cover the same input inventory once, including four-thread modes", async (t) => {
+  const out = await mkdtemp(join(tmpdir(), "tessera-shards-"));
+  t.after(() => rm(out, { recursive: true, force: true }));
+  const runs = await writePaired(out, VARIANTS[0]);
+  const selected = runs.flatMap((run) => run.cases).sort();
+  assert.deepEqual(selected, runs[0].shard!.allCases);
+  const loaded = await readPaired(out, VARIANTS[0], source, runs[0].shard!.allCases);
+  const bmf = pairedBmf(loaded);
+  assert.equal(Object.keys(bmf).length, selected.length);
+  assert.equal(Object.values(bmf)[0]["paired-time-ratio"].value, 1.2);
+  assert.deepEqual(shardCases([...selected].reverse(), 1, CONTINUOUS_SHARDS), runs[0].cases);
+});
+
+test("rejects a self-consistent but shortened inventory across every shard", async (t) => {
+  const out = await mkdtemp(join(tmpdir(), "tessera-shard-truncated-"));
+  t.after(() => rm(out, { recursive: true, force: true }));
+  const runs = await writePaired(out, VARIANTS[0]);
+  const trusted = runs[0].shard!.allCases;
+  const shortened = trusted.filter((id) => !id.endsWith("/par-4"));
+  for (const run of runs) {
+    run.shard!.allCases = shortened;
+    run.cases = shardCases(shortened, run.shard!.index, CONTINUOUS_SHARDS);
+    for (const block of run.blocks) {
+      const values = (value: number) => Object.fromEntries(run.cases.map((id) => [id, value]));
+      block.baseline = values(100);
+      block.control = values(102);
+      block.current = values(121.2);
     }
-  }
-  assert.deepEqual(partition(cases), expected);
-});
-
-test("supervisor rejects invalid IDs before starting workers", {
-  skip: process.platform !== "linux",
-}, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "tessera-scheduler-ids-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const id = "rust/u64/random/65536/s1/api";
-  const lists = ["", `${id}\n${id}`, id.replace("/api", "/workspace")];
-  for (const [index, listed] of lists.entries()) {
-    const binary = join(root, `bench-${index}`);
-    const started = join(root, `started-${index}`);
-    const out = join(root, `results-${index}`);
     await writeFile(
-      binary,
-      [
-        "#!/usr/bin/env node",
-        "// SPDX-License-Identifier: BSD-2-Clause",
-        `if (process.env.TESSERA_BENCH_LIST) console.log(${JSON.stringify(listed)});`,
-        `else require('node:fs').writeFileSync(${JSON.stringify(started)}, 'started');`,
-      ].join("\n"),
-      { mode: 0o755 },
+      join(out, `paired-default-${run.shard!.index}`, "local.json"),
+      JSON.stringify(run),
     );
-    const result = spawnSync(process.execPath, [cli, "continuous", "run", binary, "--out", out], {
-      encoding: "utf8",
-      timeout: 5000,
-    });
-    assert.equal(result.status, 1, result.stderr);
-    assert.match(
-      await readFile(`${out}.log`, "utf8"),
-      /Expected distinct benchmark IDs|Invalid benchmark ID/,
-    );
-    await assert.rejects(readFile(started), { code: "ENOENT" });
   }
+  // Internal agreement is valid but cannot replace the independently resolved list.
+  await readPaired(out, VARIANTS[0], source, shortened);
+  await assert.rejects(readPaired(out, VARIANTS[0], source, trusted), /Incompatible/);
 });
 
-test("failed workers are reaped and their siblings are killed", {
-  skip: process.platform !== "linux",
-}, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "tessera-worker-failure-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const allowed = (await readFile("/proc/self/status", "utf8")).match(
-    /^Cpus_allowed_list:\s*(.+)$/m,
-  )![1];
-  const cpu = Number(allowed.split(/[,-]/)[0]);
-  const binary = join(root, "bench");
-  await writeFile(
-    binary,
-    `#!/usr/bin/env node
-// SPDX-License-Identifier: BSD-2-Clause
-const fs = require("node:fs");
-if (process.env.TESSERA_BENCH_GROUPS === "fail") setTimeout(() => process.exit(1), 200);
-else {
-  fs.writeFileSync(${JSON.stringify(join(root, "pid"))}, String(process.pid));
-  setInterval(() => {}, 1000);
+for (const damage of [
+  "missing",
+  "duplicate",
+  "head",
+  "baseline",
+  "plan",
+  "blocks",
+  "selection",
+  "settings",
+  "features",
+  "invalid-time",
+  "provenance",
+] as const) {
+  test(`rejects ${damage} evidence before upload`, async (t) => {
+    const out = await mkdtemp(join(tmpdir(), "tessera-shard-invalid-"));
+    t.after(() => rm(out, { recursive: true, force: true }));
+    const runs = await writePaired(out, VARIANTS[0]);
+    const run = runs[0];
+    const path = join(out, "paired-default-1", "local.json");
+    if (damage === "missing") await rm(path);
+    else if (damage === "plan") await writeFile(join(out, "paired-default-1", "plan.json"), "{}");
+    else {
+      if (damage === "duplicate") run.shard!.index = 2;
+      if (damage === "head") run.head = "c".repeat(40);
+      if (damage === "baseline") run.baseline = hash;
+      if (damage === "blocks") run.blocks.pop();
+      if (damage === "selection") run.cases.pop();
+      if (damage === "settings") run.builds!.current.opt_level = "1";
+      if (damage === "features") run.builds!.current.features = [];
+      if (damage === "invalid-time") run.blocks[0].current[run.cases[0]] = -1;
+      if (damage === "provenance") delete (run.source as Partial<typeof run.source>).current;
+      await writeFile(path, JSON.stringify(run));
+    }
+    await assert.rejects(readPaired(out, VARIANTS[0], source, runs[1].shard!.allCases));
+    assert.ok(await readFile(join(out, "paired-default-2", "local.json"), "utf8"));
+  });
 }
-`,
-    { mode: 0o755 },
-  );
-  await assert.rejects(
-    runWorkers(binary, [["fail/api"], ["hang/api"]], [cpu, cpu], join(root, "workers")),
-  );
-  const pid = Number(await readFile(join(root, "pid"), "utf8"));
-  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
-});

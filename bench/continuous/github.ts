@@ -16,6 +16,7 @@ export interface ActionsCore {
 
 interface SourceRun {
   workflow_id: number;
+  display_title: string;
   event: string;
   head_sha: string;
   head_branch: string;
@@ -26,62 +27,6 @@ export interface ActionArguments {
   github: GitHub;
   context: ActionContext;
   core: Pick<ActionsCore, "notice" | "setOutput">;
-}
-
-// The branch every push to the default branch records samples under. The
-// pipeline assumes it throughout: only `main` updates the baseline, and the
-// tracker's own workflow runs default-branch code.
-const DEFAULT_BRANCH = "main";
-
-// Either the Bencher branch a PR must compare against, or why none exists.
-type Baseline = { startPoint: string; hash: string } | { reason: string };
-
-interface PullRequest {
-  number: number;
-  state: string;
-  head: { sha: string; ref: string; repo: { full_name: string } };
-  base: { sha: string; ref: string; repo: { full_name: string } };
-}
-
-// A stacked PR's base branch is the head of its parent PR. Bencher stores a
-// PR's samples under `pr-<number>`, never under the branch name, so a child
-// must name the parent's number or Bencher silently records no comparison.
-async function baselineFor(
-  { github, context, core }: ActionArguments,
-  pr: PullRequest,
-): Promise<Baseline> {
-  const repo = context.repo;
-  // Compare the code actually inherited by this head, not a moving target tip.
-  const { data: comparison } = await github.rest.repos.compareCommits({
-    ...repo,
-    base: pr.base.sha,
-    head: pr.head.sha,
-  });
-  const hash = comparison.merge_base_commit.sha;
-  if (pr.base.ref === DEFAULT_BRANCH) return { startPoint: DEFAULT_BRANCH, hash };
-  const { data: candidates } = await github.rest.pulls.list({
-    ...repo,
-    state: "all",
-    head: `${repo.owner}:${pr.base.ref}`,
-    per_page: 100,
-  });
-  const fullName = `${repo.owner}/${repo.repo}`;
-  const parents = candidates.filter(
-    (candidate) => candidate.head.repo.full_name === fullName && candidate.head.ref === pr.base.ref,
-  );
-  const open = parents.filter((candidate) => candidate.state === "open");
-  // Several PRs from one branch are ambiguous; one open PR wins over a closed
-  // one because it is the stack a reviewer sees.
-  const parent =
-    open.length === 1 ? open[0] : open.length === 0 && parents.length === 1 ? parents[0] : null;
-  if (!parent) {
-    const reason = parents.length
-      ? `several pull requests use ${pr.base.ref} as their head`
-      : `the base branch ${pr.base.ref} has no pull request`;
-    core.notice(`No baseline for the benchmark: ${reason}.`);
-    return { reason };
-  }
-  return { startPoint: `pr-${parent.number}`, hash };
 }
 
 export async function resolveSource({ github, context, core }: ActionArguments) {
@@ -100,6 +45,10 @@ export async function resolveSource({ github, context, core }: ActionArguments) 
     if (run.head_branch !== "main" || run.head_repository.full_name !== fullName) {
       throw new Error("Only main can update the baseline");
     }
+    const { data: commit } = await github.rest.repos.getCommit({ ...repo, ref: run.head_sha });
+    const baseline = commit.parents[0]?.sha;
+    if (!baseline) throw new Error("Main has no parent baseline");
+    core.setOutput("base_hash", baseline);
     core.setOutput("branch", "main");
     core.setOutput("hash", run.head_sha);
     core.setOutput("eligible", "true");
@@ -109,39 +58,31 @@ export async function resolveSource({ github, context, core }: ActionArguments) 
     throw new Error("Unexpected source event");
   }
 
-  // Fork workflow_run events can omit pull_requests; resolve the current head
-  // and target repository through GitHub's commit association instead.
-  const pulls = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
-    ...repo,
-    commit_sha: run.head_sha,
-    per_page: 100,
-  });
-  const matching = pulls.filter(
-    (pr) =>
-      pr.state === "open" && pr.head.sha === run.head_sha && pr.base.repo.full_name === fullName,
+  // Native run metadata snapshots the event; live PR state only determines
+  // eligibility. This also works when fork events omit pull_requests entirely.
+  const captured = /^paired-v1 pr=([1-9]\d*) base=([a-f0-9]{40}) head=([a-f0-9]{40})$/.exec(
+    run.display_title,
   );
-  if (matching.length === 0) {
+  if (!captured || captured[3] !== run.head_sha)
+    throw new Error("Missing or mismatched triggering PR identity");
+  const [, number, target] = captured;
+  const { data: pr } = await github.rest.pulls.get({ ...repo, pull_number: Number(number) });
+  if (pr.state !== "open" || pr.head.sha !== run.head_sha || pr.base.repo.full_name !== fullName) {
     core.notice("PR closed or superseded; no benchmark will be submitted.");
     return;
   }
-  if (matching.length !== 1) {
-    throw new Error("Ambiguous PR for benchmark commit");
-  }
-  const pr = matching[0];
   core.setOutput("branch", `pr-${pr.number}`);
   core.setOutput("hash", pr.head.sha);
-  // The GitHub base ref is what the report shows; the start point is the
-  // Bencher branch that holds the samples.
-  core.setOutput("base", pr.base.ref);
+  // The live ref may have been retargeted; display only the recorded baseline.
+  core.setOutput("base", "recorded target");
   core.setOutput("number", String(pr.number));
   core.setOutput("eligible", "true");
-  const baseline = await baselineFor({ github, context, core }, pr);
-  if ("reason" in baseline) {
-    core.setOutput("baseline_reason", baseline.reason);
-  } else {
-    core.setOutput("start_point", baseline.startPoint);
-    core.setOutput("base_hash", baseline.hash);
-  }
+  const { data: comparison } = await github.rest.repos.compareCommits({
+    ...repo,
+    base: target,
+    head: pr.head.sha,
+  });
+  core.setOutput("base_hash", comparison.merge_base_commit.sha);
 }
 
 export async function startReport({
@@ -160,6 +101,7 @@ export async function startReport({
     details_url: workflowUrl(context),
   });
   core.setOutput(variant.id, String(data.id));
+  return data.id;
 }
 
 export function workflowUrl(context: ActionContext) {

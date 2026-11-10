@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planDigits, sampleKeys } from "./digits.ts";
+import { chooseTileLeaf, partitionWork, planDigits, sampleKeys } from "./digits.ts";
 
 test("digit planning balances shifted runs and covers sparse masks", () => {
   for (const shift of [0n, 17n, 96n]) {
@@ -24,6 +24,30 @@ test("digit planning balances shifted runs and covers sparse masks", () => {
     }
     assert.equal(covered & mask, mask);
   }
+});
+
+test("conditional child work preserves terminal groups without a fanout cutoff", () => {
+  const varying = (1n << 64n) - 1n;
+  const digit = { shift: 52, width: 12 };
+  for (const groups of [1, 2, 3, 4, 8, 16, 32, 64]) {
+    const records = Array.from({ length: 1024 }, (_, index) => BigInt(index % groups) << 56n);
+    const sample = sampleKeys(records);
+    assert.equal(partitionWork(1024, varying, digit, sample, 8, 64), 2 * sample.length);
+    assert.equal(chooseTileLeaf(1024, varying, 12, sample, 64), "msd");
+  }
+  const sample = sampleKeys(
+    Array.from(
+      { length: 1024 },
+      (_, index) => (BigInt(index) * 0x9e3779b97f4a7c15n) & ((1n << 52n) - 1n),
+    ),
+  );
+  assert.equal(chooseTileLeaf(1024, varying, 12, sample, 64), "lsd");
+  const mask = ((1n << 12n) - 1n) << 52n;
+  assert.equal(partitionWork(1024, mask, digit, sample, 8, 64), 2 * sample.length);
+  assert.ok(partitionWork(8192, varying, { shift: 63, width: 1 }, [0n], 8, 64) > 2);
+  assert.equal(chooseTileLeaf(8192, 0xfffffn, 14, [], 64), "lsd");
+  assert.equal(chooseTileLeaf(8192, 0n, 14, [], 64), "done");
+  assert.equal(chooseTileLeaf(48, varying, 6, [], 64), "insertion");
 });
 
 test("bounded sampling covers short inputs and does not alias periodic keys", () => {

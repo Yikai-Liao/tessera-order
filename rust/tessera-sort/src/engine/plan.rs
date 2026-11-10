@@ -18,11 +18,6 @@ const MAX_SPLIT_BITS: usize = block::MAX_RADIX_BITS;
 const MAX_TILE_DIGIT_BITS: usize = MAX_DIGIT_BUCKETS.ilog2() as usize;
 /// Narrowest digit a leaf may use.
 const MIN_TILE_DIGIT_BITS: usize = 6;
-/// Cost model: an MSD level is one counting pass, and the insertion finish that
-/// ends the descent costs about one more. Charging a level as three passes kept
-/// three-pass plans on flat passes, which measured 11-38% slower for 32-bit keys
-/// at 1K-64K records.
-const MSD_FINISH_PASSES: usize = 1;
 /// Bounded sample shared by equality and digit-occupancy decisions.
 pub(super) const KEY_SAMPLE_LEN: usize = 128;
 /// Consecutive keys per run avoid aliasing with periodic input.
@@ -64,6 +59,50 @@ impl<V: Unsigned> KeySample<V> {
             .max_by_key(|run| run.len())
             .filter(|run| run.len() * MODE_SHARE_DENOMINATOR >= self.len)
             .map(|run| run[0])
+    }
+
+    /// Estimates one partition and its children in sampled-record pass units.
+    ///
+    /// Repeated groups estimate population and remaining variation together;
+    /// a sample-constant group needs a confirming scan, not more sorting passes.
+    /// A singleton cannot certify constancy: use the remaining candidate bits
+    /// and a uniform bucket population for that unobserved part of the sample.
+    /// All facts are advisory; actual child scans still decide completion.
+    fn partition_work(
+        &self,
+        records: usize,
+        varying: u128,
+        digit: Digit,
+        record_bytes: usize,
+    ) -> usize {
+        let mask = digit.mask::<V>();
+        let remaining = varying & !mask.to_u128();
+        let singleton_len = records.div_ceil(1 << digit.width);
+        let singleton_passes = if singleton_len <= INSERTION_MAX {
+            0
+        } else {
+            digit_passes(remaining, tile_digit_bits(singleton_len, record_bytes))
+        };
+        // All records pay a partition and either insertion or a confirming scan.
+        // Only children with work beyond that minimum need further estimation.
+        let mut work = 2 * self.len;
+        for keys in self.keys[..self.len].chunk_by(|a, b| (*a & mask) == (*b & mask)) {
+            if keys.len() == 1 {
+                work += singleton_passes;
+                continue;
+            }
+            let child_len = (records * keys.len()).div_ceil(self.len);
+            if child_len <= INSERTION_MAX || keys.first() == keys.last() {
+                continue;
+            }
+            let first = keys[0].to_u128();
+            let varying = keys
+                .iter()
+                .fold(0, |bits, key| bits | (key.to_u128() ^ first))
+                & remaining;
+            work += keys.len() * digit_passes(varying, tile_digit_bits(child_len, record_bytes));
+        }
+        work
     }
 
     /// Counts occupied top-digit buckets without a radix-sized bitmap.
@@ -321,21 +360,6 @@ fn plan_digit<T, E: Extract<T>>(
     }
 }
 
-/// Estimates record passes under uniform fan-out until insertion-sized children.
-/// The flat plan bounds the search: deeper descents cannot win this comparison.
-/// This is a strategy estimate, not a bound on actual child lengths or work.
-fn estimate_msd_passes(records: usize, fanout: usize, flat_passes: usize) -> usize {
-    debug_assert!(records > INSERTION_MAX && fanout > 0);
-    let mut largest = records;
-    let mut depth = 0;
-    while largest > INSERTION_MAX && depth < flat_passes {
-        depth += 1;
-        largest /= fanout;
-    }
-    // The loop runs at least once; keeping max(1) helps optimized code generation.
-    depth.max(1) + MSD_FINISH_PASSES
-}
-
 /// An executable tile decision; cursor layout and scratch remain private to tiles.
 #[allow(
     clippy::large_enum_variant,
@@ -363,31 +387,14 @@ pub(super) fn plan_tile<T, E: Extract<T>>(
     // Widest counting table this tile can afford; LSD spreads it over passes.
     let table_width = tile_digit_bits(len, core::mem::size_of::<T>());
     let passes = digit_passes(varying, table_width);
-    // Compare an MSD descent against the flat plan in passes over the tile.
-    // A level plus its finish cannot undercut two flat passes, so shorter
-    // plans skip the occupancy sample.
-    if passes > MSD_FINISH_PASSES + 1 {
-        // One partition finishes the tile, so it takes the widest table rather
-        // than a pass-plan window; a narrower digit leaves more to insertion.
+    // One partition plus child confirmation or insertion costs at least two
+    // passes in this estimate, so short flat plans need no sample.
+    if passes > 2 {
         let (digit, _) = top_window(varying, table_width);
-        // The tile is non-empty, so its sample is non-empty too. Repeats in
-        // the sample cap the split; a sample with no repeats at all is limited
-        // by its length, not by the keys, so the digit's buckets apply.
-        // `max(1)` is redundant in value but not in codegen: it tells the
-        // optimizer the divisor below is non-zero, and removing it measured
-        // as a slower `sort_tile` (an extra zero check and different register
-        // allocation).
         let sample = KeySample::collect(records, extractor);
-        let distinct = sample.top_digit_occupancy(digit).max(1);
-        let fanout = if distinct >= sample.len {
-            1usize << digit.width
-        } else {
-            distinct
-        };
-        let level_cost = estimate_msd_passes(len, fanout, passes);
-        // A low-fanout sample can hide a concentrated bucket that becomes
-        // equal or insertion-sized after one split.
-        if distinct <= 2 || level_cost < passes {
+        if sample.partition_work(len, varying, digit, core::mem::size_of::<T>())
+            < sample.len * passes
+        {
             return TilePlan::Msd(digit);
         }
     }
@@ -430,12 +437,66 @@ mod tests {
     }
 
     #[test]
-    fn uniform_descent_estimate_is_bounded_by_flat_work() {
-        assert_eq!(estimate_msd_passes(8192, 2, 5), 6);
-        assert_eq!(estimate_msd_passes(8192, 128, 5), 3);
-        assert_eq!(estimate_msd_passes(1000, 64, 5), 2);
-        assert_eq!(estimate_msd_passes(1000, 1, 5), 6);
-        assert_eq!(estimate_msd_passes(49, 2, 3), 2);
+    fn sampled_terminal_groups_generalize_low_fanout() {
+        for groups in [1, 2, 3, 4, 8, 16, 32, 64] {
+            let records: Vec<u64> = (0..1024)
+                .map(|index| ((index % groups) as u64) << 56)
+                .collect();
+            let sample = KeySample::collect(&records, &mut Direct);
+            let digit = Digit {
+                shift: 52,
+                width: 12,
+            };
+            // Constant children pay only their confirmation, regardless of how
+            // many groups the sample contains. No low-fanout cutoff is needed.
+            assert_eq!(
+                sample.partition_work(records.len(), u64::MAX as u128, digit, 8),
+                2 * sample.len
+            );
+            assert!(matches!(
+                plan_tile(&records, u64::MAX as u128, &mut Direct),
+                TilePlan::Msd(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn concentrated_nonterminal_groups_keep_remaining_work() {
+        let records: Vec<u64> = (0..1024u64)
+            .map(|index| index.wrapping_mul(0x9e3779b97f4a7c15) & ((1 << 52) - 1))
+            .collect();
+        let sample = KeySample::collect(&records, &mut Direct);
+        let digit = Digit {
+            shift: 52,
+            width: 12,
+        };
+        assert!(sample.partition_work(records.len(), u64::MAX as u128, digit, 8) >= 6 * sample.len);
+        // Known-completed bits do not contribute to estimated child work.
+        assert_eq!(
+            sample.partition_work(records.len(), digit.mask::<u128>(), digit, 8),
+            2 * sample.len
+        );
+        assert!(matches!(
+            plan_tile(&records, u64::MAX as u128, &mut Direct),
+            TilePlan::Lsd { .. }
+        ));
+        // One key in a bucket does not establish constancy when the estimated
+        // child still exceeds the insertion bound.
+        let singleton = KeySample {
+            keys: [0u64; KEY_SAMPLE_LEN],
+            len: 1,
+        };
+        assert!(
+            singleton.partition_work(
+                8192,
+                u64::MAX as u128,
+                Digit {
+                    shift: 63,
+                    width: 1
+                },
+                8
+            ) > 2
+        );
     }
 
     /// Exhaustively enumerates window partitions independently of the planner.

@@ -85,31 +85,65 @@ export function tileDigitBits(records: number, recordBytes: number): number {
 
 export type TileLeaf = "done" | "insertion" | "msd" | "lsd";
 
-/** Mirrors `plan_tile`'s leaf choice for one sampled top-digit fan-out. */
+/** Greedy count of width-bounded windows, without constructing a flat plan. */
+function digitPasses(varying: bigint, width: number, bits: number): number {
+  let passes = 0;
+  while (varying !== 0n) {
+    varying &= ~topWindow(varying, width, bits).window;
+    passes++;
+  }
+  return passes;
+}
+
+/** One partition and conditional child work, in sampled-record pass units. */
+export function partitionWork(
+  records: number,
+  varying: bigint,
+  digit: Digit,
+  sample: readonly bigint[],
+  recordBytes: number,
+  bits: number,
+): number {
+  const mask = ((1n << BigInt(digit.width)) - 1n) << BigInt(digit.shift);
+  const remaining = varying & ~mask;
+  const keys = [...sample].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const singletonLen = Math.ceil(records / 2 ** digit.width);
+  const singletonPasses =
+    singletonLen <= 48 ? 0 : digitPasses(remaining, tileDigitBits(singletonLen, recordBytes), bits);
+  let work = 2 * keys.length;
+  for (let start = 0; start < keys.length; ) {
+    let end = start + 1;
+    while (end < keys.length && (keys[end] & mask) === (keys[start] & mask)) end++;
+    const len = end - start;
+    const childLen = Math.ceil((records * len) / keys.length);
+    if (len === 1) {
+      work += singletonPasses;
+    } else if (childLen > 48 && keys[start] !== keys[end - 1]) {
+      let childVarying = 0n;
+      for (let index = start; index < end; index++) childVarying |= keys[index] ^ keys[start];
+      work +=
+        len * digitPasses(childVarying & remaining, tileDigitBits(childLen, recordBytes), bits);
+    }
+    start = end;
+  }
+  return work;
+}
+
+/** Mirrors the planner's weighted child-work comparison; samples are advisory. */
 export function chooseTileLeaf(
   records: number,
   varying: bigint,
   tableWidth: number,
-  sampledDistinct: number,
+  sample: readonly bigint[],
   bits: number,
+  recordBytes = 8,
 ): TileLeaf {
   if (records < 2 || varying === 0n) return "done";
   if (records <= 48) return "insertion";
-
-  const passes = planDigits(varying, tableWidth, bits).length;
+  const passes = digitPasses(varying, tableWidth, bits);
   if (passes <= 2) return "lsd";
-
-  const sampleLen = Math.min(128, records);
-  const distinct = Math.max(1, Math.min(sampledDistinct, sampleLen));
-  if (distinct <= 2) return "msd";
-
   const { digit } = topWindow(varying, tableWidth, bits);
-  const fanout = distinct >= sampleLen ? 2 ** digit.width : distinct;
-  let largest = records;
-  let depth = 0;
-  while (largest > 48 && depth < passes) {
-    depth++;
-    largest = Math.floor(largest / fanout);
-  }
-  return Math.max(depth, 1) + 1 < passes ? "msd" : "lsd";
+  return partitionWork(records, varying, digit, sample, recordBytes, bits) < sample.length * passes
+    ? "msd"
+    : "lsd";
 }

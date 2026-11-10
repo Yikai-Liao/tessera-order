@@ -7,7 +7,7 @@ A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so t
 | Leaf | Used when | How it works |
 |---|---|---|
 | <span id="insertion">**Insertion sort**</span> | the tile has at most 48 records | stable insertion on encoded keys |
-| <span id="tile-msd">**Tile MSD**</span> | the LSD plan needs more than two passes, and a sample finds at most two top-digit buckets or the cost model expects MSD to win | one counting pass on the top digit through scratch, then each bucket is finished on its own: insertion for buckets of at most 48 records, `sort_tile` again for larger ones |
+| <span id="tile-msd">**Tile MSD**</span> | the LSD plan needs more than two passes, and estimated partition-plus-child work is smaller | one counting pass on the top digit through scratch, then each bucket is finished on its own: insertion for buckets of at most 48 records, `sort_tile` again for larger ones |
 | <span id="tile-lsd">**Tile LSD**</span> | otherwise | one counting pass per planned digit, from the lowest digit up, alternating between the tile and scratch |
 
 Below 48 records, the work of clearing and scanning bucket tables costs more than insertion's shifts. The threshold is `INSERTION_MAX` in `lib.rs`.
@@ -26,30 +26,30 @@ For example, 32 adjacent varying bits use widths 11 + 11 + 10 instead of 14 + 14
 
 Leaf selection needs only the minimum pass count, which greedy width-bounded coverage computes cheaply. The engine optimizes table sizes only if it selects LSD; an MSD tile does not construct an unused flat plan. The plan capacity is derived from the widest key and narrowest allowed digit rather than an independently tuned array length.
 
-Toggle bits and change the table width to explore the plan. The figure also models the finish choice for 8,192 `u64` keys with the selected table limit; the engine itself uses 14 bits at this size. Change the sample's distinct-bucket count to explore the low-fanout rule:
+Toggle bits and change the table width to explore the plan. The figure also models the finish choice for 8,192 `u64` keys with the selected table limit; the engine itself uses 14 bits at this size. Change the sampled key pattern to compare constant children with children that still have varying bits:
 
 <DigitPlanner />
 
 ## MSD or LSD: the cost model
 
-Both leaves move records with counting passes, so the model counts passes over the tile:
+Both leaves move records with counting passes. The model compares their estimated record-pass work rather than predicting cycles:
 
-- **LSD** costs one pass per planned digit: `passes`.
-- **MSD** costs one pass per level it descends before the largest bucket falls to 48 records or fewer, plus one for the insertion finish at the bottom: `depth + 1`.
+- **LSD** touches every record once per planned digit.
+- **MSD** partitions every record once, then charges each sampled group for the work remaining in that child. Group populations weight the sum, so a small expensive child does not stand in for the whole tile.
 
-To estimate the depth, the engine uses the same bounded key sample as node planning: up to 128 keys, drawn in consecutive runs of 8 and sorted. Adjacent groups after projection onto the top digit count its distinct values without a radix-sized occupancy table. If every sampled key landed in a different bucket, the sample is too small to measure the spread, and the full bucket count is assumed. Otherwise the number of distinct values is the expected fan-out. The descent divides the tile size by the fan-out until it reaches 48.
+The planner reuses the bounded key sample: up to 128 keys, drawn in consecutive runs of 8 and sorted. Adjacent keys with the same top digit form a group. A repeated group's fraction of the sample estimates its child length; differences among its complete keys estimate the remaining varying bits, restricted to the candidate mask. An estimated child of at most 48 records costs one insertion finish. A larger child costs one variation scan plus the minimum flat passes needed by its sampled remaining bits. If all sampled keys in the group are equal, the continuation costs only the confirming scan.
 
-For plans longer than two passes, a sample with at most two distinct buckets selects MSD directly. That small sample cannot estimate the largest child reliably: one stable split may leave a dominant bucket constant or small enough for insertion, even when the average-fan-out estimate predicts no win. Other samples select MSD only when `depth + 1 < passes`. Plans of one or two passes skip the sample: one MSD level plus its finish already costs two passes.
+A singleton provides no evidence of constancy. Its estimate retains all remaining candidate bits and assumes a uniform child length of `ceil(records / digit buckets)`. This assumption can underestimate an unsampled concentration, just as repeated groups can miss rare variation. These errors affect routing only: actual child scans still decide completion and recursion still consumes candidate bits.
 
-Charging an MSD level as more than one pass kept three-pass plans on LSD, which was 11–38% slower for 32-bit keys at 1K–64K records (`MSD_FINISH_PASSES` in `engine/plan.rs`).
+The same comparison covers two, three or many sample-constant groups; there is no separate low-fanout rule. The minimum estimate is one partition plus one child finish or confirmation, so plans of one or two flat passes skip sampling. Larger plans choose MSD only when its weighted estimate is strictly smaller. Table width separately bounds storage and empty-bucket work; the model does not convert table entries into record passes through fitted cycle weights.
 
 Three examples, for 8-byte records (`u64`):
 
 | Tile | Varying bits | LSD plan | Top-digit sample | Decision |
 |---|---|---|---|---|
-| 8,192 random keys | 64 | 14-bit tables, tiled evenly: 13 + 13 + 13 + 13 + 12, 5 passes | 127 or 128 distinct 14-bit values: 1 or 2 levels | MSD: at most 2 + 1 = 3 < 5 |
+| 8,192 random keys | 64 | 14-bit tables, tiled evenly: 13 + 13 + 13 + 13 + 12, 5 passes | mostly singleton groups; a repeated group may retain lower-bit work | MSD: estimated child work is weighted by population rather than applied to the whole tile |
 | 8,192 keys in 0..2²⁰ | 20 | 10 + 10, 2 passes | skipped | LSD |
-| 1,000 `u64` keys, `skew99` | broad span | six passes | at most two top-digit buckets | MSD: low-fanout sample selects one split, then the dominant bucket can stop |
+| 1,000 `u64` keys with a dominant repeated key | broad span | six passes | a large sample-constant group and small remaining groups | MSD: the dominant group needs confirmation, not more sorting passes |
 
 ## Inside a pass
 

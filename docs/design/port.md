@@ -414,3 +414,26 @@ Each case ran nine rotating baseline/control/current process blocks. Ratios use 
 | `row_u64/two_values/65536` | 0.9982 | 0.9955–1.0039 | 0.9951–1.0049 | within A/A |
 
 The random-input losses remain open. This process-level screen does not identify their cause among shared preparation, sampling, digit planning, tile finishing and generated-code placement. It supplies neither in-process source attribution nor whole-engine performance acceptance; parallel APIs, other lengths and key widths remain unmeasured here. No distribution or size exception is added to compensate. Raw results and provenance remain outside Git in the `one-backend-screen` session.
+
+### Conditional tile-work candidate
+
+The candidate after `cb6be7f` replaces uniform-depth estimation and the two-bucket override with sample-weighted child work. Structural review found the replacement preserves the reason for constant-child finishing, but performance remains unaccepted. Serial/Rayon tests, Clippy, site checks and all 17 engine Miri tests pass. A fixed-work comparison of clean `e3da30a` against `b8968b6` already showed additional random-input instructions: 8.62% / 6.28% at 1,000 records and 1.99% / 3.32% at 65,536, for direct `u64` / keyed rows. Identical baseline repeats had identical instruction totals; simulated events do not establish a latency cause.
+
+Two nine-block maintained screens compare the conditional-work candidate with `cb6be7f` on CPU 2 with the same host/compiler/alignment as the required-SIMD screen. The first revision charged flat continuation and unnecessarily calculated variation even for insertion-sized estimates. The second skips that calculation and uses constant sorted-group endpoints. Neither is performance-accepted:
+
+| Second-revision case | Current / baseline | Block range | A/A range | Screen |
+|---|---:|---|---|---|
+| `u64/random/1000` | 1.0297 | 1.0186–1.0449 | 0.9916–1.0084 | slower |
+| `row_u64/random/1000` | 1.0350 | 1.0131–1.0401 | 0.9748–1.0252 | slower |
+| `u64/random/65536` | 1.0059 | 0.9993–1.0192 | 0.9902–1.0098 | within A/A |
+| `row_u64/random/65536` | 1.0098 | 1.0087–1.0134 | 0.9973–1.0027 | slower |
+| `u64/skew99/1000` | 0.9976 | 0.9907–1.0041 | 0.9953–1.0047 | within A/A |
+| `row_u64/skew99/1000` | 0.9920 | 0.9901–0.9961 | 0.9968–1.0032 | faster |
+| `u64/bimodal/1000` | 1.3160 | 1.3003–1.3248 | 0.9938–1.0062 | slower |
+| `row_u64/bimodal/1000` | 1.3430 | 1.3357–1.3554 | 0.9928–1.0072 | slower |
+| `u64/hot50/1000` | 1.0103 | 1.0044–1.0176 | 0.9910–1.0090 | slower |
+| `row_u64/hot50/1000` | 1.0143 | 1.0074–1.0895 | 0.9954–1.0046 | slower |
+| `u64/sparse_digits/1000` | 1.0635 | 1.0065–1.1309 | 0.9726–1.0274 | slower |
+| `row_u64/sparse_digits/1000` | 1.0329 | 1.0252–1.0376 | 0.9931–1.0069 | slower |
+
+Both `sparse8/1000` cases and both `skew99/65536` cases were within A/A. Raw evidence remains outside Git in `conditional-work-screen-v1`, `conditional-work-screen-v2`, `conditional-work-shapes-v2` and `convergence-work-v1`. Reproduce the second candidate's selections with `--types u64,row_u64 --distributions random,skew99 --lengths 1000,65536` and `--types u64,row_u64 --distributions sparse8,hot50,sparse_digits,bimodal --lengths 1000`, using `pnpm tools compare commit cb6be7f --cpu 2` and separate output directories. These are process screens, not source attribution. The flat child-continuation estimate misses further MSD opportunities and must be investigated before acceptance; no distribution exception compensates for it.

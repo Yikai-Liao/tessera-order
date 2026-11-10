@@ -109,16 +109,10 @@ export async function buildRevisions(
   source.baseline = await sourceHash(crate);
   const map = join(directory, "layout.map");
   // Keep the map path out of -Wl's comma-separated argument list.
-  // Keep executable virtual addresses fixed on Linux x86-64. Same-source
-  // hosted pairs otherwise showed stable process-specific offsets despite identical binaries.
-  const addressArgs = platform() === "linux" && arch() === "x64" ? ["-C", "link-arg=-no-pie"] : [];
   const rustcArgs = (seed: number | undefined) =>
     seed === undefined
-      ? addressArgs.length
-        ? addressArgs
-        : undefined
+      ? undefined
       : [
-          ...addressArgs,
           "-C",
           "linker=cc",
           "-C",
@@ -278,6 +272,8 @@ export async function comparisonCpus(parallel: boolean, requested?: string) {
 /** Compare an immutable working-tree snapshot with a commit, retaining only results. */
 export async function compareLocal(options: LocalOptions) {
   const { root, out, simd } = options;
+  // Probe before compiling; do not silently publish an uncontrolled ASLR run.
+  if (platform() === "linux") await command("setarch", ["-R", "true"]);
   const cpu = await comparisonCpus(Boolean(options.plan.parallel?.length), options.cpu);
   options = { ...options, cpu };
   if (options.layoutControl && !options.layoutSeeds)
@@ -346,6 +342,7 @@ export async function compareLocal(options: LocalOptions) {
           arch: arch(),
           cpu: cpus()[0]?.model ?? "unknown",
           affinity: cpu ?? "inherited",
+          aslr: platform() === "linux" ? "disabled" : "uncontrolled",
         },
         cases: options.shard
           ? shardCases(allCases, options.shard.index, options.shard.count)

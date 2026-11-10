@@ -82,6 +82,7 @@ export async function readPaired(
     if (
       run.schema !== 1 ||
       run.protocol !== "paired-samples-v1" ||
+      run.host.aslr !== "disabled" ||
       run.dirty ||
       run.head !== source.hash ||
       run.baseline !== source.baseHash ||

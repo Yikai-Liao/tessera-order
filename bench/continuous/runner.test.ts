@@ -82,6 +82,7 @@ for (const damage of [
   "features",
   "invalid-time",
   "provenance",
+  "aslr",
 ] as const) {
   test(`rejects ${damage} evidence before upload`, async (t) => {
     const out = await mkdtemp(join(tmpdir(), "tessera-shard-invalid-"));
@@ -93,6 +94,7 @@ for (const damage of [
     else if (damage === "plan") await writeFile(join(out, "paired-default-1", "plan.json"), "{}");
     else {
       if (damage === "duplicate") run.shard!.index = 2;
+      if (damage === "aslr") delete run.host.aslr;
       if (damage === "head") run.head = "c".repeat(40);
       if (damage === "baseline") run.baseline = hash;
       if (damage === "blocks") run.samples![run.cases[0]].pop();

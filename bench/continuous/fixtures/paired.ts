@@ -48,6 +48,7 @@ export function pairedRun(variant: Variant, index = 1, ratio = 1.2): LocalRun {
       arch: "x64",
       cpu: "fixture",
       affinity: "0,1,2,3",
+      aslr: "disabled",
     },
     cases,
     shard: { index, count: CONTINUOUS_SHARDS, allCases },

@@ -28,6 +28,10 @@ const fs = require("node:fs"), readline = require("node:readline");
 const role = ${JSON.stringify(role)}, dir = ${JSON.stringify(directory)};
 fs.writeFileSync(dir + "/" + role + ".pid", String(process.pid));
 const id = process.env.TESSERA_BENCH_IDS;
+if (${JSON.stringify(process.platform)} === "linux") {
+ const personality = parseInt(fs.readFileSync("/proc/self/personality", "utf8"),16);
+ require("node:assert/strict").ok(personality & 0x40000, "ASLR must be disabled");
+}
 if (${Boolean(mask)}) {
  const allowed = fs.readFileSync("/proc/self/status", "utf8").match(/^Cpus_allowed_list:\s*(.+)$/m)[1];
  const count = allowed.split(",").reduce((n,r) => {const [a,b=a]=r.split("-").map(Number);return n+b-a+1},0);

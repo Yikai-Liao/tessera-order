@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { platform } from "node:os";
 import { command, diagnostic } from "../../tools/process.ts";
 import { parseCriterionId, revisionSampling } from "../catalog.ts";
 import type { LocalRun } from "./model.ts";
@@ -25,8 +26,10 @@ export async function measureSamples(
     const worker = (
       binary: string,
       interact: (exchange: (request: string) => Promise<string>) => Promise<void>,
-    ) =>
-      command(mask ? "taskset" : binary, mask ? ["-c", mask, binary, "--bench"] : ["--bench"], {
+    ) => {
+      const argv = [...(mask ? ["taskset", "-c", mask] : []), binary, "--bench"];
+      if (platform() === "linux") argv.unshift("setarch", "-R");
+      return command(argv[0], argv.slice(1), {
         cwd,
         interact,
         env: {
@@ -36,6 +39,7 @@ export async function measureSamples(
           TESSERA_BENCH_PARALLEL: parallel ? "4" : undefined,
         },
       });
+    };
     await worker(binaries.baseline, async (a) => {
       if (JSON.parse(await a("start")).id !== id) throw new Error("Wrong baseline case");
       await worker(binaries.current, async (b) => {

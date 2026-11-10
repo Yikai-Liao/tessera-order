@@ -66,8 +66,8 @@ export function continuousCommands(program: Command) {
 
   continuous
     .command("submit")
-    .description("Submit both builds to Bencher; requires its CLI and BENCHER_API_KEY")
-    .requiredOption("--image <digest>", "immutable image reference containing both builds")
+    .description("Submit the SIMD build to Bencher; requires its CLI and BENCHER_API_KEY")
+    .requiredOption("--image <digest>", "immutable image reference containing the SIMD build")
     .requiredOption("--hash <sha>", "measured source commit")
     .requiredOption("--project <id>", "Bencher project")
     .requiredOption("--out <directory>", "new report directory")

@@ -34,7 +34,7 @@ Use `pnpm tools` for covered tasks; do not recreate its build/run/report orchest
 
 Replace uppercase placeholders. The [capability table](docs/development/benchmarking.md#command-capabilities) owns defaults, coverage options and evidence limits. A read-only feedback request does not authorize new measurements. Before a custom experiment, identify the concrete unsupported requirement and obtain operator agreement; prefer extending the maintained pipeline.
 
-Read main feedback with `pnpm -s tools status main`. Status is compact JSON: match `target.head`, read both `benchmarks[]` verdicts and `workflows[].state`; use `--details` for check summaries and the matching report body. A successful read is not a passing benchmark. The [CLI reference](docs/development/tooling.md) owns output and logging contracts.
+Read main feedback with `pnpm -s tools status main`. Status is compact JSON: match `target.head`, read all active `benchmarks[]` verdicts and `workflows[].state`; use `--details` for check summaries and the matching report body. A successful read is not a passing benchmark. The [CLI reference](docs/development/tooling.md) owns output and logging contracts.
 
 ## Engine design and simplification
 
@@ -77,4 +77,4 @@ pnpm docs:test && pnpm docs:typecheck && pnpm docs:build     # site / models
 pnpm tools:test && pnpm tools:typecheck                    # benchmark tooling
 ```
 
-Run applicable checks locally; engine feature and Miri checks are in [contributing](CONTRIBUTING.md#validation). Miri, MSRV, platform and benchmark checks also run in CI; [CI](docs/development/ci.md) explains coverage. A green tracking workflow is not a benchmark verdict: read both current-head benchmark checks.
+Run applicable checks locally; engine feature and Miri checks are in [contributing](CONTRIBUTING.md#validation). Miri, MSRV, platform and benchmark checks also run in CI; [CI](docs/development/ci.md) explains coverage. A green tracking workflow is not a benchmark verdict: read the current-head Portable SIMD benchmark check.

@@ -169,7 +169,7 @@ function fixture(
                   external_id: String(sample.owner),
                   started_at: sample.started,
                   output: {
-                    summary: `[JSON](https://api.bencher.dev/v0/projects/project/reports/${commit}-${variant.id === "default" ? "a" : "b"})`,
+                    summary: `[JSON](https://api.bencher.dev/v0/projects/project/reports/${commit}-${VARIANTS.indexOf(variant).toString(16)})`,
                   },
                 })),
             ),
@@ -178,11 +178,11 @@ function fixture(
     throw new Error(`Unexpected request: ${request.method} ${path}`);
   });
   t.mock.method(globalThis, "fetch", async (url: string) => {
-    const match = url.match(/reports\/([a-f0-9]{40})-([ab])$/)!;
+    const match = url.match(/reports\/([a-f0-9]{40})-([a-f0-9]+)$/)!;
     const report = reportFixture();
     report.branch.name = "main";
     report.branch.head.version = { hash: options.wrongReport ? hash(999) : match[1] };
-    report.testbed.name = VARIANTS[match[2] === "a" ? 0 : 1].testbed;
+    report.testbed.name = VARIANTS[Number.parseInt(match[2], 16)].testbed;
     return new Response(JSON.stringify(report), { status: 200 });
   });
   return {
@@ -270,7 +270,7 @@ test("measured alerts are baselines, but missing or wrong exact-head evidence is
   assert.equal(await baselineReady(fixture(t, { wrongReport: true }), "main", hash(0)), false);
 });
 
-test("main completion requires both configurations from its owner and current attempt", async (t) => {
+test("main completion requires the active configuration from its owner and current attempt", async (t) => {
   const builds = [build(1), { ...build(2), head_sha: hash(1) }, build(3)];
   for (const samples of [
     [{ owner: 100, started: "2026-11-10T00:06:00Z" }],
@@ -361,7 +361,7 @@ test("idle and active sweeps batch superseded heads instead of resolving old bui
     );
     counts.push(active.requests.length);
   }
-  assert.deepEqual(counts, [12, 12, 12]);
+  assert.equal(new Set(counts).size, 1);
   for (const changed of [{ closed: true }, { superseded: true }]) {
     const f = fixture(t, {
       builds: [build(2, "pull_request")],

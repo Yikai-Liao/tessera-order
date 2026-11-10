@@ -137,11 +137,11 @@ export function baselineArguments(
 }
 
 /**
- * Measure both configurations, retaining each report and outcome even on failure.
+ * Measure catalog configurations, retaining each report and outcome even on failure.
  *
  * The image must be an immutable digest. Credentials come from BENCHER_API_KEY;
  * only this explicit remote command submits jobs. Its result records per-build
- * failures rather than skipping the second build or conflating them with alerts.
+ * failures separately from benchmark alerts.
  */
 export async function measureContinuous(options: MeasurementOptions) {
   const baseline = baselineArguments(options);

@@ -22,12 +22,8 @@ use std::{
 
 /// Fallible comparison commands and result persistence.
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-/// Feature configuration named in every measurement.
-const BUILD: &str = if cfg!(feature = "portable-simd") {
-    "portable-simd"
-} else {
-    "default"
-};
+/// The single current build; manifests retain actual features for provenance.
+const BUILD: &str = "default";
 
 /// Command selection, output location and sampling limits.
 struct Options {

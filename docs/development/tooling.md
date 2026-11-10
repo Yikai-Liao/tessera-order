@@ -19,7 +19,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Resume a prepared algorithm comparison | `pnpm -s tools compare resume bench/results/SESSION` |
 | Reproduce the native comparison CI job | `pnpm -s tools check --native` |
 | Build both continuous artifacts | `pnpm -s tools continuous build --out bench/results/artifacts` |
-| Run the continuous scheduler locally | `pnpm -s tools continuous run bench/results/artifacts/default/bench` |
+| Run the continuous scheduler locally | `pnpm -s tools continuous run bench/results/artifacts/portable-simd/bench` |
 | Submit a prepared image to Bencher | `pnpm -s tools continuous submit --help` |
 | Regenerate an existing result | `pnpm -s tools report bench/results/SESSION` |
 | Read current main feedback | `pnpm -s tools status main` |
@@ -56,26 +56,26 @@ pnpm -s tools status main --text
 
 Build and measurement tasks print one compact object containing `out`, `log` and `result`. Subprocess output and progress go to the adjacent `OUT.log`, leaving machine-readable stdout free of Cargo, compiler and Criterion output. A failed operation exits nonzero with the log path. Each `compare resume` invocation uses a separate adjacent `OUT.resume-TIMESTAMP-PID.log`, preserving previous logs. Preparation, validation, memory and group progress go to these diagnostics, not machine-readable stdout. Use `--verbose` only for interactive diagnosis; it streams subprocess diagnostics instead and no longer guarantees JSON-only stdout. Report regeneration prints its output location without reading or rebuilding sources. Plans print TOML by default or compact JSON with `--format json`.
 
-A successful `status` exit means the read succeeded, not that every workflow passed. An experiment's command exit describes execution, not proof of a speedup. Algorithm comparisons retain exact executable pairs and recorded settings before measuring; `compare resume DIR` accepts no selection or sampling overrides. See [recovery](benchmarking.md#resuming-algorithm-comparisons) for interruptions and locks. `continuous submit` records each remote measurement's outcome in `outcomes.json`, attempts both configurations even after a failure, and exits nonzero if either failed; regression checks are evaluated by report publication.
+A successful `status` exit means the read succeeded, not that every workflow passed. An experiment's command exit describes execution, not proof of a speedup. Algorithm comparisons retain exact executable pairs and recorded settings before measuring; `compare resume DIR` accepts no selection or sampling overrides. See [recovery](benchmarking.md#resuming-algorithm-comparisons) for interruptions and locks. `continuous submit` records each remote measurement's outcome in `outcomes.json`, exits nonzero if any active configuration failed; regression checks are evaluated by report publication.
 
 ## Reproduce continuous work locally
 
 The local commands use the same implementation as CI, not a second script translating workflow steps. Static artifacts require Linux x86-64 with glibc, Cargo and GNU `ldd`. Scheduling requires Linux, `taskset` and two CPUs for serial-only artifacts or four CPUs when parallel IDs are listed. Four-thread cases run exclusively after serial workers exit; the supervisor records allowed masks and visible topology. Native checks additionally require the [native comparison toolchain](benchmarking.md#native-prerequisites). None of these operations needs Python.
 
 ```sh
-# One isolated build directory is shared by both configurations and removed afterward.
+# Build the shared backend in one isolated directory, removed afterward.
 pnpm -s tools continuous build --out bench/results/artifacts
 
 # Use the executable's embedded continuous plan for full coverage.
-pnpm -s tools continuous run bench/results/artifacts/default/bench
+pnpm -s tools continuous run bench/results/artifacts/portable-simd/bench
 
 # Reproduce scheduling on one saved or preset selection during development.
-pnpm -s tools continuous run bench/results/artifacts/default/bench --plan local
+pnpm -s tools continuous run bench/results/artifacts/portable-simd/bench --plan local
 ```
 
 A plan override is saved as `plan.json`; captured Criterion output is retained as `criterion.txt`. It deliberately changes coverage and is not equivalent to the full cloud suite. Omit `--plan` to reproduce the embedded selection. All output directories must be new. Temporary snapshots and build products live under `~/code/tessera-bench/` or `TESSERA_BENCH_WORK` and are cleaned after success or a handled failure; outputs and logs remain.
 
-Remote submission is explicit. Install the Bencher CLI used by CI, prepare an immutable image containing both executables and the [trusted worker image layout](../../bench/continuous/Dockerfile), and provide `BENCHER_API_KEY` through the environment:
+Remote submission is explicit. Install the Bencher CLI used by CI, prepare an immutable image containing the SIMD executable and the [trusted worker image layout](../../bench/continuous/Dockerfile), and provide `BENCHER_API_KEY` through the environment:
 
 ```sh
 pnpm -s tools continuous submit \

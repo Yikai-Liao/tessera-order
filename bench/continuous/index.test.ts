@@ -87,13 +87,20 @@ function withoutBaseline(input: ReturnType<typeof fixture>) {
 
 test("build verdicts stay independent while one comment embeds shared images", async (t) => {
   const action = publication(t);
+  // Synthetic second configuration keeps publication isolation covered.
+  const alternate: Variant = {
+    id: "alternate",
+    name: "Alternate",
+    testbed: "alternate-testbed",
+    features: [],
+  };
   const simd = fixture();
-  simd.testbed.name = VARIANTS[1].testbed;
+  simd.testbed.name = alternate.testbed;
   simd.alerts = simd.alerts.filter((alert) => alert.limit === "lower");
   const reportPath = join(action.inputs.variants[0].reportPath, "..", "simd.json");
   writeFileSync(reportPath, JSON.stringify(simd));
   action.inputs.variants.push({
-    variant: VARIANTS[1],
+    variant: alternate,
     outcome: "success",
     reportPath,
     checkId: "43",
@@ -151,7 +158,7 @@ for (const failure of [
         input.branch.head.version!.hash = "c".repeat(40);
         break;
       case "wrong build":
-        input.testbed.name = VARIANTS[1].testbed;
+        input.testbed.name = "unrelated-testbed";
         break;
       case "empty report":
         input.results = [];

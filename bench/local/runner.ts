@@ -34,7 +34,6 @@ interface LocalOptions {
   out: string;
   filter?: string;
   plan: Plan;
-  simd: boolean;
   cpu?: string;
   layoutSeeds?: number[];
   layoutControl?: LayoutControl;
@@ -70,6 +69,23 @@ export function serialBaselineManifest(baseline: string, current: string) {
   features.rayon = (reference.features as Record<string, unknown>).rayon;
   dependencies.rayon = dependency;
   return stringify(manifest);
+}
+
+/** Select the same vector backend on historical opt-in and current required builds.
+ * Missing backends fail rather than silently comparing SIMD against scalar code.
+ */
+export function backendFeatures(manifest: string): string[] {
+  const parsed = parse(manifest);
+  const features = parsed.features as Record<string, unknown> | undefined;
+  if (features && "portable-simd" in features) return ["tessera-sort/portable-simd"];
+  const dependencies = parsed.dependencies as Record<string, unknown> | undefined;
+  const backend = dependencies?.fearless_simd;
+  if (
+    typeof backend === "string" ||
+    (backend && typeof backend === "object" && !("optional" in backend && backend.optional))
+  )
+    return [];
+  throw new Error("Revision has no supported SIMD backend; choose a SIMD-capable baseline");
 }
 
 /** Compile both revisions with one harness, lockfile, toolchain and build directory. */
@@ -129,19 +145,25 @@ export async function buildRevisions(
     control === "cgu1" ? ["-Ccodegen-units=1"] : control === "aligned" ? ALIGNMENT_RUSTFLAGS : [];
   let env: NodeJS.ProcessEnv | undefined;
   const build = async (role: "baseline" | "current", seed: number | undefined) => {
+    const selectedFeatures = [...features, ...backendFeatures(await readFile(manifest, "utf8"))];
     const args = rustcArgs(seed);
     if (extraFlags.length && !env) {
       // Cargo resolves target/build config flags before exposing them to the
       // build script. Read that result before selecting its higher-precedence
       // encoded environment source, which would otherwise discard config flags.
-      const reference = await buildBenchmark(tree, target, "smoke", features, { rustcArgs: args });
+      const reference = await buildBenchmark(tree, target, "smoke", selectedFeatures, {
+        rustcArgs: args,
+      });
       env = {
         CARGO_ENCODED_RUSTFLAGS: [reference.provenance.cargo_encoded_rustflags, ...extraFlags]
           .filter(Boolean)
           .join("\x1f"),
       };
     }
-    let built = await buildBenchmark(tree, target, "smoke", features, { rustcArgs: args, env });
+    let built = await buildBenchmark(tree, target, "smoke", selectedFeatures, {
+      rustcArgs: args,
+      env,
+    });
     if (control === "engine-first") {
       if (!layout || !args) throw new Error("Engine ordering requires layout seeds");
       const views = await Promise.all(
@@ -158,7 +180,7 @@ export async function buildRevisions(
       const order = join(directory, "engine.order");
       await writeFile(order, `${symbols.join("\n")}\n`);
       await cp(order, join(layout.out, `layout-${seed}-${role}.order`));
-      built = await buildBenchmark(tree, target, "smoke", features, {
+      built = await buildBenchmark(tree, target, "smoke", selectedFeatures, {
         env,
         rustcArgs: [
           ...args,
@@ -279,7 +301,7 @@ async function measureBlock(
 
 /** Compare an immutable working-tree snapshot with a commit, retaining only results. */
 export async function compareLocal(options: LocalOptions) {
-  const { root, out, simd, cpu } = options;
+  const { root, out, cpu } = options;
   if (options.layoutControl && !options.layoutSeeds)
     throw new Error("Layout controls require --layout-seeds");
   assertWorkerEnvironment();
@@ -317,7 +339,7 @@ export async function compareLocal(options: LocalOptions) {
         root,
         workspace,
         baseline,
-        simd ? ["portable-simd"] : [],
+        [],
         seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
         options.layoutControl,
       );
@@ -331,7 +353,7 @@ export async function compareLocal(options: LocalOptions) {
         builds,
         rustc: builds.current.rustc,
         flags: builds.current.cargo_encoded_rustflags,
-        configuration: simd ? "portable-simd" : "default",
+        configuration: "portable-simd",
         host: {
           platform: platform(),
           release: release(),

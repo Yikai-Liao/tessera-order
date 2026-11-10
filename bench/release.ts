@@ -48,27 +48,25 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
   await mkdir(out, { recursive: false });
   await withComparisonWorkspace(root, native, async ({ tree, target }) => {
     const features = ["compare", "rayon", ...(native ? ["compare-native"] : [])];
-    for (const tested of [features, [...features, "portable-simd"]]) {
-      await command(
-        "cargo",
-        [
-          "test",
-          "--locked",
-          "-p",
-          "tessera-bench",
-          "--features",
-          tested.join(","),
-          "--lib",
-          "--bin",
-          "memory",
-          "--test",
-          "comparison",
-          "--target-dir",
-          target,
-        ],
-        { cwd: tree },
-      );
-    }
+    await command(
+      "cargo",
+      [
+        "test",
+        "--locked",
+        "-p",
+        "tessera-bench",
+        "--features",
+        features.join(","),
+        "--lib",
+        "--bin",
+        "memory",
+        "--test",
+        "comparison",
+        "--target-dir",
+        target,
+      ],
+      { cwd: tree },
+    );
     const { executable } = await buildBenchmark(tree, target, "compare", features);
     if (native) {
       for (const name of ["compare", "memory"]) {
@@ -92,7 +90,6 @@ export interface ReleaseOptions {
   root: string;
   out: string;
   plan: Plan;
-  simd: boolean;
   cpu?: string;
   group?: string;
   sampleMs: number;
@@ -110,7 +107,7 @@ export async function compareAlgorithms(options: ReleaseOptions) {
 
 /** Build every selected configuration before starting any measurement. */
 async function prepareComparison(options: ReleaseOptions) {
-  const { root, out, plan, simd, cpu, group, sampleMs, memoryMib } = options;
+  const { root, out, plan, cpu, group, sampleMs, memoryMib } = options;
   if (cpu) await command("taskset", ["-c", cpu, "true"]);
   const native = plan.algorithms.some((id) =>
     catalog.algorithms.some((entry) => entry.id === id && entry.adapter === "native"),
@@ -119,22 +116,19 @@ async function prepareComparison(options: ReleaseOptions) {
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
   const builds: Build[] = [];
   await withComparisonWorkspace(root, native, async ({ tree, target }) => {
-    for (const portable of simd ? [false, true] : [false]) {
-      const features = [
-        "compare",
-        ...(native && !portable ? ["compare-native"] : []),
-        ...(plan.algorithms.some((id) =>
-          catalog.algorithms.some((entry) => entry.id === id && entry.threads),
-        )
-          ? ["rayon"]
-          : []),
-        ...(portable ? ["portable-simd"] : []),
-      ];
-      const name = portable ? "portable-simd" : "default";
-      diagnostic(`Building ${name}`);
-      const { executable } = await buildBenchmark(tree, target, "compare", features);
-      builds.push(await retainBuild(out, name, executable));
-    }
+    const features = [
+      "compare",
+      ...(native ? ["compare-native"] : []),
+      ...(plan.algorithms.some((id) =>
+        catalog.algorithms.some((entry) => entry.id === id && entry.threads),
+      )
+        ? ["rayon"]
+        : []),
+    ];
+    const name = "default";
+    diagnostic(`Building ${name}`);
+    const { executable } = await buildBenchmark(tree, target, "compare", features);
+    builds.push(await retainBuild(out, name, executable));
   });
   const session: Session = {
     schema: 1,

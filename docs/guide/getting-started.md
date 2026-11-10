@@ -79,7 +79,7 @@ assert!(values[4].is_nan());
 
 ## Parallel sorting
 
-Enable the optional `rayon` feature for `par_stable_sort` and `par_stable_sort_by_key`. It enables `std` even with default features disabled. Add a direct Rayon dependency if the application configures a custom pool:
+Enable the optional `rayon` feature for `par_stable_sort` and `par_stable_sort_by_key`. Add a direct Rayon dependency if the application configures a custom pool:
 
 ```toml
 [dependencies]

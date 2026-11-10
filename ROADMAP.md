@@ -37,9 +37,9 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 | E2 | Root preparation, capacity normalization and node planning are shared; half dispatch retains borrowed and owned extractor forms | Validate the shared paths against the pre-consolidation baseline with A/A and placement controls |
 | E3 | Serial and parallel direct-key counting now share a reducible histogram and destination-run construction | Establish serial and Rayon performance against the pre-consolidation SIMD baseline; preserve bitwise representative and Send-only tests |
 | E4 | Half-key views share window operations; the root forwarding wrapper has been removed | Validate shared preparation code generation with the unified backend before performance acceptance |
-| E5 | Serial block storage contains Rayon scratch-segment state and a branch | Decide layout and tracking protocol explicitly: both continuous builds enable Rayon; the default feature set is a separate configuration |
+| E5 | Serial block storage contains Rayon scratch-segment state and a branch | Decide layout and tracking protocol explicitly: the continuous SIMD build enables Rayon; serial-only library builds remain a separate configuration |
 | E6 | Planning owns strategy estimates; tile finishing owns scratch, cached classification and restoration behind one operation | Validate the ownership boundaries and generated-code performance with inlining and placement controls |
-| E7 | The library always uses SIMD; benchmark build names and forwarding-era adapters still describe two configurations | Migrate active measurement to one backend without losing retained-report readability or silently benchmarking a scalar historical baseline |
+| E7 | Active measurement uses one backend and revision builds select historical SIMD explicitly; retained dual-build sessions remain readable | Local static artifact and comparison-harness checks pass; validate hosted deployment and actual historical SIMD provenance before final engine performance acceptance |
 
 ## C++
 
@@ -52,7 +52,7 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 
 - Validate the opt-in baseline-aware queue on hosted Actions without changing coverage or sampling. Retain arrival, queue-wait, measurement-duration and superseded-work evidence before claiming a latency improvement or choosing more measurement capacity. Queue recovery and archival must stay within Actions/API and artifact retention limits; no automatic sample reuse or cross-machine baseline equivalence is assumed.
 
-- Consolidate distribution-sensitive routing into general mechanisms. Child-order reuse and the bucket-order split replace the capped end-run route; evaluate both against current-head Default and Portable SIMD continuous feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
+- Consolidate distribution-sensitive routing into general mechanisms. Child-order reuse and the bucket-order split replace the capped end-run route; evaluate both against current-head Portable SIMD continuous feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
 
 - Extend the comparison to cold-cache experiments, additional seeds and threshold cases when an investigation needs them.
 - Add native-CPU placement controls for source A/B studies; existing CGU, alignment and engine-order screens remain process-level evidence.

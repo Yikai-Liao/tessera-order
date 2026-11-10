@@ -118,8 +118,7 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 ///
 /// If `key` panics, the panic propagates to the caller after every record has
 /// been moved back into `values`, in an unspecified order. No record is
-/// dropped or duplicated. Without the `std` feature, a panic during block
-/// partitioning aborts; panics elsewhere may unwind with every record preserved.
+/// dropped or duplicated.
 ///
 /// # Memory
 ///

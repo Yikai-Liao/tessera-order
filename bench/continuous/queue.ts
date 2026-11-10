@@ -42,7 +42,12 @@ async function sourceFor(args: ActionArguments, id: number) {
   const source: Source = {};
   await resolveSource({
     ...args,
-    context: { ...args.context, payload: { workflow_run: run } },
+    context: {
+      repo: args.context.repo,
+      serverUrl: args.context.serverUrl,
+      runId: args.context.runId,
+      payload: { workflow_run: run },
+    },
     core: {
       ...args.core,
       setOutput: (name, value) => {

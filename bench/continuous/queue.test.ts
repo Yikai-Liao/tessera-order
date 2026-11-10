@@ -190,12 +190,15 @@ function fixture(
     outputs,
     notices,
     dispatched: () => dispatched,
-    context: {
-      repo: { owner: "owner", repo: "tessera" },
-      runId: 300,
-      payload: {},
-      serverUrl: "https://github.com",
-    },
+    context: new (class {
+      // Actions exposes repo through a prototype getter, not an own property.
+      get repo() {
+        return { owner: "owner", repo: "tessera" };
+      }
+      runId = 300;
+      payload = {};
+      serverUrl = "https://github.com";
+    })(),
     core: {
       setOutput: (name: string, value: string) => {
         outputs[name] = value;
@@ -313,9 +316,9 @@ test("duplicate dispatches preserve one main owner and its native recovery", asy
     });
     await prepareScheduledSource(f, since, "1");
     assert.equal(f.outputs.eligible, "true");
-    const duplicate = { ...f, context: { ...f.context, runId: 301 } };
+    f.context.runId = 301;
     delete f.outputs.eligible;
-    await prepareScheduledSource(duplicate, since, "1");
+    await prepareScheduledSource(f, since, "1");
     assert.equal(f.outputs.eligible, undefined);
   }
 });
@@ -400,11 +403,8 @@ test("main history, not build IDs or dispatch order, owns the prefix", async (t)
   });
   await scheduleNext(blocked, since);
   assert.equal(blocked.dispatched(), "");
-  await prepareScheduledSource(
-    { ...blocked, context: { ...blocked.context, runId: 101 } },
-    since,
-    "2",
-  );
+  blocked.context.runId = 101;
+  await prepareScheduledSource(blocked, since, "2");
   assert.equal(blocked.outputs.eligible, "true");
 });
 

@@ -66,6 +66,8 @@ function fixture(
     missing?: boolean;
     wrongReport?: boolean;
     closed?: boolean;
+    superseded?: boolean;
+    openHeads?: number[];
   } = {},
 ) {
   const builds = options.builds ?? [build(1), build(2, "pull_request")];
@@ -128,13 +130,24 @@ function fixture(
         merge_base_commit: { sha: hash(options.baseline ?? 0) },
       };
     }
+    if (path === "/repos/owner/tessera/pulls")
+      return (
+        options.openHeads ??
+        (options.closed
+          ? []
+          : builds.filter((run) => run.event === "pull_request").map((run) => run.id))
+      ).map((id) => ({ head: { sha: hash(id) } }));
     if (path.endsWith("/pulls")) {
       const commit = path.match(/\/commits\/([a-f0-9]+)\//)?.[1];
       return [
         {
           number: 7,
           state: options.closed ? "closed" : "open",
-          head: { sha: commit, ref: "feature", repo: { full_name: "fork/tessera" } },
+          head: {
+            sha: options.superseded ? hash(999) : commit,
+            ref: "feature",
+            repo: { full_name: "fork/tessera" },
+          },
           base: { sha: hash(9), ref: "main", repo: { full_name: "owner/tessera" } },
         },
       ];
@@ -316,6 +329,49 @@ test("worker keeps a safe main ticket despite changed priority or queued dispatc
   assert.equal(f.outputs.eligible, "true");
   assert.equal(f.outputs.build_id, "1");
   assert.equal(f.outputs.hash, hash(1));
+});
+
+test("idle and active sweeps batch superseded heads instead of resolving old builds", async (t) => {
+  const counts: number[] = [];
+  for (const [count, sameHead] of [
+    [0, false],
+    [69, false],
+    [69, true],
+  ] as const) {
+    const builds = [
+      ...Array.from({ length: count }, (_, i) => ({
+        ...build(i + 1, "pull_request"),
+        ...(sameHead ? { head_sha: hash(100) } : {}),
+      })),
+      build(100, "pull_request"),
+    ];
+    const idle = fixture(t, { builds, openHeads: [] });
+    await scheduleNext(idle, since);
+    await scheduleNext(idle, since);
+    assert.equal(idle.requests.length, 6);
+    assert.equal(idle.dispatched(), "");
+    const active = fixture(t, { builds, openHeads: [100] });
+    await scheduleNext(active, since);
+    assert.equal(active.dispatched(), "100");
+    assert.deepEqual(
+      active.requests
+        .filter((r) => /\/actions\/runs\/\d+$/.test(r.path) && !r.path.endsWith("/200"))
+        .map((r) => r.path.split("/").at(-1)),
+      ["100"],
+    );
+    counts.push(active.requests.length);
+  }
+  assert.deepEqual(counts, [12, 12, 12]);
+  for (const changed of [{ closed: true }, { superseded: true }]) {
+    const f = fixture(t, {
+      builds: [build(2, "pull_request")],
+      openHeads: [2],
+      trackers: [tracker(300, 2)],
+      ...changed,
+    });
+    await prepareScheduledSource(f, since, "2");
+    assert.equal(f.outputs.eligible, undefined);
+  }
 });
 
 test("native recovery keeps old code but uses the freshly fetched main graph", async (t) => {

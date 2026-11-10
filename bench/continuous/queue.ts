@@ -232,13 +232,23 @@ async function nextBuild(
     core.notice(
       `Main build ${pendingMain.id} is unfinished or failed; later main builds remain queued.`,
     );
+  // Batch current heads before resolving builds; stale history must not spend
+  // three identity requests per ticket on every idle sweep.
+  const openHeads = new Set(
+    (
+      await github.paginate(github.rest.pulls.list, {
+        ...repo,
+        state: "open",
+        per_page: 100,
+      })
+    ).map((pull) => pull.head.sha),
+  );
   const pulls = [];
   for (const build of builds
     .filter((run) => run.event === "pull_request")
     .sort((a, b) => a.id - b.id)) {
-    if (attempts.has(build.id) || build.conclusion !== "success") continue;
-    const source = await sourceFor(args, build.id);
-    if (!source.eligible) continue;
+    if (attempts.has(build.id) || build.conclusion !== "success" || !openHeads.has(build.head_sha))
+      continue;
     // Only the latest successful build of the same head needs a fresh attempt.
     if (
       builds.some(
@@ -250,6 +260,8 @@ async function nextBuild(
       )
     )
       continue;
+    const source = await sourceFor(args, build.id);
+    if (!source.eligible) continue;
     const comparable =
       source.start_point && source.base_hash
         ? await measured(source.start_point, source.base_hash)

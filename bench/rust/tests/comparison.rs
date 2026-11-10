@@ -60,7 +60,19 @@ fn memory_resumes_missing_adapters() {
     };
     let blocks = records(directory.join("blocks.jsonl"));
     measure();
-    assert_eq!(fs::read_to_string(&journal).unwrap(), original);
+    let resumed = records(journal);
+    assert_eq!(resumed.len(), rows.len());
+    assert_eq!(resumed.first(), Some(tessera));
+    // Missing adapters are measured again; parallel scheduling can change peaks.
+    for (mut recovered, mut expected) in resumed.into_iter().zip(rows) {
+        assert!(recovered["peak_extra_bytes"].as_u64().is_some());
+        recovered
+            .as_object_mut()
+            .unwrap()
+            .remove("peak_extra_bytes");
+        expected.as_object_mut().unwrap().remove("peak_extra_bytes");
+        assert_eq!(recovered, expected);
+    }
     assert_eq!(records(directory.join("blocks.jsonl")), blocks);
     fs::remove_dir_all(directory).unwrap();
 }

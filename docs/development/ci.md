@@ -26,6 +26,8 @@ A cell's commands live in one composite action, [`rust-test`](../../.github/acti
 
 Each cell tests the optional `rayon` entry points, including on Rust 1.85. Stable Linux also tests all features together, so Rayon and Portable SIMD are exercised in one build; stable macOS and Windows compile that combination. Rayon tests cover sharded root scatter, caller-pool bucket scheduling, the one-thread fallback, task panics and record preservation. The existing std Miri job additionally interprets sequential ownership fixtures for parallel storage and bucket handoff; native tests cover threaded scheduling. The existing AddressSanitizer job enables Rayon with Portable SIMD. No test lane is added for the continuous benchmark's two API groups.
 
+The unprivileged [benchmark diagnostics workflow](../../.github/workflows/bench-diagnostics.yml) collects fixed-work Callgrind signals for affected PRs and additionally samples five layouts on weekly main runs. Manual dispatch selects counters or layouts and an optional baseline. Both use the four serial inputs in [the diagnostics plan](../../bench/plans/diagnostics.toml). Results and logs are retained as 14-day Actions artifacts; shared-runner layout ranges are exploratory. The job has read-only repository permissions, no Bencher credentials or submissions, and a 45-minute timeout.
+
 ## Adding a language
 
 - Add a reusable workflow and a job in `ci.yml` that calls it, gated by `ci_changes.ts` so changes outside the language skip it.

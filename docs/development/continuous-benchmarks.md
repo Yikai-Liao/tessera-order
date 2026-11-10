@@ -41,6 +41,8 @@ Read the sections below when changing tracking, investigating missing feedback o
 
 Tracker changes in a PR take effect only after merging: `workflow_run` uses default-branch code. During this rollout, the executable lists only serial IDs unless the supervisor explicitly sets `TESSERA_BENCH_PARALLEL=4`. An old tracker can therefore measure the baseline PR without rejecting new IDs. After merge the trusted supervisor enables both APIs and the first real `main` run seeds the new parallel histories; the bootstrap PR has no cloud parallel comparison. Never label that missing comparison as a demonstrated parallel gain.
 
+A separate [diagnostics workflow](../../.github/workflows/bench-diagnostics.yml) retains fixed-work counter evidence for affected PRs and weekly main runs, plus weekly five-seed layout samples. It has no Bencher credentials or publication path. These shared-runner artifacts supplement investigation; they neither replace the two cloud verdicts nor change their thresholds or Testbeds.
+
 ## Within-job scheduling
 
 The supervisor runs the plan's serial API timed IDs: small cases below 1,000,000 records balance across two single-threaded workers pinned to separate available CPUs; both exit before one pinned worker prepares or measures larger serial inputs. After every serial worker has exited, four-thread cases run strictly one at a time on a four-CPU mask. No other case's preparation, warm-up, validation, timing or pool teardown overlaps a parallel case. Only the selected sort's four workers run concurrently. Each pool is warmed before verification/timing and joined before the next case prepares. Selection precedes generation; Criterion directories are independent. Failed workers and missing, extra or duplicate results fail the run.

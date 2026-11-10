@@ -5,6 +5,7 @@ import { getOctokit } from "@actions/github";
 export interface Request {
   method: string;
   path: string;
+  query: Record<string, string>;
   body: Record<string, unknown>;
 }
 
@@ -14,13 +15,17 @@ export function mockGitHub(respond: (request: Request) => unknown) {
     const request: Request = {
       method: options?.method ?? "GET",
       path: new URL(String(url)).pathname,
+      query: Object.fromEntries(new URL(String(url)).searchParams),
       body: typeof options?.body === "string" ? JSON.parse(options.body) : {},
     };
     requests.push(request);
-    return new Response(JSON.stringify(respond(request)), {
+    const response = new Response(JSON.stringify(respond(request)), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
+    // Octokit also uses the transport URL when paginating collection envelopes.
+    Object.defineProperty(response, "url", { value: String(url) });
+    return response;
   };
   const github = getOctokit("fixture-token", {
     request: { fetch: fetchMock },

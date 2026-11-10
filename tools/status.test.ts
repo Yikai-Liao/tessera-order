@@ -216,6 +216,41 @@ test("PR status joins merge workflows without accepting stale comments", async (
   assert.equal(status.details.comment.body, marker("rust", "current"));
 });
 
+test("queued exact-head checks expose the pending trusted tracker before measurement", async (t) => {
+  const queued = {
+    status: "queued",
+    conclusion: null,
+    output: { title: "Queued for measurement", summary: "No performance result yet" },
+  };
+  const f = await fixture(t, {
+    "commits/main": { sha: "current" },
+    "commits/current/check-runs?per_page=100": [
+      {
+        check_runs: [
+          check(1, queued),
+          check(2, { ...queued, name: "Benchmarks (rust, Portable SIMD)" }),
+        ],
+      },
+    ],
+    "actions/runs?head_sha=current&per_page=100": [{ workflow_runs: [run(10)] }],
+    "actions/runs/70": run(70, {
+      workflow_id: 2,
+      name: "Track benchmarks",
+      event: "workflow_run",
+      head_sha: "trusted",
+      status: "pending",
+      conclusion: null,
+    }),
+    "actions/runs/70/jobs?per_page=100": [{ jobs: [] }],
+  });
+  const status = JSON.parse(f.run("status"));
+  assert.deepEqual(
+    status.benchmarks.map((b: { state: string }) => b.state),
+    ["queued", "queued"],
+  );
+  assert.equal(status.workflows.find((w: { id: number }) => w.id === 70)?.state, "pending");
+});
+
 test("missing workflows never become a clean verdict", async (t) => {
   const f = await fixture(t, {
     "commits/feature%2Ftopic": { sha: "new", html_url: "new-url" },

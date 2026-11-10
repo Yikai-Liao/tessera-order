@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
-import { VARIANTS } from "../catalog.ts";
+import { pathToFileURL } from "node:url";
 import { mockGitHub } from "./fixtures/github.ts";
 import { hash } from "./fixtures/report.ts";
-import { publishComment, resolveSource, startReport } from "./github.ts";
+import { publishComment, resolveSource } from "./github.ts";
 import { marker } from "./marker.ts";
 
 const repo = { owner: "owner", repo: "tessera" };
@@ -271,29 +275,19 @@ for (const [name, headSha, state] of [
   });
 }
 
-for (const variant of VARIANTS) {
-  test(`starts the ${variant.id} check on the measured head`, async () => {
-    const mock = mockGitHub(() => ({ id: 42 }));
-    const outputs: Record<string, string> = {};
-    await startReport({
-      github: mock.github,
-      hash,
-      variant,
-      context: { repo, payload: {}, serverUrl: "https://github.com", runId: 123 },
-      core: {
-        notice: () => {},
-        setOutput: (name, value) => {
-          outputs[name] = value;
-        },
-      },
-    });
-    assert.deepEqual(outputs, { [variant.id]: "42" });
-    assert.deepEqual(mock.requests[0].body, {
-      name: `Benchmarks (rust, ${variant.name})`,
-      head_sha: hash,
-      external_id: "123",
-      status: "in_progress",
-      details_url: "https://github.com/owner/tessera/actions/runs/123",
-    });
-  });
-}
+test("source resolution loads before report dependencies are installed", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-source-bootstrap-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  for (const name of ["github.ts", "marker.ts"])
+    await writeFile(join(directory, name), await readFile(new URL(name, import.meta.url)));
+  execFileSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `const { resolveSource } = await import(${JSON.stringify(pathToFileURL(join(directory, "github.ts")).href)});
+     if (typeof resolveSource !== "function") throw new Error("Missing source resolver");`,
+    ],
+    { cwd: directory },
+  );
+});

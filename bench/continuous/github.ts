@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import type { context, getOctokit } from "@actions/github";
-import type { Variant } from "../catalog.ts";
 import { MARKER, marker } from "./marker.ts";
 
 export type GitHub = ReturnType<typeof getOctokit>;
@@ -22,7 +21,8 @@ interface SourceRun {
   head_repository: { full_name: string };
 }
 
-interface ActionArguments {
+/** Trusted tracker API, run identity and output boundary. */
+export interface ActionArguments {
   github: GitHub;
   context: ActionContext;
   core: Pick<ActionsCore, "notice" | "setOutput">;
@@ -135,24 +135,6 @@ export async function resolveSource({ github, context, core }: ActionArguments) 
     core.setOutput("start_point", baseline.startPoint);
     core.setOutput("base_hash", baseline.hash);
   }
-}
-
-export async function startReport({
-  github,
-  context,
-  core,
-  hash,
-  variant,
-}: ActionArguments & { hash: string; variant: Variant }) {
-  const { data } = await github.rest.checks.create({
-    ...context.repo,
-    name: `Benchmarks (rust, ${variant.name})`,
-    head_sha: hash,
-    external_id: String(context.runId),
-    status: "in_progress",
-    details_url: workflowUrl(context),
-  });
-  core.setOutput(variant.id, String(data.id));
 }
 
 export function workflowUrl(context: ActionContext) {

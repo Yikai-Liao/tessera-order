@@ -1,4 +1,5 @@
 name: Track benchmarks
+run-name: Track benchmarks · ${{ github.event.workflow_run.head_sha }}
 
 # Privileged: runs trusted default-branch code after a build. It packages the
 # untrusted executable without running it and submits it to Bencher.
@@ -11,25 +12,24 @@ permissions:
   contents: read
 
 jobs:
-  rust:
+  queue:
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
-    environment: benchmark
-    timeout-minutes: 30
-    # Bencher Free runs one job per organization; queue rather than replace.
-    concurrency:
-      group: bencher-bare-metal
-      queue: max
+    timeout-minutes: 10
     permissions:
-      # Only this trusted workflow publishes generated SVGs to benchmark-images.
-      contents: write
+      contents: read
       actions: read
       checks: write
       pull-requests: write
+    outputs:
+      eligible: ${{ steps.source.outputs.eligible }}
+      hash: ${{ steps.source.outputs.hash }}
+      number: ${{ steps.source.outputs.number }}
+      check_default: ${{ steps.check.outputs.default }}
+      check_simd: ${{ steps.check.outputs['portable-simd'] }}
     steps:
       - uses: actions/checkout@v7
         with:
-          # Never check out the triggering PR in this workflow.
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
       - name: Resolve source commit and PR
@@ -49,7 +49,7 @@ jobs:
       - name: Install trusted report dependencies
         if: steps.source.outputs.eligible == 'true'
         run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Start the report checks
+      - name: Queue the report checks
         id: check
         if: steps.source.outputs.eligible == 'true'
         uses: actions/github-script@v9
@@ -57,12 +57,83 @@ jobs:
           HASH: ${{ steps.source.outputs.hash }}
         with:
           script: |
-            const { startReport } = require('./bench/continuous/github.ts');
+            const { queueReport } = require('./bench/continuous/lifecycle.ts');
             const { VARIANTS } = require('./bench/catalog.ts');
             for (const variant of VARIANTS) {
-              await startReport({ github, context, core, hash: process.env.HASH, variant });
+              core.setOutput(variant.id, await queueReport({ github, context, hash: process.env.HASH, variant }));
             }
-            core.setOutput('variants', JSON.stringify(VARIANTS));
+      - name: Publish queued feedback
+        if: steps.source.outputs.eligible == 'true'
+        uses: actions/github-script@v9
+        env:
+          HASH: ${{ steps.source.outputs.hash }}
+          PR_NUMBER: ${{ steps.source.outputs.number }}
+        with:
+          script: |
+            const { publishProgress } = require('./bench/continuous/lifecycle.ts');
+            await publishProgress({ github, context, core, hash: process.env.HASH,
+              number: process.env.PR_NUMBER, state: 'queued' });
+
+  rust:
+    needs: queue
+    if: needs.queue.outputs.eligible == 'true'
+    runs-on: ubuntu-24.04
+    environment: benchmark
+    timeout-minutes: 30
+    # Only measurement holds the shared slot; queue feedback is already visible.
+    concurrency:
+      group: bencher-bare-metal
+      queue: max
+    permissions:
+      contents: write
+      actions: read
+      checks: write
+      pull-requests: write
+    outputs:
+      eligible: ${{ steps.source.outputs.eligible }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Never check out the triggering PR in this workflow.
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Revalidate source after waiting
+        id: source
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { resolveSource } = require('./bench/continuous/github.ts');
+            await resolveSource({ github, context, core });
+      - uses: pnpm/action-setup@v4
+        if: steps.source.outputs.eligible == 'true'
+      - uses: actions/setup-node@v7
+        if: steps.source.outputs.eligible == 'true'
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install trusted report dependencies
+        if: steps.source.outputs.eligible == 'true'
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Activate the report checks
+        id: check
+        if: steps.source.outputs.eligible == 'true'
+        uses: actions/github-script@v9
+        env:
+          HASH: ${{ steps.source.outputs.hash }}
+          CHECK_DEFAULT: ${{ needs.queue.outputs.check_default }}
+          CHECK_SIMD: ${{ needs.queue.outputs.check_simd }}
+          PR_NUMBER: ${{ steps.source.outputs.number }}
+        with:
+          script: |
+            const { activateReport, publishProgress } = require('./bench/continuous/lifecycle.ts');
+            const { VARIANTS } = require('./bench/catalog.ts');
+            const ids = { default: process.env.CHECK_DEFAULT, 'portable-simd': process.env.CHECK_SIMD };
+            for (const variant of VARIANTS) {
+              core.setOutput(variant.id, await activateReport({ github, context, hash: process.env.HASH,
+                variant, checkId: ids[variant.id] }));
+            }
+            await publishProgress({ github, context, core, hash: process.env.HASH,
+              number: process.env.PR_NUMBER, state: 'running' });
       - uses: actions/download-artifact@v8
         if: steps.source.outputs.eligible == 'true'
         with:
@@ -124,7 +195,7 @@ jobs:
           pnpm --silent tools continuous submit --project "$BENCHER_PROJECT" \
             --image "$IMAGE" --hash "$HASH" --out "$RUNNER_TEMP/measurement" "${args[@]}"
       - name: Publish report
-        if: always() && (steps.check.outputs.default || steps.check.outputs['portable-simd'])
+        if: always() && steps.check.outputs.default && steps.check.outputs['portable-simd']
         uses: actions/github-script@v9
         env:
           HASH: ${{ steps.source.outputs.hash }}
@@ -168,3 +239,46 @@ jobs:
             ${{ runner.temp }}/measurement/
             ${{ runner.temp }}/measurement.log
           if-no-files-found: ignore
+
+  finalize:
+    needs: [queue, rust]
+    if: always() && (needs.queue.outputs.eligible == 'true' || needs.queue.result == 'failure' || needs.queue.result == 'cancelled')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Close unfinished tracking checks
+        uses: actions/github-script@v9
+        env:
+          HASH: ${{ needs.queue.outputs.hash || github.event.workflow_run.head_sha }}
+          PR_NUMBER: ${{ needs.queue.outputs.number }}
+          QUEUE_RESULT: ${{ needs.queue.result }}
+          MEASURE_RESULT: ${{ needs.rust.result }}
+          ELIGIBLE: ${{ needs.rust.outputs.eligible }}
+        with:
+          script: |
+            const { finishPendingReports } = require('./bench/continuous/lifecycle.ts');
+            const { VARIANTS } = require('./bench/catalog.ts');
+            const env = process.env;
+            const cancelled = env.QUEUE_RESULT === 'cancelled' || env.MEASURE_RESULT === 'cancelled';
+            const superseded = env.MEASURE_RESULT === 'success' && env.ELIGIBLE !== 'true';
+            const reason = cancelled ? 'tracking was cancelled'
+              : superseded ? 'the source was closed or superseded before measurement'
+              : 'tracking ended without publishing all configuration results';
+            await finishPendingReports({ github, context, core, hash: env.HASH,
+              number: env.PR_NUMBER, variants: VARIANTS,
+              conclusion: cancelled || superseded ? 'cancelled' : 'failure', reason });

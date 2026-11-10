@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { VARIANTS } from "../bench/catalog.ts";
-import { marker } from "../bench/continuous/marker.ts";
+import { latestCheck, marker } from "../bench/continuous/marker.ts";
 import { command } from "./process.ts";
 
 interface Check {
@@ -176,10 +176,8 @@ export async function readStatus(
     ),
     pull ? api.pages<Comment[]>(`issues/${pull.number}/comments?per_page=100`) : [],
   ]);
-  const candidates = checkPages.flatMap((page) => page.check_runs).sort((a, b) => b.id - a.id);
-  const checks = VARIANTS.map((variant) =>
-    candidates.find((check) => check.name === `Benchmarks (rust, ${variant.name})`),
-  );
+  const candidates = checkPages.flatMap((page) => page.check_runs);
+  const checks = VARIANTS.map((variant) => latestCheck(candidates, variant));
   const attached = checks.filter((check) => check !== undefined);
   const trackers = await Promise.all(
     trackerIds(attached, api.repo).map((id) => api.get<WorkflowRun>(`actions/runs/${id}`)),

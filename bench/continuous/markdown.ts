@@ -266,6 +266,28 @@ export function render(s: ReportSummary, options: RenderOptions) {
   return out.join("\n");
 }
 
+/** Show tracking progress without implying a measured performance verdict. */
+export function renderProgress(
+  options: { hash: string; runUrl: string } & (
+    | { state: "queued" | "running" }
+    | { state: "interrupted"; reason: string }
+  ),
+) {
+  const message =
+    options.state === "interrupted"
+      ? `Benchmark feedback is incomplete: ${options.reason}. Any completed per-build checks retain their results.`
+      : options.state === "queued"
+        ? "Waiting for the shared benchmark worker. No performance result is available yet."
+        : "The benchmark worker has started preparing or measuring this commit. No performance verdict is available yet.";
+  return [
+    `### Benchmarks · rust · ${options.state}`,
+    "",
+    `**${short(options.hash)}**: ${message}`,
+    "",
+    `[Tracking workflow](${options.runUrl})`,
+  ].join("\n");
+}
+
 export function renderFailure({ language, configuration, hash, runUrl, reason }: FailureOptions) {
   return [
     `### Benchmarks · ${[language, configuration, "measurement failed"].filter(Boolean).join(" · ")}`,

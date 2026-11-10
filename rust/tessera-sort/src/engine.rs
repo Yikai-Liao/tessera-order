@@ -350,16 +350,14 @@ fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
             Order::Unsorted
         };
     }
-    keys.try_fold((current, strict), |(before, strict), after| {
-        if before > after {
-            Some((after, strict))
-        } else if before == after {
-            Some((after, false))
-        } else {
-            None
+    for after in keys {
+        if current < after {
+            return Order::Unsorted;
         }
-    })
-    .map_or(Order::Unsorted, |(_, strict)| Order::Descending { strict })
+        strict &= current != after;
+        current = after;
+    }
+    Order::Descending { strict }
 }
 
 /// Confirms ascending keys after an already encoded predecessor.

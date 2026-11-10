@@ -177,18 +177,43 @@ test("Cargo artifacts retain paths and build provenance", async (t) => {
     ["compare", "/target/configured-target/release/compare"],
     ["smoke", "C:\\target\\configured-target\\release\\deps\\smoke.exe"],
   ]) {
-    const messages = [
-      { reason: "compiler-artifact", target: { name: "dependency" }, executable: "/unrelated" },
-      { reason: "build-script-executed", package_id: "measured", out_dir: directory },
-      { reason: "compiler-artifact", package_id: "measured", target: { name }, executable },
-    ];
-    const output = messages.map((message) => JSON.stringify(message)).join("\n");
-    assert.deepEqual(await buildArtifact(output, name), { executable, provenance });
-    await assert.rejects(buildArtifact("", name), /Expected one/);
-    await assert.rejects(buildArtifact(JSON.stringify(messages[2]), name), /Missing .* provenance/);
-    await assert.rejects(
-      buildArtifact(`${output}\n${JSON.stringify(messages[2])}`, name),
-      /Expected one/,
-    );
+    for (const library_features of [[], ["default", "portable-simd", "std"]]) {
+      const messages = [
+        { reason: "compiler-artifact", target: { name: "dependency" }, executable: "/unrelated" },
+        { reason: "build-script-executed", package_id: "measured", out_dir: directory },
+        { reason: "compiler-artifact", package_id: "measured", target: { name }, executable },
+        {
+          reason: "compiler-artifact",
+          package_id: "library",
+          target: { name: "tessera_sort", kind: ["lib"] },
+          features: library_features,
+        },
+      ];
+      const output = messages.map((message) => JSON.stringify(message)).join("\n");
+      assert.deepEqual(await buildArtifact(output, name), {
+        executable,
+        provenance: { ...provenance, library_features },
+      });
+      await assert.rejects(buildArtifact("", name), /Expected one/);
+      await assert.rejects(
+        buildArtifact(JSON.stringify(messages[2]), name),
+        /Missing .* provenance/,
+      );
+      for (const artifact of [messages[2], messages[3]])
+        await assert.rejects(
+          buildArtifact(`${output}\n${JSON.stringify(artifact)}`, name),
+          /Expected one/,
+        );
+      await assert.rejects(
+        buildArtifact(
+          messages
+            .slice(0, 3)
+            .map((message) => JSON.stringify(message))
+            .join("\n"),
+          name,
+        ),
+        /Expected one Tessera library artifact/,
+      );
+    }
   }
 });

@@ -276,7 +276,7 @@ The report requires the complete suite. `--partial` generates a report of the co
 
 ### Portable SIMD
 
-Every build uses the SIMD backend; there is no `--simd` CLI option or Cargo feature to select. Algorithm sessions retain one `default` build with all selected adapters. Revision comparisons enable the historical library feature when needed, so both revisions use the vector backend; actual per-revision Cargo features remain in provenance. Revisions without a supported SIMD backend are rejected.
+Every build uses the SIMD backend; there is no `--simd` CLI option or Cargo feature to select. Algorithm sessions retain one `default` build with all selected adapters. Revision comparisons enable the historical library feature when needed, so both revisions use the vector backend; resolved per-revision library features remain in provenance as `library_features`, separate from harness `features`. Revisions without a supported SIMD backend are rejected.
 
 Retained sessions with separate `default` and `portable-simd` builds remain readable and resumable using their recorded executables. Their report checks preserve the shared standard-library anchor and flag absolute anchor drift above 5%; no current build is substituted for those artifacts.
 

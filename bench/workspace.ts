@@ -33,6 +33,8 @@ export interface BuildProvenance {
   opt_level: string;
   debug: string;
   features: string[];
+  /** Resolved library features from Cargo; absent in historical result files. */
+  library_features?: string[];
   rustc_args?: string[];
 }
 
@@ -156,9 +158,22 @@ export async function buildArtifact(output: string, name: string) {
     (value) => value.reason === "build-script-executed" && value.package_id === artifact.package_id,
   );
   if (!script) throw new Error(`Missing ${name} build provenance`);
+  const libraries = messages.filter(
+    (value) =>
+      value.reason === "compiler-artifact" &&
+      value.target.name === "tessera_sort" &&
+      value.target.kind?.includes("lib"),
+  );
+  if (
+    libraries.length !== 1 ||
+    !Array.isArray(libraries[0].features) ||
+    !libraries[0].features.every((feature: unknown) => typeof feature === "string")
+  )
+    throw new Error("Expected one Tessera library artifact with resolved Cargo features");
   const provenance = JSON.parse(
     await readFile(join(script.out_dir, "provenance.json"), "utf8"),
   ) as BuildProvenance;
+  provenance.library_features = [...libraries[0].features].sort();
   return { executable: artifact.executable as string, provenance };
 }
 

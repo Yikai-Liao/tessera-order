@@ -14,6 +14,11 @@ export const ALIGNMENT_RUSTFLAGS = [
   "llvm-args=-align-all-nofallthru-blocks=6",
 ];
 
+/** Read checkout modification state before creating operation outputs or logs. */
+export async function workingTreeDirty(root: string) {
+  return Boolean(await command("git", ["status", "--porcelain"], { cwd: root, capture: true }));
+}
+
 export interface Workspace {
   directory: string;
   tree: string;

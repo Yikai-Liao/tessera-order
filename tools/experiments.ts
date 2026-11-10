@@ -12,6 +12,7 @@ import { compareLocal } from "../bench/local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
 import { checkAlgorithms, compareAlgorithms, resumeComparison } from "../bench/release.ts";
 import { writeReport } from "../bench/report/index.ts";
+import { workingTreeDirty } from "../bench/workspace.ts";
 import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
 
 interface MeasurementOptions extends SelectionOptions {
@@ -191,6 +192,7 @@ export function experimentCommands(program: Command) {
         const plan = await loadPlan(options.plan ?? "local", selectAxes(options));
         if (plan.harness !== "smoke") throw new Error("Counters require a smoke harness plan");
         const root = await repositoryRoot();
+        const dirty = await workingTreeDirty(root);
         const out = resultDirectory(root, options.out);
         await runTask(out, Boolean(program.opts().verbose), () =>
           compareCounters({
@@ -199,6 +201,7 @@ export function experimentCommands(program: Command) {
             baseline: baseline ?? "HEAD",
             plan,
             sorts: options.sorts,
+            dirty,
             cpu: options.cpu,
             valgrindImage: options.valgrindImage,
           }),

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { CommandCancelledError, command, diagnostic } from "../../tools/process.ts";
 import { parseCriterionId } from "../catalog.ts";
 import type { Plan } from "../plan.ts";
-import { withWorkspace } from "../workspace.ts";
+import { withWorkspace, workingTreeDirty } from "../workspace.ts";
 import { assertWorkerEnvironment, buildRevisions, selectedCases } from "./runner.ts";
 
 /** Own a Docker process through failure/cancellation, including daemon-side cleanup. */
@@ -124,6 +124,7 @@ export async function compareCounters(options: {
   sorts: number;
   cpu?: string;
   valgrindImage?: string;
+  dirty?: boolean;
 }) {
   assertWorkerEnvironment();
   if (process.platform !== "linux" || process.arch !== "x64")
@@ -144,9 +145,7 @@ export async function compareCounters(options: {
     capture: true,
   });
   const head = await command("git", ["rev-parse", "HEAD"], { cwd: root, capture: true });
-  const dirty = Boolean(
-    await command("git", ["status", "--porcelain"], { cwd: root, capture: true }),
-  );
+  const dirty = options.dirty ?? (await workingTreeDirty(root));
   await mkdir(out, { recursive: false });
   const planPath = join(out, "plan.json");
   await writeFile(planPath, `${JSON.stringify(options.plan, null, 2)}\n`);

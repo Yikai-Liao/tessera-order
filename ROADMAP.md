@@ -34,7 +34,7 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 
 | ID | Debt | Acceptance |
 |---|---|---|
-| E2 | Root preparation, node planning and recursive child finishing are shared; staged finishing owns its capacity allowance and half dispatch retains borrowed and owned extractor forms | Validate the shared paths against the pre-consolidation baseline with A/A and placement controls |
+| E2 | Root preparation, node planning, child finishing and exact order confirmation are shared; staged finishing owns its capacity allowance and half dispatch retains borrowed and owned extractor forms | Resolve the [shared-confirmation candidate](docs/design/port.md#shared-order-confirmation-candidate)'s short-input costs, then validate shared paths against the pre-consolidation baseline with A/A and placement controls |
 | E3 | Serial and parallel direct-key counting now share a reducible histogram and destination-run construction | Establish serial and Rayon performance against the pre-consolidation SIMD baseline; preserve bitwise representative and Send-only tests |
 | E4 | Half-key views share window operations; the root forwarding wrapper has been removed | Validate shared preparation code generation with the unified backend before performance acceptance |
 | E5 | Serial block storage contains Rayon scratch-segment state and a branch | Decide layout and tracking protocol explicitly: the continuous SIMD build enables Rayon; serial-only library builds remain a separate configuration |

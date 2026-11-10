@@ -292,53 +292,7 @@ const ORDER_SAMPLES: usize = 4096;
 fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     let stride = (records.len() / ORDER_SAMPLES).max(1);
     if stride == 1 {
-        // Three keys are the shortest mixed-direction witness. Reject it
-        // before selecting a directional continuation; each key is read once.
-        let first = extractor.key(&records[0]);
-        let mut keys = records[1..].iter().map(|record| extractor.key(record));
-        let Some(mut current) = keys.next() else {
-            return Order::Ascending;
-        };
-        let mut ascending = first <= current;
-        let mut descending = first >= current;
-        let mut strict = first != current;
-        if let Some(after) = keys.next() {
-            ascending &= current <= after;
-            descending &= current >= after;
-            strict &= current != after;
-            if !ascending && !descending {
-                return Order::Unsorted;
-            }
-            current = after;
-        }
-        if ascending && descending {
-            let Some(after) = keys.find(|&key| key != current) else {
-                return Order::Ascending;
-            };
-            ascending = current < after;
-            current = after;
-        }
-        if ascending {
-            return if keys
-                .try_fold(current, |before, after| (before <= after).then_some(after))
-                .is_some()
-            {
-                Order::Ascending
-            } else {
-                Order::Unsorted
-            };
-        }
-        return keys
-            .try_fold((current, strict), |(before, strict), after| {
-                if before > after {
-                    Some((after, strict))
-                } else if before == after {
-                    Some((after, false))
-                } else {
-                    None
-                }
-            })
-            .map_or(Order::Unsorted, |(_, strict)| Order::Descending { strict });
+        return confirm_order(records, extractor);
     }
     let mut ascending = true;
     let mut descending = true;
@@ -359,35 +313,53 @@ fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     confirm_order(records, extractor)
 }
 
-/// Confirms direction from the first unequal key, marking strict descent.
+/// Rejects a mixed prefix, then confirms one direction while preserving strictness.
 fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
+    // Three keys are the shortest mixed-direction witness. Reject it
+    // before selecting a directional continuation; each key is read once.
     let first = extractor.key(&records[0]);
     let mut keys = records[1..].iter().map(|record| extractor.key(record));
-    let Some(current) = keys.find(|&key| key != first) else {
+    let Some(mut current) = keys.next() else {
         return Order::Ascending;
     };
-    if first < current {
-        // The iterator has already encoded the first unequal key.
+    let mut ascending = first <= current;
+    let mut descending = first >= current;
+    let mut strict = first != current;
+    if let Some(after) = keys.next() {
+        ascending &= current <= after;
+        descending &= current >= after;
+        strict &= current != after;
+        if !ascending && !descending {
+            return Order::Unsorted;
+        }
+        current = after;
+    }
+    if ascending && descending {
+        let Some(after) = keys.find(|&key| key != current) else {
+            return Order::Ascending;
+        };
+        ascending = current < after;
+        current = after;
+    }
+    if ascending {
+        // The prefix is already encoded and checked; scan only the remaining suffix.
         let tail = &records[records.len() - keys.len()..];
-        if extractor.confirm_ascending(tail, current) {
+        return if extractor.confirm_ascending(tail, current) {
             Order::Ascending
         } else {
             Order::Unsorted
-        }
-    } else {
-        // Strict descent requires the first unequal key to be the second record.
-        let strict = keys.len() == records.len() - 2;
-        keys.try_fold((current, strict), |(before, strict), after| {
-            if before > after {
-                Some((after, strict))
-            } else if before == after {
-                Some((after, false))
-            } else {
-                None
-            }
-        })
-        .map_or(Order::Unsorted, |(_, strict)| Order::Descending { strict })
+        };
     }
+    keys.try_fold((current, strict), |(before, strict), after| {
+        if before > after {
+            Some((after, strict))
+        } else if before == after {
+            Some((after, false))
+        } else {
+            None
+        }
+    })
+    .map_or(Order::Unsorted, |(_, strict)| Order::Descending { strict })
 }
 
 /// Confirms ascending keys after an already encoded predecessor.
@@ -604,6 +576,38 @@ mod tests {
     use super::*;
     use crate::key::ByKey;
     use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    #[test]
+    fn confirmation_preserves_direction_and_ties() {
+        for len in 1..=6 {
+            for mut encoded in 0..3usize.pow(len) {
+                let records: Vec<u64> = (0..len)
+                    .map(|_| {
+                        let key = (encoded % 3) as u64;
+                        encoded /= 3;
+                        key
+                    })
+                    .collect();
+                let expected = if records.windows(2).all(|pair| pair[0] <= pair[1]) {
+                    Order::Ascending
+                } else if records.windows(2).all(|pair| pair[0] >= pair[1]) {
+                    Order::Descending {
+                        strict: records.windows(2).all(|pair| pair[0] > pair[1]),
+                    }
+                } else {
+                    Order::Unsorted
+                };
+                assert!(
+                    confirm_order(&records, &mut Direct) == expected,
+                    "{records:?}"
+                );
+                assert!(
+                    confirm_order(&records, &mut ByKey(|key: &u64| *key)) == expected,
+                    "{records:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn confirm_order_finds_unsampled_inversion() {

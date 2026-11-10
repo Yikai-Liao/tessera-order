@@ -417,6 +417,21 @@ The random-input losses remain open. This process-level screen does not identify
 
 The obsolete float-specific sealed scan override was removed after `a239c33`: primitive production confirmation and insertion already dispatch through the required vector backend. Scalar kernels and `Reverse<K>`'s blocked fallback remain. Serial/Rayon tests, both Clippy configurations, float-scan Miri and independent source review pass. Two nine-block serial cases (`float-policy-screen`, `--types f64 --distributions random,sorted99 --lengths 1000 --cpu 2`, same conditions) remain within A/A: random ratio 1.0006, block range 0.9940–1.0050, A/A 0.9981–1.0019; sorted99 ratio 1.0002, block range 0.9973–1.0076, A/A 0.9943–1.0057. Fixed-work instructions, data references and branch counts are identical (`float-policy-counters`); simulated sorted99 data-write misses differ by one. This is bounded evidence for removing a dead policy, not a whole-engine acceptance verdict.
 
+### Shared order confirmation candidate
+
+Root unit-stride probing and recursive/sample confirmation now share the minimal mixed-prefix witness, leading-tie handling and strict-descending classification. The scalar prefix is consumed once; ascending continuation receives only its unchecked suffix and the encoded predecessor. Direct-key roots can therefore use the same vector continuation as recursive children. This removes a separate direction state machine, not the early rejection or strict-reversal mechanism. It changes backend selection and code generation, so it is a performance candidate rather than a behavior-only move.
+
+A three-block linked comparison against `28e6a96`, pinned to CPU 0 on the Ryzen 7 8845H, covered 60 cases: `u64`, `f64` and `row_u64`; random, sorted, reverse, equal and sorted99; 48, 1,000, 8,192 and 65,536 records. Baseline/current copies had matching within-revision source hashes. The retained executable has separate complete `u64` order-probe and confirmation bodies for all four copies, not merely separate wrappers. Ratios below are baseline time divided by the current A/A mean; values above one favor current.
+
+| Case | Baseline copies | Current copy | A/A range |
+|---|---:|---:|---:|
+| `u64/sorted/1000` | 1.451 / 1.442 | 1.004 | 0.951–1.049 |
+| `f64/sorted/1000` | 1.588 / 1.599 | 0.983 | 0.988–1.012 |
+| `u64/sorted/48` | 0.728 / 0.689 | 1.232 | 0.974–1.026 |
+| `u64/reverse/1000` | 0.963 / 0.956 | 0.996 | 0.995–1.005 |
+
+The larger ascending cases benefit, but the short ascending and reverse cases regress; the second current placement also exposes sensitivity. Disassembly shows an out-of-line shared confirmation and another call to the ascending backend where the old unit-stride path kept scalar continuation inside its probe. These observations require investigation, not automatic additional rounds or a claim that all losses are noise. Results remain performance-unaccepted. Raw evidence is retained outside Git in `shared-order-linked`; tests, affected Miri checks and independent structural review passed.
+
 ### Active block directory and shard adoption
 
 The structural checkpoint after `e4fea65` replaces the overloaded bucket-count field with an active block range and makes shard adoption a complete partition-guard operation. It preserves allocation and record-copy work, bounded staging, compaction overlap and callback recovery. Serial/Rayon tests and doctests, both Clippy configurations, site checks, four serial block Miri tests and thirteen parallel block Miri tests pass. Independent review accepted the structure after the unsafe adoption contract was made explicit about original shard offsets and recovery ownership.

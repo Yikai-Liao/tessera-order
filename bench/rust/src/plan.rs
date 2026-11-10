@@ -419,6 +419,16 @@ mod tests {
             );
         }
         let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
+        let cases = continuous.inputs().unwrap();
+        // Keep keyed and direct separated-tail screens even if the total stays fixed.
+        for (ty, len) in [("u64", 65_536), ("row_u64", 65_536), ("u64", 1_000_000)] {
+            assert!(
+                cases.iter().any(|case| {
+                    case.ty == ty && case.distribution == "sorted_tail" && case.len == len
+                }),
+                "missing required continuous workload: {ty}/sorted_tail/{len}/s1"
+            );
+        }
         let parallel = continuous.parallel_inputs().unwrap();
         assert_eq!(parallel.len(), 8);
         assert!(parallel.iter().all(|case| case.len == 10_000_000));

@@ -55,6 +55,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: sudo apt-get update -qq && sudo apt-get install -y valgrind lld
+      # Keep results and logs ignored so provenance describes the source checkout.
       - name: Fixed-work attribution signals
         if: github.event_name != 'workflow_dispatch' || inputs.mode == 'counters'
         env:
@@ -62,7 +63,7 @@ jobs:
         run: >-
           pnpm tools compare counters "$BASELINE"
           --plan bench/plans/diagnostics.toml
-          --sorts 8 --out out/counters
+          --sorts 8 --out bench/results/diagnostics/counters
       - name: Placement sample (shared runner; exploratory)
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'layout')
         env:
@@ -70,11 +71,11 @@ jobs:
         run: >-
           pnpm tools compare commit "$BASELINE"
           --plan bench/plans/diagnostics.toml
-          --layout-seeds 11,12,13,14,15 --out out/layout
+          --layout-seeds 11,12,13,14,15 --out bench/results/diagnostics/layout
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: benchmark-diagnostics-${{ github.run_id }}
-          path: out
+          path: bench/results/diagnostics
           retention-days: 14
           if-no-files-found: warn

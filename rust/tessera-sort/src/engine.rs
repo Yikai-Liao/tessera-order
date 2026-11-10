@@ -34,7 +34,7 @@ const MAX_SPLIT_BITS: usize = block::MAX_RADIX_BITS;
 const MAX_TILE_DIGIT_BITS: usize = 14;
 /// Maximum cursor table length.
 const MAX_DIGIT_BUCKETS: usize = 1 << MAX_TILE_DIGIT_BITS;
-/// Narrowest digit a leaf may use.
+/// Smallest table-width budget; a digit may be narrower after skipping constant bits.
 const MIN_TILE_DIGIT_BITS: usize = 6;
 /// Default tile size in bytes of records; a tile always holds at least one record.
 const TILE_BYTES: usize = crate::thresholds::TILE_BYTES;
@@ -189,9 +189,10 @@ impl Digit {
     }
 }
 
-/// Capacity of a digit plan. A plan over a 128-bit key needs at most 22 windows
-/// of at least `MIN_TILE_DIGIT_BITS` bits; the array keeps 48 entries until a
-/// smaller one is measured.
+/// Capacity of a digit plan. Fixed windows clear the budget below the highest
+/// remaining bit, even when the digit skips constant bits. When every low bit
+/// through the highest varying bit varies, use `ceil(key bits / budget)` balanced windows. A 128-bit key therefore needs at
+/// most 22 entries with the minimum budget; keep 48 until a smaller array is measured.
 const MAX_DIGITS: usize = 48;
 
 /// Scans until all candidate bits have appeared in both states, or the input ends.
@@ -683,11 +684,12 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
     }
 }
 
-/// Chooses the widest cursor table that fits beside the tile, capped by
-/// record count to avoid clearing mostly empty buckets on wide records.
+/// Chooses a table-width budget from tile bytes and record count, clamped to
+/// 6–14 bits. The minimum can exceed a small tile's byte or bucket target.
+/// This bounds the active cursor prefix, not the fixed array's stack reservation.
 fn tile_digit_bits(len: usize, record_bytes: usize) -> usize {
     let tile_bytes = len.saturating_mul(record_bytes);
-    // The widest table that still fits: `2 * 2^width` bytes of cursors.
+    // Byte target before the minimum clamp: `2 * 2^width` bytes of cursors.
     let widest = (tile_bytes / 2).max(1).ilog2() as usize;
     // Limit empty-bucket work to at most eight times the record count, or four
     // for a record wider than a machine word: the same table then holds half as
@@ -1091,8 +1093,9 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             } else {
                 distinct
             };
-            // Estimate the descent until the largest child fits insertion; each
-            // level is one counting pass and the finish is one more.
+            // Estimate repeated uniform fan-out until the length proxy fits
+            // insertion; this is not the observed largest child or an upper bound.
+            // Each level is one counting pass and the finish is one more.
             let mut largest = len;
             let mut depth = 0;
             while largest > INSERTION_MAX && depth < passes {

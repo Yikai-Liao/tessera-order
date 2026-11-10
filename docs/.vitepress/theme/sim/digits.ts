@@ -50,7 +50,7 @@ export function planDigits(varying: bigint, width: number, bits: number): Digit[
   return digits;
 }
 
-/** `tile_digit_bits`: the widest u16 cursor table that fits beside the tile. */
+/** `tile_digit_bits`: a 6–14-bit table budget; the minimum can exceed a small tile's target. */
 export function tileDigitBits(records: number, recordBytes: number): number {
   const tileBytes = records * recordBytes;
   const widest = Math.floor(Math.log2(Math.max(1, Math.floor(tileBytes / 2))));

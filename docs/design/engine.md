@@ -20,6 +20,21 @@ The engine chooses a stride of `max(1, floor(n / 4,096))`. At unit stride it cla
 
 An unsorted input that fits a tile and has at most 48 records goes directly to insertion finishing, using the existing leaf threshold without a budget or varying-bit scan. Confirmed ordered inputs still finish in the order probe. A larger unsorted input gets a budgeted stable insertion pass. When the probe window, one tile of records, is shorter than the input, the pass first runs on a buffered copy of the window's keys to estimate the number of swaps, and only then touches the records with a budget scaled to the whole input. The scaling uses a wide intermediate product so that a valid budget cannot overflow on 32-bit targets. Each call owns this encoded-key buffer and releases it before the radix path continues. If the budget runs out, the input is left as a stable permutation of itself and the radix path continues. See [Insertion and scans](#insertion-and-scans) for how the pass finds inversions.
 
+### Order-rule consumers
+
+Order classification and stable completion have several consumers. A rule change must account for their different entry conditions rather than merging the routes mechanically:
+
+| Consumer | Shared rule or intentional difference |
+|---|---|
+| Unit-stride `probe_order` | Classifies directly; leading, interior and trailing ties rule out strict descent |
+| Strided probe and `confirm_order` | A candidate direction needs full confirmation; a flat sample does not prove constant keys |
+| Serial root | May finish a small unsorted input directly only when it fits the insertion leaf and tile budget |
+| Parallel preparation | The public entry has already rejected roots below 1 MiB and one-thread pools; it needs no serial small-leaf gate |
+| Serial child gate | Variation and order confirmation may finish a child before scratch allocation |
+| Parallel bucket jobs and staged finish | Retain their own scan/`sort_node` entry sequence, not the serial child gate |
+
+The classifiers and stable reversal in `engine.rs` own the shared order rules. Public ordering, stability and permutation tests protect the result; focused tests retain the unsampled-inversion and changing-key progress boundaries. These contracts do not fix callback counts or require identical routing.
+
 ### 2. Varying bits
 
 One scan computes the bitwise union and intersection of all keys. Bits that are equal in every key cannot change the order and are excluded from every later digit. A constant input returns at this point. Wide keys whose variation fits in one 64-bit half are sorted by that half as a 64-bit key. The borrowed `KeyHalf` in `key.rs` and cloneable `Narrow` in `engine/parallel.rs` share one implementation of truncation and counting-window translation; each representation stays in its owning module. Other operations retain the narrowed extractor's defaults instead of forwarding the original-width backend. Tile and block scratch are created only after these root fast paths; budgeted insertion may already have allocated probe keys. Confirmed ordered and constant inputs do not allocate.
@@ -57,9 +72,13 @@ A tile is finished by one of three leaves:
 
 - **Insertion sort** for tiles and buckets of at most 48 records.
 - **Tile-local MSD partition**, recursing into buckets with a cursor table on the stack.
-- **LSD counting passes** over a scratch buffer, with digit widths between 6 and 14 bits.
+- **LSD counting passes** over a scratch buffer, with a table-width budget between 6 and 14 bits. Actual digits can be narrower when a window skips constant bits or a contiguous run is balanced across passes.
 
-The leaf and the digit widths are chosen by a cost model that counts passes and charges for bucket tables. For plans longer than two passes, a sample of at most two distinct top-digit buckets selects MSD directly; otherwise an MSD level is charged as one counting pass plus one pass for the insertion finish that ends the descent. Child variation scans return only bits in the remaining candidate mask, so even an inconsistent key function cannot restore a processed digit and prevent recursion from making progress.
+The table budget targets a `u16` cursor prefix that fits within the tile's record bytes and limits empty-bucket work by record count. Its 6-bit minimum can exceed those targets on small tiles: 49 two-byte records select 64 cursors (128 bytes) for 98 bytes of records. The declared cursor arrays retain their fixed maximum stack reservation; the budget controls the prefix used, cleared and walked.
+
+Leaf selection compares pass-equivalent estimates, with bucket work constrained separately by the table budget and balanced planning. For plans longer than two passes, a sample of at most two distinct top-digit buckets selects MSD directly; otherwise the model assumes repeated uniform fan-out, charging one counting pass per MSD level plus one pass for the insertion finish. The estimated child length is neither an observed maximum nor an upper bound; execution obtains actual bucket lengths from a full histogram. Child variation scans return only bits in the remaining candidate mask, so even an inconsistent key function cannot restore a processed digit and prevent recursion from making progress.
+
+A budget is not a minimum actual digit width. With `varying = (1 << 127) | 1` and a 6-bit budget, the two digits both have width 1. Each fixed window clears all remaining variation in its budget below the highest remaining bit, including gaps that the actual digit omits. When every bit from bit 0 through the highest varying bit varies, the plan instead uses `ceil(key bits / budget)` balanced windows. A contiguous varying interval above constant low bits still uses fixed windows. Thus a 128-bit plan needs at most 22 entries at the minimum budget; the same consumed-window rule bounds tile-local MSD depth, not an assumption that every actual digit is at least 6 bits.
 
 ## Parallel root completion
 
@@ -127,4 +146,4 @@ Without the `std` feature, a panic cannot be caught. A key-function panic during
 
 ## Stack usage
 
-Each tile-local MSD level keeps a cursor table of up to 32 KiB on the stack. The depth is bounded by ⌈key bits / 6⌉, at most 22 levels for 128-bit keys. Actual frame sizes depend on the compiler.
+Each tile-local MSD level keeps a cursor table of up to 32 KiB on the stack. Each level removes a fixed budget window from the remaining variation, including constant gaps omitted from its actual digit. The minimum 6-bit budget therefore bounds depth by ⌈key bits / 6⌉, at most 22 levels for 128-bit keys. Actual frame sizes depend on the compiler.

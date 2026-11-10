@@ -34,11 +34,13 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 
 | ID | Debt | Acceptance |
 |---|---|---|
-| E2 | Parallel preparation repeats serial tile geometry, probes and half dispatch | Consolidate only if separate serial inlining contexts retain their measured behavior |
+| E2 | Parallel preparation repeats serial tile geometry, probes and half dispatch | Preserve the documented entry differences and existing order contracts; consolidate only if independent serial contexts retain their measured behavior |
 | E3 | Parallel direct-key counting repeats serial counting and fill | Constrain shared semantics and establish both configurations' performance before merging mechanisms |
 | E4 | Half-key views share window operations, but `RootExtractor` retains independent forwarding | Reduce remaining forwarding only without losing backend choices or independent call contexts; validate code generation |
 | E5 | Serial block storage contains Rayon scratch-segment state and a branch | Decide layout and tracking protocol explicitly: both continuous builds enable Rayon; the default feature set is a separate configuration |
 | E6 | `engine.rs` combines routing, sampling, planning, node/tile sorting and scratch | Split along mechanism/invariant boundaries only with inlining and placement controls |
+| E8 | Tile-choice arithmetic lacks direct production-model contracts connected to the site model | Keep sampling in the sorter; test the pure decision and shared Rust/TypeScript boundary cases, distinguishing observations from uniform-fan-out estimates |
+| E9 | Parallel directory-byte budgeting is not visibly tied to the serial layout authority | Derive an explicit conservative coexistence budget from entry bytes; preserve block sizes and keep independently measured scale factors separate |
 
 ## C++
 

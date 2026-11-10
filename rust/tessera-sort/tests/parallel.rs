@@ -265,10 +265,15 @@ fn repeated_root_uses_workers_stably() {
     pool.install(|| {
         par_stable_sort_by_key(&mut records, |row| {
             if calls.fetch_add(1, Ordering::Relaxed) % 1024 == 0 {
-                workers
-                    .lock()
-                    .unwrap()
-                    .insert(rayon::current_thread_index().unwrap());
+                let mut seen = workers.lock().unwrap();
+                seen.insert(rayon::current_thread_index().unwrap());
+                let alone = seen.len() == 1;
+                drop(seen);
+                if alone {
+                    // Let pending shards run even on oversubscribed hosts;
+                    // callbacks may block without holding engine metadata.
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
             }
             row.0.get()
         });
@@ -288,14 +293,15 @@ fn repeated_root_uses_workers_stably() {
 
 #[test]
 #[cfg(not(miri))]
-fn repeated_root_recovers_worker_key_panic() {
+fn repeated_root_key_panic_keeps_owned_records() {
     let len = 1usize << 17;
     let mut records: Vec<_> = (0..len as u32)
         .map(|id| {
-            let key = if id % 16 == 0 {
-                mix(u64::from(id))
-            } else {
-                1 << 63
+            let key = match id {
+                0 => 0,
+                16 => u64::MAX,
+                _ if id % 16 == 0 => mix(u64::from(id)),
+                _ => 1 << 63,
             };
             (Cell::new(key), Box::new(id))
         })
@@ -309,12 +315,14 @@ fn repeated_root_recovers_worker_key_panic() {
     let result = catch_unwind(AssertUnwindSafe(|| {
         pool.install(|| {
             let guard = offset.lock().unwrap();
-            let origin = std::thread::current().id();
             let panicked = &panicked;
             par_stable_sort_by_key(&mut records, move |row| {
-                if std::thread::current().id() != origin && !panicked.swap(true, Ordering::Relaxed)
-                {
-                    panic!("repeated-root worker key panic");
+                // Sampling misses the last record; keys 0 and MAX complete
+                // variation in the prefix. Fail during partition regardless
+                // of which worker happens to process the final shard.
+                if *row.1 == len as u32 - 1 {
+                    panicked.store(true, Ordering::Relaxed);
+                    panic!("repeated-root partition key panic");
                 }
                 row.0.get().wrapping_add(*guard)
             });
@@ -324,10 +332,11 @@ fn repeated_root_recovers_worker_key_panic() {
     assert!(panicked.load(Ordering::Relaxed));
     for row in &records {
         let id = *row.1;
-        let key = if id % 16 == 0 {
-            mix(u64::from(id))
-        } else {
-            1 << 63
+        let key = match id {
+            0 => 0,
+            16 => u64::MAX,
+            _ if id % 16 == 0 => mix(u64::from(id)),
+            _ => 1 << 63,
         };
         assert_eq!(row.0.get(), key);
     }

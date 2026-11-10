@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { CommandCancelledError, command, diagnostic } from "../../tools/process.ts";
 import { parseCriterionId, VARIANTS } from "../catalog.ts";
 import type { Plan } from "../plan.ts";
-import { buildBenchmark, withWorkspace } from "../workspace.ts";
+import { ALIGNMENT_RUSTFLAGS, buildBenchmark, withWorkspace } from "../workspace.ts";
 
 /** Validate an additive API listing without duplicating the plan's case count. */
 export function validateApiListings(listed: string[], legacy: string[]) {
@@ -38,10 +38,7 @@ export async function buildContinuous(root: string, out: string) {
             "target-feature=+crt-static",
             "-C",
             "llvm-args=-x86-branches-within-32B-boundaries",
-            "-C",
-            "llvm-args=-align-loops=64",
-            "-C",
-            "llvm-args=-align-all-nofallthru-blocks=6",
+            ...ALIGNMENT_RUSTFLAGS,
           ].join("\u001f"),
         },
       });

@@ -8,11 +8,108 @@ import { test } from "node:test";
 import { command } from "../tools/process.ts";
 import {
   buildArtifact,
+  buildBenchmark,
   copyLibraryRevision,
   copySnapshot,
   sourceHash,
   withWorkspace,
 } from "./workspace.ts";
+
+test("benchmark defaults preserve Cargo configuration and explicit flag precedence", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tessera-build-flags-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, ".cargo"));
+  await mkdir(join(root, "src"));
+  await writeFile(
+    join(root, "Cargo.toml"),
+    `
+[package]
+name = "tessera-bench"
+version = "0.0.0"
+edition = "2021"
+[[bench]]
+name = "smoke"
+path = "src/smoke.rs"
+harness = false
+[[bin]]
+name = "compare"
+path = "src/compare.rs"
+[[bin]]
+name = "memory"
+path = "src/memory.rs"
+`,
+  );
+  for (const name of ["smoke", "compare", "memory"])
+    await writeFile(
+      join(root, `src/${name}.rs`),
+      'fn main() { print!("{}", env!("OBSERVED_FLAGS")); }',
+    );
+  await writeFile(
+    join(root, "build.rs"),
+    String.raw`
+use std::{env, fs, path::Path};
+fn main() {
+    let flags = env::var("CARGO_ENCODED_RUSTFLAGS").unwrap_or_default();
+    let escaped = flags.replace('\\', "\\\\").replace('"', "\\\"").replace('\u{1f}', "\\u001f");
+    fs::write(Path::new(&env::var("OUT_DIR").unwrap()).join("provenance.json"),
+        format!("{{\"cargo_encoded_rustflags\":\"{escaped}\"}}")).unwrap();
+    println!("cargo:rustc-env=OBSERVED_FLAGS={flags}");
+}
+`,
+  );
+  const env = {
+    RUSTFLAGS: undefined,
+    CARGO_ENCODED_RUSTFLAGS: undefined,
+    CARGO_BUILD_RUSTFLAGS: undefined,
+  };
+  await command("cargo", ["generate-lockfile", "--offline"], { cwd: root, env });
+  const target = join(root, "target");
+  const config = join(root, ".cargo/config.toml");
+  const defaults = [
+    "-C",
+    "llvm-args=-align-loops=64",
+    "-C",
+    "llvm-args=-align-all-nofallthru-blocks=6",
+  ].join("\x1f");
+  for (const name of ["smoke", "compare"] as const) {
+    const built = await buildBenchmark(root, target, name, [], { env });
+    assert.equal(built.provenance.cargo_encoded_rustflags, defaults);
+    assert.equal(await command(built.executable, [], { capture: true }), defaults);
+  }
+  assert.equal(
+    await command(
+      join(target, "release", process.platform === "win32" ? "memory.exe" : "memory"),
+      [],
+      { capture: true },
+    ),
+    defaults,
+  );
+  for (const rustflags of ['["--cfg", "project_config"]', '"--cfg project_config"']) {
+    await writeFile(config, `[build]\nrustflags = ${rustflags}\n`);
+    const built = await buildBenchmark(root, target, "smoke", [], { env });
+    assert.equal(
+      built.provenance.cargo_encoded_rustflags,
+      `${defaults}\x1f--cfg\x1fproject_config`,
+    );
+  }
+  for (const [override, expected] of [
+    [{ RUSTFLAGS: "--cfg ambient" }, "--cfg\x1fambient"],
+    [
+      { RUSTFLAGS: "-C llvm-args=-align-loops=32 -C llvm-args=-align-all-nofallthru-blocks=5" },
+      "-C\x1fllvm-args=-align-loops=32\x1f-C\x1fllvm-args=-align-all-nofallthru-blocks=5",
+    ],
+    [
+      { RUSTFLAGS: "--cfg ambient", CARGO_ENCODED_RUSTFLAGS: "--cfg\x1fencoded" },
+      "--cfg\x1fencoded",
+    ],
+  ] as const) {
+    const built = await buildBenchmark(root, target, "smoke", [], { env: { ...env, ...override } });
+    assert.equal(built.provenance.cargo_encoded_rustflags, `${defaults}\x1f${expected}`);
+  }
+  await writeFile(config, '[target.\'cfg(all())\']\nrustflags = ["--cfg", "target_config"]\n');
+  const built = await buildBenchmark(root, target, "smoke", [], { env });
+  assert.equal(built.provenance.cargo_encoded_rustflags, `${defaults}\x1f--cfg\x1ftarget_config`);
+});
 
 /** Commit fixture inputs without depending on the caller's identity or hooks. */
 async function commit(root: string, message: string) {

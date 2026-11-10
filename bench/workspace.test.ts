@@ -7,7 +7,6 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { command } from "../tools/process.ts";
 import {
-  ALIGNMENT_RUSTFLAGS,
   buildArtifact,
   buildBenchmark,
   copyLibraryRevision,
@@ -66,7 +65,12 @@ fn main() {
   await command("cargo", ["generate-lockfile", "--offline"], { cwd: root, env });
   const target = join(root, "target");
   const config = join(root, ".cargo/config.toml");
-  const defaults = ALIGNMENT_RUSTFLAGS.join("\x1f");
+  const defaults = [
+    "-C",
+    "llvm-args=-align-loops=64",
+    "-C",
+    "llvm-args=-align-all-nofallthru-blocks=6",
+  ].join("\x1f");
   for (const name of ["smoke", "compare"] as const) {
     const built = await buildBenchmark(root, target, name, [], { env });
     assert.equal(built.provenance.cargo_encoded_rustflags, defaults);

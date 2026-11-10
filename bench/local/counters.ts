@@ -54,6 +54,7 @@ interface CounterRun {
   kind: "callgrind-fixed-sorts";
   baseline: string;
   head: string;
+  dirty?: boolean;
   source: Awaited<ReturnType<typeof buildRevisions>>["source"];
   builds: Awaited<ReturnType<typeof buildRevisions>>["builds"];
   binaries: Awaited<ReturnType<typeof buildRevisions>>["hashes"];
@@ -79,7 +80,7 @@ export async function reportCounters(out: string, run?: CounterRun) {
   const lines = [
     "# Fixed-work instruction and simulated-event comparison",
     "",
-    `Baseline: ${run.baseline}. Current head: ${run.head}. Sorts per process: ${run.sorts}.`,
+    `Baseline: ${run.baseline}. Current head: ${run.head} (${run.dirty === undefined ? "working-tree state unrecorded" : run.dirty ? "modified working tree" : "clean working tree"}). Sorts per process: ${run.sorts}.`,
     "",
     "Collection covers one prepared batch, its loop and dynamic call overhead. Input generation, restoration, warm-up and output verification are excluded. Cache and branch events are simulator results and can depend on addresses. Equal instruction counts do not establish a layout cause or exclude a real latency regression.",
     "",
@@ -143,6 +144,9 @@ export async function compareCounters(options: {
     capture: true,
   });
   const head = await command("git", ["rev-parse", "HEAD"], { cwd: root, capture: true });
+  const dirty = Boolean(
+    await command("git", ["status", "--porcelain"], { cwd: root, capture: true }),
+  );
   await mkdir(out, { recursive: false });
   const planPath = join(out, "plan.json");
   await writeFile(planPath, `${JSON.stringify(options.plan, null, 2)}\n`);
@@ -156,6 +160,7 @@ export async function compareCounters(options: {
       kind: "callgrind-fixed-sorts",
       baseline,
       head,
+      dirty,
       valgrind,
       image,
       sorts,

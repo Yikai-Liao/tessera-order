@@ -6,7 +6,54 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { readCallgrind } from "./counters.ts";
+import { readCallgrind, reportCounters } from "./counters.ts";
+
+test("counter reports retain clean, modified and legacy-unrecorded snapshot state", async (t) => {
+  const out = await mkdtemp(join(tmpdir(), "tessera-counter-report-"));
+  t.after(() => rm(out, { recursive: true, force: true }));
+  const provenance = {
+    rustc: "fixture",
+    cargo_encoded_rustflags: "",
+    target: "fixture",
+    profile: "bench",
+    opt_level: "3",
+    debug: "false",
+    features: [],
+  };
+  const id = "rust/u32/random/48/s1/api";
+  for (const [dirty, label] of [
+    [true, "modified working tree"],
+    [false, "clean working tree"],
+    [undefined, "working-tree state unrecorded"],
+  ] as const) {
+    const run = {
+      schema: 1,
+      kind: "callgrind-fixed-sorts",
+      baseline: "base",
+      head: "current",
+      ...(dirty === undefined ? {} : { dirty }),
+      source: {
+        baseline: "base-source",
+        current: "current-source",
+        harness: "harness",
+        catalog: "catalog",
+      },
+      builds: { baseline: provenance, current: provenance },
+      binaries: { baseline: "base-binary", current: "current-binary" },
+      host: { cpu: "fixture", kernel: "fixture" },
+      valgrind: "fixture",
+      sorts: 1,
+      selected: [id],
+      cases: [{ id, baseline: { Ir: 10 }, control: { Ir: 10 }, current: { Ir: 10 } }],
+    } satisfies NonNullable<Parameters<typeof reportCounters>[1]>;
+    await reportCounters(out, run);
+    const initial = await readFile(join(out, "index.md"), "utf8");
+    assert.ok(initial.includes(`Current head: current (${label})`));
+    await writeFile(join(out, "counters.json"), JSON.stringify(run));
+    await reportCounters(out);
+    assert.equal(await readFile(join(out, "index.md"), "utf8"), initial);
+  }
+});
 
 test("Callgrind summary preserves event names and omitted trailing zeroes", () => {
   assert.deepEqual(readCallgrind("events: Ir Dr Dw Bc Bcm\nsummary: 182 12 9\n"), {

@@ -198,6 +198,32 @@ fn measure<T: Copy>(
         values.iter().zip(expected).all(|(a, b)| same(a, b)),
         "{id}/{mode}: output differs from the reference"
     );
+    #[cfg(feature = "layout-study")]
+    if let Ok(count) = std::env::var("TESSERA_BENCH_FIXED_SORTS") {
+        let count: usize = count.parse().expect("integer fixed sort count");
+        assert!(
+            (1..=1024).contains(&count),
+            "fixed sort count must be 1..1024"
+        );
+        let mut buffers = vec![input.to_vec(); count];
+        // Callgrind toggles collection at this stable symbol. Preparation,
+        // restoration and verification stay outside its dynamic call tree.
+        tessera_counted_sorts(&mut || {
+            for values in &mut buffers {
+                sort(black_box(values.as_mut_slice()));
+            }
+        });
+        assert!(
+            buffers
+                .iter()
+                .all(|values| { values.iter().zip(expected).all(|(a, b)| same(a, b)) })
+        );
+        println!(
+            "{}",
+            serde_json::json!({ "id": criterion_id!(id, mode), "sorts": count })
+        );
+        return;
+    }
     let batch = (BATCH_ELEMENTS / input.len()).max(1) as u64;
     let mut group = c.benchmark_group(id);
     let (warm_up, window, samples) = if input.len() >= HUGE {
@@ -219,6 +245,15 @@ fn measure<T: Copy>(
         );
     });
     group.finish();
+}
+
+/// Marks one prepared batch for Callgrind's function-scoped collection.
+#[cfg(feature = "layout-study")]
+#[inline(never)]
+#[unsafe(no_mangle)]
+fn tessera_counted_sorts(run: &mut dyn FnMut()) {
+    run();
+    black_box(());
 }
 
 /// Reads the compiled suite unless a local reproduction supplies a saved plan.

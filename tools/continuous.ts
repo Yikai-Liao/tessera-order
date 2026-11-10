@@ -8,6 +8,7 @@ import {
   measureContinuous,
   runContinuous,
 } from "../bench/continuous/runner.ts";
+import { probeCounters } from "../bench/local/counters.ts";
 import { loadPlan } from "../bench/plan.ts";
 import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
 
@@ -16,6 +17,15 @@ export function continuousCommands(program: Command) {
   const continuous = program
     .command("continuous")
     .description("Build, reproduce or explicitly submit the continuous benchmark protocol");
+
+  continuous
+    .command("probe-counters")
+    .description("Probe Linux PMU events on the current host; never changes permissions")
+    .requiredOption("--out <directory>", "new probe directory")
+    .action(async (options: { out: string }) => {
+      const out = resolve(options.out);
+      await runTask(out, Boolean(program.opts().verbose), () => probeCounters(out));
+    });
 
   continuous
     .command("build")

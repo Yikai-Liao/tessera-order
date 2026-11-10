@@ -48,77 +48,58 @@ const MSD_FINISH_PASSES: usize = 1;
 const INSERTION_MAX: usize = crate::thresholds::INSERTION_MAX;
 /// u16 cursors bound a tile to 65535 records.
 const MAX_TILE_RECORDS: usize = crate::thresholds::MAX_TILE_RECORDS;
-/// Keys an occupancy sample reads to judge whether a digit divides its range.
-const DIGIT_SAMPLE_LEN: usize = 128;
-
-/// Counts distinct digits in an evenly spaced sample.
-fn sample_distinct_digits<T, E: Extract<T>>(
-    records: &[T],
-    digit: Digit,
-    extractor: &mut E,
-) -> usize {
-    let mask = digit.mask::<E::Value>();
-    let shift = E::Value::from_usize(digit.shift);
-
-    let mut seen = [0u64; MAX_DIGIT_BUCKETS / 64];
-    let sample_len = DIGIT_SAMPLE_LEN.min(records.len());
-    let step = (records.len() / sample_len).max(1);
-    let mut distinct = 0;
-    for index in (0..records.len()).step_by(step).take(sample_len) {
-        let bucket = ((extractor.key(&records[index]) & mask) >> shift).to_usize();
-        let word = bucket / 64;
-        let bit = 1u64 << (bucket % 64);
-        if seen[word] & bit == 0 {
-            seen[word] |= bit;
-            distinct += 1;
-        }
-    }
-    distinct
-}
-
-/// Keys a node samples to look for one value that a large share of it repeats.
-const MODE_SAMPLE_LEN: usize = 64;
-
-/// A value repeated by at least a quarter of the sample gets an equality partition.
+/// Bounded sample shared by equality and digit-occupancy decisions.
+const KEY_SAMPLE_LEN: usize = 128;
+/// Consecutive keys per run avoid aliasing with periodic input.
+const SAMPLE_RUN_LEN: usize = 8;
+/// A value occupying this fraction of the sample merits an equality partition.
 const MODE_SHARE_DENOMINATOR: usize = 4;
 
-/// Consecutive keys per sampled run.
-const MODE_SAMPLE_RUN_LEN: usize = 8;
-
-/// Fills `keys` with runs of `MODE_SAMPLE_RUN_LEN` consecutive keys spread over
-/// the node, which avoids stride aliasing with periodic keys.
-fn sample_keys<T, E: Extract<T>>(records: &[T], keys: &mut [KeyValue<T, E>], extractor: &mut E) {
-    let runs = keys.len() / MODE_SAMPLE_RUN_LEN;
-    let step = (records.len() / runs).max(1);
-    let mut len = 0;
-    for run in 0..runs {
-        let start = run * step;
-        for offset in 0..MODE_SAMPLE_RUN_LEN {
-            let index = start + offset;
-            if index >= records.len() {
-                break;
-            }
-            keys[len] = extractor.key(&records[index]);
-            len += 1;
-        }
-    }
-    // Short inputs pad the sample with the first key.
-    let first = keys[0];
-    keys[len..].fill(first);
+/// Sorted sampled keys, independent of the digit currently being considered.
+/// This is advisory evidence only: execution still scans actual child variation.
+struct KeySample<V> {
+    keys: [V; KEY_SAMPLE_LEN],
+    len: usize,
 }
 
-/// Finds a key repeated by at least `1 / MODE_SHARE_DENOMINATOR` of the sample.
-/// Leaves the sample sorted; later uses may only depend on the multiset.
-fn sample_mode<V: Unsigned>(keys: &mut [V]) -> Option<V> {
-    let len = keys.len();
-    keys.sort_unstable();
-    let mut best = &keys[..1];
-    for run in keys.chunk_by(|a, b| a == b) {
-        if run.len() > best.len() {
-            best = run;
+impl<V: Unsigned> KeySample<V> {
+    /// Reads bounded runs distributed across a nonempty input, then sorts the keys.
+    fn collect<T, E: Extract<T, Value = V>>(records: &[T], extractor: &mut E) -> Self {
+        let len = records.len().min(KEY_SAMPLE_LEN);
+        let mut sample = Self {
+            keys: [V::from_usize(0); KEY_SAMPLE_LEN],
+            len,
+        };
+        let runs = len.div_ceil(SAMPLE_RUN_LEN);
+        let stride = SAMPLE_RUN_LEN + (records.len() - len) / runs;
+        for (run, keys) in sample.keys[..len].chunks_mut(SAMPLE_RUN_LEN).enumerate() {
+            let start = run * stride;
+            for (key, record) in keys.iter_mut().zip(&records[start..]) {
+                *key = extractor.key(record);
+            }
         }
+        sample.keys[..len].sort_unstable();
+        sample
     }
-    (best.len() * MODE_SHARE_DENOMINATOR >= len).then_some(best[0])
+
+    /// Finds a sufficiently frequent complete key, not merely a repeated digit.
+    fn mode(&self) -> Option<V> {
+        self.keys[..self.len]
+            .chunk_by(|a, b| a == b)
+            .max_by_key(|run| run.len())
+            .filter(|run| run.len() * MODE_SHARE_DENOMINATOR >= self.len)
+            .map(|run| run[0])
+    }
+
+    /// Counts occupied top-digit buckets without a radix-sized bitmap.
+    /// Above this digit keys are constant, so sorted sample projections are ordered.
+    /// Inconsistent extractors may overestimate occupancy; no safety relies on it.
+    fn distinct(&self, digit: Digit) -> usize {
+        let mask = digit.mask::<V>();
+        self.keys[..self.len]
+            .chunk_by(|a, b| (*a & mask) == (*b & mask))
+            .count()
+    }
 }
 
 /// Stably inserts inverted records until sorted or the swap budget runs out.
@@ -717,16 +698,16 @@ fn tile_digit_bits(len: usize, record_bytes: usize) -> usize {
 }
 
 /// Chooses an initial width targeting half-tile children, then widens if needed.
-fn choose_split_digit<T, E: Extract<T>>(
-    records: &[T],
+fn choose_split_digit<V: Unsigned>(
+    len: usize,
+    record_bytes: usize,
     top: usize,
     tile_bytes: usize,
-    extractor: &mut E,
+    sample: &KeySample<V>,
 ) -> Digit {
-    let record_bytes = core::mem::size_of::<T>();
     let tile_records = (tile_bytes / record_bytes).max(64);
     let target = (tile_records / 2).max(1);
-    let children = (records.len() / target).max(2);
+    let children = (len / target).max(2);
     let bits = (children - 1).ilog2() + 1;
     // Wider fan-out increased page/TLB pressure in the 10M measurements.
     let mut width = (bits as usize).clamp(3, SPLIT_BITS).min(top).max(1);
@@ -734,13 +715,13 @@ fn choose_split_digit<T, E: Extract<T>>(
     // Widen a concentrated top window until a quarter of its buckets are sampled.
     while width < top && width + 2 <= MAX_SPLIT_BITS {
         // At larger widths the sample cannot fill a quarter of the buckets.
-        if (1usize << width) <= 4 * DIGIT_SAMPLE_LEN {
+        if (1usize << width) <= 4 * sample.len {
             let probe = Digit {
                 shift: top - width,
                 width,
             };
 
-            if sample_distinct_digits(records, probe, extractor) * 4 >= 1usize << width {
+            if sample.distinct(probe) * 4 >= 1usize << width {
                 break;
             }
         }
@@ -808,14 +789,12 @@ fn plan_node<T, E: Extract<T>>(
             width: span,
         });
     }
-    if records.len().saturating_mul(core::mem::size_of::<T>()) >= 4 * tile_bytes {
-        let mut keys = [E::Value::from_usize(0); MODE_SAMPLE_LEN];
-        sample_keys(records, &mut keys, extractor);
-        if let Some(equal) = sample_mode(&mut keys) {
-            return NodePlan::Equal(equal);
-        }
+    let sample = (records.len().saturating_mul(core::mem::size_of::<T>()) >= 4 * tile_bytes)
+        .then(|| KeySample::collect(records, extractor));
+    if let Some(equal) = sample.as_ref().and_then(KeySample::mode) {
+        return NodePlan::Equal(equal);
     }
-    plan_digit(records, varying, tile_bytes, extractor)
+    plan_digit(records, varying, tile_bytes, extractor, sample)
 }
 
 /// Consumes key bits even when an inconsistent extractor defeats an equality split.
@@ -824,12 +803,20 @@ fn plan_digit<T, E: Extract<T>>(
     varying: u128,
     tile_bytes: usize,
     extractor: &mut E,
+    sample: Option<KeySample<E::Value>>,
 ) -> NodePlan<E::Value> {
     let top = bit_len(varying);
     if let Some((boundary, set)) = two_runs(records, 1u128 << (top - 1), extractor) {
         NodePlan::Runs { boundary, set }
     } else {
-        NodePlan::Digit(choose_split_digit(records, top, tile_bytes, extractor))
+        let sample = sample.unwrap_or_else(|| KeySample::collect(records, extractor));
+        NodePlan::Digit(choose_split_digit(
+            records.len(),
+            core::mem::size_of::<T>(),
+            top,
+            tile_bytes,
+            &sample,
+        ))
     }
 }
 
@@ -976,7 +963,13 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             // sampled pivot. Force a digit partition to remove candidate bits
             // rather than repeat the same equality partition indefinitely.
             self.scratch.block.recycle_ends(ends);
-            let plan = plan_digit(records, parent_varying, self.tile_bytes, self.extractor);
+            let plan = plan_digit(
+                records,
+                parent_varying,
+                self.tile_bytes,
+                self.extractor,
+                None,
+            );
             self.execute_node(records, parent_varying, plan);
             return;
         }
@@ -1114,8 +1107,9 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
             // optimizer the divisor below is non-zero, and removing it measured
             // as a slower `sort_tile` (an extra zero check and different register
             // allocation).
-            let distinct = sample_distinct_digits(records, digit, self.extractor).max(1);
-            let fanout = if distinct >= DIGIT_SAMPLE_LEN.min(len) {
+            let sample = KeySample::collect(records, self.extractor);
+            let distinct = sample.distinct(digit).max(1);
+            let fanout = if distinct >= sample.len {
                 1usize << digit.width
             } else {
                 distinct
@@ -1316,6 +1310,33 @@ mod tests {
     }
 
     #[test]
+    fn sampled_keys_cover_short_inputs_and_top_buckets() {
+        for len in [1, 7, 8, 9, 63, 127, 128, 129, 1024] {
+            let records: Vec<u64> = (0..len).map(|index| (index * 7919) as u64).collect();
+            let sample = KeySample::collect(&records, &mut Direct);
+            assert_eq!(sample.len, len.min(KEY_SAMPLE_LEN));
+            if len <= KEY_SAMPLE_LEN {
+                let mut expected = records.clone();
+                expected.sort_unstable();
+                assert_eq!(&sample.keys[..sample.len], expected);
+            }
+            for width in 1..=MAX_SPLIT_BITS {
+                let digit = Digit {
+                    shift: 24 - width,
+                    width,
+                };
+                let mut buckets: Vec<_> = sample.keys[..sample.len]
+                    .iter()
+                    .map(|key| key & digit.mask::<u64>())
+                    .collect();
+                buckets.sort_unstable();
+                buckets.dedup();
+                assert_eq!(sample.distinct(digit), buckets.len());
+            }
+        }
+    }
+
+    #[test]
     fn variation_stays_within_candidate() {
         assert_eq!(
             scan_varying_bits(&[0u64, u64::MAX], 0xff, &mut Direct),
@@ -1330,7 +1351,7 @@ mod tests {
         let mut calls = 0;
         // Every sample and histogram puts all records in one bucket. Each child
         // scan then reintroduces every key bit, including the partitioned digit.
-        let constant_calls = DIGIT_SAMPLE_LEN + records.len();
+        let constant_calls = KEY_SAMPLE_LEN + records.len();
         let mut extractor = ByKey(|_: &u64| {
             assert!(calls < 12_000, "tile recursion did not make progress");
             let phase = calls % (constant_calls + 65);
@@ -1364,7 +1385,7 @@ mod tests {
             // the stack.
             let mut extractor = ByKey(|_: &u16| -> u16 {
                 assert!(calls < 12_000, "node recursion did not make progress");
-                let phase = calls % (len + 4 + 65 + MODE_SAMPLE_LEN);
+                let phase = calls % (len + 4 + 65 + KEY_SAMPLE_LEN);
                 calls += 1;
                 if phase < len {
                     1

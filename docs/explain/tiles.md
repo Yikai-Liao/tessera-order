@@ -36,7 +36,7 @@ Both leaves move records with counting passes, so the model counts passes over t
 - **LSD** costs one pass per planned digit: `passes`.
 - **MSD** costs one pass per level it descends before the largest bucket falls to 48 records or fewer, plus one for the insertion finish at the bottom: `depth + 1`.
 
-To estimate the depth, the engine samples 128 keys on the top digit and counts distinct digit values. If every sampled key landed in a different bucket, the sample is too small to measure the spread, and the full bucket count is assumed. Otherwise the number of distinct values is the expected fan-out. The descent divides the tile size by the fan-out until it reaches 48.
+To estimate the depth, the engine uses the same bounded key sample as node planning: up to 128 keys, drawn in consecutive runs of 8 and sorted. Adjacent groups after projection onto the top digit count its distinct values without a radix-sized occupancy table. If every sampled key landed in a different bucket, the sample is too small to measure the spread, and the full bucket count is assumed. Otherwise the number of distinct values is the expected fan-out. The descent divides the tile size by the fan-out until it reaches 48.
 
 For plans longer than two passes, a sample with at most two distinct buckets selects MSD directly. That small sample cannot estimate the largest child reliably: one stable split may leave a dominant bucket constant or small enough for insertion, even when the average-fan-out estimate predicts no win. Other samples select MSD only when `depth + 1 < passes`. Plans of one or two passes skip the sample: one MSD level plus its finish already costs two passes.
 

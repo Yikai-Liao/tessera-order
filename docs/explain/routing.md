@@ -56,7 +56,7 @@ Records sorted by a key function keep their payloads: two records with key 7 may
 
 ### Block partition of the window
 
-A node that reaches this point gets a [block partition](block-partition.md) on the window, which also finishes the node. Wider nodes have two ways to split. Equality sampling is checked only on nodes of at least four tiles, so its 64-key sample is paid for, and it runs before the digit route below.
+A node that reaches this point gets a [block partition](block-partition.md) on the window, which also finishes the node. Wider nodes have two ways to split. Equality sampling is checked only on nodes of at least four tiles, so its bounded sample is paid for, and it runs before the digit route below.
 
 ### Already in bucket order
 
@@ -64,7 +64,7 @@ A node that reaches its digit partition may already hold the two runs its top va
 
 ### Repeated key
 
-The node samples 64 keys in 8 runs of 8 consecutive keys. Runs rather than single keys avoid aliasing with periodic data. If one value fills at least a quarter of the sample, an **equality partition** splits the node into three bands: keys below, equal to, and above that value. The equal band is finished, since all of its keys are the same. The other two are routed again.
+The node samples up to 128 keys in runs of 8 consecutive keys. Runs rather than single keys avoid aliasing with periodic data. Sorting this bounded sample lets both equality detection and digit occupancy use the same extracted keys. If one value fills at least a quarter of the sample, an **equality partition** splits the node into three bands: keys below, equal to, and above that value. The equal band is finished, since all of its keys are the same. The other two are routed again.
 
 A heavily skewed distribution (Zipf, a default value, a null marker) would otherwise put most records in one bucket on every digit, and that bucket would cost one pass per digit.
 
@@ -75,7 +75,7 @@ A changing key function can make the sampled value disappear: every record then 
 Otherwise the node is split on the digit under its highest varying bit, with the [stable block partition](block-partition.md). `choose_split_digit` picks the width:
 
 1. Aim for children of half a tile: with `target = tile records / 2`, start with enough bits for `n / target` children, clamped to 3–8 bits. Wider splits measured slower on 10 million records because of page and TLB pressure.
-2. Sample 128 keys. If they hit fewer than a quarter of the digit's buckets, the keys are concentrated in a few buckets, so widen the digit by 2 bits and check again, up to 12 bits. Above 9 bits, 128 keys cannot fill a quarter of the buckets, so widening continues without a check.
+2. Project the retained key sample onto the digit. If it hits fewer than a quarter of the digit's buckets, widen the digit by 2 bits and check the same sample again, up to 12 bits. Above 9 bits, 128 keys cannot fill a quarter of the buckets, so widening continues without a check. Sample keys only if equality detection has not already done so; changing the width does not call the extractor again.
 
 Serial and parallel roots share this partition decision. If equality or existing runs make a serial operation preferable, the parallel entry executes that decision without repeating its sample. Existing runs are checked before digit-width sampling, so a successful split never plans an unused table. A narrow window uses its actual bit width in both engines.
 

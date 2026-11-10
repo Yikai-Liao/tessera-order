@@ -211,17 +211,17 @@ fn changing_pivot_keeps_records() {
             let offset = call - prelude;
             // The root was already probed. Subsequent children reject order
             // before scanning their remaining candidate bits.
-            let phase = offset % (64 + len + 4 + 65);
-            if phase < 64 {
+            let phase = offset % (128 + len + 4 + 65);
+            if phase < 128 {
                 if greater { 0 } else { u64::MAX }
-            } else if phase < 64 + len {
-                if offset < 64 + len {
+            } else if phase < 128 + len {
+                if offset < 128 + len {
                     assert!(!first_band[record.id], "record classified twice");
                     first_band[record.id] = true;
                 }
                 1
-            } else if phase < 64 + len + 4 {
-                [1, 0, 0, 1][phase - 64 - len]
+            } else if phase < 128 + len + 4 {
+                [1, 0, 0, 1][phase - 128 - len]
             } else if phase % 2 == 0 {
                 0
             } else {

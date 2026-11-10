@@ -29,10 +29,6 @@ function trailingZeros(value: bigint): number {
   return count;
 }
 
-function popcount(value: bigint): number {
-  return [...value.toString(2)].filter((c) => c === "1").length;
-}
-
 /** The window of `width` bits under the highest remaining bit, snapped to its lowest varying bit. */
 export function topWindow(
   remaining: bigint,
@@ -46,18 +42,33 @@ export function topWindow(
   return { digit: { shift: low, width: high - low + 1 }, window };
 }
 
-/** Packs varying bits into windows, highest first; LSD passes run the plan in reverse. */
-export function planDigits(varying: bigint, width: number, bits: number): Digit[] {
-  const top = bitLen(varying);
-  let even: number | null = popcount(varying) === top ? Math.ceil(top / width) : null;
-  let remaining = varying;
+/** Minimum-pass plan, minimizing bucket slots among plans with that pass count. */
+export function planDigits(varying: bigint, width: number, _bits: number): Digit[] {
+  const positions: number[] = [];
+  for (let bit = 0; bit < bitLen(varying); bit++) {
+    if ((varying & (1n << BigInt(bit))) !== 0n) positions.push(bit);
+  }
+  const cost = Array.from({ length: positions.length + 1 }, () => [0, 0]);
+  const previous = new Array<number>(positions.length + 1).fill(0);
+  for (let end = 1; end <= positions.length; end++) {
+    cost[end] = [Infinity, Infinity];
+    for (let start = end - 1; start >= 0; start--) {
+      const span = positions[end - 1] - positions[start] + 1;
+      if (span > width) break;
+      const candidate = [cost[start][0] + 1, cost[start][1] + 2 ** span];
+      if (
+        candidate[0] < cost[end][0] ||
+        (candidate[0] === cost[end][0] && candidate[1] < cost[end][1])
+      ) {
+        cost[end] = candidate;
+        previous[end] = start;
+      }
+    }
+  }
   const digits: Digit[] = [];
-  while (remaining !== 0n) {
-    const windowWidth = even !== null && even > 0 ? Math.ceil(bitLen(remaining) / even) : width;
-    const { digit, window } = topWindow(remaining, windowWidth, bits);
-    digits.push(digit);
-    remaining &= ~window;
-    if (even !== null) even = Math.max(0, even - 1);
+  for (let end = positions.length; end > 0; end = previous[end]) {
+    const start = previous[end];
+    digits.push({ shift: positions[start], width: positions[end - 1] - positions[start] + 1 });
   }
   return digits;
 }

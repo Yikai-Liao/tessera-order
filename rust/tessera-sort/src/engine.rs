@@ -170,10 +170,8 @@ impl Digit {
     }
 }
 
-/// Capacity of a digit plan. A plan over a 128-bit key needs at most 22 windows
-/// of at least `MIN_TILE_DIGIT_BITS` bits; the array keeps 48 entries until a
-/// smaller one is measured.
-const MAX_DIGITS: usize = 48;
+/// A minimum-pass plan cannot exceed the number of windows needed for all bits.
+const MAX_DIGITS: usize = (u128::BITS as usize).div_ceil(MIN_TILE_DIGIT_BITS);
 
 /// Scans until all candidate bits have appeared in both states, or the input ends.
 /// Only candidate bits are returned, so even changing keys cannot restore a
@@ -215,36 +213,66 @@ fn top_window(remaining: u128, width: usize) -> (Digit, u128) {
     (digit, window)
 }
 
-/// Packs varying bits into windows, highest first; the LSD passes consume the
-/// plan in reverse and each window skips the constant bits below it.
-///
-/// A window spans at most `width` bits. When every bit below the top one varies,
-/// the run is instead tiled evenly over the passes that `width` would need, so
-/// 32 bits in three passes become 11 + 11 + 10 rather than 14 + 14 + 4. Both
-/// plans move each record three times and cover the same bits, but the even one
-/// clears, counts and walks 5,120 bucket slots instead of 32,784. Gaps keep the
-/// wide windows, which jump over them.
-fn plan_digits(varying: u128, width: usize, digits: &mut [Digit]) -> usize {
-    let top = bit_len(varying);
-    // Passes left to tile the contiguous run over; `None` keeps fixed windows.
-    let mut even = (varying.count_ones() as usize == top).then_some(top.div_ceil(width));
-    let mut remaining = varying;
-    let mut len = 0;
-    while remaining != 0 {
-        let window_width = match even {
-            Some(left) if left > 0 => bit_len(remaining).div_ceil(left),
-            // Gaps keep windows of the full budget that jump over them.
-            _ => width,
-        };
-        let (digit, window) = top_window(remaining, window_width);
-        debug_assert!(len < digits.len());
-        debug_assert!(digit.width <= width);
-        digits[len] = digit;
-        len += 1;
-        remaining &= !window;
-        even = even.map(|left| left.saturating_sub(1));
+/// Minimum number of width-bounded windows; greedy coverage is optimal for count.
+fn digit_passes(mut varying: u128, width: usize) -> usize {
+    let mut passes = 0;
+    while varying != 0 {
+        let (_, window) = top_window(varying, width);
+        varying &= !window;
+        passes += 1;
     }
-    len
+    passes
+}
+
+/// Covers varying positions with the fewest passes, then the fewest bucket slots.
+///
+/// Every legal final window extends an optimal lower-bit prefix. This bounded
+/// search treats dense, shifted and sparse variation alike: constant gaps cost
+/// table slots only when keeping them avoids another record pass.
+fn plan_digits(varying: u128, width: usize, digits: &mut [Digit]) -> usize {
+    if varying == 0 {
+        return 0;
+    }
+    let (digit, window) = top_window(varying, width);
+    if varying & !window == 0 {
+        digits[0] = digit;
+        return 1;
+    }
+    let mut positions = [0u8; u128::BITS as usize];
+    let mut bits = varying;
+    let len = bits.count_ones() as usize;
+    for position in &mut positions[..len] {
+        *position = bits.trailing_zeros() as u8;
+        bits &= bits - 1;
+    }
+    let mut cost = [(0u8, 0u32); u128::BITS as usize + 1];
+    let mut previous = [0u8; u128::BITS as usize + 1];
+    for end in 1..=len {
+        cost[end] = (u8::MAX, u32::MAX);
+        for start in (0..end).rev() {
+            let span = (positions[end - 1] - positions[start]) as usize + 1;
+            if span > width {
+                break;
+            }
+            let candidate = (cost[start].0 + 1, cost[start].1 + (1 << span));
+            if candidate < cost[end] {
+                cost[end] = candidate;
+                previous[end] = start as u8;
+            }
+        }
+    }
+    let mut end = len;
+    let mut passes = 0;
+    while end != 0 {
+        let start = previous[end] as usize;
+        digits[passes] = Digit {
+            shift: positions[start] as usize,
+            width: (positions[end - 1] - positions[start]) as usize + 1,
+        };
+        passes += 1;
+        end = start;
+    }
+    passes
 }
 
 /// Buffers shared by the nodes and tiles of one sort.
@@ -1091,8 +1119,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         }
         // Widest counting table this tile can afford; LSD spreads it over passes.
         let table_width = tile_digit_bits(len, core::mem::size_of::<T>());
-        let mut digits = [Digit { shift: 0, width: 0 }; MAX_DIGITS];
-        let passes = plan_digits(varying, table_width, &mut digits);
+        let passes = digit_passes(varying, table_width);
         // Compare an MSD descent against the flat plan in passes over the tile.
         // A level plus its finish cannot undercut two flat passes, so shorter
         // plans skip the occupancy sample.
@@ -1132,6 +1159,8 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
                 return;
             }
         }
+        let mut digits = [Digit { shift: 0, width: 0 }; MAX_DIGITS];
+        let passes = plan_digits(varying, table_width, &mut digits);
         let buckets = if CACHED {
             1 << digits[..passes]
                 .iter()
@@ -1439,6 +1468,50 @@ mod tests {
             0x3fff,
         );
         assert_eq!(records, expected);
+    }
+
+    /// Exhaustively enumerates window partitions independently of the planner.
+    fn optimal_digit_cost(bits: u128, width: usize) -> (usize, usize) {
+        if bits == 0 {
+            return (0, 0);
+        }
+        let high = bit_len(bits);
+        (1..=width.min(high))
+            .map(|span| {
+                let remaining = bits & !(u128::MAX << (high - span));
+                let (passes, slots) = optimal_digit_cost(remaining, width);
+                (passes + 1, slots + (1 << span))
+            })
+            .min()
+            .unwrap()
+    }
+
+    #[test]
+    fn digit_plan_minimizes_passes_then_tables() {
+        for bits in 1..256u128 {
+            for width in 1..=5 {
+                let mut digits = [Digit { shift: 0, width: 0 }; 128];
+                let len = plan_digits(bits, width, &mut digits);
+                let cost = (
+                    len,
+                    digits[..len].iter().map(|digit| 1 << digit.width).sum(),
+                );
+                assert_eq!(cost, optimal_digit_cost(bits, width));
+                assert_eq!(len, digit_passes(bits, width));
+            }
+        }
+        for shift in [0, 17, 96] {
+            let mut digits = [Digit { shift: 0, width: 0 }; MAX_DIGITS];
+            let len = plan_digits(0xffff_ffffu128 << shift, 14, &mut digits);
+            assert_eq!(len, 3);
+            assert_eq!(
+                digits[..len]
+                    .iter()
+                    .map(|digit| 1usize << digit.width)
+                    .sum::<usize>(),
+                5120
+            );
+        }
     }
 
     #[test]

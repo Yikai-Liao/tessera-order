@@ -20,12 +20,13 @@ The width of a counting digit is limited by its cursor table, one `u16` per buck
 - has at most 8 buckets per record, or 4 for records wider than 8 bytes, so clearing and scanning empty buckets cannot dominate. A wider record fits fewer records in the same table budget, so its buckets would be mostly empty;
 - is between 6 and 14 bits wide.
 
-`plan_digits` then covers the [varying bits](keys.md#varying-bits) with windows of at most that width, highest window first. Two rules shape the plan:
+The planner covers varying bit positions with nonoverlapping windows no wider than that limit. It minimizes the number of record passes first, then the total bucket slots among equally short plans. A bounded search over at most 128 positions finds the cheapest lower-bit prefix for every legal next window. Dense, shifted and sparse variation follow the same rule; constant gaps only occupy a window when that avoids a pass or reduces total table work.
 
-1. **Windows skip constant bits.** A window starts at the highest remaining varying bit and is cut back to its lowest varying bit, so a pass never ends on bits that cannot change. Gaps between varying bits are jumped over.
-2. **Contiguous runs are tiled evenly.** If every bit below the top varying bit varies, the run is split into equal windows over the same number of passes. 32 bits with 14-bit tables become 11 + 11 + 10 instead of 14 + 14 + 4. Both plans move each record three times, but the even one clears and scans 5,120 bucket slots instead of 32,784.
+For example, 32 adjacent varying bits use widths 11 + 11 + 10 instead of 14 + 14 + 4, whether those bits start at bit zero or above a constant low part. Both plans move each record three times, but balancing clears and scans 5,120 bucket slots instead of 32,784. Sparse inputs can choose different window boundaries under the same objective.
 
-Toggle bits and change the table width to see both rules. The figure also models the finish choice for 8,192 `u64` keys with the selected table limit; the engine itself uses 14 bits at this size. Change the sample's distinct-bucket count to explore the low-fanout rule:
+Leaf selection needs only the minimum pass count, which greedy width-bounded coverage computes cheaply. The engine optimizes table sizes only if it selects LSD; an MSD tile does not construct an unused flat plan. The plan capacity is derived from the widest key and narrowest allowed digit rather than an independently tuned array length.
+
+Toggle bits and change the table width to explore the plan. The figure also models the finish choice for 8,192 `u64` keys with the selected table limit; the engine itself uses 14 bits at this size. Change the sample's distinct-bucket count to explore the low-fanout rule:
 
 <DigitPlanner />
 

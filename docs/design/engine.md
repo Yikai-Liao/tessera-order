@@ -59,7 +59,7 @@ A tile is finished by one of three leaves:
 - **Tile-local MSD partition**, recursing into buckets with a cursor table on the stack.
 - **LSD counting passes** over a scratch buffer, with digit widths between 6 and 14 bits.
 
-The leaf and the digit widths are chosen by a cost model that counts passes and charges for bucket tables. For plans longer than two passes, a sample of at most two distinct top-digit buckets selects MSD directly; otherwise an MSD level is charged as one counting pass plus one pass for the insertion finish that ends the descent. Child variation scans return only bits in the remaining candidate mask, so even an inconsistent key function cannot restore a processed digit and prevent recursion from making progress.
+The LSD digit planner minimizes record passes, then total bucket slots, over varying bit positions. This one objective covers dense, shifted and sparse variation. Greedy coverage supplies the minimum pass count for leaf selection; only a selected LSD leaf runs the bounded table-cost optimization. A plan has at most `ceil(128 / MIN_TILE_DIGIT_BITS)` windows, derived from key width rather than an independent capacity constant. The leaf and table-width budget use a cost model that counts passes and charges for bucket tables. For plans longer than two passes, a sample of at most two distinct top-digit buckets selects MSD directly; otherwise an MSD level is charged as one counting pass plus one pass for the insertion finish that ends the descent. Child variation scans return only bits in the remaining candidate mask, so even an inconsistent key function cannot restore a processed digit and prevent recursion from making progress.
 
 ## Parallel root completion
 

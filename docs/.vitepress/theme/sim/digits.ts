@@ -121,8 +121,24 @@ export function partitionWork(
     } else if (childLen > 48 && keys[start] !== keys[end - 1]) {
       let childVarying = 0n;
       for (let index = start; index < end; index++) childVarying |= keys[index] ^ keys[start];
+      childVarying &= remaining;
+      const width = tileDigitBits(childLen, recordBytes);
+      const passes = digitPasses(childVarying, width, bits);
+      const flat = len * passes;
       work +=
-        len * digitPasses(childVarying & remaining, tileDigitBits(childLen, recordBytes), bits);
+        passes > 2
+          ? Math.min(
+              flat,
+              partitionWork(
+                childLen,
+                childVarying,
+                topWindow(childVarying, width, bits).digit,
+                keys.slice(start, end),
+                recordBytes,
+                bits,
+              ),
+            )
+          : flat;
     }
     start = end;
   }

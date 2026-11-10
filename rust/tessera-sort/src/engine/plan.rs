@@ -67,9 +67,12 @@ impl<V: Unsigned> KeySample<V> {
     /// a sample-constant group needs a confirming scan, not more sorting passes.
     /// A singleton cannot certify constancy: use the remaining candidate bits
     /// and a uniform bucket population for that unobserved part of the sample.
+    /// Nonterminal groups compare flat work with the same estimate on their
+    /// remaining bits. Recursion only projects this retained sample: it neither
+    /// reads more records nor allocates, and every level consumes a digit.
     /// All facts are advisory; actual child scans still decide completion.
     fn partition_work(
-        &self,
+        sample: &[V],
         records: usize,
         varying: u128,
         digit: Digit,
@@ -85,13 +88,13 @@ impl<V: Unsigned> KeySample<V> {
         };
         // All records pay a partition and either insertion or a confirming scan.
         // Only children with work beyond that minimum need further estimation.
-        let mut work = 2 * self.len;
-        for keys in self.keys[..self.len].chunk_by(|a, b| (*a & mask) == (*b & mask)) {
+        let mut work = 2 * sample.len();
+        for keys in sample.chunk_by(|a, b| (*a & mask) == (*b & mask)) {
             if keys.len() == 1 {
                 work += singleton_passes;
                 continue;
             }
-            let child_len = (records * keys.len()).div_ceil(self.len);
+            let child_len = (records * keys.len()).div_ceil(sample.len());
             if child_len <= INSERTION_MAX || keys.first() == keys.last() {
                 continue;
             }
@@ -100,7 +103,22 @@ impl<V: Unsigned> KeySample<V> {
                 .iter()
                 .fold(0, |bits, key| bits | (key.to_u128() ^ first))
                 & remaining;
-            work += keys.len() * digit_passes(varying, tile_digit_bits(child_len, record_bytes));
+            let width = tile_digit_bits(child_len, record_bytes);
+            let passes = digit_passes(varying, width);
+            let flat = keys.len() * passes;
+            let continuation = if passes > 2 {
+                let (digit, _) = top_window(varying, width);
+                flat.min(Self::partition_work(
+                    keys,
+                    child_len,
+                    varying,
+                    digit,
+                    record_bytes,
+                ))
+            } else {
+                flat
+            };
+            work += continuation;
         }
         work
     }
@@ -392,8 +410,13 @@ pub(super) fn plan_tile<T, E: Extract<T>>(
     if passes > 2 {
         let (digit, _) = top_window(varying, table_width);
         let sample = KeySample::collect(records, extractor);
-        if sample.partition_work(len, varying, digit, core::mem::size_of::<T>())
-            < sample.len * passes
+        if KeySample::partition_work(
+            &sample.keys[..sample.len],
+            len,
+            varying,
+            digit,
+            core::mem::size_of::<T>(),
+        ) < sample.len * passes
         {
             return TilePlan::Msd(digit);
         }
@@ -450,7 +473,13 @@ mod tests {
             // Constant children pay only their confirmation, regardless of how
             // many groups the sample contains. No low-fanout cutoff is needed.
             assert_eq!(
-                sample.partition_work(records.len(), u64::MAX as u128, digit, 8),
+                KeySample::partition_work(
+                    &sample.keys[..sample.len],
+                    records.len(),
+                    u64::MAX as u128,
+                    digit,
+                    8
+                ),
                 2 * sample.len
             );
             assert!(matches!(
@@ -470,15 +499,29 @@ mod tests {
             shift: 52,
             width: 12,
         };
-        assert!(sample.partition_work(records.len(), u64::MAX as u128, digit, 8) >= 6 * sample.len);
+        assert!(
+            KeySample::partition_work(
+                &sample.keys[..sample.len],
+                records.len(),
+                u64::MAX as u128,
+                digit,
+                8
+            ) > 2 * sample.len
+        );
         // Known-completed bits do not contribute to estimated child work.
         assert_eq!(
-            sample.partition_work(records.len(), digit.mask::<u128>(), digit, 8),
+            KeySample::partition_work(
+                &sample.keys[..sample.len],
+                records.len(),
+                digit.mask::<u128>(),
+                digit,
+                8
+            ),
             2 * sample.len
         );
         assert!(matches!(
             plan_tile(&records, u64::MAX as u128, &mut Direct),
-            TilePlan::Lsd { .. }
+            TilePlan::Msd(_)
         ));
         // One key in a bucket does not establish constancy when the estimated
         // child still exceeds the insertion bound.
@@ -487,7 +530,8 @@ mod tests {
             len: 1,
         };
         assert!(
-            singleton.partition_work(
+            KeySample::partition_work(
+                &singleton.keys[..singleton.len],
                 8192,
                 u64::MAX as u128,
                 Digit {
@@ -497,6 +541,37 @@ mod tests {
                 8
             ) > 2
         );
+    }
+
+    #[test]
+    fn sampled_continuation_reuses_deeper_partition_opportunities() {
+        for groups in [2u64, 4, 8] {
+            let records: Vec<u64> = (0..1024u64)
+                .map(|index| {
+                    ((index % groups) << 60)
+                        | (index.wrapping_mul(0x9e3779b97f4a7c15) & ((1 << 40) - 1))
+                })
+                .collect();
+            let varying = records.iter().fold(0u128, |bits, key| {
+                bits | (*key as u128 ^ records[0] as u128)
+            });
+            let sample = KeySample::collect(&records, &mut Direct);
+            let width = tile_digit_bits(records.len(), 8);
+            let (digit, _) = top_window(varying, width);
+            let work = KeySample::partition_work(
+                &sample.keys[..sample.len],
+                records.len(),
+                varying,
+                digit,
+                8,
+            );
+            assert!(work > 2 * sample.len);
+            assert!(work < digit_passes(varying, width) * sample.len);
+            assert!(matches!(
+                plan_tile(&records, varying, &mut Direct),
+                TilePlan::Msd(_)
+            ));
+        }
     }
 
     /// Exhaustively enumerates window partitions independently of the planner.

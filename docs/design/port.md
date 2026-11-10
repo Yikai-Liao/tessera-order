@@ -436,4 +436,17 @@ Two nine-block maintained screens compare the conditional-work candidate with `c
 | `u64/sparse_digits/1000` | 1.0635 | 1.0065–1.1309 | 0.9726–1.0274 | slower |
 | `row_u64/sparse_digits/1000` | 1.0329 | 1.0252–1.0376 | 0.9931–1.0069 | slower |
 
-Both `sparse8/1000` cases and both `skew99/65536` cases were within A/A. Raw evidence remains outside Git in `conditional-work-screen-v1`, `conditional-work-screen-v2`, `conditional-work-shapes-v2` and `convergence-work-v1`. Reproduce the second candidate's selections with `--types u64,row_u64 --distributions random,skew99 --lengths 1000,65536` and `--types u64,row_u64 --distributions sparse8,hot50,sparse_digits,bimodal --lengths 1000`, using `pnpm tools compare commit cb6be7f --cpu 2` and separate output directories. These are process screens, not source attribution. The flat child-continuation estimate misses further MSD opportunities and must be investigated before acceptance; no distribution exception compensates for it.
+Both `sparse8/1000` cases and both `skew99/65536` cases were within A/A. Raw evidence remains outside Git in `conditional-work-screen-v1`, `conditional-work-screen-v2`, `conditional-work-shapes-v2` and `convergence-work-v1`. Reproduce the second candidate's selections with `--types u64,row_u64 --distributions random,skew99 --lengths 1000,65536` and `--types u64,row_u64 --distributions sparse8,hot50,sparse_digits,bimodal --lengths 1000`, using `pnpm tools compare commit cb6be7f --cpu 2` and separate output directories. These are process screens, not source attribution. The flat child-continuation estimate misses further MSD opportunities; no distribution exception compensates for it.
+
+A third candidate recursively projects the retained sample onto each nonterminal child's next digit and compares that continuation with flat passes. No further input samples or allocations are introduced, and every estimated level removes a digit. Its six-case screen (`conditional-work-recursive-v3`, same baseline and conditions, `--types u64,row_u64 --distributions random,bimodal,skew99 --lengths 1000`) reduces but does not resolve the bimodal loss:
+
+| Third-revision case | Current / baseline | Block range | A/A range | Screen |
+|---|---:|---|---|---|
+| `u64/bimodal/1000` | 1.0569 | 1.0450–1.0638 | 0.9938–1.0062 | slower |
+| `row_u64/bimodal/1000` | 1.0541 | 1.0503–1.0789 | 0.9944–1.0056 | slower |
+| `u64/random/1000` | 1.0267 | 1.0186–1.0311 | 0.9933–1.0067 | slower |
+| `row_u64/random/1000` | 1.0234 | 0.9933–1.0292 | 0.9616–1.0384 | within A/A |
+| `u64/skew99/1000` | 1.0016 | 0.9928–1.0077 | 0.9969–1.0031 | within A/A |
+| `row_u64/skew99/1000` | 1.0107 | 0.9884–1.0441 | 0.9797–1.0203 | within A/A |
+
+The third candidate passes serial/Rayon tests, Clippy, site checks and all six affected planner tests under Miri. Independent source review found no issues but explicitly withheld performance acceptance. Fixed-work counters (`conditional-recursive-counters-v3`, one sort per process against `cb6be7f`) show additional instructions: 9.52% / 7.48% for `bimodal/1000` and 4.19% / 3.21% for `random/1000`, direct / keyed respectively; identical baseline repeats had identical instruction totals. These counts establish additional work, not its full latency contribution. These candidates remain performance-unaccepted; the residual model/planning work and broader coverage must be evaluated before adopting the trade-off.

@@ -41,13 +41,25 @@ test("conditional child work preserves terminal groups without a fanout cutoff",
       (_, index) => (BigInt(index) * 0x9e3779b97f4a7c15n) & ((1n << 52n) - 1n),
     ),
   );
-  assert.equal(chooseTileLeaf(1024, varying, 12, sample, 64), "lsd");
+  assert.ok(partitionWork(1024, varying, digit, sample, 8, 64) > 2 * sample.length);
+  assert.equal(chooseTileLeaf(1024, varying, 12, sample, 64), "msd");
   const mask = ((1n << 12n) - 1n) << 52n;
   assert.equal(partitionWork(1024, mask, digit, sample, 8, 64), 2 * sample.length);
   assert.ok(partitionWork(8192, varying, { shift: 63, width: 1 }, [0n], 8, 64) > 2);
   assert.equal(chooseTileLeaf(8192, 0xfffffn, 14, [], 64), "lsd");
   assert.equal(chooseTileLeaf(8192, 0n, 14, [], 64), "done");
   assert.equal(chooseTileLeaf(48, varying, 6, [], 64), "insertion");
+});
+
+test("sampled child continuation retains recursive partition opportunities", () => {
+  for (const groups of [2n, 4n, 8n]) {
+    const records = Array.from({ length: 1024 }, (_, i) => {
+      const index = BigInt(i);
+      return ((index % groups) << 60n) | ((index * 0x9e3779b97f4a7c15n) & ((1n << 40n) - 1n));
+    });
+    const varying = records.reduce((mask, key) => mask | (key ^ records[0]), 0n);
+    assert.equal(chooseTileLeaf(records.length, varying, 12, sampleKeys(records), 64), "msd");
+  }
 });
 
 test("bounded sampling covers short inputs and does not alias periodic keys", () => {

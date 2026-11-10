@@ -174,6 +174,31 @@ test("invalid samples fail validation", () => {
   }
 });
 
+test("short reports retain their declared budget and reject missing or extra blocks", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-short-report-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const dataset = createFixture(false, 3);
+  await writeFixture(directory, false, dataset);
+  const loaded = await loadRun([directory]);
+  assert.equal(loaded.manifests.get("default")!.blocks, 3);
+  await writeReport([directory]);
+  assert.match(
+    await readFile(join(directory, "report/index.md"), "utf8"),
+    /3 blocks per case.*short screen/,
+  );
+  loaded.samples[0].block = 3;
+  assert.throws(() => validateRun(loaded), /invalid or unverified/);
+  loaded.samples[0].block = 0;
+  loaded.samples.pop();
+  assert.throws(() => validateRun(loaded), /missing blocks/);
+  dataset.manifests.get("default")!.blocks = 9;
+  await writeFixture(directory, false, dataset);
+  await assert.rejects(loadRun([directory]), /missing blocks/);
+  dataset.manifests.get("default")!.blocks = 2;
+  await writeFixture(directory, false, dataset);
+  await assert.rejects(loadRun([directory]), /budget/);
+});
+
 test("raw results round trip", async () => {
   const dir = await mkdtemp(join(tmpdir(), "tessera-report-"));
   try {
@@ -204,8 +229,8 @@ test("optimization and debug settings must agree across timing, memory and SIMD"
   try {
     const dataset = await writeFixture(dir, true);
     await loadRun([dir]);
-    for (const field of ["opt_level", "debug"]) {
-      const different = field === "opt_level" ? "1" : "true";
+    for (const field of ["opt_level", "debug", "blocks"]) {
+      const different = field === "blocks" ? 3 : field === "opt_level" ? "1" : "true";
       for (const [build, manifest] of dataset.manifests) {
         const memoryPath = join(dir, `memory-manifest-${build}.json`);
         await writeFile(memoryPath, JSON.stringify({ ...manifest, [field]: different }));

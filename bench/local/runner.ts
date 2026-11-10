@@ -8,6 +8,7 @@ import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
 import { criterionGroup, parseCriterionId } from "../catalog.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
+import { pairedBudget } from "../statistics.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
   buildBenchmark,
@@ -36,6 +37,7 @@ interface LocalOptions {
   filter?: string;
   plan: Plan;
   cpu?: string;
+  blocks: number;
   layoutSeeds?: number[];
   layoutControl?: LayoutControl;
 }
@@ -283,7 +285,7 @@ async function measureBlock(
       binary = role === "current" ? binaries.current : binaries.baseline;
     const criterion = join(workspace.directory, "criterion");
     await rm(criterion, { recursive: true, force: true });
-    diagnostic(`Block ${run.blocks.length + 1}/9: ${role}`);
+    diagnostic(`Block ${run.blocks.length + 1}/${options.blocks}: ${role}`);
     const pattern = run.cases.map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
     const args = ["--bench", `^(?:${pattern})$`];
     const { cpu } = options;
@@ -333,6 +335,7 @@ export async function parallelExecution(cpu?: string) {
 /** Compare an immutable working-tree snapshot with a commit, retaining only results. */
 export async function compareLocal(options: LocalOptions) {
   const { root, out, cpu } = options;
+  pairedBudget(options.blocks);
   if (options.layoutControl && !options.layoutSeeds)
     throw new Error("Layout controls require --layout-seeds");
   assertWorkerEnvironment();
@@ -401,6 +404,7 @@ export async function compareLocal(options: LocalOptions) {
           workspace.tree,
           Boolean(options.plan.parallel?.length),
         ),
+        blockCount: options.blocks,
         blocks: [],
       };
       if (layouts.length && run.cases.join("\n") !== layouts[0].run.cases.join("\n"))
@@ -414,14 +418,14 @@ export async function compareLocal(options: LocalOptions) {
     if (result.schema === 2) validateLayoutBuilds(result);
     const save = () => writeFile(join(out, "local.json"), `${JSON.stringify(result, null, 2)}\n`);
     await save();
-    for (let block = 0; block < 9; block++) {
+    for (let block = 0; block < options.blocks; block++) {
       // Rotate layouts between blocks so one seed does not own one time interval.
       for (let offset = 0; offset < layouts.length; offset++) {
         const index = (block + offset) % layouts.length;
         const { seed, run } = layouts[index];
         if (linker) diagnostic(`Layout seed ${seed}`);
         run.blocks.push(await measureBlock(run, executables[index], workspace, options));
-        if (run.blocks.length === 9) summarizeLocal(run);
+        if (run.blocks.length === options.blocks) summarizeLocal(run);
         await save();
       }
     }

@@ -19,6 +19,7 @@ import {
   type Session,
   withSessionLock,
 } from "./session.ts";
+import { pairedBudget } from "./statistics.ts";
 import { buildBenchmark, copySnapshot, type Workspace, withWorkspace } from "./workspace.ts";
 
 /** Acquire native sources and own their link inside an isolated build workspace. */
@@ -95,12 +96,14 @@ export interface ReleaseOptions {
   cpu?: string;
   group?: string;
   sampleMs: number;
+  blocks: number;
   memoryMib: number;
   revisions?: Revisions;
 }
 
 /** Retain immutable builds, then validate, measure and report one experiment. */
 export async function compareAlgorithms(options: ReleaseOptions) {
+  pairedBudget(options.blocks);
   await mkdir(options.out, { recursive: false });
   await withSessionLock(options.out, async () => {
     await prepareComparison(options);
@@ -110,7 +113,7 @@ export async function compareAlgorithms(options: ReleaseOptions) {
 
 /** Build every selected configuration before starting any measurement. */
 async function prepareComparison(options: ReleaseOptions) {
-  const { root, out, plan, cpu, group, sampleMs, memoryMib } = options;
+  const { root, out, plan, cpu, group, sampleMs, memoryMib, blocks } = options;
   if (cpu) await command("taskset", ["-c", cpu, "true"]);
   const native = plan.algorithms.some((id) =>
     catalog.algorithms.some((entry) => entry.id === id && entry.adapter === "native"),
@@ -141,6 +144,7 @@ async function prepareComparison(options: ReleaseOptions) {
     cpu,
     group,
     sampleMs,
+    blocks,
     memoryMib,
     builds,
   };
@@ -163,6 +167,7 @@ async function measureComparison(out: string) {
     "--out",
     out,
     ...(group ? ["--group", group] : []),
+    ...(session.blocks === undefined ? [] : ["--blocks", String(session.blocks)]),
   ];
   for (const build of session.builds) {
     const binary = executables(out, build.name).compare;

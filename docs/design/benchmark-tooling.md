@@ -8,7 +8,7 @@
 |---|---|
 | `tools/` | Task-oriented CLI, exact-ref status, operation logs and workflow dispatch |
 | `.github/scripts/` | Dependency-free CI bootstrap adapters and shared repository policy |
-| `bench/catalog.toml`, `catalog.ts` | Identities, labels, families, record widths, build names and suite order |
+| `bench/catalog.toml`, `catalog.ts` | Identities, labels, families, record widths, build names, suite order and paired-block budgets |
 | `bench/plans/`, `plan.ts`, `config.ts` | Presets, strict schema, CLI overrides and syntax decoding |
 | `bench/workspace.ts` | Source snapshots, builds, temporary worktrees and cleanup |
 | `bench/local/` | Commit comparison, process-level blocks, A/A analysis and report |
@@ -30,7 +30,7 @@ Continuous build, scheduling and submission operations are shared between CI and
 
 ## One catalog and plan contract
 
-The catalog is the language-neutral authority for identities and display names. TypeScript and Rust validate schema version 1; reports use its labels rather than local dictionaries or string heuristics. Historical IDs have readable fallbacks. Executable adapters, capability checks and input generation remain typed Rust code; the catalog does not store functions. Deployment matrices and artifact/security boundaries remain explicit in workflows. New consumers of an ID, mode or record width use the catalog and the owning formatter, not positional parsing or local constants. Code copied into the trusted image stays built-ins-only; where it repeats such a rule, unit tests check it against the owner. Rust and native registries that index the same records share one type list, and layout and output tests cover every entry.
+The catalog is the language-neutral authority for identities, display names and supported paired-block budgets. CLI timing comparisons select the short budget; direct binaries and historical results retain the extended default. `statistics.ts` applies the catalog's agreement count only to a complete declared budget. Sessions, native manifests, journal scheduling and reports consume that count rather than infer completeness from the number of observations. TypeScript and Rust validate schema version 1; reports use its labels rather than local dictionaries or string heuristics. Historical IDs have readable fallbacks. Executable adapters, capability checks and input generation remain typed Rust code; the catalog does not store functions. Deployment matrices and artifact/security boundaries remain explicit in workflows. New consumers of an ID, mode or record width use the catalog and the owning formatter, not positional parsing or local constants. Code copied into the trusted image stays built-ins-only; where it repeats such a rule, unit tests check it against the owner. Rust and native registries that index the same records share one type list, and layout and output tests cover every entry.
 
 Repository-authored selections use TOML; custom plans accept JSON too. Decode syntax once, then use one validated model: products within inclusion rules, union across rules, exclusions and deduplication. TypeScript owns input validation, CLI overrides and editor JSON Schema; Rust expands cases, including boundaries resolved from the measured crate. Do not recreate the case inventory in the CLI.
 

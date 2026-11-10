@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { summarizePaired } from "../statistics.ts";
+import { catalog } from "../catalog.ts";
+import { type PairedVerdict, pairedBudget, summarizePaired } from "../statistics.ts";
 import type { BuildProvenance } from "../workspace.ts";
 
 export interface LocalBlock {
@@ -29,6 +30,8 @@ export interface LocalRun {
     parallel?: { threads: number; allowed: number; affinity: string; topology: string };
   };
   cases: string[];
+  /** Absent in historical nine-block results. */
+  blockCount?: number;
   blocks: LocalBlock[];
 }
 
@@ -39,13 +42,18 @@ export interface LocalSummary {
   high: number;
   aaLow: number;
   aaHigh: number;
-  verdict: "faster" | "slower" | "within noise";
+  verdict: PairedVerdict;
 }
 
-/** Summarize nine process-level blocks with their paired A/A controls. */
-export function summarizeLocal(run: Pick<LocalRun, "cases" | "blocks">): LocalSummary[] {
-  if (run.blocks.length !== 9 || !run.cases.length)
-    throw new Error("Expected nine complete blocks");
+/** Summarize the complete retained budget with its process-level A/A controls. */
+export function summarizeLocal(
+  run: Pick<LocalRun, "cases" | "blocks" | "blockCount">,
+): LocalSummary[] {
+  const { count } = pairedBudget(
+    run.blockCount === undefined ? catalog.pairedBlocks.extended.count : run.blockCount,
+  );
+  if (run.blocks.length !== count || !run.cases.length)
+    throw new Error(`Expected ${count} complete blocks`);
   for (const block of run.blocks) {
     for (const values of [block.baseline, block.control, block.current]) {
       if (
@@ -64,6 +72,7 @@ export function summarizeLocal(run: Pick<LocalRun, "cases" | "blocks">): LocalSu
         second: block.control[id],
         value: block.current[id],
       })),
+      count,
     ),
   }));
 }

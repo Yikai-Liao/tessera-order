@@ -2,8 +2,9 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { rawCaseParts } from "../catalog.ts";
+import { catalog, rawCaseParts } from "../catalog.ts";
 import { renderRows } from "../plot/rows.ts";
+import { pairedBudget } from "../statistics.ts";
 import { type LayoutRun, summarizeLayouts } from "./layout.ts";
 import { type LocalRun, summarizeLocal } from "./model.ts";
 
@@ -11,6 +12,7 @@ import { type LocalRun, summarizeLocal } from "./model.ts";
 async function writeLayoutFigures(
   directory: string,
   summaries: ReturnType<typeof summarizeLayouts>,
+  blocks: number,
 ) {
   const figures: string[] = [];
   for (const [index, summary] of summaries.entries()) {
@@ -37,7 +39,7 @@ async function writeLayoutFigures(
     const filename = `layout-${index + 1}.svg`;
     const svg = renderRows({
       title: `Layout times · ${Object.values(rawCaseParts(summary.id)).filter(Boolean).join(" · ")}`,
-      guide: "Median time per sort · lines: observed nine-block ranges, not confidence intervals",
+      guide: `Median time per sort · lines: observed ${blocks}-block ranges, not confidence intervals`,
       columns: [`Median (${label})`, `Block range (${label})`],
       groups: [
         {
@@ -78,7 +80,6 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
   if (result.schema !== 1 && result.schema !== 2)
     throw new Error("Unsupported local result schema");
   const layoutSummaries = result.schema === 2 ? summarizeLayouts(result) : undefined;
-  const layoutFigures = layoutSummaries ? await writeLayoutFigures(directory, layoutSummaries) : "";
   const runs =
     result.schema === 2
       ? result.layouts.map(({ seed, run }) => ({
@@ -87,6 +88,11 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
         }))
       : [{ title: result.configuration, run: result }];
   const run = runs[0].run;
+  const { count, agreement } = pairedBudget(run.blockCount ?? catalog.pairedBlocks.extended.count);
+  const short = count === catalog.pairedBlocks.short.count;
+  const layoutFigures = layoutSummaries
+    ? await writeLayoutFigures(directory, layoutSummaries, count)
+    : "";
   const groups = runs.map(({ title, run }) => ({ title, summaries: summarizeLocal(run) }));
   const summaries = groups.flatMap(({ summaries }) => summaries);
   const ratios = summaries.flatMap((s) => [s.low, s.high, s.aaLow, s.aaHigh]);
@@ -96,7 +102,7 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
     ticks.push({ value: 2 ** k, label: `${2 ** k}×` });
   const svg = renderRows({
     title: "Working tree against commit",
-    guide: "Current / baseline run time · lower is better · nine process-level blocks per layout",
+    guide: `Current / baseline run time · lower is better · ${count} process-level blocks per layout${short ? " · short screen" : ""}`,
     columns: ["Time ratio", "A/A range"],
     groups: groups.map(({ title, summaries }) => ({
       title,
@@ -139,11 +145,11 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
 
 Baseline: \`${run.baseline}\`. Working-tree HEAD: \`${run.head}\` (${run.dirty ? "modified" : "clean"}).
 
-This is a development screen, not an in-process source-attribution claim. Each process measures Criterion's mean time per sort. Each block runs the baseline executable twice and the current executable once; ratios use the paired baseline mean. A direction requires eight of nine blocks and a median outside the A/A range. All processes use the same input seed and current harness; they do not share an address space.
+This is a development screen, not an in-process source-attribution claim. Each process measures Criterion's mean time per sort. Each block runs the baseline executable twice and the current executable once; ratios use the paired baseline mean. ${count} blocks per case${short ? " (short screen)" : ""}; a direction requires ${agreement} of ${count} blocks and a median outside the A/A range.${short ? " Conflicting directions or a median within the control range are inconclusive; no extra blocks are added automatically." : ""} All processes use the same input seed and current harness; they do not share an address space.
 
 ${
   layoutSummaries
-    ? `Each fixed seed shuffles LLD's .text.* input sections for both revisions. Seeds rotate between blocks; every seed retains nine complete blocks and its own process-level A/A control. Equal seeds do not imply matching addresses between revisions. The cross-layout median and min/max describe only the observed sample, with no pooled regression verdict or confidence interval. Spreads are max/min minus one across each revision's per-layout median times; they include process and host variation. Link maps are retained as layout-<seed>-<revision>.map. Final rustc arguments are recorded separately from Cargo's dependency flags.
+    ? `Each fixed seed shuffles LLD's .text.* input sections for both revisions. Seeds rotate between blocks; every seed retains ${count} complete blocks and its own process-level A/A control. Equal seeds do not imply matching addresses between revisions. The cross-layout median and min/max describe only the observed sample, with no pooled regression verdict or confidence interval. Spreads are max/min minus one across each revision's per-layout median times; they include process and host variation. Link maps are retained as layout-<seed>-<revision>.map. Final rustc arguments are recorded separately from Cargo's dependency flags.
 
 ${layoutTable}
 

@@ -2,7 +2,8 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { median } from "../statistics.ts";
+import { catalog } from "../catalog.ts";
+import { median, pairedBudget } from "../statistics.ts";
 import { renderFigures } from "./charts.ts";
 import { loadRun } from "./load.ts";
 import { caseId, type Dataset, measurementId, type Summary, summarize, types } from "./model.ts";
@@ -78,7 +79,7 @@ export function collectWarnings(dataset: Dataset): string[] {
 }
 function renderResults(dataset: Dataset, summaries: Map<string, Summary>): string {
   let output =
-    "## Full results\n\nTimes include each sort's scratch allocation. Ratios divide the variant's time by the mean of Tessera's paired samples in the same block. Bounds are per-block minima and maxima. The A/A noise range spans both Tessera samples divided by their block mean, across all blocks. Faster/slower describes the variant relative to Tessera; it requires 8 of 9 blocks to agree and the median to fall outside that range. The tessera-aa row separately reports A2 / A1.\n\n";
+    "## Full results\n\nTimes include each sort's scratch allocation. Ratios divide the variant's time by the mean of Tessera's paired samples in the same block. Bounds are per-block minima and maxima. The A/A noise range spans both Tessera samples divided by their block mean, across all blocks. Faster/slower describes the variant relative to Tessera; it requires the declared budget's direction agreement and a median outside that range (see Measurement budget). A short screen is inconclusive when either condition fails. The tessera-aa row separately reports A2 / A1.\n\n";
   const variants = [
     ...new Set([...dataset.manifests.values()].flatMap((m) => m.variants.map((v) => v.name))),
     "tessera-aa",
@@ -161,7 +162,14 @@ export async function writeReport(directories: string[], partial = false): Promi
   await mkdir(out, { recursive: true });
   let markdown = `# Sorting comparison\n\n${partial ? "Partial suite; only completed groups are shown." : `${dataset.manifests.get("default")!.suite} suite, version 1.`} Every value is regenerated from the accompanying manifests, host fingerprint, blocks and memory samples.\n\n`;
   markdown +=
-    "Nine blocks reuse each case's seed-one input. Their range measures execution variability on that input; it does not measure variability across random inputs. Calibration can choose different batch sizes for different variants, changing the prepared-buffer working set and cache behavior.\n\n";
+    "All blocks reuse each case's seed-one input. Their range measures execution variability on that input; it does not measure variability across random inputs. Calibration can choose different batch sizes for different variants, changing the prepared-buffer working set and cache behavior.\n\n";
+  markdown += "## Measurement budget\n\n";
+  for (const [build, manifest] of dataset.manifests) {
+    const { count, agreement } = pairedBudget(manifest.blocks);
+    markdown += `- ${build}: **${count} blocks per case${count === catalog.pairedBlocks.short.count ? " (short screen)" : ""}**; ${agreement} of ${count} must agree.\n`;
+  }
+  markdown +=
+    "\nNo blocks are added automatically after an inconclusive result. These observed ranges are not confidence intervals.\n\n";
   markdown += renderProvenance(dataset);
   const revisions = dataset.manifests.get("default")!.revisions;
   if (revisions) {

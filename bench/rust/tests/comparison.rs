@@ -80,6 +80,80 @@ fn memory_resumes_missing_adapters() {
     fs::remove_dir_all(directory).unwrap();
 }
 
+#[test]
+fn short_budget_is_retained_and_fixed() {
+    let directory =
+        std::env::temp_dir().join(format!("tessera-short-budget-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    let plan = directory.join("plan.json");
+    fs::write(
+        &plan,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": 1, "harness": "comparison", "algorithms": ["tessera", "std-stable"],
+            "include": [{"types": ["u64"], "distributions": ["random"], "lengths": [49]}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let measure = |blocks: &str| {
+        Command::new(env!("CARGO_BIN_EXE_compare"))
+            .args(["run", "--plan"])
+            .arg(&plan)
+            .arg("--out")
+            .arg(&directory)
+            .args(["--sample-ms", "1", "--memory-mib", "1", "--blocks", blocks])
+            .output()
+            .unwrap()
+    };
+    let invalid = measure("2");
+    assert!(!invalid.status.success());
+    assert!(!directory.join("manifest.json").exists());
+    let first = measure("3");
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    for file in ["manifest.json", "memory-manifest-default.json"] {
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(directory.join(file)).unwrap()).unwrap();
+        assert_eq!(manifest["blocks"], 3);
+    }
+    let path = directory.join("blocks.jsonl");
+    let original = fs::read_to_string(&path).unwrap();
+    let records = || {
+        fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>()
+    };
+    let rows = records();
+    let samples: Vec<_> = rows.iter().filter(|row| row["kind"] == "sample").collect();
+    assert_eq!(samples.len(), 9); // Three adapters, including A/A, in each of three blocks.
+    assert!(
+        samples
+            .iter()
+            .all(|row| row["block"].as_u64().unwrap() < 3 && row["verified"] == true)
+    );
+    assert!(measure("3").status.success());
+    assert_eq!(records(), rows);
+    assert!(!measure("9").status.success());
+    assert_eq!(records(), rows);
+    // An interrupted group is remeasured at the same budget, not promoted to nine.
+    fs::write(
+        &path,
+        original.lines().take(2).collect::<Vec<_>>().join("\n") + "\n",
+    )
+    .unwrap();
+    assert!(measure("3").status.success());
+    assert_eq!(
+        fs::read_to_string(&path).unwrap().lines().count(),
+        rows.len()
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
 #[cfg(feature = "rayon")]
 #[test]
 fn large_parallel_memory_is_measured() {

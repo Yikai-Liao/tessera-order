@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { type Command, InvalidArgumentError, Option } from "commander";
 import { stringify as stringifyToml } from "smol-toml";
 import { cpuListSchema } from "../bench/affinity.ts";
+import { catalog } from "../bench/catalog.ts";
 import { reportMainHistory } from "../bench/continuous/volatility.ts";
 import { compareCounters, reportCounters } from "../bench/local/counters.ts";
 import { LAYOUT_CONTROLS, type LayoutControl, parseLayoutSeeds } from "../bench/local/layout.ts";
@@ -13,6 +14,7 @@ import { compareLocal } from "../bench/local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
 import { checkAlgorithms, compareAlgorithms, resumeComparison } from "../bench/release.ts";
 import { writeReport } from "../bench/report/index.ts";
+import { pairedBudget } from "../bench/statistics.ts";
 import { workingTreeDirty } from "../bench/workspace.ts";
 import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
 
@@ -33,6 +35,18 @@ function parsePositiveInteger(value: string) {
   if (!Number.isSafeInteger(number) || number < 1)
     throw new InvalidArgumentError("expected a positive integer");
   return number;
+}
+
+function blockOption() {
+  return new Option("--blocks <number>", "paired blocks per case (3: short screen; 9: extended)")
+    .argParser((value) => {
+      try {
+        return pairedBudget(Number(value)).count;
+      } catch (error) {
+        throw new InvalidArgumentError((error as Error).message);
+      }
+    })
+    .default(catalog.pairedBlocks.short.count);
 }
 
 function parseCasePattern(value: string) {
@@ -112,7 +126,9 @@ async function report(directories: string[], partial = false) {
   }
   if (local) {
     if (paths.length !== 1 || partial)
-      throw new Error("Local reports require one directory and nine complete blocks per layout");
+      throw new Error(
+        "Local reports require one directory and the complete declared budget per layout",
+      );
     await renderLocalReport(paths[0]);
   } else await writeReport(paths, partial);
 }
@@ -127,6 +143,7 @@ export function experimentCommands(program: Command) {
       .option("--cpu <list>", "pin measurement to a CPU list or range (Linux)", parseLogicalCpu);
 
   measurement("commit [revision]", "Compare the working tree with a commit (default: HEAD)")
+    .addOption(blockOption())
     .option("--filter <regex>", "additional case ID pattern", parseCasePattern)
     .addOption(
       new Option(
@@ -149,6 +166,7 @@ export function experimentCommands(program: Command) {
       async (
         baseline: string | undefined,
         options: MeasurementOptions & {
+          blocks: number;
           filter?: string;
           layoutSeeds?: number[];
           layoutControl?: LayoutControl;
@@ -169,6 +187,7 @@ export function experimentCommands(program: Command) {
             out,
             cpu: options.cpu,
             filter: options.filter,
+            blocks: options.blocks,
             layoutSeeds: options.layoutSeeds,
             layoutControl: options.layoutControl,
           }),
@@ -216,6 +235,7 @@ export function experimentCommands(program: Command) {
     );
 
   measurement("algorithms", "Prepare, validate, measure and report a resumable comparison")
+    .addOption(blockOption())
     .option(
       "--sample-ms <number>",
       "minimum timed sample duration in milliseconds",
@@ -231,7 +251,12 @@ export function experimentCommands(program: Command) {
     .option("--group <type/shape>", "measure one complete group and report it as partial")
     .action(
       async (
-        options: MeasurementOptions & { group?: string; sampleMs: number; memoryMib: number },
+        options: MeasurementOptions & {
+          group?: string;
+          sampleMs: number;
+          memoryMib: number;
+          blocks: number;
+        },
       ) => {
         const plan = await loadPlan(options.plan ?? "smoke", selectAxes(options));
         if (plan.harness !== "comparison")
@@ -245,6 +270,7 @@ export function experimentCommands(program: Command) {
             cpu: options.cpu,
             plan,
             group: options.group,
+            blocks: options.blocks,
             sampleMs: options.sampleMs,
             memoryMib: options.memoryMib,
           }),
@@ -256,6 +282,7 @@ export function experimentCommands(program: Command) {
     "revisions [baseline]",
     "Compare revisions and independent linked copies in one process",
   )
+    .addOption(blockOption())
     .option("--current <revision>", "current library commit (default: working snapshot)")
     .option(
       "--sample-ms <number>",
@@ -267,7 +294,12 @@ export function experimentCommands(program: Command) {
     .action(
       async (
         baseline: string | undefined,
-        options: MeasurementOptions & { current?: string; sampleMs: number; memoryMib: number },
+        options: MeasurementOptions & {
+          current?: string;
+          sampleMs: number;
+          memoryMib: number;
+          blocks: number;
+        },
       ) => {
         if (options.algorithms)
           throw new Error("Revision comparisons select their own linked controls");
@@ -291,6 +323,7 @@ export function experimentCommands(program: Command) {
             out,
             plan,
             cpu: options.cpu,
+            blocks: options.blocks,
             sampleMs: options.sampleMs,
             memoryMib: options.memoryMib,
             revisions: { baseline: baseline ?? "HEAD", current: options.current },

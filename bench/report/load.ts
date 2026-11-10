@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { algorithm } from "../catalog.ts";
+import { pairedBudget } from "../statistics.ts";
 import {
   caseId,
   type Dataset,
@@ -49,10 +50,11 @@ function parseManifest(value: unknown): Manifest {
   if (
     value.schema !== 1 ||
     value.suite_version !== 1 ||
-    value.blocks !== 9 ||
     !["smoke", "release", "custom"].includes(String(value.suite))
   )
     throw new Error("unsupported measurement schema or suite");
+  assertInteger(value.blocks, 1);
+  pairedBudget(value.blocks);
   if (!["default", "portable-simd"].includes(String(value.build))) throw new Error("unknown build");
   for (const name of [
     "commit",
@@ -121,7 +123,7 @@ export function validateRun(dataset: Dataset): void {
       c = m?.cases.find((c) => caseId(c) === s.case_id);
     if (
       !c ||
-      s.block >= 9 ||
+      s.block >= m!.blocks ||
       s.slot >= c.variants.length + 1 ||
       s.verified !== true ||
       ![...c.variants, "tessera-aa"].includes(s.variant) ||
@@ -150,6 +152,7 @@ export function validateRun(dataset: Dataset): void {
     observations.set(id, o);
   }
   for (const [build, m] of dataset.manifests) {
+    pairedBudget(m.blocks);
     for (const c of m.cases) {
       const has = [...c.variants, "tessera-aa"].map((v) =>
         samples.get(measurementId(build, caseId(c), v)),
@@ -162,7 +165,7 @@ export function validateRun(dataset: Dataset): void {
         !observations.has(`${group}:end`)
       )
         continue;
-      if (has.some((s) => s?.length !== 9))
+      if (has.some((s) => s?.length !== m.blocks))
         throw new Error(`missing blocks: ${build}/${caseId(c)}`);
       const start = observations.get(`${group}:start`),
         end = observations.get(`${group}:end`);
@@ -234,6 +237,7 @@ export async function loadRun(directories: string[], partial = false): Promise<D
       assertObject(memory);
       for (const field of [
         "schema",
+        "blocks",
         "source_sha256",
         "rustc",
         "target",
@@ -273,6 +277,7 @@ export async function loadRun(directories: string[], partial = false): Promise<D
       "debug",
       "cargo_encoded_rustflags",
       "cargo_lock",
+      "blocks",
     ]) {
       if (!isDeepStrictEqual(baseline[field], simd[field]))
         throw new Error(`builds do not share a source and compiler configuration: ${field}`);

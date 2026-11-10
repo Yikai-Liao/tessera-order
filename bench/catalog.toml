@@ -2,6 +2,8 @@
 
 schema = 1
 
+pairedBlocks = { short = { count = 3, agreement = 3 }, extended = { count = 9, agreement = 8 } }
+
 algorithms = [
   { id = "tessera", label = "Tessera", stable = true, family = "radix", adapter = "common" },
   { id = "tessera-baseline", label = "Tessera baseline A", stable = true, family = "radix", adapter = "revision" },

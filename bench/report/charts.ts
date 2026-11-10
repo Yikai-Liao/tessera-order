@@ -479,7 +479,7 @@ function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figu
       if (!entries.length) return [];
       return [
         {
-          title: build,
+          title: `${build} · ${dataset.manifests.get(build)!.blocks} blocks`,
           rows: entries.map(
             (summary): Row => ({
               name: sortName(summary.variant),
@@ -508,7 +508,7 @@ function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figu
         title,
         svg: renderRows({
           title,
-          guide: "Sort time / paired Tessera time · nine blocks per build",
+          guide: "Sort time / paired Tessera time · declared blocks per build",
           columns: ["Time ratio", "Block range", "A/A range"],
           groups,
           scale,

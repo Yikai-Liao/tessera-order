@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { catalog } from "../catalog.ts";
 import { median } from "../statistics.ts";
 import { type LocalRun, summarizeLocal } from "./model.ts";
 
@@ -59,6 +60,11 @@ export function validateLayoutBuilds(result: LayoutRun) {
   for (const { run } of result.layouts) {
     for (const field of ["baseline", "head", "configuration", "rustc", "flags"] as const)
       if (run[field] !== first[field]) throw new Error(`Layout runs differ: ${field}`);
+    if (
+      (run.blockCount ?? catalog.pairedBlocks.extended.count) !==
+      (first.blockCount ?? catalog.pairedBlocks.extended.count)
+    )
+      throw new Error("Layout runs differ: block budget");
     if (JSON.stringify(run.source) !== JSON.stringify(first.source))
       throw new Error("Layout runs differ: sources");
     if (run.cases.join("\n") !== first.cases.join("\n"))

@@ -27,7 +27,7 @@ The optional feature and bounded completion are implemented; current contracts b
 | Deliverable | Done when |
 |---|---|
 | Broader acceptance | Extend measured whole-call scaling and memory coverage to other hosts, wide records and expensive extraction, with source-attribution controls for causal claims |
-| Bounded-finisher cache batching | Measure one free-cache lock per gathered bucket against per-source locking on current-main four-thread and eight-thread whole calls; keep it only with controls, no serial regression and preserved progress, callback and panic invariants |
+| Repeated-key parallel roots | Confirm head-versus-main whole-call gains for sharded equality partitioning, with four/eight-thread, random/ordered, wide/owned, panic and memory controls; retain serial performance and the unchanged public bounds |
 
 ### Measured engine refactors
 

@@ -267,12 +267,22 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
 
     let mut keys = [KeyValue::<T, E>::from_usize(0); MODE_SAMPLE_LEN];
     sample_keys(records, &mut keys, extractor);
+    if let Some(equal) = sample_mode(&mut keys) {
+        sort_repeated_root::<T, E, CACHED>(
+            records,
+            extractor,
+            scratch,
+            equal.to_u128(),
+            varying,
+            tile_bytes,
+            shards,
+        );
+        return;
+    }
     // A node the order already groups is finished sequentially: the run split
     // needs no partition pass, so there is nothing to share.
     let top_bit = 1u128 << (top - 1);
-    if sample_mode(&mut keys).is_some()
-        || two_runs(records, top_bit, extractor).is_some_and(|(_, set)| !set)
-    {
+    if two_runs(records, top_bit, extractor).is_some_and(|(_, set)| !set) {
         Sorter::<T, E, CACHED> {
             scratch,
             extractor,
@@ -362,6 +372,70 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
         }
         scratch.block.recycle_ends(ends);
     });
+}
+
+/// Encodes the three bands of `Sorter::partition_equal` as a two-bit digit.
+///
+/// The rank is not a record key, so counting/filling is never forwarded.
+#[derive(Clone)]
+struct EqualityRank<E> {
+    extractor: E,
+    equal: u128,
+}
+
+impl<T, E: Extract<T>> Extract<T> for EqualityRank<E> {
+    type Value = u8;
+
+    fn key(&mut self, record: &T) -> u8 {
+        let key = self.extractor.key(record).to_u128();
+        u8::from(key >= self.equal) + u8::from(key > self.equal)
+    }
+}
+
+/// Materializes a sharded equality partition and sorts only its two outer bands.
+fn sort_repeated_root<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: bool>(
+    records: &mut [T],
+    extractor: &mut E,
+    scratch: &mut Scratch<T>,
+    equal: u128,
+    varying: u128,
+    tile_bytes: usize,
+    shards: usize,
+) {
+    let ends = block::partition_digit_parallel_with_visit(
+        records,
+        2,
+        0,
+        EqualityRank {
+            extractor: extractor.clone(),
+            equal,
+        },
+        &mut scratch.block,
+        shards,
+        &mut |_| {},
+    );
+    let (less, rest) = records.split_at_mut(ends[0]);
+    let (_, greater) = rest.split_at_mut(ends[1] - ends[0]);
+    scratch.block.recycle_ends(ends);
+    let mut right_extractor = extractor.clone();
+    rayon::join(
+        || {
+            Sorter::<T, E, CACHED> {
+                scratch,
+                extractor,
+                tile_bytes,
+            }
+            .sort_child(less, varying)
+        },
+        || {
+            Sorter::<T, E, CACHED> {
+                scratch: &mut Scratch::new(),
+                extractor: &mut right_extractor,
+                tile_bytes,
+            }
+            .sort_child(greater, varying);
+        },
+    );
 }
 
 /// Bounds staging to square-root space and declines infeasible root layouts.

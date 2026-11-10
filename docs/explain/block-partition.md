@@ -70,6 +70,8 @@ A bucket is contiguous in the input as soon as its last record has been copied. 
 
 The optional Rayon path scatters disjoint input shards independently. Its directory reads bucket 0 from the first shard, then bucket 0 from the second, and so on before bucket 1. This preserves original input order inside every bucket regardless of which worker finishes first.
 
+A root with a frequent sampled key can use that same sharded scatter: classify records below, equal to and above the key as ranks 0, 1 and 2. Four buckets hold those three outcomes, with the last unused. This route materializes the partition, leaves the equal band untouched, and sorts the two disjoint outer bands concurrently. It does not use an input-sized staging buffer.
+
 A bounded root bucket need not become contiguous in the input before sorting. A worker gathers its source prefixes in directory order into private staging, releasing those physical blocks for reuse. It sorts the staged records, then writes their final input band. Before overwriting any full input block, it checks the block's owner: an unread source moves to a free block and its logical location is updated. A finalized block cannot hold an unread source; adjacent buckets may then write disjoint fragments of it. The input tail holds no unread source after scatter.
 
 Free blocks are shared through registered per-bucket caches and a reserve. A completed or suspended worker cannot hide its unused free blocks. Source relocation locks physical owners in increasing ID order, and no metadata lock spans a user key callback. If a callback panics, its serial sorter restores the staged bucket; all staged and unread buckets finish their writes before the panic propagates.

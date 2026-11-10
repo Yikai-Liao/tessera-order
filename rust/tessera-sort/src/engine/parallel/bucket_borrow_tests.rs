@@ -35,6 +35,57 @@ fn sort_group<'records, T: Send, E: Extract<T> + Clone + Send>(
 }
 
 #[test]
+fn equality_ranks_keep_key_bounds_and_disable_filling() {
+    let pivot = 1u128 << 64;
+    let mut rank = EqualityRank {
+        extractor: Direct,
+        equal: pivot,
+    };
+    let mut records = [0u128, pivot - 1, pivot, pivot + 1, u128::MAX];
+    assert_eq!(records.map(|record| rank.key(&record)), [0, 0, 1, 2, 2]);
+    let original = records;
+    assert!(!rank.try_count_window(&mut records, 0, 2));
+    assert_eq!(records, original);
+    for (pivot, ranks) in [(0, [1, 2]), (u128::MAX, [0, 1])] {
+        let mut rank = EqualityRank {
+            extractor: Direct,
+            equal: pivot,
+        };
+        assert_eq!([0u128, u128::MAX].map(|record| rank.key(&record)), ranks);
+    }
+}
+
+#[test]
+fn equality_partition_keeps_exclusive_owned_records() {
+    let mut records: Vec<_> = [7u64, 3, 1, 3, 9, 2, 3, 6]
+        .into_iter()
+        .enumerate()
+        .map(|(id, key)| (Cell::new(key), Box::new(id)))
+        .collect();
+    let mut rank = EqualityRank {
+        extractor: ByKey(&|row: &(Cell<u64>, Box<usize>)| row.0.get()),
+        equal: 3,
+    };
+    let mut buffers = block::Buffers::new();
+    let ends = block::partition_digit_with_ends(
+        &mut records,
+        2,
+        0,
+        &mut rank,
+        &mut buffers,
+        &mut |_, _| {},
+    );
+    assert_eq!(ends, [2, 5, 8, 8]);
+    assert_eq!(
+        records.iter().map(|row| *row.1).collect::<Vec<_>>(),
+        [2, 5, 1, 3, 6, 0, 4, 7]
+    );
+    for row in records {
+        assert_eq!(row.0.get(), [7, 3, 1, 3, 9, 2, 3, 6][*row.1]);
+    }
+}
+
+#[test]
 fn bucket_slices_keep_provenance() {
     let mut records = [3_u64, 2, 1, 0, 7, 6, 5, 4];
     sort_group(&mut records, Direct);

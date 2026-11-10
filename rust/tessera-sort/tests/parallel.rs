@@ -240,6 +240,127 @@ fn large_sort_uses_workers_and_recovers_task_panics() {
     assert_eq!(ids, (0..LEN as u32).collect::<Vec<_>>());
 }
 
+#[test]
+#[cfg(not(miri))]
+fn repeated_root_uses_workers_stably() {
+    let len = 1usize << 18;
+    let mut records: Vec<_> = (0..len)
+        .map(|id| {
+            let key = if id % 16 == 0 {
+                mix(id as u64)
+            } else {
+                1 << 63
+            };
+            (Cell::new(key), id)
+        })
+        .collect();
+    let mut expected: Vec<_> = records.iter().map(|row| (row.0.get(), row.1)).collect();
+    expected.sort_by_key(|row| row.0);
+    let calls = AtomicUsize::new(0);
+    let workers = Mutex::new(HashSet::new());
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    pool.install(|| {
+        par_stable_sort_by_key(&mut records, |row| {
+            if calls.fetch_add(1, Ordering::Relaxed) % 1024 == 0 {
+                workers
+                    .lock()
+                    .unwrap()
+                    .insert(rayon::current_thread_index().unwrap());
+            }
+            row.0.get()
+        });
+    });
+    assert_eq!(
+        records
+            .iter()
+            .map(|row| (row.0.get(), row.1))
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert!(
+        workers.lock().unwrap().len() > 1,
+        "repeated root stayed serial"
+    );
+}
+
+#[test]
+#[cfg(not(miri))]
+fn repeated_root_recovers_worker_key_panic() {
+    let len = 1usize << 17;
+    let mut records: Vec<_> = (0..len as u32)
+        .map(|id| {
+            let key = if id % 16 == 0 {
+                mix(u64::from(id))
+            } else {
+                1 << 63
+            };
+            (Cell::new(key), Box::new(id))
+        })
+        .collect();
+    let offset = Mutex::new(0u64);
+    let panicked = AtomicBool::new(false);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        pool.install(|| {
+            let guard = offset.lock().unwrap();
+            let origin = std::thread::current().id();
+            let panicked = &panicked;
+            par_stable_sort_by_key(&mut records, move |row| {
+                if std::thread::current().id() != origin && !panicked.swap(true, Ordering::Relaxed)
+                {
+                    panic!("repeated-root worker key panic");
+                }
+                row.0.get().wrapping_add(*guard)
+            });
+        });
+    }));
+    assert!(result.is_err());
+    assert!(panicked.load(Ordering::Relaxed));
+    for row in &records {
+        let id = *row.1;
+        let key = if id % 16 == 0 {
+            mix(u64::from(id))
+        } else {
+            1 << 63
+        };
+        assert_eq!(row.0.get(), key);
+    }
+    let mut ids: Vec<_> = records.into_iter().map(|row| *row.1).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, (0..len as u32).collect::<Vec<_>>());
+}
+
+#[test]
+#[cfg(not(miri))]
+fn changing_repeated_keys_keep_records() {
+    let len = 1usize << 17;
+    let mut records: Vec<_> = (0..len).map(Box::new).collect();
+    let calls = AtomicUsize::new(0);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    pool.install(|| {
+        par_stable_sort_by_key(&mut records, |_| {
+            let call = calls.fetch_add(1, Ordering::Relaxed);
+            assert!(
+                call < 100 * len,
+                "changing equality keys did not make progress"
+            );
+            if call % 16 == 0 { u64::MAX } else { 0 }
+        });
+    });
+    let mut ids: Vec<_> = records.into_iter().map(|record| *record).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, (0..len).collect::<Vec<_>>());
+}
+
 fn mix(value: u64) -> u64 {
     let mut value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);

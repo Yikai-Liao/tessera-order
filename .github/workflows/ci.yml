@@ -94,7 +94,8 @@ jobs:
   comparison:
     needs: changes
     if: needs.changes.outputs.comparison == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     env:
       TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/comparison
       # Match the CLI before testing so functional builds can be reused unchanged.
@@ -105,15 +106,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target/comparison"
-          shared-key: comparison
+          # Keep the native objects in tessera-bench's build-script output.
+          cache-workspace-crates: true
+          shared-key: comparison-native-${{ hashFiles('bench/rust/native/**') }}
+          env-vars: CARGO CC CFLAGS CXX CMAKE RUST ImageOS ImageVersion
       - uses: actions/cache@v6
         with:
           path: bench/vendor
           key: native-sources-${{ runner.os }}-${{ hashFiles('bench/rust/native/sources.toml') }}
       - name: Install native benchmark tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang libtbb-dev
+          clang --version
+          clang++ --version
+          if ! dpkg-query -W -f='${Status}' libtbb-dev 2>/dev/null | grep -q 'install ok installed'; then
+            # Avoid the Azure mirror whose DNS failures stalled this lane.
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt
+            fi
+            sudo apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 update --error-on=any
+            sudo apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 install -y --no-install-recommends libtbb-dev
+          fi
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v7
         with:

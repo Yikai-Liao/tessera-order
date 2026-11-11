@@ -20,12 +20,12 @@ At larger strides, the sample rejects most unsorted inputs within a few pairs. T
 
 ## Budgeted insertion
 
-An unsorted input that fits a tile and has at most 48 records is already small enough for the existing insertion leaf. It goes directly to insertion finishing: trying a budget and scanning varying bits would only lead back to the same algorithm. The order probe still runs first, so ascending and descending inputs keep their existing return and reversal paths. The [executable stage model](../.vitepress/theme/sim/rootInsertion.ts) mirrors this choice.
+An unsorted input that fits a tile and is insertion-sized ([the leaf's threshold](tiles.md#three-leaves)) is already small enough for the insertion leaf. It goes directly to insertion finishing: trying a budget and scanning varying bits would only lead back to the same algorithm. The order probe still runs first, so ascending and descending inputs keep their existing return and reversal paths. The [executable stage model](../.vitepress/theme/sim/rootInsertion.ts) mirrors this choice.
 
 A larger unsorted input may still be *nearly* sorted: a sorted log with a few late entries, for example. Insertion sort finishes such an input in linear time, but on a random input it is quadratic. Tessera therefore gives it a **swap budget** and abandons it when the budget runs out.
 
 - If the input fits in one tile, insertion runs on the records with a budget of n swaps.
-- Otherwise, the keys of a probe window (one tile's worth of records, at most 65,535) are copied into a buffer and insertion-sorted there first. The number of swaps on the window predicts the number on the whole input: the budget for the records is `floor(swaps × n / window)`. The product is computed in a wider integer type, so it cannot overflow before division on a 32-bit target; the resulting budget is at most n. A window that needed no swaps proves nothing, because the inversions are elsewhere, so the radix path continues.
+- Otherwise, the keys of a probe window (one tile's worth of records) are copied into a buffer and insertion-sorted there first. The number of swaps on the window predicts the number on the whole input: the budget for the records is `floor(swaps × n / window)`. The product is computed in a wider integer type, so it cannot overflow before division on a 32-bit target; the resulting budget is at most n. A window that needed no swaps proves nothing, because the inversions are elsewhere, so the radix path continues.
 
 An abandoned insertion pass leaves the records in a different order, but every swap exchanged two adjacent out-of-order records, so equal keys never crossed. The input is still a *stable permutation* of itself, and the radix path sorts it correctly.
 
@@ -41,7 +41,7 @@ Only now do the free functions create tile/block scratch. Budgeted insertion on 
 
 From here on, the engine works on slices of the input and sorts each one in place:
 
-- a **tile** is a slice of at most 64 KiB of records. It is finished in a scratch buffer of the same size, which stays in the L2 cache ([tiles](tiles.md));
+- a **tile** is a slice that fits the cache-resident tile budget, the [size defined on the tiles page](tiles.md). It is finished in a scratch buffer of the same size;
 - a **node** is anything larger. It is split by a stable partition into children, and each child is routed again.
 
 Partition children entering `sort_child` reuse the full order confirmation described above, without first sampling adjacent pairs. An ascending or constant child returns, and a descending child uses the same strict or stable reversal. Thus a radix partition can expose an ordered child even when the full input was not ordered. This applies equally to children from either end or the interior of the input, without an end-run detector or a length cap. Only unordered children scan their remaining candidate bits and continue to the normal routes. The root goes directly to `sort_node`, since it was already probed. The extra check takes at most linear work in the slice length and allocates nothing; it does not run insertion or create a second key buffer.
@@ -88,7 +88,7 @@ While the block partition writes its result back into the input, each child that
 | sorted | probe + one confirming scan | ~1 read pass, no allocation |
 | reversed | probe + scan + stable reversal | ~2 passes, no allocation |
 | all keys equal | confirmation at unit stride; otherwise flat sample + varying-bit scan | ~1 read pass, no allocation |
-| unsorted tile, at most 48 records | insertion finish | bounded quadratic leaf, no allocation |
+| unsorted tile, insertion-sized | insertion finish | bounded quadratic leaf, no allocation |
 | larger nearly sorted input | budgeted insertion | linear in n plus inversions |
 | one dominant key | equality partition | one partition, the equal band is done |
 | ordered or constant child exposed by a partition | full order confirmation, then return or stable reversal | at most linear work in that child |

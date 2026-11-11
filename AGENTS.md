@@ -6,8 +6,8 @@ Build a mature, small and reliable sorting library, with a shared benchmark syst
 
 | Task | Read |
 |---|---|
-| Library behavior or engine changes | [Semantics](conformance/semantics.md), [engine reference](docs/design/engine.md), [engine validation](CONTRIBUTING.md#engine-changes) |
-| Performance-sensitive engine changes | The engine references above and [measurement procedure](docs/development/benchmarking.md#run-an-experiment); consult [engine evidence](docs/design/port.md) for the affected choice |
+| Library behavior or engine changes | [Semantics](conformance/semantics.md), [engine reference](docs/design/engine.md) and the [explanation page](docs/explain/index.md#reading-order) of the changed stage, [engine validation](CONTRIBUTING.md#engine-changes) |
+| Performance-sensitive engine changes | The engine references above and [measurement procedure](docs/development/benchmarking.md#run-an-experiment); consult [engine evidence](docs/design/evidence.md) for the affected choice |
 | Benchmark tooling | [Ownership and boundaries](docs/design/benchmark-tooling.md), then the affected [command contract](docs/development/benchmarking.md#command-capabilities) |
 | Figures | [Figure guide](docs/development/benchmark-figures.md) |
 | PR feedback or history | [Continuous benchmarks](docs/development/continuous-benchmarks.md) |
@@ -45,7 +45,7 @@ Use the `software-design-philosophy` skill for structural engine changes. Judge 
 - Preserve stable Rust and the MSRV in `Cargo.toml`; agree dependency, MSRV or platform-support changes with the operator. New source files carry BSD-2-Clause SPDX headers; retain Clausecker's notice in `block.rs`. Third-party algorithms remain dependencies or verified external sources.
 - Separate structural cleanup from changes to measured algorithms, inputs and sampling. Verify performance-sensitive engine changes using the [measurement contract](docs/development/benchmarking.md#additional-source-attribution-controls).
 - Use domain names and units: records, keys, extractor, `_bytes`, `_bits` and `_len`. Public APIs explain their contract; internal comments explain non-obvious invariants and decisions.
-- Keep current rationale in its owning topic. Update semantics for contract changes and explanations/simulation models for algorithm changes. Track unfinished work in [ROADMAP.md](ROADMAP.md).
+- Keep current rationale in its owning topic. Every fact has one owner in the [ownership table](docs/README.md#who-owns-what): before adding a page or a record, check it; link to the owner instead of restating its numbers or rules; do not add experiment logs (accepted effects belong in the PR description, failed experiments and open losses in [engine evidence](docs/design/evidence.md)). Update semantics for contract changes and explanations/simulation models for algorithm changes. Track unfinished work in [ROADMAP.md](ROADMAP.md).
 - Every PR receives an independent subagent review before merge. Review affected runtime paths, trust boundaries and shared-rule consumers; resolve accepted findings and re-review material fixes.
 
 ## Commands

@@ -25,7 +25,7 @@
 An LSD radix sort is stable and runs in linear time, but it needs a second buffer as large as the input. Comparison sorts avoid that buffer and pay O(n log n) comparisons instead. Tessera keeps the radix sort's linear time and stability and bounds the extra memory to O(√n).
 
 - **Stable**, also for descending keys.
-- **O(√n) auxiliary memory**, through a stable in-place block partition and a bounded 64 KiB tile buffer.
+- **O(√n) auxiliary memory**, through a stable in-place block partition and a bounded tile buffer.
 - **Adaptive.** Sorted, reverse-sorted, nearly sorted and heavily repeated inputs take shortcuts, and constant key bits are skipped.
 - **Any record type.** No `Copy`, `Clone`, `Default` or `Ord` needed. Records are moved, never duplicated, even if the key function misbehaves or panics.
 - **Wide keys.** Integers up to 128 bits, `f32` and `f64` in `total_cmp` order, and `Reverse<K>`.

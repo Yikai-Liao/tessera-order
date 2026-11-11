@@ -1,21 +1,35 @@
 # Documentation
 
-Choose a task and read its topic directly. Procedures, contracts and explanations share the same sources for repository readers, agents and the public site. API contracts also live in Rust doctests (`cargo doc --open`).
+Every fact has one owner. Other pages link to it and never restate its numbers or rules, so a change touches its owner and the code, not a chain of pages. Pick your task below; API contracts also live in Rust doctests (`cargo doc --open`).
 
-| Task | Start here |
+## Start here
+
+| Task | Read |
 |---|---|
 | Use the library | [Getting started](guide/getting-started.md) |
 | Check ordering, panic or memory guarantees | [Shared semantics](../conformance/semantics.md) |
-| Change the engine | [Procedure and validation](../CONTRIBUTING.md#engine-changes), [engine reference](design/engine.md), [semantics](../conformance/semantics.md) |
-| Learn the algorithm | [Explanation and reading order](explain/index.md), with interactive figures |
-| Compare source revisions or algorithms | [Command capabilities and measurement procedure](development/benchmarking.md#command-capabilities); [engine evidence](design/port.md) for performance-sensitive engine decisions |
-| Regenerate or interpret a report | [Report command](development/benchmarking.md#command-capabilities), [timing](development/benchmarking.md#timing-and-statistics) and [result contracts](development/benchmarking.md#results-and-provenance) when needed |
-| Read current-head PR performance feedback | [PR feedback](development/continuous-benchmarks.md#read-feedback-from-a-pr) |
-| Investigate main/history or maintain tracking | [Existing evidence](development/continuous-benchmarks.md#read-main-and-history), tracking internals on the same page |
-| Use repository and CI commands | [CLI reference](development/tooling.md) |
-| Change benchmark tooling | [Architecture](design/benchmark-tooling.md); [comparison harness](design/comparison-benchmarks.md) or [figures](development/benchmark-figures.md) when relevant |
-| Maintain documentation | [Contribution rules](../CONTRIBUTING.md#documentation), [site guide](development/docs-site.md) |
-| Contribute, change CI or release | [Contributing](../CONTRIBUTING.md), [CI](development/ci.md), [releases](../RELEASING.md) |
-| Work on future capabilities | [Roadmap](../ROADMAP.md), [Python proposal](proposals/python-binding.md) (not implemented), [engine simplification candidates](proposals/engine-simplification.md) (not accepted) |
+| Learn the algorithm | [Explanation](explain/index.md), with interactive figures |
+| Change the engine | [Engine reference](design/engine.md), then the [explanation page](explain/index.md#reading-order) for the stage you change; [validation](../CONTRIBUTING.md#engine-changes) |
+| Measure a change or compare algorithms | [Benchmark protocol](development/benchmarking.md#run-an-experiment); [engine evidence](design/evidence.md) before repeating an experiment |
+| Read PR or main performance feedback | [PR feedback](development/continuous-benchmarks.md#read-feedback-from-a-pr) |
+| Change benchmark tooling or figures | [Tooling design](design/benchmark-tooling.md), [figure guide](development/benchmark-figures.md) |
+| Change CI, the site or a release | [CI](development/ci.md), [site guide](development/docs-site.md), [releases](../RELEASING.md) |
+| Contribute | [Contributing](../CONTRIBUTING.md) |
+| Plan future work | [Roadmap](../ROADMAP.md), [Python binding design](design/python-binding.md) (not implemented) |
 
-Current rules and their rationale live together in these topics. Superseded decisions remain in Git history, not the active reading path.
+## Who owns what
+
+| Fact | Owner | Update it when |
+|---|---|---|
+| Ordering, stability, panic and memory guarantees | [semantics](../conformance/semantics.md) | The public contract changes |
+| Routing rules, thresholds, digit planning, block size and the reasons for them | The [explanation page](explain/index.md#reading-order) of that stage, with its model in `docs/.vitepress/theme/sim/` | An algorithm rule or constant changes |
+| Code boundaries, invariants, ownership and recovery, parallel completion | [engine reference](design/engine.md) | A boundary or invariant changes, not a threshold |
+| Failed experiments, open measured losses, placement lessons | [engine evidence](design/evidence.md) | An experiment is rejected or an accepted change keeps a loss |
+| Accepted effect of a change | Its PR description | Never in the repository |
+| Unfinished work and its acceptance | [roadmap](../ROADMAP.md) | Work starts, lands or is rejected |
+| Measurement commands, statistics, inputs, result formats | [benchmark protocol](development/benchmarking.md) | A command, input or statistic changes |
+| Hosted benchmark pipeline, PR reports, alerts | [continuous benchmarks](development/continuous-benchmarks.md) | The hosted pipeline changes |
+| Benchmark module ownership and change paths | [tooling design](design/benchmark-tooling.md) | A module boundary moves |
+| CI lanes and routing, release procedure | [CI](development/ci.md), [releasing](../RELEASING.md) | A workflow changes |
+
+An algorithm change normally edits the Rust code, its explanation page and that page's model, plus semantics only when a guarantee changes. If a page needs a number it does not own, it links to the owner.

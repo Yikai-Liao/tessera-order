@@ -8,7 +8,7 @@ The engine in `rust/tessera-sort` is a Stable Rust port of the research prototyp
 
 The [simplification proposal](../proposals/engine-simplification.md) is being evaluated as small, independently reviewed PRs. The maintainer permits individually justified losses up to 10%, asks that the general mechanism retain fast-path savings wherever possible, and requests targeted three-block screens instead of nine-block matrices. These limits do not turn inconclusive controls into source-attribution evidence.
 
-### R2: flat samples as ordinary order candidates — rejected
+### R2: flat samples as ordinary order candidates — merge hold
 
 Against `ef6c174`, the candidate removed `Order::Flat` and its deferred confirmation. Every surviving sampled order candidate instead entered `confirm_order` before insertion and variation. This removed a state and a root-only branch, but constant inputs then used leading-tie confirmation rather than the vectorizable union/intersection variation scan.
 
@@ -18,12 +18,12 @@ Ratios below divide each baseline placement by the current A/A mean. Values belo
 
 | Case | Baseline copies | Current copy | A/A range | Decision |
 |---|---:|---:|---:|---|
-| `u64/equal/65536` | 0.839 / 0.834 | 0.999 | 0.994–1.006 | About 19–20% slower in the primary current placement; reject |
+| `u64/equal/65536` | 0.839 / 0.834 | 0.999 | 0.994–1.006 | About 19–20% slower in the primary current placement; exceeds ordinary limit |
 | `row_u64/equal/65536` | 0.925 / 0.921 | 1.024 | 0.996–1.004 | Primary current placement about 8–9% slower, second current placement worse |
 
-The hot50 and runs medians were within 0.5% of one for both types. The two-values medians spanned 0.988–1.006 for the baseline placements, with ranges overlapping A/A. These unaffected cases do not compensate for the constant-input loss. The screen establishes a practical rejection, not a source-causal slowdown claim: distinct wrappers alone do not establish independent internal bodies, and no disassembly or extra placement experiment was needed to decline the candidate.
+The hot50 and runs medians were within 0.5% of one for both types. The two-values medians spanned 0.988–1.006 for the baseline placements, with ranges overlapping A/A. These cases do not compensate for the constant-input loss or prove that only constant inputs can regress. Sampled equal pairs may conceal nonconstant keys in the gaps, whose confirmation and insertion routing also change. The screen exceeds the ordinary acceptance limit; it is not a source-causal slowdown claim, since distinct wrappers alone do not establish independent internal bodies. The maintainer subsequently requested publication as a regular, non-draft [PR #105](https://github.com/Yikai-Liao/tessera-sort/pull/105), explicitly **do not merge**. A possible all-equal exception remains undecided; R2 is on hold rather than finally rejected.
 
-Serial and Rayon library tests, all-feature workspace Clippy with `TESSERA_BENCH_CHECK_ONLY=1`, and the order-confirmation fixture under Miri passed for the rejected checkpoint. The native-enabled Clippy attempt without check-only mode stopped at missing fetched native sources, before completing; it is not a passing check. No production engine change from R2 is retained. R3 can still unify ordered finishing without changing the flat-sample route.
+Serial and Rayon library tests, all-feature workspace Clippy with `TESSERA_BENCH_CHECK_ONLY=1`, and the order-confirmation fixture under Miri passed for the rejected checkpoint. The native-enabled Clippy attempt without check-only mode stopped at missing fetched native sources, before completing; it is not a passing check. No R2 engine change is included in this documentation PR; its implementation is isolated in PR #105. R3 can still unify ordered finishing without changing the flat-sample route.
 
 ## Eight-core parallel completion
 

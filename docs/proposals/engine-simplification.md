@@ -36,7 +36,8 @@ Ordered by expected value for the risk. "Cases" names the continuous shapes most
 
 | ID | Retire | Replace with | Risk and cases |
 |---|---|---|---|
-| R3 | Three copies of "ascending returns, descending reverses" (probe, flat, child) | One `finish_ordered` operation, retaining the flat-sample route after R2 was rejected | Structural; inlining of the root path |
+| R2 | `Order::Flat` and the second confirmation after the variation scan | Confirm all sampled order candidates with the shared scan | [PR #105](https://github.com/Yikai-Liao/tessera-sort/pull/105) is open, not draft, and explicitly **do not merge**; constant-input losses exceed the ordinary limit, and a possible exception is not accepted |
+| R3 | Three copies of "ascending returns, descending reverses" (probe, flat, child) | One `finish_ordered` operation, retaining the flat-sample route while R2 is on hold | Structural; inlining of the root path |
 | R4 | The `INSERTION_MAX` root shortcut beside the budgeted probe | One insertion attempt that owns its budget; a leaf-sized input is the unlimited-budget case | Short inputs carry the known `random/1000` losses; measure them first |
 | R5 | `Descending { strict }` | Always reverse stably | One extra key scan on `reverse`; likely a rejected candidate, listed so the cost is measured once |
 
@@ -75,7 +76,7 @@ Ordered by expected value for the risk. "Cases" names the continuous shapes most
 
 Evaluate one candidate per PR, against the preceding merged head. Keep a structural change separate from any later routing experiment. Rejection is a completed evaluation, not permission to remove the saving another way without evidence.
 
-1. Root preparation: R2 was rejected on constant-input cost; proceed with R3 while retaining `Flat`. Evaluate R4 separately.
+1. Root preparation: R2 is published in [PR #105](https://github.com/Yikai-Liao/tessera-sort/pull/105) for discussion with an explicit merge hold after its constant-input screen exceeded the ordinary limit. Do not merge R2 without lifting that hold; whether losses are confined to all-equal inputs is unproven. Proceed independently with R3 while retaining `Flat`. Evaluate R4 separately.
 2. Independent small boundaries: N1, X1, X2 and N4, each with its affected invariants and targeted inputs.
 3. Tile and entry cleanup: X4, T1 and X3. Try X3's structural helper before considering narrower-key routing.
 4. Speculative routing: R5 and N2; stop candidates whose known savings cannot be preserved within the acceptance limit.

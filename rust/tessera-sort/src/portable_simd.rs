@@ -162,11 +162,13 @@ fn scan_int<S: Simd, T: SimdIntElement>(simd: S, values: &[T]) -> Option<usize> 
     while index + vectors * lanes <= pairs {
         // One mask check per block; the bitmask also locates the lane, so a
         // block with an inversion needs no second pass over the keys.
+        // The block's fixed-length window lets every load below skip its bounds check.
+        let block = &values[index..=index + vectors * lanes];
         let mut bits = 0u64;
         for vector in 0..vectors {
-            let at = index + vector * lanes;
-            let left = T::Native::<S>::from_slice(simd, &values[at..at + lanes]);
-            let right = T::Native::<S>::from_slice(simd, &values[at + 1..at + 1 + lanes]);
+            let at = vector * lanes;
+            let left = T::Native::<S>::from_slice(simd, &block[at..at + lanes]);
+            let right = T::Native::<S>::from_slice(simd, &block[at + 1..at + 1 + lanes]);
             bits |= left.simd_gt(right).to_bitmask() << (vector * lanes);
         }
         if bits != 0 {
@@ -206,13 +208,14 @@ where
     };
     let mut index = 0;
     while index + vectors * lanes <= pairs {
+        let block = &values[index..=index + vectors * lanes];
         let mut mask_bits = 0u64;
         for vector in 0..vectors {
-            let at = index + vector * lanes;
-            let left = encode(T::Native::<S>::from_slice(simd, &values[at..at + lanes]));
+            let at = vector * lanes;
+            let left = encode(T::Native::<S>::from_slice(simd, &block[at..at + lanes]));
             let right = encode(T::Native::<S>::from_slice(
                 simd,
-                &values[at + 1..at + 1 + lanes],
+                &block[at + 1..at + 1 + lanes],
             ));
             mask_bits |= left.simd_gt(right).to_bitmask() << (vector * lanes);
         }

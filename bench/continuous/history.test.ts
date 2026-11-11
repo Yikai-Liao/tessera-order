@@ -41,8 +41,9 @@ test("paired history retains focus after a regression is fixed", () => {
   assert.equal(trend.base, current.summary.baseHash);
 });
 
-test("paired history excludes other baseline Heads and fixes the shared cohort", () => {
-  const other = measured(3, "other", "2026-11-11T00:00:00Z", "different-baseline");
+test("paired history continues across baseline Heads and fixes the shared cohort", () => {
+  // A merge of main changes the baseline, and so the Head, but not the PR.
+  const other = measured(3, "other", "2026-11-11T00:00:00Z", "earlier-baseline");
   const first = measured(1.1, "first", "2026-11-11T01:00:00Z");
   first.report.results[0].pop();
   const current = measured(1, "current", "2026-11-11T02:00:00Z");
@@ -52,11 +53,23 @@ test("paired history excludes other baseline Heads and fixes the shared cohort",
   ])!;
   assert.deepEqual(
     trend.runs.map((run) => run.uuid),
-    ["first", "current"],
+    ["other", "first", "current"],
   );
   assert.equal(trend.sharedCases, current.summary.rows.length - 1);
-  assert.ok(Math.abs(trend.overall[0] - 0.1) < 1e-10);
-  assert.equal(trend.overall[1], 0);
+  assert.ok(Math.abs(trend.overall[0] - 2) < 1e-10);
+  assert.ok(Math.abs(trend.overall[1] - 0.1) < 1e-10);
+  assert.equal(trend.overall[2], 0);
+});
+
+test("paired history excludes other branches", () => {
+  const other = measured(3, "other", "2026-11-11T00:00:00Z");
+  other.report.branch.uuid = "other-pr";
+  const current = measured(1, "current", "2026-11-11T02:00:00Z");
+  const trend = summarizePairedTrend(current.summary, "rust", current.report, [other.report])!;
+  assert.deepEqual(
+    trend.runs.map((run) => run.uuid),
+    ["current"],
+  );
 });
 
 test("unavailable Cloud still produces the current measured trend point", () => {

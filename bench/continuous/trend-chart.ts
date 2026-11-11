@@ -137,6 +137,6 @@ export function trendSvg(configurations: ConfigurationTrend[], base = "main") {
     rows,
     minimumSpan: MIN_SWING,
     reference: `${base} ${bases.join(", ")} · runs ${ranges.join(", ")}`,
-    guide: `value: latest run against ${base} · one scale per row · —: no comparable history`,
+    guide: `value: latest run against its ${base} baseline · one scale per row · —: no comparable history`,
   });
 }

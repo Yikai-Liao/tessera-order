@@ -59,7 +59,7 @@ Current tooling retains one algorithm build, the current paired revision protoco
 
 - Validate the hosted paired pipeline on Actions: retain cold/warm-cache full-suite duration, queue wait, paired median intervals, same-source false alerts and held-out detection evidence for the required backend before claiming hosted stability or tuning the per-case sample budget. Verify direct PR Cloud upload, fork/Dependabot summary-only behavior and partial-job reruns. Automatic main measurements are disabled. The legacy dual-configuration calibration in PR #96 (Actions run `42904693411`) completed all 70 cases per configuration with no same-source alerts; its four measurement jobs took 346–406 seconds. One calibration does not establish long-term false-alert or detection rates.
 
-- Retain raw paired evidence beyond Actions’ 14-day artifacts if longer-term offline regeneration becomes required. PR trend history uses native Bencher Heads segmented by protocol and exact baseline; do not reconnect segments as absolute latency.
+- Retain raw paired evidence beyond Actions’ 14-day artifacts if longer-term offline regeneration becomes required. PR trend history follows one Bencher branch per PR across baseline changes; each point is a ratio to its own baseline, never absolute latency.
 
 - Consolidate distribution-sensitive routing into general mechanisms. Child-order reuse and the bucket-order split replace the capped end-run route; evaluate both against current-head continuous benchmark feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
 

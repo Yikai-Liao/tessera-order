@@ -2,16 +2,16 @@
 // `plan_digits` and `top_window` from `rust/tessera-sort/src/engine/plan.rs`, on
 // BigInt masks so that the explanation pages can plan keys of any width.
 
-/** Bounded clustered sample shared by the engine's mode and occupancy decisions. */
+/** One key per equal stratum at a golden-ratio offset, mirroring `KeySample::collect`. */
 export function sampleKeys(records: readonly bigint[]): bigint[] {
   if (records.length === 0) return [];
   const len = Math.min(records.length, 128);
-  const runs = Math.ceil(len / 8);
-  const stride = 8 + Math.floor((records.length - len) / runs);
-  return Array.from(
-    { length: len },
-    (_, index) => records[Math.floor(index / 8) * stride + (index % 8)],
-  ).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const stride = Math.floor(records.length / len);
+  return Array.from({ length: len }, (_, stratum) => {
+    const fraction = (BigInt(stratum) * 0x9e3779b97f4a7c15n) & ((1n << 64n) - 1n);
+    const offset = Number((fraction * BigInt(stride)) >> 64n);
+    return records[stratum * stride + offset];
+  }).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 export interface Digit {

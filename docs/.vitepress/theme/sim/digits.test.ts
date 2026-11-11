@@ -72,4 +72,7 @@ test("bounded sampling covers short inputs and does not alias periodic keys", ()
   }
   const periodic = Array.from({ length: 1024 }, (_, index) => BigInt(index % 8));
   assert.equal(new Set(sampleKeys(periodic)).size, 8);
+  // Locally ordered input still yields one independent observation per stratum.
+  const ordered = Array.from({ length: 65536 }, (_, index) => BigInt(index));
+  assert.equal(new Set(sampleKeys(ordered).map((key) => key >> 9n)).size, 128);
 });

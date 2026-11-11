@@ -20,8 +20,6 @@ const MAX_TILE_DIGIT_BITS: usize = MAX_DIGIT_BUCKETS.ilog2() as usize;
 const MIN_TILE_DIGIT_BITS: usize = 6;
 /// Bounded sample shared by equality and digit-occupancy decisions.
 pub(super) const KEY_SAMPLE_LEN: usize = 128;
-/// Consecutive keys per run avoid aliasing with periodic input.
-const SAMPLE_RUN_LEN: usize = 8;
 /// A value occupying this fraction of the sample merits an equality partition.
 const MODE_SHARE_DENOMINATOR: usize = 4;
 
@@ -33,20 +31,22 @@ struct KeySample<V> {
 }
 
 impl<V: Unsigned> KeySample<V> {
-    /// Reads bounded runs distributed across a nonempty input, then sorts the keys.
+    /// Reads one key from each equal stratum of a nonempty input, then sorts them.
+    ///
+    /// A golden-ratio offset within each stratum avoids aliasing with periodic
+    /// input, and locally ordered keys still yield independent observations.
     fn collect<T, E: Extract<T, Value = V>>(records: &[T], extractor: &mut E) -> Self {
         let len = records.len().min(KEY_SAMPLE_LEN);
         let mut sample = Self {
             keys: [V::from_usize(0); KEY_SAMPLE_LEN],
             len,
         };
-        let runs = len.div_ceil(SAMPLE_RUN_LEN);
-        let stride = SAMPLE_RUN_LEN + (records.len() - len) / runs;
-        for (run, keys) in sample.keys[..len].chunks_mut(SAMPLE_RUN_LEN).enumerate() {
-            let start = run * stride;
-            for (key, record) in keys.iter_mut().zip(&records[start..]) {
-                *key = extractor.key(record);
-            }
+        let stride = records.len() / len;
+        for (stratum, key) in sample.keys[..len].iter_mut().enumerate() {
+            // A fixed-point fraction times `stride` stays below `stride`.
+            let fraction = (stratum as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+            let offset = ((u128::from(fraction) * stride as u128) >> 64) as usize;
+            *key = extractor.key(&records[stratum * stride + offset]);
         }
         sample.keys[..len].sort_unstable();
         sample
@@ -465,6 +465,15 @@ mod tests {
                 assert_eq!(sample.top_digit_occupancy(digit), buckets.len());
             }
         }
+    }
+
+    #[test]
+    fn locally_ordered_nodes_keep_the_initial_split_width() {
+        // Neighbouring records share their top digit. A sample of adjacent
+        // keys would under-count occupancy and widen past what it can test.
+        let records: Vec<u64> = (0..65536).collect();
+        let sample = KeySample::collect(&records, &mut Direct);
+        assert_eq!(choose_split_digit(records.len(), 16, 512, &sample).width, 8);
     }
 
     #[test]

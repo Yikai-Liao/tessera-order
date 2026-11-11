@@ -64,7 +64,7 @@ A node that reaches its digit partition may already hold the two runs its top va
 
 ### Repeated key
 
-The node samples up to 128 keys in runs of 8 consecutive keys. Runs rather than single keys avoid aliasing with periodic data. Sorting this bounded sample lets both equality detection and digit occupancy use the same extracted keys. If one value fills at least a quarter of the sample, an **equality partition** splits the node into three bands: keys below, equal to, and above that value. The equal band is finished, since all of its keys are the same. The other two are routed again.
+The node samples up to 128 keys, one from each equal stratum. A golden-ratio offset inside each stratum avoids aliasing with periodic data, and locally ordered input still gives independent observations rather than runs of neighbours that share their top digit. Sorting this bounded sample lets both equality detection and digit occupancy use the same extracted keys. If one value fills at least a quarter of the sample, an **equality partition** splits the node into three bands: keys below, equal to, and above that value. The equal band is finished, since all of its keys are the same. The other two are routed again.
 
 A heavily skewed distribution (Zipf, a default value, a null marker) would otherwise put most records in one bucket on every digit, and that bucket would cost one pass per digit.
 

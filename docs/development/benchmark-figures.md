@@ -65,6 +65,7 @@ A new dataset does not require a new template. A genuinely different question ma
 - Blue emphasizes Tessera or less run time, orange identifies other radix sorts or more run time, and neutral grey provides context. A chart's legend states its meaning; colour alone does not carry the verdict.
 - Use dots and ranges for comparisons. A reference line makes the denominator visible. Ratio comparisons use logarithmic spacing; equal multiplicative changes occupy equal distances.
 - Tessera is drawn above the competitor field. Rings distinguish reference observations such as random-input memory from the worst case. The shared axis includes every plotted value; values outside 1/32×–32× use overflow triangles, with their numeric values retained in the accompanying tables. Selected-input figures also mark off-scale block-range endpoints, even when the median is in range, and print both bounds in the figure and table.
+- PR comparison and trend matrices group serial and parallel cases vertically under mode headings, with serial first. Each trend group starts with its own geometric mean; case labels reserve tags for qualifiers such as non-default seeds, not the mode.
 - Thin rules separate groups. Titles and value columns carry hierarchy; avoid gradients, shadows, 3D effects and per-chart font choices.
 - Light and dark surfaces use the same semantic colours and separate neutral tokens. Standalone SVGs carry literal neutral colours for image viewers; ordinary CSS supplies browser dark mode. Every SVG includes a title and description.
 

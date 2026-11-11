@@ -18,7 +18,7 @@ import {
   renderCombined,
   renderFailure,
 } from "./markdown.ts";
-import { configurationMarker } from "./marker.ts";
+import { publicationMarker } from "./marker.ts";
 import { type PairedSource, pairedSummary, publishedVariants, readPaired } from "./paired.ts";
 
 interface PublicationOptions {
@@ -44,7 +44,10 @@ export async function publishReport({ github, context, core, inputs }: Publicati
   const { hash, baseHash, number, baseRef = "main", artifacts } = inputs;
   const runUrl = workflowUrl(context);
   const variants = await publishedVariants(artifacts);
-  const configurationSummary = configurationMarker(variants.map((variant) => variant.id));
+  const configurationSummary = publicationMarker(
+    variants.map((variant) => variant.id),
+    context.runAttempt,
+  );
   const measured = await Promise.all(
     variants.map(async (variant) => {
       const checkId = await startReport({

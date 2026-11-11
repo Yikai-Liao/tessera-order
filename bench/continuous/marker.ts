@@ -7,22 +7,26 @@ export function marker(language: string, hash: string) {
   return `<!-- ${MARKER} language=${language} sha=${hash} -->`;
 }
 
-/** Retain the active check set on every check in one publication. */
-export function configurationMarker(ids: string[]) {
-  return `<!-- tessera-bench-configurations ${JSON.stringify(ids)} -->`;
+/** Retain the active check set and workflow attempt on every published check. */
+export function publicationMarker(configurations: string[], attempt: number) {
+  return `<!-- tessera-bench-publication ${JSON.stringify({ configurations, attempt })} -->`;
 }
 
-/** Read publication metadata; unknown or malformed evidence remains missing. */
-export function readConfigurations(summary: string) {
-  const match = summary.match(/<!-- tessera-bench-configurations (\[[^\n]*\]) -->/);
+/** Read publication metadata; malformed evidence retains the legacy fallback. */
+export function readPublication(summary: string) {
+  const match = summary.match(/<!-- tessera-bench-publication (\{[^\n]*\}) -->/);
   if (!match) return undefined;
   try {
-    const ids: unknown = JSON.parse(match[1]);
+    const value = JSON.parse(match[1]);
+    const ids: unknown = value.configurations;
     return Array.isArray(ids) &&
       ids.length &&
       ids.every((id) => typeof id === "string") &&
-      new Set(ids).size === ids.length
-      ? (ids as string[])
+      new Set(ids).size === ids.length &&
+      typeof value.attempt === "number" &&
+      Number.isSafeInteger(value.attempt) &&
+      value.attempt > 0
+      ? { configurations: ids as string[], attempt: value.attempt as number }
       : undefined;
   } catch {
     return undefined;

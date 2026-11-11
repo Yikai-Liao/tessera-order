@@ -10,7 +10,7 @@ import { mockGitHub } from "./fixtures/github.ts";
 import { pairedRun, writePaired } from "./fixtures/paired.ts";
 import { baseHash, fixture, hash } from "./fixtures/report.ts";
 import { publishReport } from "./index.ts";
-import { readConfigurations } from "./marker.ts";
+import { readPublication } from "./marker.ts";
 import { pairedBmf } from "./paired.ts";
 
 async function publication(
@@ -78,6 +78,7 @@ async function publication(
       payload: {},
       serverUrl: "https://github.com",
       runId: 1,
+      runAttempt: 1,
     },
     inputs: {
       hash,
@@ -191,9 +192,10 @@ test("required-backend evidence publishes one SIMD check without a Default build
     ["Benchmarks (rust, Portable SIMD)"],
   );
   for (const request of created)
-    assert.deepEqual(readConfigurations((request.body.output as { summary: string }).summary), [
-      "portable-simd",
-    ]);
+    assert.deepEqual(readPublication((request.body.output as { summary: string }).summary), {
+      configurations: ["portable-simd"],
+      attempt: 1,
+    });
   const completed = action.requests.filter(
     (request) => request.method === "PATCH" && request.path.includes("/check-runs/"),
   );

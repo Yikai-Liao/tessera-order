@@ -5,7 +5,10 @@ import type { Variant } from "../catalog.ts";
 import { MARKER, marker } from "./marker.ts";
 
 export type GitHub = ReturnType<typeof getOctokit>;
-export type ActionContext = Pick<typeof context, "repo" | "serverUrl" | "runId" | "payload">;
+export type ActionContext = Pick<
+  typeof context,
+  "repo" | "serverUrl" | "runId" | "runAttempt" | "payload"
+>;
 type Repository = ActionContext["repo"];
 
 export interface ActionsCore {

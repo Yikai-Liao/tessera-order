@@ -35,6 +35,7 @@ function sourceFixture(event = "pull_request") {
       repo: { owner: "owner", repo: "tessera" },
       serverUrl: "https://github.com",
       runId: 1,
+      runAttempt: 1,
       payload: {
         workflow_run: {
           event,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { VARIANTS } from "../bench/catalog.ts";
-import { marker, readConfigurations } from "../bench/continuous/marker.ts";
+import { marker, readPublication } from "../bench/continuous/marker.ts";
 import { command } from "./process.ts";
 
 interface Check {
@@ -182,7 +182,8 @@ export async function readStatus(
     VARIANTS.some((variant) => check.name === `Benchmarks (rust, ${variant.name})`),
   );
   const latest = named[0];
-  const ids = readConfigurations(latest?.output.summary ?? "");
+  const metadata = readPublication(latest?.output.summary ?? "");
+  const ids = metadata?.configurations;
   const active = ids?.every((id) => VARIANTS.some((variant) => variant.id === id));
   let variants = active ? VARIANTS.filter((variant) => ids!.includes(variant.id)) : VARIANTS;
   const publication =
@@ -197,7 +198,9 @@ export async function readStatus(
     named.find(
       (check) =>
         check.name === `Benchmarks (rust, ${variant.name})` &&
-        (!publication || check.external_id === publication),
+        (!publication ||
+          (check.external_id === publication &&
+            readPublication(check.output.summary ?? "")?.attempt === metadata?.attempt)),
     ),
   );
   const attached = checks.filter((check) => check !== undefined);

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { configurationMarker, marker } from "../bench/continuous/marker.ts";
+import { marker, publicationMarker } from "../bench/continuous/marker.ts";
 
 const cli = fileURLToPath(new URL("./index.ts", import.meta.url));
 
@@ -210,9 +210,16 @@ test("API failures fail the command instead of returning empty success", async (
   assert.throws(() => f.run("status", "missing"));
 });
 
-for (const scenario of ["fresh", "older-default", "in-progress", "partial-dual"] as const) {
+for (const scenario of [
+  "fresh",
+  "older-default",
+  "in-progress",
+  "partial-dual",
+  "same-run-rerun",
+] as const) {
   test(`status uses the current publication check set: ${scenario}`, async (t) => {
-    const dual = scenario === "partial-dual";
+    const rerun = scenario === "same-run-rerun";
+    const dual = scenario === "partial-dual" || rerun;
     const current = check(20, {
       name: `Benchmarks (rust, ${dual ? "Default" : "Portable SIMD"})`,
       external_id: "80",
@@ -220,7 +227,10 @@ for (const scenario of ["fresh", "older-default", "in-progress", "partial-dual"]
       conclusion: scenario === "in-progress" ? null : "success",
       output: {
         title: "Current publication",
-        summary: configurationMarker(dual ? ["default", "portable-simd"] : ["portable-simd"]),
+        summary: publicationMarker(
+          dual ? ["default", "portable-simd"] : ["portable-simd"],
+          rerun ? 2 : 1,
+        ),
       },
     });
     const old =
@@ -228,7 +238,14 @@ for (const scenario of ["fresh", "older-default", "in-progress", "partial-dual"]
         ? []
         : [
             check(1, { external_id: "70", conclusion: "failure" }),
-            check(2, { name: "Benchmarks (rust, Portable SIMD)", external_id: "70" }),
+            check(2, {
+              name: "Benchmarks (rust, Portable SIMD)",
+              external_id: rerun ? "80" : "70",
+              output: {
+                title: "Older attempt",
+                summary: publicationMarker(["default", "portable-simd"], 1),
+              },
+            }),
           ];
     const f = await fixture(t, {
       "commits/main": { sha: "current", html_url: "commit-url" },

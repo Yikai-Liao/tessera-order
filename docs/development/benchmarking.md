@@ -11,7 +11,7 @@ Run `pnpm tools` from the repository root with Node.js 24 and the pinned pnpm an
 | Compare working-tree code with a commit | `pnpm tools compare commit COMMIT` | Two revision builds, adjacent AB/BA sample pairs, verification, provenance and a report |
 | Sample revision comparisons across layouts | `pnpm tools compare commit COMMIT --layout-seeds 1,2,3,4,5` | One revision pair per fixed LLD seed and descriptive cross-layout ranges; Linux x86-64 GNU only |
 | Compare fixed-work counters | `pnpm tools compare counters COMMIT` | Verified serial batches with Callgrind instruction and simulated cache/branch counts |
-| Probe local PMU access | `pnpm tools continuous probe-counters --out DIR` | Read-only, per-event `perf` availability on the current host |
+| Probe local PMU access | `pnpm tools compare probe-counters --out DIR` | Read-only, per-event `perf` availability on the current host |
 | Compare linked source revisions | `pnpm tools compare revisions BASE --current HEAD` | Serial revisions and independently named copies in one process, repeated-current A/A, verification, allocation and retained executables |
 | Compare algorithms | `pnpm tools compare algorithms` | Registered algorithms in one timing executable, three shuffled blocks by default, two Tessera calls for A/A, verification and allocation measurement |
 | Local parallel comparison | `pnpm tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` | Serial controls, Tessera-8 and Rayon stable-8 in the same harness; choose a CPU list for the host |
@@ -23,11 +23,11 @@ Run `pnpm tools` from the repository root with Node.js 24 and the pinned pnpm an
 
 `compare commit` defaults to `HEAD` and the `local` plan; `compare algorithms` defaults to the `smoke` plan. Replace uppercase placeholders. `report` reads retained results without compiling or measuring; incomplete algorithm sessions require `--partial`, while revision reports require every case's complete recorded sample budget.
 
-CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment (`-C llvm-args=-align-loops=64`, `-C llvm-args=-align-all-nofallthru-blocks=6`) for both revisions, Rust competitors and memory workers. The builder prepends these to Cargo's resolved flags, so explicitly configured values override them, and records the effective flags in provenance. Direct Cargo commands keep their own configuration; hosted comparisons use the CLI defaults.
+CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment (`-C llvm-args=-align-loops=64`, `-C llvm-args=-align-all-nofallthru-blocks=6`) for both revisions, Rust competitors and memory workers. A dependency-free Cargo probe resolves environment, build and target configuration before the single benchmark build. The builder prepends the defaults to those resolved flags, so explicitly configured values override them, and records the effective flags in provenance. Direct Cargo commands keep their own configuration; hosted comparisons use the CLI defaults.
 
 ## Command output
 
-Build and measurement tasks print one compact JSON object with `out`, `log` and `result`; subprocess output and progress go to the adjacent `OUT.log` (each `compare resume` writes its own `OUT.resume-TIMESTAMP-PID.log`), and a failed task exits nonzero with the log path. `--verbose` streams diagnostics instead and no longer guarantees JSON-only stdout. Completed revision and algorithm comparisons return the protocol, ratio denominator, interval meaning, measured counts, faster/slower/within-noise counts and up to five changes with numeric evidence (`omittedChanges` counts the rest; `summaries.json` has everything). Algorithm counts describe opponent/input pairs and exclude the two Tessera controls; layout results stay separate per layout; preparation returns an identity and case count, not a verdict. `report` returns the same summary without reading or rebuilding sources, and `plan` prints compact JSON or editable TOML.
+Build and measurement tasks print one compact JSON object with `out`, `log` and `result`; subprocess output and progress go to the adjacent `OUT.log` (each `compare resume` writes its own `OUT.resume-TIMESTAMP-PID.log`), and a failed task exits nonzero with the log path. `--verbose` streams diagnostics instead and no longer guarantees JSON-only stdout. Completed revision and algorithm comparisons return the protocol, ratio denominator, interval meaning, measured counts, faster/slower/within-noise counts and up to five changes with numeric evidence (current regressions first for revision screens; opponents faster than Tessera first for algorithm and linked-revision comparisons) (`omittedChanges` counts the rest; `summaries.json` has everything). Algorithm counts describe opponent/input pairs and exclude the two Tessera controls; layout results stay separate per layout; preparation returns an identity and case count, not a verdict. Completed comparisons also return the recorded host affinity; `inherited` (revision screens) or a multi-CPU mask means no single-CPU pin was established by default. `report` returns the same summary without reading or rebuilding sources, and `plan` prints compact JSON or editable TOML.
 
 A command's exit status describes execution, not a speedup: a successful `status` means the read succeeded, not that workflows passed. `status` prints one compact object for the exact `target.head` of a remote ref, keeps the latest workflow run per workflow/event/branch and lists only unfinished or failed jobs; `--details` adds full check summaries, the report comment and workflow links, and `--text` a short human overview. Neither triggers jobs or changes GitHub state; authenticate with `gh auth login` first. [PR feedback](continuous-benchmarks.md#read-feedback-from-a-pr) explains how to read it.
 
@@ -77,13 +77,13 @@ Ratios are **placement time / paired current time**: a slower baseline row indic
 
 ## Working-tree comparisons
 
-`compare commit [COMMIT]` and `compare algorithms` snapshot the current staged, unstaged and untracked sources without touching the checkout, build under `~/code/tessera-bench/` (`TESSERA_BENCH_WORK` overrides) and clean up. Internal symlinks are materialized; escaping or dangling links and directory cycles are rejected. Baseline links must resolve inside an archive of the selected commit.
+`compare commit [COMMIT]` and `compare algorithms` snapshot the current staged, unstaged and untracked sources without touching the checkout, build under `~/code/tessera-bench/` (`TESSERA_BENCH_WORK` overrides) and clean up temporary sources. Builds reuse `target/tessera-bench` in the checkout by default; `TESSERA_BENCH_TARGET_DIR` overrides it (relative paths resolve from the repository root). Remove that cache for a cold build, and never share it across trust boundaries. Internal symlinks are materialized; escaping or dangling links and directory cycles are rejected. Baseline links must resolve inside an archive of the selected commit.
 
 `compare commit` accepts any resolvable local commit compatible with the current crate API, harness and lockfile. Both revisions use the current harness, lockfile and toolchain; the baseline substitutes only `rust/tessera-sort`. Linux workers run under `setarch -R` to control address randomization (checked before building). Selected timed IDs must match. The `local` plan measures only `rust/u64/random/65536/s1/api`; override its axes rather than implicitly running the full continuous inventory. `--filter` narrows the resulting IDs.
 
 Fresh worker pairs measure adjacent A/B samples, reversing startup, warm-up and measurement order on every other pair. The catalog owns one warm-up and one sampling budget per revision, divided across samples, with no outer repetition. Input preparation repeats in each fresh process outside the clock. The report gives the median B/A ratio and its distribution-free 99% median interval; only an interval entirely outside 0.95–1.05 alerts. Nominal coverage assumes independent pairs and is per case, not family-wide. The [continuous protocol](continuous-benchmarks.md#within-job-scheduling) defines batching and clocks. This is a development screen, not an in-process or placement-controlled claim.
 
-Output: `plan.json`, `local.json`, `summaries.json`, `index.md`, `local.svg` and the executed `binaries/`. `local.json` records revision and source hashes, executable hashes and paths, both builds' Cargo provenance, host information, selected IDs and observations; regeneration uses the retained counts. Downloaded executables are untrusted code, and JSON-only regeneration never runs them. Interrupted comparisons retain completed cases but cannot be resumed or reported as complete. `--prepare-only`, `compare prepared` and `--shard` are described under [local use of continuous work](continuous-benchmarks.md#local-use).
+Output: `plan.json`, `local.json`, `summaries.json`, `index.md`, `local.svg` and the executed `binaries/`. `local.json` records revision and source hashes, executable hashes and paths, both builds' Cargo provenance, host information, selected IDs and observations; regeneration uses the retained counts. Downloaded executables are untrusted code, and JSON-only regeneration never runs them. Interrupted comparisons retain completed cases but cannot be resumed or reported as complete. `continuous prepare`, `continuous measure` and its `--shard` are described under [local use of continuous work](continuous-benchmarks.md#local-use).
 
 Standard algorithm-report figures show fixed slices and aggregates, not every case; custom lengths omitted from them remain in Full results and `summaries.json`. The [figure guide](benchmark-figures.md) owns presentation and the [tooling design](../design/benchmark-tooling.md) the module boundaries.
 
@@ -113,7 +113,7 @@ Each serial API case runs in three processes: baseline, a second baseline for A/
 
 Hosts whose libc needs instructions Valgrind lacks can use the baseline-ISA container (`docker build -t tessera-callgrind -f bench/local/Callgrind.Dockerfile .`, then `--valgrind-image tessera-callgrind`); it records the image ID, mounts sources read-only and runs without network access.
 
-`continuous probe-counters --out DIR` separately tries `instructions:u`, `branch-misses:u`, `idq.dsb_uops:u`, `idq.mite_uops:u` and `baclears.any:u` with the host's `perf` and preserves each result in `probe.json`. It changes no `perf_event_paranoid` setting and infers nothing about cloud hosts.
+`compare probe-counters --out DIR` separately tries `instructions:u`, `branch-misses:u`, `idq.dsb_uops:u`, `idq.mite_uops:u` and `baclears.any:u` with the host's `perf` and preserves each result in `probe.json`. It changes no `perf_event_paranoid` setting and infers nothing about cloud hosts.
 
 ## Experiment plans
 
@@ -147,7 +147,7 @@ lengths = [1_000_000]
 
 Values within an axis are alternatives; axes within a rule form a Cartesian product; included inputs are measured once; any matching exclusion removes a combination. Omitted axes use the catalog defaults when including and match everything when excluding. Empty choices, unknown fields and unknown identities are errors. The axes are `types`, `distributions` and `lengths` (positive record counts, or `"insertion-max"`, `"insertion-next"` and `"tile-next"`, resolved from the measured library's thresholds and the record width). Case IDs keep the resolved number, and a commit comparison rejects different IDs between revisions.
 
-The `smoke` harness measures Tessera through its public functions; its types and distributions are under `smoke` in [the catalog](../../bench/catalog.toml), those of `comparison` under `comparison`. Criterion IDs end in `/api`; optional `parallel` rules in a smoke plan select four-thread `/par-4` inputs on the same axes. Comparison plans reject `parallel` rules. Inputs always use seed 1, and a plan that selects nothing fails before timing. Algorithm comparisons always retain `tessera`, `std-stable` and the Tessera A/A control; native algorithms enable source acquisition and native compilation. Unsupported adapter/type pairs are omitted from the manifest's capabilities, not recorded as measurements.
+The `smoke` harness measures Tessera through its public functions; its types and distributions are under `smoke` in [the catalog](../../bench/catalog.toml), those of `comparison` under `comparison`. Criterion IDs end in `/api`; optional `parallel` rules in a smoke plan select four-thread `/par-4` inputs on the same axes when built with Rayon. The plan is the only runtime parallel-selection authority; no parallel-enable environment variable is needed. Comparison plans reject `parallel` rules. Inputs always use seed 1, and a plan that selects nothing fails before timing. Algorithm comparisons always retain `tessera`, `std-stable` and the Tessera A/A control; native algorithms enable source acquisition and native compilation. Unsupported adapter/type pairs are omitted from the manifest's capabilities, not recorded as measurements.
 
 ```sh
 pnpm -s tools plan local --types u32,u64 --distributions random,zipf2           # preview
@@ -158,7 +158,7 @@ pnpm tools compare algorithms --plan smoke --algorithms glidesort,radsort \
 pnpm -s tools plan --schema > benchmark-plan.schema.json                         # editor schema
 ```
 
-`--plan` takes a preset name or a `.toml`/`.json` path. Comma-separated CLI axes replace that axis in every inclusion rule; exclusions stay. `--algorithms` replaces the opponent list before the controls are added. `--group` runs one resumable group and marks the report partial. Every result retains the normalized `plan.json`.
+`--plan` takes a preset name or a `.toml`/`.json` path. Comma-separated CLI axes replace that axis in every inclusion rule; exclusions stay. Only `compare algorithms` and `plan` accept `--algorithms`, replacing the opponent list before the controls are added. Revision and counter experiments accept smoke-harness plans (`local` or `continuous`); algorithm and linked-revision experiments accept comparison-harness plans (`smoke`, `release` or `parallel`). `--group` runs one resumable group and marks the report partial. Every result retains the normalized `plan.json`.
 
 ## Local parallel comparisons
 
@@ -191,7 +191,7 @@ pnpm tools compare algorithms --plan release --cpu 2 --out bench/results/release
 pnpm tools compare resume bench/results/release   # same directory; no rebuild or overrides
 ```
 
-Resume verifies retained files before executing them. Validation receipts bind each validation to its executable pair, plan, group and block budget. The Rust journal keeps groups with their full budget and complete memory rows, replaces interrupted groups and drops an incomplete final JSONL write. Changed plans or executables need a new session; Rust also rechecks the host and build provenance. Only one session writer is allowed: after an abrupt parent exit its lease must expire before another CLI writer can recover, and a still-running worker keeps its kernel lock. A completed preparation or a failed/cancelled measurement is not a completed experiment.
+Resume verifies retained files before executing them. Memory sorts, calibration and every timed batch check their outputs; there is no separate automatic validation pass or validation receipt. The direct `validate` command remains available for functional checks without a full measurement. The Rust journal keeps groups with their full budget and complete memory rows, replaces interrupted groups and drops an incomplete final JSONL write. Changed plans or executables need a new session; Rust also rechecks the host and build provenance. Only one session writer is allowed: after an abrupt parent exit its lease must expire before another CLI writer can recover, and a still-running worker keeps its kernel lock. A completed preparation or a failed/cancelled measurement is not a completed experiment.
 
 ## Direct executable sessions
 
@@ -274,7 +274,6 @@ DIR/
   plan.json                       normalized experiment selection
   session.json                    immutable settings and executable hashes
   bin/compare, memory            retained timing/memory executable pair
-  bin/validated.json             successful validation receipt
   manifest.json                   timing build and complete case plan
   memory-manifest-default.json    memory executable's build provenance
   host.json                       machine fingerprint

@@ -11,15 +11,20 @@ import { fetchNative } from "./rust/native/fetch.ts";
 import {
   executables,
   fileHash,
-  isValidated,
   loadSession,
-  recordValidation,
   retainBuild,
   type Session,
   withSessionLock,
 } from "./session.ts";
 import { pairedBudget } from "./statistics.ts";
-import { buildBenchmark, copySnapshot, type Workspace, withWorkspace } from "./workspace.ts";
+import {
+  benchmarkEnvironment,
+  buildBenchmark,
+  copySnapshot,
+  type Workspace,
+  withBuildCache,
+  withWorkspace,
+} from "./workspace.ts";
 
 /** Acquire native sources and own their link inside an isolated build workspace. */
 async function withComparisonWorkspace<T>(
@@ -50,38 +55,25 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
   await withComparisonWorkspace(root, native, async ({ tree, target }) => {
     const features = ["compare", "rayon", ...(native ? ["compare-native"] : [])];
     await prepareRevisions(root, tree, { baseline: "HEAD" }, features);
-    await command(
-      "cargo",
-      [
-        "test",
-        "--locked",
-        "-p",
-        "tessera-bench",
-        "--features",
-        features.join(","),
-        "--lib",
-        "--bins",
-        "--tests",
-        "--target-dir",
-        target,
-      ],
-      { cwd: tree },
-    );
-    await command(
-      "cargo",
-      [
-        "test",
-        "--locked",
-        "-p",
-        "tessera-bench",
-        "--features",
-        features.join(","),
-        "--doc",
-        "--target-dir",
-        target,
-      ],
-      { cwd: tree },
-    );
+    await withBuildCache(target, async () => {
+      const env = await benchmarkEnvironment(tree);
+      for (const targets of [["--lib", "--bins", "--tests"], ["--doc"]])
+        await command(
+          "cargo",
+          [
+            "test",
+            "--locked",
+            "-p",
+            "tessera-bench",
+            "--features",
+            features.join(","),
+            ...targets,
+            "--target-dir",
+            target,
+          ],
+          { cwd: tree, env },
+        );
+    });
     const { executable } = await buildBenchmark(tree, target, "compare", features, {
       profile: "dev",
     });
@@ -115,7 +107,7 @@ export interface ReleaseOptions {
   revisions?: Revisions;
 }
 
-/** Retain the executable pair, then validate, measure and report one experiment. */
+/** Retain the executable pair, then measure verified batches and report one experiment. */
 export async function compareAlgorithms(options: ReleaseOptions) {
   pairedBudget(options.blocks);
   await mkdir(options.out, { recursive: false });
@@ -169,7 +161,7 @@ export async function resumeComparison(out: string) {
   return withSessionLock(out, () => measureComparison(out));
 }
 
-/** Validate immutable inputs, then let the native journal resume complete groups. */
+/** Check immutable inputs, then let the native journal resume verified groups. */
 async function measureComparison(out: string) {
   const session = await loadSession(out);
   const { cpu, group, sampleMs, memoryMib } = session;
@@ -181,15 +173,9 @@ async function measureComparison(out: string) {
     ...(group ? ["--group", group] : []),
     ...(session.blocks === undefined ? [] : ["--blocks", String(session.blocks)]),
   ];
-  const build = session.build;
   const binary = executables(out).compare;
   const execute = (args: string[]) =>
     command(cpu ? "taskset" : binary, cpu ? ["-c", cpu, binary, ...args] : args, { cwd: out });
-  if (!(await isValidated(out, build, session))) {
-    diagnostic("Validating algorithms");
-    await execute(["validate", ...selection]);
-    await recordValidation(out, build, session);
-  }
   diagnostic("Measuring; completed groups are retained");
   await execute([
     "run",

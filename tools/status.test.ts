@@ -206,6 +206,25 @@ test("missing workflows never become a clean verdict", async (t) => {
   assert.match(f.run("status", "feature/topic", "--text"), /No workflow runs attached/);
 });
 
+test("main has no automatic benchmark, while an unmeasured PR is still missing", async (t) => {
+  const responses = {
+    "commits/main": { sha: "current", html_url: "commit-url" },
+    "pulls/49": {
+      number: 49,
+      state: "open",
+      head: { sha: "current" },
+      merge_commit_sha: null,
+      html_url: "pr-url",
+    },
+    "commits/current/check-runs?per_page=100": [{ check_runs: [] }],
+    "actions/runs?head_sha=current&per_page=100": [{ workflow_runs: [] }],
+    "issues/49/comments?per_page=100": [[]],
+  };
+  const f = await fixture(t, responses);
+  assert.equal(JSON.parse(f.run("status", "main")).benchmark.state, "not_applicable");
+  assert.equal(JSON.parse(f.run("status", "--pr", "49")).benchmark.state, "missing");
+});
+
 test("API failures fail the command instead of returning empty success", async (t) => {
   const f = await fixture(t, {});
   assert.throws(() => f.run("status", "missing"));

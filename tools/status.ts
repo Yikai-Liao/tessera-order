@@ -203,7 +203,11 @@ export async function readStatus(
       })),
     })),
     benchmark: {
-      state: check ? (check.conclusion ?? check.status) : "missing",
+      state: check
+        ? (check.conclusion ?? check.status)
+        : resolved.ref === "main"
+          ? "not_applicable"
+          : "missing",
       title: check?.output.title ?? null,
     },
     report: comment?.url ?? null,

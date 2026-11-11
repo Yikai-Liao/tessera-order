@@ -5,12 +5,26 @@ import { runTitleCheck } from "../.github/scripts/check_pr_title.ts";
 import { runDcoCheck } from "../.github/scripts/check-dco.ts";
 import { routeChanges } from "../.github/scripts/ci_changes.ts";
 import { verifyRustRelease } from "../.github/scripts/release.ts";
+import { checkAlgorithms } from "../bench/release.ts";
 import { fetchNative } from "../bench/rust/native/fetch.ts";
-import { repositoryRoot } from "./tasks.ts";
+import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
 
 /** Register repository checks and native-source operations, not CI scheduling policy. */
 export function repositoryCommands(program: Command) {
-  const ci = program.command("ci").description("Reproduce change routing, PR title and DCO checks");
+  const ci = program
+    .command("ci")
+    .description("Reproduce harness, change routing, PR title and DCO checks");
+  ci.command("check")
+    .description("Run comparison harness checks, not a performance experiment")
+    .option("--native", "include native adapters and verify sequential linkage (Linux)")
+    .option("--out <directory>", "new result directory (default: bench/results/<timestamp>)")
+    .action(async (options: { native?: boolean; out?: string }) => {
+      const root = await repositoryRoot();
+      const out = resultDirectory(root, options.out);
+      await runTask(out, Boolean(program.opts().verbose), () =>
+        checkAlgorithms(root, out, Boolean(options.native)),
+      );
+    });
   ci.command("changes")
     .option("--base <commit>", "base commit; unavailable history checks every language")
     .option("--head <commit>", "head commit", "HEAD")

@@ -118,8 +118,6 @@ jobs:
     timeout-minutes: 15
     env:
       TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/comparison
-      # Match the CLI before testing so functional builds can be reused unchanged.
-      RUSTFLAGS: -C llvm-args=-align-loops=64 -C llvm-args=-align-all-nofallthru-blocks=6
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -183,7 +181,7 @@ jobs:
             "$compiler" -std=c++17 -pedantic-errors -Wall -Wextra -Werror \
               -c bench/rust/native/registry.cpp -o "$RUNNER_TEMP/registry.o"
           done
-      - run: pnpm tools check --native --out bench/results/ci
+      - run: pnpm tools --verbose ci check --native --out bench/results/ci
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
@@ -199,7 +197,6 @@ jobs:
     timeout-minutes: 10
     env:
       TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/continuous
-      RUSTFLAGS: -C llvm-args=-align-loops=64 -C llvm-args=-align-all-nofallthru-blocks=6
     outputs:
       matrix: ${{ steps.matrix.outputs.value }}
       baseline: ${{ steps.build.outputs.baseline }}
@@ -229,7 +226,7 @@ jobs:
         run: |
           baseline=$(git merge-base "$PR_BASE" HEAD)
           echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
-          pnpm tools compare commit "$baseline" --plan continuous --prepare-only \
+          pnpm tools continuous prepare "$baseline" \
             --out bench/results/prepared
       - uses: actions/upload-artifact@v7
         with:
@@ -264,7 +261,7 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          pnpm tools compare prepared bench/results/prepared --shard "$SHARD" \
+          pnpm tools continuous measure bench/results/prepared --shard "$SHARD" \
             --out bench/results/continuous
       - name: Retain measurement log
         if: always()

@@ -141,11 +141,13 @@ test("revision selection checks parallel IDs from both binaries", {
     const source = (withParallel: boolean) => `#!${process.execPath}
 if (process.env.TESSERA_BENCH_LIST !== "1" || process.env.TESSERA_BENCH_PLAN !== ${JSON.stringify(plan)}) process.exit(1);
 console.log(${JSON.stringify(serial)});
-if (${withParallel} && process.env.TESSERA_BENCH_PARALLEL === "4") console.log(${JSON.stringify(parallel)});
+if (${withParallel} && JSON.parse(require("node:fs").readFileSync(process.env.TESSERA_BENCH_PLAN)).parallel?.length) console.log(${JSON.stringify(parallel)});
 `;
     for (const path of Object.values(binaries))
       await writeFile(path, source(true), { mode: 0o755 });
+    await writeFile(plan, JSON.stringify({}));
     assert.deepEqual(await selectedCases(binaries, plan, undefined, directory), [serial]);
+    await writeFile(plan, JSON.stringify({ parallel: [{}] }));
     assert.deepEqual(await selectedCases(binaries, plan, undefined, directory, true), [
       serial,
       parallel,

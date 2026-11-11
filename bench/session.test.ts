@@ -9,9 +9,7 @@ import { loadPlan } from "./plan.ts";
 import {
   executables,
   fileHash,
-  isValidated,
   loadSession,
-  recordValidation,
   retainBuild,
   type Session,
   withSessionLock,
@@ -48,18 +46,8 @@ test("sessions retain immutable executable pairs and settings", async (t) => {
   const session = await loadSession(directory);
   assert.deepEqual(session, expected);
   assert.equal(await readFile(executables(directory).memory, "utf8"), "memory contents");
-  const build = session.build;
-  assert.equal(await isValidated(directory, build, session), false);
-  await recordValidation(directory, build, session);
-  assert.equal(await isValidated(directory, build, session), true);
-  assert.equal(await isValidated(directory, build, { ...session, group: "u64/hot50" }), false);
-  assert.equal(await isValidated(directory, build, { ...session, blocks: 3 }), false);
   await writeFile(join(directory, "session.json"), JSON.stringify({ ...session, blocks: 3 }));
   assert.equal((await loadSession(directory)).blocks, 3);
-  assert.equal(
-    await isValidated(directory, { ...build, compareSha256: "0".repeat(64) }, session),
-    false,
-  );
 });
 
 test("resume rejects incomplete or altered experiments before execution", async (t) => {

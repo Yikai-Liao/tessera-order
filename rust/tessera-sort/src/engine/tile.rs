@@ -189,6 +189,10 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
     ///
     /// The records end in the tile, also when a key function panics. `cursor`
     /// then holds each bucket's end for the first digit.
+    // Keep the result at its consumer: LSD discards the histogram maximum,
+    // so optimization can remove its per-record update without a second loop.
+    // Counter and placement evidence: port.md, "Counting-pass result visibility".
+    #[inline(always)]
     fn counting_passes(
         &mut self,
         records: &mut [T],

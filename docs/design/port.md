@@ -462,6 +462,23 @@ A three-block linked screen against `ce71415` covers direct/keyed u64, random/eq
 
 The earlier `before-linked-v3` screen compares the unchanged `ce71415` library against main `3db3860`, not this scan candidate. It reproduces random/49 regressions in both baseline placements: baseline/current ratios 0.694/0.696 for row_u32 and 0.811/0.803 for u64. Two preceding invocations failed before measurement (wrong plan kind, then an output-log filename collision); they provide no timing evidence.
 
+### Counting-pass result visibility
+
+The shared pass loop at `79e3ef2` retained per-record maximum-bucket tracking even for LSD, whose caller discards it. Fixed-work u32/random/1M counters against main `3db3860` showed +13.09% instructions and +17.00% reads with identical baseline/control counts (`/tmp/pr97-work/u32-counters`). The follow-up inlines the existing loop into its consumers: LSD can discard the maximum while MSD retains its whole-tile insertion shortcut. No second source loop, mode parameter, allocation or extra scan is introduced.
+
+A three-block linked screen against `79e3ef2` (`/tmp/pr97-work/pass-inline-linked`) covers u32/u64/row_u32/row_u64, random/d16, 49/1,000/1M records. It uses the same i7-10875H, CPU 2, Rust 1.99.1, alignment, powersave/turbo/SMT settings as the bounded-planner screens. Ratios divide baseline time by current time:
+
+| Case | Baseline A / B | Current B | A/A range |
+|---|---:|---:|---:|
+| u32/random/1M | 1.0524 / 1.0523 | 0.9827 | 0.9659–1.0341 |
+| row_u64/random/1000 | 0.9540 / 0.9496 | 0.9843 | 0.9920–1.0080 |
+| u32/random/49 | 0.9618 / 0.9932 | 0.9601 | 0.9962–1.0038 |
+| u64/random/1M | 0.9895 / 0.9928 | 0.9909 | 0.9842–1.0158 |
+
+The u32/1M direction improves in both placements, but the row_u64/1000 loss remains open; its nearly unchanged instructions do not dismiss its latency loss. Short u32 placement disagreement and other inconclusive cases are retained in the full report. Four fixed-work cases (`pass-inline-counters`, one sort, u32/row_u64 random at 1K/1M) verify the intended removal: u32/1M instructions fall 69,894,067 → 61,889,199 (−11.45%) and reads 13,884,021 → 11,881,593 (−14.42%); baseline/control totals match. Row_u64/1K instructions fall only 0.05%. Disassembly of the retained linked executable shows four distinct u32 tile bodies; current MSD retains histogram maximum updates, current LSD does not. Inlining increases their code footprint and does not establish whole-engine acceptance.
+
+A rejected alternative removed the maximum from every histogram and tested insertion eligibility from completed bucket ends. It achieved similar u32/1M instruction savings but regressed random/49 in both baseline placements for all four types, approximately 11–24%, and u64/random/1M by about 14%. The added boundary scan was not retained. Its patch, counters and linked results remain outside Git in `rejected-cursor-finish.patch`, `cursor-finish-counters` and `cursor-finish-linked` under the same result root. Serial/Rayon tests and both Clippy configurations pass for the inline candidate; final cloud and performance acceptance remain pending.
+
 ### Terminal parallel completion
 
 Independent review found that covering-digit callback buckets still allocated jobs or took pooled scratch before the shared child finisher returned on an empty candidate mask. The callbacks now return before that work, preserving the single partition entry and block recovery operation. A four-thread stable payload test and Rayon Clippy pass. A paired process screen against `11f94f6` (`/tmp/pr97-work/terminal-screen`, CPU 0/2/4/6, same host/toolchain) reports current/baseline 0.9965 for row_u64/d16/1M parallel (99% median interval 0.9661–1.0338), 1.0024 for two_values (0.9931–1.0124), and serial random/65536 control 1.0001 (0.9918–1.0062). This preserves a known saving; the screen makes no measured speedup claim or A/A/source-attribution claim.

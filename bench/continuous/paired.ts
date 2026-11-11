@@ -5,11 +5,11 @@ import { join } from "node:path";
 import {
   caseLabel,
   caseParts,
+  continuous,
   parseCriterionId,
   revisionSampling,
-  type Variant,
 } from "../catalog.ts";
-import { type LocalRun, shardCases, summarizeLocal } from "../local/model.ts";
+import { type LocalRun, readPrepared, shardCases, summarizeLocal } from "../local/model.ts";
 import { parsePlan } from "../plan.ts";
 import { type BencherReport, type Row, summarizeRows } from "./report.ts";
 
@@ -42,32 +42,15 @@ function settings(run: LocalRun) {
  * This run’s prepared pair owns the plan, full inventory and build identity.
  * Only JSON is read; measurement hosts may differ from the preparation host.
  */
-export async function readPaired(
-  directory: string,
-  variant: Variant,
-  source: PairedSource,
-  prepared: string,
-) {
+export async function readPaired(directory: string, source: PairedSource, prepared: string) {
   const runs: LocalRun[] = [];
-  const reference = JSON.parse(await readFile(join(prepared, "local.json"), "utf8")) as LocalRun;
+  const reference = await readPrepared(prepared);
   const expectedCases = reference.cases;
-  const expectedPlan = JSON.stringify(
-    parsePlan(JSON.parse(await readFile(join(prepared, "plan.json"), "utf8"))),
-  );
-  if (
-    reference.schema !== 1 ||
-    reference.protocol !== "paired-samples-v2" ||
-    reference.head !== source.hash ||
-    reference.baseline !== source.baseHash ||
-    reference.dirty ||
-    reference.configuration !== variant.id ||
-    reference.shard ||
-    reference.samples ||
-    reference.sampleCounts
-  )
+  const expectedPlan = JSON.stringify(reference.plan);
+  if (reference.head !== source.hash || reference.baseline !== source.baseHash || reference.dirty)
     throw new Error("Expected this run’s unmeasured prepared pair");
   for (const name of await readdir(directory)) {
-    if (!name.startsWith(`paired-${variant.id}-`)) continue;
+    if (!name.startsWith("paired-")) continue;
     const plan = parsePlan(JSON.parse(await readFile(join(directory, name, "plan.json"), "utf8")));
     if (JSON.stringify(plan) !== expectedPlan) throw new Error("Unexpected continuous plan");
     const run = JSON.parse(await readFile(join(directory, name, "local.json"), "utf8")) as LocalRun;
@@ -87,7 +70,6 @@ export async function readPaired(
       run.dirty ||
       run.head !== source.hash ||
       run.baseline !== source.baseHash ||
-      run.configuration !== variant.id ||
       !shard ||
       shard.count !== count ||
       indexes.has(shard.index) ||
@@ -110,7 +92,7 @@ export async function readPaired(
       ].every((value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)) ||
       JSON.stringify(settings(run).baseline) !== JSON.stringify(settings(run).current) ||
       run.builds.current.features.join(",") !==
-        variant.features
+        continuous.features
           .map((feature) => `CARGO_FEATURE_${feature.toUpperCase().replaceAll("-", "_")}`)
           .toSorted()
           .join(",")
@@ -128,13 +110,8 @@ export async function readPaired(
   return runs.toSorted((a, b) => a.shard!.index - b.shard!.index);
 }
 
-/** Check that Cloud retained this run’s exact configuration and recomputed ratios. */
-export function validateCloud(
-  report: BencherReport,
-  runs: LocalRun[],
-  variant: Variant,
-  number?: string,
-) {
+/** Check that Cloud retained this run’s exact Testbed, branch and recomputed ratios. */
+export function validateCloud(report: BencherReport, runs: LocalRun[], number?: string) {
   const expected = pairedBmf(runs);
   const values = new Map<string, number>();
   for (const result of report.results?.[0] ?? []) {
@@ -151,7 +128,7 @@ export function validateCloud(
     !report.branch.head.uuid ||
     report.results.length !== 1 ||
     report.branch.head.version?.hash !== runs[0].head ||
-    report.testbed.name !== variant.relativeTestbed ||
+    report.testbed.name !== continuous.testbed ||
     report.branch.name !== (number ? `pr-${number}` : "main") ||
     values.size !== Object.keys(expected).length ||
     Object.entries(expected).some(([id, metric]) => {
@@ -167,7 +144,7 @@ export function validateCloud(
 }
 
 /** Derive ratios and verdicts from raw paired samples, never from PR-authored summaries. */
-export function pairedSummary(runs: LocalRun[], variant: Variant, cloud?: BencherReport) {
+export function pairedSummary(runs: LocalRun[], cloud?: BencherReport) {
   const results = runs.flatMap(summarizeLocal);
   const rows: Row[] = results.map((result) => ({
     name: result.id,
@@ -191,7 +168,7 @@ export function pairedSummary(runs: LocalRun[], variant: Variant, cloud?: Benche
     hash: runs[0].head,
     baseHash: runs[0].baseline,
     history: cloud ? [{ branch: cloud.branch.uuid, head: cloud.branch.head.uuid }] : [],
-    testbed: cloud?.testbed ?? { uuid: "", name: variant.relativeTestbed },
+    testbed: cloud?.testbed ?? { uuid: "", name: continuous.testbed },
     project: cloud?.project.slug ?? "",
     uuid: cloud?.uuid ?? "",
   });

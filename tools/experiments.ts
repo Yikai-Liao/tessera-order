@@ -88,32 +88,28 @@ function selectAxes(options: MeasurementOptions): SelectionOptions {
   );
 }
 
+const exists = (path: string) =>
+  access(path).then(
+    () => true,
+    (error: NodeJS.ErrnoException) => (error.code === "ENOENT" ? false : Promise.reject(error)),
+  );
+
 /** Regenerate a report from its persisted result format without rerunning measurements. */
 async function report(directories: string[], partial = false) {
   const paths = directories.map((path) => resolve(path));
-  try {
-    await access(join(paths[0], "counters.json"));
-    if (paths.length !== 1 || partial)
-      throw new Error("Counter reports require one complete result directory");
-    await reportCounters(paths[0]);
-    return;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  const single = paths.length === 1 && !partial;
+  if (await exists(join(paths[0], "counters.json"))) {
+    if (!single) throw new Error("Counter reports require one complete result directory");
+    return reportCounters(paths[0]);
   }
-  let local = false;
-  try {
-    await access(join(paths[0], "local.json"));
-    local = true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  if (local) {
-    if (paths.length !== 1 || partial)
+  if (await exists(join(paths[0], "local.json"))) {
+    if (!single)
       throw new Error(
         "Revision reports require one directory and complete recorded samples per layout",
       );
     return renderLocalReport(paths[0]);
-  } else return writeReport(paths, partial);
+  }
+  return writeReport(paths, partial);
 }
 
 /** Register experiment selection, comparison, verification and regeneration tasks. */

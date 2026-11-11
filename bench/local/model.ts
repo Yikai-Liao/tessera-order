@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { parseCriterionId, revisionSampling } from "../catalog.ts";
+import { type Plan, parsePlan } from "../plan.ts";
 import { summarizeRatios } from "../statistics.ts";
 import type { BuildProvenance } from "../workspace.ts";
 
@@ -37,22 +40,34 @@ export function shardCases(cases: string[], index: number, count: number) {
   return lanes[index - 1].sort();
 }
 
-export interface LocalRun {
+/** Immutable source and executable identity, shared by preparation and measurement. */
+export interface RevisionPair {
   schema: 1;
   protocol: "paired-samples-v2";
-  samples?: Record<string, { baseline: number; current: number }[]>;
-  sampleCounts?: Record<string, number>;
   baseline: string;
   head: string;
   dirty: boolean;
   source: { baseline: string; current: string; harness: string; catalog: string };
   binaries: { baseline: string; current: string };
-  /** Executed files relative to the result directory; absent from older artifacts. */
-  binaryPaths?: { baseline: string; current: string };
-  builds?: { baseline: BuildProvenance; current: BuildProvenance };
+  /** Executed files relative to the artifact directory. */
+  binaryPaths: { baseline: string; current: string };
+  builds: { baseline: BuildProvenance; current: BuildProvenance };
   rustc: string;
   flags: string;
   configuration: string;
+  cases: string[];
+}
+
+/** Complete build inventory and plan; no measurement host, samples or shard. */
+export interface PreparedPair extends RevisionPair {
+  kind: "prepared-revisions";
+  plan: Plan;
+}
+
+/** Measurement state; empty samples are incomplete, never a prepared build. */
+export interface LocalRun extends RevisionPair {
+  samples: Record<string, { baseline: number; current: number }[]>;
+  sampleCounts: Record<string, number>;
   host: {
     platform: string;
     release: string;
@@ -61,8 +76,30 @@ export interface LocalRun {
     affinity: string;
     aslr?: "disabled" | "uncontrolled";
   };
-  cases: string[];
   shard?: Shard;
+}
+
+/** Read one frozen preparation contract for execution or JSON-only CI validation. */
+export async function readPrepared(directory: string): Promise<PreparedPair> {
+  const pair = JSON.parse(await readFile(join(directory, "prepared.json"), "utf8"));
+  if (
+    pair.kind !== "prepared-revisions" ||
+    pair.schema !== 1 ||
+    pair.protocol !== "paired-samples-v2" ||
+    ["host", "shard", "samples", "sampleCounts"].some((field) => field in pair) ||
+    !Array.isArray(pair.cases) ||
+    !pair.cases.length ||
+    new Set(pair.cases).size !== pair.cases.length ||
+    !pair.builds?.baseline ||
+    !pair.builds?.current ||
+    !pair.binaryPaths?.baseline ||
+    !pair.binaryPaths?.current
+  )
+    throw new Error("Expected an unmeasured prepared revision pair");
+  pair.plan = parsePlan(pair.plan);
+  if (pair.plan.harness !== "smoke")
+    throw new Error("Prepared comparisons require a smoke harness plan");
+  return pair;
 }
 
 export interface LocalSummary {
@@ -70,8 +107,6 @@ export interface LocalSummary {
   ratio: number;
   low: number;
   high: number;
-  aaLow?: number;
-  aaHigh?: number;
   verdict: "faster" | "slower" | "within noise";
 }
 

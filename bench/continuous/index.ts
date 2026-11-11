@@ -2,7 +2,6 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { VARIANTS } from "../catalog.ts";
 import { chartSvg } from "./chart.ts";
 import {
   type ActionContext,
@@ -16,7 +15,7 @@ import { loadHistory, summarizePairedTrend, type TrendSummary } from "./history.
 import { type ChartLinks, publishImages } from "./images.ts";
 import { headline, render, renderFailure } from "./markdown.ts";
 import { type PairedSource, pairedSummary, readPaired, validateCloud } from "./paired.ts";
-import type { BencherReport } from "./report.ts";
+import type { BencherReport, ReportSummary } from "./report.ts";
 import { trendSvg } from "./trend-chart.ts";
 
 interface PublicationOptions {
@@ -47,79 +46,55 @@ export async function publishReport({
   fetchHistory,
 }: PublicationOptions) {
   const { hash, baseHash, number, baseRef = "main", artifacts } = inputs;
+  const publish = inputs.publish !== false;
   const runUrl = workflowUrl(context);
-  const measured = await Promise.all(
-    VARIANTS.map(async (variant) => {
-      const checkId =
-        inputs.publish === false ? undefined : await startReport({ github, context, hash });
+  const checkId = publish ? await startReport({ github, context, hash }) : undefined;
+  let summary: ReportSummary | undefined;
+  let trend: TrendSummary | null = null;
+  let reason = "";
+  try {
+    const runs = await readPaired(artifacts, { hash, baseHash }, inputs.prepared);
+    let cloud: BencherReport | undefined;
+    if (inputs.reports) {
       try {
-        const runs = await readPaired(artifacts, variant, { hash, baseHash }, inputs.prepared);
-        let cloud: BencherReport | undefined;
-        if (inputs.reports) {
-          try {
-            cloud = JSON.parse(
-              await readFile(join(inputs.reports, `bencher-${variant.id}.json`), "utf8"),
-            );
-            validateCloud(cloud!, runs, variant, number);
-          } catch (error) {
-            cloud = undefined;
-            core.notice(`Cloud links unavailable: ${String(error)}`);
-          }
-        }
-        const summary = pairedSummary(runs, variant, cloud);
-        let trend = summarizePairedTrend(summary, "rust");
-        if (cloud) {
-          try {
-            trend =
-              summarizePairedTrend(
-                summary,
-                "rust",
-                cloud,
-                await loadHistory(cloud, fetchHistory),
-              ) ?? trend;
-          } catch (error) {
-            core.notice(`PR history unavailable: ${String(error)}`);
-          }
-        }
-        return { variant, checkId, summary, trend, reason: undefined };
+        cloud = JSON.parse(await readFile(join(inputs.reports, "bencher.json"), "utf8"));
+        validateCloud(cloud!, runs, number);
       } catch (error) {
-        return {
-          variant,
-          checkId,
-          summary: null,
-          trend: null as TrendSummary | null,
-          reason: String(error),
-        };
+        cloud = undefined;
+        core.notice(`Cloud links unavailable: ${String(error)}`);
       }
-    }),
-  );
-  const configurations = measured.map((result) => ({
-    name: result.variant.name,
-    outcome: result.summary ? "success" : "failure",
-    summary: result.summary,
-    reason: result.reason,
-  }));
+    }
+    summary = pairedSummary(runs, cloud);
+    trend = summarizePairedTrend(summary, "rust");
+    if (cloud) {
+      try {
+        trend =
+          summarizePairedTrend(summary, "rust", cloud, await loadHistory(cloud, fetchHistory)) ??
+          trend;
+      } catch (error) {
+        core.notice(`PR history unavailable: ${String(error)}`);
+      }
+    }
+  } catch (error) {
+    reason = String(error);
+  }
   let links: ChartLinks = {};
   let imagesUnavailable = false;
   try {
-    const svg = chartSvg(configurations, baseRef);
-    const trend = trendSvg(
-      measured.map((result) => ({ name: result.variant.name, trend: result.trend })),
-      baseRef,
-    );
+    const svg = summary && chartSvg(summary, baseRef);
+    const trendImage = trend && trendSvg(trend, baseRef);
     links = await publishImages({
       github,
       context,
       language: "rust",
       hash,
       number,
-      images:
-        inputs.publish === false
-          ? []
-          : [
-              ...(svg ? [{ kind: "comparison" as const, svg }] : []),
-              ...(trend ? [{ kind: "trend" as const, svg: trend }] : []),
-            ],
+      images: publish
+        ? [
+            ...(svg ? [{ kind: "comparison" as const, svg }] : []),
+            ...(trendImage ? [{ kind: "trend" as const, svg: trendImage }] : []),
+          ]
+        : [],
     });
   } catch (error) {
     core.notice(`Benchmark images unavailable: ${String(error)}`);
@@ -134,26 +109,21 @@ export async function publishReport({
     trendRef: links.trend,
     imagesUnavailable,
   };
-  const first = measured[0];
-  const body = first.summary
-    ? render(first.summary, options)
-    : renderFailure({ ...options, reason: first.reason! });
-  for (const result of measured) {
-    if (result.checkId === undefined) continue;
+  const body = summary ? render(summary, options) : renderFailure({ ...options, reason });
+  if (checkId !== undefined)
     await github.rest.checks.update({
       ...context.repo,
-      check_run_id: result.checkId,
+      check_run_id: checkId,
       status: "completed",
-      conclusion: !result.summary || result.summary.regressions ? "failure" : "success",
+      conclusion: !summary || summary.regressions ? "failure" : "success",
       details_url: runUrl,
       output: {
-        title: result.summary ? headline(result.summary) : "Results could not be validated",
+        title: summary ? headline(summary) : "Results could not be validated",
         summary: body.slice(0, 65000),
       },
     });
-  }
   await core.summary.addRaw(body).write();
-  if (number && inputs.publish !== false)
+  if (number && publish)
     await publishComment({
       github,
       repo: context.repo,
@@ -163,8 +133,7 @@ export async function publishReport({
       body,
       core,
     });
-  if (measured.some((result) => !result.summary))
-    throw new Error("Benchmark results could not be validated");
-  if (inputs.publish === false && measured.some((result) => result.summary?.regressions))
+  if (!summary) throw new Error("Benchmark results could not be validated");
+  if (!publish && summary.regressions)
     throw new Error("Benchmark regression alerts; see the job summary");
 }

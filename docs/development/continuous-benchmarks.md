@@ -13,7 +13,7 @@ pnpm -s tools status --pr 123 --details
 ```
 
 1. Match `target.head` to the requested commit. Stale-head feedback is not current evidence.
-2. Read `Benchmarks (rust)` in `benchmarks[]`. Missing or incomplete measurements cannot pass.
+2. Read `Benchmarks (rust)` in `benchmark`. Missing or incomplete measurements cannot pass.
 3. Read `workflows[].state`. The normal `CI` run builds, measures, attempts Cloud archival and publishes the report. An upload failure fails CI while the report retains its independently computed performance verdict.
 4. Use `--details` for the exact baseline and affected cases. Negative changes mean less time. Stacked PRs compare with their parent branch, not automatically with main.
 
@@ -40,7 +40,7 @@ Both revisions enable Rayon and use the runtime-dispatched SIMD backend. Histori
 
 One preparation job and four measurement jobs cover the single required backend. Preparation retains both frozen executables and their full inventory; each measurement job checks their hashes and records its own host before sampling. Ordinary Rust CI retains its original parallelism; no test job waits for benchmarks. PR updates cancel obsolete CI runs. GitHub still provides no global priority or preemption guarantee. Image publication has no global queue; a conflicting ref update rebuilds against the latest image tree inside the same report job.
 
-Only preparation compiles. CI supplies `TESSERA_BENCH_TARGET_DIR` and uses `Swatinem/rust-cache` for the actual Cargo target, separated by build configuration. CLI alignment flags are set before compiling, avoiding the preliminary unaligned build. Temporary source snapshots still disappear; cached dependencies survive. Cargo validates source changes and rebuilds the measured crate. PR caches are scoped by GitHub. Local caching is explicit and must not cross trust boundaries.
+Only preparation compiles. CI supplies `TESSERA_BENCH_TARGET_DIR` and uses `Swatinem/rust-cache` for the actual Cargo target, shared by the one hosted build. CLI alignment flags are set before compiling, avoiding the preliminary unaligned build. Temporary source snapshots still disappear; cached dependencies survive. Cargo validates source changes and rebuilds the measured crate. PR caches are scoped by GitHub. Local caching is explicit and must not cross trust boundaries.
 
 After deploying this workflow, update active branches such as #97 with the new CI source and trigger a fresh run. Former measurement-only workflows do not gain a report job when rerun; their retained artifacts can be inspected offline or archived with the source version and complete layout that produced them. Do not submit old two-shard evidence through the new four-shard validator.
 

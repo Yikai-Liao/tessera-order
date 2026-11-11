@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { catalog, VARIANTS } from "../catalog.ts";
+import { catalog } from "../catalog.ts";
 import { pairedRun } from "../continuous/fixtures/paired.ts";
 import { summarizeLocal } from "./model.ts";
 import { renderLocalReport } from "./report.ts";
@@ -15,7 +15,7 @@ import { measureSamples } from "./samples.ts";
 test("retained budgets survive catalog changes without accepting incomplete samples", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-retained-budget-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const run = pairedRun(VARIANTS[0]);
+  const run = pairedRun();
   for (const id of run.cases) {
     run.sampleCounts![id]++;
     run.samples![id].push(run.samples![id][0]);
@@ -29,7 +29,7 @@ test("retained budgets survive catalog changes without accepting incomplete samp
     // Missing or incomplete budgets cannot be regenerated as complete evidence.
     for (const id of run.cases) run.samples![id].pop();
     assert.throws(() => summarizeLocal(run), /budget/);
-    delete run.sampleCounts;
+    delete (run as Partial<typeof run>).sampleCounts;
     assert.throws(() => summarizeLocal(run), /budget/);
   } finally {
     catalog.revisionSampling.forEach((s, i) => {
@@ -78,7 +78,7 @@ rl.on("line", request => {
 `,
       { mode: 0o755 },
     );
-  const run = pairedRun(VARIANTS[0]);
+  const run = pairedRun();
   run.cases = ["rust/u64/random/48/s1/api", ...(mask ? ["rust/u64/random/49/s1/par-4"] : [])];
   await measureSamples(run, binaries, "unused", mask, async () => {});
   if (mask) await assert.rejects(comparisonCpus(true, "0"), /four available CPUs/);

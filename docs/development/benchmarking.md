@@ -68,7 +68,7 @@ For an unsupported experiment, identify the missing measurement capability and e
 
 Fresh worker pairs measure adjacent A/B samples, reversing startup, warm-up and measurement order on every other pair. The catalog owns one total warm-up and one total sampling budget per revision; each is divided across samples, with no outer repetition. Input preparation repeats in each fresh process outside the clock. Report the median B/A ratio and its distribution-free 99% median interval; only an interval entirely outside 0.95–1.05 alerts. Nominal coverage assumes independent pairs and is per case, not family-wide. The [continuous protocol](continuous-benchmarks.md#within-job-scheduling) defines batching, clocks and interference limits. This is a development screen, not an in-process or placement-controlled source claim.
 
-`--prepare-only` retains one complete, non-layout revision pair without timing. `pnpm tools compare prepared DIR --shard INDEX/COUNT --out RESULT` verifies the retained executable hashes and listings, then uses the same sampling and reporting operation without compiling. It requires the original harness and catalog and records the measurement host separately from build provenance. Prepared inputs remain unchanged; every result directory is new. This is build reuse, not measurement resumption; an interrupted measured result remains incomplete.
+`--prepare-only` retains one complete, non-layout revision pair without timing. `prepared.json` contains its plan, full case inventory and build provenance; it has no measurement host or samples. Older prepared directories use their original tooling revision; prepare again to use the current tooling. `pnpm tools compare prepared DIR --shard INDEX/COUNT --out RESULT` verifies the retained executable hashes and listings, then uses the same sampling and reporting operation without compiling. It requires the original harness and catalog and records the measurement host separately from build provenance. Prepared inputs remain unchanged; every result directory is new. This is build reuse, not measurement resumption; an interrupted measured result remains incomplete.
 
 `--shard INDEX/COUNT` optionally measures a deterministic partition of complete timed IDs, retaining their complete per-case sampling budget. The result records the complete inventory, shard identity and selected subset. Plans with `parallel` rules enable Rayon in both builds, select identical serial/four-thread IDs and require Linux with four allowed CPUs. Serial and parallel preparation never overlap; serial calls use one CPU, parallel calls four. Hosted CI uses this path with the continuous plan; layout sampling remains separate.
 
@@ -278,9 +278,7 @@ The report requires the complete suite. `--partial` generates a report of the co
 
 ### Portable SIMD
 
-Every build uses the SIMD backend; there is no `--simd` CLI option or Cargo feature to select. Algorithm sessions retain one `default` build with all selected adapters. Revision comparisons enable the historical library feature when needed, so both revisions use the vector backend; actual per-revision Cargo features remain in provenance. Revisions without a supported SIMD backend are rejected.
-
-Algorithm comparisons use one shared-SIMD build. Retained dual-build results and schema-1 sessions use their original source revision for regeneration or recovery; current tooling rejects them rather than silently dropping a build.
+Every build uses the SIMD backend; no option or Cargo feature selects it. Revision comparisons enable the historical library feature when needed, and actual per-revision Cargo features remain in provenance. Revisions without a supported SIMD backend, retained dual-build results and schema-1 sessions are rejected; regenerate or recover them with their original source revision.
 
 ## Cases and suites
 

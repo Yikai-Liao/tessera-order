@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { VARIANTS } from "../catalog.ts";
+import { continuous } from "../catalog.ts";
 import { writePaired } from "./fixtures/paired.ts";
 import { baseHash, fixture, hash } from "./fixtures/report.ts";
 import { pairedBmf } from "./paired.ts";
@@ -14,9 +14,9 @@ import { pairedBmf } from "./paired.ts";
 test("submission archives ratios in a native Head keyed by protocol and exact baseline", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-submission-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const runs = await writePaired(directory, VARIANTS[0]);
+  const runs = await writePaired(directory);
   const report = fixture();
-  report.testbed.name = VARIANTS[0].relativeTestbed;
+  report.testbed.name = continuous.testbed;
   report.branch.name = "pr-7";
   report.branch.head.start_point = null;
   report.results = [
@@ -53,7 +53,7 @@ process.stdout.write(fs.readFileSync(path.join(process.env.SUBMISSION_FIXTURE, "
     baseHash,
     pr: "7",
   };
-  const source = `import {submitContinuous} from ${JSON.stringify(new URL("./runner.ts", import.meta.url).href)}; const result=await submitContinuous(${JSON.stringify(options)}); if(Object.values(result).includes("failure")) process.exitCode=1;`;
+  const source = `import {submitContinuous} from ${JSON.stringify(new URL("./runner.ts", import.meta.url).href)}; await submitContinuous(${JSON.stringify(options)});`;
   const child = spawnSync(process.execPath, ["--input-type=module", "-e", source], {
     encoding: "utf8",
     env: {

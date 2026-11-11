@@ -83,33 +83,13 @@ jobs:
           TESSERA_BENCH_CHECK_ONLY: "1"
       - run: cargo package -p tessera-sort
 
-  comparison:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install native benchmark tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang libtbb-dev
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm tools check --native --out bench/results/ci
-      - uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: comparison-check-log
-          path: bench/results/ci.log
-          if-no-files-found: ignore
-
   miri:
-    name: miri
+    name: miri (${{ matrix.mode }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [serial, rayon]
     env:
       MIRI_SYSROOT: ${{ github.workspace }}/.miri-sysroot
       RUSTFLAGS: -D warnings
@@ -137,14 +117,18 @@ jobs:
         if: steps.miri-cache.outputs.cache-hit != 'true'
       # Each test gets its own interpreter so the runner's cores can be used.
       - run: cargo miri nextest run -p tessera-sort
+        if: matrix.mode == 'serial'
       # Sequential ownership fixtures cover the optional Rayon storage paths;
       # native pool tests cover scheduling, which these Miri fixtures do not.
-      - run: >-
+      - if: matrix.mode == 'rayon'
+        run: >-
           cargo miri nextest run -p tessera-sort --features rayon
           -E 'test(block::parallel::) | test(engine::parallel::bucket_borrow_tests::)'
       - run: cargo miri test -p tessera-sort --doc --features rayon
+        if: matrix.mode == 'rayon'
       # Nextest does not run doctests.
       - run: cargo miri test -p tessera-sort --doc
+        if: matrix.mode == 'serial'
 
   asan:
     runs-on: ubuntu-latest

@@ -35,7 +35,7 @@ test("all shards cover the same input inventory once, including four-thread mode
   const runs = await writePaired(out, VARIANTS[0]);
   const selected = runs.flatMap((run) => run.cases).sort();
   assert.deepEqual(selected, runs[0].shard!.allCases);
-  const loaded = await readPaired(out, VARIANTS[0], source, runs[0].shard!.allCases);
+  const loaded = await readPaired(out, VARIANTS[0], source, join(out, "prepared"));
   const bmf = pairedBmf(loaded);
   assert.equal(Object.keys(bmf).length, selected.length);
   assert.equal(Object.values(bmf)[0]["paired-time-ratio"].value, 1.2);
@@ -68,9 +68,8 @@ test("rejects a self-consistent but shortened inventory across every shard", asy
       JSON.stringify(run),
     );
   }
-  // Internal agreement is valid but cannot replace the independently resolved list.
-  await readPaired(out, VARIANTS[0], source, shortened);
-  await assert.rejects(readPaired(out, VARIANTS[0], source, trusted), /Incompatible/);
+  // Agreement between shards cannot replace this run’s prepared inventory.
+  await assert.rejects(readPaired(out, VARIANTS[0], source, join(out, "prepared")), /Incompatible/);
 });
 
 for (const damage of [
@@ -116,7 +115,24 @@ for (const damage of [
       if (damage === "provenance") delete (run.source as Partial<typeof run.source>).current;
       await writeFile(path, JSON.stringify(run));
     }
-    await assert.rejects(readPaired(out, VARIANTS[0], source, runs[1].shard!.allCases));
+    await assert.rejects(readPaired(out, VARIANTS[0], source, join(out, "prepared")));
     assert.ok(await readFile(join(out, `paired-${VARIANTS[0].id}-2`, "local.json"), "utf8"));
   });
 }
+
+test("report uses the prepared plan from its own run instead of a publisher preset", async (t) => {
+  const out = await mkdtemp(join(tmpdir(), "tessera-branch-plan-"));
+  t.after(() => rm(out, { recursive: true, force: true }));
+  await writePaired(out, VARIANTS[0]);
+  const prepared = join(out, "prepared");
+  const plan = JSON.parse(await readFile(join(prepared, "plan.json"), "utf8"));
+  plan.include = [
+    { types: ["u64"], distributions: ["random"], lengths: [48, 49, 1000, 65536, 1000000] },
+  ];
+  for (const dir of [
+    "prepared",
+    ...Array.from({ length: CONTINUOUS_SHARDS }, (_, i) => `paired-${VARIANTS[0].id}-${i + 1}`),
+  ])
+    await writeFile(join(out, dir, "plan.json"), JSON.stringify(plan));
+  assert.equal((await readPaired(out, VARIANTS[0], source, prepared)).length, CONTINUOUS_SHARDS);
+});

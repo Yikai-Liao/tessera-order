@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { VARIANTS } from "../bench/catalog.ts";
-import { marker } from "../bench/continuous/marker.ts";
+import { BENCHMARK_CHECK, LEGACY_BENCHMARK_CHECK, marker } from "../bench/continuous/marker.ts";
 import { command } from "./process.ts";
 
 interface Check {
@@ -97,8 +97,8 @@ function latestRuns(runs: WorkflowRun[]) {
   return [...latest.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Recover the measured head's tracker even when GitHub rewrites its details URL. */
-function trackerIds(checks: Check[], repo: string) {
+/** Associate historical checks with their separate archival run. */
+function legacyTrackerIds(checks: Check[], repo: string) {
   const ids = new Set<string>();
   for (const check of checks) {
     if (check.external_id && /^\d+$/.test(check.external_id)) {
@@ -128,8 +128,8 @@ function hasUnfinishedOrFailedResult(item: Step) {
 /**
  * Read one remote commit's CI and benchmark feedback, with compact output by default.
  *
- * PR workflows may use the test merge commit. A tracker runs trusted default-
- * branch code, so only a check attached to the requested head can identify it.
+ * PR workflows may use the test merge commit. Benchmark checks attach to the
+ * measured head; all current jobs belong to the ordinary CI run.
  * Missing feedback is not a pass; API failures reject the entire read.
  */
 export async function readStatus(
@@ -178,26 +178,25 @@ export async function readStatus(
     pull ? api.pages<Comment[]>(`issues/${pull.number}/comments?per_page=100`) : [],
   ]);
   const candidates = checkPages.flatMap((page) => page.check_runs).sort((a, b) => b.id - a.id);
-  const checks = VARIANTS.map((variant) =>
-    candidates.find((check) => check.name === `Benchmarks (rust, ${variant.name})`),
+  const checks = VARIANTS.map(() =>
+    candidates.find(
+      (check) => check.name === BENCHMARK_CHECK || check.name === LEGACY_BENCHMARK_CHECK,
+    ),
   );
   const attached = checks.filter((check) => check !== undefined);
-  const trackers = await Promise.all(
-    trackerIds(attached, api.repo).map((id) => api.get<WorkflowRun>(`actions/runs/${id}`)),
+  const currentRuns = runPages
+    .flat()
+    .flatMap((page) => page.workflow_runs)
+    .filter((run) => heads.includes(run.head_sha) && run.event !== "workflow_run");
+  const legacy = await Promise.all(
+    legacyTrackerIds(
+      attached.filter((check) => check.name === LEGACY_BENCHMARK_CHECK),
+      api.repo,
+    )
+      .filter((id) => !currentRuns.some((run) => String(run.id) === id))
+      .map((id) => api.get<WorkflowRun>(`actions/runs/${id}`)),
   );
-  // Both tracker triggers identify trusted code, not the measured source.
-  const runs = latestRuns([
-    ...runPages
-      .flat()
-      .flatMap((page) => page.workflow_runs)
-      .filter(
-        (run) =>
-          heads.includes(run.head_sha) &&
-          run.event !== "workflow_run" &&
-          run.path?.split("@")[0] !== ".github/workflows/bench-track.yml",
-      ),
-    ...trackers,
-  ]);
+  const runs = latestRuns([...currentRuns, ...legacy]);
   const workflows = await Promise.all(
     runs.map(async (run) => {
       const pages =

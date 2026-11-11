@@ -70,7 +70,9 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
       ],
       { cwd: tree },
     );
-    const { executable } = await buildBenchmark(tree, target, "compare", features);
+    const { executable } = await buildBenchmark(tree, target, "compare", features, {
+      profile: "dev",
+    });
     if (native) {
       for (const name of ["compare", "memory"]) {
         const binary = name === "compare" ? executable : join(dirname(executable), "memory");

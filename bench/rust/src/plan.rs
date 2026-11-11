@@ -451,7 +451,7 @@ mod tests {
     #[test]
     fn presets_preserve_coverage() {
         for (text, harness, expected) in [
-            (include_str!("../../plans/continuous.toml"), "smoke", 62),
+            (include_str!("../../plans/continuous.toml"), "smoke", 61),
             (include_str!("../../plans/smoke.toml"), "comparison", 125),
             (include_str!("../../plans/release.toml"), "comparison", 381),
             (include_str!("../../plans/parallel.toml"), "comparison", 16),
@@ -543,9 +543,8 @@ mod tests {
         }
         require(&cases, "u128", "sparse8", 1_000_000);
         require(&cases, "u64", "bimodal", 1_000_000);
-        require(&cases, "u64", "random", 10_000_000);
         // Bound the expensive serial phase without locking input iteration order.
-        assert_eq!(cases.iter().filter(|case| case.len >= 1_000_000).count(), 8);
+        assert_eq!(cases.iter().filter(|case| case.len >= 1_000_000).count(), 7);
         assert!(!cases.iter().any(|case| {
             case.ty == "u64"
                 && ["skew99", "two_values"].contains(&case.distribution.as_str())
@@ -554,13 +553,19 @@ mod tests {
 
         let parallel = continuous.parallel_inputs().unwrap();
         assert_eq!(parallel.len(), 8);
+        assert!(
+            cases
+                .iter()
+                .chain(&parallel)
+                .all(|case| case.len <= 1_000_000)
+        );
         for ty in ["u32", "row_u32", "u64", "row_u64"] {
-            require(&parallel, ty, "random", 10_000_000);
+            require(&parallel, ty, "random", 1_000_000);
         }
         for distribution in ["sorted", "reverse", "equal"] {
-            require(&parallel, "u64", distribution, 10_000_000);
+            require(&parallel, "u64", distribution, 1_000_000);
         }
-        require(&parallel, "row_u32", "skew99", 10_000_000);
+        require(&parallel, "row_u32", "skew99", 1_000_000);
     }
 
     #[test]

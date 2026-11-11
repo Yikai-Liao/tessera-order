@@ -28,7 +28,7 @@ const API = "https://api.bencher.dev/v0";
 
 interface RenderOptions {
   language: string;
-  // The build configuration, such as "Portable SIMD"; it names the check.
+  // Optional build name for historical reports with multiple configurations.
   configuration?: string;
   runUrl: string;
   baseRef?: string;
@@ -120,8 +120,10 @@ function callouts(s: ReportSummary) {
 
 function overall(s: ReportSummary, baseRef: string) {
   if (s.geomean == null) return null;
-  const g = s.geomean;
-  return `**Overall run time ${formatChange(g - 1)}** against \`${baseRef}\`, the geometric mean over ${s.compared} cases.`;
+  return (
+    `**Overall run time ${formatChange(s.geomean - 1)}** against \`${baseRef}\`, the geometric mean over ${s.compared} cases.` +
+    (!s.regressions && !s.improvements ? " No regression or improvement alerts." : "")
+  );
 }
 
 // Public perf pages need no login, unlike the console links in Bencher's own
@@ -239,14 +241,15 @@ export function render(s: ReportSummary, options: RenderOptions) {
     `### Benchmarks · ${[language, configuration, headline(s, Boolean(noBaseline))].filter(Boolean).join(" · ")}`,
   ];
   const boxes = callouts(s);
+  const summaryLine = overall(s, baseRef);
+  if (summaryLine) out.push("", summaryLine);
   if (boxes) out.push("", boxes);
   if (noBaseline) out.push("", unavailableBox(noBaseline));
   // The charts hold every configuration; the check's own column is named in
   // their header.
   if (chartRef) out.push("", `![Changes against ${baseRef}](${chartRef})`);
   if (trendRef) out.push("", `![PR benchmark history](${trendRef})`);
-  const summaryLine = overall(s, baseRef);
-  if (summaryLine) out.push("", summaryLine);
+  if (s.relative) out.push("", overview([{ name: "Change", outcome: "success", summary: s }]));
   if (slower.length) out.push("", "#### Slower", "", alertTable(slower, s));
   if (faster.length) out.push("", "#### Faster", "", alertTable(faster, s));
   // Measured but uncompared cases are not new cases; the warning says what is
@@ -274,9 +277,9 @@ export function render(s: ReportSummary, options: RenderOptions) {
 
 export function renderFailure({ language, configuration, hash, runUrl, reason }: FailureOptions) {
   return [
-    `### Benchmarks · ${[language, configuration, "measurement failed"].filter(Boolean).join(" · ")}`,
+    `### Benchmarks · ${[language, configuration, "results unavailable"].filter(Boolean).join(" · ")}`,
     "",
-    `**${short(hash)}** was not measured: ${reason}. See the [workflow run](${runUrl}).`,
+    `**${short(hash)}** results could not be validated: ${reason}. See the [workflow run](${runUrl}).`,
   ].join("\n");
 }
 
@@ -338,7 +341,10 @@ function overviewCell(summary: ReportSummary, mode?: string) {
 // with that configuration's alert counts, so a change confined to one API
 // or one build stands out without reading any case.
 function overview(configurations: ConfigurationResult[]) {
-  const header = ["", ...configurations.map((c) => c.name)];
+  const header = [
+    "",
+    ...configurations.map((c) => (configurations.length === 1 ? "Change" : c.name)),
+  ];
   const lines = [
     `| ${header.join(" | ")} |`,
     `|---|${configurations.map(() => "---:").join("|")}|`,
@@ -433,7 +439,13 @@ function speedups(configurations: ConfigurationResult[], rows: CaseRow[]) {
 }
 
 function changedTable(configurations: ConfigurationResult[], rows: CaseRow[]) {
-  const head = ["Input", "Type", "N", "Mode", ...configurations.map((c) => c.name)];
+  const head = [
+    "Input",
+    "Type",
+    "N",
+    "Mode",
+    ...configurations.map((c) => (configurations.length === 1 ? "Change" : c.name)),
+  ];
   const lines = [
     `| ${head.join(" | ")} |`,
     `|---|---|---:|---|${configurations.map(() => "---:").join("|")}|`,
@@ -468,6 +480,11 @@ export interface CombinedOptions {
 }
 
 export function renderCombined(configurations: ConfigurationResult[], options: CombinedOptions) {
+  if (configurations.length === 1 && !configurations[0].summary)
+    return renderFailure({
+      ...options,
+      reason: configurations[0].reason ?? "Missing measurement results",
+    });
   const { language, hash, runUrl, baseRef = "main", chartRef, trendRef } = options;
   // A build that was not measured stays in the overview and gets a line of
   // its own; the case lines, table and charts cover only measured builds, so
@@ -475,6 +492,10 @@ export function renderCombined(configurations: ConfigurationResult[], options: C
   const measured = configurations.filter((c) => c.summary);
   const rows = changedRows(measured);
   const out = [`### Benchmarks · ${language} · ${combinedHeadline(configurations, rows)}`];
+  if (configurations.length === 1 && measured.length) {
+    const summaryLine = overall(measured[0].summary!, baseRef);
+    if (summaryLine) out.push("", summaryLine);
+  }
   out.push("", overview(configurations));
   for (const c of configurations) {
     if (!c.summary)
@@ -515,7 +536,11 @@ export function renderCombined(configurations: ConfigurationResult[], options: C
     );
   }
   if (measured.length) {
-    out.push("", "<details><summary>All cases, by build</summary>", "");
+    out.push(
+      "",
+      `<details><summary>${measured.length === 1 ? `All ${measured[0].summary!.rows.length} cases` : "All cases, by build"}</summary>`,
+      "",
+    );
     for (const c of measured)
       out.push(
         `**${c.name}** · \`${c.summary!.testbed.name}\``,

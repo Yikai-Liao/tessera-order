@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { mkdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { Command } from "commander";
 import { VARIANTS } from "../bench/catalog.ts";
-import { CONTINUOUS_SHARDS, continuousInventory } from "../bench/continuous/paired.ts";
+import { CONTINUOUS_SHARDS } from "../bench/continuous/paired.ts";
 import { type SubmissionOptions, submitContinuous } from "../bench/continuous/runner.ts";
 import { readMainHistory } from "../bench/continuous/volatility.ts";
 import { probeCounters } from "../bench/local/counters.ts";
-import { repositoryRoot, runTask } from "./tasks.ts";
+import { runTask } from "./tasks.ts";
 
 /** Register read-only diagnostics and explicit JSON-only Cloud publication. */
 export function continuousCommands(program: Command) {
@@ -32,18 +31,6 @@ export function continuousCommands(program: Command) {
       ),
     );
   continuous
-    .command("inventory")
-    .description("Build and list the trusted continuous selection without measurements")
-    .requiredOption("--out <directory>", "new trusted inventory directory")
-    .action(async (options: { out: string }) => {
-      const root = await repositoryRoot();
-      const out = resolve(options.out);
-      await runTask(out, Boolean(program.opts().verbose), async () => {
-        await mkdir(out, { recursive: false });
-        await writeFile(join(out, "cases.json"), JSON.stringify(await continuousInventory(root)));
-      });
-    });
-  continuous
     .command("probe-counters")
     .description("Probe Linux PMU events; never changes permissions")
     .requiredOption("--out <directory>", "new probe directory")
@@ -65,7 +52,7 @@ export function continuousCommands(program: Command) {
   continuous
     .command("submit")
     .description("Upload complete paired shards; never executes measured code")
-    .requiredOption("--inventory <file>", "trusted cases.json, never from measurement artifacts")
+    .requiredOption("--prepared <directory>", "this run’s prepared revision pair")
     .requiredOption("--artifacts <directory>", "downloaded paired-* artifact directories")
     .requiredOption("--hash <sha>", "exact measured source commit")
     .requiredOption("--base-hash <sha>", "exact same-run baseline commit")

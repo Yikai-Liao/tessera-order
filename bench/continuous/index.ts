@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { VARIANTS } from "../catalog.ts";
 import { chartSvg } from "./chart.ts";
 import {
@@ -11,6 +12,7 @@ import {
   startReport,
   workflowUrl,
 } from "./github.ts";
+import { loadHistory, summarizePairedTrend, type TrendSummary } from "./history.ts";
 import { type ChartLinks, publishImages } from "./images.ts";
 import {
   type ConfigurationResult,
@@ -19,16 +21,20 @@ import {
   renderCombined,
   renderFailure,
 } from "./markdown.ts";
-import { type PairedSource, pairedSummary, readPaired } from "./paired.ts";
+import { type PairedSource, pairedSummary, readPaired, validateCloud } from "./paired.ts";
+import type { BencherReport } from "./report.ts";
+import { trendSvg } from "./trend-chart.ts";
 
 interface PublicationOptions {
   github: GitHub;
   context: ActionContext;
   core: ActionsCore;
+  fetchHistory?: typeof fetch;
   inputs: PairedSource & {
     artifacts: string;
-    inventory: string;
-    reports: string;
+    prepared: string;
+    reports?: string;
+    publish?: boolean;
     number?: string;
     baseRef?: string;
   };
@@ -36,27 +42,60 @@ interface PublicationOptions {
 
 /** Publish same-run comparisons from validated raw paired samples using trusted code.
  *
- * Only JSON is read from measurement artifacts. Missing shards and identity
- * mismatches fail their configuration; upload/image failures cannot turn absent
- * measurements into a pass or discard the other configuration's evidence.
+ * The branch’s prepare artifact owns selection and identity. Missing shards
+ * fail validation; image and Cloud failures leave numeric evidence available.
  */
-export async function publishReport({ github, context, core, inputs }: PublicationOptions) {
+export async function publishReport({
+  github,
+  context,
+  core,
+  inputs,
+  fetchHistory,
+}: PublicationOptions) {
   const { hash, baseHash, number, baseRef = "main", artifacts } = inputs;
   const runUrl = workflowUrl(context);
   const measured = await Promise.all(
     VARIANTS.map(async (variant) => {
-      const checkId = await startReport({ github, context, core, hash, variant });
+      const checkId =
+        inputs.publish === false ? undefined : await startReport({ github, context, hash });
       try {
-        const expectedCases: string[] = JSON.parse(await readFile(inputs.inventory, "utf8"));
-        const runs = await readPaired(artifacts, variant, { hash, baseHash }, expectedCases);
+        const runs = await readPaired(artifacts, variant, { hash, baseHash }, inputs.prepared);
+        let cloud: BencherReport | undefined;
+        if (inputs.reports) {
+          try {
+            cloud = JSON.parse(
+              await readFile(join(inputs.reports, `bencher-${variant.id}.json`), "utf8"),
+            );
+            validateCloud(cloud!, runs, variant, number);
+          } catch (error) {
+            cloud = undefined;
+            core.notice(`Cloud links unavailable: ${String(error)}`);
+          }
+        }
+        const summary = pairedSummary(runs, variant, cloud);
+        let trend = summarizePairedTrend(summary, "rust");
+        if (cloud) {
+          try {
+            trend =
+              summarizePairedTrend(
+                summary,
+                "rust",
+                cloud,
+                await loadHistory(cloud, fetchHistory),
+              ) ?? trend;
+          } catch (error) {
+            core.notice(`PR history unavailable: ${String(error)}`);
+          }
+        }
+        return { variant, checkId, summary, trend, reason: undefined };
+      } catch (error) {
         return {
           variant,
           checkId,
-          summary: pairedSummary(runs, variant),
-          reason: undefined,
+          summary: null,
+          trend: null as TrendSummary | null,
+          reason: String(error),
         };
-      } catch (error) {
-        return { variant, checkId, summary: null, reason: String(error) };
       }
     }),
   );
@@ -70,37 +109,42 @@ export async function publishReport({ github, context, core, inputs }: Publicati
   let imagesUnavailable = false;
   try {
     const svg = chartSvg(configurations, baseRef);
+    const trend = trendSvg(
+      measured.map((result) => ({ name: result.variant.name, trend: result.trend })),
+      baseRef,
+    );
     links = await publishImages({
       github,
       context,
       language: "rust",
       hash,
       number,
-      images: svg ? [{ kind: "comparison", svg }] : [],
+      images:
+        inputs.publish === false
+          ? []
+          : [
+              ...(svg ? [{ kind: "comparison" as const, svg }] : []),
+              ...(trend ? [{ kind: "trend" as const, svg: trend }] : []),
+            ],
     });
   } catch (error) {
     core.notice(`Benchmark images unavailable: ${String(error)}`);
     imagesUnavailable = true;
   }
-  const note =
-    "Adjacent A/B samples alternate AB/BA order. Median ratios use a distribution-free 99% median interval; an alert requires the entire interval outside 0.95–1.05. Coverage assumes independent samples, not immunity to code placement or interference. Each shard measures both revisions on one runner. Cloud archives results; it does not decide verdicts. Baseline changes split PR history; main points describe individual parent-to-commit changes, not absolute or cumulative performance.";
-  const footer =
-    "\n\nCloud archival runs separately after these checks. See the workflow for upload status; raw measurements remain in the Actions artifacts.";
   const options = {
     language: "rust",
     hash,
     runUrl,
     baseRef,
     chartRef: links.comparison,
+    trendRef: links.trend,
     imagesUnavailable,
   };
   for (const result of measured) {
     const body = result.summary
-      ? render(result.summary, { ...options, configuration: result.variant.name }) +
-        "\n\n" +
-        note +
-        footer
-      : renderFailure({ ...options, configuration: result.variant.name, reason: result.reason! });
+      ? render(result.summary, options)
+      : renderFailure({ ...options, reason: result.reason! });
+    if (result.checkId === undefined) continue;
     await github.rest.checks.update({
       ...context.repo,
       check_run_id: result.checkId,
@@ -108,14 +152,14 @@ export async function publishReport({ github, context, core, inputs }: Publicati
       conclusion: !result.summary || result.summary.regressions ? "failure" : "success",
       details_url: runUrl,
       output: {
-        title: result.summary ? headline(result.summary) : "Measurement failed",
+        title: result.summary ? headline(result.summary) : "Results could not be validated",
         summary: body.slice(0, 65000),
       },
     });
   }
-  const body = `${renderCombined(configurations, options)}\n\n${note}${footer}`;
+  const body = renderCombined(configurations, options);
   await core.summary.addRaw(body).write();
-  if (number)
+  if (number && inputs.publish !== false)
     await publishComment({
       github,
       repo: context.repo,
@@ -125,4 +169,8 @@ export async function publishReport({ github, context, core, inputs }: Publicati
       body,
       core,
     });
+  if (measured.some((result) => !result.summary))
+    throw new Error("Benchmark results could not be validated");
+  if (inputs.publish === false && measured.some((result) => result.summary?.regressions))
+    throw new Error("Benchmark regression alerts; see the job summary");
 }

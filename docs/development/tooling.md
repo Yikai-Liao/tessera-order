@@ -20,7 +20,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Resume a prepared algorithm comparison | `pnpm -s tools compare resume bench/results/SESSION` |
 | Reproduce the native comparison CI job | `pnpm -s tools check --native` |
 | Preview hosted benchmark jobs | `pnpm -s tools continuous matrix` |
-| Reproduce one paired shard | `pnpm -s tools compare commit main --plan continuous --shard 1/2` |
+| Reproduce one paired shard | `pnpm -s tools compare commit main --plan continuous --shard 1/4` |
 | Upload completed paired JSON | `pnpm -s tools continuous submit --help` |
 | Regenerate an existing result | `pnpm -s tools report bench/results/SESSION` |
 | Read current main feedback | `pnpm -s tools status main` |
@@ -37,7 +37,7 @@ Use a task's `--help` for its options. Algorithm and linked-revision comparisons
 
 `status` prints one compact JSON object by default. It resolves a remote ref once, reports that exact `target.head`, keeps only the latest workflow run per workflow/event/branch, and lists only unfinished or failed jobs and active or failed steps. Benchmark verdicts are independent of workflow success: `Measurement failed`, `no comparable baseline` and a slowdown alert retain their published check titles rather than becoming one generic failure. A missing check has `state: "missing"`; an empty workflow list is not a passing verdict.
 
-For an open PR, CI may run against its test merge commit, while benchmarks attach to its head. `target.merge` records that distinction. A merged PR is still queried at its PR head; use `status main` for the squash commit. A trusted tracker runs default-branch code, so it is associated through the benchmark check's run identity, not by assuming its workflow SHA is the measured source. API or authentication failures exit nonzero instead of producing an empty successful result.
+For an open PR, CI may run against its test merge commit, while benchmarks attach to its head. `target.merge` records that distinction. A merged PR is still queried at its PR head; use `status main` for the squash commit. All current benchmark jobs belong to the normal CI run; the performance check is attached to the measured head. Historical checks retain their recorded tracker association so a later archival failure remains visible. API or authentication failures exit nonzero instead of producing an empty successful result.
 
 Start with the compact response:
 
@@ -53,19 +53,21 @@ pnpm -s tools status --pr 123 --details
 pnpm -s tools status main --text
 ```
 
-`--details` adds full benchmark check summaries, the matching trusted report comment and workflow links under `details`. It does not download logs or historical reports. `--text` is an optional small human overview. Neither option triggers jobs or changes GitHub state. Authenticate the GitHub CLI with `gh auth login` first.
+`--details` adds full benchmark check summaries, the matching report comment and workflow links under `details`. It does not download logs or historical reports. `--text` is an optional small human overview. Neither option triggers jobs or changes GitHub state. Authenticate the GitHub CLI with `gh auth login` first.
 
 Build and measurement tasks print one compact object containing `out`, `log` and `result`. Subprocess output and progress go to the adjacent `OUT.log`, leaving machine-readable stdout free of Cargo, compiler and Criterion output. A failed operation exits nonzero with the log path. Each `compare resume` invocation uses a separate adjacent `OUT.resume-TIMESTAMP-PID.log`, preserving previous logs. Preparation, validation, memory and group progress go to these diagnostics, not machine-readable stdout. Use `--verbose` only for interactive diagnosis; it streams subprocess diagnostics instead and no longer guarantees JSON-only stdout. Report regeneration prints its output location without reading or rebuilding sources. Plans print TOML by default or compact JSON with `--format json`.
 
-A successful `status` exit means the read succeeded, not that every workflow passed. An experiment's command exit describes execution, not proof of a speedup. Algorithm comparisons retain exact executable pairs and recorded settings before measuring; `compare resume DIR` accepts no selection or sampling overrides. See [recovery](benchmarking.md#resuming-algorithm-comparisons) for interruptions and locks. `continuous submit` records each configuration’s upload outcome in `outcomes.json`, attempts both even after a failure, and exits nonzero if either failed. It only reads validated JSON; paired regression checks are evaluated separately by report publication.
+A successful `status` exit means the read succeeded, not that every workflow passed. An experiment's command exit describes execution, not proof of a speedup. Algorithm comparisons retain exact executable pairs and recorded settings before measuring; `compare resume DIR` accepts no selection or sampling overrides. See [recovery](benchmarking.md#resuming-algorithm-comparisons) for interruptions and locks. `continuous submit` records each configuration’s upload outcome in `outcomes.json`, attempts every active configuration even after a failure, and exits nonzero if any failed. It only reads validated JSON; paired regression checks are evaluated separately by report publication.
 
 ## Reproduce continuous work locally
 
-The hosted jobs call the maintained revision comparison command, with the complete continuous plan and one partition of timed IDs. Linux and `taskset` with four available CPUs are required for the four-thread plan. Serial cases and parallel cases never overlap on a runner. Both revisions use the same current harness, lockfile and toolchain with the SIMD backend; historical libraries enable their opt-in feature explicitly. No Cloud history is needed.
+The hosted preparation job builds the two revisions once; measurement jobs reuse their frozen executables through the maintained prepared-comparison command, with the complete continuous plan and one partition of timed IDs. Linux and `taskset` with four available CPUs are required for the four-thread plan. Serial cases and parallel cases never overlap on a runner. Both revisions use the same current harness, lockfile, SIMD backend and toolchain; historical libraries enable their opt-in feature explicitly. No Cloud history is needed.
 
 ```sh
-# New output directories; baseline can be any compatible local commit.
-pnpm tools compare commit main --plan continuous --shard 1/2 \
+# Build once; each measurement uses its own new result directory.
+pnpm tools compare commit main --plan continuous --prepare-only \
+  --out bench/results/prepared
+pnpm tools compare prepared bench/results/prepared --shard 1/4 \
   --out bench/results/paired-portable-simd-1
 
 # Regenerate one completed shard without building or measuring.
@@ -74,26 +76,24 @@ pnpm tools report bench/results/paired-portable-simd-1
 
 Each shard keeps adjacent A/B sample pairs and the full catalogued sampling budget for its selected cases, without outer repetition. Omit `--shard` to run all cases on one host. `--shard INDEX/COUNT` partitions a resolved listing deterministically; it does not shorten samples. Results record the full inventory and selected subset. Directories must be new; temporary snapshots and default builds are cleaned, retained results and adjacent logs remain. Set `TESSERA_BENCH_TARGET_DIR` to a caller-owned Cargo cache to retain builds across runs; do not share it across trust boundaries. CI caches this exact target directory by configuration and sets the CLI alignment defaults before building.
 
-Upload is explicit and never executes code. Install the pinned Bencher CLI, download all four `paired-*` artifacts into separate directories under `ARTIFACTS`, and provide `BENCHER_API_KEY` through the environment:
+Upload is explicit and never executes code. Install the pinned Bencher CLI, download `prepared-revisions` into `PREPARED` and every `paired-*` artifact for that run into separate directories under `ARTIFACTS`, and provide `BENCHER_API_KEY` through the environment:
 
 ```sh
-# Run from a trusted checkout; this builds/lists, without timing any cases.
-pnpm tools continuous inventory --out bench/results/trusted-inventory
 pnpm tools continuous submit --project PROJECT \
   --hash COMMIT --base-hash BASE_COMMIT --pr 123 \
-  --inventory bench/results/trusted-inventory/cases.json \
+  --prepared PREPARED \
   --artifacts ARTIFACTS --out bench/results/submission
 ```
 
-Omit `--pr` for main. The command validates the complete continuous plan, exact trusted inventory, disjoint shard coverage, exact revision pair, common source/build settings and positive complete sample pairs before uploading each configuration. Local dirty-tree or custom-plan results are reportable locally, not accepted as continuous publication evidence. New relative Testbeds and the `paired-time-ratio` Measure keep old latency history untouched. Cloud receives paired median ratios and their median intervals, not raw samples. Performance checks are published first and do not depend on archival success; upload failures remain explicit in the workflow. Baseline changes split PR history; main points are individual parent-to-commit effects, not a cumulative trend. Artifact source metadata is self-reported by the unprivileged measurement job: validation catches inconsistent or incomplete evidence but cannot prove that malicious PR-authored code measured honestly. The publisher never evaluates artifact scripts or configuration as code.
+The command validates the prepared plan and inventory, disjoint shard coverage, exact revision pair, common source/build settings and positive complete sample pairs before uploading. Use the source version that created the prepared pair; no inventory build is needed. New relative Testbeds and the `paired-time-ratio` Measure keep old latency history untouched. Cloud receives paired median ratios and median intervals. An upload is attempted first so successful reports include Cloud links; upload failure remains explicit without changing raw-sample verdicts. Native Bencher Heads keyed by protocol and baseline split PR history. Artifact metadata catches inconsistent or incomplete evidence but cannot prove honest measurement by malicious PR code. Submission reads JSON only. Omitting `--pr` retains explicit legacy/manual main upload support; CI does not measure or archive main.
 
 ## CI boundary
 
 | Workflow | Shared operation | Workflow-only responsibilities |
 |---|---|---|
-| Measure benchmarks | `continuous matrix`, `compare commit --plan continuous --shard` | Checkout attribution, matrix runners, artifact upload, read-only permissions |
+| CI prepare/measure | `continuous matrix`, `compare commit --prepare-only`, `compare prepared` | Event attribution, runners and artifact transfer |
 | Native comparison | `check --native` | Install system tools, provision a runner |
-| Track benchmarks | `continuous inventory`, `continuous submit`, trusted report modules | Independently resolve the triggering event, download JSON, hold credentials, serialize image writes and publish checks |
+| CI report | Paired validation, report modules, `continuous submit` | Same-run artifact download, publication credentials, GitHub checks/comments and Cloud archival |
 | Change routing | `ci changes` | Supply the event's base/head and collect Actions outputs |
 | PR title and DCO | `ci title`, `ci dco` | Supply the title and trusted checkout; fetch fork objects without running them |
 | Release | `release verify` | Registry authentication and actual publication |

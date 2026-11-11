@@ -86,8 +86,8 @@ modes = [
 ]
 
 configurations = [
-  # One required backend; keep the Portable SIMD publication identity.
-  { id = "portable-simd", name = "Portable SIMD", testbed = "intel-v1-portable-simd-hybrid-v1", relativeTestbed = "actions-screen-portable-simd-v1", features = ["rayon"] },
+  # One required backend retains the existing SIMD identity.
+  { id = "portable-simd", name = "Tessera", testbed = "intel-v1-portable-simd-hybrid-v1", relativeTestbed = "ci", features = ["rayon"] },
 ]
 
 [comparison]

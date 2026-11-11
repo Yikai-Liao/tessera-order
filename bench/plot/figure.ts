@@ -65,16 +65,6 @@ export function renderFigure(options: FigureOptions, layers: Plot.PlotOptions[])
     root.appendChild(element);
   }
   const style = svgDocument.createElementNS("http://www.w3.org/2000/svg", "style");
-  const variables = (palette: typeof theme.palette.light | typeof theme.palette.dark) =>
-    Object.entries(palette)
-      .map(([key, value]) => `--${key}: ${value};`)
-      .join(" ");
-  style.textContent = `
-    .benchmark-figure { ${variables(theme.palette.light)} font-feature-settings: "tnum", "cv11"; }
-    .benchmark-figure [font-size="10.5"] { letter-spacing: 1.1px; }
-    .benchmark-figure [font-size="28"] { font-feature-settings: "pnum"; letter-spacing: -.6px; }
-    @media (prefers-color-scheme: dark) { .benchmark-figure { ${variables(theme.palette.dark)} } }
-  `;
   root.appendChild(style);
   for (const layer of layers) {
     const rendered = Plot.plot({
@@ -105,5 +95,30 @@ export function renderFigure(options: FigureOptions, layers: Plot.PlotOptions[])
       ),
     );
   }
+  // SVG image viewers may ignore CSS variables. Literal presentation colours
+  // keep the standalone image readable; ordinary CSS supplies browser dark mode.
+  const darkRules = new Set<string>();
+  for (const attribute of ["fill", "stroke"] as const) {
+    for (const element of root.querySelectorAll(`[${attribute}]`)) {
+      const value = element.getAttribute(attribute)!;
+      const token = /^var\(--([a-z]+)\)$/.exec(value)?.[1];
+      if (!token) continue;
+      if (!Object.hasOwn(theme.palette.light, token))
+        throw new Error(`Unknown figure colour: ${token}`);
+      const key = token as keyof typeof theme.palette.light;
+      const className = `figure-${attribute}-${key}`;
+      element.setAttribute(attribute, theme.palette.light[key]);
+      element.classList.add(className);
+      darkRules.add(
+        `.benchmark-figure .${className} { ${attribute}: ${theme.palette.dark[key]}; }`,
+      );
+    }
+  }
+  style.textContent = `
+    .benchmark-figure { font-feature-settings: "tnum", "cv11"; }
+    .benchmark-figure [font-size="10.5"] { letter-spacing: 1.1px; }
+    .benchmark-figure [font-size="28"] { font-feature-settings: "pnum"; letter-spacing: -.6px; }
+    @media (prefers-color-scheme: dark) { ${[...darkRules].join("\n")} }
+  `;
   return root.outerHTML;
 }

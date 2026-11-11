@@ -73,4 +73,4 @@ pnpm docs:test && pnpm docs:typecheck && pnpm docs:build     # site / models
 pnpm tools:test && pnpm tools:typecheck                    # benchmark tooling
 ```
 
-Run applicable checks locally; engine feature and Miri checks are in [contributing](CONTRIBUTING.md#validation). Miri, MSRV, platform and benchmark checks also run in CI; [CI](docs/development/ci.md) explains coverage. A green tracking workflow is not a benchmark verdict: read the current-head Portable SIMD benchmark check.
+Run applicable checks locally; engine feature and Miri checks are in [contributing](CONTRIBUTING.md#validation). Miri, MSRV, platform and benchmark checks also run in CI; [CI](docs/development/ci.md) explains coverage. Workflow success is not a performance verdict: read the current-head `Benchmarks (rust)` check. Automatic measurement runs on PRs, not main.

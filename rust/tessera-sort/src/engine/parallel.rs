@@ -167,6 +167,11 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync>(
     rayon::scope(move |scope| {
         let mut pending: Option<Job<'records, T>> = None;
         let mut visit = |bucket: &'records mut [T]| {
+            // A covering digit already finished these records; do not retain
+            // borrows or allocate jobs whose child finisher would return.
+            if candidate == 0 {
+                return;
+            }
             let mut job = pending.take().unwrap_or_else(Job::new);
             job.push(bucket);
             if job.bytes() >= MIN_TASK_BYTES {
@@ -183,6 +188,9 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync>(
             }
         };
         let finish = |child: &mut [T]| {
+            if candidate == 0 {
+                return;
+            }
             let mut key = child_extractor.clone();
             let mut scratch = pool_ref.take();
             Sorter::<T, E> {

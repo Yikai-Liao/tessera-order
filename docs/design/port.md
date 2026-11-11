@@ -462,6 +462,10 @@ A three-block linked screen against `ce71415` covers direct/keyed u64, random/eq
 
 The earlier `before-linked-v3` screen compares the unchanged `ce71415` library against main `3db3860`, not this scan candidate. It reproduces random/49 regressions in both baseline placements: baseline/current ratios 0.694/0.696 for row_u32 and 0.811/0.803 for u64. Two preceding invocations failed before measurement (wrong plan kind, then an output-log filename collision); they provide no timing evidence.
 
+### Terminal parallel completion
+
+Independent review found that covering-digit callback buckets still allocated jobs or took pooled scratch before the shared child finisher returned on an empty candidate mask. The callbacks now return before that work, preserving the single partition entry and block recovery operation. A four-thread stable payload test and Rayon Clippy pass. A paired process screen against `11f94f6` (`/tmp/pr97-work/terminal-screen`, CPU 0/2/4/6, same host/toolchain) reports current/baseline 0.9965 for row_u64/d16/1M parallel (99% median interval 0.9661–1.0338), 1.0024 for two_values (0.9931–1.0124), and serial random/65536 control 1.0001 (0.9918–1.0062). This preserves a known saving; the screen makes no measured speedup claim or A/A/source-attribution claim.
+
 ### Bounded tile planner
 
 The follow-up to `2c0ae42` removes tile sampling, conditional population estimates, singleton assumptions and recursive projected work. It tries a one-pass finish, then searches at most the table width's split points for an optimal two-pass finish; otherwise one MSD partition exposes actual children. The two-digit plan replaces the general dynamic-programming tables and 22-digit array. Actual constant children still terminate after confirmation, insertion-sized buckets avoid scans, and larger children retain candidate-masked recursive finishing. Node sampling is unchanged. This is a routing candidate, not a behavior-only refactor or a declaration of performance acceptance.

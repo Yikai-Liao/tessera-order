@@ -67,6 +67,25 @@ fn counted_keys_keep_bits() {
     });
 }
 
+/// Covering digits keep equal-key payload order without child finishing.
+#[test]
+#[cfg(not(miri))]
+fn covering_digit_keeps_payload_order() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    let mut rows: Vec<_> = (0..1usize << 17)
+        .map(|id| (((id * 7919) & 255) as u64, Cell::new(id)))
+        .collect();
+    pool.install(|| par_stable_sort_by_key(&mut rows, |row| row.0));
+    assert!(rows.windows(2).all(|pair| pair[0].0 < pair[1].0
+        || (pair[0].0 == pair[1].0 && pair[0].1.get() < pair[1].1.get())));
+    for row in &rows {
+        assert_eq!(row.0, ((row.1.get() * 7919) & 255) as u64);
+    }
+}
+
 /// Both orientations of pre-separated buckets use the same stable run split.
 #[test]
 #[cfg(not(miri))]

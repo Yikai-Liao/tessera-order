@@ -9,7 +9,7 @@ import { type TestContext, test } from "node:test";
 import { revisionSampling } from "../catalog.ts";
 import { parsePlan } from "../plan.ts";
 import { sourceHash } from "../workspace.ts";
-import type { LocalRun } from "./model.ts";
+import type { LocalRun, PreparedPair } from "./model.ts";
 import { comparePrepared } from "./runner.ts";
 
 const id = "rust/u64/random/48/s1/api";
@@ -46,7 +46,14 @@ require('node:readline').createInterface({input: process.stdin}).on('line', requ
     debug: "false",
     features: [],
   };
-  const run: LocalRun = {
+  const run: PreparedPair = {
+    kind: "prepared-revisions",
+    plan: parsePlan({
+      schema: 1,
+      harness: "smoke",
+      algorithms: ["tessera"],
+      include: [{ types: ["u64"], distributions: ["random"], lengths: [48] }],
+    }),
     schema: 1,
     protocol: "paired-samples-v2",
     baseline: "b".repeat(40),
@@ -64,27 +71,13 @@ require('node:readline').createInterface({input: process.stdin}).on('line', requ
     rustc: "fixture",
     flags: "fixture",
     configuration: "portable-simd",
-    host: {
-      platform: "build-host",
-      release: "fixture",
-      arch: "fixture",
-      cpu: "build CPU",
-      affinity: "inherited",
-    },
     cases: [id],
   };
   for (const path of Object.values(run.binaryPaths!)) {
     await mkdir(join(prepared, path, ".."), { recursive: true });
     await writeFile(join(prepared, path), worker, { mode: 0o755 });
   }
-  const plan = parsePlan({
-    schema: 1,
-    harness: "smoke",
-    algorithms: ["tessera"],
-    include: [{ types: ["u64"], distributions: ["random"], lengths: [48] }],
-  });
-  await writeFile(join(prepared, "plan.json"), JSON.stringify(plan));
-  await writeFile(join(prepared, "local.json"), JSON.stringify(run));
+  await writeFile(join(prepared, "prepared.json"), JSON.stringify(run));
   return { root, prepared, calls, run, worker, out: join(root, "result") };
 }
 
@@ -96,7 +89,7 @@ test("prepared pairs execute full samples with retained binaries and the measure
   assert.equal(measured.host.platform, process.platform);
   assert.deepEqual(measured.shard?.allCases, [id]);
   assert.equal(await readFile(join(f.out, measured.binaryPaths!.current), "utf8"), f.worker);
-  assert.deepEqual(JSON.parse(await readFile(join(f.prepared, "local.json"), "utf8")), f.run);
+  assert.deepEqual(JSON.parse(await readFile(join(f.prepared, "prepared.json"), "utf8")), f.run);
   assert.ok((await readFile(join(f.out, "index.md"), "utf8")).includes(id));
 });
 
@@ -115,12 +108,13 @@ for (const damage of ["binary", "source", "escape", "measured", "basename"] as c
     if (damage === "basename") {
       f.run.binaryPaths!.current = "binaries/current/different";
       await writeFile(join(f.prepared, f.run.binaryPaths!.current), f.worker, { mode: 0o755 });
-      await writeFile(join(f.prepared, "local.json"), JSON.stringify(f.run));
+      await writeFile(join(f.prepared, "prepared.json"), JSON.stringify(f.run));
     }
-    if (damage === "measured") {
-      f.run.samples = { [id]: [] };
-      await writeFile(join(f.prepared, "local.json"), JSON.stringify(f.run));
-    }
+    if (damage === "measured")
+      await writeFile(
+        join(f.prepared, "prepared.json"),
+        JSON.stringify({ ...f.run, samples: { [id]: [] } }),
+      );
     await assert.rejects(comparePrepared(f));
     await assert.rejects(readFile(f.calls), { code: "ENOENT" });
   });

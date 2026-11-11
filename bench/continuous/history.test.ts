@@ -2,20 +2,20 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { VARIANTS } from "../catalog.ts";
+import { continuous } from "../catalog.ts";
 import { pairedRun } from "./fixtures/paired.ts";
 import { fixture } from "./fixtures/report.ts";
 import { summarizePairedTrend } from "./history.ts";
 import { pairedBmf, pairedSummary } from "./paired.ts";
 
 function measured(ratio: number, uuid: string, time: string, head = "same-baseline") {
-  const run = pairedRun(VARIANTS[0], 1, ratio);
+  const run = pairedRun(1, ratio);
   const report = fixture();
   report.uuid = uuid;
   report.start_time = time;
   report.branch.head.uuid = head;
   report.branch.head.start_point = null;
-  report.testbed.name = VARIANTS[0].relativeTestbed;
+  report.testbed.name = continuous.testbed;
   report.results = [
     Object.entries(pairedBmf([run])).map(([name, values]) => ({
       benchmark: { uuid: name, name },
@@ -27,7 +27,7 @@ function measured(ratio: number, uuid: string, time: string, head = "same-baseli
       ],
     })),
   ];
-  return { report, summary: pairedSummary([run], VARIANTS[0], report) };
+  return { report, summary: pairedSummary([run], report) };
 }
 
 test("paired history retains focus after a regression is fixed", () => {
@@ -55,7 +55,7 @@ test("paired history continues across baseline Heads and fixes the shared cohort
     trend.runs.map((run) => run.uuid),
     ["other", "first", "current"],
   );
-  assert.equal(trend.sharedCases, current.summary.rows.length - 1);
+  assert.equal(trend.series.length, current.summary.rows.length - 1);
   assert.ok(Math.abs(trend.overall[0] - 2) < 1e-10);
   assert.ok(Math.abs(trend.overall[1] - 0.1) < 1e-10);
   assert.equal(trend.overall[2], 0);

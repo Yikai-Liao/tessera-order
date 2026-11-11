@@ -10,7 +10,6 @@ export interface Headline {
   value: string;
   detail: string;
   tone: "primary" | "radix" | "muted" | "text";
-  failed?: boolean;
 }
 
 /** Annotate a matrix's headline and row names with the shared typography. */
@@ -23,6 +22,6 @@ export function matrixHeader(headline: Headline, left: number): Plot.Markish[] {
       tone: ink[headline.tone],
     }),
     label(headline.name, nameX, 36, { strong: true }),
-    label(headline.detail, nameX, 51, { size: 11, tone: headline.failed ? ink.radix : ink.muted }),
+    label(headline.detail, nameX, 51, { size: 11, tone: ink.muted }),
   ];
 }

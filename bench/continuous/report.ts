@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import type { caseParts } from "../catalog.ts";
+import { type caseParts, modeOrder } from "../catalog.ts";
 
 export { caseLabel, caseParts } from "../catalog.ts";
 
@@ -68,13 +68,11 @@ interface ReportIdentity {
   uuid: string;
 }
 
+/** The one hosted build's name in figures and reports. */
+export const BUILD = "Tessera";
+
 export function short(hash: string | null) {
   return hash ? hash.slice(0, 7) : "unknown";
-}
-
-export function formatPercent(v: number) {
-  const pct = Math.round(Math.abs(v) * 100);
-  return v === 0 ? "0" : `${v > 0 ? "+" : "−"}${pct}%`;
 }
 
 export function formatChange(change: number | null) {
@@ -148,6 +146,24 @@ export function summarizeRows(rows: Row[], identity: ReportIdentity) {
   };
 }
 
-export function secondary(r: Row) {
-  return [r.parts.type, r.parts.n].filter(Boolean).join(" · ");
+/** The geometric mean of current/baseline over compared cases, optionally within one mode. */
+export function geomean(summary: ReportSummary, mode?: string) {
+  const compared = summary.rows.filter(
+    (r): r is ComparedRow =>
+      r.baseline !== null && r.value > 0 && (mode === undefined || r.parts.mode === mode),
+  );
+  if (!compared.length) return null;
+  return {
+    change:
+      Math.exp(
+        compared.reduce((sum, r) => sum + Math.log(r.value / r.baseline), 0) / compared.length,
+      ) - 1,
+    cases: compared.length,
+  };
+}
+
+export function modes(summary: ReportSummary) {
+  return [...new Set(summary.rows.map((r) => r.parts.mode))].sort(
+    (a, b) => modeOrder(a) - modeOrder(b) || a.localeCompare(b),
+  );
 }

@@ -19,39 +19,27 @@ export const MIN_SWING = 0.05;
 
 export interface TrendSeries {
   name: string;
-  label: string;
-  baseValue: number;
-  firstValue: number;
-  lastValue: number;
   // Change against the comparison baseline, one per PR run.
   changes: number[];
 }
 
-interface Measurement {
-  uuid: string;
-  hash: string | null;
-  time: string;
-}
-
 export interface TrendSummary {
-  project: string;
-  branch: string;
-  testbed: string;
   // The base commit the latest report compared against; earlier runs may use older ones.
   base: string | null;
-  sharedCases: number;
   // Current API groups, including groups without a comparable history yet.
   modes: string[];
-  runs: Measurement[];
+  runs: { uuid: string; hash: string | null }[];
   // Geometric mean of the changes against the base, one per PR run.
   overall: number[];
   focus: TrendSeries[];
-  // Every shared case, so a case selected in one configuration can still be
-  // drawn beside its quiet history in another.
+  // Every shared case, so aggregates and focus rows share one history.
   series: TrendSeries[];
 }
 
-interface MeasuredRun extends Measurement {
+interface MeasuredRun {
+  uuid: string;
+  hash: string | null;
+  time: string;
   values: Map<string, number>;
 }
 
@@ -154,11 +142,6 @@ export function summarizePairedTrend(
         },
       ],
       summary,
-      {
-        project: { slug: summary.project },
-        branch: { name: "" },
-        testbed: summary.testbed,
-      },
       language,
     );
   }
@@ -169,13 +152,12 @@ export function summarizePairedTrend(
     return { ...row, benchmark: identity.benchmark, measure: identity.measure };
   });
   const runs = comparableRuns(reports, current, language);
-  return summarizeRuns(runs, { rows, baseHash: summary.baseHash }, current, language);
+  return summarizeRuns(runs, { rows, baseHash: summary.baseHash }, language);
 }
 
 function summarizeRuns(
   runs: MeasuredRun[],
   summary: Pick<ReportSummary, "rows" | "baseHash">,
-  current: { project: { slug: string }; branch: { name: string }; testbed: { name: string } },
   language: string,
 ): TrendSummary | null {
   const shared = summary.rows.filter(
@@ -207,18 +189,10 @@ function summarizeRuns(
     );
   const series = (row: ComparedRow): TrendSeries => ({
     name: row.name,
-    label: row.label,
-    baseValue: row.baseline,
-    firstValue: runs[0].values.get(caseKey(row))!,
-    lastValue: runs.at(-1)!.values.get(caseKey(row))!,
     changes: changes(row),
   });
   return {
-    project: current.project.slug,
-    branch: current.branch.name,
-    testbed: current.testbed.name,
     base: summary.baseHash,
-    sharedCases: shared.length,
     modes: [
       ...new Set(
         summary.rows
@@ -226,7 +200,7 @@ function summarizeRuns(
           .map((row) => row.parts.mode),
       ),
     ],
-    runs: runs.map(({ uuid, hash, time }) => ({ uuid, hash, time })),
+    runs: runs.map(({ uuid, hash }) => ({ uuid, hash })),
     overall: runs.map(
       (run) =>
         Math.exp(

@@ -64,15 +64,6 @@ export function planDigits(varying: bigint, width: number, bits: number): Digit[
   return digits;
 }
 
-/** `tile_digit_bits`: the widest u16 cursor table that fits beside the tile. */
-export function tileDigitBits(records: number, recordBytes: number): number {
-  const tileBytes = records * recordBytes;
-  const widest = Math.floor(Math.log2(Math.max(1, Math.floor(tileBytes / 2))));
-  // At most four buckets per record; narrow records already meet this by bytes.
-  const byRecords = Math.floor(Math.log2(Math.max(1, records))) + 2;
-  return Math.min(14, Math.max(6, Math.min(widest, byRecords)));
-}
-
 export type TileLeaf = "done" | "insertion" | "msd" | "lsd";
 
 /** Mirrors the bounded planner: finish at most two flat passes, otherwise split. */

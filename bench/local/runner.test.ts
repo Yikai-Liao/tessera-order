@@ -5,12 +5,40 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { VARIANTS } from "../catalog.ts";
+import { catalog, VARIANTS } from "../catalog.ts";
 import { pairedRun } from "../continuous/fixtures/paired.ts";
 import { summarizeLocal } from "./model.ts";
 import { renderLocalReport } from "./report.ts";
 import { comparisonCpus } from "./runner.ts";
 import { measureSamples } from "./samples.ts";
+
+test("retained budgets survive catalog changes without accepting incomplete samples", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-retained-budget-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const run = pairedRun(VARIANTS[0]);
+  for (const id of run.cases) {
+    run.sampleCounts![id]++;
+    run.samples![id].push(run.samples![id][0]);
+  }
+  await writeFile(join(directory, "local.json"), JSON.stringify(run));
+  const budgets = catalog.revisionSampling.map((s) => s.samples);
+  try {
+    for (const settings of catalog.revisionSampling) settings.samples += 2;
+    await renderLocalReport(directory);
+    assert.equal(summarizeLocal(run).length, run.cases.length);
+    // Pre-metadata artifacts also keep their historical counts after catalog changes.
+    for (const id of run.cases) run.samples![id].pop();
+    assert.throws(() => summarizeLocal(run), /budget/);
+    delete run.sampleCounts;
+    assert.equal(summarizeLocal(run).length, run.cases.length);
+    run.samples![run.cases[0]].pop();
+    assert.throws(() => summarizeLocal(run), /budget/);
+  } finally {
+    catalog.revisionSampling.forEach((s, i) => {
+      s.samples = budgets[i];
+    });
+  }
+});
 
 test("revision workers alternate adjacent samples, retain evidence and reap failures", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-samples-"));

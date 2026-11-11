@@ -51,6 +51,9 @@ test("rejects a self-consistent but shortened inventory across every shard", asy
   for (const run of runs) {
     run.shard!.allCases = shortened;
     run.cases = shardCases(shortened, run.shard!.index, CONTINUOUS_SHARDS);
+    run.sampleCounts = Object.fromEntries(
+      run.cases.map((id) => [id, revisionSampling(parseCriterionId(id).len).samples]),
+    );
     run.samples = Object.fromEntries(
       run.cases.map((id) => [
         id,
@@ -83,6 +86,8 @@ for (const damage of [
   "invalid-time",
   "provenance",
   "aslr",
+  "budget",
+  "missing-budget",
 ] as const) {
   test(`rejects ${damage} evidence before upload`, async (t) => {
     const out = await mkdtemp(join(tmpdir(), "tessera-shard-invalid-"));
@@ -98,6 +103,11 @@ for (const damage of [
       if (damage === "head") run.head = "c".repeat(40);
       if (damage === "baseline") run.baseline = hash;
       if (damage === "blocks") run.samples![run.cases[0]].pop();
+      if (damage === "missing-budget") delete run.sampleCounts;
+      if (damage === "budget") {
+        run.sampleCounts![run.cases[0]]--;
+        run.samples![run.cases[0]].pop();
+      }
       if (damage === "selection") run.cases.pop();
       if (damage === "settings") run.builds!.current.opt_level = "1";
       if (damage === "features") run.builds!.current.features = [];

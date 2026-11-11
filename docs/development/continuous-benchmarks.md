@@ -40,7 +40,7 @@ Both builds enable Rayon; SIMD additionally enables runtime dispatch. There is n
 
 ### Capacity and recovery
 
-Four measurement jobs replace eight long-running jobs. Ordinary Rust CI retains its original parallelism; no test job waits for benchmarks. PR updates cancel obsolete measurements. GitHub still provides no global priority or preemption guarantee. Only publication serializes image-branch writes.
+Four measurement jobs replace eight long-running jobs. Ordinary Rust CI retains its original parallelism; no test job waits for benchmarks. PR updates cancel obsolete measurements; main runs use distinct concurrency groups so a newer push cannot replace a pending first-parent comparison. GitHub still provides no global priority or preemption guarantee. Only publication serializes image-branch writes.
 
 CI supplies `TESSERA_BENCH_TARGET_DIR` and uses `Swatinem/rust-cache` for the actual Cargo target, separated by build configuration. CLI alignment flags are set before compiling, avoiding the preliminary unaligned build. Temporary source snapshots still disappear; cached dependencies survive. Cargo validates source changes and rebuilds the measured crate. PR caches are scoped by GitHub; the privileged default-branch publisher cannot restore PR-scoped caches. Local caching is explicit and must not cross trust boundaries.
 

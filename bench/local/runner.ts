@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { arch, cpus, platform, release } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
@@ -173,11 +173,10 @@ export async function buildRevisions(
     return built;
   };
   const binaries = {
-    baseline: join(directory, "baseline", "worker"),
-    current: join(directory, "current", "worker"),
+    baseline: join(directory, `baseline-${layout?.baselineSeed ?? "default"}`, "worker"),
+    current: join(directory, `current-${layout?.currentSeed ?? "default"}`, "worker"),
   };
-  await mkdir(join(directory, "baseline"), { recursive: true });
-  await mkdir(join(directory, "current"), { recursive: true });
+  for (const binary of Object.values(binaries)) await mkdir(dirname(binary), { recursive: true });
   const first = await build("baseline", layout?.baselineSeed);
   if (layout) {
     if (first.provenance.target !== "x86_64-unknown-linux-gnu")

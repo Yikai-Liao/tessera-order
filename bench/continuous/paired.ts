@@ -2,7 +2,13 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { caseLabel, caseParts, parseCriterionId, type Variant } from "../catalog.ts";
+import {
+  caseLabel,
+  caseParts,
+  parseCriterionId,
+  revisionSampling,
+  type Variant,
+} from "../catalog.ts";
 import { type LocalRun, shardCases, summarizeLocal } from "../local/model.ts";
 import { selectedCases } from "../local/runner.ts";
 import { loadPlan, parsePlan } from "../plan.ts";
@@ -115,8 +121,10 @@ export async function readPaired(
     )
       throw new Error("Missing source or configuration provenance");
     for (const id of run.cases) {
-      const { mode } = parseCriterionId(id);
+      const { mode, len } = parseCriterionId(id);
       if (mode !== "api" && mode !== "par-4") throw new Error("Unsupported measurement mode");
+      if (run.sampleCounts?.[id] !== revisionSampling(len).samples)
+        throw new Error("Untrusted measurement budget");
     }
     summarizeLocal(run);
     indexes.add(shard.index);

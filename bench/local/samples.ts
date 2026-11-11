@@ -14,12 +14,16 @@ export async function measureSamples(
   cpu: string | undefined,
   save: () => Promise<void>,
 ) {
+  run.sampleCounts = Object.fromEntries(
+    run.cases.map((id) => [id, revisionSampling(parseCriterionId(id).len).samples]),
+  );
   run.samples = {};
+  await save();
   for (const id of run.cases) {
     diagnostic(`Sampling ${id}`);
     const parallel = parseCriterionId(id).mode === "par-4";
     const mask = parallel ? cpu : cpu?.split(",")[0];
-    const count = revisionSampling(parseCriterionId(id).len).samples;
+    const count = run.sampleCounts[id];
     const worker = (
       role: keyof typeof binaries,
       interact: (exchange: (request: string) => Promise<string>) => Promise<void>,

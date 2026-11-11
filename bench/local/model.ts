@@ -47,6 +47,7 @@ export interface LocalRun {
   schema: 1;
   protocol?: "paired-samples-v1" | "paired-samples-v2";
   samples?: Record<string, { baseline: number; current: number }[]>;
+  sampleCounts?: Record<string, number>;
   baseline: string;
   head: string;
   dirty: boolean;
@@ -81,7 +82,7 @@ export interface LocalSummary {
 
 /** Summarize retained sample pairs, or historical nine-block A/A evidence. */
 export function summarizeLocal(
-  run: Pick<LocalRun, "protocol" | "samples" | "cases" | "blocks">,
+  run: Pick<LocalRun, "protocol" | "samples" | "sampleCounts" | "cases" | "blocks">,
 ): LocalSummary[] {
   if (run.protocol === "paired-samples-v1" || run.protocol === "paired-samples-v2") {
     if (
@@ -92,11 +93,26 @@ export function summarizeLocal(
       Object.keys(run.samples).sort().join("\n") !== [...run.cases].sort().join("\n")
     )
       throw new Error("Incomplete paired samples");
+    if (
+      run.sampleCounts !== undefined &&
+      Object.keys(run.sampleCounts).sort().join("\n") !== [...run.cases].sort().join("\n")
+    )
+      throw new Error("Incomplete recorded sample budgets");
     return run.cases.map((id) => {
       const samples = run.samples![id];
       const len = parseCriterionId(id).len;
-      const count = revisionSampling(len).samples;
+      // Early v1/v2 artifacts omitted counts; their fixed protocol must not follow a new catalog.
+      const count =
+        run.sampleCounts === undefined
+          ? len >= 10_000_000
+            ? 20
+            : len >= 1_000_000
+              ? 40
+              : 30
+          : run.sampleCounts[id];
       if (
+        !Number.isSafeInteger(count) ||
+        count < 10 ||
         samples.length !== count ||
         samples.some(
           (s) => ![s.baseline, s.current].every((value) => Number.isFinite(value) && value > 0),
@@ -106,7 +122,7 @@ export function summarizeLocal(
       return { id, ...summarizeRatios(samples.map((s) => s.current / s.baseline)) };
     });
   }
-  if (run.protocol !== undefined || run.samples !== undefined)
+  if (run.protocol !== undefined || run.samples !== undefined || run.sampleCounts !== undefined)
     throw new Error("Unsupported comparison protocol");
   if (run.blocks.length !== 9 || !run.cases.length || new Set(run.cases).size !== run.cases.length)
     throw new Error("Expected nine complete blocks");

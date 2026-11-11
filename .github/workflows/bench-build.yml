@@ -28,7 +28,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: bench-measure-${{ github.event.pull_request.number || github.ref }}
+  # Cancel obsolete PR heads, but never replace a pending main comparison.
+  group: bench-measure-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

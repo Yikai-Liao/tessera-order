@@ -13,7 +13,7 @@ const MIN_PARALLEL_BYTES: usize = 1 << 20;
 const MIN_TASK_BYTES: usize = 256 * 1024;
 
 /// Sorts large inputs by handing complete root buckets to Rayon's current pool.
-pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: bool>(
+pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
     records: &mut [T],
     extractor: &mut E,
 ) {
@@ -23,7 +23,7 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: b
         return;
     }
     if bytes < MIN_PARALLEL_BYTES || rayon::current_num_threads() == 1 {
-        super::sort::<T, E, CACHED>(records, extractor);
+        super::sort::<T, E>(records, extractor);
         return;
     }
 
@@ -37,16 +37,16 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: b
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
             let mut key = Narrow::<E, 0>(extractor.clone());
-            sort_root::<T, _, CACHED>(records, &mut key, &mut scratch, varying, tile_len);
+            sort_root::<T, _>(records, &mut key, &mut scratch, varying, tile_len);
             return;
         }
         if varying & ((1u128 << 64) - 1) == 0 {
             let mut key = Narrow::<E, 64>(extractor.clone());
-            sort_root::<T, _, CACHED>(records, &mut key, &mut scratch, varying >> 64, tile_len);
+            sort_root::<T, _>(records, &mut key, &mut scratch, varying >> 64, tile_len);
             return;
         }
     }
-    sort_root::<T, E, CACHED>(records, extractor, &mut scratch, varying, tile_len);
+    sort_root::<T, E>(records, extractor, &mut scratch, varying, tile_len);
 }
 
 /// Owns a half-key view so parallel jobs can clone the original extractor.
@@ -81,7 +81,7 @@ impl<'records, T> Job<'records, T> {
         self.records.saturating_mul(core::mem::size_of::<T>())
     }
 
-    fn run<E: Extract<T> + Clone + Send, const CACHED: bool>(
+    fn run<E: Extract<T> + Clone + Send>(
         &mut self,
         mut extractor: E,
         candidate: u128,
@@ -89,7 +89,7 @@ impl<'records, T> Job<'records, T> {
         pool: &Pool<T>,
     ) {
         let mut scratch = pool.take();
-        let mut sorter = Sorter::<T, E, CACHED> {
+        let mut sorter = Sorter::<T, E> {
             scratch: &mut scratch,
             extractor: &mut extractor,
             tile_len,
@@ -130,7 +130,7 @@ impl<T> Pool<T> {
 }
 
 /// Partitions the root and sorts each bucket as soon as compaction releases it.
-fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHED: bool>(
+fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync>(
     records: &'records mut [T],
     extractor: &mut E,
     scratch: &mut Scratch<T>,
@@ -139,7 +139,7 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
 ) {
     let node_bytes = records.len().saturating_mul(core::mem::size_of::<T>());
     if records.len() < 4 * tile_len {
-        Sorter::<T, E, CACHED> {
+        Sorter::<T, E> {
             scratch,
             extractor,
             tile_len,
@@ -172,7 +172,7 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
         }
         NodePlan::Digit(digit) => digit,
         plan => {
-            Sorter::<T, E, CACHED> {
+            Sorter::<T, E> {
                 scratch,
                 extractor,
                 tile_len,
@@ -207,7 +207,7 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
             let mut job = pending.take().unwrap_or_else(Job::new);
             job.push(bucket);
             if job.bytes() >= MIN_TASK_BYTES {
-                spawn_job::<T, E, CACHED>(
+                spawn_job::<T, E>(
                     scope,
                     job,
                     candidate,
@@ -222,7 +222,7 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
         let finish = |child: &mut [T]| {
             let mut key = child_extractor.clone();
             let mut scratch = pool_ref.take();
-            Sorter::<T, E, CACHED> {
+            Sorter::<T, E> {
                 scratch: &mut scratch,
                 extractor: &mut key,
                 tile_len,
@@ -246,7 +246,7 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync, const CACHE
         );
         drop(visit);
         if let Some(job) = pending {
-            spawn_job::<T, E, CACHED>(
+            spawn_job::<T, E>(
                 scope,
                 job,
                 candidate,
@@ -274,12 +274,7 @@ fn bucket_limit<T>(len: usize, width: usize) -> usize {
 }
 
 /// Queues a group of complete buckets on the current Rayon scope.
-fn spawn_job<
-    'scope,
-    T: Send + 'scope,
-    E: Extract<T> + Clone + Send + 'scope,
-    const CACHED: bool,
->(
+fn spawn_job<'scope, T: Send + 'scope, E: Extract<T> + Clone + Send + 'scope>(
     scope: &Scope<'scope>,
     mut job: Job<'scope, T>,
     candidate: u128,
@@ -287,7 +282,7 @@ fn spawn_job<
     tile_len: usize,
     pool: &'scope Pool<T>,
 ) {
-    scope.spawn(move |_| job.run::<E, CACHED>(extractor, candidate, tile_len, pool));
+    scope.spawn(move |_| job.run::<E>(extractor, candidate, tile_len, pool));
 }
 
 #[cfg(test)]

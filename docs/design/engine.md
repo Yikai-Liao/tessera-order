@@ -141,6 +141,8 @@ Each counting pass reads the keys twice: once for the histogram and once to scat
 - **User key functions** (`stable_sort_by_key`). The histogram stores a two-byte bucket number per record, and scatter reads it instead of calling the key function again. Bucket ranges are disjoint, so each output slot is written exactly once whatever the key function returns. This keeps `String`, `Box<T>` and `&mut T` records safe and every record type on one path.
 - **Library-encoded keys** (`stable_sort`). The keys are the records and are encoded by Tessera, so they are deterministic. Scatter recomputes them and stores nothing.
 
+The extractor owns this distinction through `Extract::CACHE_BUCKETS`, not an independent mode passed through the serial and parallel executors. Its unsafe implementation contract permits opting out only when key extraction is deterministic and panic-free; narrowed extractors inherit that guarantee. Tile allocation, histogram and scatter consume the same associated constant. Adding an extractor no longer requires choosing a cache mode at each sort entry.
+
 The research prototype skipped the stored bucket numbers for `Copy` records. It filled scratch with valid records on the first pass, so a misbehaving key function could duplicate or drop records but never expose uninitialized memory. The cost of storing bucket numbers for every record type is measured in the [port record](port.md#performance).
 
 ## Panic safety

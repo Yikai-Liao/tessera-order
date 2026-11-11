@@ -99,7 +99,7 @@ pub use parallel::{par_stable_sort, par_stable_sort_by_key};
 /// assert_eq!(bits, expected);
 /// ```
 pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
-    engine::sort::<K, _, false>(values, &mut key::Direct);
+    engine::sort::<K, _>(values, &mut key::Direct);
 }
 
 /// Sorts records by a key, keeping records with equal keys in input order.
@@ -143,7 +143,7 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 /// assert_eq!(names, ["a", "c", "d"]);
 /// ```
 pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
-    engine::sort::<T, _, true>(values, &mut key::ByKey(key));
+    engine::sort::<T, _>(values, &mut key::ByKey(key));
 }
 
 /// Internal thresholds, exported for benchmarks that probe boundary sizes.

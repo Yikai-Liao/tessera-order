@@ -124,11 +124,7 @@ impl<T> Scratch<T> {
 }
 
 /// Routes nodes and finishes tiles with one extractor and shared scratch.
-///
-/// `CACHED` stores each record's bucket ID during a tile pass's histogram so
-/// the scatter never calls the key function again; it is `true` for user key
-/// functions and `false` for library-encoded keys.
-struct Sorter<'a, T, E, const CACHED: bool> {
+struct Sorter<'a, T, E> {
     scratch: &'a mut Scratch<T>,
     extractor: &'a mut E,
     tile_len: usize,
@@ -138,17 +134,13 @@ struct Sorter<'a, T, E, const CACHED: bool> {
 ///
 /// Allocates tile and block buffers only after the order probe and varying-bit
 /// scan have not finished the sort.
-pub(crate) fn sort<T, E: Extract<T>, const CACHED: bool>(records: &mut [T], extractor: &mut E) {
-    sort_with_tile_bytes::<T, E, CACHED>(records, extractor, TILE_BYTES);
+pub(crate) fn sort<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
+    sort_with_tile_bytes::<T, E>(records, extractor, TILE_BYTES);
 }
 
 /// [`sort`] with a tile budget of `tile_bytes`, so tests can reach node routes
 /// with small inputs.
-fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
-    records: &mut [T],
-    extractor: &mut E,
-    tile_bytes: usize,
-) {
+fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], extractor: &mut E, tile_bytes: usize) {
     let record_bytes = core::mem::size_of::<T>();
     if records.len() < 2 || record_bytes == 0 {
         return;
@@ -161,7 +153,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
     let scratch = &mut scratch;
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
-            Sorter::<T, _, CACHED> {
+            Sorter::<T, _> {
                 scratch,
                 extractor: &mut KeyHalf::<_, 0>(extractor),
                 tile_len,
@@ -170,7 +162,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
             return;
         }
         if varying & ((1u128 << 64) - 1) == 0 {
-            Sorter::<T, _, CACHED> {
+            Sorter::<T, _> {
                 scratch,
                 extractor: &mut KeyHalf::<_, 64>(extractor),
                 tile_len,
@@ -179,7 +171,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>, const CACHED: bool>(
             return;
         }
     }
-    Sorter::<T, E, CACHED> {
+    Sorter::<T, E> {
         scratch,
         extractor,
         tile_len,
@@ -400,7 +392,7 @@ fn reverse_stably<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
     }
 }
 
-impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
+impl<T, E: Extract<T>> Sorter<'_, T, E> {
     /// Consumes an ordered-run decision without probing or partitioning again.
     fn split_ordered(&mut self, records: &mut [T], boundary: usize, set: bool, varying: u128) {
         // Rotation preserves each run's internal order.
@@ -446,7 +438,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
     /// The larger tile allowance is local to this operation and cursor-bounded.
     #[cfg(feature = "rayon")]
     fn sort_staged_child(&mut self, records: &mut [T], candidate: u128) {
-        Sorter::<T, E, CACHED> {
+        Sorter::<T, E> {
             scratch: self.scratch,
             extractor: self.extractor,
             tile_len: self
@@ -466,7 +458,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         if len <= self.tile_len {
             self.scratch
                 .tile
-                .sort::<E, CACHED>(records, varying, self.extractor);
+                .sort::<E>(records, varying, self.extractor);
             return;
         }
         let plan = plan_node(records, varying, self.tile_len, self.extractor);
@@ -506,9 +498,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Sorter<'_, T, E, CACHED> {
         let mut visit = |child: &mut [T], extractor: &mut E| {
             if child.len() <= tile_len {
                 let varying = scan_varying_bits(child, candidate, extractor);
-                self.scratch
-                    .tile
-                    .sort::<E, CACHED>(child, varying, extractor);
+                self.scratch.tile.sort::<E>(child, varying, extractor);
             }
         };
         let ends = block::partition_digit_with_ends(
@@ -630,7 +620,7 @@ mod tests {
         {
             let mut backing: Vec<_> = (0..len).collect();
             let mut probe: Vec<_> = backing.iter_mut().enumerate().collect();
-            sort_with_tile_bytes::<_, _, true>(
+            sort_with_tile_bytes::<_, _>(
                 &mut probe,
                 &mut ByKey(|x: &(usize, &mut usize)| {
                     total += 1;
@@ -647,7 +637,7 @@ mod tests {
                 let mut records: Vec<_> = values.iter_mut().enumerate().collect();
                 let mut calls = 0;
                 let outcome = catch_unwind(AssertUnwindSafe(|| {
-                    sort_with_tile_bytes::<_, _, true>(
+                    sort_with_tile_bytes::<_, _>(
                         &mut records,
                         &mut ByKey(|x: &(usize, &mut usize)| {
                             calls += 1;
@@ -715,7 +705,7 @@ mod tests {
                     0x1ff
                 }
             });
-            Sorter::<_, _, true> {
+            Sorter::<_, _> {
                 scratch: &mut scratch,
                 extractor: &mut extractor,
                 tile_len: tile_capacity::<u16>(32),

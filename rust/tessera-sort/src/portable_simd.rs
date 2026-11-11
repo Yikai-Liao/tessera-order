@@ -57,7 +57,8 @@ pub(crate) fn insertion_sort<K: SimdKey>(keys: &mut [K], budget: usize) -> Optio
 /// Direct extraction with a backend already selected for this insertion pass.
 struct VectorKeys<S>(S);
 
-impl<S: Simd, K: SimdKey> crate::key::Extract<K> for VectorKeys<S> {
+// SAFETY: this insertion-only adapter retains the default cached classification policy.
+unsafe impl<S: Simd, K: SimdKey> crate::key::Extract<K> for VectorKeys<S> {
     type Value = K::Encoded;
 
     #[inline(always)]

@@ -197,7 +197,16 @@ const SMALL_WINDOW_BUCKETS: usize = 1 << SMALL_WINDOW_BITS;
 ///
 /// `ByKey` calls a user key function, `Direct` encodes the record itself, and
 /// `KeyHalf` narrows another extractor to one 64-bit half of a 128-bit key.
-pub(crate) trait Extract<T> {
+///
+/// # Safety
+///
+/// If `CACHE_BUCKETS` is false, `key` must be deterministic and panic-free:
+/// tile scatter may evaluate it again after ownership transfer has started.
+pub(crate) unsafe trait Extract<T> {
+    /// Whether tile passes must retain each classification before moving records.
+    /// User callbacks keep the default; only repeatable library encoders opt out.
+    const CACHE_BUCKETS: bool = true;
+
     /// The encoded key type.
     type Value: Unsigned;
 
@@ -282,7 +291,8 @@ pub(crate) trait Extract<T> {
 /// Extracts keys with a user key function, which may panic or be inconsistent.
 #[derive(Clone)]
 pub(crate) struct ByKey<F>(pub F);
-impl<T, K: RadixKey, F: FnMut(&T) -> K> Extract<T> for ByKey<F> {
+// SAFETY: user callbacks retain cached classifications, even if they panic or change keys.
+unsafe impl<T, K: RadixKey, F: FnMut(&T) -> K> Extract<T> for ByKey<F> {
     type Value = K::Encoded;
     #[inline]
     fn key(&mut self, record: &T) -> Self::Value {
@@ -294,7 +304,9 @@ impl<T, K: RadixKey, F: FnMut(&T) -> K> Extract<T> for ByKey<F> {
 #[derive(Clone, Copy)]
 pub(crate) struct Direct;
 
-impl<K: RadixKey> Extract<K> for Direct {
+// SAFETY: sealed key encodings are deterministic and panic-free.
+unsafe impl<K: RadixKey> Extract<K> for Direct {
+    const CACHE_BUCKETS: bool = false;
     type Value = K::Encoded;
 
     #[cfg(feature = "rayon")]
@@ -433,12 +445,16 @@ pub(crate) struct KeyHalf<'a, E, const SHIFT: usize>(pub &'a mut E);
 /// Scans retain the defaults for the narrowed keys, not the inner key width.
 macro_rules! impl_key_half {
     ($half:ty) => {
-        impl<T, E: $crate::key::Extract<T>, const SHIFT: usize> $crate::key::Extract<T> for $half {
+        // SAFETY: the inner extractor owns repeatability; wrapping shifts cannot panic.
+        unsafe impl<T, E: $crate::key::Extract<T>, const SHIFT: usize> $crate::key::Extract<T>
+            for $half
+        {
+            const CACHE_BUCKETS: bool = E::CACHE_BUCKETS;
             type Value = u64;
 
             #[inline]
             fn key(&mut self, record: &T) -> u64 {
-                ($crate::key::Unsigned::to_u128(self.0.key(record)) >> SHIFT) as u64
+                $crate::key::Unsigned::to_u128(self.0.key(record)).wrapping_shr(SHIFT as u32) as u64
             }
 
             fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {

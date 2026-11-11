@@ -30,7 +30,7 @@ fn sort_group<'records, T: Send, E: Extract<T> + Clone + Send>(
 
     let mut job = pending.expect("both output buckets are nonempty");
     assert_eq!(job.buckets.len(), 2);
-    job.run::<E, true>(extractor, 3, tile_capacity::<T>(TILE_BYTES), &pool);
+    job.run::<E>(extractor, 3, tile_capacity::<T>(TILE_BYTES), &pool);
     scratch.block.recycle_ends(ends);
 }
 
@@ -65,7 +65,7 @@ fn descending_children_keep_equal_key_order() {
         let mut records = band.to_vec();
         let mut expected = records.clone();
         expected.sort_by_key(|row| row.0);
-        Sorter::<_, _, true> {
+        Sorter::<_, _> {
             scratch: &mut Scratch::new(),
             extractor: &mut ByKey(|row: &(u64, usize)| row.0),
             tile_len: 1,

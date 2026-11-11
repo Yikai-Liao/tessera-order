@@ -34,14 +34,14 @@ impl<T> Scratch<T> {
     }
 
     /// Stably finishes a cursor-bounded slice, restoring records on key panic.
-    pub(super) fn sort<E: Extract<T>, const CACHED: bool>(
+    pub(super) fn sort<E: Extract<T>>(
         &mut self,
         records: &mut [T],
         varying: u128,
         extractor: &mut E,
     ) {
         debug_assert!(records.len() <= MAX_TILE_RECORDS);
-        Tile::<T, E, CACHED> {
+        Tile::<T, E> {
             scratch: &mut self.0,
             extractor,
         }
@@ -50,7 +50,7 @@ impl<T> Scratch<T> {
 }
 
 /// One active tile operation, including recursive MSD children.
-struct Tile<'a, T, E, const CACHED: bool> {
+struct Tile<'a, T, E> {
     scratch: &'a mut Vec<MaybeUninit<T>>,
     extractor: &'a mut E,
 }
@@ -58,7 +58,7 @@ struct Tile<'a, T, E, const CACHED: bool> {
 /// One stable counting pass: histogram, prefix sum, then scatter from `source`
 /// to `destination`. Returns the size of the largest bucket.
 ///
-/// When `CACHED`, the histogram stores each record's bucket and the scatter
+/// When `E::CACHE_BUCKETS`, the histogram stores each record's bucket and the scatter
 /// reads it back, so a key function that changes its answer cannot send two
 /// records to one slot. Otherwise the scatter recomputes the key.
 ///
@@ -68,14 +68,12 @@ struct Tile<'a, T, E, const CACHED: bool> {
 /// - `source` holds `len` initialized records; `destination` has `len`
 ///   writable slots in a separate allocation.
 /// - `cursor` has `MAX_DIGIT_BUCKETS` writable `Cursor` slots.
-/// - When `CACHED` and the IDs do not fit after the cursor table, `cache_tail`
+/// - When `E::CACHE_BUCKETS` and the IDs do not fit after the cursor table, `cache_tail`
 ///   has `len` aligned `Cursor` slots disjoint from both record buffers.
-/// - When not `CACHED`, `key` is a library encoder: deterministic and
-///   panic-free.
 /// - If `key` panics, `destination` holds a partial copy that must be neither
 ///   read nor dropped.
 #[inline]
-unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
+unsafe fn counting_pass<T, E: Extract<T>>(
     source: *const T,
     destination: *mut T,
     len: usize,
@@ -90,7 +88,7 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
         let mask = digit.mask::<E::Value>();
         let shift = E::Value::from_usize(digit.shift);
         let buckets = 1usize << digit.width;
-        let bucket_ids = if CACHED && len + buckets <= MAX_DIGIT_BUCKETS {
+        let bucket_ids = if E::CACHE_BUCKETS && len + buckets <= MAX_DIGIT_BUCKETS {
             cursor.add(buckets)
         } else {
             cache_tail
@@ -104,7 +102,7 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
             // SAFETY: the caller guarantees `len` initialized records.
             let key = extractor.key(&*source.add(index));
             let bucket = ((key & mask) >> shift).to_usize();
-            if CACHED {
+            if E::CACHE_BUCKETS {
                 // SAFETY: the scratch tail has len aligned Cursor slots.
                 *bucket_ids.add(index) = bucket as Cursor;
             }
@@ -119,7 +117,7 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
         crate::portable_simd::prefix_sum(starts);
         for index in 0..len {
             let record = source.add(index);
-            let bucket = if !CACHED {
+            let bucket = if !E::CACHE_BUCKETS {
                 // Only sealed library encoders use the uncached path; their
                 // classification is deterministic and cannot panic.
                 ((extractor.key(&*record) & mask) >> shift).to_usize()
@@ -130,7 +128,7 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
             };
             let slot = *cursor.add(bucket);
             *cursor.add(bucket) = slot.wrapping_add(1);
-            let target = if CACHED {
+            let target = if E::CACHE_BUCKETS {
                 slot as usize
             } else {
                 (slot as usize).min(len - 1)
@@ -143,7 +141,7 @@ unsafe fn counting_pass<T, E: Extract<T>, const CACHED: bool>(
     }
 }
 
-impl<T, E: Extract<T>, const CACHED: bool> Tile<'_, T, E, CACHED> {
+impl<T, E: Extract<T>> Tile<'_, T, E> {
     /// Reserves `len` scratch records and, when bucket IDs are cached and do not
     /// fit after `buckets` cursors, `len` aligned `Cursor` slots after them.
     ///
@@ -153,7 +151,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Tile<'_, T, E, CACHED> {
         // Cached IDs first use the unused suffix of the cursor table. Larger
         // caches share the record allocation, without another allocation or
         // zero initialization.
-        let tail = CACHED && len + buckets > MAX_DIGIT_BUCKETS;
+        let tail = E::CACHE_BUCKETS && len + buckets > MAX_DIGIT_BUCKETS;
         if tail {
             let bytes = core::mem::size_of::<T>();
             let extra = (len * core::mem::size_of::<Cursor>() + core::mem::align_of::<Cursor>()
@@ -200,9 +198,10 @@ impl<T, E: Extract<T>, const CACHED: bool> Tile<'_, T, E, CACHED> {
         };
         let mut destination = scratch;
         // SAFETY: both buffers have len slots and the cursor/cache regions
-        // satisfy pass requirements; uncached mode uses only sealed encoders.
+        // satisfy pass requirements. Extract guarantees safe re-evaluation
+        // whenever classification caching is disabled.
         let largest = unsafe {
-            guard.pass::<E, CACHED>(
+            guard.pass::<E>(
                 &mut destination,
                 digit,
                 counts_ptr,
@@ -256,7 +255,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Tile<'_, T, E, CACHED> {
             }
             TilePlan::Lsd { digits, passes } => (digits, passes),
         };
-        let buckets = if CACHED {
+        let buckets = if E::CACHE_BUCKETS {
             1 << digits[..passes]
                 .iter()
                 .map(|digit| digit.width)
@@ -280,7 +279,7 @@ impl<T, E: Extract<T>, const CACHED: bool> Tile<'_, T, E, CACHED> {
             // SAFETY: scratch and tile are disjoint len-slot buffers. Cached
             // IDs fit in the cursor suffix or the reserved scratch tail.
             unsafe {
-                guard.pass::<E, CACHED>(
+                guard.pass::<E>(
                     &mut destination,
                     digit,
                     counts_ptr,
@@ -312,7 +311,7 @@ impl<T> RestoreTile<T> {
     /// The requirements of [`counting_pass`], with `self.source` as the source
     /// and `*destination` as the destination.
     #[inline]
-    unsafe fn pass<E: Extract<T>, const CACHED: bool>(
+    unsafe fn pass<E: Extract<T>>(
         &mut self,
         destination: &mut *mut T,
         digit: Digit,
@@ -323,7 +322,7 @@ impl<T> RestoreTile<T> {
         // SAFETY: the caller supplies initialized source records, disjoint writable
         // output and cursor/cache storage as specified by this function's contract.
         unsafe {
-            let largest = counting_pass::<T, E, CACHED>(
+            let largest = counting_pass::<T, E>(
                 self.source,
                 *destination,
                 self.len,
@@ -372,13 +371,49 @@ mod tests {
                 u64::MAX
             }
         });
-        Tile::<_, _, true> {
+        Tile::<_, _> {
             scratch: &mut scratch.0,
             extractor: &mut extractor,
         }
         .sort_tile(&mut records, u64::MAX as u128);
         records.sort_unstable();
         assert_eq!(records, (0..1000u64).collect::<Vec<_>>());
+    }
+
+    /// Narrowing must retain callback caching through both scatter and recovery.
+    fn check_narrowed_callback<const SHIFT: usize>() {
+        for panic_at in [None, Some(33)] {
+            let mut values: Vec<_> = (0..65).collect();
+            let mut records: Vec<_> = values.iter_mut().enumerate().collect();
+            let mut calls = 0u128;
+            let mut key = ByKey(|_: &(usize, &mut usize)| {
+                calls += 1;
+                assert_ne!(Some(calls), panic_at);
+                calls << SHIFT
+            });
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                Tile {
+                    scratch: &mut Vec::new(),
+                    extractor: &mut crate::key::KeyHalf::<_, SHIFT>(&mut key),
+                }
+                .partition_tile(&mut records, Digit { shift: 0, width: 6 }, 63);
+            }));
+            assert_eq!(result.is_err(), panic_at.is_some());
+            records.sort_by_key(|record| record.0);
+            for (id, (original, value)) in records.iter_mut().enumerate() {
+                assert_eq!(id, *original);
+                assert_eq!(id, **value);
+                **value += 65;
+            }
+            drop(records);
+            assert_eq!(values, (65..130).collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
+    fn narrowed_callbacks_preserve_borrowed_records() {
+        check_narrowed_callback::<0>();
+        check_narrowed_callback::<64>();
     }
 
     #[test]
@@ -395,7 +430,7 @@ mod tests {
         expected.sort_by_key(|x| u16::from_le_bytes([x.0[0], x.0[1]]));
         let mut scratch = Scratch::new();
         let mut key = ByKey(|x: &Odd| u16::from_le_bytes([x.0[0], x.0[1]]));
-        Tile::<_, _, true> {
+        Tile::<_, _> {
             scratch: &mut scratch.0,
             extractor: &mut key,
         }

@@ -3,10 +3,12 @@
 import assert from "node:assert/strict";
 import { lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { command } from "../tools/process.ts";
 import {
+  ALIGNMENT_RUSTFLAGS,
+  benchmarkEnvironment,
   buildArtifact,
   copyLibraryRevision,
   copySnapshot,
@@ -65,6 +67,12 @@ test("snapshots preserve dirty sources and clean up failures", async () => {
     await assert.rejects(
       withWorkspace(root, async (workspace) => {
         directory = workspace.directory;
+        assert.equal(
+          workspace.target,
+          process.env.TESSERA_BENCH_TARGET_DIR
+            ? resolve(root, process.env.TESSERA_BENCH_TARGET_DIR)
+            : join(root, "target/tessera-bench"),
+        );
         assert.equal(
           await readFile(join(workspace.tree, "rust/tessera-sort/src/lib.rs"), "utf8"),
           "modified\n",
@@ -257,4 +265,49 @@ test("Cargo artifacts retain paths and build provenance", async (t) => {
       );
     }
   }
+});
+
+test("Cargo resolves configured flags before a single aligned benchmark build", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-flags-test-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const tree = join(directory, "tree");
+  const target = join(directory, "target");
+  await mkdir(join(tree, ".cargo"), { recursive: true });
+  const config = join(tree, ".cargo/config.toml");
+  const env = { RUSTFLAGS: undefined, CARGO_ENCODED_RUSTFLAGS: undefined };
+  // Environment deletion is handled by command(); no ambient flags may alter this fixture.
+  for (const configured of [
+    `[build]
+rustflags = ["--cfg", "from_build"]
+`,
+    `[target.'cfg(all())']
+rustflags = ["--cfg", "from_target"]
+`,
+  ]) {
+    await writeFile(config, configured);
+    const resolved = await benchmarkEnvironment(tree, target, { env });
+    assert.equal(
+      resolved.CARGO_ENCODED_RUSTFLAGS,
+      [
+        ...ALIGNMENT_RUSTFLAGS,
+        "--cfg",
+        configured.includes("from_target") ? "from_target" : "from_build",
+      ].join(""),
+    );
+  }
+  for (const explicit of [
+    { RUSTFLAGS: "--cfg from_env" },
+    { CARGO_ENCODED_RUSTFLAGS: "--cfgfrom_encoded" },
+    { CARGO_ENCODED_RUSTFLAGS: "" },
+    { CARGO_ENCODED_RUSTFLAGS: '--cfglabel="two words"' },
+  ]) {
+    const resolved = await benchmarkEnvironment(tree, target, { env: { ...env, ...explicit } });
+    const configured = explicit.CARGO_ENCODED_RUSTFLAGS ?? "--cfgfrom_env";
+    assert.equal(
+      resolved.CARGO_ENCODED_RUSTFLAGS,
+      [...ALIGNMENT_RUSTFLAGS, ...(configured ? [configured] : [])].join(""),
+    );
+    assert.deepEqual(await benchmarkEnvironment(tree, target, { env: resolved }), resolved);
+  }
+  assert.deepEqual((await readdir(directory)).sort(), ["target", "tree"]);
 });

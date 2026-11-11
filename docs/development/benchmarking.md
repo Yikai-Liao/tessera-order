@@ -23,7 +23,7 @@ Run `pnpm tools` from the repository root with Node.js 24 and the pinned pnpm an
 
 `compare commit` defaults to `HEAD` and the `local` plan; `compare algorithms` defaults to the `smoke` plan. Replace uppercase placeholders. `report` reads retained results without compiling or measuring; incomplete algorithm sessions require `--partial`, while revision reports require every case's complete recorded sample budget.
 
-CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment (`-C llvm-args=-align-loops=64`, `-C llvm-args=-align-all-nofallthru-blocks=6`) for both revisions, Rust competitors and memory workers. The builder prepends these to Cargo's resolved flags, so explicitly configured values override them, and records the effective flags in provenance. Direct Cargo commands keep their own configuration; hosted comparisons use the CLI defaults.
+CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment (`-C llvm-args=-align-loops=64`, `-C llvm-args=-align-all-nofallthru-blocks=6`) for both revisions, Rust competitors and memory workers. A dependency-free Cargo probe resolves environment, build and target configuration before the single benchmark build. The builder prepends the defaults to those resolved flags, so explicitly configured values override them, and records the effective flags in provenance. Direct Cargo commands keep their own configuration; hosted comparisons use the CLI defaults.
 
 ## Command output
 
@@ -77,7 +77,7 @@ Ratios are **placement time / paired current time**: a slower baseline row indic
 
 ## Working-tree comparisons
 
-`compare commit [COMMIT]` and `compare algorithms` snapshot the current staged, unstaged and untracked sources without touching the checkout, build under `~/code/tessera-bench/` (`TESSERA_BENCH_WORK` overrides) and clean up. Internal symlinks are materialized; escaping or dangling links and directory cycles are rejected. Baseline links must resolve inside an archive of the selected commit.
+`compare commit [COMMIT]` and `compare algorithms` snapshot the current staged, unstaged and untracked sources without touching the checkout, build under `~/code/tessera-bench/` (`TESSERA_BENCH_WORK` overrides) and clean up temporary sources. Builds reuse `target/tessera-bench` in the checkout by default; `TESSERA_BENCH_TARGET_DIR` overrides it (relative paths resolve from the repository root). Remove that cache for a cold build, and never share it across trust boundaries. Internal symlinks are materialized; escaping or dangling links and directory cycles are rejected. Baseline links must resolve inside an archive of the selected commit.
 
 `compare commit` accepts any resolvable local commit compatible with the current crate API, harness and lockfile. Both revisions use the current harness, lockfile and toolchain; the baseline substitutes only `rust/tessera-sort`. Linux workers run under `setarch -R` to control address randomization (checked before building). Selected timed IDs must match. The `local` plan measures only `rust/u64/random/65536/s1/api`; override its axes rather than implicitly running the full continuous inventory. `--filter` narrows the resulting IDs.
 

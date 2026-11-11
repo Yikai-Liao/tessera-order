@@ -97,8 +97,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/comparison
-      # Match the CLI before testing so functional builds can be reused unchanged.
-      RUSTFLAGS: -C llvm-args=-align-loops=64 -C llvm-args=-align-all-nofallthru-blocks=6
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -136,7 +134,6 @@ jobs:
     timeout-minutes: 10
     env:
       TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/continuous
-      RUSTFLAGS: -C llvm-args=-align-loops=64 -C llvm-args=-align-all-nofallthru-blocks=6
     outputs:
       matrix: ${{ steps.matrix.outputs.value }}
       baseline: ${{ steps.build.outputs.baseline }}

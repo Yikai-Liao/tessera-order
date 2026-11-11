@@ -19,7 +19,13 @@ import {
   withSessionLock,
 } from "./session.ts";
 import { pairedBudget } from "./statistics.ts";
-import { buildBenchmark, copySnapshot, type Workspace, withWorkspace } from "./workspace.ts";
+import {
+  benchmarkEnvironment,
+  buildBenchmark,
+  copySnapshot,
+  type Workspace,
+  withWorkspace,
+} from "./workspace.ts";
 
 /** Acquire native sources and own their link inside an isolated build workspace. */
 async function withComparisonWorkspace<T>(
@@ -67,7 +73,7 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
         "--target-dir",
         target,
       ],
-      { cwd: tree },
+      { cwd: tree, env: await benchmarkEnvironment(tree, target) },
     );
     const { executable } = await buildBenchmark(tree, target, "compare", features, {
       profile: "dev",

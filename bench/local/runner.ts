@@ -10,6 +10,7 @@ import { parseCriterionId } from "../catalog.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
+  benchmarkEnvironment,
   buildBenchmark,
   copyLibraryRevision,
   copySnapshot,
@@ -151,11 +152,9 @@ export async function buildRevisions(
       // Cargo resolves target/build config flags before exposing them to the
       // build script. Read that result before selecting its higher-precedence
       // encoded environment source, which would otherwise discard config flags.
-      const reference = await buildBenchmark(tree, target, "smoke", selectedFeatures, {
-        rustcArgs: args,
-      });
+      const resolved = await benchmarkEnvironment(tree, target);
       env = {
-        CARGO_ENCODED_RUSTFLAGS: [reference.provenance.cargo_encoded_rustflags, ...extraFlags]
+        CARGO_ENCODED_RUSTFLAGS: [resolved.CARGO_ENCODED_RUSTFLAGS, ...extraFlags]
           .filter(Boolean)
           .join("\x1f"),
       };

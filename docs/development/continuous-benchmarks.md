@@ -36,7 +36,7 @@ Both revisions enable Rayon and the runtime-dispatched SIMD backend, with no for
 
 ### Capacity and recovery
 
-One preparation job and four measurement jobs cover the single backend; ordinary Rust CI keeps its own parallelism and no test job waits for benchmarks. PR updates cancel obsolete runs, and GitHub gives no global priority or preemption guarantee. Only preparation compiles, with `TESSERA_BENCH_TARGET_DIR` and `Swatinem/rust-cache` supplying the Cargo target and CLI alignment flags set before compiling. The target is four minutes from triggering CI through archival; measure the complete critical path, since budgets, cache hits and timeouts are not completion evidence.
+One preparation job and four measurement jobs cover the single backend; ordinary Rust CI keeps its own parallelism and no test job waits for benchmarks. PR updates cancel obsolete runs, and GitHub gives no global priority or preemption guarantee. Only preparation compiles, with `TESSERA_BENCH_TARGET_DIR` and `Swatinem/rust-cache` supplying the Cargo target and the shared CLI builder resolving alignment flags before compiling. The target is four minutes from triggering CI through archival; measure the complete critical path, since budgets, cache hits and timeouts are not completion evidence.
 
 Rerun failed jobs in their original run. Missing or expired artifacts need a new complete run; an archival retry can reuse complete artifacts. A plan change is handled by that branch's preparation and report code in the same run.
 
@@ -92,7 +92,7 @@ pnpm tools compare prepared bench/results/prepared --shard 1/4 --out bench/resul
 pnpm tools report bench/results/paired-1    # regenerate offline
 ```
 
-A prepared pair holds the plan, provenance and executable hashes but no samples, so it is not evidence. `compare prepared` requires the original harness and catalog, rejects modified or escaping executable paths, verifies both listings and retains the executed copies. `--shard INDEX/COUNT` partitions the resolved listing deterministically, keeping each case's full sampling budget; omit it to run everything on one host. The four-thread plan needs Linux and `taskset` with four allowed CPUs, and serial and parallel cases never overlap. Interrupted measurement is not resumable. Set `TESSERA_BENCH_TARGET_DIR` to a caller-owned Cargo cache to keep builds across runs, but never share it across trust boundaries. Older protocols and absolute-time histories use their original tooling revision.
+A prepared pair holds the plan, provenance and executable hashes but no samples, so it is not evidence. `compare prepared` requires the original harness and catalog, rejects modified or escaping executable paths, verifies both listings and retains the executed copies. `--shard INDEX/COUNT` partitions the resolved listing deterministically, keeping each case's full sampling budget; omit it to run everything on one host. The four-thread plan needs Linux and `taskset` with four allowed CPUs, and serial and parallel cases never overlap. Interrupted measurement is not resumable. Builds reuse the checkout-local cache by default; `TESSERA_BENCH_TARGET_DIR` selects another caller-owned Cargo cache. Never share it across trust boundaries. Older protocols and absolute-time histories use their original tooling revision.
 
 Upload is explicit and never executes artifact code. With the pinned Bencher CLI, the `prepared-revisions` artifact in `PREPARED`, every `paired-*` artifact in separate directories under `ARTIFACTS` and `BENCHER_API_KEY` in the environment:
 

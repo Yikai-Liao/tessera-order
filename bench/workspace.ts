@@ -1,7 +1,18 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { createHash } from "node:crypto";
-import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
+import {
+  cp,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse } from "smol-toml";
@@ -128,8 +139,8 @@ export async function sourceHash(directory: string): Promise<string> {
 
 /** Own an isolated snapshot and clean it up, even on failure.
  *
- * TESSERA_BENCH_TARGET_DIR opts into a caller-owned Cargo cache (relative to
- * root); never share it across trust boundaries. Otherwise builds are temporary.
+ * Builds reuse a checkout-local dependency cache. TESSERA_BENCH_TARGET_DIR
+ * selects a caller-owned cache (relative to root); never share across trust boundaries.
  */
 export async function withWorkspace<T>(
   root: string,
@@ -164,7 +175,7 @@ export async function withWorkspace<T>(
     }
     const target = process.env.TESSERA_BENCH_TARGET_DIR
       ? resolve(root, process.env.TESSERA_BENCH_TARGET_DIR)
-      : join(directory, "target");
+      : join(root, "target", "tessera-bench");
     return await operation({ directory, tree, target });
   } finally {
     try {
@@ -224,6 +235,79 @@ export async function buildArtifact(output: string, name: string) {
   return { executable: artifact.executable as string, provenance };
 }
 
+/** Ask Cargo to resolve flags without compiling the benchmark or its dependencies.
+ * A dependency-free build script preserves Cargo's environment/config/target
+ * precedence, including encoded arguments containing spaces. The probe is temporary.
+ */
+export async function benchmarkEnvironment(
+  tree: string,
+  target: string,
+  options: { targetTriple?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<NodeJS.ProcessEnv> {
+  const encoded =
+    options.env && Object.hasOwn(options.env, "CARGO_ENCODED_RUSTFLAGS")
+      ? options.env.CARGO_ENCODED_RUSTFLAGS
+      : process.env.CARGO_ENCODED_RUSTFLAGS;
+  const defaults = ALIGNMENT_RUSTFLAGS.join("\x1f");
+  const environment = (flags: string) => ({
+    ...options.env,
+    CARGO_ENCODED_RUSTFLAGS: flags.startsWith(defaults)
+      ? flags
+      : [defaults, flags].filter(Boolean).join("\x1f"),
+  });
+  if (encoded !== undefined) return environment(encoded);
+  const probe = await mkdtemp(join(dirname(tree), "rustflags-"));
+  try {
+    await writeFile(
+      join(probe, "Cargo.toml"),
+      `[package]
+name = "tessera-flags"
+version = "0.0.0"
+edition = "2021"
+[workspace]
+[lib]
+path = "lib.rs"
+`,
+    );
+    await writeFile(join(probe, "lib.rs"), "// SPDX-License-Identifier: BSD-2-Clause\n");
+    await writeFile(
+      join(probe, "build.rs"),
+      `// SPDX-License-Identifier: BSD-2-Clause
+fn main() {
+    std::fs::write(
+        std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("flags"),
+        std::env::var("CARGO_ENCODED_RUSTFLAGS").unwrap_or_default(),
+    ).unwrap();
+}
+`,
+    );
+    const output = await command(
+      "cargo",
+      [
+        "check",
+        "--offline",
+        "--manifest-path",
+        join(probe, "Cargo.toml"),
+        "--target-dir",
+        join(target, "flags"),
+        "--message-format=json",
+        ...(options.targetTriple ? ["--target", options.targetTriple] : []),
+      ],
+      { cwd: tree, capture: true, env: options.env },
+    );
+    const scripts = output
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((message) => message.reason === "build-script-executed");
+    if (scripts.length !== 1) throw new Error("Missing Cargo flags probe result");
+    const flags = await readFile(join(scripts[0].out_dir, "flags"), "utf8");
+    return environment(flags);
+  } finally {
+    await rm(probe, { recursive: true, force: true });
+  }
+}
+
 /** Build a runnable benchmark, including the comparison memory worker, with its provenance. */
 export async function buildBenchmark(
   tree: string,
@@ -241,49 +325,30 @@ export async function buildBenchmark(
     throw new Error("Explicit profiles are only supported for comparison builds");
   if (options.rustcArgs && name !== "smoke")
     throw new Error("Final rustc arguments require a smoke benchmark build");
-  const build = async (env = options.env) =>
-    buildArtifact(
-      await command(
-        "cargo",
-        [
-          ...(name === "smoke"
-            ? options.rustcArgs
-              ? ["rustc", "--profile", "bench", "--bench", name]
-              : ["bench", "--bench", name, "--no-run"]
-            : [
-                "build",
-                "--profile",
-                options.profile ?? "release",
-                "--bin",
-                name,
-                "--bin",
-                "memory",
-              ]),
-          "--locked",
-          "-p",
-          "tessera-bench",
-          "--message-format=json",
-          "--target-dir",
-          target,
-          ...(options.targetTriple ? ["--target", options.targetTriple] : []),
-          ...(features.length ? ["--features", features.join(",")] : []),
-          ...(options.rustcArgs ? ["--", ...options.rustcArgs] : []),
-        ],
-        { cwd: tree, capture: true, env },
-      ),
-      name,
-    );
-  const reference = await build();
-  const flags = reference.provenance.cargo_encoded_rustflags;
-  const aligned = ALIGNMENT_RUSTFLAGS.every((flag) => flags.split("\x1f").includes(flag));
-  // Cargo resolves string/array, target and environment settings itself. An
-  // encoded override before this build would discard some of those settings.
-  const result = aligned
-    ? reference
-    : await build({
-        ...options.env,
-        CARGO_ENCODED_RUSTFLAGS: [...ALIGNMENT_RUSTFLAGS, flags].filter(Boolean).join("\x1f"),
-      });
+  const env = await benchmarkEnvironment(tree, target, options);
+  const result = await buildArtifact(
+    await command(
+      "cargo",
+      [
+        ...(name === "smoke"
+          ? options.rustcArgs
+            ? ["rustc", "--profile", "bench", "--bench", name]
+            : ["bench", "--bench", name, "--no-run"]
+          : ["build", "--profile", options.profile ?? "release", "--bin", name, "--bin", "memory"]),
+        "--locked",
+        "-p",
+        "tessera-bench",
+        "--message-format=json",
+        "--target-dir",
+        target,
+        ...(options.targetTriple ? ["--target", options.targetTriple] : []),
+        ...(features.length ? ["--features", features.join(",")] : []),
+        ...(options.rustcArgs ? ["--", ...options.rustcArgs] : []),
+      ],
+      { cwd: tree, capture: true, env },
+    ),
+    name,
+  );
   if (options.rustcArgs) result.provenance.rustc_args = options.rustcArgs;
   return result;
 }

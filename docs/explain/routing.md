@@ -16,7 +16,7 @@ At larger strides, the adjacent-pair sample classifies the input below. The targ
 
 A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. Any leading equal keys skipped while finding the direction rule out strict descent. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
 
-At larger strides, the sample rejects most unsorted inputs within a few pairs. The full scan runs only on inputs that look ordered. It finds the first unequal key, which fixes the direction, and then continues in that direction. For an ascending input it reuses the scan that budgeted insertion uses: blocked adjacent pairs in the default build (`f64` keeps its scalar scan), or the vector backend with Portable SIMD. A descending input continues with a scan that also records whether any adjacent pair ties.
+At larger strides, the sample rejects most unsorted inputs within a few pairs. The full scan runs only on inputs that look ordered. It finds the first unequal key, which fixes the direction, and then continues in that direction. For an ascending input it reuses the scan that budgeted insertion uses: the runtime-dispatched vector backend for direct primitive keys, with scalar fallbacks for unsupported keys and short slices. A descending input continues with a scan that also records whether any adjacent pair ties.
 
 ## Budgeted insertion
 

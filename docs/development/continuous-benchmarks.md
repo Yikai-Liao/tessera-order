@@ -6,7 +6,6 @@ Rust changes and pushes to `main` compare the required SIMD backend against an e
 
 Run from the repository root with Node.js 24, pinned dependencies and authenticated `gh`:
 
-
 ```
 pnpm -s tools status main
 pnpm -s tools status --pr 123

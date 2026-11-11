@@ -120,8 +120,10 @@ function callouts(s: ReportSummary) {
 
 function overall(s: ReportSummary, baseRef: string) {
   if (s.geomean == null) return null;
-  const g = s.geomean;
-  return `**Overall run time ${formatChange(g - 1)}** against \`${baseRef}\`, the geometric mean over ${s.compared} cases.`;
+  return (
+    `**Overall run time ${formatChange(s.geomean - 1)}** against \`${baseRef}\`, the geometric mean over ${s.compared} cases.` +
+    (!s.regressions && !s.improvements ? " No regression or improvement alerts." : "")
+  );
 }
 
 // Public perf pages need no login, unlike the console links in Bencher's own
@@ -239,6 +241,8 @@ export function render(s: ReportSummary, options: RenderOptions) {
     `### Benchmarks · ${[language, configuration, headline(s, Boolean(noBaseline))].filter(Boolean).join(" · ")}`,
   ];
   const boxes = callouts(s);
+  const summaryLine = overall(s, baseRef);
+  if (summaryLine) out.push("", summaryLine);
   if (boxes) out.push("", boxes);
   if (noBaseline) out.push("", unavailableBox(noBaseline));
   // The charts hold every configuration; the check's own column is named in
@@ -246,10 +250,6 @@ export function render(s: ReportSummary, options: RenderOptions) {
   if (chartRef) out.push("", `![Changes against ${baseRef}](${chartRef})`);
   if (trendRef) out.push("", `![PR benchmark history](${trendRef})`);
   if (s.relative) out.push("", overview([{ name: "Change", outcome: "success", summary: s }]));
-  else {
-    const summaryLine = overall(s, baseRef);
-    if (summaryLine) out.push("", summaryLine);
-  }
   if (slower.length) out.push("", "#### Slower", "", alertTable(slower, s));
   if (faster.length) out.push("", "#### Faster", "", alertTable(faster, s));
   // Measured but uncompared cases are not new cases; the warning says what is
@@ -492,6 +492,10 @@ export function renderCombined(configurations: ConfigurationResult[], options: C
   const measured = configurations.filter((c) => c.summary);
   const rows = changedRows(measured);
   const out = [`### Benchmarks · ${language} · ${combinedHeadline(configurations, rows)}`];
+  if (configurations.length === 1 && measured.length) {
+    const summaryLine = overall(measured[0].summary!, baseRef);
+    if (summaryLine) out.push("", summaryLine);
+  }
   out.push("", overview(configurations));
   for (const c of configurations) {
     if (!c.summary)

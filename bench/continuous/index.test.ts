@@ -89,6 +89,13 @@ test("a precise sub-threshold change is no alert, not statistical equivalence", 
   await publishReport(action);
   assert.doesNotMatch(action.summaries[0], /no significant change/);
   assert.match(action.summaries[0], /no regression alert/);
+  assert.match(action.summaries[0], /Overall run time \+4\.0%.*`main`.*10 cases/);
+  assert.match(action.summaries[0], /No regression or improvement alerts/);
+  const check = action.requests.find((request) => request.method === "PATCH")!;
+  assert.match(
+    (check.body.output as { summary: string }).summary,
+    /Overall run time \+4\.0%.*10 cases/,
+  );
   assert.match(action.summaries[0], /!\[Changes against main\]/);
   assert.match(action.summaries[0], /!\[PR benchmark history\]/);
   assert.match(action.summaries[0], /\| serial \|/);
@@ -106,6 +113,9 @@ test("improvements publish successful configured checks", async (t) => {
     VARIANTS.map(() => "success"),
   );
   assert.match(action.summaries[0], /0.8000×/);
+  assert.match(action.summaries[0], /Overall run time −20\.0%/);
+  assert.match(action.summaries[0], /\[!TIP\]/);
+  assert.doesNotMatch(action.summaries[0], /No regression or improvement alerts/);
   assert.match(action.summaries[0], /\[Report\]\(/);
   assert.match(action.summaries[0], /\[JSON\]\(/);
   assert.match(action.summaries[0], /<details><summary>10 changed cases/);
@@ -122,6 +132,9 @@ test("raw paired samples drive configured checks and the existing shared chart",
     VARIANTS.map(() => "failure"),
   );
   const body = action.summaries[0];
+  assert.match(body, /Overall run time \+20\.0%/);
+  assert.match(body, /\[!CAUTION\]/);
+  assert.doesNotMatch(body, /No regression or improvement alerts/);
   assert.match(body, /1.2000×/);
   assert.ok(body.includes("Median interval"));
   assert.doesNotMatch(body, /1.20 ns|0.800 ns/);

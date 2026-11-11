@@ -80,7 +80,7 @@ Testbeds identify build configuration and protocol, not individual PRs or stable
 
 ## Reports
 
-The single-backend report uses `Benchmarks (rust)`, with changed-case tables, a focused comparison figure, a compact overview when there are no alerts, and a PR trend figure, and the complete case table. Historical multi-build reports remain readable. Ratios display as ×, never nanoseconds. Missing measurements fail their performance check independently; image or Cloud failures do not erase valid numeric evidence.
+The single-backend report uses `Benchmarks (rust)`. A short paragraph states the baseline, compared-case count and overall run-time change, including an explicit result when there are no regression or improvement alerts. It retains changed-case summaries and tables, a focused comparison figure, a compact overview when there are no alerts, a PR trend figure and the complete case table. Historical multi-build reports remain readable. Ratios display as ×, never nanoseconds. Missing measurements fail their performance check independently; image or Cloud failures do not erase valid numeric evidence.
 
 ### Report images
 

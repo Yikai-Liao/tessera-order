@@ -1,6 +1,6 @@
 # Proposal: engine simplification candidates
 
-Status: proposed, not accepted. Date: 2026-11-11.
+Status: candidate evaluation in progress. Date: 2026-11-11.
 
 This lists the remaining opportunities to replace a specialized engine mechanism with a more general one. It is a search result, not a plan of record: each candidate is adopted only if it meets the [acceptance rule](#acceptance-rule), and the [engine reference](../design/engine.md) continues to describe what the code does today. Delete an entry when it lands or is rejected; record accepted debt in the [roadmap](../../ROADMAP.md#measured-engine-refactors).
 
@@ -26,6 +26,8 @@ A candidate lands when all of these hold:
 2. The retired fast path's saving is kept by the general mechanism, or each measured loss is listed and accepted individually.
 3. Structural and routing changes are separate commits, measured under the [benchmark protocol](../development/benchmarking.md#run-an-experiment).
 
+For this series, the maintainer accepts individually reported local losses of at most 10% when the reduction in mechanisms warrants them. This is a ceiling, not a performance budget: preserve savings through the general mechanism before accepting a loss. Use three-block, narrowly selected screens rather than nine-block matrices; expand input coverage only to answer a concrete remaining question. Do not claim source causality when placement or A/A controls do not support it. Rejected candidates retain evidence in the [port record](../design/port.md#simplification-series-candidate-screens). Each PR needs independent review and correctness checks before it merges.
+
 ## Candidates
 
 Ordered by expected value for the risk. "Cases" names the continuous shapes most likely to move.
@@ -34,8 +36,8 @@ Ordered by expected value for the risk. "Cases" names the continuous shapes most
 
 | ID | Retire | Replace with | Risk and cases |
 |---|---|---|---|
-| R2 | `Order::Flat` and the second confirmation after the variation scan | Treat an all-equal sample as a candidate order. `confirm_order` already returns ascending for a constant slice in one scan, which is the scan the variation pass spends today | A flat sample over unsorted keys would enter the insertion probe it now skips: `runs`, `two_values`, `hot50` |
-| R3 | Three copies of "ascending returns, descending reverses" (probe, flat, child) | One `finish_ordered` operation. With R2 the root tail becomes the child finisher | Structural after R2; inlining of the root path |
+| R2 | `Order::Flat` and the second confirmation after the variation scan | Confirm all sampled order candidates with the shared scan | [PR #105](https://github.com/Yikai-Liao/tessera-sort/pull/105) is open, not draft, and explicitly **do not merge**; constant-input losses exceed the ordinary limit, and a possible exception is not accepted |
+| R3 | Three copies of "ascending returns, descending reverses" (probe, flat, child) | One `finish_ordered` operation, retaining the flat-sample route while R2 is on hold | Structural; inlining of the root path |
 | R4 | The `INSERTION_MAX` root shortcut beside the budgeted probe | One insertion attempt that owns its budget; a leaf-sized input is the unlimited-budget case | Short inputs carry the known `random/1000` losses; measure them first |
 | R5 | `Descending { strict }` | Always reverse stably | One extra key scan on `reverse`; likely a rejected candidate, listed so the cost is measured once |
 
@@ -70,6 +72,14 @@ Ordered by expected value for the risk. "Cases" names the continuous shapes most
 | P2 | `Config`, `BucketFinish` and `BoundedFinish` describing one root partition | One description consumed by the block layer | Structural; follows P1 |
 | P3 | `tile::Scratch`, `block::Buffers` and the job `Pool` as three reuse protocols | One scratch owner per worker | Structural; check allocation counts in the memory tests |
 
-## Suggested order
+## PR sequence
 
-R2 and R3 share the root path and should be measured together after each lands separately. N1 and X1 are independent and small. P1 decides whether P2 is worth doing and should start with measurements, not code. N2, R5 and X3's generalization are the candidates most likely to be rejected.
+Evaluate one candidate per PR, against the preceding merged head. Keep a structural change separate from any later routing experiment. Rejection is a completed evaluation, not permission to remove the saving another way without evidence.
+
+1. Root preparation: R2 is published in [PR #105](https://github.com/Yikai-Liao/tessera-sort/pull/105) for discussion with an explicit merge hold after its constant-input screen exceeded the ordinary limit. Do not merge R2 without lifting that hold; whether losses are confined to all-equal inputs is unproven. Proceed independently with R3 while retaining `Flat`. Evaluate R4 separately.
+2. Independent small boundaries: N1, X1, X2 and N4, each with its affected invariants and targeted inputs.
+3. Tile and entry cleanup: X4, T1 and X3. Try X3's structural helper before considering narrower-key routing.
+4. Speculative routing: R5 and N2; stop candidates whose known savings cannot be preserved within the acceptance limit.
+5. Parallel completion: start P1 with the existing completion evidence and a bounded feasibility screen. P2 follows the chosen completion representation; P3 must preserve allocation reuse and the documented memory bound.
+
+The [port record](../design/port.md#simplification-series-candidate-screens) owns evaluated candidates and their measurements. Delete candidates above only when accepted or rejected; keep remaining work visible here.

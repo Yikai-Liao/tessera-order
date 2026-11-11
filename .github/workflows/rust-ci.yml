@@ -106,7 +106,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm tools check --native --out bench/results/ci
+      - run: pnpm tools --verbose check --native --out bench/results/ci
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

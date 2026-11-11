@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { createHash } from "node:crypto";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { arch, cpus, platform, release } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
-import { type Plan, selectCaseIds } from "../plan.ts";
+import { type Plan, parsePlan, selectCaseIds } from "../plan.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
   buildBenchmark,
@@ -38,6 +38,7 @@ interface LocalOptions {
   layoutSeeds?: number[];
   layoutControl?: LayoutControl;
   shard?: { index: number; count: number };
+  prepareOnly?: boolean;
 }
 
 /** Reject ambient worker controls that could change a requested experiment. */
@@ -279,9 +280,110 @@ export async function comparisonCpus(parallel: boolean, requested?: string) {
   return [...selected].join(",");
 }
 
+/** Record the host that actually executes samples, separately from build provenance. */
+function measurementHost(cpu?: string): LocalRun["host"] {
+  return {
+    platform: platform(),
+    release: release(),
+    arch: arch(),
+    cpu: cpus()[0]?.model ?? "unknown",
+    affinity: cpu ?? "inherited",
+    aslr: platform() === "linux" ? "disabled" : "uncontrolled",
+  };
+}
+
+/** Execute a retained revision pair without snapshots or compilation.
+ *
+ * Preparation is immutable; each shard gets its own result directory and host
+ * observations. Executable hashes and source/selection compatibility are checked
+ * before any retained code runs. Sampling and reports use the ordinary runner.
+ */
+export async function comparePrepared(options: {
+  root: string;
+  prepared: string;
+  out: string;
+  cpu?: string;
+  shard?: { index: number; count: number };
+}) {
+  const { root, prepared, out } = options;
+  assertWorkerEnvironment();
+  if (platform() === "linux") await command("setarch", ["-R", "true"]);
+  const plan = parsePlan(JSON.parse(await readFile(join(prepared, "plan.json"), "utf8")));
+  if (plan.harness !== "smoke")
+    throw new Error("Prepared comparisons require a smoke harness plan");
+  const run = JSON.parse(await readFile(join(prepared, "local.json"), "utf8")) as LocalRun;
+  if (
+    run.schema !== 1 ||
+    run.protocol !== "paired-samples-v2" ||
+    run.shard ||
+    run.samples ||
+    run.sampleCounts ||
+    run.blocks.length ||
+    !run.cases.length ||
+    !run.builds ||
+    !run.binaryPaths ||
+    new Set(run.cases).size !== run.cases.length
+  )
+    throw new Error("Expected an unmeasured prepared revision pair");
+  const catalogHash = createHash("sha256")
+    .update(await readFile(join(root, "bench/catalog.toml")))
+    .digest("hex");
+  if (
+    run.source.harness !== (await sourceHash(join(root, "bench/rust"))) ||
+    run.source.catalog !== catalogHash
+  )
+    throw new Error("Prepared pair requires its original harness and catalog");
+  const cpu = await comparisonCpus(Boolean(plan.parallel?.length), options.cpu);
+  const binaries = { baseline: "", current: "" };
+  const preparedRoot = await realpath(prepared);
+  await mkdir(out, { recursive: false });
+  await writeFile(join(out, "plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
+  for (const role of ["baseline", "current"] as const) {
+    const path = run.binaryPaths[role];
+    if (typeof path !== "string" || !path || isAbsolute(path) || path.split(/[\\/]/).includes(".."))
+      throw new Error("Prepared executable path must stay inside its directory");
+    const input = await realpath(join(preparedRoot, path));
+    const within = relative(preparedRoot, input);
+    if (within.split(sep)[0] === ".." || isAbsolute(within))
+      throw new Error("Prepared executable path escapes its directory");
+    const bytes = await readFile(input);
+    if (createHash("sha256").update(bytes).digest("hex") !== run.binaries[role])
+      throw new Error("Prepared executable hash differs from build provenance");
+    binaries[role] = join(out, path);
+    await mkdir(dirname(binaries[role]), { recursive: true });
+    await writeFile(binaries[role], bytes, { mode: 0o755 });
+  }
+  if (basename(binaries.baseline) !== basename(binaries.current))
+    throw new Error("Prepared executables must have identical basenames");
+  const allCases = await selectedCases(
+    binaries,
+    join(out, "plan.json"),
+    undefined,
+    root,
+    Boolean(plan.parallel?.length),
+  );
+  if (JSON.stringify(allCases) !== JSON.stringify(run.cases))
+    throw new Error("Prepared executable inventory differs from its recorded cases");
+  run.host = measurementHost(cpu);
+  run.cases = options.shard
+    ? shardCases(allCases, options.shard.index, options.shard.count)
+    : allCases;
+  if (options.shard) run.shard = { ...options.shard, allCases };
+  const save = () => writeFile(join(out, "local.json"), `${JSON.stringify(run, null, 2)}\n`);
+  await save();
+  await measureSamples(run, binaries, join(out, "plan.json"), cpu, save);
+  summarizeLocal(run);
+  await renderLocalReport(out, run);
+}
+
 /** Compare an immutable working-tree snapshot with a commit, retaining only results. */
 export async function compareLocal(options: LocalOptions) {
   const { root, out } = options;
+  if (
+    options.prepareOnly &&
+    (options.shard || options.layoutSeeds || options.layoutControl || options.filter)
+  )
+    throw new Error("Preparation requires a complete non-layout revision pair");
   // Probe before compiling; do not silently publish an uncontrolled ASLR run.
   if (platform() === "linux") await command("setarch", ["-R", "true"]);
   const cpu = await comparisonCpus(Boolean(options.plan.parallel?.length), options.cpu);
@@ -356,14 +458,7 @@ export async function compareLocal(options: LocalOptions) {
         rustc: builds.current.rustc,
         flags: builds.current.cargo_encoded_rustflags,
         configuration: "portable-simd",
-        host: {
-          platform: platform(),
-          release: release(),
-          arch: arch(),
-          cpu: cpus()[0]?.model ?? "unknown",
-          affinity: cpu ?? "inherited",
-          aslr: platform() === "linux" ? "disabled" : "uncontrolled",
-        },
+        host: measurementHost(cpu),
         cases: options.shard
           ? shardCases(allCases, options.shard.index, options.shard.count)
           : allCases,
@@ -381,6 +476,7 @@ export async function compareLocal(options: LocalOptions) {
     if (result.schema === 2) validateLayoutBuilds(result);
     const save = () => writeFile(join(out, "local.json"), `${JSON.stringify(result, null, 2)}\n`);
     await save();
+    if (options.prepareOnly) return;
     for (const [index, { seed, run }] of layouts.entries()) {
       if (linker) diagnostic(`Layout seed ${seed}`);
       await measureSamples(run, executables[index], planPath, cpu, save);

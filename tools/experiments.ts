@@ -9,7 +9,7 @@ import { reportMainHistory } from "../bench/continuous/volatility.ts";
 import { compareCounters, reportCounters } from "../bench/local/counters.ts";
 import { LAYOUT_CONTROLS, type LayoutControl, parseLayoutSeeds } from "../bench/local/layout.ts";
 import { renderLocalReport } from "../bench/local/report.ts";
-import { compareLocal } from "../bench/local/runner.ts";
+import { compareLocal, comparePrepared } from "../bench/local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
 import { checkAlgorithms, compareAlgorithms, resumeComparison } from "../bench/release.ts";
 import { writeReport } from "../bench/report/index.ts";
@@ -33,6 +33,13 @@ function parsePositiveInteger(value: string) {
   if (!Number.isSafeInteger(number) || number < 1)
     throw new InvalidArgumentError("expected a positive integer");
   return number;
+}
+
+function parseShard(value: string) {
+  const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(value);
+  if (!match || Number(match[1]) > Number(match[2]) || Number(match[2]) > 64)
+    throw new InvalidArgumentError("expected index/count with 1 <= index <= count <= 64");
+  return { index: Number(match[1]), count: Number(match[2]) };
 }
 
 function parseCasePattern(value: string) {
@@ -147,21 +154,18 @@ export function experimentCommands(program: Command) {
         }
       },
     )
+    .option("--prepare-only", "retain a complete revision pair without timing")
     .option(
       "--shard <index/count>",
       "measure one balanced partition of the resolved cases",
-      (value) => {
-        const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(value);
-        if (!match || Number(match[1]) > Number(match[2]) || Number(match[2]) > 64)
-          throw new InvalidArgumentError("expected index/count with 1 <= index <= count <= 64");
-        return { index: Number(match[1]), count: Number(match[2]) };
-      },
+      parseShard,
     )
     .action(
       async (
         baseline: string | undefined,
         options: MeasurementOptions & {
           shard?: { index: number; count: number };
+          prepareOnly?: boolean;
           filter?: string;
           layoutSeeds?: number[];
           layoutControl?: LayoutControl;
@@ -184,6 +188,32 @@ export function experimentCommands(program: Command) {
             filter: options.filter,
             layoutSeeds: options.layoutSeeds,
             layoutControl: options.layoutControl,
+            shard: options.shard,
+            prepareOnly: options.prepareOnly,
+          }),
+        );
+      },
+    );
+
+  compare
+    .command("prepared <directory>")
+    .description("Measure and report a frozen revision pair without compiling")
+    .option("--out <directory>", "new result directory")
+    .option("--cpu <list>", "pin measurement to a CPU list", parseLogicalCpu)
+    .option("--shard <index/count>", "measure one complete-case partition", parseShard)
+    .action(
+      async (
+        directory: string,
+        options: { out?: string; cpu?: string; shard?: { index: number; count: number } },
+      ) => {
+        const root = await repositoryRoot();
+        const out = resultDirectory(root, options.out);
+        await runTask(out, Boolean(program.opts().verbose), () =>
+          comparePrepared({
+            root,
+            prepared: resolve(directory),
+            out,
+            cpu: options.cpu,
             shard: options.shard,
           }),
         );

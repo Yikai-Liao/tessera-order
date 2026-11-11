@@ -49,15 +49,22 @@ jobs:
             const { resolveSource } = require('./bench/continuous/github.ts');
             await resolveSource({ github, context, core });
       - uses: dtolnay/rust-toolchain@stable
+        id: toolchain
         if: steps.source.outputs.eligible == 'true'
-      # workflow_run restores only trusted default-branch caches, never PR artifacts.
+      # Only trusted default-branch code can populate this exact-source cache.
+      - uses: actions/cache@v6
+        id: inventory
+        if: steps.source.outputs.eligible == 'true'
+        with:
+          path: ${{ runner.temp }}/inventory
+          key: inventory-${{ runner.os }}-${{ runner.arch }}-${{ github.workflow_sha }}-${{ steps.toolchain.outputs.cachekey }}
       - uses: Swatinem/rust-cache@v2
-        if: steps.source.outputs.eligible == 'true'
+        if: steps.source.outputs.eligible == 'true' && steps.inventory.outputs.cache-hit != 'true'
         with:
           workspaces: ". -> target/continuous"
           shared-key: continuous-default
       - name: Resolve trusted case inventory without measurements
-        if: steps.source.outputs.eligible == 'true'
+        if: steps.source.outputs.eligible == 'true' && steps.inventory.outputs.cache-hit != 'true'
         run: pnpm tools continuous inventory --out "$RUNNER_TEMP/inventory"
       - uses: actions/download-artifact@v8
         if: steps.source.outputs.eligible == 'true'

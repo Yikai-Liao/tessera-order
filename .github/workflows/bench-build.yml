@@ -33,35 +33,14 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  plan:
-    runs-on: ubuntu-24.04
-    outputs:
-      matrix: ${{ steps.matrix.outputs.value }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
-      - id: matrix
-        run: echo "value=$(pnpm -s tools continuous matrix)" >> "$GITHUB_OUTPUT"
-
-  measure:
-    needs: plan
+  prepare:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/continuous
-      # Match CLI defaults up front instead of compiling twice to resolve flags.
       RUSTFLAGS: -C llvm-args=-align-loops=64 -C llvm-args=-align-all-nofallthru-blocks=6
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    outputs:
+      matrix: ${{ steps.matrix.outputs.value }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -72,24 +51,60 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target/continuous"
-          shared-key: continuous-${{ matrix.configuration }}
+          shared-key: continuous-portable-simd
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Same-run revision comparison
+      - id: matrix
+        run: echo "value=$(pnpm -s tools continuous matrix)" >> "$GITHUB_OUTPUT"
+      - name: Build both revisions once
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
-          SHARD: ${{ matrix.shard }}
         run: |
           if [ -n "$PR_BASE" ]; then
             baseline=$(git merge-base "$PR_BASE" HEAD)
           else
             baseline=$(git rev-parse HEAD^)
           fi
-          pnpm tools compare commit "$baseline" --plan continuous --shard "$SHARD" \
+          pnpm tools compare commit "$baseline" --plan continuous --prepare-only \
+            --out bench/results/prepared
+      - uses: actions/upload-artifact@v7
+        with:
+          name: prepared-revisions
+          path: bench/results/prepared/
+          retention-days: 14
+          if-no-files-found: error
+
+  measure:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@v8
+        with:
+          name: prepared-revisions
+          path: bench/results/prepared
+      - name: Measure retained revisions without compiling
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          pnpm tools compare prepared bench/results/prepared --shard "$SHARD" \
             --out bench/results/continuous
       - name: Retain measurement log
         if: always()

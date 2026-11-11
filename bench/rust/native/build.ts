@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { createHash } from "node:crypto";
-import { copyFile, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { copyFile, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { command } from "../../../tools/process.ts";
@@ -36,6 +36,14 @@ async function build(out: string) {
   const jobs = Math.min(2, Number(process.env.CARGO_BUILD_JOBS ?? 2));
   if (!Number.isInteger(jobs) || jobs < 1) throw new Error("CARGO_BUILD_JOBS must be positive");
   const highway = join(out, "highway");
+  // CMake decides by source timestamps, which a newly fetched tree does not
+  // guarantee, so a different pin starts from a fresh build directory.
+  const pin = sources.highway?.sha256 ?? "";
+  const configured = await readFile(join(highway, "pin"), "utf8").then(
+    (recorded) => recorded === pin,
+    () => false,
+  );
+  if (!configured) await rm(highway, { recursive: true, force: true });
   await command("cmake", [
     "-S",
     // The workspace's vendor link points to the retained, verified sources.
@@ -54,6 +62,7 @@ async function build(out: string) {
   ]);
   await command("cmake", ["--build", highway, "--target", "hwy", "-j", String(jobs)]);
   await copyFile(join(highway, "libhwy.a"), join(out, "libhwy.a"));
+  await writeFile(join(highway, "pin"), pin);
   const cpp = ["-std=c++17", "-I.", `-I${vendor}/highway`, `-I${vendor}/x86simdsort/lib`];
   const tasks: TranslationUnit[] = [];
   const libs: Record<string, string[]> = { tessera_native: [], hwy_contrib: [], x86simdsort: [] };
@@ -112,7 +121,12 @@ async function build(out: string) {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    await command(compiler, args, { cwd: root });
+    // Invalidate before writing, and publish the object by rename: an interrupted
+    // compiler must not leave another snapshot's object beside a matching stamp.
+    await rm(stamp, { force: true });
+    const pending = `${object}.pending`;
+    await command(compiler, [...base, ...flags, "-c", source, "-o", pending], { cwd: root });
+    await rename(pending, object);
     await writeFile(stamp, digest);
   };
   // Each lane owns its queue; settle both before exiting on a compiler failure.

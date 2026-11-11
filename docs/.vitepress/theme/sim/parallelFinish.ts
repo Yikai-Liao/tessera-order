@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 // Models block/parallel.rs directory adoption and parallel/finish.rs transfers.
-// Actions linearize whole-bucket staging or one-prefix streaming and protected
-// writes; mutex scheduling, key panics and pointer provenance remain Rust tests.
+// Actions are serial linearizations of whole-bucket staging and final writes;
+// mutex scheduling, key panics and raw-pointer provenance remain Rust tests.
 import { type Rec, simulate } from "./blockPartition.ts";
 
 export interface FinishAction {
-  phase: "stage" | "write" | "prefix";
+  phase: "stage" | "write";
   bucket: number;
 }
 
@@ -14,14 +14,13 @@ interface Source {
   len: number;
 }
 
-/** Replays both completion strategies over one adopted source ledger. */
+/** Replays bounded finishing from the serial model's scattered shard frames. */
 export function simulateParallelFinish(config: {
   keys: number[];
   buckets: number;
   blockSize: number;
   shards: number;
   classify: (key: number) => number;
-  strategy?: "staged" | "streamed";
   actions?: FinishAction[];
 }) {
   const { keys, buckets: R, blockSize: b, classify } = config;
@@ -97,8 +96,6 @@ export function simulateParallelFinish(config: {
         .map((record) => record.id),
     });
   };
-  const consumed = Array<number>(R).fill(0);
-  const written = Array<number>(R).fill(0);
   let relocations = 0;
   const takeFree = (bucket: number) => {
     for (const cache of [
@@ -128,81 +125,48 @@ export function simulateParallelFinish(config: {
     snapshot("protect");
   };
   snapshot("adopt");
-  const gather = (source: Source, bucket: number): Rec[] => {
-    const physical = locations[source.logical];
-    if (owners[physical] !== source.logical) throw new Error("Source owner changed");
-    const records = cells[physical].slice(0, source.len) as Rec[];
-    cells[physical] = Array<Rec | null>(b).fill(null);
-    owners[physical] = FREE;
-    free[bucket].push(physical);
-    return records;
-  };
-  const write = (bucket: number) => {
-    staged[bucket].forEach((record, offset) => {
-      const position = starts[bucket] + written[bucket] + offset;
-      const block = Math.floor(position / b);
-      if (block < fullBlocks) {
-        const physical = scratchBlocks + block;
-        protect(physical, bucket);
-        cells[physical][position % b] = record;
-      } else {
-        tail[position % b] = record;
-      }
-      staged[bucket][offset] = null;
-    });
-    written[bucket] += staged[bucket].length;
-    staged[bucket] = [];
-  };
-  const finishBand = (bucket: number) => {
-    const band = Array.from({ length: written[bucket] }, (_, offset) => {
-      const position = starts[bucket] + offset;
-      const block = Math.floor(position / b);
-      return block < fullBlocks ? cells[scratchBlocks + block][position % b]! : tail[position % b]!;
-    }).sort((a, b) => a.key - b.key);
-    band.forEach((record, offset) => {
-      const position = starts[bucket] + offset;
-      const block = Math.floor(position / b);
-      if (block < fullBlocks) cells[scratchBlocks + block][position % b] = record;
-      else tail[position % b] = record;
-    });
-  };
   const actions =
     config.actions ??
-    (config.strategy === "streamed"
-      ? sources.flatMap((bucket, id) =>
-          bucket.map(() => ({ phase: "prefix", bucket: id }) as const),
-        )
-      : Array.from({ length: R }, (_, bucket) => [
-          { phase: "stage", bucket } as const,
-          { phase: "write", bucket } as const,
-        ]).flat());
+    Array.from({ length: R }, (_, bucket) => [
+      { phase: "stage", bucket } as const,
+      { phase: "write", bucket } as const,
+    ]).flat();
   for (const { phase, bucket } of actions) {
     if (phase === "stage") {
       if (ready[bucket]) throw new Error("Bucket staged twice");
       const records: Rec[] = [];
       for (const source of sources[bucket]) {
-        records.push(...gather(source, bucket));
+        const physical = locations[source.logical];
+        if (owners[physical] !== source.logical) throw new Error("Source owner changed");
+        records.push(...(cells[physical].slice(0, source.len) as Rec[]));
+        cells[physical] = Array<Rec | null>(b).fill(null);
+        owners[physical] = FREE;
+        free[bucket].push(physical);
       }
       // The engine uses the shared child finisher here, including ordered-child
       // completion; this ownership model treats the whole stable sort atomically.
       records.sort((a, b) => a.key - b.key);
       staged[bucket] = records;
       ready[bucket] = true;
-    } else if (phase === "prefix") {
-      const source = sources[bucket][consumed[bucket]++];
-      if (!source) throw new Error("No remaining source prefix");
-      staged[bucket] = gather(source, bucket);
-      snapshot(`gather prefix ${bucket}`);
-      write(bucket);
-      if (consumed[bucket] === sources[bucket].length) finishBand(bucket);
     } else {
       if (!ready[bucket]) throw new Error("Bucket written before staging");
-      write(bucket);
+      staged[bucket].forEach((record, offset) => {
+        const position = starts[bucket] + offset;
+        const block = Math.floor(position / b);
+        if (block < fullBlocks) {
+          const physical = scratchBlocks + block;
+          protect(physical, bucket);
+          cells[physical][position % b] = record;
+        } else {
+          tail[position % b] = record;
+        }
+        staged[bucket][offset] = null;
+      });
     }
     snapshot(`${phase} ${bucket}`);
   }
   const output = [...cells.slice(scratchBlocks).flat(), ...tail].filter(
     (record) => record !== null,
   );
-  return { output, frames, relocations, sourceCounts: sources.map((bucket) => bucket.length) };
+  return { output, frames, relocations };
 }

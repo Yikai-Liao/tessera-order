@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! One relocatable-source ledger for staged and streamed final bands.
+//! Bounded bucket sorting with protected writes into final input bands.
 
 use super::*;
 use std::sync::{
@@ -185,7 +185,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl<T> Bucket<T> {
-    /// Stages, sorts, and writes a bounded bucket, completing writes after a key panic.
+    /// Stages, sorts, and writes a bucket, completing writes after a key panic.
     fn finish(&mut self, storage: &Storage<T>, sort: Option<BucketSort<'_, T>>) {
         if self.completed || self.len == 0 {
             self.completed = true;
@@ -225,80 +225,23 @@ impl<T> Bucket<T> {
         self.completed = true;
         self.records = Vec::new();
     }
-
-    /// Streams a band without a bucket-sized buffer, then publishes its borrow.
-    fn stream<'records>(
-        &mut self,
-        storage: &Storage<T>,
-        visit: Option<BucketVisit<'_, 'records, T>>,
-    ) {
-        if self.completed {
-            return;
-        }
-        // Allocation precedes movement. The kernel below has no allocation,
-        // user code or scheduler call, so unwind recovery sees whole buckets.
-        self.records
-            .resize_with(storage.block_size, MaybeUninit::uninit);
-        let mut offset = 0;
-        for source in &self.sources {
-            let physical = storage.gather(source, self.records.as_mut_ptr().cast());
-            let mut free = lock(&storage.free[self.cache]);
-            // The cache was reserved for every own source. protect consumes
-            // candidates or returns one to an empty cache; it cannot grow it.
-            free.push(physical);
-            storage.write(
-                self.start + offset,
-                self.records.as_ptr().cast(),
-                source.len,
-                &mut free,
-                self.cache,
-            );
-            offset += source.len;
-        }
-        self.completed = true;
-        self.records = Vec::new();
-        if self.len != 0
-            && let Some(visit) = visit
-        {
-            // SAFETY: all this band's sources are retired and every physical
-            // destination is FINAL. Peers cannot read it and write only their
-            // disjoint bands, even if they share a physical block fragment.
-            let band =
-                unsafe { core::slice::from_raw_parts_mut(storage.input.add(self.start), self.len) };
-            self.panic = unwind::catch(|| visit(band)).err();
-        }
-    }
 }
 
-/// Completes every bucket using one protected-source ownership/recovery ledger.
-/// Eligible roots stage and sort before writing; other roots stream prefixes
-/// and lend each final band as soon as it no longer has live copy sources.
-pub(super) fn complete<'records, T: Send>(
-    sorter: &mut Partition<'records, '_, T>,
+/// Sorts bounded virtual buckets before writing their final record bands.
+pub(super) fn try_finish<T: Send>(
+    sorter: &mut Partition<'_, '_, T>,
     ends: &[usize],
     parallel: bool,
     limit: usize,
-    finish: Option<BucketSort<'_, T>>,
-    visit: Option<BucketVisit<'_, 'records, T>>,
-) {
-    complete_with_fault(sorter, ends, parallel, limit, finish, visit, None);
-}
-
-fn complete_with_fault<'records, T: Send>(
-    sorter: &mut Partition<'records, '_, T>,
-    ends: &[usize],
-    parallel: bool,
-    limit: usize,
-    finish: Option<BucketSort<'_, T>>,
-    visit: Option<BucketVisit<'_, 'records, T>>,
-    fail_after: Option<usize>,
-) {
+    finish: &(dyn Fn(&mut [T]) + Sync),
+) -> bool {
     let mut start = 0;
-    let staged = ends.iter().all(|&end| {
-        let fits = end - start <= limit;
+    for &end in ends {
+        if end - start > limit {
+            return false;
+        }
         start = end;
-        fits
-    });
+    }
     let block_size = sorter.blocks.block_size;
     let count = sorter.block_order.len();
     let head = sorter.active_blocks.start;
@@ -365,35 +308,20 @@ fn complete_with_fault<'records, T: Send>(
         lengths,
         free: caches,
     };
-    let completed = AtomicUsize::new(0);
-    let run = |bucket: &mut Bucket<T>| {
-        if staged {
-            bucket.finish(&storage, finish);
-        } else {
-            bucket.stream(&storage, visit);
-        }
-        if let Some(fail_after) = fail_after {
-            let position = completed.fetch_add(1, Ordering::Relaxed);
-            assert_ne!(
-                position, fail_after,
-                "injected scheduler panic between bucket tasks"
-            );
-        }
-    };
     let result = unwind::catch(|| {
         if parallel {
-            buckets.par_iter_mut().for_each(run);
+            buckets
+                .par_iter_mut()
+                .for_each(|bucket| bucket.finish(&storage, Some(finish)));
         } else {
-            buckets.iter_mut().for_each(run);
+            buckets
+                .iter_mut()
+                .for_each(|bucket| bucket.finish(&storage, Some(finish)));
         }
     });
     if result.is_err() {
         for bucket in &mut buckets {
-            if staged {
-                bucket.finish(&storage, None);
-            } else {
-                bucket.stream(&storage, None);
-            }
+            bucket.finish(&storage, None);
         }
     }
     sorter.input_materialized = true;
@@ -403,6 +331,7 @@ fn complete_with_fault<'records, T: Send>(
     if let Some(payload) = buckets.iter_mut().find_map(|bucket| bucket.panic.take()) {
         unwind::resume(payload);
     }
+    true
 }
 
 #[cfg(test)]
@@ -437,7 +366,7 @@ mod tests {
                     sort: finish,
                 }),
             },
-            Some(&|_| panic!("bounded finishing unexpectedly declined")),
+            Some(&mut |_| panic!("bounded finishing unexpectedly declined")),
         );
     }
 
@@ -808,127 +737,13 @@ mod tests {
     }
 
     #[test]
-    fn streamed_borrows_reenter_and_recover() {
-        use core::cell::Cell;
-        for block_size in [1, 3, 8] {
-            for fail in [None, Some(0usize), Some(31)] {
-                let len = if cfg!(miri) { 37 } else { 97 };
-                let mut backing: Vec<_> = (0..len).map(Cell::new).collect();
-                let mut records: Vec<_> = backing
-                    .iter_mut()
-                    .enumerate()
-                    .map(|(id, value)| (((id * 7919 + 73) % 256) as u32, id, value))
-                    .collect();
-                let result = unwind::catch(|| {
-                    partition_impl_with_visit(
-                        &mut records,
-                        3,
-                        5,
-                        ByKey(|record: &(u32, usize, &mut Cell<usize>)| record.0),
-                        &mut Buffers::new(),
-                        Config {
-                            shards: 3,
-                            block_size: Some(block_size),
-                            parallel: !cfg!(miri),
-                            finish: Some(BoundedFinish {
-                                limit: 0,
-                                sort: &|_| panic!("must stream"),
-                            }),
-                        },
-                        Some(&|band| {
-                            if !cfg!(miri) {
-                                let (a, b) = rayon::join(|| 13 * 7, || 13 * 7);
-                                assert_eq!(a, b);
-                            }
-                            crate::stable_sort_by_key(band, |record| {
-                                assert_ne!(Some(record.1), fail, "streamed callback panic");
-                                record.0
-                            });
-                        }),
-                    )
-                });
-                assert_eq!(result.is_err(), fail.is_some());
-                if fail.is_none() {
-                    assert!(
-                        records
-                            .windows(2)
-                            .all(|pair| (pair[0].0, pair[0].1) <= (pair[1].0, pair[1].1))
-                    );
-                }
-                let mut ids = Vec::new();
-                for (_, id, value) in records {
-                    assert_eq!(id, value.get());
-                    value.set(id + 1);
-                    ids.push(id);
-                }
-                ids.sort_unstable();
-                assert_eq!(ids, (0..len).collect::<Vec<_>>());
-                assert_eq!(
-                    backing.iter().map(Cell::get).collect::<Vec<_>>(),
-                    (1..=len).collect::<Vec<_>>()
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn scheduler_panic_restores_streamed_and_staged_owners() {
-        struct Owned {
-            id: usize,
-            drops: Arc<Vec<AtomicUsize>>,
-            text: String,
-        }
-        impl Drop for Owned {
-            fn drop(&mut self) {
-                assert_eq!(self.text, self.id.to_string());
-                self.drops[self.id].fetch_add(1, Ordering::Relaxed);
-            }
-        }
-        let len = if cfg!(miri) { 23 } else { 113 };
-        for limit in [0, usize::MAX] {
-            for parallel in [false, !cfg!(miri)] {
-                let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
-                let mut records: Vec<_> = (0..len)
-                    .map(|id| Owned {
-                        id,
-                        drops: drops.clone(),
-                        text: id.to_string(),
-                    })
-                    .collect();
-                let result = unwind::catch(|| {
-                    let mut buffers = Buffers::new();
-                    let mut partition = Partition::new(&mut records, 4, 3, &mut buffers);
-                    assert!(partition.step(|record| record.id * 37 % 4).is_none());
-                    let ends = partition.record_ends();
-                    complete_with_fault(
-                        &mut partition,
-                        &ends,
-                        parallel,
-                        limit,
-                        None,
-                        None,
-                        Some(0),
-                    );
-                });
-                assert!(result.is_err());
-                let mut ids: Vec<_> = records.iter().map(|record| record.id).collect();
-                ids.sort_unstable();
-                assert_eq!(ids, (0..len).collect::<Vec<_>>());
-                assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 0));
-                drop(records);
-                assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 1));
-            }
-        }
-    }
-
-    #[test]
     fn oversized_buckets_use_fallback() {
         let mut records: Vec<_> = (0..97)
             .map(|id| (((id * 7919 + 73) % 256) as u32, id))
             .collect();
         let mut expected = records.clone();
         expected.sort_by_key(|record| record.0);
-        let visits = AtomicUsize::new(0);
+        let mut visits = 0;
         partition_impl_with_visit(
             &mut records,
             3,
@@ -944,12 +759,12 @@ mod tests {
                     sort: &|_| panic!("oversized bucket entered bounded finishing"),
                 }),
             },
-            Some(&|records| {
-                visits.fetch_add(1, Ordering::Relaxed);
+            Some(&mut |records| {
+                visits += 1;
                 records.sort_by_key(|record| record.0);
             }),
         );
-        assert!(visits.load(Ordering::Relaxed) > 0);
+        assert!(visits > 0);
         assert_eq!(records, expected);
     }
 }

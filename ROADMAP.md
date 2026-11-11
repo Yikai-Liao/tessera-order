@@ -1,6 +1,6 @@
 # Roadmap
 
-This page tracks unfinished work and its acceptance conditions. Current behavior belongs in the [user guide](docs/guide/getting-started.md), the [engine reference](docs/design/engine.md) and [shared semantics](conformance/semantics.md); delete an item when it lands or is rejected, leaving the rationale to the PR.
+This page tracks unfinished work and its acceptance conditions. Current behavior belongs in the [user guide](docs/guide/getting-started.md), the [engine reference](docs/design/engine.md) and [shared semantics](conformance/semantics.md); delete an item when it lands or is rejected, after moving any conclusion later work depends on to its owner.
 
 ## Rust 0.1
 
@@ -18,18 +18,48 @@ Open questions:
 
 ## Engine
 
+The [structure analysis](docs/design/evidence.md#structure-analysis) states the open structural question, its yardstick and the current reading: local serial duplication has converged but minimality is not shown, and parallel completion is the largest open question. New work proceeds in this order: the [mechanism audit](#mechanism-audit), the [parallel completion study](#parallel-completion-study), then the [simplification candidates](#simplification-candidates) in their listed order; R3 continues in [PR #107](https://github.com/Yikai-Liao/tessera-sort/pull/107). The audit and the study change no engine code until a design is chosen, and no candidate is a prerequisite of either. [Acceptance debt](#acceptance-debt) stays open alongside them, and [Rayon](#rayon) coverage on further hosts waits for the study's completion design.
+
 ### Acceptance debt
 
 The consolidated engine (shared root preparation, node planning and order confirmation; one half-key extractor; shared direct-key counting; segmented scratch; bounded tile planner; single SIMD backend) has measured losses that no exception compensates for; they are listed under [landed with open losses](docs/design/evidence.md#landed-with-open-losses). Done when the shared paths are validated against the pre-consolidation baseline with A/A and placement controls, the open losses are resolved or individually accepted, and a fresh current-head Actions run passes preparation, all four measurement shards, Cloud archival and publication. Raw artifacts alone do not satisfy publication acceptance.
 
+### Mechanism audit
+
+The audit looks for constructions that remove several mechanisms at once and tests the analysis's serial reading. It reads code and documents only, with no build or measurement. Its unit is a mechanism: a state, route, protocol or retained representation that a change would add or retire, such as `Order::Flat`, `plan_progress` or the owner-lock protocol, not a function or a file. It delivers a decision table, not an inventory of every mechanism.
+
+Trace the representative changes named in [`AGENTS.md`](AGENTS.md#engine-design-and-simplification) (sampling, tile capacity, partition selection, block layout and task size) and record the files, invariants and rule interpreters each one touches.
+
+Then look across mechanisms: which ones maintain the same invariant, which intermediate representations serve only the next stage, which record moves the information requires and which the implementation adds, which states exist only for one execution order, and which new invariant removing a boundary would require. Start with the ownership and recovery state that `finish.rs` and `compact.rs` maintain, which is the study's model C, rather than with small conditionals. Where the answers suggest one mechanism could replace several, write a short alternative-structure model comparing states, invariants, record moves and critical path with the current code.
+
+Record each modeled alternative as a row of a candidate-structure table in the [structure analysis](docs/design/evidence.md#structure-analysis): the mechanisms it removes and adds, the invariants it affects, its owner changes and whether it is worth a prototype. A row worth a prototype enters the [candidate table](#simplification-candidates) or, if it spans parallel completion, the study; a rule a trace finds interpreted in more than one place enters the candidate table directly, and a mechanism found without an owner gets one. One owner and one interpreter per rule show that the structure is easy to change, not that it is minimal. Finding no row worth a prototype is a valid result; record the blockers instead of creating refactoring work.
+
+Done when the traces and the candidate-structure table, with at least one cross-module group modeled, replace the serial reading in the structure analysis.
+
+### Parallel completion study
+
+The study decides when a bucket must become a contiguous, exclusive slice and how ownership moves with that decision, and keeps or retires each [parallel completion](docs/design/engine.md#parallel-root-completion) protocol by evidence. Its premises and the candidate models are in the [structure analysis](docs/design/evidence.md#structure-analysis): one ownership protocol with two movement strategies (C), one contiguity mechanism (A), or scattered buckets through recursion (B).
+
+Fixed constraints: auxiliary space stays within the [structure analysis](docs/design/evidence.md#structure-analysis)'s O(P^{3/2}√n) ceiling, so a design that needs an n-record buffer is out of scope. A candidate must not widen staging's gap under reentrant suspension or assume one live buffer per worker. Every guarantee in semantics holds unchanged, notably `Send`-only records, the `Fn + Sync` key function, panic restoration and termination under inconsistent keys.
+
+Steps form a research order, not gates; a model that meets a clear blocker is recorded and stops.
+
+1. Measure on the [baseline host](docs/design/evidence.md#parallel-completion-baseline), with peak heap, alongside the models. Inside the staging window, run both protocols at the baseline's equal root plans. Above the window, and on a skewed root whose largest bucket exceeds the limit, only materialization runs; time its block permutation, sequential compaction and leaf jobs separately. Large-input runs need the maintainer's approval of the measurement budget.
+2. Extend the audit's parallel completion rows with the work each mechanism avoids and whether it survives each candidate.
+3. Model C, from the audit: whether one ownership, recovery and completion-state protocol can serve both movement strategies and delete one protocol's responsibilities.
+4. Model A: auxiliary space, extra record moves and critical path, for independent and dependent segments, with P growing with the pool and R bounded by the root digit cap; a measured configuration does not establish a bound.
+5. Model B: partial blocks, free reserves, directories and recovery metadata over the active frontier of live subproblems.
+6. Prototype on an unmerged branch only a candidate whose model holds the space ceiling and deletes mechanisms, covering large, small and skewed buckets, non-`Copy` and `&mut` records, key panics, and inconsistent and reentrant key functions.
+
+Done when one candidate retires a protocol while keeping its saving within the controls, or when each candidate's blocking cost is recorded and both protocols stay as a measured trade-off; either way the result replaces the candidate models in the structure analysis. Compare independent protocols and invariants, full passes and copies, metadata peak, suspended buffers and whole-call time, and list each loss individually as for the candidates below. Whole-call differences inside the eight-core parallel A/A ranges are not detectable; compare those cases by modeled copies and the sequential critical path. A chosen design lands in stages after the study, with structural commits separate from routing changes.
+
 ### Simplification candidates
 
-Candidates that would replace a specialized mechanism with a more general one, ordered by expected value for risk. A candidate lands when one mechanism replaces at least two, the retired fast path's saving is kept or each loss is listed and accepted individually (up to 10% locally, never a performance budget), and structural and routing changes are separate commits under the [benchmark protocol](docs/development/benchmarking.md#run-an-experiment). Evaluate one candidate per PR against the preceding merged head, with three-block screens, and do not claim source causality without placement controls. Rejection completes an evaluation; it does not permit removing the saving another way without evidence.
+Local cleanups that replace a specialized mechanism with a more general one, ordered by expected value for risk. Each retires one mechanism and none settles the structural questions above; the [mechanism audit](#mechanism-audit) adds rows or records that the serial structure has none left. A candidate lands when one mechanism replaces at least two, the retired fast path's saving is kept or each loss is listed and accepted individually (up to 10% locally, never a performance budget), and structural and routing changes are separate commits under the [benchmark protocol](docs/development/benchmarking.md#run-an-experiment). Evaluate one candidate per PR against the preceding merged head, with three-block screens, and do not claim source causality without placement controls. Rejection completes an evaluation; it does not permit removing the saving another way without evidence.
 
 | ID | Retire | Replace with | Risk |
 |---|---|---|---|
-| R2 | `Order::Flat` and its second confirmation | Confirm all sampled candidates with the shared scan | On hold: [constant-input losses exceed the limit](docs/design/evidence.md#rejected-or-on-hold); PR #105, do not merge |
-| R3 | Three copies of "ascending returns, descending reverses" | One `finish_ordered`, keeping the flat route while R2 is on hold | Inlining of the root path |
+| R3 | Three copies of "ascending returns, descending reverses" | One `finish_ordered` that keeps the flat route ([R2 rejected](docs/design/evidence.md#rejected-or-on-hold)) | Inlining of the root path; in review as PR #107 |
 | R4 | The `INSERTION_MAX` root shortcut beside the budgeted probe | One insertion attempt owning its budget | Known short `random/1000` losses; measure first |
 | R5 | `Descending { strict }` | Always reverse stably | One extra scan on `reverse`; likely rejected, listed to measure once |
 | N1 | `plan_progress` and the equality fallback in the executor | A plan that carries its progress guarantee | Keep the inconsistent-key termination test |
@@ -40,11 +70,10 @@ Candidates that would replace a specialized mechanism with a more general one, o
 | X3 | Duplicated half-key dispatch in serial and parallel entries | One root helper, or `KeyHalf` over the narrowest covering unsigned type | The second is a routing change for narrow 64-bit variation |
 | X4 | `finish_insertion` beside `insertion_sort(usize::MAX)` | One entry | Measured micro-choice on short tiles |
 | T1 | Two homes for cached bucket IDs | Always the scratch tail | An extra cache line set per by-key pass on small tiles |
-| P1 | Bounded staging (`finish.rs`) or materialized jobs (`compact.rs`) | Whichever serves every layout within controls; staging could split an oversized bucket | About 600 non-test lines; needs the eight-core evidence rerun and the memory bound rechecked |
-| P2 | `Config`, `BucketFinish`, `BoundedFinish` | One description consumed by the block layer | Follows P1 |
-| P3 | `tile::Scratch`, `block::Buffers`, job `Pool` | One scratch owner per worker | Check allocation counts in the memory tests |
+| P2 | `Config`, `BucketFinish` and `BoundedFinish` describing one root partition | One description consumed by the block layer | Follows the parallel completion study, which decides what the description holds |
+| P3 | `tile::Scratch`, `block::Buffers`, job `Pool` | One scratch owner per worker | Follows the study; check allocation counts in the memory tests, and do not assume one live buffer per worker under reentrant callbacks |
 
-Order: R3 and R4; then N1, X1, X2, N4; then X4, T1, X3; then speculative R5 and N2; P1 last, after a bounded feasibility screen.
+Order: R3 and R4; then N1, X1, X2, N4; then X4, T1, X3; then speculative R5 and N2; P2 and P3 after the parallel completion study.
 
 ### Rayon
 

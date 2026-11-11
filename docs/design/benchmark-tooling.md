@@ -14,7 +14,7 @@
 | `bench/local/` | Commit comparison, adjacent sample scheduling, prepared/measured results (`model.ts`), layout and counter studies, report |
 | `bench/release.ts`, `bench/session.ts` | Preparation, retained builds and session recovery |
 | `bench/rust/` | Timing, allocation measurement and resumable journals: `case.rs` (seed-one generator shared with the continuous suite), `plan.rs`, `record.rs` (record semantics and immutable originals), `variant.rs` (capabilities and adapters), `check.rs`, `run.rs` (clock boundaries, calibration, block order), `host.rs`, `comparison/mod.rs` (CLI, provenance, persistence) |
-| `bench/rust/native/` | Foreign signatures, layouts, pinned archives, source verification and offline compilation |
+| `bench/rust/native/` | Foreign signatures, layouts, pinned archives, source verification and offline compilation. Compiler inputs stay relative to the adapter directory and vendor sources are reached through the workspace link, so isolated source snapshots reuse the compiled objects; source, layout, compiler-version and flag changes invalidate them |
 | `bench/report/` | Persisted-result validation, statistics, figures and BMF |
 | `bench/continuous/` | Paired-shard validation, JSON-only Cloud upload, PR history and GitHub publication |
 | `bench/plot/` | Host-independent figure templates, visual encoding and theme |

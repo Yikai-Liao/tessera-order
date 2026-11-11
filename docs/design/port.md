@@ -4,6 +4,27 @@ This page retains measured evidence behind engine choices, not current developme
 
 The engine in `rust/tessera-sort` is a Stable Rust port of the research prototype in `sort-research-rs` at commit `6c0877f0491dc3b8fc052aa529bce44bf8a53fa8`. The crate is unreleased (`0.0.0`, `publish = false`).
 
+## Simplification series candidate screens
+
+The [simplification proposal](../proposals/engine-simplification.md) is being evaluated as small, independently reviewed PRs. The maintainer permits individually justified losses up to 10%, asks that the general mechanism retain fast-path savings wherever possible, and requests targeted three-block screens instead of nine-block matrices. These limits do not turn inconclusive controls into source-attribution evidence.
+
+### R2: flat samples as ordinary order candidates — rejected
+
+Against `ef6c174`, the candidate removed `Order::Flat` and its deferred confirmation. Every surviving sampled order candidate instead entered `confirm_order` before insertion and variation. This removed a state and a root-only branch, but constant inputs then used leading-tie confirmation rather than the vectorizable union/intersection variation scan.
+
+The maintained command was `pnpm -s tools compare revisions ef6c174 --types u64,row_u64 --distributions equal,two_values,hot50,runs --lengths 65536 --blocks 3 --cpu 2 --out /home/lyk/code/tessera-research/engine-simplification/r2-screen`. It verified all eight inputs in one linked executable with two named copies per revision and repeated-current A/A. Host: Intel Core i7-10875H, Rust 1.99.1 / LLVM 23.1.3, release, default target, 64-byte loop/block alignment, CPU 2, powersave, turbo and SMT on; no system settings changed. Raw observations, binaries, provenance and regenerated reports remain at that path; the rejected patch is alongside it as `r2-rejected.patch`.
+
+Ratios below divide each baseline placement by the current A/A mean. Values below one mean the candidate is slower.
+
+| Case | Baseline copies | Current copy | A/A range | Decision |
+|---|---:|---:|---:|---|
+| `u64/equal/65536` | 0.839 / 0.834 | 0.999 | 0.994–1.006 | About 19–20% slower in the primary current placement; reject |
+| `row_u64/equal/65536` | 0.925 / 0.921 | 1.024 | 0.996–1.004 | Primary current placement about 8–9% slower, second current placement worse |
+
+The hot50 and runs medians were within 0.5% of one for both types. The two-values medians spanned 0.988–1.006 for the baseline placements, with ranges overlapping A/A. These unaffected cases do not compensate for the constant-input loss. The screen establishes a practical rejection, not a source-causal slowdown claim: distinct wrappers alone do not establish independent internal bodies, and no disassembly or extra placement experiment was needed to decline the candidate.
+
+Serial and Rayon library tests, all-feature workspace Clippy with `TESSERA_BENCH_CHECK_ONLY=1`, and the order-confirmation fixture under Miri passed for the rejected checkpoint. The native-enabled Clippy attempt without check-only mode stopped at missing fetched native sources, before completing; it is not a passing check. No production engine change from R2 is retained. R3 can still unify ordered finishing without changing the flat-sample route.
+
 ## Eight-core parallel completion
 
 These are local whole-call algorithm comparisons, not isolated source-change or placement-controlled claims. The portable bounded-finishing implementation and its fallback are described in the [engine reference](engine.md#parallel-root-completion).

@@ -278,9 +278,7 @@ The report requires the complete suite. `--partial` generates a report of the co
 
 ### Portable SIMD
 
-Every build uses the SIMD backend; there is no `--simd` CLI option or Cargo feature to select. Algorithm sessions retain one `default` build with all selected adapters. Revision comparisons enable the historical library feature when needed, so both revisions use the vector backend; actual per-revision Cargo features remain in provenance. Revisions without a supported SIMD backend are rejected.
-
-Algorithm comparisons use one shared-SIMD build. Retained dual-build results and schema-1 sessions use their original source revision for regeneration or recovery; current tooling rejects them rather than silently dropping a build.
+Every build uses the SIMD backend; no option or Cargo feature selects it. Revision comparisons enable the historical library feature when needed, and actual per-revision Cargo features remain in provenance. Revisions without a supported SIMD backend, retained dual-build results and schema-1 sessions are rejected; regenerate or recover them with their original source revision.
 
 ## Cases and suites
 

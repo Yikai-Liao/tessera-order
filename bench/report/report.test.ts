@@ -5,21 +5,16 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { figureContent, parseSvg } from "../svg-test-utils.ts";
-import { renderFigures } from "./charts.ts";
 import { createFixture } from "./fixture.ts";
 import { collectWarnings, writeReport } from "./index.ts";
 import { loadRun, validateRun } from "./load.ts";
 import { measurementId, summarize } from "./model.ts";
 
-async function writeFixture(directory: string, simd = false, dataset = createFixture(simd)) {
+async function writeFixture(directory: string, dataset = createFixture()) {
   await Promise.all([
     writeFile(join(directory, "host.json"), JSON.stringify(dataset.host)),
-    ...[...dataset.manifests].flatMap(([build, manifest]) =>
-      [
-        build === "default" ? "manifest.json" : `manifest-${build}.json`,
-        `memory-manifest-${build}.json`,
-      ].map((file) => writeFile(join(directory, file), JSON.stringify(manifest))),
+    ...["manifest.json", "memory-manifest-default.json"].map((file) =>
+      writeFile(join(directory, file), JSON.stringify(dataset.manifest)),
     ),
     writeFile(
       join(directory, "blocks.jsonl"),
@@ -32,19 +27,6 @@ async function writeFixture(directory: string, simd = false, dataset = createFix
   ]);
   return dataset;
 }
-
-test("synthetic memory uses the full record width", () => {
-  const dataset = createFixture();
-  for (const [id, bytes] of [
-    ["row_u64/random/1000/s1", 16_000],
-    ["owned/random/1000/s1", 32_000],
-  ] as const) {
-    const memory = dataset.memory.find(
-      (sample) => sample.case_id === id && sample.variant === "std-stable",
-    );
-    assert.equal(memory?.peak_extra_bytes, bytes, id);
-  }
-});
 
 test("paired ratios respect noise", () => {
   const dataset = createFixture();
@@ -80,11 +62,22 @@ test("paired ratios respect noise", () => {
   );
 });
 
+test("revision placements retain their own measured verdict", () => {
+  const dataset = createFixture();
+  dataset.manifest.variants.push({ name: "tessera-baseline", stable: true, adapter: "revision" });
+  for (const row of dataset.samples)
+    if (row.variant === "std-stable") row.variant = "tessera-baseline";
+  const result = summarize(dataset).get(
+    measurementId("default", "u64/random/1000/s1", "tessera-baseline"),
+  )!;
+  assert.equal(result.verdict, "slower");
+  assert.equal(result.stable, true);
+});
+
 test("parallel Tessera is an opponent, not an A/A control", () => {
   const dataset = createFixture();
   const id = "u64/random/1000/s1";
-  for (const manifest of dataset.manifests.values())
-    manifest.variants.push({ name: "tessera-par-8", stable: true, threads: 8 });
+  dataset.manifest.variants.push({ name: "tessera-par-8", stable: true, threads: 8 });
   for (const sample of dataset.samples) {
     if (sample.variant !== "std-stable") continue;
     sample.variant = "tessera-par-8";
@@ -101,41 +94,6 @@ test("parallel Tessera is an opponent, not an A/A control", () => {
   const warnings = collectWarnings(dataset);
   assert.ok(warnings.some((warning) => warning.includes("requested physical cores")));
   assert.ok(warnings.every((warning) => !warning.includes("recommended one logical CPU")));
-});
-
-test("large parallel memory is required with manifest metadata or catalog fallback", () => {
-  for (const [name, adapter] of [
-    ["tessera-par-8", undefined],
-    ["parallel-copy", "tessera-par"],
-  ] as const) {
-    const dataset = createFixture();
-    const manifest = dataset.manifests.get("default")!;
-    const selected = manifest.cases.find(
-      (c) => c.ty === "row_u32" && c.distribution === "random" && c.len === 10_000_000,
-    )!;
-    manifest.cases = [selected];
-    selected.variants.push(name);
-    manifest.variants.push({ name, stable: true, adapter });
-    const id = "row_u32/random/10000000/s1";
-    dataset.samples = dataset.samples.filter((sample) => sample.case_id === id);
-    dataset.samples.push(
-      ...dataset.samples
-        .filter((sample) => sample.variant === "std-stable")
-        .map((sample) => ({ ...sample, variant: name, slot: selected.variants.length })),
-    );
-    dataset.memory = dataset.memory.filter((sample) => sample.case_id === id);
-    const memory = { ...dataset.memory[0], variant: name };
-    dataset.memory.push(memory);
-    validateRun(dataset);
-    dataset.memory.pop();
-    for (const partial of [false, true]) {
-      dataset.partial = partial;
-      assert.throws(
-        () => validateRun(dataset),
-        /missing memory sample.*row_u32.*parallel|missing memory sample.*tessera-par/,
-      );
-    }
-  }
 });
 
 test("A/A verdicts use the paired mean and survive swapping control labels", () => {
@@ -209,78 +167,40 @@ test("invalid samples fail validation", () => {
   }
 });
 
-test("figures preserve plotted values", () => {
-  const dataset = createFixture(),
-    charts = renderFigures(dataset, summarize(dataset));
-  assert.equal(charts.length, 5);
-  for (const chart of charts) {
-    assert.match(chart.svg, /width="\d+"/);
-    assert.match(chart.svg, /<title id="t">/);
-    assert.doesNotMatch(chart.svg, /NaN|Infinity|undefined/);
-    assert.match(chart.table, /\|/);
-  }
-  assert.deepEqual(
-    charts.map((c) => c.name),
-    ["ranking", "inputs", "short", "types", "memory"],
+test("short reports retain their declared budget and reject missing or extra blocks", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-short-report-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const dataset = createFixture(3);
+  await writeFixture(directory, dataset);
+  const loaded = await loadRun([directory]);
+  assert.equal(loaded.manifest.blocks, 3);
+  await writeReport([directory]);
+  assert.match(
+    await readFile(join(directory, "report/index.md"), "utf8"),
+    /3 blocks per case.*short screen/,
   );
-  assert.ok(charts[0].table.indexOf("vqsort") < charts[0].table.indexOf("Tessera"));
-  assert.match(charts[0].svg, /long-stable-variant-name/);
-  // vqsort is always faster in the fixture, and radsort also wins on reverse.
-  assert.match(charts[1].table, /\| reverse \| [^|]+ \| 3rd of 7 \|/);
-  assert.match(charts[1].title, /fastest on 0 of 10 input patterns/);
-});
-
-test("new patterns enter type panels and memory maxima", () => {
-  const dataset = createFixture(true);
-  const additions = [
-    ["u64", "hot50", 1000000],
-    ["u64", "sparse_digits", 1000000],
-    ["f64", "finite_signed", 1000000],
-    ["record128", "bimodal", 1000000],
-    ["u64", "hot50", 10000000],
-  ] as const;
-  for (const [ty, distribution, len] of additions) {
-    const sourceId = `${ty}/random/${len}/s1`;
-    const targetId = `${ty}/${distribution}/${len}/s1`;
-    for (const manifest of dataset.manifests.values()) {
-      const source = manifest.cases.find(
-        (input) => input.ty === ty && input.distribution === "random" && input.len === len,
-      )!;
-      manifest.cases.push({ ...source, distribution });
-    }
-    dataset.samples.push(
-      ...dataset.samples
-        .filter((row) => row.case_id === sourceId)
-        .map((row) => ({ ...row, case_id: targetId, group: `${ty}/${distribution}` })),
-    );
-    dataset.memory.push(
-      ...dataset.memory
-        .filter((row) => row.case_id === sourceId)
-        .map((row) => ({ ...row, case_id: targetId, peak_extra_bytes: 99_000_000 })),
-    );
-  }
-  const charts = renderFigures(dataset, summarize(dataset));
-  const inputs = charts.find((chart) => chart.name === "inputs")!;
-  assert.match(inputs.table, /50% one key, rest random/);
-  assert.match(inputs.table, /sparse digits/);
-  assert.match(inputs.title, /12 input patterns/);
-  const floats = charts.find((chart) => chart.name === "inputs-f64")!;
-  assert.match(floats.table, /finite floats/);
-  const records = charts.find((chart) => chart.name === "inputs-record128")!;
-  assert.match(records.table, /two clusters/);
-  assert.doesNotMatch(records.table, /sort_unstable|vqsort/);
-  assert.match(records.svg, /each dot is one stable sort/);
-  const memory = charts.find((chart) => chart.name === "memory")!;
-  assert.match(memory.table, /Worst of 11 inputs/);
-  assert.match(memory.table, /99 MB/);
-  for (const chart of charts) assert.doesNotMatch(chart.svg, /NaN|Infinity|undefined/);
+  loaded.samples[0].block = 3;
+  assert.throws(() => validateRun(loaded), /invalid or unverified/);
+  loaded.samples[0].block = 0;
+  loaded.samples.pop();
+  assert.throws(() => validateRun(loaded), /missing blocks/);
+  dataset.manifest.blocks = 9;
+  await writeFixture(directory, dataset);
+  await assert.rejects(loadRun([directory]), /missing blocks/);
+  dataset.manifest.blocks = 2;
+  await writeFixture(directory, dataset);
+  await assert.rejects(loadRun([directory]), /budget/);
 });
 
 test("raw results round trip", async () => {
   const dir = await mkdtemp(join(tmpdir(), "tessera-report-"));
   try {
     await writeFixture(dir);
-    await writeReport([dir]);
+    const summary = await writeReport([dir]);
+    assert.equal(summary.kind, "algorithm-comparison");
+    assert.equal(summary.ratio, "algorithm / paired Tessera mean");
+    assert.equal(summary.focus.length, 5);
+    assert.ok(summary.omittedChanges > 0);
     const bmf = JSON.parse(await readFile(join(dir, "bmf.json"), "utf8"));
     const s = bmf["compare/u64/random/1000/s1/std-stable/default"];
     assert.ok(Math.abs(s.latency.value - 10.816) < 0.01);
@@ -288,6 +208,9 @@ test("raw results round trip", async () => {
     assert.ok(bmf["compare/u64/random/1000/s1/tessera-aa/default"]);
     assert.match(await readFile(join(dir, "report/index.md"), "utf8"), /synthetic fixture/);
     await assert.rejects(loadRun([dir, dir]), /duplicate/);
+    await writeFile(join(dir, "manifest-portable-simd.json"), "{}");
+    await assert.rejects(loadRun([dir]), /Multiple-build/);
+    await rm(join(dir, "manifest-portable-simd.json"));
     const other = await mkdtemp(join(tmpdir(), "tessera-other-host-"));
     try {
       await writeFixture(other);
@@ -301,14 +224,16 @@ test("raw results round trip", async () => {
   }
 });
 
-test("optimization and debug settings must agree across timing, memory and SIMD", async () => {
+test("optimization and debug settings must agree across timing and memory", async () => {
   const dir = await mkdtemp(join(tmpdir(), "tessera-build-config-"));
   try {
-    const dataset = await writeFixture(dir, true);
+    const dataset = await writeFixture(dir);
     await loadRun([dir]);
-    for (const field of ["opt_level", "debug"]) {
-      const different = field === "opt_level" ? "1" : "true";
-      for (const [build, manifest] of dataset.manifests) {
+    for (const field of ["opt_level", "debug", "blocks"]) {
+      const different = field === "blocks" ? 3 : field === "opt_level" ? "1" : "true";
+      {
+        const manifest = dataset.manifest;
+        const build = "default";
         const memoryPath = join(dir, `memory-manifest-${build}.json`);
         await writeFile(memoryPath, JSON.stringify({ ...manifest, [field]: different }));
         await assert.rejects(
@@ -317,232 +242,8 @@ test("optimization and debug settings must agree across timing, memory and SIMD"
         );
         await writeFile(memoryPath, JSON.stringify(manifest));
       }
-      const simd = dataset.manifests.get("portable-simd")!;
-      const simdPaths = ["manifest-portable-simd.json", "memory-manifest-portable-simd.json"];
-      for (const path of simdPaths)
-        await writeFile(join(dir, path), JSON.stringify({ ...simd, [field]: different }));
-      await assert.rejects(loadRun([dir]), new RegExp(`compiler configuration: ${field}`));
-      for (const path of simdPaths) await writeFile(join(dir, path), JSON.stringify(simd));
-
-      const incomplete: Record<string, unknown> = { ...dataset.manifests.get("default")! };
-      delete incomplete[field];
-      for (const path of ["manifest.json", "memory-manifest-default.json"])
-        await writeFile(join(dir, path), JSON.stringify(incomplete));
-      await assert.rejects(loadRun([dir]), /expected a nonempty string/);
-      for (const path of ["manifest.json", "memory-manifest-default.json"])
-        await writeFile(join(dir, path), JSON.stringify(dataset.manifests.get("default")));
     }
   } finally {
     await rm(dir, { recursive: true });
   }
-});
-
-test("native compiler versions match", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "tessera-native-compilers-"));
-  try {
-    const dataset = await writeFixture(dir, true);
-    const native = {
-      ...dataset.manifests.get("default")!,
-      cc: "gcc 12",
-      cxx: "g++ 12",
-      native_build: { cc: "cc", cxx: "c++" },
-    };
-    const timingPath = join(dir, "manifest.json");
-    const memoryPath = join(dir, "memory-manifest-default.json");
-    await writeFile(timingPath, JSON.stringify(native));
-    await writeFile(memoryPath, JSON.stringify(native));
-    await loadRun([dir]);
-    for (const [field, version] of [
-      ["cc", "gcc 14"],
-      ["cxx", "g++ 14"],
-    ]) {
-      await writeFile(memoryPath, JSON.stringify({ ...native, [field]: version }));
-      await assert.rejects(
-        loadRun([dir]),
-        new RegExp(`memory provenance differs: default/${field}`),
-      );
-      const incomplete: Record<string, unknown> = { ...native };
-      delete incomplete[field];
-      await writeFile(timingPath, JSON.stringify(incomplete));
-      await writeFile(memoryPath, JSON.stringify(incomplete));
-      await assert.rejects(loadRun([dir]), /expected a nonempty string/);
-      await writeFile(timingPath, JSON.stringify(native));
-      await writeFile(memoryPath, JSON.stringify(native));
-    }
-  } finally {
-    await rm(dir, { recursive: true });
-  }
-});
-
-test("custom selections retain figures", () => {
-  const dataset = createFixture(true);
-  for (const manifest of dataset.manifests.values())
-    manifest.cases = manifest.cases.filter(
-      (input) => input.ty === "u64" && input.distribution === "random" && input.len === 65536,
-    );
-  dataset.samples = dataset.samples.filter((sample) => sample.case_id === "u64/random/65536/s1");
-  dataset.memory = dataset.memory.filter((sample) => sample.case_id === "u64/random/65536/s1");
-  const figures = renderFigures(dataset, summarize(dataset));
-  assert.equal(figures.length, 1);
-  assert.match(figures[0].name, /^selected-/);
-  assert.match(figures[0].svg, /65,536 records/);
-  assert.match(figures[0].svg, /portable-simd/i);
-  assert.doesNotMatch(figures[0].svg, /NaN|Infinity/);
-});
-
-test("selected inputs retain overflowing ranges", () => {
-  for (const [low, high] of [
-    [0.5, 2],
-    [0.01, 2],
-    [0.5, 64],
-    [0.01, 64],
-    [0.004, 64],
-    [0.0000004, 64],
-  ]) {
-    const dataset = createFixture();
-    const manifest = dataset.manifests.get("default")!;
-    manifest.cases = manifest.cases.filter(
-      (input) => input.ty === "u64" && input.distribution === "random" && input.len === 65536,
-    );
-    dataset.samples = dataset.samples.filter((sample) => sample.case_id === "u64/random/65536/s1");
-    dataset.memory = dataset.memory.filter((sample) => sample.case_id === "u64/random/65536/s1");
-    const summaries = summarize(dataset);
-    const summary = summaries.get(measurementId("default", "u64/random/65536/s1", "std-stable"))!;
-    Object.assign(summary, { ratio: 1, low, high });
-    const [figure] = renderFigures(dataset, summaries);
-    assert.match(figure.name, /^selected-/);
-    assert.match(figure.table, /Time ratio \| Block range \| A\/A range/);
-    const range = `${low < 0.01 ? low.toPrecision(2) : low.toFixed(2)}×–${high}×`;
-    assert.ok(figure.table.includes(range), range);
-    assert.ok(figure.svg.includes(range), range);
-    assert.equal(figure.svg.includes("rotate(270)"), low < 1 / 32);
-    assert.equal(figure.svg.includes("rotate(90)"), high > 32);
-  }
-});
-
-test("mixed plans disclose figure scope", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "tessera-mixed-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const dataset = createFixture();
-  const manifest = dataset.manifests.get("default")!;
-  const original = manifest.cases.find(
-    (input) => input.ty === "u64" && input.distribution === "random" && input.len === 1000,
-  )!;
-  manifest.cases.push({ ...original, len: 1234 });
-  dataset.samples.push(
-    ...dataset.samples
-      .filter((row) => row.case_id === "u64/random/1000/s1")
-      .map((row) => ({ ...row, case_id: "u64/random/1234/s1" })),
-  );
-  dataset.memory.push(
-    ...dataset.memory
-      .filter((row) => row.case_id === "u64/random/1000/s1")
-      .map((row) => ({ ...row, case_id: "u64/random/1234/s1" })),
-  );
-  await writeFixture(directory, false, dataset);
-  await writeReport([directory]);
-  const report = await readFile(join(directory, "report/index.md"), "utf8");
-  assert.match(report, /Standard panels show fixed slices and aggregates/);
-  assert.match(report, /fallback used only when no standard panel/);
-  assert.match(report, /1,234/);
-  assert.match(report, /ranking.svg/);
-  const summaries = JSON.parse(await readFile(join(directory, "report/summaries.json"), "utf8"));
-  assert.ok(summaries.some((row: { caseId: string }) => row.caseId === "u64/random/1234/s1"));
-});
-
-test("field scales include SIMD rings", () => {
-  for (const factor of [1 / 8, 64]) {
-    const dataset = createFixture(true);
-    for (const sample of dataset.samples) {
-      if (sample.build === "portable-simd" && sample.variant !== "std-stable")
-        sample.elapsed_ns = Math.round(sample.elapsed_ns * factor);
-    }
-    const figures = renderFigures(dataset, summarize(dataset));
-    for (const name of ["inputs", "short", "types"]) {
-      const figure = figures.find((chart) => chart.name === name)!;
-      // SIMD speeds of 26x or 0.05x fit inside the 32x limit and must
-      // remain rings, not overflow triangles on a default-only scale.
-      assert.match(figure.svg, />16×<\/text>/, `${name}, factor=${factor}`);
-      assert.doesNotMatch(figure.svg, /rotate\((90|270)\)/, `${name}, factor=${factor}`);
-      const root = parseSvg(figure.svg);
-      const rings = [
-        ...root.querySelectorAll(
-          '[aria-label="dot"][fill="none"][stroke-width="2"] circle[r="5.5"]',
-        ),
-      ];
-      const defaults = [...root.querySelectorAll('[aria-label="dot"] circle[r="6.5"]')];
-      assert.equal(rings.length, defaults.length, name);
-      assert.ok(rings.length > 0, name);
-      const ticks = [...root.querySelectorAll('[aria-label="x-axis tick label"] text')];
-      const position = (label: string) =>
-        Number(
-          ticks
-            .find((tick) => tick.textContent === label)!
-            .getAttribute("transform")!
-            .match(/translate\(([^,]+)/)![1],
-        );
-      const pixelsPerDoubling = (position("16×") - position("slice::sort")) / 4;
-      for (const [index, ring] of rings.entries()) {
-        assert.equal(ring.getAttribute("cy"), defaults[index].getAttribute("cy"));
-        const displacement =
-          Number(ring.getAttribute("cx")) - Number(defaults[index].getAttribute("cx"));
-        assert.ok(
-          Math.abs(displacement / pixelsPerDoubling - Math.log2(1.25 / factor)) < 0.002,
-          name,
-        );
-      }
-    }
-  }
-});
-
-test("speed panels keep the stated overflow limit", () => {
-  const dataset = createFixture(true);
-  for (const sample of dataset.samples) {
-    if (sample.build === "portable-simd" && sample.variant !== "std-stable")
-      sample.elapsed_ns = Math.round(sample.elapsed_ns / 12);
-  }
-  for (const figure of renderFigures(dataset, summarize(dataset)).filter(
-    (chart) => chart.name !== "memory",
-  )) {
-    // A 39x speed exceeds the 32x cap even after axis padding.
-    assert.doesNotMatch(figure.svg, />64×<\/text>/, figure.name);
-    assert.match(figure.svg, /rotate\(90\)/, figure.name);
-  }
-});
-
-test("SIMD shares the anchor", () => {
-  const dataset = createFixture(true);
-  validateRun(dataset);
-  const charts = renderFigures(dataset, summarize(dataset));
-  assert.match(charts[0].table, /Tessera, Portable SIMD/);
-  const values = summarize(dataset);
-  const id = "u64/random/1000/s1";
-  const defaultStd = values.get(measurementId("default", id, "std-stable"))!.ratio;
-  const simdStd = values.get(measurementId("portable-simd", id, "std-stable"))!.ratio;
-  assert.ok(Math.abs(simdStd / defaultStd - 1.25) < 0.001);
-});
-
-test("legacy figures preserve content", async () => {
-  const dataset = createFixture(true);
-  for (const chart of renderFigures(dataset, summarize(dataset))) {
-    assert.deepEqual(
-      figureContent(chart.svg),
-      figureContent(
-        await readFile(new URL(`./fixtures/${chart.name}.svg`, import.meta.url), "utf8"),
-      ),
-    );
-  }
-});
-
-test("partial builds omit anchors", () => {
-  const dataset = createFixture(true);
-  dataset.partial = true;
-  const selected = (build: string, group: string) =>
-    group === (build === "default" ? "u64/random" : "u32/random");
-  dataset.samples = dataset.samples.filter((sample) => selected(sample.build, sample.group));
-  dataset.observations = dataset.observations.filter((observation) =>
-    selected(observation.build, observation.group),
-  );
-  validateRun(dataset);
-  assert.doesNotThrow(() => collectWarnings(dataset));
 });

@@ -80,7 +80,6 @@ fn exercise(len: usize, changing: bool) {
     }
 }
 
-#[cfg(feature = "std")]
 #[test]
 fn key_panic_recovery() {
     for len in if cfg!(miri) {
@@ -89,72 +88,6 @@ fn key_panic_recovery() {
         vec![12, 47, 48, 49, 80, 5000]
     } {
         exercise(len, false);
-    }
-}
-
-// A separate process is needed because a panic in the no-std movement guard
-// must abort even when the host supplies an unwinder.
-#[cfg(all(not(feature = "std"), not(miri)))]
-#[test]
-fn no_std_block_panic_aborts() {
-    const CHILD: &str = "TESSERA_NO_STD_PANIC_CHILD";
-    if std::env::var_os(CHILD).is_some() {
-        let build = || {
-            (0..8192usize)
-                .map(|id| {
-                    let key = if id < 64 {
-                        0
-                    } else {
-                        id.wrapping_mul(73) as u8
-                    };
-                    (key, format!("record {id}"))
-                })
-                .collect::<Vec<_>>()
-        };
-        let mut probe = build();
-        let mut total = 0;
-        let mut key = |x: &(u8, String)| {
-            total += 1;
-            x.0
-        };
-        stable_sort_by_key(&mut probe, &mut key);
-        drop(probe);
-
-        let mut input = build();
-        let mut calls = 0;
-        let _ = catch_unwind(AssertUnwindSafe(|| {
-            let mut key = |x: &(u8, String)| {
-                calls += 1;
-                // The middle of this narrow-key sort is the block scatter,
-                // after consumed input blocks have become output blocks.
-                assert_ne!(calls, total / 2, "no-std block panic probe");
-                x.0
-            };
-            stable_sort_by_key(&mut input, &mut key);
-        }));
-        // If unwinding escapes the guard, report a successful child exit so
-        // the parent fails. Do not drop possibly duplicated owning records.
-        std::process::exit(0);
-    }
-
-    let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "no_std_block_panic_aborts", "--nocapture"])
-        .env(CHILD, "1")
-        .env("RUST_BACKTRACE", "0")
-        .current_dir(std::env::temp_dir())
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!output.status.success(), "panic escaped the guard");
-    assert!(stderr.contains("no-std block panic probe"), "{stderr}");
-    assert!(
-        stderr.contains("cannot unwind through record movement without the std feature"),
-        "{stderr}"
-    );
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt;
-        assert_eq!(output.status.signal(), Some(6), "{stderr}");
     }
 }
 
@@ -184,7 +117,8 @@ fn changing_pivot_keeps_records() {
             })
             .collect();
         let probe_len = 65_536 / std::mem::size_of::<Owned>();
-        let prelude = 4 + probe_len + 1025;
+        // Root and child variation now stop at the same first 64-key batch.
+        let prelude = 4 + probe_len + 65;
         let mut first_band = vec![false; len];
         let mut calls = 0;
         stable_sort_by_key(&mut records, |record| {
@@ -211,18 +145,18 @@ fn changing_pivot_keeps_records() {
             let offset = call - prelude;
             // The root was already probed. Subsequent children reject order
             // before scanning their remaining candidate bits.
-            let phase = offset % (64 + len + 4 + 65);
-            if phase < 64 {
+            let phase = offset % (128 + len + 4 + 65);
+            if phase < 128 {
                 if greater { 0 } else { u64::MAX }
-            } else if phase < 64 + len {
-                if offset < 64 + len {
+            } else if phase < 128 + len {
+                if offset < 128 + len {
                     assert!(!first_band[record.id], "record classified twice");
                     first_band[record.id] = true;
                 }
                 1
-            } else if phase < 64 + len + 4 {
-                [1, 0, 0, 1][phase - 64 - len]
-            } else if phase % 2 == 0 {
+            } else if phase < 128 + len + 4 {
+                [1, 0, 0, 1][phase - 128 - len]
+            } else if phase.is_multiple_of(2) {
                 0
             } else {
                 u64::MAX
@@ -267,9 +201,6 @@ fn changing_keys_borrowed_records() {
             });
         }
         for panic in [false, true] {
-            if panic && !cfg!(feature = "std") {
-                continue;
-            }
             for at in [1, 24, 180, 500, 1200] {
                 let mut backing: Vec<_> = (0..len).collect();
                 let mut records: Vec<_> = backing

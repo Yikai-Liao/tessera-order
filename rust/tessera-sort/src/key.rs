@@ -26,60 +26,11 @@ use core::ops::{BitAnd, BitOrAssign, Not, Shl, Shr};
 /// | Signed integers | Sign bit flipped |
 /// | `f32`, `f64` | All bits inverted if the sign bit is set, otherwise the sign bit flipped; this matches `total_cmp` |
 /// | `Reverse<K>` | All bits of the encoding of `K` inverted |
-pub trait RadixKey: sealed::Sealed + Copy {
+pub trait RadixKey: crate::portable_simd::SimdKey + Copy {
     #[doc(hidden)]
     type Encoded: Unsigned;
     #[doc(hidden)]
     fn encode(self) -> Self::Encoded;
-}
-
-mod sealed {
-    use super::{Direct, RadixKey};
-
-    /// Scans and insertion passes for direct keys of one type.
-    ///
-    /// The defaults are the default-build scans. Primitive keys override them
-    /// with the vector backend under `portable-simd`; `Reverse<K>` keeps the
-    /// defaults, so it needs no second set of vector kernels.
-    pub trait Sealed: Copy {
-        #[inline]
-        fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool
-        where
-            Self: RadixKey,
-        {
-            // Confirmation and insertion probes cross the same ordered runs.
-            keys.first().is_none_or(|key| previous <= key.encode())
-                && Self::first_inversion(keys).is_none()
-        }
-
-        #[inline(always)]
-        fn first_inversion(keys: &[Self]) -> Option<usize>
-        where
-            Self: RadixKey,
-        {
-            crate::scan::first_inversion(keys)
-        }
-
-        #[inline]
-        fn finish_insertion(keys: &mut [Self])
-        where
-            Self: RadixKey,
-        {
-            // Tile finishing crosses many short ordered runs, so a blocked scan
-            // would build a 32-pair mask for every inversion it finds. `ByKey`
-            // scans one pair at a time; budgeted probes keep the blocked scan
-            // for their long ordered stretches.
-            crate::engine::finish_insertion(keys, &mut super::ByKey(|key: &Self| *key));
-        }
-
-        #[inline]
-        fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize>
-        where
-            Self: RadixKey,
-        {
-            crate::engine::insertion_loop(keys, budget, &mut Direct)
-        }
-    }
 }
 
 /// Unsigned integer operations the engine needs on encoded keys.
@@ -100,35 +51,8 @@ pub trait Unsigned:
     fn to_u128(self) -> u128;
 }
 
-/// Routes the scans of a primitive key to the vector backend under
-/// `portable-simd`. Expands to nothing in the default build.
-macro_rules! vector_backend {
-    () => {
-        #[cfg(feature = "portable-simd")]
-        #[inline]
-        fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool {
-            crate::portable_simd::confirm_ascending(keys, previous)
-        }
-
-        #[cfg(feature = "portable-simd")]
-        #[inline]
-        fn finish_insertion(keys: &mut [Self]) {
-            crate::portable_simd::finish_insertion(keys)
-        }
-
-        #[cfg(feature = "portable-simd")]
-        #[inline]
-        fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
-            crate::portable_simd::insertion_sort(keys, budget)
-        }
-    };
-}
-
 macro_rules! unsigned {
     ($($ty:ty),* $(,)?) => {$(
-        impl sealed::Sealed for $ty {
-            vector_backend!();
-        }
         impl Unsigned for $ty {
             const BITS: usize = <$ty>::BITS as usize;
             #[inline] fn from_usize(value: usize) -> Self { value as Self }
@@ -145,9 +69,6 @@ unsigned!(u8, u16, u32, u64, u128, usize);
 
 macro_rules! signed {
     ($(($s:ty, $u:ty)),* $(,)?) => {$(
-        impl sealed::Sealed for $s {
-            vector_backend!();
-        }
         impl RadixKey for $s {
             type Encoded = $u;
             #[inline] fn encode(self) -> $u {
@@ -166,15 +87,7 @@ signed!(
 );
 
 macro_rules! float {
-    ($(($f:ty, $u:ty, $scan:path)),* $(,)?) => {$(
-        impl sealed::Sealed for $f {
-            vector_backend!();
-
-            #[inline(always)]
-            fn first_inversion(keys: &[Self]) -> Option<usize> {
-                $scan(keys)
-            }
-        }
+    ($(($f:ty, $u:ty)),* $(,)?) => {$(
         impl RadixKey for $f {
             type Encoded = $u;
             #[inline] fn encode(self) -> $u {
@@ -185,14 +98,8 @@ macro_rules! float {
         }
     )*};
 }
-// The default build's blocked scan compares 64-bit lanes poorly at the
-// baseline vector width, so `f64` scans one pair at a time.
-float!(
-    (f32, u32, crate::scan::first_inversion),
-    (f64, u64, crate::scan::scalar)
-);
+float!((f32, u32), (f64, u64));
 
-impl<K: RadixKey> sealed::Sealed for Reverse<K> {}
 impl<K: RadixKey> RadixKey for Reverse<K> {
     type Encoded = K::Encoded;
     #[inline]
@@ -211,7 +118,16 @@ const SMALL_WINDOW_BUCKETS: usize = 1 << SMALL_WINDOW_BITS;
 ///
 /// `ByKey` calls a user key function, `Direct` encodes the record itself, and
 /// `KeyHalf` narrows another extractor to one 64-bit half of a 128-bit key.
-pub(crate) trait Extract<T> {
+///
+/// # Safety
+///
+/// If `CACHE_BUCKETS` is false, `key` must be deterministic and panic-free:
+/// tile scatter may evaluate it again after ownership transfer has started.
+pub(crate) unsafe trait Extract<T> {
+    /// Whether tile passes must retain each classification before moving records.
+    /// User callbacks keep the default; only repeatable library encoders opt out.
+    const CACHE_BUCKETS: bool = true;
+
     /// The encoded key type.
     type Value: Unsigned;
 
@@ -296,7 +212,8 @@ pub(crate) trait Extract<T> {
 /// Extracts keys with a user key function, which may panic or be inconsistent.
 #[derive(Clone)]
 pub(crate) struct ByKey<F>(pub F);
-impl<T, K: RadixKey, F: FnMut(&T) -> K> Extract<T> for ByKey<F> {
+// SAFETY: user callbacks retain cached classifications, even if they panic or change keys.
+unsafe impl<T, K: RadixKey, F: FnMut(&T) -> K> Extract<T> for ByKey<F> {
     type Value = K::Encoded;
     #[inline]
     fn key(&mut self, record: &T) -> Self::Value {
@@ -308,7 +225,9 @@ impl<T, K: RadixKey, F: FnMut(&T) -> K> Extract<T> for ByKey<F> {
 #[derive(Clone, Copy)]
 pub(crate) struct Direct;
 
-impl<K: RadixKey> Extract<K> for Direct {
+// SAFETY: sealed key encodings are deterministic and panic-free.
+unsafe impl<K: RadixKey> Extract<K> for Direct {
+    const CACHE_BUCKETS: bool = false;
     type Value = K::Encoded;
 
     #[cfg(feature = "rayon")]
@@ -324,49 +243,18 @@ impl<K: RadixKey> Extract<K> for Direct {
         if records.is_empty() {
             return true;
         }
-        let buckets = 1usize << width;
         let shard_len = records.len().div_ceil(rayon::current_num_threads());
-        // Mutable shards need only Send, including when a sealed key type is
-        // not known to be Sync through the RadixKey trait.
-        let partials: Vec<_> = records
+        // Mutable shards need only Send; no shared record borrow crosses tasks.
+        let counts = records
             .par_chunks_mut(shard_len)
-            .map(|records| {
-                let mask = Self::Value::from_usize(buckets - 1);
-                let shift = Self::Value::from_usize(low);
-                let mut counts = [0usize; SMALL_WINDOW_BUCKETS];
-                let mut representatives = [records[0]; SMALL_WINDOW_BUCKETS];
-                for record in records {
-                    let bucket = ((record.encode() >> shift) & mask).to_usize();
-                    if counts[bucket] == 0 {
-                        representatives[bucket] = *record;
-                    }
-                    counts[bucket] += 1;
-                }
-                (counts, representatives)
-            })
-            .collect();
-        let mut counts = [0usize; SMALL_WINDOW_BUCKETS];
-        let mut representatives = [records[0]; SMALL_WINDOW_BUCKETS];
-        for (local_counts, local_representatives) in partials {
-            for bucket in 0..buckets {
-                if local_counts[bucket] != 0 {
-                    representatives[bucket] = local_representatives[bucket];
-                    counts[bucket] += local_counts[bucket];
-                }
-            }
-        }
-        // Equal sealed encodings imply identical record bits. Filling these
-        // disjoint runs therefore preserves both the records and stability.
-        let mut remaining = records;
-        let mut runs = Vec::with_capacity(buckets);
-        for bucket in 0..buckets {
-            let (run, rest) = remaining.split_at_mut(counts[bucket]);
-            remaining = rest;
-            if !run.is_empty() {
-                runs.push((run, representatives[bucket]));
-            }
-        }
-        runs.into_par_iter().for_each(|(run, key)| run.fill(key));
+            .map(|records| KeyCounts::count(records, low, width))
+            .reduce_with(KeyCounts::merge)
+            .unwrap();
+        counts
+            .runs(records)
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .for_each(|(run, key)| run.fill(key));
         true
     }
 
@@ -374,40 +262,17 @@ impl<K: RadixKey> Extract<K> for Direct {
         if width == 0 || width > SMALL_WINDOW_BITS {
             return false;
         }
-        // An empty slice and a single record are already sorted.
-        let Some(&first) = records.first() else {
-            return true;
-        };
-        let buckets = 1usize << width;
-        let mask = Self::Value::from_usize(buckets - 1);
-        let shift = Self::Value::from_usize(low);
-        let mut counts = [0usize; SMALL_WINDOW_BUCKETS];
-        let mut representatives = [first; SMALL_WINDOW_BUCKETS];
-        for record in records.iter() {
-            let key = self.key(record);
-            let bucket = ((key >> shift) & mask).to_usize();
-            if counts[bucket] == 0 {
-                representatives[bucket] = *record;
+        if !records.is_empty() {
+            for (run, key) in KeyCounts::count(records, low, width).runs(records) {
+                run.fill(key);
             }
-            counts[bucket] += 1;
         }
-        // Every sealed encoding is a bijection on bit patterns, so equal keys
-        // mean equal records: a run of one bucket is interchangeable, and one of
-        // its records stands for all of them, NaN payloads and signed zeros
-        // included.
-        let mut start = 0;
-        for (bucket, &count) in counts[..buckets].iter().enumerate() {
-            let end = start + count;
-            records[start..end].fill(representatives[bucket]);
-            start = end;
-        }
-        debug_assert_eq!(start, records.len());
         true
     }
 
     #[inline]
     fn confirm_ascending(&mut self, records: &[K], previous: Self::Value) -> bool {
-        K::confirm_ascending(records, previous)
+        crate::portable_simd::confirm_ascending(records, previous)
     }
 
     #[inline]
@@ -415,38 +280,97 @@ impl<K: RadixKey> Extract<K> for Direct {
         record.encode()
     }
 
-    // Inlined through `K::first_inversion` so each scan is not a call and the
-    // scan sees the caller's slice bounds.
-    #[inline(always)]
-    fn first_inversion(&mut self, records: &[K]) -> Option<usize> {
-        K::first_inversion(records)
-    }
-
     #[inline]
     fn finish_insertion(&mut self, records: &mut [K]) {
-        K::finish_insertion(records);
+        crate::portable_simd::finish_insertion(records);
     }
 
     #[inline]
     fn insertion_sort(&mut self, records: &mut [K], budget: usize) -> Option<usize> {
-        K::insertion_sort(records, budget)
+        crate::portable_simd::insertion_sort(records, budget)
     }
 }
 
-/// The 64 key bits starting at `SHIFT`, used when only one half of a 128-bit
-/// key varies.
-pub(crate) struct KeyHalf<'a, E, const SHIFT: usize>(pub &'a mut E);
-impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for KeyHalf<'_, E, SHIFT> {
+/// A histogram retaining one interchangeable record per encoded-key bucket.
+///
+/// Sealed encodings are bijective on bits, including NaN payloads and signed
+/// zeros. When the window covers all variation, a representative stands for
+/// every record counted in its bucket. Serial and parallel finishing share this
+/// ownership-free summary; only collection and filling are scheduled differently.
+struct KeyCounts<K> {
+    buckets: usize,
+    counts: [usize; SMALL_WINDOW_BUCKETS],
+    representatives: [K; SMALL_WINDOW_BUCKETS],
+}
+
+impl<K: RadixKey> KeyCounts<K> {
+    /// Counts a nonempty slice in a window of at most `SMALL_WINDOW_BITS` bits.
+    fn count(records: &[K], low: usize, width: usize) -> Self {
+        let mut result = Self {
+            buckets: 1 << width,
+            counts: [0; SMALL_WINDOW_BUCKETS],
+            representatives: [records[0]; SMALL_WINDOW_BUCKETS],
+        };
+        let mask = K::Encoded::from_usize(result.buckets - 1);
+        let shift = K::Encoded::from_usize(low);
+        for &record in records {
+            let bucket = ((record.encode() >> shift) & mask).to_usize();
+            if result.counts[bucket] == 0 {
+                result.representatives[bucket] = record;
+            }
+            result.counts[bucket] += 1;
+        }
+        result
+    }
+
+    /// Combines disjoint shards counted with the same window.
+    #[cfg(feature = "rayon")]
+    fn merge(mut self, other: Self) -> Self {
+        debug_assert_eq!(self.buckets, other.buckets);
+        for bucket in 0..self.buckets {
+            if other.counts[bucket] != 0 {
+                self.representatives[bucket] = other.representatives[bucket];
+                self.counts[bucket] += other.counts[bucket];
+            }
+        }
+        self
+    }
+
+    /// Pairs each nonempty destination run with its representative.
+    /// The slice must contain exactly the records summarized by this histogram.
+    fn runs(self, records: &mut [K]) -> impl Iterator<Item = (&mut [K], K)> {
+        self.counts
+            .into_iter()
+            .zip(self.representatives)
+            .take(self.buckets)
+            .scan(records, |remaining, (count, key)| {
+                let (run, rest) = core::mem::take(remaining).split_at_mut(count);
+                *remaining = rest;
+                Some((run, key))
+            })
+            .filter(|(run, _)| !run.is_empty())
+    }
+}
+
+/// Extracts the 64 key bits starting at `SHIFT` when the other half is constant.
+///
+/// Scans retain the defaults for the narrowed keys, not the inner key width.
+#[derive(Clone)]
+pub(crate) struct KeyHalf<E, const SHIFT: usize>(pub E);
+
+// SAFETY: the inner extractor owns repeatability; wrapping shifts cannot panic.
+unsafe impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for KeyHalf<E, SHIFT> {
+    const CACHE_BUCKETS: bool = E::CACHE_BUCKETS;
     type Value = u64;
+
     #[inline]
     fn key(&mut self, record: &T) -> u64 {
-        (self.0.key(record).to_u128() >> SHIFT) as u64
+        self.0.key(record).to_u128().wrapping_shr(SHIFT as u32) as u64
     }
 
     fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
-        // The engine narrows a key to one half only when the other half is
-        // constant, so the window moves up with the half and still covers every
-        // difference in the underlying key.
+        // The other half is constant, so this translated window still
+        // covers every difference in the underlying key.
         self.0.try_count_window(records, low + SHIFT, width)
     }
 
@@ -464,6 +388,59 @@ impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for KeyHalf<'_, E, SHIFT> 
 mod tests {
     use super::*;
     use alloc::vec::Vec;
+
+    #[test]
+    fn half_keys_keep_encoded_bits() {
+        let key = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210u128;
+        assert_eq!(KeyHalf::<_, 0>(Direct).key(&key), 0xfedc_ba98_7654_3210);
+        assert_eq!(KeyHalf::<_, 64>(Direct).key(&key), 0x0123_4567_89ab_cdef);
+    }
+
+    /// Checks shared window and decline rules against independently sorted keys.
+    fn check_half_windows<const SHIFT: usize>(
+        direct_half: &mut impl Extract<u128, Value = u64>,
+        keyed_half: &mut impl Extract<(u128, usize), Value = u64>,
+    ) {
+        for (low, width) in [(0, 8), (9, 3), (57, 7)] {
+            let mask = ((1u128 << width) - 1) << (low + SHIFT);
+            let base = 0x73a5_491b_c621_d8e0_2b93_a3f7_1d05_0000u128 & !mask;
+            let input: Vec<_> = (0..65)
+                .map(|index| base | (((index * 37) as u128) << (low + SHIFT) & mask))
+                .collect();
+            let mut expected = input.clone();
+            expected.sort();
+
+            let mut keys = input.clone();
+            let mut records: Vec<_> = input.iter().copied().zip(0..input.len()).collect();
+            let original = records.clone();
+            assert!(direct_half.try_count_window(&mut keys, low, width));
+            assert!(!keyed_half.try_count_window(&mut records, low, width));
+            assert_eq!(keys, expected);
+            assert_eq!(records, original);
+
+            // Miri interprets both storage forms without invoking Rayon's pool.
+            #[cfg(all(feature = "rayon", not(miri)))]
+            {
+                let mut keys = input;
+                assert!(direct_half.try_count_window_parallel(&mut keys, low, width));
+                assert!(!keyed_half.try_count_window_parallel(&mut records, low, width));
+                assert_eq!(keys, expected);
+                assert_eq!(records, original);
+            }
+        }
+    }
+
+    #[test]
+    fn half_windows_keep_offsets_and_payloads() {
+        check_half_windows::<0>(
+            &mut KeyHalf::<_, 0>(Direct),
+            &mut KeyHalf::<_, 0>(ByKey(|record: &(u128, usize)| record.0)),
+        );
+        check_half_windows::<64>(
+            &mut KeyHalf::<_, 64>(Direct),
+            &mut KeyHalf::<_, 64>(ByKey(|record: &(u128, usize)| record.0)),
+        );
+    }
 
     /// Checks confirmation against scalar extraction at every adjacent pair.
     fn check_confirmation<K: RadixKey>(mut keys: Vec<K>) {

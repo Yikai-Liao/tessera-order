@@ -8,7 +8,7 @@ The first crates.io release. It provides the stable sort only. Use the implement
 
 | Deliverable | Done when |
 |---|---|
-| First release comparison, default and Portable SIMD builds, on Stable | The complete local session regenerates from its raw directory; README and Performance page show the figures; the release attaches the archive |
+| First release comparison of the always-enabled SIMD backend on Stable | The complete local session regenerates from its raw directory; README and Performance page show the figures; the release attaches the archive |
 | Release | Robert Clausecker has been told before publication; `rust/v0.1.0` follows [`RELEASING.md`](RELEASING.md) |
 
 Open questions for this milestone:
@@ -31,30 +31,43 @@ The optional feature and bounded completion are implemented; current contracts b
 
 ### Measured engine refactors
 
-These are the engine items E1–E6 deferred from the completed tooling refactor, not permission to change hot paths without measurements. Preserve ownership and panic recovery; keep invariant tests for any copies retained for code placement.
+These are the engine items E1–E6 deferred from the completed tooling refactor, not permission to change hot paths without measurements. Unaccepted further candidates are in the [engine simplification proposal](docs/proposals/engine-simplification.md). Preserve ownership and panic recovery; keep invariant tests for any copies retained for code placement.
 
 | ID | Debt | Acceptance |
 |---|---|---|
-| E1 | Owned `Narrow` and borrowed `KeyHalf` repeat window shifting | Share the representation only with preserved window invariants and paired source/placement evidence |
-| E2 | Parallel preparation repeats serial tile geometry, probes and half dispatch | Consolidate only if separate serial inlining contexts retain their measured behavior |
-| E3 | Parallel direct-key counting repeats serial counting and fill | Constrain shared semantics and establish both configurations' performance before merging mechanisms |
-| E4 | Window operations require forwarding through `KeyHalf`, `Narrow` and `RootExtractor` | Reduce forwarding obligations without losing bit-offset or direct/user-extractor distinctions; validate code generation |
-| E5 | Serial block storage contains Rayon scratch-segment state and a branch | Decide layout and tracking protocol explicitly: both continuous builds enable Rayon; the default feature set is a separate configuration |
-| E6 | `engine.rs` combines routing, sampling, planning, node/tile sorting and scratch | Split along mechanism/invariant boundaries only with inlining and placement controls |
+| E2 | Root preparation, node planning, child finishing and exact order confirmation are shared; staged finishing owns its capacity allowance and both entries narrow through one owned half-key extractor | Resolve the [shared-confirmation candidate](docs/design/port.md#shared-order-confirmation-candidate)'s short-input costs, then validate shared paths against the pre-consolidation baseline with A/A and placement controls |
+| E3 | Serial and parallel direct-key counting now share a reducible histogram and destination-run construction | Establish serial and Rayon performance against the pre-consolidation SIMD baseline; preserve bitwise representative and Send-only tests |
+| E4 | One owned half-key extractor serves serial and parallel roots; the root forwarding wrapper has been removed | Validate shared preparation code generation with the unified backend before performance acceptance |
+| E5 | Serial and adopted partitions address one segmented scratch representation; serial passes have one segment | Establish serial and Rayon scatter and compaction performance against the pre-consolidation baseline; serial-only library builds remain a separate configuration |
+| E6 | Tile planning now tries at most two flat passes, otherwise partitions actual children; the recursive sample model and general digit-plan dynamic programming are removed in the candidate | Complete main-relative acceptance of the [bounded tile planner](docs/design/port.md#bounded-tile-planner), including large sparse/bimodal losses and placement controls; investigate the [counting-pass inline candidate](docs/design/port.md#counting-pass-result-visibility)'s row_u64/random/1000 loss; preserve prior model evidence as historical, not current acceptance |
+| E7 | Active measurement uses one backend and revision builds select historical SIMD explicitly; retained dual-build sessions require their original tooling revision for reading and recovery | Local static artifacts, comparison harness and historical SIMD provenance pass validation; validate a fresh current-head Actions run through preparation, all four measurement shards, Cloud archival and publication before final engine performance acceptance; raw artifacts alone do not satisfy publication acceptance |
 
 ## C++
 
 1. **C++ runner.** Measure the C++ implementation with the shared input specification and native-buffer timing. Add cross-language golden hashes in `conformance/vectors/` and verify them in both generators.
 2. **C++17 header-only implementation** for trivially copyable records, with CMake install and a consumer test. Done when it passes the shared vectors and has a direct comparison with Rust.
 
+## Benchmark tooling simplification
+
+Current tooling retains one algorithm build, the current paired revision protocol, shared PR report rendering and bounded machine-readable summaries. Follow-up work keeps sorting code and sampling changes independently reviewable:
+
+- Separate immutable prepared revision pairs from measured results in `bench/local/model.ts`; consolidate both consumers in the local runner and hosted validator before removing optional-state checks.
+- Let the Rust comparison manifest own the expected memory-case inventory, consumed by measurement and offline completeness validation. Preserve timing/memory process isolation.
+- Evaluate a single normalized worker request instead of parallel TS/Rust user-facing CLI rules. Keep the existing timed calls, inputs and recovery behavior; validate any Criterion removal with code-placement controls.
+- Expose structured current-head performance details through `status`, without parsing human report wording. The check publisher owns the machine summary; status validates its exact-head identity.
+
 ## Benchmark investigations
 
-- Consolidate distribution-sensitive routing into general mechanisms. Child-order reuse and the bucket-order split replace the capped end-run route; evaluate both against current-head Default and Portable SIMD continuous feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
+- Validate the hosted paired pipeline on Actions: retain cold/warm-cache full-suite duration, queue wait, paired median intervals, same-source false alerts and held-out detection evidence for the required backend before claiming hosted stability or tuning the per-case sample budget. Verify direct PR Cloud upload, fork/Dependabot summary-only behavior and partial-job reruns. Automatic main measurements are disabled. The legacy dual-configuration calibration in PR #96 (Actions run `42904693411`) completed all 70 cases per configuration with no same-source alerts; its four measurement jobs took 346–406 seconds. One calibration does not establish long-term false-alert or detection rates.
+
+- Retain raw paired evidence beyond Actions’ 14-day artifacts if longer-term offline regeneration becomes required. PR trend history follows one Bencher branch per PR across baseline changes; each point is a ratio to its own baseline, never absolute latency.
+
+- Consolidate distribution-sensitive routing into general mechanisms. Child-order reuse and the bucket-order split replace the capped end-run route; evaluate both against current-head continuous benchmark feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
 
 - Extend the comparison to cold-cache experiments, additional seeds and threshold cases when an investigation needs them.
-- Add native-CPU and branch-aligned placement controls for source A/B studies.
-- Validate continuous alignment's dispersion and full-job budget on target Intel hardware.
-- Add hosted comparison groups using the existing Bencher queue after the local release report; retain complete per-type length groups for absolute scaling.
+- Add native-CPU placement controls for source A/B studies; existing CGU, alignment and engine-order screens remain process-level evidence.
+- Validate continuous alignment’s dispersion across hosted CPU models. Revisit multi-layout sampling only with held-out false-alert, detection and measured whole-job cost evidence.
+- Add hosted algorithm comparison groups after the local release report; retain complete per-type length groups for absolute scaling and keep them separate from revision-ratio Cloud history.
 
 ## Integrations
 

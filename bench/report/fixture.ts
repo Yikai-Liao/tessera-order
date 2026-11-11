@@ -12,7 +12,7 @@ import {
 } from "./model.ts";
 
 /** Builds a synthetic release run with Tessera between faster and slower competitors. */
-export function createFixture(simd = false): Dataset {
+export function createFixture(blocks = 9): Dataset {
   const variants = [
     { name: "tessera", stable: true },
     { name: "std-stable", stable: true },
@@ -42,7 +42,7 @@ export function createFixture(simd = false): Dataset {
     suite: "release",
     suite_version: 1,
     build: "default",
-    blocks: 9,
+    blocks,
     cases,
     variants,
     commit: "fixture-only",
@@ -65,7 +65,7 @@ export function createFixture(simd = false): Dataset {
       smt: "0",
       affinity: "2",
     },
-    manifests: new Map([["default", m]]),
+    manifest: m,
     samples: [],
     memory: [],
     observations: [],
@@ -88,7 +88,7 @@ export function createFixture(simd = false): Dataset {
     };
     if (c.distribution === "reverse") factors.radsort = 0.7;
     if (c.distribution === "runs") factors.radsort = 1.001;
-    for (let block = 0; block < 9; block++) {
+    for (let block = 0; block < blocks; block++) {
       for (const [slot, variant] of [...c.variants, "tessera-aa"].entries()) {
         const factor = variant === "tessera-aa" ? (block % 2 ? 1.005 : 0.995) : factors[variant];
         const sample: Sample = {
@@ -136,32 +136,5 @@ export function createFixture(simd = false): Dataset {
         memory_pressure: "some avg10=0.00",
       });
     }
-  if (simd) {
-    const selected = ["tessera", "std-stable"];
-    dataset.manifests.set("portable-simd", {
-      ...m,
-      build: "portable-simd",
-      variants: variants.filter((v) => selected.includes(v.name)),
-      cases: cases.map((c) => ({ ...c, variants: selected })),
-    });
-    dataset.samples.push(
-      ...dataset.samples
-        .filter((s) => [...selected, "tessera-aa"].includes(s.variant))
-        .map((s) => ({
-          ...s,
-          build: "portable-simd",
-          slot: s.variant === "tessera-aa" ? 2 : s.slot,
-          elapsed_ns: Math.round(s.elapsed_ns * (s.variant === "std-stable" ? 1 : 0.8)),
-        })),
-    );
-    dataset.memory.push(
-      ...dataset.memory
-        .filter((r) => selected.includes(r.variant))
-        .map((r) => ({ ...r, build: "portable-simd" })),
-    );
-    dataset.observations.push(
-      ...dataset.observations.map((o) => ({ ...o, build: "portable-simd" })),
-    );
-  }
   return dataset;
 }

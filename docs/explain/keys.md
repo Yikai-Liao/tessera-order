@@ -28,7 +28,7 @@ Normalize the key in the key function if you want every NaN equal, or both zeros
 
 Real keys rarely use all of their bits. Timestamps share their high bits, small IDs in a `u64` have dozens of leading zeros, and a flag stored in bit 40 is the only bit that changes. A bit that has the same value in every key cannot affect the order.
 
-Tessera finds these bits with one scan (`varying_key_bits` in [`block.rs`](../../rust/tessera-sort/src/block.rs)):
+Tessera finds these bits with one scan (`scan_varying_bits` in [`engine.rs`](../../rust/tessera-sort/src/engine.rs)):
 
 - the **union** (bitwise OR) of all keys has a 1 wherever *some* key has a 1;
 - the **intersection** (bitwise AND) has a 1 wherever *every* key has a 1;

@@ -64,15 +64,16 @@ A new dataset does not require a new template. A genuinely different question ma
 - Labels form a left column; numbers form right-aligned value columns. Words do not repeat inside every plotted cell.
 - Blue emphasizes Tessera or less run time, orange identifies other radix sorts or more run time, and neutral grey provides context. A chart's legend states its meaning; colour alone does not carry the verdict.
 - Use dots and ranges for comparisons. A reference line makes the denominator visible. Ratio comparisons use logarithmic spacing; equal multiplicative changes occupy equal distances.
-- A Portable SIMD build is a hollow ring in algorithm-speed figures. Rings are drawn above dots, and Tessera is drawn above the competitor field. The shared axis includes every plotted build; values outside 1/32×–32× use overflow triangles, with their numeric values retained in the accompanying tables. Selected-input figures also mark off-scale block-range endpoints, even when the median is in range, and print both bounds in the figure and table.
+- Tessera is drawn above the competitor field. Rings distinguish reference observations such as random-input memory from the worst case. The shared axis includes every plotted value; values outside 1/32×–32× use overflow triangles, with their numeric values retained in the accompanying tables. Selected-input figures also mark off-scale block-range endpoints, even when the median is in range, and print both bounds in the figure and table.
+- PR comparison and trend matrices group serial and parallel cases vertically under mode headings, with serial first. Each trend group starts with its own geometric mean; case labels reserve tags for qualifiers such as non-default seeds, not the mode.
 - Thin rules separate groups. Titles and value columns carry hierarchy; avoid gradients, shadows, 3D effects and per-chart font choices.
-- Light and dark surfaces use the same semantic colours and separate neutral tokens. Every SVG includes a title and description.
+- Light and dark surfaces use the same semantic colours and separate neutral tokens. Standalone SVGs carry literal neutral colours for image viewers; ordinary CSS supplies browser dark mode. Every SVG includes a title and description.
 
 The row interface accepts no arbitrary style objects or drawing callbacks. The template owns column widths, row spacing, drawing order and legends; Observable Plot supplies scales, axes, collision placement and SVG marks, string-pixel-width supplies font metrics, and a private SVG document handles escaping and serialization. The input remains unchanged, so reactive callers can render it repeatedly.
 
 ## Use from TypeScript or VitePress
 
-Import `renderRows` and `RowChart` from `bench/plot/rows.ts`. The renderer accepts the structure shown by the example above and returns an SVG string. Offline callers decide where to write it; browser callers decide where to display it. Neither the template nor the catalog imports filesystem or GitHub code.
+Import `renderRows` and `RowChart` from `bench/plot/rows.ts`. The renderer accepts the structure shown by the example above and returns an SVG string. Offline callers decide where to write it; browser callers decide where to display it. Templates import neither filesystem nor GitHub code; the Node catalog loader supplies presentation metadata to report callers.
 
 VitePress uses [`BenchmarkFigure.vue`](../.vitepress/theme/components/BenchmarkFigure.vue), a reactive image adapter with responsive sizing and alternative text. Its `chart` prop is a `RowChart`; changing the data regenerates the SVG. When inserting SVG markup inline rather than using the image adapter, supply a unique chart `id` so accessibility references remain distinct.
 
@@ -87,6 +88,6 @@ Benchmark identifiers and human-readable names come from [the catalog](../../ben
 5. Render a reference example in light and dark appearance and inspect it at its actual display width. Check hierarchy, label fit, value alignment and whether the main finding is visible without reading every number.
 6. Keep the plotted-value table or equivalent accessible report alongside published figures.
 
-[`bench/report/fixtures/`](../../bench/report/fixtures/) holds five standard algorithm figures; [the PR fixture](../../bench/continuous/fixtures/chart.svg) covers the comparison matrix. The original SVG references are retained when changing rendering libraries. Tests compare their content and canvas dimensions and separately check values and layout invariants. Render both implementations from the same recorded dataset for visual inspection; synthetic fixtures exercise boundary cases and do not serve as performance evidence.
+Automated tests protect report generation, numeric summaries and unavailable builds. They do not pin SVG snapshots, exact wording or layout coordinates. When changing rendering, generate before-and-after figures from the same recorded dataset and inspect light and dark appearance; synthetic fixtures exercise boundary cases and do not serve as performance evidence.
 
 Run `pnpm tools:test`, `pnpm tools:typecheck`, `pnpm docs:typecheck` and `pnpm docs:build` when the shared figure layer changes.

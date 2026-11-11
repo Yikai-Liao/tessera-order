@@ -5,18 +5,22 @@ import { join, resolve } from "node:path";
 import { type Command, InvalidArgumentError, Option } from "commander";
 import { stringify as stringifyToml } from "smol-toml";
 import { cpuListSchema } from "../bench/affinity.ts";
+import { catalog } from "../bench/catalog.ts";
+import { compareCounters, reportCounters } from "../bench/local/counters.ts";
+import { LAYOUT_CONTROLS, type LayoutControl, parseLayoutSeeds } from "../bench/local/layout.ts";
 import { renderLocalReport } from "../bench/local/report.ts";
-import { compareLocal } from "../bench/local/runner.ts";
+import { compareLocal, comparePrepared } from "../bench/local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
 import { checkAlgorithms, compareAlgorithms, resumeComparison } from "../bench/release.ts";
 import { writeReport } from "../bench/report/index.ts";
+import { pairedBudget } from "../bench/statistics.ts";
+import { workingTreeDirty } from "../bench/workspace.ts";
 import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
 
 interface MeasurementOptions extends SelectionOptions {
   plan?: string;
   out?: string;
   cpu?: string;
-  simd?: boolean;
 }
 
 function parseLogicalCpu(value: string) {
@@ -30,6 +34,25 @@ function parsePositiveInteger(value: string) {
   if (!Number.isSafeInteger(number) || number < 1)
     throw new InvalidArgumentError("expected a positive integer");
   return number;
+}
+
+function blockOption() {
+  return new Option("--blocks <number>", "paired blocks per case (3: short screen; 9: extended)")
+    .argParser((value) => {
+      try {
+        return pairedBudget(Number(value)).count;
+      } catch (error) {
+        throw new InvalidArgumentError((error as Error).message);
+      }
+    })
+    .default(catalog.pairedBlocks.short.count);
+}
+
+function parseShard(value: string) {
+  const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(value);
+  if (!match || Number(match[1]) > Number(match[2]) || Number(match[2]) > 64)
+    throw new InvalidArgumentError("expected index/count with 1 <= index <= count <= 64");
+  return { index: Number(match[1]), count: Number(match[2]) };
 }
 
 function parseCasePattern(value: string) {
@@ -79,21 +102,28 @@ function selectAxes(options: MeasurementOptions): SelectionOptions {
   );
 }
 
+const exists = (path: string) =>
+  access(path).then(
+    () => true,
+    (error: NodeJS.ErrnoException) => (error.code === "ENOENT" ? false : Promise.reject(error)),
+  );
+
 /** Regenerate a report from its persisted result format without rerunning measurements. */
 async function report(directories: string[], partial = false) {
   const paths = directories.map((path) => resolve(path));
-  let local = false;
-  try {
-    await access(join(paths[0], "local.json"));
-    local = true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  const single = paths.length === 1 && !partial;
+  if (await exists(join(paths[0], "counters.json"))) {
+    if (!single) throw new Error("Counter reports require one complete result directory");
+    return reportCounters(paths[0]);
   }
-  if (local) {
-    if (paths.length !== 1 || partial)
-      throw new Error("Local reports require one directory and nine complete blocks");
-    await renderLocalReport(paths[0]);
-  } else await writeReport(paths, partial);
+  if (await exists(join(paths[0], "local.json"))) {
+    if (!single)
+      throw new Error(
+        "Revision reports require one directory and a complete recorded budget per layout",
+      );
+    return renderLocalReport(paths[0]);
+  }
+  return writeReport(paths, partial);
 }
 
 /** Register experiment selection, comparison, verification and regeneration tasks. */
@@ -103,13 +133,46 @@ export function experimentCommands(program: Command) {
     addSelectionOptions(compare.command(name))
       .description(description)
       .option("--out <directory>", "new result directory (default: bench/results/<timestamp>)")
-      .option("--cpu <list>", "pin measurement to a CPU list or range (Linux)", parseLogicalCpu)
-      .option("--simd", "include Portable SIMD");
+      .option("--cpu <list>", "pin measurement to a CPU list or range (Linux)", parseLogicalCpu);
 
   measurement("commit [revision]", "Compare the working tree with a commit (default: HEAD)")
     .option("--filter <regex>", "additional case ID pattern", parseCasePattern)
+    .addOption(
+      new Option(
+        "--layout-control <control>",
+        "local build control; requires layout seeds",
+      ).choices(LAYOUT_CONTROLS),
+    )
+    .option(
+      "--layout-seeds <seeds>",
+      "comma-separated fixed LLD layout seeds (Linux GNU)",
+      (value) => {
+        try {
+          return parseLayoutSeeds(value);
+        } catch (error) {
+          throw new InvalidArgumentError((error as Error).message);
+        }
+      },
+    )
+    .option("--prepare-only", "retain a complete revision pair without timing")
+    .option(
+      "--shard <index/count>",
+      "measure one balanced partition of the resolved cases",
+      parseShard,
+    )
     .action(
-      async (baseline: string | undefined, options: MeasurementOptions & { filter?: string }) => {
+      async (
+        baseline: string | undefined,
+        options: MeasurementOptions & {
+          shard?: { index: number; count: number };
+          prepareOnly?: boolean;
+          filter?: string;
+          layoutSeeds?: number[];
+          layoutControl?: LayoutControl;
+        },
+      ) => {
+        if (options.layoutControl && !options.layoutSeeds)
+          throw new InvalidArgumentError("layout controls require --layout-seeds");
         const plan = await loadPlan(options.plan ?? "local", selectAxes(options));
         if (plan.harness !== "smoke")
           throw new Error("Commit comparisons require a smoke harness plan");
@@ -122,14 +185,82 @@ export function experimentCommands(program: Command) {
             plan,
             out,
             cpu: options.cpu,
-            simd: Boolean(options.simd),
             filter: options.filter,
+            layoutSeeds: options.layoutSeeds,
+            layoutControl: options.layoutControl,
+            shard: options.shard,
+            prepareOnly: options.prepareOnly,
+          }),
+        );
+      },
+    );
+
+  compare
+    .command("prepared <directory>")
+    .description("Measure and report a frozen revision pair without compiling")
+    .option("--out <directory>", "new result directory")
+    .option("--cpu <list>", "pin measurement to a CPU list", parseLogicalCpu)
+    .option("--shard <index/count>", "measure one complete-case partition", parseShard)
+    .action(
+      async (
+        directory: string,
+        options: { out?: string; cpu?: string; shard?: { index: number; count: number } },
+      ) => {
+        const root = await repositoryRoot();
+        const out = resultDirectory(root, options.out);
+        await runTask(out, Boolean(program.opts().verbose), () =>
+          comparePrepared({
+            root,
+            prepared: resolve(directory),
+            out,
+            cpu: options.cpu,
+            shard: options.shard,
+          }),
+        );
+      },
+    );
+
+  measurement(
+    "counters [revision]",
+    "Compare fixed-work serial instruction and simulated event counts",
+  )
+    .option(
+      "--valgrind-image <image>",
+      "run Valgrind in a prepared Docker image with a compatible libc",
+    )
+    .option(
+      "--sorts <number>",
+      "prepared sorts per collected batch (1..1024)",
+      parsePositiveInteger,
+      8,
+    )
+    .action(
+      async (
+        baseline: string | undefined,
+        options: MeasurementOptions & { sorts: number; valgrindImage?: string },
+      ) => {
+        const plan = await loadPlan(options.plan ?? "local", selectAxes(options));
+        if (plan.harness !== "smoke") throw new Error("Counters require a smoke harness plan");
+        const root = await repositoryRoot();
+        const dirty = await workingTreeDirty(root);
+        const out = resultDirectory(root, options.out);
+        await runTask(out, Boolean(program.opts().verbose), () =>
+          compareCounters({
+            root,
+            out,
+            baseline: baseline ?? "HEAD",
+            plan,
+            sorts: options.sorts,
+            dirty,
+            cpu: options.cpu,
+            valgrindImage: options.valgrindImage,
           }),
         );
       },
     );
 
   measurement("algorithms", "Prepare, validate, measure and report a resumable comparison")
+    .addOption(blockOption())
     .option(
       "--sample-ms <number>",
       "minimum timed sample duration in milliseconds",
@@ -145,7 +276,12 @@ export function experimentCommands(program: Command) {
     .option("--group <type/shape>", "measure one complete group and report it as partial")
     .action(
       async (
-        options: MeasurementOptions & { group?: string; sampleMs: number; memoryMib: number },
+        options: MeasurementOptions & {
+          group?: string;
+          sampleMs: number;
+          memoryMib: number;
+          blocks: number;
+        },
       ) => {
         const plan = await loadPlan(options.plan ?? "smoke", selectAxes(options));
         if (plan.harness !== "comparison")
@@ -157,11 +293,63 @@ export function experimentCommands(program: Command) {
             root,
             out,
             cpu: options.cpu,
-            simd: Boolean(options.simd),
             plan,
             group: options.group,
+            blocks: options.blocks,
             sampleMs: options.sampleMs,
             memoryMib: options.memoryMib,
+          }),
+        );
+      },
+    );
+
+  measurement(
+    "revisions [baseline]",
+    "Compare revisions and independent linked copies in one process",
+  )
+    .addOption(blockOption())
+    .option("--current <revision>", "current library commit (default: working snapshot)")
+    .option(
+      "--sample-ms <number>",
+      "minimum timed sample duration in milliseconds",
+      parsePositiveInteger,
+      5,
+    )
+    .option("--memory-mib <number>", "prepared-buffer cap in MiB", parsePositiveInteger, 256)
+    .action(
+      async (
+        baseline: string | undefined,
+        options: MeasurementOptions & {
+          current?: string;
+          sampleMs: number;
+          memoryMib: number;
+          blocks: number;
+        },
+      ) => {
+        if (options.algorithms)
+          throw new Error("Revision comparisons select their own linked controls");
+        const plan = await loadPlan(options.plan ?? "smoke", {
+          ...selectAxes(options),
+          algorithms: [
+            "tessera",
+            "std-stable",
+            ...catalog.algorithms.filter((a) => a.adapter === "revision").map((a) => a.id),
+          ],
+        });
+        if (plan.harness !== "comparison")
+          throw new Error("Revision comparisons require a comparison harness plan");
+        const root = await repositoryRoot();
+        const out = resultDirectory(root, options.out);
+        await runTask(out, Boolean(program.opts().verbose), () =>
+          compareAlgorithms({
+            root,
+            out,
+            plan,
+            cpu: options.cpu,
+            blocks: options.blocks,
+            sampleMs: options.sampleMs,
+            memoryMib: options.memoryMib,
+            revisions: { baseline: baseline ?? "HEAD", current: options.current },
           }),
         );
       },
@@ -179,7 +367,7 @@ export function experimentCommands(program: Command) {
   addSelectionOptions(program.command("plan [name-or-file]"))
     .description("Print a resolved plan without compiling or measuring")
     .addOption(
-      new Option("--format <format>", "output encoding").choices(["json", "toml"]).default("toml"),
+      new Option("--format <format>", "output encoding").choices(["json", "toml"]).default("json"),
     )
     .option("--schema", "print the plan JSON Schema")
     .action(
@@ -203,8 +391,8 @@ export function experimentCommands(program: Command) {
     .description("Regenerate figures and tables without building")
     .option("--partial", "allow completed groups of an algorithm suite")
     .action(async (directories: string[], options: { partial?: boolean }) => {
-      await report(directories, options.partial);
-      console.log(JSON.stringify({ out: resolve(directories[0]), result: "reported" }));
+      const result = await report(directories, options.partial);
+      console.log(JSON.stringify({ out: resolve(directories[0]), result: result ?? "reported" }));
     });
 
   program

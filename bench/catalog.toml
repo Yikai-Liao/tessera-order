@@ -2,8 +2,19 @@
 
 schema = 1
 
+pairedBlocks = { short = { count = 3, agreement = 3 }, extended = { count = 9, agreement = 8 } }
+# Descending length floors; one budget per revision, not per outer repetition.
+revisionSampling = [
+  { min_len = 10000000, warm_ms = 1000, window_ms = 4000, samples = 20 },
+  { min_len = 1000000, warm_ms = 1000, window_ms = 4000, samples = 40 },
+  { min_len = 1, warm_ms = 500, window_ms = 1500, samples = 30 },
+]
+
 algorithms = [
   { id = "tessera", label = "Tessera", stable = true, family = "radix", adapter = "common" },
+  { id = "tessera-baseline", label = "Tessera baseline A", stable = true, family = "radix", adapter = "revision" },
+  { id = "tessera-baseline-copy", label = "Tessera baseline B", stable = true, family = "radix", adapter = "revision" },
+  { id = "tessera-copy", label = "Tessera current B", stable = true, family = "radix", adapter = "revision" },
   { id = "std-stable", label = "slice::sort", stable = true, family = "comparison", adapter = "common" },
   { id = "radsort", label = "radsort", stable = true, family = "radix", adapter = "rust" },
   { id = "voracious", label = "voracious", stable = true, family = "radix", adapter = "rust" },
@@ -74,10 +85,10 @@ modes = [
   { id = "par_unstable", label = "parallel unstable" },
 ]
 
-configurations = [
-  { id = "default", name = "Default", testbed = "intel-v1-hybrid-v1", features = ["rayon"] },
-  { id = "portable-simd", name = "Portable SIMD", testbed = "intel-v1-portable-simd-hybrid-v1", features = ["portable-simd", "rayon"] },
-]
+[continuous]
+# One required SIMD backend; Cloud history lives under this Testbed.
+testbed = "ci"
+features = ["rayon"]
 
 [comparison]
 types = ["u32","u64","f64","row_u64","record128","owned","row_u32"]

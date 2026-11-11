@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { VARIANTS } from "../bench/catalog.ts";
-import { marker } from "../bench/continuous/marker.ts";
+import { BENCHMARK_CHECK, marker } from "../bench/continuous/marker.ts";
 import { command } from "./process.ts";
 
 interface Check {
@@ -24,6 +23,7 @@ interface WorkflowRun {
   id: number;
   workflow_id: number;
   name: string;
+  path?: string;
   event: string;
   head_sha: string;
   head_branch: string | null;
@@ -54,7 +54,7 @@ export interface RepositoryStatus {
     attempt: number;
     jobs: { name: string; state: string; steps: { name: string; state: string }[] }[];
   }[];
-  benchmarks: { configuration: string; state: string; title: string | null }[];
+  benchmark: { state: string; title: string | null };
   report: string | null;
   details?: {
     url: string;
@@ -96,28 +96,6 @@ function latestRuns(runs: WorkflowRun[]) {
   return [...latest.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Recover the measured head's tracker even when GitHub rewrites its details URL. */
-function trackerIds(checks: Check[], repo: string) {
-  const ids = new Set<string>();
-  for (const check of checks) {
-    if (check.external_id && /^\d+$/.test(check.external_id)) {
-      ids.add(check.external_id);
-      continue;
-    }
-    // Older checks record the workflow in their summary. GitHub can replace
-    // details_url with /runs/<check-id>, which is not an Actions run ID.
-    const links =
-      `${check.details_url} ${check.output.summary ?? ""}`.match(
-        /https?:\/\/[^\s)]+\/actions\/runs\/\d+/g,
-      ) ?? [];
-    for (const link of links) {
-      const path = new URL(link).pathname;
-      if (path.startsWith(`/${repo}/actions/runs/`)) ids.add(path.split("/").at(-1)!);
-    }
-  }
-  return [...ids];
-}
-
 function hasUnfinishedOrFailedResult(item: Step) {
   return item.conclusion
     ? !["success", "skipped", "neutral"].includes(item.conclusion)
@@ -127,8 +105,8 @@ function hasUnfinishedOrFailedResult(item: Step) {
 /**
  * Read one remote commit's CI and benchmark feedback, with compact output by default.
  *
- * PR workflows may use the test merge commit. A tracker runs trusted default-
- * branch code, so only a check attached to the requested head can identify it.
+ * PR workflows may use the test merge commit. Benchmark checks attach to the
+ * measured head; all current jobs belong to the ordinary CI run.
  * Missing feedback is not a pass; API failures reject the entire read.
  */
 export async function readStatus(
@@ -177,21 +155,12 @@ export async function readStatus(
     pull ? api.pages<Comment[]>(`issues/${pull.number}/comments?per_page=100`) : [],
   ]);
   const candidates = checkPages.flatMap((page) => page.check_runs).sort((a, b) => b.id - a.id);
-  const checks = VARIANTS.map((variant) =>
-    candidates.find((check) => check.name === `Benchmarks (rust, ${variant.name})`),
-  );
-  const attached = checks.filter((check) => check !== undefined);
-  const trackers = await Promise.all(
-    trackerIds(attached, api.repo).map((id) => api.get<WorkflowRun>(`actions/runs/${id}`)),
-  );
-  // A workflow_run's head SHA identifies its trusted code, not its measured source.
-  const runs = latestRuns([
-    ...runPages
-      .flat()
-      .flatMap((page) => page.workflow_runs)
-      .filter((run) => heads.includes(run.head_sha) && run.event !== "workflow_run"),
-    ...trackers,
-  ]);
+  const check = candidates.find((candidate) => candidate.name === BENCHMARK_CHECK);
+  const currentRuns = runPages
+    .flat()
+    .flatMap((page) => page.workflow_runs)
+    .filter((run) => heads.includes(run.head_sha) && run.event !== "workflow_run");
+  const runs = latestRuns(currentRuns);
   const workflows = await Promise.all(
     runs.map(async (run) => {
       const pages =
@@ -233,17 +202,16 @@ export async function readStatus(
           })),
       })),
     })),
-    benchmarks: VARIANTS.map((variant, index) => ({
-      configuration: variant.id,
-      state: checks[index] ? (checks[index].conclusion ?? checks[index].status) : "missing",
-      title: checks[index]?.output.title ?? null,
-    })),
+    benchmark: {
+      state: check ? (check.conclusion ?? check.status) : "missing",
+      title: check?.output.title ?? null,
+    },
     report: comment?.url ?? null,
     ...(details
       ? {
           details: {
             url,
-            checks: attached.map(
+            checks: (check ? [check] : []).map(
               ({ id, name, status, conclusion, external_id, details_url, output }) => ({
                 id,
                 name,
@@ -289,9 +257,7 @@ export function formatStatus(status: RepositoryStatus) {
       for (const step of job.steps) lines.push(`    ${step.name}: ${step.state}`);
     }
   }
-  for (const check of status.benchmarks)
-    lines.push(
-      `Benchmark ${check.configuration}: ${check.state}${check.title ? ` · ${check.title}` : ""}`,
-    );
+  const { state, title } = status.benchmark;
+  lines.push(`Benchmark: ${state}${title ? ` · ${title}` : ""}`);
   return lines.join("\n");
 }

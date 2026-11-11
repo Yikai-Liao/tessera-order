@@ -6,8 +6,12 @@ use super::{InputCase, variant::Kernel};
 use serde::Serialize;
 use std::time::Instant;
 
-/// Number of paired blocks in one case measurement.
-pub(super) const BLOCKS: usize = 9;
+/// Fixed block budget and limits for calibrating each verified sample.
+pub(super) struct Sampling {
+    pub min_sample_ns: u64,
+    pub prepared_cap_bytes: usize,
+    pub blocks: usize,
+}
 /// One verified batch timing and its position within a case.
 #[derive(Serialize)]
 pub(super) struct Sample {
@@ -59,13 +63,12 @@ pub(super) fn shuffle_variants(n: usize, block: usize, c: &InputCase) -> Vec<usi
     order
 }
 
-/// Publishes nine shuffled blocks with a separate Tessera A/A sample.
+/// Publishes the requested shuffled blocks with a separate Tessera A/A sample.
 pub(super) fn measure_case(
     case: &InputCase,
     variants: &[super::variant::Variant],
     scratch_bytes: usize,
-    min_sample_ns: u64,
-    prepared_cap_bytes: usize,
+    sampling: &Sampling,
     build: &str,
     mut publish: impl FnMut(Sample) -> super::Result<()>,
 ) -> super::Result<()> {
@@ -76,14 +79,18 @@ pub(super) fn measure_case(
         .copied()
         .chain(std::iter::once(variants[0]))
         .collect();
-    for block in 0..BLOCKS {
+    for block in 0..sampling.blocks {
         for (slot, index) in shuffle_variants(active.len(), block, case)
             .into_iter()
             .enumerate()
         {
             let variant = active[index];
             let mut kernel = variant.prepare(&input, scratch_bytes).unwrap();
-            let batch = calibrate(&mut *kernel, min_sample_ns, prepared_cap_bytes)?;
+            let batch = calibrate(
+                &mut *kernel,
+                sampling.min_sample_ns,
+                sampling.prepared_cap_bytes,
+            )?;
             let elapsed_ns = measure_batch(&mut *kernel, batch)
                 .map_err(|e| format!("{} {}: {e}", case.id(), variant.name))?;
             publish(Sample {

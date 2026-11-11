@@ -7,9 +7,7 @@ import { chooseTileLeaf, type Digit, planDigits } from "../sim/digits";
 const BITS = 32;
 const varying = ref((1n << 32n) - 1n);
 const width = ref(14);
-const sampledDistinct = ref(2);
-
-const tileLeaf = computed(() => chooseTileLeaf(8192, varying.value, width.value, sampledDistinct.value, BITS));
+const tileLeaf = computed(() => chooseTileLeaf(8192, varying.value, width.value, BITS));
 const tileLeafLabel = computed(() =>
   ({ done: "already ordered", insertion: "insertion sort", msd: "MSD", lsd: "LSD" })[tileLeaf.value],
 );
@@ -28,9 +26,9 @@ const isSet = (bit: number) => ((varying.value >> BigInt(bit)) & 1n) === 1n;
 const plan = computed(() => planDigits(varying.value, width.value, BITS));
 const tileLeafReason = computed(() => {
   if (varying.value === 0n) return "No key bits vary, so no pass is needed.";
-  if (plan.value.length <= 2) return "The plan needs at most two LSD passes, so the engine skips sampling.";
-  if (sampledDistinct.value <= 2) return "The low-fanout sample selects MSD directly.";
-  return "The estimated MSD cost is compared with the LSD pass count.";
+  return tileLeaf.value === "lsd"
+    ? "At most two flat passes finish this tile; their split minimizes table slots."
+    : "One top-digit partition exposes actual child variation. Each child chooses its own finishing plan.";
 });
 /** Fixed windows of the full width from the top bit down, for comparison. */
 const fixed = computed<Digit[]>(() => {
@@ -58,10 +56,6 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
       <label>
         Widest digit (cursor table): {{ width }} bits
         <input v-model.number="width" type="range" min="6" max="14" />
-      </label>
-      <label>
-        Distinct top-digit buckets in sample: {{ sampledDistinct }}
-        <input v-model.number="sampledDistinct" type="range" min="1" max="128" />
       </label>
       <span>Presets:</span>
       <button v-for="[name, mask] in presets" :key="name" type="button" class="preset" @click="varying = mask">
@@ -125,7 +119,7 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
     </svg>
     <table class="tsr-table">
       <thead>
-        <tr><th>Plan</th><th>Passes</th><th>Digit widths, in LSD order</th><th>Bucket slots cleared and scanned</th></tr>
+        <tr><th>Plan</th><th>Selected passes</th><th>Digit widths, execution order</th><th>Selected bucket slots</th></tr>
       </thead>
       <tbody>
         <tr>
@@ -143,11 +137,11 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
       </tbody>
     </table>
     <p class="tsr-note">
-      Passes run from the lowest window (pass 1) to the highest. A window may contain constant bits between varying ones,
-      but never starts or ends on one.
+      LSD passes run from the lowest window to the highest. An MSD plan shows only its first partition,
+      not the unknown child work. Windows may contain constant gaps, but their endpoints vary.
     </p>
     <p class="tsr-note">
-      For 8,192 <code>u64</code> keys with the selected {{ width }}-bit table limit, this sample selects
+      For 8,192 <code>u64</code> keys with the selected {{ width }}-bit table limit, the planner selects
       <strong>{{ tileLeafLabel }}</strong>. The engine itself uses a 14-bit limit at this tile size.
       {{ tileLeafReason }}
     </p>

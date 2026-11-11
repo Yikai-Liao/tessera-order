@@ -1,55 +1,56 @@
 // SPDX-License-Identifier: BSD-2-Clause
-import { chooseTileLeaf, planDigits, tileDigitBits } from "./digits.ts";
 
-const show = (v: bigint, w: number) =>
-  planDigits(v, w, 128)
-    .map((d) => `${d.shift}+${d.width}`)
-    .join(" ");
-const check = (got: string, want: string) => {
-  if (got !== want) throw new Error(`${got} != ${want}`);
-};
-// The engine's doc comment: 32 contiguous bits at 14-bit tables become 11 + 11 + 10.
-check(show((1n << 32n) - 1n, 14), "21+11 10+11 0+10");
-// Gaps keep full-width windows that skip constant bits.
-check(show(0xff00ffn, 8), "16+8 0+8");
-for (const w of [6, 8, 11, 14]) {
-  for (const v of [
-    1n,
-    1n << 127n,
-    (1n << 127n) | 1n,
-    (1n << 128n) - 1n,
-    0x01010101010101010101010101010101n,
-  ]) {
-    let mask = 0n;
-    for (const d of planDigits(v, w, 128)) {
-      const bits = ((1n << BigInt(d.width)) - 1n) << BigInt(d.shift);
-      if (mask & bits) throw new Error("overlap");
-      if (d.width > w) throw new Error("too wide");
-      mask |= bits;
-    }
-    if ((mask & v) !== v) throw new Error("uncovered bits");
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { chooseTileLeaf, planDigits, sampleKeys } from "./digits.ts";
+
+test("short flat plans balance shifted runs and sparse bits", () => {
+  for (const shift of [0n, 17n, 96n]) {
+    const plan = planDigits(0xfffffn << shift, 14, 128);
+    assert.deepEqual(
+      plan.map((digit) => digit.width),
+      [10, 10],
+    );
+    assert.equal(chooseTileLeaf(8192, 0xfffffn << shift, 14, 128), "lsd");
   }
-}
-// `tile_digit_bits`: the table must fit beside the tile, and its buckets are capped at
-// 8 per record, or 4 above 8 bytes. 2,048 16-byte records get 13 bits, not 14.
-check(String(tileDigitBits(1024, 8)), "12");
-check(String(tileDigitBits(1024, 16)), "12");
-check(String(tileDigitBits(4096, 8)), "14");
-check(String(tileDigitBits(2048, 16)), "13");
+  for (let mask = 1n; mask < 256n; mask++) {
+    const plan = planDigits(mask, 3, 128);
+    let covered = 0n;
+    for (const digit of plan) {
+      const bits = ((1n << BigInt(digit.width)) - 1n) << BigInt(digit.shift);
+      assert.equal(covered & bits, 0n);
+      assert.ok(digit.width <= 3);
+      covered |= bits;
+    }
+    if (chooseTileLeaf(1024, mask, 3, 128) === "lsd") assert.equal(covered & mask, mask);
+    else assert.notEqual(covered & mask, 0n);
+  }
+  const sparse = (1n << 127n) | 1n;
+  assert.deepEqual(planDigits(sparse, 14, 128), [
+    { shift: 127, width: 1 },
+    { shift: 0, width: 1 },
+  ]);
+});
 
-// A two-bucket sample predicts five MSD levels plus insertion, tying six LSD passes.
-check(chooseTileLeaf(1000, (1n << 64n) - 1n, 11, 2, 64), "msd");
-// One- and two-pass plans skip the sample, even when it reports two buckets.
-check(chooseTileLeaf(1000, (1n << 20n) - 1n, 11, 2, 64), "lsd");
-check(chooseTileLeaf(48, (1n << 64n) - 1n, 11, 2, 64), "insertion");
-check(chooseTileLeaf(8192, 0n, 14, 2, 32), "done");
-for (const [distinct, leaf] of [
-  [1, "msd"],
-  [2, "msd"],
-  [3, "lsd"],
-  [127, "lsd"],
-  [128, "msd"],
-] as const) {
-  check(chooseTileLeaf(8192, (1n << 32n) - 1n, 14, distinct, 32), leaf);
-}
-console.log("digit planner and tile routing models ok");
+test("wide tiles partition without sampling and short tiles retain insertion", () => {
+  const varying = (1n << 64n) - 1n;
+  assert.equal(chooseTileLeaf(1024, varying, 12, 64), "msd");
+  assert.equal(chooseTileLeaf(8192, 0n, 14, 64), "done");
+  assert.equal(chooseTileLeaf(48, varying, 6, 64), "insertion");
+  assert.deepEqual(planDigits(varying, 12, 64), [{ shift: 52, width: 12 }]);
+});
+
+test("bounded sampling covers short inputs and does not alias periodic keys", () => {
+  for (const len of [1, 7, 8, 9, 63, 127, 128, 129, 1024]) {
+    const records = Array.from({ length: len }, (_, index) => BigInt(index));
+    const sample = sampleKeys(records);
+    assert.equal(sample.length, Math.min(len, 128));
+    assert.equal(new Set(sample).size, sample.length);
+    if (len <= 128) assert.deepEqual(sample, records);
+  }
+  const periodic = Array.from({ length: 1024 }, (_, index) => BigInt(index % 8));
+  assert.equal(new Set(sampleKeys(periodic)).size, 8);
+  // Locally ordered input still yields one independent observation per stratum.
+  const ordered = Array.from({ length: 65536 }, (_, index) => BigInt(index));
+  assert.equal(new Set(sampleKeys(ordered).map((key) => key >> 9n)).size, 128);
+});

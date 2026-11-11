@@ -1,67 +1,68 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
-import { VARIANTS, type Variant } from "../catalog.ts";
-import { chartSvg } from "./chart.ts";
+import { continuous } from "../catalog.ts";
 import { mockGitHub } from "./fixtures/github.ts";
+import { writePaired } from "./fixtures/paired.ts";
 import { baseHash, fixture, hash } from "./fixtures/report.ts";
 import { publishReport } from "./index.ts";
-import { summarize } from "./report.ts";
+import { pairedBmf } from "./paired.ts";
 
-test("trusted dependencies precede report checks", () => {
-  const workflow = readFileSync(
-    new URL("../../.github/workflows/bench-track.yml", import.meta.url),
-    "utf8",
-  );
-  const checkout = workflow.indexOf("github.workflow_sha");
-  const install = workflow.indexOf("run: pnpm install --frozen-lockfile --ignore-scripts");
-  const checks = workflow.indexOf("name: Start the report checks");
-  assert.ok(checkout >= 0 && checkout < install && install < checks);
-  assert.match(workflow, /pnpm\/action-setup@/);
-  assert.match(workflow, /node-version: 24/);
-});
-
-function publication(t: TestContext, outcome = "success", imageFailure = false) {
-  const dir = mkdtempSync(join(tmpdir(), "tessera-report-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const reportPath = join(dir, "report.json");
-  writeFileSync(reportPath, JSON.stringify(fixture()));
-  const outputs: Record<string, string> = {};
+async function publication(t: TestContext, cloud = true, moved = false, ratio?: number) {
+  const dir = await mkdtemp(join(tmpdir(), "tessera-paired-report-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const runs = await writePaired(dir, ratio ?? 1.2);
+  if (cloud) {
+    const report = fixture();
+    report.testbed.name = continuous.testbed;
+    report.branch.name = "pr-7";
+    report.results = [
+      Object.entries(pairedBmf(runs)).map(([name, metric]) => ({
+        benchmark: { name, uuid: name },
+        measures: [
+          {
+            measure: { name: "paired-time-ratio", uuid: "ratio" },
+            metric: { uuid: name, value: metric["paired-time-ratio"].value },
+          },
+        ],
+      })),
+    ];
+    await writeFile(join(dir, "bencher.json"), JSON.stringify(report));
+  }
   const summaries: string[] = [];
+  let id = 40;
   const mock = mockGitHub((request) => {
+    if (request.path.endsWith("/check-runs") && request.method === "POST") return { id: ++id };
     if (request.path.includes("/git/")) {
-      if (imageFailure) throw new Error("Image storage unavailable");
       if (request.path.includes("/matching-refs/")) return [];
       if (request.path.endsWith("/trees")) return { sha: "image-tree" };
       if (request.path.endsWith("/commits")) return { sha: "image-commit" };
     }
-    if (request.path.endsWith("/pulls/7")) return { state: "open", head: { sha: hash } };
+    if (request.path.endsWith("/pulls/7"))
+      return { state: "open", head: { sha: moved ? "c".repeat(40) : hash } };
     if (request.method === "GET" && request.path.endsWith("/issues/7/comments")) return [];
     return {};
   });
-  const core = {
-    notice: () => {},
-    setOutput: (name: string, value: string) => {
-      outputs[name] = value;
-    },
-    summary: {
-      addRaw(text: string) {
-        summaries.push(text);
-        return this;
-      },
-      async write() {},
-    },
-  };
   return {
     ...mock,
-    outputs,
+    fetchHistory: async () =>
+      new Response("[]", { headers: { "content-type": "application/json" } }),
     summaries,
-    core,
-    fetchHistory: (async () => new Response("[]")) as typeof fetch,
+    core: {
+      notice: () => {},
+      setOutput: () => {},
+      summary: {
+        addRaw(text: string) {
+          summaries.push(text);
+          return this;
+        },
+        async write() {},
+      },
+    },
     context: {
       repo: { owner: "o", repo: "r" },
       payload: {},
@@ -69,381 +70,189 @@ function publication(t: TestContext, outcome = "success", imageFailure = false) 
       runId: 1,
     },
     inputs: {
-      language: "rust",
       hash,
+      baseHash,
       number: "7",
       baseRef: "main",
-      startPoint: "main",
-      baseHash,
-      variants: [{ variant: VARIANTS[0] as Variant, outcome, reportPath, checkId: "42" }],
+      artifacts: dir,
+      prepared: join(dir, "prepared"),
+      reports: dir,
     },
   };
 }
 
-// The SVG files written to the image branch, by path.
-function publishedImages(action: ReturnType<typeof publication>) {
-  const files = action.requests
-    .filter((request) => request.path.endsWith("/git/trees"))
-    .flatMap((request) => request.body.tree as { path: string; content: string }[]);
-  return new Map(files.map((file) => [file.path, file.content]));
-}
-
-test("embeds both published charts in the summary, check and PR comment", async (t) => {
-  const action = publication(t);
+test("a precise sub-threshold change is no alert, not statistical equivalence", async (t) => {
+  const action = await publication(t, false, false, 1.04);
   await publishReport(action);
-  const images = publishedImages(action);
-  assert.deepEqual([...images.keys()], ["pr-7/rust/comparison.svg", "pr-7/rust/trend.svg"]);
-  assert.equal(
-    images.get("pr-7/rust/comparison.svg"),
-    chartSvg([{ name: "Default", summary: summarize(fixture()) }]),
-  );
-  assert.match(images.get("pr-7/rust/trend.svg")!, /<title id="t">PR benchmark history: Default /);
-  assert.match(action.summaries[0], /^### Benchmarks · rust · 2 slower, 1 faster, 1 new$/m);
-  const raw = "https://raw.githubusercontent.com/o/r/image-commit/pr-7/rust";
-  for (const [alt, file] of [
-    ["Changes against main", "comparison"],
-    ["PR benchmark history", "trend"],
-  ]) {
-    const embed = `![${alt}](${raw}/${file}.svg)`;
-    assert.ok(action.summaries[0].includes(embed), embed);
-    const comment = action.requests.find(
-      (request) => request.method === "POST" && request.path.endsWith("/issues/7/comments"),
-    );
-    assert.ok(String(comment?.body.body).includes(embed), embed);
-  }
-  assert.doesNotMatch(action.summaries[0], /#artifacts/);
-  assert.equal(
-    action.requests.find((request) => request.path.endsWith("/check-runs/42"))?.body.conclusion,
-    "failure",
-  );
-  assert.ok(
-    action.requests.some(
-      (request) => request.method === "POST" && request.path.endsWith("/issues/7/comments"),
-    ),
-  );
-});
-
-// A report whose cases were all measured against nothing: Bencher records
-// no start point when it cannot resolve one.
-function withoutBaseline(input: ReturnType<typeof fixture>) {
-  for (const result of input.results[0]) {
-    for (const measure of result.measures) {
-      measure.boundary = null;
-      measure.threshold = undefined;
-    }
-  }
-  input.alerts = [];
-  return input;
-}
-
-test("fails a PR check when no case has a baseline", async (t) => {
-  const action = publication(t);
-  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(withoutBaseline(fixture())));
-  await publishReport(action);
-  const check = action.requests.find((request) => request.path.endsWith("/check-runs/42"))!;
-  assert.equal(check.body.conclusion, "failure");
-  const output = check.body.output as { title: string; summary: string };
-  assert.equal(output.title, "no comparable baseline");
-  const summary = output.summary;
-  assert.match(summary, /> \[!WARNING\]\n> \*\*No comparable baseline:\*\*/);
-  assert.match(summary, /no case has a baseline at `main` bbbbbbb/);
-  // The numbers stay; only their comparison is missing.
-  assert.match(summary, /All 5 cases/);
-  assert.doesNotMatch(summary, /new case/);
-});
-
-test("fails a PR check when Bencher recorded no start point", async (t) => {
-  const action = publication(t);
-  const input = withoutBaseline(fixture());
-  input.branch.head.start_point = null;
-  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(input));
-  await publishReport(action);
-  const check = action.requests.find((request) => request.path.endsWith("/check-runs/42"))!;
-  assert.equal(check.body.conclusion, "failure");
+  assert.doesNotMatch(action.summaries[0], /no significant change/);
+  assert.match(action.summaries[0], /no regression alert/);
+  assert.match(action.summaries[0], /Overall run time \+4\.0%.*`main`.*10 cases/);
+  assert.match(action.summaries[0], /No regression or improvement alerts/);
+  const check = action.requests.find((request) => request.method === "PATCH")!;
   assert.match(
     (check.body.output as { summary: string }).summary,
-    /Bencher recorded no start point/,
+    /Overall run time \+4\.0%.*10 cases/,
   );
-});
-
-test("fails a PR check that compared against another commit", async (t) => {
-  const action = publication(t);
-  const input = fixture();
-  input.branch.head.start_point!.version!.hash = "c".repeat(40);
-  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(input));
-  await publishReport(action);
-  const check = action.requests.find((request) => request.path.endsWith("/check-runs/42"))!;
-  assert.equal(check.body.conclusion, "failure");
-  assert.match(
-    (check.body.output as { summary: string }).summary,
-    /compares against ccccccc instead of `main` bbbbbbb/,
-  );
-});
-
-test("fails a PR check when the start point has no commit", async (t) => {
-  const action = publication(t);
-  const input = fixture();
-  input.branch.head.start_point!.version = null;
-  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(input));
-  await publishReport(action);
-  const check = action.requests.find((request) => request.path.endsWith("/check-runs/42"))!;
-  assert.equal(check.body.conclusion, "failure");
-  assert.match(
-    (check.body.output as { summary: string }).summary,
-    /compares against unknown instead of `main` bbbbbbb/,
-  );
-});
-
-test("fails a PR check when the measured commit has no hash", async (t) => {
-  const action = publication(t);
-  const input = fixture();
-  input.branch.head.version = null;
-  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(input));
-  await publishReport(action);
-  assert.equal(action.requests[0].body.conclusion, "failure");
-  assert.match(String(action.summaries[0]), /does not match the expected configuration and commit/);
-});
-
-test("passes a main run that has nothing to compare", async (t) => {
-  const action = publication(t);
-  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(withoutBaseline(fixture())));
-  await publishReport({ ...action, inputs: { ...action.inputs, number: undefined } });
-  const check = action.requests.find((request) => request.path.endsWith("/check-runs/42"))!;
-  assert.equal(check.body.conclusion, "success");
-  const output = check.body.output as { title: string; summary: string };
-  assert.equal(output.title, "5 new, no baseline");
-  assert.doesNotMatch(output.summary, /No comparable baseline/);
-});
-
-test("passes a check when all active alerts are improvements", async (t) => {
-  const action = publication(t);
-  const input = fixture();
-  input.alerts = input.alerts.filter((alert) => alert.limit === "lower");
-  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(input));
-  await publishReport(action);
-  assert.equal(
-    action.requests.find((request) => request.path.endsWith("/check-runs/42"))?.body.conclusion,
-    "success",
-  );
-});
-
-test("keeps the current verdict and comparison when history is unavailable", async (t) => {
-  const action = publication(t);
-  action.fetchHistory = async () => new Response("unavailable", { status: 503 });
-  await publishReport(action);
-  assert.deepEqual([...publishedImages(action).keys()], ["pr-7/rust/comparison.svg"]);
   assert.match(action.summaries[0], /!\[Changes against main\]/);
-  assert.match(action.summaries[0], /\[Trend unavailable\]/);
-  assert.equal(
-    action.requests.find((request) => request.path.endsWith("/check-runs/42"))?.body.conclusion,
-    "failure",
-  );
+  assert.match(action.summaries[0], /!\[PR benchmark history\]/);
+  assert.match(action.summaries[0], /\| serial \|/);
+  assert.match(action.summaries[0], /\| parallel · 4 threads \|/);
+  assert.match(action.summaries[0], /`ci`/);
 });
 
-test("reports image publication failures without masking metrics", async (t) => {
-  const action = publication(t, "success", true);
+test("improvements publish successful configured checks", async (t) => {
+  const action = await publication(t, true, false, 0.8);
   await publishReport(action);
-  assert.match(action.summaries[0], /\[Images unavailable\]/);
-  assert.ok(!action.summaries[0].includes("!["));
-  assert.equal(
-    action.requests.find((request) => request.path.endsWith("/check-runs/42"))?.body.conclusion,
-    "failure",
+  assert.deepEqual(
+    action.requests
+      .filter((request) => request.method === "PATCH")
+      .map((request) => request.body.conclusion),
+    ["success"],
   );
+  assert.match(action.summaries[0], /0.8000×/);
+  assert.match(action.summaries[0], /Overall run time −20\.0%/);
+  assert.match(action.summaries[0], /\[!TIP\]/);
+  assert.doesNotMatch(action.summaries[0], /No regression or improvement alerts/);
+  assert.match(action.summaries[0], /\[Report\]\(/);
+  assert.match(action.summaries[0], /\[JSON\]\(/);
+  assert.match(action.summaries[0], /<details><summary>10 changed cases/);
 });
 
-for (const outcome of ["failure", "cancelled"]) {
-  test(`completes the check when measurement is ${outcome}`, async (t) => {
-    const action = publication(t, outcome);
-    await publishReport(action);
-    assert.equal(publishedImages(action).size, 0);
-    assert.equal(action.requests[0].body.conclusion, outcome);
-    assert.match(action.summaries[0], /\*\*Default\*\* was not measured/);
-    if (outcome === "cancelled") assert.equal(action.requests.length, 1);
-  });
-}
-
-for (const [name, contents] of [
-  ["unreadable", null],
-  ["invalid JSON", "{"],
-  ["empty", JSON.stringify({ ...fixture(), results: [] })],
-]) {
-  test(`fails the check for an ${name} report`, async (t) => {
-    const action = publication(t);
-    if (contents === null) rmSync(action.inputs.variants[0].reportPath);
-    else writeFileSync(action.inputs.variants[0].reportPath, contents);
-    await publishReport(action);
-    assert.equal(publishedImages(action).size, 0);
-    assert.equal(action.requests[0].body.conclusion, "failure");
-    assert.match(action.summaries[0], /\*\*Default\*\* was not measured/);
-  });
-}
-
-function addSimd(action: ReturnType<typeof publication>) {
-  const report = fixture();
-  report.uuid = "r-simd";
-  report.testbed = { ...report.testbed, uuid: "t-simd", name: VARIANTS[1].testbed };
-  report.alerts = report.alerts.filter((alert) => alert.limit === "lower");
-  // Its baseline differs from Default, so a mixed comparison is observable.
-  report.results[0][0].measures[0].boundary!.baseline = 1000;
-  const reportPath = join(action.inputs.variants[0].reportPath, "..", "simd.json");
-  writeFileSync(reportPath, JSON.stringify(report));
-  action.inputs.variants.push({
-    variant: VARIANTS[1],
-    outcome: "success",
-    reportPath,
-    checkId: "43",
-  });
-}
-
-test("publishes one check per build and one comment with builds as columns", async (t) => {
-  const action = publication(t);
-  addSimd(action);
-  const histories: string[] = [];
-  action.fetchHistory = async (...args: Parameters<typeof fetch>) => {
-    histories.push(String(args[0]));
-    return new Response("[]");
-  };
+test("raw paired samples drive configured checks and the existing shared chart", async (t) => {
+  const action = await publication(t);
   await publishReport(action);
-  const checks = action.requests.filter((request) => request.path.includes("/check-runs/"));
+  const checks = action.requests.filter(
+    (request) => request.method === "PATCH" && request.path.includes("/check-runs/"),
+  );
   assert.deepEqual(
     checks.map((request) => request.body.conclusion),
-    ["failure", "success"],
+    ["failure"],
   );
-  const summary = (i: number) => String((checks[i].body.output as { summary: string }).summary);
-  assert.match(summary(0), /^### Benchmarks · rust · Default · 2 slower/);
-  assert.match(summary(0), /\*\*Overall run time −5\.1%\*\*/);
-  assert.match(summary(1), /^### Benchmarks · rust · Portable SIMD · 1 faster/);
-  assert.match(summary(1), /−26.4%/);
-  // One pair of images holds both builds as columns.
-  assert.deepEqual(
-    [...publishedImages(action).keys()],
-    ["pr-7/rust/comparison.svg", "pr-7/rust/trend.svg"],
-  );
-  assert.match(publishedImages(action).get("pr-7/rust/comparison.svg")!, />Portable SIMD</);
-  assert.deepEqual(
-    histories.map((url) => new URL(url).searchParams.get("testbed")),
-    ["t-1", "t-simd"],
-  );
-  const comments = action.requests.filter(
-    (request) => request.method === "POST" && request.path.endsWith("/issues/7/comments"),
-  );
-  assert.equal(comments.length, 1);
-  const body = String(comments[0].body.body);
-  // Distinct cases: the sorted99 speedup in both builds counts once.
-  assert.match(body, /^### Benchmarks · rust · 2 slower, 1 faster, 1 new$/m);
-  assert.equal(body.match(/^#{3,4} /gm)?.length, 1);
-  assert.match(body, /^\| {2}\| Default \| Portable SIMD \|$/m);
-  assert.match(
-    body,
-    /^\| \*\*All cases\*\* \| −5\.1% · \*\*2 slower\*\* · 1 faster · 1 new \| −12\.9% · 1 faster · 1 new \|$/m,
-  );
-  // A single mode needs no per-mode rows.
-  assert.doesNotMatch(body, /^\| serial \|/m);
-  assert.match(body, /> \*\*2 cases slower\*\*: 2 in Default only\./);
-  assert.match(
-    body,
-    /> - \{u32,u32\} · random · 48: Default \*\*\+10\.2%\*\*, Portable SIMD \+10\.2%/,
-  );
-  assert.match(
-    body,
-    /^> \*\*1 case faster\*\*: 1 in both\. Best: u64 · 99% sorted · 1,000,000, Default \*\*−29\.1%\*\*\. Nice work\.$/m,
-  );
-  assert.equal(body.match(/\[!CAUTION\]/g)?.length, 1);
-  assert.equal(body.match(/\[!TIP\]/g)?.length, 1);
-  assert.doesNotMatch(body, /Overall run time|Each build is compared/);
-  assert.match(body, /<details><summary>3 changed cases<\/summary>/);
-  assert.match(body, /^\| Input \| Type \| N \| Mode \| Default \| Portable SIMD \|$/m);
-  assert.match(
-    body,
-    /\| u64 \| 49 \| serial \| \*\*\+3\.8%\*\* <sub>736 ns<\/sub> \| −26\.4% <sub>736 ns<\/sub> \|/,
-  );
-  assert.match(body, /1 new case without a baseline in each build/);
-  assert.match(body, /\*\*Portable SIMD\*\* · `intel-v1-portable-simd-hybrid-v1`/);
-  // Every table is folded below the charts.
-  assert.doesNotMatch(body.replace(/<details>[\s\S]*?<\/details>/g, ""), /\| Input \|/);
-  assert.ok(
-    body.indexOf("](https://raw.githubusercontent.com/o/r/image-commit/pr-7/rust/trend.svg)") <
-      body.indexOf("<details>"),
-  );
-});
-
-test("groups the overview by API mode when the suite has several", async (t) => {
-  const action = publication(t);
-  const input = fixture();
-  const first = input.results[0][0];
-  input.results[0].push({
-    ...structuredClone(first),
-    benchmark: { uuid: "b-unstable", name: "rust/u64/random/49/s1/unstable" },
-    measures: [
-      { ...structuredClone(first.measures[0]), metric: { uuid: "m-unstable", value: 709 } },
-    ],
-  });
-  writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(input));
-  await publishReport(action);
-  assert.match(
-    action.summaries[0],
-    /^\| serial \| −5\.1% · \*\*2 slower\*\* · 1 faster · 1 new \|$/m,
-  );
-  assert.match(action.summaries[0], /^\| unstable \| \+0\.0% \|$/m);
-});
-
-test("publishes both builds on main without loading PR history or commenting", async (t) => {
-  const action = publication(t);
-  addSimd(action);
-  action.fetchHistory = async () => {
-    throw new Error("Main must not load PR history");
-  };
-  await publishReport({ ...action, inputs: { ...action.inputs, number: undefined } });
-  assert.deepEqual([...publishedImages(action).keys()], ["main/rust/comparison.svg"]);
+  const body = action.summaries[0];
+  assert.match(body, /Overall run time \+20\.0%/);
+  assert.match(body, /\[!CAUTION\]/);
+  assert.doesNotMatch(body, /No regression or improvement alerts/);
+  assert.match(body, /1.2000×/);
+  assert.ok(body.includes("Median interval"));
+  assert.doesNotMatch(body, /1.20 ns|0.800 ns/);
+  assert.match(body, /serial/);
+  assert.match(body, /4|Parallel/);
+  const images = action.requests
+    .filter((request) => request.path.endsWith("/git/trees"))
+    .flatMap((request) => request.body.tree as { content: string }[]);
+  assert.equal(images.length, 2);
+  assert.match(images[0].content, /20/);
+  assert.doesNotMatch(body, /Portable SIMD|Adjacent A\/B|Cloud archival runs separately/);
   assert.equal(
-    action.requests.filter((request) => request.path.includes("/check-runs/")).length,
-    2,
+    action.requests.filter(
+      (request) => request.method === "POST" && request.path.endsWith("/issues/7/comments"),
+    ).length,
+    1,
   );
-  assert.ok(
-    action.requests.every(
-      (request) => !request.path.includes("/issues/") && !request.path.includes("/pulls/"),
-    ),
-  );
-  assert.match(action.summaries[0], /^\| {2}\| Default \| Portable SIMD \|$/m);
-  assert.doesNotMatch(action.summaries[0], /Trend unavailable/);
 });
 
-for (const failed of [0, 1]) {
-  test(`preserves the other build when build ${failed} fails`, async (t) => {
-    const action = publication(t);
-    addSimd(action);
-    action.inputs.variants[failed].outcome = "failure";
-    await publishReport(action);
-    const checks = action.requests.filter((request) => request.path.includes("/check-runs/"));
-    assert.equal(checks[failed].body.conclusion, "failure");
-    assert.match(JSON.stringify(checks[failed].body.output), /measurement failed/);
-    assert.doesNotMatch(JSON.stringify(checks[1 - failed].body.output), /measurement failed/);
-    const name = VARIANTS[failed].name;
-    // Failed builds keep their unavailable column instead of disappearing.
-    assert.equal(publishedImages(action).size, 2);
-    assert.match(publishedImages(action).get("pr-7/rust/comparison.svg")!, new RegExp(`>${name}<`));
-    assert.match(publishedImages(action).get("pr-7/rust/comparison.svg")!, /measurement failed/);
-    assert.match(action.summaries[0], new RegExp(`, ${name} failed$`, "m"));
-    assert.match(
-      action.summaries[0],
-      new RegExp(`\\*\\*${name}\\*\\* was not measured: the Bencher job failed\\.`),
-    );
-    // "only" never stands for "the other build failed".
-    assert.doesNotMatch(action.summaries[0], / only\./);
-    assert.doesNotMatch(action.summaries[0], new RegExp(`${name} —`));
-  });
-}
+test("missing shards fail the configured build", async (t) => {
+  const action = await publication(t);
+  await rm(join(action.inputs.artifacts, "paired-1"), { recursive: true });
+  await assert.rejects(publishReport(action), /could not be validated/);
+  const checks = action.requests.filter(
+    (request) => request.method === "PATCH" && request.path.includes("/check-runs/"),
+  );
+  assert.deepEqual(
+    checks.map((request) => request.body.conclusion),
+    ["failure"],
+  );
+  assert.match(action.summaries[0], /Missing measurement shards/);
+});
 
-for (const mismatch of ["testbed", "commit"]) {
-  test(`rejects a report with the wrong ${mismatch}`, async (t) => {
-    const action = publication(t);
-    const input = fixture();
-    if (mismatch === "testbed") input.testbed.name = VARIANTS[1].testbed;
-    else input.branch.head.version!.hash = "c".repeat(40);
-    writeFileSync(action.inputs.variants[0].reportPath, JSON.stringify(input));
-    await publishReport(action);
-    assert.match(action.summaries[0], /does not match the expected configuration and commit/);
-    assert.equal(action.requests[0].body.conclusion, "failure");
-    assert.equal(publishedImages(action).size, 0);
+test("Cloud failure retains ratio tables and does not change performance checks", async (t) => {
+  const action = await publication(t, false);
+  await publishReport(action);
+  assert.match(action.summaries[0], /1.2000×/);
+  assert.deepEqual(
+    action.requests
+      .filter((request) => request.method === "PATCH")
+      .map((request) => request.body.conclusion),
+    ["failure"],
+  );
+});
+
+test("Cloud contents cannot override performance evidence", async (t) => {
+  const action = await publication(t);
+  const path = join(action.inputs.artifacts, "bencher.json");
+  const report = fixture();
+  report.testbed.name = continuous.testbed;
+  report.branch.name = "pr-7";
+  report.results = [[]];
+  await writeFile(path, JSON.stringify(report));
+  await publishReport(action);
+  assert.match(action.summaries[0], /1.2000×/);
+});
+
+test("superseded PR results stay in checks and summary, not a new comment", async (t) => {
+  const action = await publication(t, true, true);
+  await publishReport(action);
+  assert.equal(
+    action.requests.filter(
+      (request) => request.method === "POST" && request.path.endsWith("/issues/7/comments"),
+    ).length,
+    0,
+  );
+  assert.equal(action.summaries.length, 1);
+});
+
+test("fork reports retain the summary without writes or credentials", async (t) => {
+  const action = await publication(t, false);
+  await assert.rejects(
+    publishReport({ ...action, inputs: { ...action.inputs, publish: false } }),
+    /regression alerts/,
+  );
+  assert.match(action.summaries[0], /1.2000×/);
+  assert.equal(action.requests.length, 0);
+});
+
+test("missing Cloud history metadata cannot discard a valid measured verdict", async (t) => {
+  const action = await publication(t, true, false, 0.8);
+  const path = join(action.inputs.reports, "bencher.json");
+  const report = JSON.parse(await readFile(path, "utf8"));
+  delete report.start_time;
+  await writeFile(path, JSON.stringify(report));
+  await publishReport(action);
+  assert.match(action.summaries[0], /0.8000×/);
+  assert.match(action.summaries[0], /!\[PR benchmark history\]/);
+  const check = action.requests.find(
+    (request) => request.method === "PATCH" && request.path.includes("/check-runs/"),
+  )!;
+  assert.equal(check.body.conclusion, "success");
+});
+
+test("a changed inventory without shared history retains both current figures", async (t) => {
+  const action = await publication(t, true, false, 0.8);
+  const path = join(action.inputs.reports, "bencher.json");
+  const previous = JSON.parse(await readFile(path, "utf8"));
+  previous.uuid = "earlier";
+  previous.start_time = "2026-11-07T01:00:00Z";
+  previous.results = [
+    [
+      {
+        benchmark: { name: "rust/u32/random/65536/s1/api", uuid: "other-case" },
+        measures: [
+          {
+            measure: { name: "paired-time-ratio", uuid: "ratio" },
+            metric: { uuid: "older-value", value: 1.2 },
+          },
+        ],
+      },
+    ],
+  ];
+  await publishReport({
+    ...action,
+    fetchHistory: async () =>
+      new Response(JSON.stringify([previous]), { headers: { "content-type": "application/json" } }),
   });
-}
+  const images = action.requests
+    .filter((request) => request.path.endsWith("/git/trees"))
+    .flatMap((request) => request.body.tree as { content: string }[]);
+  assert.equal(images.length, 2);
+  assert.match(action.summaries[0], /!\[PR benchmark history\]/);
+});

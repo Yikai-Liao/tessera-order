@@ -18,18 +18,61 @@ use voracious_radix_sort::{RadixSort as VoraciousSort, Radixable};
 pub(super) trait TesseraAdapter: BenchmarkRecord {
     /// Sorts scalar keys directly and keyed records through the by-key API.
     fn tessera(records: &mut [Self]);
+    /// Sorts through the independently named baseline crate.
+    #[cfg(tessera_bench_revisions)]
+    fn baseline(records: &mut [Self]);
+    /// Sorts through the second baseline placement.
+    #[cfg(tessera_bench_revisions)]
+    fn baseline_copy(records: &mut [Self]);
+    /// Sorts through the second current placement.
+    #[cfg(tessera_bench_revisions)]
+    fn current_copy(records: &mut [Self]);
+    /// Reports distinct relative adapter addresses, independent of process ASLR.
+    #[cfg(tessera_bench_revisions)]
+    fn revision_entries() -> Vec<String> {
+        let entries = [
+            Self::tessera as *const () as usize,
+            Self::baseline as *const () as usize,
+            Self::baseline_copy as *const () as usize,
+            Self::current_copy as *const () as usize,
+        ];
+        assert!(
+            (0..entries.len()).all(|i| !entries[..i].contains(&entries[i])),
+            "revision adapters were folded together"
+        );
+        entries
+            .iter()
+            .map(|entry| format!("{:#x}", entry.wrapping_sub(entries[0])))
+            .collect()
+    }
     /// Uses the same direct/by-key distinction for caller-owned parallel sorting.
     #[cfg(feature = "rayon")]
     fn tessera_parallel(records: &mut [Self]);
+}
+
+/// Calls the same public API with identical record and key types in every copy.
+#[cfg(tessera_bench_revisions)]
+macro_rules! revision_sorts {
+    ($api:ident $(, $key:expr)?) => {
+        #[inline(never)]
+        fn baseline(records: &mut [Self]) { revision_baseline::$api(records $(, $key)?); }
+        #[inline(never)]
+        fn baseline_copy(records: &mut [Self]) { revision_baseline_copy::$api(records $(, $key)?); }
+        #[inline(never)]
+        fn current_copy(records: &mut [Self]) { revision_current_copy::$api(records $(, $key)?); }
+    };
 }
 
 /// Keeps scalar adapters on Tessera's direct-key entry points.
 macro_rules! tessera_keys {
     ($($t:ty),+ $(,)?) => {$(
         impl TesseraAdapter for $t {
+            #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
                 tessera_sort::stable_sort(records);
             }
+            #[cfg(tessera_bench_revisions)]
+            revision_sorts!(stable_sort);
             #[cfg(feature = "rayon")]
             fn tessera_parallel(records: &mut [Self]) {
                 tessera_sort::par_stable_sort(records);
@@ -43,9 +86,12 @@ tessera_keys!(u32, u64, f64);
 macro_rules! tessera_records {
     ($($t:ty),+ $(,)?) => {$(
         impl TesseraAdapter for $t {
+            #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
                 tessera_sort::stable_sort_by_key(records, |r| r.key);
             }
+            #[cfg(tessera_bench_revisions)]
+            revision_sorts!(stable_sort_by_key, |r| r.key);
             #[cfg(feature = "rayon")]
             fn tessera_parallel(records: &mut [Self]) {
                 tessera_sort::par_stable_sort_by_key(records, |r| r.key);
@@ -170,9 +216,9 @@ pub(super) fn list_variants() -> Vec<Variant> {
         .filter(|algorithm| {
             algorithm.adapter == "common"
                 || (cfg!(feature = "rayon") && algorithm.threads.is_some())
-                || (!cfg!(feature = "portable-simd")
-                    && (algorithm.adapter == "rust"
-                        || (algorithm.adapter == "native" && cfg!(feature = "compare-native"))))
+                || (algorithm.adapter == "revision" && cfg!(tessera_bench_revisions))
+                || algorithm.adapter == "rust"
+                || (algorithm.adapter == "native" && cfg!(feature = "compare-native"))
         })
         .map(|algorithm| Variant {
             name: &algorithm.id,
@@ -194,6 +240,12 @@ fn try_prepare_common<T: TesseraAdapter>(
     }
     Some(match v.name {
         "tessera" => prepare_kernel(input, true, T::tessera),
+        #[cfg(tessera_bench_revisions)]
+        "tessera-baseline" => prepare_kernel(input, true, T::baseline),
+        #[cfg(tessera_bench_revisions)]
+        "tessera-baseline-copy" => prepare_kernel(input, true, T::baseline_copy),
+        #[cfg(tessera_bench_revisions)]
+        "tessera-copy" => prepare_kernel(input, true, T::current_copy),
         "std-stable" => prepare_kernel(input, true, |v| v.sort_by(T::order)),
         "std-unstable" => prepare_kernel(input, false, |v| v.sort_unstable_by(T::order)),
         "glidesort" => prepare_kernel(input, true, glidesort::<T>),
@@ -252,10 +304,53 @@ impl Variant {
     }
 }
 
+/// Adapter placement belongs to the sorting boundary, not record semantics.
+#[cfg(tessera_bench_revisions)]
+impl CaseInput {
+    /// Records offsets for current, baseline A, baseline B and current B in order.
+    pub(super) fn revision_entries(&self) -> Vec<String> {
+        match self {
+            Self::U32(_) => u32::revision_entries(),
+            Self::U64(_) => u64::revision_entries(),
+            Self::F64(_) => f64::revision_entries(),
+            Self::Row32(_) => Row::<u32>::revision_entries(),
+            Self::Row64(_) => Row::<u64>::revision_entries(),
+            Self::WideRecord(_) => WideRecord::revision_entries(),
+            Self::OwnedRecord(_) => OwnedRecord::revision_entries(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::plan::InputCase;
+    #[cfg(tessera_bench_revisions)]
+    #[test]
+    fn revisions_preserve_records() {
+        for ty in &crate::plan::catalog().comparison.types {
+            for distribution in ["random", "equal", "reverse", "d16"] {
+                let input = CaseInput::new(&InputCase {
+                    ty: ty.clone(),
+                    distribution: distribution.into(),
+                    len: 1000,
+                });
+                assert_eq!(input.revision_entries().len(), 4);
+                for variant in list_variants()
+                    .into_iter()
+                    .filter(|v| v.name == "tessera" || v.adapter == "revision")
+                {
+                    let mut kernel = variant.prepare(&input, 0).unwrap();
+                    kernel.restore(2);
+                    kernel.run_batch();
+                    kernel.check().unwrap_or_else(|error| {
+                        panic!("{ty}/{distribution}/{}: {error}", variant.name)
+                    });
+                }
+            }
+        }
+    }
+
     #[test]
     fn adapters_follow_features() {
         let names: Vec<_> = list_variants().iter().map(|v| v.name).collect();
@@ -264,10 +359,10 @@ mod tests {
         }
         assert!(names.contains(&"tessera"));
         assert!(names.contains(&"std-stable"));
-        assert_eq!(names.contains(&"radsort"), !cfg!(feature = "portable-simd"));
+        assert!(names.contains(&"radsort"));
         assert_eq!(
             names.contains(&"fluxsort"),
-            cfg!(feature = "compare-native") && !cfg!(feature = "portable-simd")
+            cfg!(feature = "compare-native")
         );
     }
 

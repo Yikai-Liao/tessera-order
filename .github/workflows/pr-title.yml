@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# A newer push or title edit supersedes the check still running.
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   pr-title:
     runs-on: ubuntu-latest

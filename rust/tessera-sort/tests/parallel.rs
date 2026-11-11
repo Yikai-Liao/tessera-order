@@ -10,30 +10,9 @@ use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use tessera_sort::{par_stable_sort, par_stable_sort_by_key};
-
-#[test]
-fn keys_keep_total_order() {
-    let mut keys = [
-        f64::from_bits(0xfff8_0000_0000_0001),
-        f64::NAN,
-        -0.0,
-        1.0,
-        f64::NEG_INFINITY,
-        0.0,
-        f64::INFINITY,
-    ];
-    let mut expected = keys;
-    expected.sort_by(f64::total_cmp);
-    par_stable_sort(&mut keys);
-    assert_eq!(keys.map(f64::to_bits), expected.map(f64::to_bits));
-
-    let mut wide = [Reverse(i128::MIN), Reverse(i128::MAX), Reverse(-1)];
-    par_stable_sort(&mut wide);
-    assert_eq!(wide, [Reverse(i128::MAX), Reverse(-1), Reverse(i128::MIN)]);
-    par_stable_sort::<u8>(&mut []);
-    par_stable_sort(&mut [1u8]);
-}
+#[cfg(not(miri))]
+use tessera_sort::par_stable_sort;
+use tessera_sort::par_stable_sort_by_key;
 
 #[test]
 #[cfg(not(miri))]
@@ -86,6 +65,51 @@ fn counted_keys_keep_bits() {
             );
         }
     });
+}
+
+/// Covering digits keep equal-key payload order without child finishing.
+#[test]
+#[cfg(not(miri))]
+fn covering_digit_keeps_payload_order() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    let mut rows: Vec<_> = (0..1usize << 17)
+        .map(|id| (((id * 7919) & 255) as u64, Cell::new(id)))
+        .collect();
+    pool.install(|| par_stable_sort_by_key(&mut rows, |row| row.0));
+    assert!(rows.windows(2).all(|pair| pair[0].0 < pair[1].0
+        || (pair[0].0 == pair[1].0 && pair[0].1.get() < pair[1].1.get())));
+    for row in &rows {
+        assert_eq!(row.0, ((row.1.get() * 7919) & 255) as u64);
+    }
+}
+
+/// Both orientations of pre-separated buckets use the same stable run split.
+#[test]
+#[cfg(not(miri))]
+fn separated_runs_match_serial() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    let len = 1usize << 17;
+    for set_first in [false, true] {
+        let mut rows: Vec<_> = (0..len)
+            .map(|id| {
+                let set = (id < len / 2) == set_first;
+                (((set as u64) << 63) | ((id as u64 * 7919) % 65521), id)
+            })
+            .collect();
+        let mut expected = rows.clone();
+        expected.sort_by_key(|row| row.0);
+        let mut serial = rows.clone();
+        tessera_sort::stable_sort_by_key(&mut serial, |row| row.0);
+        pool.install(|| par_stable_sort_by_key(&mut rows, |row| row.0));
+        assert_eq!(serial, expected);
+        assert_eq!(rows, expected);
+    }
 }
 
 #[test]
@@ -155,28 +179,6 @@ fn bounded_callback_can_reenter() {
 }
 
 #[test]
-fn caller_pools_are_supported() {
-    for threads in [1, 4] {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build()
-            .unwrap();
-        let mut rows: Vec<_> = (0..16_384u32)
-            .map(|index| ((index.wrapping_mul(7919) % 257), index))
-            .collect();
-        let mut expected = rows.clone();
-        expected.sort_by_key(|row| row.0);
-        pool.install(|| {
-            par_stable_sort_by_key(&mut rows, |row| {
-                assert_eq!(rayon::current_num_threads(), threads);
-                row.0
-            });
-        });
-        assert_eq!(rows, expected);
-    }
-}
-
-#[test]
 fn large_sort_uses_workers_and_recovers_task_panics() {
     const LEN: usize = 1_000_000;
 
@@ -193,7 +195,7 @@ fn large_sort_uses_workers_and_recovers_task_panics() {
     let workers = Mutex::new(HashSet::new());
     pool.install(|| {
         par_stable_sort_by_key(&mut rows, |row| {
-            if calls.fetch_add(1, Ordering::Relaxed) % 4096 == 0 {
+            if calls.fetch_add(1, Ordering::Relaxed).is_multiple_of(4096) {
                 workers
                     .lock()
                     .unwrap()

@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { type BencherReport, type ComparedRow, type Row, summarize } from "./report.ts";
+import {
+  type BencherReport,
+  type ComparedRow,
+  cloudRows,
+  type ReportSummary,
+  type Row,
+} from "./report.ts";
 
 const API = "https://api.bencher.dev/v0/projects";
 const PAGE_SIZE = 100;
@@ -13,44 +19,32 @@ export const MIN_SWING = 0.05;
 
 export interface TrendSeries {
   name: string;
-  label: string;
-  baseValue: number;
-  firstValue: number;
-  lastValue: number;
   // Change against the comparison baseline, one per PR run.
   changes: number[];
 }
 
-interface Measurement {
-  uuid: string;
-  hash: string | null;
-  time: string;
-}
-
 export interface TrendSummary {
-  project: string;
-  branch: string;
-  testbed: string;
-  // The base commit the latest report compared against.
+  // The base commit the latest report compared against; earlier runs may use older ones.
   base: string | null;
-  sharedCases: number;
   // Current API groups, including groups without a comparable history yet.
   modes: string[];
-  runs: Measurement[];
+  runs: { uuid: string; hash: string | null }[];
   // Geometric mean of the changes against the base, one per PR run.
   overall: number[];
   focus: TrendSeries[];
-  // Every shared case, so a case selected in one configuration can still be
-  // drawn beside its quiet history in another.
+  // Every shared case, so aggregates and focus rows share one history.
   series: TrendSeries[];
 }
 
-interface MeasuredRun extends Measurement {
+interface MeasuredRun {
+  uuid: string;
+  hash: string | null;
+  time: string;
   values: Map<string, number>;
 }
 
-// Branch heads reset for each PR comparison. Listing by branch retains the
-// earlier heads and same-commit reruns that a one-head perf query would miss.
+// One PR branch holds every run of the PR, including reruns of a commit and
+// heads that earlier submissions created for other baselines.
 export async function loadHistory(current: BencherReport, request: typeof fetch = fetch) {
   const time = Date.parse(current.start_time ?? "");
   if (!Number.isFinite(time)) throw new Error("The report has no measurement time");
@@ -80,7 +74,7 @@ export async function loadHistory(current: BencherReport, request: typeof fetch 
   return [...reports.values()];
 }
 
-function caseKey(row: Row) {
+function caseKey(row: Pick<Row, "benchmark" | "measure">) {
   return `${row.benchmark}/${row.measure}`;
 }
 
@@ -105,7 +99,7 @@ function comparableRuns(reports: BencherReport[], current: BencherReport, langua
       !report.results?.[0]?.length
     )
       continue;
-    const rows = summarize(report).rows.filter(
+    const rows = cloudRows(report).filter(
       (row) => row.name.startsWith(`${language}/`) && row.value > 0,
     );
     runs.push({
@@ -123,22 +117,49 @@ function comparableRuns(reports: BencherReport[], current: BencherReport, langua
   );
 }
 
-// Every run is compared with the baseline from the latest report, which
-// Bencher computes from the start point's own history: `main`, or the parent
-// PR of a stacked one. One fixed reference keeps rebases and force pushes out
-// of the calculation: an earlier run on an older base still shows how far that
-// code was from the base a reviewer would merge into. Cases new in the PR have
-// no baseline and stay in the table only. The cohort is also fixed across
-// runs, so a case added to or removed from the suite cannot move the overall
-// line.
-export function summarizeTrend(
-  reports: BencherReport[],
-  current: BencherReport,
+/** Summarize the PR branch's runs, each as the ratio to its own exact baseline.
+ *
+ * Merging main changes the baseline but not the PR, so the trend continues.
+ *
+ * The current point remains available when Cloud or history loading fails.
+ * Raw paired verdicts remain authoritative; Cloud supplies history and links.
+ */
+export function summarizePairedTrend(
+  summary: ReportSummary,
+  language: string,
+  current?: BencherReport,
+  reports: BencherReport[] = [],
+): TrendSummary | null {
+  if (!summary.baseHash) throw new Error("Paired history needs an exact baseline");
+  if (!current) {
+    return summarizeRuns(
+      [
+        {
+          uuid: summary.hash!,
+          hash: summary.hash,
+          time: "",
+          values: new Map(summary.rows.map((row) => [caseKey(row), row.value])),
+        },
+      ],
+      summary,
+      language,
+    );
+  }
+  const identities = new Map(cloudRows(current).map((row) => [row.name, row]));
+  const rows = summary.rows.map((row) => {
+    const identity = identities.get(row.name);
+    if (!identity) throw new Error("Cloud history lacks a current case");
+    return { ...row, benchmark: identity.benchmark, measure: identity.measure };
+  });
+  const runs = comparableRuns(reports, current, language);
+  return summarizeRuns(runs, { rows, baseHash: summary.baseHash }, language);
+}
+
+function summarizeRuns(
+  runs: MeasuredRun[],
+  summary: Pick<ReportSummary, "rows" | "baseHash">,
   language: string,
 ): TrendSummary | null {
-  const runs = comparableRuns(reports, current, language);
-  if (!runs.length) return null;
-  const summary = summarize(current);
   const shared = summary.rows.filter(
     (row): row is ComparedRow =>
       row.baseline !== null &&
@@ -168,18 +189,10 @@ export function summarizeTrend(
     );
   const series = (row: ComparedRow): TrendSeries => ({
     name: row.name,
-    label: row.label,
-    baseValue: row.baseline,
-    firstValue: runs[0].values.get(caseKey(row))!,
-    lastValue: runs.at(-1)!.values.get(caseKey(row))!,
     changes: changes(row),
   });
   return {
-    project: current.project.slug,
-    branch: current.branch.name,
-    testbed: current.testbed.name,
     base: summary.baseHash,
-    sharedCases: shared.length,
     modes: [
       ...new Set(
         summary.rows
@@ -187,7 +200,7 @@ export function summarizeTrend(
           .map((row) => row.parts.mode),
       ),
     ],
-    runs: runs.map(({ uuid, hash, time }) => ({ uuid, hash, time })),
+    runs: runs.map(({ uuid, hash }) => ({ uuid, hash })),
     overall: runs.map(
       (run) =>
         Math.exp(

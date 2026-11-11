@@ -231,7 +231,6 @@ impl<T> Bucket<T> {
 pub(super) fn try_finish<T: Send>(
     sorter: &mut Partition<'_, '_, T>,
     ends: &[usize],
-    shards: usize,
     parallel: bool,
     limit: usize,
     finish: &(dyn Fn(&mut [T]) + Sync),
@@ -245,7 +244,7 @@ pub(super) fn try_finish<T: Send>(
     }
     let block_size = sorter.blocks.block_size;
     let count = sorter.block_order.len();
-    let head = sorter.bucket_count;
+    let head = sorter.active_blocks.start;
     let input_len = sorter.blocks.input_len;
     let mut owners = vec![FREE; count];
     let mut locations = Vec::new();
@@ -255,7 +254,7 @@ pub(super) fn try_finish<T: Send>(
     let mut partial = 0;
     let mut start = 0;
     for (bucket, &end) in ends.iter().enumerate() {
-        let logical_end = sorter.partial_blocks[(bucket + 1) * shards - 1].order_index + 1;
+        let logical_end = sorter.buffers.counts[bucket];
         let mut sources = Vec::with_capacity(logical_end - logical);
         while logical < logical_end {
             let len = sorter.next_block_len(logical, &mut partial);
@@ -298,13 +297,7 @@ pub(super) fn try_finish<T: Send>(
     caches.push(Mutex::new(free));
     let storage = Storage {
         addresses: (0..count)
-            .map(|physical| {
-                if sorter.blocks.scratch_segments.is_empty() {
-                    sorter.blocks.block_ptr(physical)
-                } else {
-                    sorter.blocks.block_ptr_segmented(physical)
-                }
-            })
+            .map(|physical| sorter.blocks.block_ptr(physical))
             .collect(),
         input: sorter.blocks.input,
         full_blocks: input_len / block_size,
@@ -378,35 +371,23 @@ mod tests {
     }
 
     #[test]
-    fn bands_keep_stability() {
-        let lengths: &[usize] = if cfg!(miri) {
-            &[3, 17, 29]
-        } else {
-            &[2, 3, 17, 97, 293, 509]
-        };
-        let sizes: &[usize] = if cfg!(miri) { &[1, 7] } else { &[1, 3, 7, 19] };
-        let shards: &[usize] = if cfg!(miri) { &[1, 3] } else { &[1, 2, 4] };
-        for &len in lengths {
-            for &block_size in sizes {
-                for &shards in shards {
-                    let mut records: Vec<_> = (0..len)
-                        .map(|id| (((id * 7919 + 73) % 256) as u32, id))
-                        .collect();
-                    let mut expected = records.clone();
-                    expected.sort_by_key(|record| record.0);
-                    finish_records(
-                        &mut records,
-                        ByKey(|record: &(u32, usize)| record.0),
-                        block_size,
-                        shards,
-                        &|records| records.sort_by_key(|record| record.0),
-                    );
-                    assert_eq!(
-                        records, expected,
-                        "len={len}, block={block_size}, shards={shards}"
-                    );
-                }
-            }
+    fn sparse_buckets_keep_directory_ends() {
+        for shards in [2, 5] {
+            let mut records: Vec<_> = (0..97u32)
+                .map(|id| (32 + (id % 2) * 128 + id % 16, id.to_string()))
+                .collect();
+            let mut expected = records.clone();
+            expected.sort_by_key(|record| record.0);
+            // Only buckets 1 and 5 are populated: empty leading, interior and
+            // trailing buckets must not change the next bucket's source range.
+            finish_records(
+                &mut records,
+                ByKey(|record: &(u32, String)| record.0),
+                5,
+                shards,
+                &|records| records.sort_by_key(|record| record.0),
+            );
+            assert_eq!(records, expected);
         }
     }
 
@@ -606,8 +587,7 @@ mod tests {
             let records =
                 unsafe { core::slice::from_raw_parts_mut(input.add(shard * SHARD_LEN), SHARD_LEN) };
             let mut part = Partition::new(records, BUCKETS, BLOCK, buffers);
-            let (panic, _) = part.step_with_ends(|record| record.0 as usize, false);
-            assert!(panic.is_none());
+            assert!(part.step(|record| record.0 as usize).is_none());
             parts.push(part);
         }
         let scratch_blocks = SHARDS * 2 * BUCKETS;

@@ -4,6 +4,27 @@ This page retains measured evidence behind engine choices, not current developme
 
 The engine in `rust/tessera-sort` is a Stable Rust port of the research prototype in `sort-research-rs` at commit `6c0877f0491dc3b8fc052aa529bce44bf8a53fa8`. The crate is unreleased (`0.0.0`, `publish = false`).
 
+## Simplification series candidate screens
+
+The [simplification proposal](../proposals/engine-simplification.md) is being evaluated as small, independently reviewed PRs. The maintainer permits individually justified losses up to 10%, asks that the general mechanism retain fast-path savings wherever possible, and requests targeted three-block screens instead of nine-block matrices. These limits do not turn inconclusive controls into source-attribution evidence.
+
+### R2: flat samples as ordinary order candidates — merge hold
+
+Against `ef6c174`, the candidate removed `Order::Flat` and its deferred confirmation. Every surviving sampled order candidate instead entered `confirm_order` before insertion and variation. This removed a state and a root-only branch, but constant inputs then used leading-tie confirmation rather than the vectorizable union/intersection variation scan.
+
+The maintained command was `pnpm -s tools compare revisions ef6c174 --types u64,row_u64 --distributions equal,two_values,hot50,runs --lengths 65536 --blocks 3 --cpu 2 --out /home/lyk/code/tessera-research/engine-simplification/r2-screen`. It verified all eight inputs in one linked executable with two named copies per revision and repeated-current A/A. Host: Intel Core i7-10875H, Rust 1.99.1 / LLVM 23.1.3, release, default target, 64-byte loop/block alignment, CPU 2, powersave, turbo and SMT on; no system settings changed. Raw observations, binaries, provenance and regenerated reports remain at that path; the rejected patch is alongside it as `r2-rejected.patch`.
+
+Ratios below divide each baseline placement by the current A/A mean. Values below one mean the candidate is slower.
+
+| Case | Baseline copies | Current copy | A/A range | Decision |
+|---|---:|---:|---:|---|
+| `u64/equal/65536` | 0.839 / 0.834 | 0.999 | 0.994–1.006 | About 19–20% slower in the primary current placement; exceeds ordinary limit |
+| `row_u64/equal/65536` | 0.925 / 0.921 | 1.024 | 0.996–1.004 | Primary current placement about 8–9% slower, second current placement worse |
+
+The hot50 and runs medians were within 0.5% of one for both types. The two-values medians spanned 0.988–1.006 for the baseline placements, with ranges overlapping A/A. These cases do not compensate for the constant-input loss or prove that only constant inputs can regress. Sampled equal pairs may conceal nonconstant keys in the gaps, whose confirmation and insertion routing also change. The screen exceeds the ordinary acceptance limit; it is not a source-causal slowdown claim, since distinct wrappers alone do not establish independent internal bodies. The maintainer subsequently requested publication as a regular, non-draft [PR #105](https://github.com/Yikai-Liao/tessera-sort/pull/105), explicitly **do not merge**. A possible all-equal exception remains undecided; R2 is on hold rather than finally rejected.
+
+Serial and Rayon library tests, all-feature workspace Clippy with `TESSERA_BENCH_CHECK_ONLY=1`, and the order-confirmation fixture under Miri passed for the rejected checkpoint. The native-enabled Clippy attempt without check-only mode stopped at missing fetched native sources, before completing; it is not a passing check. No R2 engine change is included in this documentation PR; its implementation is isolated in PR #105. R3 can still unify ordered finishing without changing the flat-sample route.
+
 ## Eight-core parallel completion
 
 These are local whole-call algorithm comparisons, not isolated source-change or placement-controlled claims. The portable bounded-finishing implementation and its fallback are described in the [engine reference](engine.md#parallel-root-completion).
@@ -397,3 +418,165 @@ The broad run also found a small cost on `u64/sorted_tail/65536`: fix ratios 1.0
 Ordered-input timing also moves with code placement. The root `u64` sort bodies of main and the fix have the same instruction sequence after address relocations are normalized, and sorted inputs return before the changed finishing operation. Their apparent speedup is not attributed to the scan change. Raw samples, manifests, executable snapshots and disassembly stay outside the repository. These local results do not establish the size of an improvement on Bencher's Intel runner. A paired Portable SIMD check of `u64/random/65536/s1/api` remained within its controls; the changed default finishing body is overridden for that primitive SIMD path.
 
 At that revision, Default, no-std and Portable SIMD tests, doctests, Clippy, rustdoc and Miri passed. The local MSRV toolchain was unavailable; Rust 1.85 validation was left to CI.
+
+### Shared planning and required SIMD screen
+
+A maintained revision screen compares the pre-consolidation `b8968b6` library with clean checkpoint `383ddb7`. It covers six serial API cases at 65,536 records on an Intel Core i7-10875H, Linux x86-64, CPU 2, Rust 1.99.1 / LLVM 23.1.3, with the shared 64-byte loop and non-fallthrough block alignment flags. Both revisions use the current harness and lockfile. Resolved Cargo provenance records `[default, portable-simd, std]` for the historical library and `[]` for the current required-SIMD library, separately from the harness's empty feature lists. The baseline is not a scalar build.
+
+Reproduce the selection with:
+
+```sh
+pnpm tools compare commit b8968b6 --types u64,row_u64 \
+  --distributions random,d16,two_values --lengths 65536 --cpu 2 \
+  --out bench/results/shared-planning-screen
+```
+
+Each case ran nine rotating baseline/control/current process blocks. Ratios use the paired baseline mean; a screen direction requires eight of nine blocks and a median outside the paired A/A range.
+
+| Case | Current / baseline | Block range | A/A range | Screen |
+|---|---:|---|---|---|
+| `u64/d16/65536` | 0.8815 | 0.8799–0.9001 | 0.9978–1.0022 | faster |
+| `row_u64/d16/65536` | 0.8923 | 0.8843–0.8979 | 0.9882–1.0118 | faster |
+| `u64/random/65536` | 1.0350 | 0.9929–1.0448 | 0.9722–1.0278 | slower |
+| `row_u64/random/65536` | 1.0469 | 1.0024–1.0549 | 0.9539–1.0461 | slower |
+| `u64/two_values/65536` | 1.0000 | 0.9923–1.0113 | 0.9937–1.0063 | within A/A |
+| `row_u64/two_values/65536` | 0.9982 | 0.9955–1.0039 | 0.9951–1.0049 | within A/A |
+
+The random-input losses remain open. This process-level screen does not identify their cause among shared preparation, sampling, digit planning, tile finishing and generated-code placement. It supplies neither in-process source attribution nor whole-engine performance acceptance; parallel APIs, other lengths and key widths remain unmeasured here. No distribution or size exception is added to compensate. Raw results and provenance remain outside Git in the `one-backend-screen` session.
+
+The obsolete float-specific sealed scan override was removed after `a239c33`: primitive production confirmation and insertion already dispatch through the required vector backend. Scalar kernels and `Reverse<K>`'s blocked fallback remain. Serial/Rayon tests, both Clippy configurations, float-scan Miri and independent source review pass. Two nine-block serial cases (`float-policy-screen`, `--types f64 --distributions random,sorted99 --lengths 1000 --cpu 2`, same conditions) remain within A/A: random ratio 1.0006, block range 0.9940–1.0050, A/A 0.9981–1.0019; sorted99 ratio 1.0002, block range 0.9973–1.0076, A/A 0.9943–1.0057. Fixed-work instructions, data references and branch counts are identical (`float-policy-counters`); simulated sorted99 data-write misses differ by one. This is bounded evidence for removing a dead policy, not a whole-engine acceptance verdict.
+
+### Shared order confirmation candidate
+
+Root unit-stride probing and recursive/sample confirmation now share the minimal mixed-prefix witness, leading-tie handling and strict-descending classification. The scalar prefix is consumed once; ascending continuation receives only its unchecked suffix and the encoded predecessor. Direct-key roots can therefore use the same vector continuation as recursive children. This removes a separate direction state machine, not the early rejection or strict-reversal mechanism. It changes backend selection and code generation, so it is a performance candidate rather than a behavior-only move.
+
+A three-block linked comparison against `28e6a96`, pinned to CPU 0 on the Ryzen 7 8845H, covered 60 cases: `u64`, `f64` and `row_u64`; random, sorted, reverse, equal and sorted99; 48, 1,000, 8,192 and 65,536 records. Baseline/current copies had matching within-revision source hashes. The retained executable has separate complete `u64` order-probe and confirmation bodies for all four copies, not merely separate wrappers. Ratios below are baseline time divided by the current A/A mean; values above one favor current.
+
+| Case | Baseline copies | Current copy | A/A range |
+|---|---:|---:|---:|
+| `u64/sorted/1000` | 1.451 / 1.442 | 1.004 | 0.951–1.049 |
+| `f64/sorted/1000` | 1.588 / 1.599 | 0.983 | 0.988–1.012 |
+| `u64/sorted/48` | 0.728 / 0.689 | 1.232 | 0.974–1.026 |
+| `u64/reverse/1000` | 0.963 / 0.956 | 0.996 | 0.995–1.005 |
+
+The larger ascending cases benefit, but the short ascending and reverse cases regress; the second current placement also exposes sensitivity. Disassembly shows an out-of-line shared confirmation and another call to the ascending backend where the old unit-stride path kept scalar continuation inside its probe. These observations require investigation, not automatic additional rounds or a claim that all losses are noise. Results remain performance-unaccepted. Raw evidence is retained outside Git in `shared-order-linked`; tests, affected Miri checks and independent structural review passed.
+
+
+The follow-up keeps that shared state machine, expresses descending continuation as one loop (reject an increase, then accumulate ties), and inlines the existing ascending-backend entry so short scalar suffixes need no additional call. An alternative based only on the first distinct key was tested and rejected: it reduced source further but regressed 1,000-record constant inputs by about 14–29% across the tested representations. No distribution-specific exception was added.
+
+The retained follow-up uses the same 60-case, three-block linked selection in `shared-order-desc-linked`. Baseline/current ratios are 1.364 / 1.360 for `u64/sorted/1000` (A/A 0.964–1.036), 1.552 / 1.574 for `f64/sorted/1000` (0.991–1.009), and 1.307 / 1.299 for `f64/reverse/1000` (0.991–1.009). The second current copies are 0.960, 1.000 and 1.007 respectively. Short ascending losses are no longer common to both current placements, but larger ascending regressions remain: `u64/sorted/65536` baseline ratios 0.958 / 0.961 with A/A 0.994–1.006, and `f64/sorted/65536` 0.983 / 0.983 with A/A 0.994–1.006. Short random rows and second-copy outliers also remain in the full report; the screen is not whole-engine acceptance.
+
+A maintained fixed-work comparison (`shared-order-counters`, eight sorts per process, `u64`/`f64`, equal/reverse/sorted, 1,000/65,536 records) confirms fewer instructions for descending confirmation: −24.8% / −19.8% at 1,000 records, with identical baseline/control counts. Constant-input counts differ only by small call overhead. It also confirms added work on the large ascending route: +29.5% / +5.3% instructions. Callgrind attribution locates the increase in the existing AVX2 inversion scan, not a new full-slice traversal; the generated backend changed with the caller/inlining context. This loss remains explicit rather than being dismissed as timing noise or repaired with a length exception.
+
+### Active block directory and shard adoption
+
+The structural checkpoint after `e4fea65` replaces the overloaded bucket-count field with an active block range and makes shard adoption a complete partition-guard operation. It preserves allocation and record-copy work, bounded staging, compaction overlap and callback recovery. Serial/Rayon tests and doctests, both Clippy configurations, site checks, four serial block Miri tests and thirteen parallel block Miri tests pass. Independent review accepted the structure after the unsafe adoption contract was made explicit about original shard offsets and recovery ownership.
+
+A maintained nine-block serial screen against `e4fea65` uses `--types u64,row_u64 --distributions random --lengths 65536,2097152 --cpu 2`, with the same host/compiler/alignment as the required-SIMD screen. Raw results and provenance remain outside Git in `block-directory-screen-v2`:
+
+| Case | Current / baseline | Block range | A/A range | Screen |
+|---|---:|---|---|---|
+| `u64/random/65536` | 1.0007 | 0.9974–1.1737 | 0.9968–1.0032 | within A/A |
+| `row_u64/random/65536` | 0.9991 | 0.9974–1.0077 | 0.9974–1.0026 | within A/A |
+| `u64/random/2097152` | 0.9976 | 0.9901–1.0066 | 0.9918–1.0082 | within A/A |
+| `row_u64/random/2097152` | 1.0014 | 0.9955–1.0055 | 0.9963–1.0037 | within A/A |
+
+The first attempt (`block-directory-screen`) timed out before nine blocks; it has no complete verdict and is not pooled with the second run. This screen neither measures parallel adoption latency nor establishes whole-engine performance acceptance; one direct 65,536-record block also had a 17.37% excursion despite the median remaining within A/A.
+
+### Candidate-masked root and child scans
+
+The follow-up to `ce71415` removes the block layer's root-only variation scan. Roots and children use the engine's candidate-masked scan, starting with 64 keys after the first and doubling batches. This keeps early completion and long vectorizable stretches without two scan implementations. Serial and Rayon tests and Rayon Clippy pass. The adversarial owned-record fixture now schedules its changing pivot after the shared first batch; its classification, drop and permutation assertions are unchanged. Local Miri is unavailable (no rustup/Miri installation).
+
+A three-block linked screen against `ce71415` covers direct/keyed u64, random/equal/two_values/d16/sorted_tail, at 49 and 65,536 records. Raw results are retained outside Git in `/tmp/pr97-work/r1-linked` on the i7-10875H, CPU 2, Rust 1.99.1, shared alignment defaults, powersave governor, turbo and SMT enabled. Baseline/current ratios for `u64/random/65536` are 0.990/0.990 (A/A 0.999–1.001), but the second current copy is also 0.990. For `row_u64/sorted_tail/49` they are 0.804/0.800 (A/A 0.855–1.145), with current B 0.811. These losses and placement sensitivity remain unresolved; this screen is not performance acceptance. Larger sorted-tail ratios are 1.020/1.025 for direct keys and 1.014/1.018 for keyed records. Neither those improvements nor the mostly inconclusive narrow-key cases cancel the losses.
+
+The earlier `before-linked-v3` screen compares the unchanged `ce71415` library against main `3db3860`, not this scan candidate. It reproduces random/49 regressions in both baseline placements: baseline/current ratios 0.694/0.696 for row_u32 and 0.811/0.803 for u64. Two preceding invocations failed before measurement (wrong plan kind, then an output-log filename collision); they provide no timing evidence.
+
+### Counting-pass result visibility
+
+The shared pass loop at `79e3ef2` retained per-record maximum-bucket tracking even for LSD, whose caller discards it. Fixed-work u32/random/1M counters against main `3db3860` showed +13.09% instructions and +17.00% reads with identical baseline/control counts (`/tmp/pr97-work/u32-counters`). The follow-up inlines the existing loop into its consumers: LSD can discard the maximum while MSD retains its whole-tile insertion shortcut. No second source loop, mode parameter, allocation or extra scan is introduced.
+
+A three-block linked screen against `79e3ef2` (`/tmp/pr97-work/pass-inline-linked`) covers u32/u64/row_u32/row_u64, random/d16, 49/1,000/1M records. It uses the same i7-10875H, CPU 2, Rust 1.99.1, alignment, powersave/turbo/SMT settings as the bounded-planner screens. Ratios divide baseline time by current time:
+
+| Case | Baseline A / B | Current B | A/A range |
+|---|---:|---:|---:|
+| u32/random/1M | 1.0524 / 1.0523 | 0.9827 | 0.9659–1.0341 |
+| row_u64/random/1000 | 0.9540 / 0.9496 | 0.9843 | 0.9920–1.0080 |
+| u32/random/49 | 0.9618 / 0.9932 | 0.9601 | 0.9962–1.0038 |
+| u64/random/1M | 0.9895 / 0.9928 | 0.9909 | 0.9842–1.0158 |
+
+The u32/1M direction improves in both placements, but the row_u64/1000 loss remains open; its nearly unchanged instructions do not dismiss its latency loss. Short u32 placement disagreement and other inconclusive cases are retained in the full report. Four fixed-work cases (`pass-inline-counters`, one sort, u32/row_u64 random at 1K/1M) verify the intended removal: u32/1M instructions fall 69,894,067 → 61,889,199 (−11.45%) and reads 13,884,021 → 11,881,593 (−14.42%); baseline/control totals match. Row_u64/1K instructions fall only 0.05%. Disassembly of the retained linked executable shows four distinct u32 tile bodies; current MSD retains histogram maximum updates, current LSD does not. Inlining increases their code footprint and does not establish whole-engine acceptance.
+
+A rejected alternative removed the maximum from every histogram and tested insertion eligibility from completed bucket ends. It achieved similar u32/1M instruction savings but regressed random/49 in both baseline placements for all four types, approximately 11–24%, and u64/random/1M by about 14%. The added boundary scan was not retained. Its patch, counters and linked results remain outside Git in `rejected-cursor-finish.patch`, `cursor-finish-counters` and `cursor-finish-linked` under the same result root. Serial/Rayon tests and both Clippy configurations pass for the inline candidate; final cloud and performance acceptance remain pending.
+
+### Terminal parallel completion
+
+Independent review found that covering-digit callback buckets still allocated jobs or took pooled scratch before the shared child finisher returned on an empty candidate mask. The callbacks now return before that work, preserving the single partition entry and block recovery operation. A four-thread stable payload test and Rayon Clippy pass. A paired process screen against `11f94f6` (`/tmp/pr97-work/terminal-screen`, CPU 0/2/4/6, same host/toolchain) reports current/baseline 0.9965 for row_u64/d16/1M parallel (99% median interval 0.9661–1.0338), 1.0024 for two_values (0.9931–1.0124), and serial random/65536 control 1.0001 (0.9918–1.0062). This preserves a known saving; the screen makes no measured speedup claim or A/A/source-attribution claim.
+
+### Bounded tile planner
+
+The follow-up to `2c0ae42` removes tile sampling, conditional population estimates, singleton assumptions and recursive projected work. It tries a one-pass finish, then searches at most the table width's split points for an optimal two-pass finish; otherwise one MSD partition exposes actual children. The two-digit plan replaces the general dynamic-programming tables and 22-digit array. Actual constant children still terminate after confirmation, insertion-sized buckets avoid scans, and larger children retain candidate-masked recursive finishing. Node sampling is unchanged. This is a routing candidate, not a behavior-only refactor or a declaration of performance acceptance.
+
+Two three-block linked screens on the same host/settings as the candidate-masked scan compare with main `3db3860`. The first (`/tmp/pr97-work/simple-routing-linked`) removes only the tile sample model, retaining the old flat-plan optimizer; it covers u64/row_u64, random/bimodal/skew99/sparse_digits/sparse8/runs, 49/1,000/65,536 records. The second (`/tmp/pr97-work/two-pass-linked`) also uses the bounded planner and covers u32/u64/row_u32/row_u64, random/bimodal/sparse_digits at the same lengths. All outputs verify. These are complete selections, not whole-engine acceptance.
+
+Selected second-screen baseline/current ratios (both main placements) and current-B controls:
+
+| Case | Main A / B | Current B | A/A range |
+|---|---:|---:|---:|
+| row_u32/random/49 | 1.621 / 1.669 | 0.967 | 0.992–1.008 |
+| row_u64/random/49 | 1.807 / 1.848 | 0.995 | 0.995–1.005 |
+| u32/random/49 | 1.776 / 1.767 | 1.029 | 0.999–1.001 |
+| u64/random/49 | 1.916 / 1.881 | 0.995 | 0.913–1.087 |
+| row_u32/random/65536 | 0.977 / 0.982 | 0.997 | 0.990–1.010 |
+| row_u32/bimodal/65536 | 0.993 / 0.983 | 1.009 | 0.999–1.001 |
+| row_u32/sparse_digits/65536 | 0.992 / 0.992 | 0.996 | 0.998–1.003 |
+| u32/sparse_digits/65536 | 0.959 / 0.961 | 0.999 | 0.993–1.007 |
+| u64/bimodal/65536 | 0.977 / 0.990 | 0.988 | 0.985–1.015 |
+
+Short random cases improve substantially, but the listed large-input losses remain open individually. Current-copy sensitivity also remains: u64/bimodal/49 current B is 0.806, and u64/random/1000 has an A/A range of 0.769–1.231. These observations are not discarded or averaged away. Final cloud coverage, broader lengths/types, internal-body inspection and source-attribution controls remain outstanding. Serial workspace tests, Rayon tests, Clippy and documentation model/type checks pass at this candidate; Miri remains for CI.
+
+### Conditional tile-work candidate
+
+The candidate after `cb6be7f` replaces uniform-depth estimation and the two-bucket override with sample-weighted child work. Structural review found the replacement preserves the reason for constant-child finishing, but performance remains unaccepted. Serial/Rayon tests, Clippy, site checks and all 17 engine Miri tests pass. A fixed-work comparison of clean `e3da30a` against `b8968b6` already showed additional random-input instructions: 8.62% / 6.28% at 1,000 records and 1.99% / 3.32% at 65,536, for direct `u64` / keyed rows. Identical baseline repeats had identical instruction totals; simulated events do not establish a latency cause.
+
+Two nine-block maintained screens compare the conditional-work candidate with `cb6be7f` on CPU 2 with the same host/compiler/alignment as the required-SIMD screen. The first revision charged flat continuation and unnecessarily calculated variation even for insertion-sized estimates. The second skips that calculation and uses constant sorted-group endpoints. Neither is performance-accepted:
+
+| Second-revision case | Current / baseline | Block range | A/A range | Screen |
+|---|---:|---|---|---|
+| `u64/random/1000` | 1.0297 | 1.0186–1.0449 | 0.9916–1.0084 | slower |
+| `row_u64/random/1000` | 1.0350 | 1.0131–1.0401 | 0.9748–1.0252 | slower |
+| `u64/random/65536` | 1.0059 | 0.9993–1.0192 | 0.9902–1.0098 | within A/A |
+| `row_u64/random/65536` | 1.0098 | 1.0087–1.0134 | 0.9973–1.0027 | slower |
+| `u64/skew99/1000` | 0.9976 | 0.9907–1.0041 | 0.9953–1.0047 | within A/A |
+| `row_u64/skew99/1000` | 0.9920 | 0.9901–0.9961 | 0.9968–1.0032 | faster |
+| `u64/bimodal/1000` | 1.3160 | 1.3003–1.3248 | 0.9938–1.0062 | slower |
+| `row_u64/bimodal/1000` | 1.3430 | 1.3357–1.3554 | 0.9928–1.0072 | slower |
+| `u64/hot50/1000` | 1.0103 | 1.0044–1.0176 | 0.9910–1.0090 | slower |
+| `row_u64/hot50/1000` | 1.0143 | 1.0074–1.0895 | 0.9954–1.0046 | slower |
+| `u64/sparse_digits/1000` | 1.0635 | 1.0065–1.1309 | 0.9726–1.0274 | slower |
+| `row_u64/sparse_digits/1000` | 1.0329 | 1.0252–1.0376 | 0.9931–1.0069 | slower |
+
+Both `sparse8/1000` cases and both `skew99/65536` cases were within A/A. Raw evidence remains outside Git in `conditional-work-screen-v1`, `conditional-work-screen-v2`, `conditional-work-shapes-v2` and `convergence-work-v1`. Reproduce the second candidate's selections with `--types u64,row_u64 --distributions random,skew99 --lengths 1000,65536` and `--types u64,row_u64 --distributions sparse8,hot50,sparse_digits,bimodal --lengths 1000`, using `pnpm tools compare commit cb6be7f --cpu 2` and separate output directories. These are process screens, not source attribution. The flat child-continuation estimate misses further MSD opportunities; no distribution exception compensates for it.
+
+A third candidate recursively projects the retained sample onto each nonterminal child's next digit and compares that continuation with flat passes. No further input samples or allocations are introduced, and every estimated level removes a digit. Its six-case screen (`conditional-work-recursive-v3`, same baseline and conditions, `--types u64,row_u64 --distributions random,bimodal,skew99 --lengths 1000`) reduces but does not resolve the bimodal loss:
+
+| Third-revision case | Current / baseline | Block range | A/A range | Screen |
+|---|---:|---|---|---|
+| `u64/bimodal/1000` | 1.0569 | 1.0450–1.0638 | 0.9938–1.0062 | slower |
+| `row_u64/bimodal/1000` | 1.0541 | 1.0503–1.0789 | 0.9944–1.0056 | slower |
+| `u64/random/1000` | 1.0267 | 1.0186–1.0311 | 0.9933–1.0067 | slower |
+| `row_u64/random/1000` | 1.0234 | 0.9933–1.0292 | 0.9616–1.0384 | within A/A |
+| `u64/skew99/1000` | 1.0016 | 0.9928–1.0077 | 0.9969–1.0031 | within A/A |
+| `row_u64/skew99/1000` | 1.0107 | 0.9884–1.0441 | 0.9797–1.0203 | within A/A |
+
+The third candidate passes serial/Rayon tests, Clippy, site checks and all six affected planner tests under Miri. Independent source review found no issues but explicitly withheld performance acceptance. Fixed-work counters (`conditional-recursive-counters-v3`, one sort per process against `cb6be7f`) show additional instructions: 9.52% / 7.48% for `bimodal/1000` and 4.19% / 3.21% for `random/1000`, direct / keyed respectively; identical baseline repeats had identical instruction totals. These counts establish additional work, not its full latency contribution. These candidates remain performance-unaccepted; the residual model/planning work and broader coverage must be evaluated before adopting the trade-off.
+
+An equivalent group scan after `a208d15` holds the current digit fixed while finding its group end, rather than masking both keys at every adjacent comparison. It changes no sample, estimate or routing rule. The maintained counters (`conditional-fixed-group-counters`, one sort) reduce instructions by 1.50% / 1.20% on `bimodal/1000` and 0.83% / 0.64% on `random/1000`, direct / keyed respectively; baseline repeats have identical instruction totals. A nine-block screen (`conditional-fixed-group-screen`, `--types u64,row_u64 --distributions random,bimodal --lengths 1000 --cpu 2`, same conditions) reports:
+
+| Case | Current / baseline | Block range | A/A range | Screen |
+|---|---:|---|---|---|
+| `u64/bimodal/1000` | 0.9920 | 0.9887–0.9935 | 0.9978–1.0022 | faster |
+| `row_u64/bimodal/1000` | 0.9933 | 0.9865–1.0003 | 0.9956–1.0044 | faster |
+| `u64/random/1000` | 0.9919 | 0.9888–0.9979 | 0.9966–1.0034 | faster |
+| `row_u64/random/1000` | 0.9953 | 0.9920–0.9993 | 0.9972–1.0028 | faster |
+
+This reduces work in the candidate, but neither cancels the earlier regressions nor supplies the missing in-process and placement-controlled acceptance evidence.

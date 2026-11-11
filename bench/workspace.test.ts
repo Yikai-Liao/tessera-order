@@ -94,6 +94,21 @@ test("snapshots preserve dirty sources and clean up failures", async () => {
       await command("git", ["status", "--porcelain"], { cwd: root, capture: true }),
       before,
     );
+    const cached = join(root, "../", `target-${process.pid}`);
+    const previous = process.env.TESSERA_BENCH_TARGET_DIR;
+    try {
+      process.env.TESSERA_BENCH_TARGET_DIR = cached;
+      await withWorkspace(root, async (workspace) => {
+        assert.equal(workspace.target, cached);
+        await mkdir(cached, { recursive: true });
+        await writeFile(join(cached, "dependency"), "cached");
+      });
+      assert.equal(await readFile(join(cached, "dependency"), "utf8"), "cached");
+    } finally {
+      if (previous === undefined) delete process.env.TESSERA_BENCH_TARGET_DIR;
+      else process.env.TESSERA_BENCH_TARGET_DIR = previous;
+      await rm(cached, { recursive: true, force: true });
+    }
     const escaping = join(crate, "src/escaping.rs");
     await symlink(process.execPath, escaping);
     await assert.rejects(
@@ -177,18 +192,69 @@ test("Cargo artifacts retain paths and build provenance", async (t) => {
     ["compare", "/target/configured-target/release/compare"],
     ["smoke", "C:\\target\\configured-target\\release\\deps\\smoke.exe"],
   ]) {
-    const messages = [
-      { reason: "compiler-artifact", target: { name: "dependency" }, executable: "/unrelated" },
-      { reason: "build-script-executed", package_id: "measured", out_dir: directory },
-      { reason: "compiler-artifact", package_id: "measured", target: { name }, executable },
-    ];
-    const output = messages.map((message) => JSON.stringify(message)).join("\n");
-    assert.deepEqual(await buildArtifact(output, name), { executable, provenance });
-    await assert.rejects(buildArtifact("", name), /Expected one/);
-    await assert.rejects(buildArtifact(JSON.stringify(messages[2]), name), /Missing .* provenance/);
-    await assert.rejects(
-      buildArtifact(`${output}\n${JSON.stringify(messages[2])}`, name),
-      /Expected one/,
-    );
+    for (const library_features of [[], ["default", "portable-simd", "std"]]) {
+      const messages = [
+        { reason: "compiler-artifact", target: { name: "dependency" }, executable: "/unrelated" },
+        { reason: "build-script-executed", package_id: "measured", out_dir: directory },
+        { reason: "compiler-artifact", package_id: "measured", target: { name }, executable },
+        {
+          reason: "compiler-artifact",
+          package_id: "library",
+          target: { name: "tessera_sort", kind: ["lib"] },
+          features: library_features,
+        },
+      ];
+      const output = messages.map((message) => JSON.stringify(message)).join("\n");
+      assert.deepEqual(await buildArtifact(output, name), {
+        executable,
+        provenance: { ...provenance, library_features },
+      });
+      const revision = {
+        revisions: {
+          libraries: { "tessera-sort": library_features, "revision-baseline": ["portable-simd"] },
+        },
+      };
+      await writeFile(
+        join(directory, "provenance.json"),
+        JSON.stringify({ ...provenance, ...revision }),
+      );
+      await assert.rejects(buildArtifact(output, name), /features differ/);
+      const clone = {
+        reason: "compiler-artifact",
+        target: { name: "revision_baseline", kind: ["lib"] },
+        features: ["portable-simd"],
+      };
+      const linked = output + "\n" + JSON.stringify(clone);
+      assert.deepEqual(
+        (await buildArtifact(linked, name)).provenance.revisions,
+        revision.revisions,
+      );
+      clone.features = [];
+      await assert.rejects(
+        buildArtifact(output + "\n" + JSON.stringify(clone), name),
+        /features differ/,
+      );
+      await writeFile(join(directory, "provenance.json"), JSON.stringify(provenance));
+      await assert.rejects(buildArtifact("", name), /Expected one/);
+      await assert.rejects(
+        buildArtifact(JSON.stringify(messages[2]), name),
+        /Missing .* provenance/,
+      );
+      for (const artifact of [messages[2], messages[3]])
+        await assert.rejects(
+          buildArtifact(`${output}\n${JSON.stringify(artifact)}`, name),
+          /Expected one/,
+        );
+      await assert.rejects(
+        buildArtifact(
+          messages
+            .slice(0, 3)
+            .map((message) => JSON.stringify(message))
+            .join("\n"),
+          name,
+        ),
+        /Expected one Tessera library artifact/,
+      );
+    }
   }
 });

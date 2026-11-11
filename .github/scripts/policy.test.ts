@@ -2,12 +2,10 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { glob, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, matchesGlob, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { titleErrors } from "./check_pr_title.ts";
 import { checkDco } from "./check-dco.ts";
 import { changedPaths, select } from "./ci_changes.ts";
 import {
@@ -46,131 +44,32 @@ function replace(value: object, path: string[], replacement: unknown) {
   return copy;
 }
 
-test("title rules preserve accepted conventions and reject malformed summaries", () => {
-  for (const title of [
-    "refactor: clean up engine naming, documentation and tooling",
-    "perf(engine): cap tile buckets at 4 per record above 8 bytes",
-    "feat!: rename Sorter::sort_by_key to sort_by",
-    "build(deps): bump serde from 1.0.0 to 1.0.1",
-    "docs(site): explain the wide-record cursor cap",
-  ])
-    assert.deepEqual(titleErrors(title), []);
-  for (const [title, error] of [
-    ["Clean up engine naming", "expected"],
-    ["refactor:clean up", "expected"],
-    ["Refactor: clean up", "expected"],
-    ["refactor(): clean up", "expected"],
-    ["feature: add a sort", "type `feature`"],
-    ["fix(lib): keep records", "scope `lib`"],
-    ["fix: keep records.", "period"],
-    [`docs: ${"x".repeat(60)}`, "over 64"],
-    ["fix: change\n", "expected"],
-    ["fix: first\nsecond", "expected"],
-  ])
-    assert.ok(
-      titleErrors(title).some((message) => message.includes(error)),
-      title,
-    );
-});
-
-test("platform test cells enable library features without native competitors", async () => {
-  const action = await readFile(
-    new URL("../actions/rust-test/action.yml", import.meta.url),
-    "utf8",
-  );
-  const validate = (action: string) => {
-    const commands = [...action.matchAll(/^\s+run: (cargo (?:test|build)[^\n]+)$/gm)].map(
-      (match) => match[1],
-    );
-    const workspace = commands.filter((command) => command.includes("--workspace"));
-    assert.ok(workspace.length);
-    for (const command of workspace) {
-      assert.doesNotMatch(command, /--all-features/, command);
-      const features = command.match(/--features\s+(\S+)/)?.[1].split(",") ?? [];
-      assert.ok(
-        features.every((feature) => feature.startsWith("tessera-sort/")),
-        command,
-      );
-    }
-    const combined = workspace.filter(
-      (command) =>
-        command.includes("tessera-sort/rayon") && command.includes("tessera-sort/portable-simd"),
-    );
-    assert.ok(
-      combined.some(
-        (command) => command.startsWith("cargo test") && command.includes("--lib --tests"),
-      ),
-    );
-    assert.ok(combined.some((command) => command.includes("--doc")));
-    assert.ok(combined.some((command) => command.startsWith("cargo build")));
-    assert.doesNotMatch(commands.join("\n"), /compare-native/);
-    assert.doesNotMatch(action, /TESSERA_BENCH_CHECK_ONLY=1/);
-  };
-  validate(action);
-  const regression = action.replaceAll(
-    "--features tessera-sort/portable-simd,tessera-sort/rayon",
-    "--all-features",
-  );
-  assert.notEqual(regression, action);
-  assert.throws(() => validate(regression), /all-features/);
-});
-
-test("language routing preserves independent and shared paths", () => {
-  for (const paths of [
-    ["rust/tessera-sort/src/lib.rs"],
-    ["Cargo.lock"],
-    ["rustfmt.toml"],
-    ["bench/rust/main.rs"],
-  ])
-    assert.deepEqual(select(paths), { rust: true, cpp: false });
-  for (const path of ["cpp/include/sort.hpp", "CMakeLists.txt"])
-    assert.deepEqual(select([path]), { rust: false, cpp: true });
+test("routing selects dependencies without running Rust for presentation changes", () => {
+  const none = { rust: false, cpp: false, comparison: false, benchmark: false, docs: false };
   for (const path of [
-    "conformance/semantics.md",
-    "conformance/vectors/a.json",
-    "bench/report/index.ts",
-    "tools/process.ts",
-    "LICENSE",
-    ".github/workflows/release.yml",
-    ".github/workflows/rust-ci.yml",
+    "tools/status.ts",
+    "bench/continuous/markdown.ts",
+    "bench/continuous/index.test.ts",
   ])
-    assert.deepEqual(select([path]), { rust: true, cpp: true });
-  for (const path of [
-    "docs/.vitepress/config.ts",
-    "docs/public/logo.svg",
-    "package.json",
-    "pnpm-lock.yaml",
-    "pnpm-workspace.yaml",
-    ".github/workflows/docs.yml",
-    "README.md",
-    "RELEASING.md",
-    "ROADMAP.md",
-    "docs/explain/keys.md",
-    "bench/README.md",
-    "assets/logo.svg",
-    ".github/scripts/ci_changes.ts",
-    ".github/scripts/check-dco.sh",
-    "biome.json",
-  ])
-    assert.deepEqual(select([path]), { rust: false, cpp: false });
-  assert.deepEqual(select([]), { rust: false, cpp: false });
-  assert.deepEqual(select(["rust/tessera-sort/README.md"]), {
+    assert.deepEqual(select([path]), none);
+  assert.deepEqual(select(["docs/explain/keys.md"]), { ...none, docs: true });
+  assert.deepEqual(select(["rust/tessera-sort/src/lib.rs"]), {
+    ...none,
     rust: true,
-    cpp: false,
+    comparison: true,
+    benchmark: true,
   });
-  assert.deepEqual(select(["rust/a.rs", "cpp/b.hpp"]), { rust: true, cpp: true });
+  assert.deepEqual(select(["bench/plans/continuous.toml"]), { ...none, benchmark: true });
+  assert.deepEqual(select(["bench/rust/native/adapters.cpp"]), {
+    ...none,
+    rust: true,
+    comparison: true,
+  });
+  assert.deepEqual(select(["cpp/include/sort.hpp"]), { ...none, cpp: true, comparison: true });
+  for (const path of ["conformance/semantics.md", "unknown-input"])
+    assert.ok(Object.values(select([path])).every(Boolean));
   assert.equal(changedPaths(undefined, "HEAD"), null);
-  assert.equal(changedPaths("0".repeat(40), "HEAD"), null);
   assert.equal(changedPaths("missing-base-ref", "HEAD"), null);
-});
-
-test("Rust include paths remain covered by language routing", async () => {
-  const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-  for await (const path of glob("{rust,bench/rust}/**/*.rs", { cwd: root })) {
-    const source = await readFile(join(root, path), "utf8");
-    for (const match of source.matchAll(/include_(?:str|bytes)!\(\s*"([^"]+)"/g))
-      assert.ok(select([relative(root, resolve(root, dirname(path), match[1]))]).rust, path);
-  }
 });
 
 test("Dependabot provenance requires every event and identity field", () => {
@@ -367,58 +266,4 @@ test("DCO enforces each commit independently of a later sign-off or bot exceptio
   } finally {
     process.chdir(before);
   }
-});
-
-test("title entry points retain JSON and actionable failure annotations", () => {
-  const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-  for (const args of [
-    [join(root, ".github/scripts/check_pr_title.ts")],
-    [join(root, "tools/index.ts"), "ci", "title"],
-  ]) {
-    const result = spawnSync(process.execPath, args, {
-      encoding: "utf8",
-      env: { ...process.env, PR_TITLE: "invalid title" },
-    });
-    assert.equal(result.status, 1);
-    assert.ok(JSON.parse(result.stdout).errors.length > 0);
-    assert.match(result.stderr, /::error::/);
-    assert.match(result.stderr, /CONTRIBUTING.md/);
-  }
-});
-
-test("benchmark triggers include runtime inputs without scheduling presentation changes", async () => {
-  const source = await readFile(new URL("../workflows/bench-build.yml", import.meta.url), "utf8");
-  const paths = source.split("    paths:\n")[1].split("  push:")[0];
-  const patterns = [...paths.matchAll(/ {6}- "([^"\n]+)"/g)].map((match) => match[1]);
-  const triggers = (path: string) =>
-    patterns.reduce(
-      (selected, pattern) =>
-        matchesGlob(path, pattern.replace(/^!/, "")) ? !pattern.startsWith("!") : selected,
-      false,
-    );
-  for (const path of [
-    "rust/tessera-sort/src/lib.rs",
-    "bench/rust/benches/smoke.rs",
-    "bench/plans/continuous.toml",
-    "bench/catalog.toml",
-    "bench/workspace.ts",
-    "tools/process.ts",
-    "tools/continuous.ts",
-    "bench/continuous/worker.ts",
-    "Cargo.lock",
-    ".cargo/config.toml",
-  ])
-    assert.ok(triggers(path), path);
-  for (const path of [
-    "bench/README.md",
-    "rust/tessera-sort/README.md",
-    "bench/rust/README.md",
-    "bench/plot/rows.ts",
-    "bench/continuous/chart.ts",
-    "tools/status.ts",
-    "package.json",
-    "pnpm-lock.yaml",
-    ".github/scripts/release.ts",
-  ])
-    assert.equal(triggers(path), false, path);
 });

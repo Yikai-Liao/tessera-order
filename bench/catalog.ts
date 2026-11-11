@@ -5,6 +5,10 @@ import { z } from "zod";
 import { decodeConfig } from "./config.ts";
 
 const identity = z.object({ id: z.string(), label: z.string() });
+const blockBudget = z.object({
+  count: z.number().int().positive(),
+  agreement: z.number().int().positive(),
+});
 const inventory = z.object({
   types: z.array(z.string()),
   shapes: z.array(z.string()),
@@ -15,6 +19,17 @@ const inventory = z.object({
 export const catalog = z
   .object({
     schema: z.literal(1),
+    pairedBlocks: z.object({ short: blockBudget, extended: blockBudget }),
+    revisionSampling: z
+      .array(
+        z.object({
+          min_len: z.number().int().positive(),
+          warm_ms: z.number().int().positive(),
+          window_ms: z.number().int().positive(),
+          samples: z.number().int().min(10).max(100),
+        }),
+      )
+      .min(1),
     algorithms: z.array(
       identity.extend({
         stable: z.boolean(),
@@ -40,14 +55,7 @@ export const catalog = z
       }),
     ),
     modes: z.array(identity),
-    configurations: z.array(
-      z.object({
-        id: z.string(),
-        name: z.string(),
-        testbed: z.string(),
-        features: z.array(z.string()),
-      }),
-    ),
+    continuous: z.object({ testbed: z.string(), features: z.array(z.string()) }),
     smoke: inventory,
     comparison: inventory.extend({
       summaryShapes: z.array(z.string()),
@@ -64,9 +72,15 @@ export const catalog = z
     decodeConfig(readFileSync(new URL("./catalog.toml", import.meta.url), "utf8"), "catalog.toml"),
   );
 
-/** Continuous configurations and their shared publication identity. */
-export const VARIANTS = catalog.configurations;
-export type Variant = (typeof VARIANTS)[number];
+/** Shared revision budget consumed by the runner and trusted completeness check. */
+export function revisionSampling(len: number) {
+  const settings = catalog.revisionSampling.find((s) => len >= s.min_len);
+  if (!settings) throw new Error("No revision sampling budget");
+  return settings;
+}
+
+/** The one hosted build: its Cloud Testbed and required Cargo features. */
+export const continuous = catalog.continuous;
 
 function index<T extends { id: string }>(entries: T[]) {
   return new Map(entries.map((entry) => [entry.id, entry]));

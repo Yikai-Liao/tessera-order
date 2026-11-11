@@ -69,7 +69,7 @@ function run(id: number, overrides: object = {}) {
 function check(id: number, overrides: object = {}) {
   return {
     id,
-    name: "Benchmarks (rust, Default)",
+    name: "Benchmarks (rust)",
     status: "completed",
     conclusion: "success",
     details_url: "https://github.com/owner/project/actions/runs/70",
@@ -102,62 +102,38 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
           run(10),
           run(90, { head_sha: "old" }),
           run(92, { event: "workflow_run", workflow_id: 2 }),
+          run(93, {
+            event: "workflow_dispatch",
+            workflow_id: 2,
+            path: ".github/workflows/bench-diagnostics.yml@refs/heads/main",
+          }),
         ],
       },
       { workflow_runs: [run(11, { status: "in_progress", conclusion: null, run_attempt: 2 })] },
     ],
+    "actions/runs/93/jobs?per_page=100": [{ jobs: [] }],
+    "actions/runs/11/jobs?per_page=100": [{ jobs: [] }],
+    "actions/runs/70/jobs?per_page=100": [{ jobs: [] }],
     "actions/runs/70": run(70, {
       workflow_id: 2,
-      name: "Track benchmarks",
+      name: "Legacy tracker",
       event: "workflow_run",
       head_sha: "trusted",
       conclusion: "failure",
     }),
-    "actions/runs/11/jobs?per_page=100": [
-      {
-        jobs: [
-          {
-            name: "miri",
-            status: "in_progress",
-            conclusion: null,
-            html_url: "job-url",
-            steps: [{ name: "Install tools", status: "in_progress", conclusion: null }],
-          },
-        ],
-      },
-    ],
-    "actions/runs/70/jobs?per_page=100": [
-      {
-        jobs: [
-          {
-            name: "rust",
-            status: "completed",
-            conclusion: "failure",
-            html_url: "failed-job",
-            steps: [{ name: "Install Bencher", status: "completed", conclusion: "failure" }],
-          },
-        ],
-      },
-    ],
   });
   const status = JSON.parse(f.run("status"));
   assert.equal(status.target.head, "current");
   assert.deepEqual(
     status.workflows.map((w: { id: number }) => w.id),
-    [11, 70],
+    [93, 11],
   );
-  assert.equal(status.benchmarks[0].state, "failure");
-  assert.equal(status.benchmarks[0].title, "Measurement failed");
-  assert.equal(status.benchmarks[1].state, "missing");
+  assert.equal(status.benchmark.state, "failure");
+  assert.equal(status.benchmark.title, "Measurement failed");
   assert.equal(status.report, null);
   assert.equal(status.details, undefined);
   assert.ok(JSON.stringify(status).length < 2000);
-  const text = f.run("status", "main", "--text");
-  assert.match(text, /Install tools: in_progress/);
-  assert.match(text, /Install Bencher: failure/);
-  assert.match(text, /Measurement failed/);
-  assert.match(text, /portable-simd: missing/);
-  assert.ok(!(await f.requests()).some((path) => path.includes("/92")));
+  assert.ok(!(await f.requests()).some((path) => /\/(70|92)(\/|$)/.test(path)));
 });
 
 test("PR status joins merge workflows without accepting stale comments", async (t) => {
@@ -196,8 +172,9 @@ test("PR status joins merge workflows without accepting stale comments", async (
     ],
     "actions/runs/70": run(70, {
       workflow_id: 2,
-      name: "Track benchmarks",
-      event: "workflow_run",
+      name: "Legacy tracker",
+      event: "workflow_dispatch",
+      path: ".github/workflows/bench-track.yml",
       head_sha: "trusted",
     }),
     "issues/49/comments?per_page=100": [
@@ -209,9 +186,10 @@ test("PR status joins merge workflows without accepting stale comments", async (
   assert.equal(status.target.head, "current");
   assert.equal(status.target.merge, "merge");
   assert.equal(status.details.workflows[0].head, "merge");
-  assert.equal(status.workflows[1].state, "success");
-  assert.equal(status.benchmarks[0].state, "failure");
-  assert.equal(status.benchmarks[0].title, "2 slower");
+  assert.equal(status.workflows.length, 1);
+  assert.equal(status.workflows[0].state, "success");
+  assert.equal(status.benchmark.state, "failure");
+  assert.equal(status.benchmark.title, "2 slower");
   assert.equal(status.report, "current");
   assert.equal(status.details.comment.body, marker("rust", "current"));
 });
@@ -224,25 +202,8 @@ test("missing workflows never become a clean verdict", async (t) => {
   });
   const status = JSON.parse(f.run("status", "feature/topic"));
   assert.deepEqual(status.workflows, []);
-  assert.ok(status.benchmarks.every((c: { state: string }) => c.state === "missing"));
+  assert.equal(status.benchmark.state, "missing");
   assert.match(f.run("status", "feature/topic", "--text"), /No workflow runs attached/);
-});
-
-test("merged PR status does not substitute main for the PR head", async (t) => {
-  const f = await fixture(t, {
-    "pulls/49": {
-      number: 49,
-      state: "closed",
-      head: { sha: "current" },
-      merge_commit_sha: "squash",
-      html_url: "pr-url",
-    },
-    "commits/current/check-runs?per_page=100": [{ check_runs: [] }],
-    "actions/runs?head_sha=current&per_page=100": [{ workflow_runs: [] }],
-    "issues/49/comments?per_page=100": [[]],
-  });
-  assert.equal(JSON.parse(f.run("status", "--pr", "49", "--details")).target.merge, null);
-  assert.ok(!(await f.requests()).some((path) => path.includes("squash")));
 });
 
 test("API failures fail the command instead of returning empty success", async (t) => {

@@ -2,238 +2,80 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ink } from "../plot/annotations.ts";
-import { parseSvg, svgAttribute } from "../svg-test-utils.ts";
-import { baseHash, fixture, hash } from "./fixtures/report.ts";
-import { loadHistory, summarizeTrend } from "./history.ts";
-import { trendSvg } from "./trend-chart.ts";
+import { continuous } from "../catalog.ts";
+import { pairedRun } from "./fixtures/paired.ts";
+import { fixture } from "./fixtures/report.ts";
+import { summarizePairedTrend } from "./history.ts";
+import { pairedBmf, pairedSummary } from "./paired.ts";
 
-// One report per run. Every case has main's baseline of 100 unless the
-// test sets another.
-function measured(index: number, values: number[], commit = hash) {
+function measured(ratio: number, uuid: string, time: string, head = "same-baseline") {
+  const run = pairedRun(1, ratio);
   const report = fixture();
-  report.uuid = `report-${index}`;
-  report.start_time = new Date(Date.UTC(2026, 10, 7, 0, index)).toISOString();
-  report.branch.head.version = { hash: commit };
-  const template = report.results[0][0];
+  report.uuid = uuid;
+  report.start_time = time;
+  report.branch.head.uuid = head;
+  report.branch.head.start_point = null;
+  report.testbed.name = continuous.testbed;
   report.results = [
-    values.map((value, i) => ({
-      benchmark: { uuid: `case-${i}`, name: `rust/u64/random/${100 + i}/s1/api` },
+    Object.entries(pairedBmf([run])).map(([name, values]) => ({
+      benchmark: { uuid: name, name },
       measures: [
         {
-          ...structuredClone(template.measures[0]),
-          metric: { uuid: `metric-${index}-${i}`, value },
-          boundary: { baseline: 100, lower_limit: 99, upper_limit: 101 },
+          measure: { uuid: "ratio", name: "paired-time-ratio" },
+          metric: { uuid: name, value: values["paired-time-ratio"].value },
         },
       ],
     })),
   ];
-  report.alerts = [];
-  return report;
+  return { report, summary: pairedSummary([run], report) };
 }
 
-function baselines(report: ReturnType<typeof measured>, values: (number | null)[]) {
-  report.results[0].forEach((result, i) => {
-    const value = values[i];
-    result.measures[0].boundary =
-      value === null ? null : { baseline: value, lower_limit: value, upper_limit: value };
-  });
-}
-
-test("compares every run with main's latest baseline, ignoring the baselines of earlier runs", () => {
-  const first = measured(1, [100, 200, 300]);
-  baselines(first, [9000, 9000, 9000]);
-  const current = measured(2, [50, 400]);
-  const trend = summarizeTrend([first, current], current, "rust")!;
-  assert.equal(trend.sharedCases, 2);
-  assert.equal(trend.base, baseHash);
-  // Against main's 100: run 1 is 1× and 2×, run 2 is 0.5× and 4×.
-  assert.deepEqual(
-    trend.overall.map((v) => Math.round(v * 1000) / 1000),
-    [0.414, 0.414],
-  );
-  const growing = trend.focus.find((series) => series.name.endsWith("/101/s1/api"))!;
-  assert.equal(growing.baseValue, 100);
-  assert.equal(growing.lastValue, 400);
-  assert.deepEqual(growing.changes, [1, 3]);
+test("paired history retains focus after a regression is fixed", () => {
+  const first = measured(1.3, "first", "2026-11-11T00:00:00Z");
+  const current = measured(0.9, "current", "2026-11-11T01:00:00Z");
+  const trend = summarizePairedTrend(current.summary, "rust", current.report, [first.report])!;
+  assert.equal(trend.runs.length, 2);
+  assert.equal(trend.focus.length, current.summary.rows.length);
+  assert.ok(Math.abs(trend.overall[0] - 0.3) < 1e-10);
+  assert.ok(Math.abs(trend.overall[1] + 0.1) < 1e-10);
+  assert.equal(trend.base, current.summary.baseHash);
 });
 
-test("leaves cases without a main baseline to the table", () => {
-  const first = measured(1, [100, 100]);
-  const current = measured(2, [100, 200]);
-  baselines(current, [100, null]);
-  const trend = summarizeTrend([first, current], current, "rust")!;
-  assert.equal(trend.sharedCases, 1);
-  assert.deepEqual(trend.focus, []);
-  baselines(current, [null, null]);
-  assert.equal(summarizeTrend([first, current], current, "rust"), null);
-});
-
-test("retains same-commit reruns but deduplicates reports and excludes other environments and future runs", () => {
-  const first = measured(1, [100]);
-  const current = measured(2, [90]);
-  const otherSpec = measured(0, [1000]);
-  otherSpec.uuid = "other-spec-report";
-  otherSpec.testbed.spec = { uuid: "other-spec" };
-  const otherBranch = measured(0, [1000]);
-  otherBranch.uuid = "other-branch-report";
-  otherBranch.branch.uuid = "other-branch";
-  const otherTestbed = measured(0, [1000]);
-  otherTestbed.uuid = "other-testbed-report";
-  otherTestbed.testbed.uuid = "other-testbed";
-  const trend = summarizeTrend(
-    [current, measured(3, [1000]), otherSpec, otherBranch, otherTestbed, first, first],
-    current,
-    "rust",
-  )!;
+test("paired history continues across baseline Heads and fixes the shared cohort", () => {
+  // A merge of main changes the baseline, and so the Head, but not the PR.
+  const other = measured(3, "other", "2026-11-11T00:00:00Z", "earlier-baseline");
+  const first = measured(1.1, "first", "2026-11-11T01:00:00Z");
+  first.report.results[0].pop();
+  const current = measured(1, "current", "2026-11-11T02:00:00Z");
+  const trend = summarizePairedTrend(current.summary, "rust", current.report, [
+    other.report,
+    first.report,
+  ])!;
   assert.deepEqual(
     trend.runs.map((run) => run.uuid),
-    [first.uuid, current.uuid],
+    ["other", "first", "current"],
   );
+  assert.equal(trend.series.length, current.summary.rows.length - 1);
+  assert.ok(Math.abs(trend.overall[0] - 2) < 1e-10);
+  assert.ok(Math.abs(trend.overall[1] - 0.1) < 1e-10);
+  assert.equal(trend.overall[2], 0);
+});
+
+test("paired history excludes other branches", () => {
+  const other = measured(3, "other", "2026-11-11T00:00:00Z");
+  other.report.branch.uuid = "other-pr";
+  const current = measured(1, "current", "2026-11-11T02:00:00Z");
+  const trend = summarizePairedTrend(current.summary, "rust", current.report, [other.report])!;
   assert.deepEqual(
-    trend.runs.map((run) => run.hash),
-    [hash, hash],
-  );
-  assert.ok(Math.abs(trend.overall[1] + 0.1) < 1e-12);
-});
-
-test("selects every large swing, including a regression fixed later, without a row cap", () => {
-  const first = measured(1, Array(8).fill(100));
-  const peak = measured(2, Array(8).fill(130));
-  const current = measured(3, Array(8).fill(100));
-  const trend = summarizeTrend([first, peak, current], current, "rust")!;
-  assert.equal(trend.focus.length, 8);
-  assert.deepEqual(
-    trend.overall.map((v) => Math.round(v * 100)),
-    [0, 30, 0],
+    trend.runs.map((run) => run.uuid),
+    ["current"],
   );
 });
 
-test("a quiet history only shows overall, while an unresolved alert remains visible", () => {
-  const first = measured(1, [100, 100]);
-  const current = measured(2, [101, 102]);
-  assert.equal(summarizeTrend([first], current, "rust")!.focus.length, 0);
-  current.alerts = [{ metric: { uuid: "metric-2-0" }, limit: "upper" }];
-  const trend = summarizeTrend([first], current, "rust")!;
-  assert.deepEqual(
-    trend.focus.map((row) => row.name),
-    ["rust/u64/random/100/s1/api"],
-  );
-});
-
-test("orders rows by swing alone, whichever way a case moved and whatever its alert", () => {
-  const first = measured(1, [100, 100, 100]);
-  const current = measured(2, [101, 90, 120]);
-  current.alerts = [{ metric: { uuid: "metric-2-0" }, limit: "upper" }];
-  const trend = summarizeTrend([first], current, "rust")!;
-  assert.deepEqual(
-    trend.focus.map((row) => row.name.split("/")[3]),
-    ["102", "101", "100"],
-  );
-});
-
-test("measures a swing between PR runs, so a case far from main does not magnify noise", () => {
-  // At twice main's time, 200 → 206 is a 6-point change against main but a 3% swing.
-  const first = measured(1, [200]);
-  const current = measured(2, [206]);
-  assert.equal(summarizeTrend([first], current, "rust")!.focus.length, 0);
-});
-
-test("zero-valued cases cannot produce infinite ratios", () => {
-  const first = measured(1, [0, 100]);
-  const current = measured(2, [100, 80]);
-  const trend = summarizeTrend([first], current, "rust")!;
-  assert.equal(trend.sharedCases, 1);
-  assert.ok(trend.overall.every(Number.isFinite));
-  assert.equal(summarizeTrend([measured(1, [0])], measured(2, [0]), "rust"), null);
-});
-
-test("loads all report pages across reset heads and appends the just-completed report", async () => {
-  const firstPage = Array.from({ length: 100 }, (_, i) => measured(i, [100]));
-  const lastPage = [measured(100, [100])];
-  const current = measured(101, [100]);
-  const urls: URL[] = [];
-  const request: typeof fetch = async (input) => {
-    const url = new URL(String(input));
-    urls.push(url);
-    return new Response(
-      JSON.stringify(url.searchParams.get("page") === "1" ? firstPage : lastPage),
-    );
-  };
-  const reports = await loadHistory(current, request);
-  assert.equal(reports.length, 102);
-  assert.equal(reports.at(-1)!.uuid, current.uuid);
-  assert.equal(urls.length, 2);
-  assert.equal(urls[0].searchParams.get("branch"), current.branch.uuid);
-  assert.equal(urls[0].searchParams.get("testbed"), current.testbed.uuid);
-  assert.equal(urls[0].searchParams.get("expand"), "true");
-  assert.equal(urls[0].searchParams.get("end_time"), String(Date.parse(current.start_time!)));
-});
-
-test("refuses failed or non-advancing history rather than presenting a partial trend", async () => {
-  const current = measured(101, [100]);
-  await assert.rejects(
-    loadHistory(current, async () => new Response("", { status: 503 })),
-    /HTTP 503/,
-  );
-  const page = Array.from({ length: 100 }, (_, i) => measured(i, [100]));
-  await assert.rejects(
-    loadHistory(current, async () => new Response(JSON.stringify(page))),
-    /did not advance/,
-  );
-});
-
-test("draws main as each row's axis and colours by side of main", () => {
-  // Alternating around main's 110 crosses it on every segment.
-  const reports = Array.from({ length: 100 }, (_, i) =>
-    measured(i, [i % 2 ? 120 : 100], i.toString(16).padStart(40, "0")),
-  );
-  const current = reports.at(-1)!;
-  baselines(current, [110]);
-  const trend = summarizeTrend(reports, current, "rust")!;
-  assert.equal(trend.series.length, 1);
-  const svg = trendSvg([{ name: "Default", trend }])!;
-  const panel = parseSvg(svg);
-  const paths = [...panel.querySelectorAll("path")];
-  assert.ok(paths.some((path) => svgAttribute(path, "stroke") === ink.primary));
-  assert.ok(paths.some((path) => svgAttribute(path, "stroke") === ink.radix));
-  const references = [...panel.querySelectorAll("line")].filter(
-    (line) =>
-      svgAttribute(line, "stroke-dasharray") === "3 3" &&
-      Number(line.getAttribute("x2")) - Number(line.getAttribute("x1")) > 20,
-  );
-  assert.equal(references.length, 2);
-  for (const clipped of panel.querySelectorAll("[clip-path]")) {
-    const reference = clipped.getAttribute("clip-path")!;
-    assert.ok(reference.startsWith("url(#") && reference.endsWith(")"));
-    const id = reference.slice(5, -1);
-    assert.ok([...panel.querySelectorAll("clipPath")].some((clip) => clip.id === id));
-  }
-  assert.equal(trendSvg([{ name: "Default", trend }]), svg);
-  assert.match(svg, />main bbbbbbb · runs 0000000 → 0000000</);
-  assert.match(svg, />Default</);
-  assert.match(svg, />100 runs</);
-  assert.doesNotMatch(svg, /SLOWER|FASTER|MOVED/);
-  // Overall and the case: a first and a latest dot each.
-  assert.equal((svg.match(/<circle /g) ?? []).length, 4);
-  assert.doesNotMatch(svg, /NaN|Infinity/);
-});
-
-test("gives a case selected in one build a row in every build", () => {
-  const quiet = Array.from({ length: 3 }, (_, i) => measured(i, [100, 100]));
-  const moving = Array.from({ length: 3 }, (_, i) => measured(i, [100, i === 2 ? 130 : 100]));
-  baselines(quiet.at(-1)!, [100, 100]);
-  baselines(moving.at(-1)!, [100, 100]);
-  const a = summarizeTrend(quiet, quiet.at(-1)!, "rust")!;
-  const b = summarizeTrend(moving, moving.at(-1)!, "rust")!;
-  assert.equal(a.focus.length, 0);
-  assert.equal(b.focus.length, 1);
-  const svg = trendSvg([
-    { name: "Default", trend: a },
-    { name: "Portable SIMD", trend: b },
-  ])!;
-  // Overall plus the moving case, in both columns: two dots per cell.
-  assert.equal((svg.match(/<circle /g) ?? []).length, 2 * 2 * 2);
-  assert.match(svg, />\+30\.0%</);
-  assert.match(svg, />\+0\.0%</);
+test("unavailable Cloud still produces the current measured trend point", () => {
+  const { summary } = measured(1.2, "current", "2026-11-11T00:00:00Z");
+  const trend = summarizePairedTrend(summary, "rust")!;
+  assert.equal(trend.runs.length, 1);
+  assert.equal(trend.runs[0].hash, summary.hash);
+  assert.ok(Math.abs(trend.overall[0] - 0.2) < 1e-10);
 });

@@ -4,7 +4,46 @@ import { createHash } from "node:crypto";
 import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { parse } from "smol-toml";
 import { command } from "../tools/process.ts";
+
+/** Select the same vector backend on historical opt-in and current required builds.
+ * Missing backends fail rather than silently comparing SIMD against scalar code.
+ */
+export function simdFeatures(manifest: string): string[] {
+  const parsed = parse(manifest);
+  const features = parsed.features as Record<string, unknown> | undefined;
+  if (features && "portable-simd" in features) return ["portable-simd"];
+  const dependencies = parsed.dependencies as Record<string, unknown> | undefined;
+  const backend = dependencies?.fearless_simd;
+  if (
+    typeof backend === "string" ||
+    (backend && typeof backend === "object" && !("optional" in backend && backend.optional))
+  )
+    return [];
+  throw new Error("Revision has no supported SIMD backend; choose a SIMD-capable baseline");
+}
+
+/** Align measured Rust code while retaining later, explicitly configured overrides. */
+export const ALIGNMENT_RUSTFLAGS = [
+  "-C",
+  "llvm-args=-align-loops=64",
+  "-C",
+  "llvm-args=-align-all-nofallthru-blocks=6",
+];
+
+/** Read checkout modification state before creating operation outputs or logs. */
+/** Resolve a revision to its full commit SHA. */
+export function resolveCommit(root: string, ref: string) {
+  return command("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], {
+    cwd: root,
+    capture: true,
+  });
+}
+
+export async function workingTreeDirty(root: string) {
+  return Boolean(await command("git", ["status", "--porcelain"], { cwd: root, capture: true }));
+}
 
 export interface Workspace {
   directory: string;
@@ -20,6 +59,10 @@ export interface BuildProvenance {
   opt_level: string;
   debug: string;
   features: string[];
+  /** Resolved library features from Cargo; absent in historical result files. */
+  library_features?: string[];
+  rustc_args?: string[];
+  revisions?: { libraries: Record<string, string[]> };
 }
 
 /** Materialize repository-local links; reject escaping targets and directory cycles.
@@ -83,7 +126,11 @@ export async function sourceHash(directory: string): Promise<string> {
   return digest.digest("hex");
 }
 
-/** Own an isolated source snapshot, one build directory and all cleanup. */
+/** Own an isolated snapshot and clean it up, even on failure.
+ *
+ * TESSERA_BENCH_TARGET_DIR opts into a caller-owned Cargo cache (relative to
+ * root); never share it across trust boundaries. Otherwise builds are temporary.
+ */
 export async function withWorkspace<T>(
   root: string,
   operation: (workspace: Workspace) => Promise<T>,
@@ -115,7 +162,10 @@ export async function withWorkspace<T>(
       }
       await copySnapshot(join(root, path), join(tree, path), root);
     }
-    return await operation({ directory, tree, target: join(directory, "target") });
+    const target = process.env.TESSERA_BENCH_TARGET_DIR
+      ? resolve(root, process.env.TESSERA_BENCH_TARGET_DIR)
+      : join(directory, "target");
+    return await operation({ directory, tree, target });
   } finally {
     try {
       if (added) await command("git", ["worktree", "remove", "--force", tree], { cwd: root });
@@ -142,9 +192,35 @@ export async function buildArtifact(output: string, name: string) {
     (value) => value.reason === "build-script-executed" && value.package_id === artifact.package_id,
   );
   if (!script) throw new Error(`Missing ${name} build provenance`);
+  const libraries = messages.filter(
+    (value) =>
+      value.reason === "compiler-artifact" &&
+      value.target.name === "tessera_sort" &&
+      value.target.kind?.includes("lib"),
+  );
+  if (
+    libraries.length !== 1 ||
+    !Array.isArray(libraries[0].features) ||
+    !libraries[0].features.every((feature: unknown) => typeof feature === "string")
+  )
+    throw new Error("Expected one Tessera library artifact with resolved Cargo features");
   const provenance = JSON.parse(
     await readFile(join(script.out_dir, "provenance.json"), "utf8"),
   ) as BuildProvenance;
+  provenance.library_features = [...libraries[0].features].sort();
+  for (const [library, features] of Object.entries(provenance.revisions?.libraries ?? {})) {
+    const matches = messages.filter(
+      (value) =>
+        value.reason === "compiler-artifact" &&
+        value.target.name === library.replaceAll("-", "_") &&
+        value.target.kind?.includes("lib"),
+    );
+    if (
+      matches.length !== 1 ||
+      JSON.stringify([...matches[0].features].sort()) !== JSON.stringify(features)
+    )
+      throw new Error("Revision library features differ from prepared metadata: " + library);
+  }
   return { executable: artifact.executable as string, provenance };
 }
 
@@ -154,26 +230,60 @@ export async function buildBenchmark(
   target: string,
   name: "smoke" | "compare",
   features: string[],
-  options: { targetTriple?: string; env?: NodeJS.ProcessEnv } = {},
+  options: {
+    targetTriple?: string;
+    env?: NodeJS.ProcessEnv;
+    rustcArgs?: string[];
+    profile?: "dev" | "release";
+  } = {},
 ) {
-  return buildArtifact(
-    await command(
-      "cargo",
-      [
-        ...(name === "smoke"
-          ? ["bench", "--bench", name, "--no-run"]
-          : ["build", "--release", "--bin", name, "--bin", "memory"]),
-        "--locked",
-        "-p",
-        "tessera-bench",
-        "--message-format=json",
-        "--target-dir",
-        target,
-        ...(options.targetTriple ? ["--target", options.targetTriple] : []),
-        ...(features.length ? ["--features", features.join(",")] : []),
-      ],
-      { cwd: tree, capture: true, env: options.env },
-    ),
-    name,
-  );
+  if (options.profile && name !== "compare")
+    throw new Error("Explicit profiles are only supported for comparison builds");
+  if (options.rustcArgs && name !== "smoke")
+    throw new Error("Final rustc arguments require a smoke benchmark build");
+  const build = async (env = options.env) =>
+    buildArtifact(
+      await command(
+        "cargo",
+        [
+          ...(name === "smoke"
+            ? options.rustcArgs
+              ? ["rustc", "--profile", "bench", "--bench", name]
+              : ["bench", "--bench", name, "--no-run"]
+            : [
+                "build",
+                "--profile",
+                options.profile ?? "release",
+                "--bin",
+                name,
+                "--bin",
+                "memory",
+              ]),
+          "--locked",
+          "-p",
+          "tessera-bench",
+          "--message-format=json",
+          "--target-dir",
+          target,
+          ...(options.targetTriple ? ["--target", options.targetTriple] : []),
+          ...(features.length ? ["--features", features.join(",")] : []),
+          ...(options.rustcArgs ? ["--", ...options.rustcArgs] : []),
+        ],
+        { cwd: tree, capture: true, env },
+      ),
+      name,
+    );
+  const reference = await build();
+  const flags = reference.provenance.cargo_encoded_rustflags;
+  const aligned = ALIGNMENT_RUSTFLAGS.every((flag) => flags.split("\x1f").includes(flag));
+  // Cargo resolves string/array, target and environment settings itself. An
+  // encoded override before this build would discard some of those settings.
+  const result = aligned
+    ? reference
+    : await build({
+        ...options.env,
+        CARGO_ENCODED_RUSTFLAGS: [...ALIGNMENT_RUSTFLAGS, flags].filter(Boolean).join("\x1f"),
+      });
+  if (options.rustcArgs) result.provenance.rustc_args = options.rustcArgs;
+  return result;
 }

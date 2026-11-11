@@ -1,6 +1,6 @@
 # Contributing to Tessera
 
-Tessera is pre-release. Bug reports, real-workload experience and measurements on other machines are especially useful. Follow the [code of conduct](CODE_OF_CONDUCT.md); discuss changes larger than a small fix in an issue first.
+Tessera is pre-release. Bug reports, real-workload experience and measurements on other machines are especially useful. Follow the [code of conduct](CODE_OF_CONDUCT.md); agree the scope of larger changes with the maintainer in an issue or development request.
 
 ## Development
 
@@ -8,7 +8,7 @@ Use stable Rust (MSRV in `Cargo.toml`), Node.js 24 and the pnpm version pinned i
 
 ### Refactoring
 
-A refactor serves maintainability, readability and lower change cost: fewer duplicated rules and smaller change surfaces, not more files, layers or abstractions. It keeps algorithm logic, generated inputs and the benchmark protocol unchanged; timed regions call the same library functions with the same record types and key extractors, with no added indirection. Ship behavior or performance changes in separate PRs. Moving or splitting engine code can change inlining and code placement, so it follows the measurement rule for [engine changes](#engine-changes).
+A refactor reduces the concepts and coordinated edits needed to maintain the project. Retire obsolete representations and their consumers together; moving code between files alone does not simplify it. It keeps algorithm logic, generated inputs and the benchmark protocol unchanged; timed regions call the same library functions with the same record types and key extractors, with no added indirection. Keep behavior and performance changes independently reviewable. Pre-release tooling interfaces and result formats may change when that removes real complexity; document the break rather than retaining an unused compatibility layer. Moving or splitting engine code can change inlining and code placement, so it follows the measurement rule for [engine changes](#engine-changes).
 
 ### Engine changes
 
@@ -21,14 +21,16 @@ Read the [engine reference](docs/design/engine.md) and [shared semantics](confor
 
 ### Validation
 
-Run the applicable [local checks](AGENTS.md#commands), including workspace tests and doctests. Engine changes also exercise both feature configurations and affected tests under Miri:
+Keep tests focused on public contracts, unsafe ownership invariants, historical defects and external trust or recovery boundaries. Prefer one end-to-end check plus focused boundary cases to repeated assertions at every layer. Vary independent dimensions separately; combine them where their interaction can fail. Do not pin internal call counts, exact report wording, SVG snapshots or incidental layout. Keep ordering, stability, panic, inconsistent-key, owned-record and `&mut`-record coverage.
+
+Run the applicable [local checks](AGENTS.md#commands), including workspace tests and doctests. Engine changes exercise serial and Rayon builds and affected tests under Miri:
 
 ```sh
-cargo test -p tessera-sort --no-default-features
-cargo test -p tessera-sort --features portable-simd
+cargo test -p tessera-sort
+cargo test -p tessera-sort --features rayon
 rustup +nightly component add miri
 cargo +nightly miri test -p tessera-sort
-cargo +nightly miri test -p tessera-sort --no-default-features
+cargo +nightly miri test -p tessera-sort --lib --features rayon block::parallel::
 ```
 
 Run `pnpm docs:test` when simulation models change and the [site checks](docs/development/docs-site.md#commands) when their pages change. CI owns the remaining platform, MSRV and sanitizer lanes; the [Rust workflow](.github/workflows/rust-ci.yml) is the command source for reproducing a lane. It uses cargo-nextest for test processes and runs doctests separately.
@@ -47,7 +49,7 @@ Use the [task index](docs/README.md) to find the current topic. Edit an existing
 
 Keep a task's procedure and completion criteria in its existing topic, with the normal path before implementation details and exceptional branches. `AGENTS.md` lists the required first-read sections for agents; the [task index](docs/README.md) and site link to the same sources. Link directly to the relevant section, keep conditional references conditional, and let fact lookups skip procedures. Check representative tasks for unnecessary reading and discovery steps, not just document counts. Run the [site checks](docs/development/docs-site.md#commands) after changing pages or shared documents.
 
-Rust items have a one-line summary. Public items explain their contract with intra-doc links and applicable `# Key function`, `# Panics`, `# Safety`, `# Memory` and `# Examples` sections; examples are asserting doctests. Internal comments explain invariants, hazards and measured choices. Update [shared semantics](conformance/semantics.md) with ordering, stability, panic or space changes, and explanations and simulation models with algorithm changes.
+Public Rust items explain their contract with intra-doc links and applicable `# Key function`, `# Panics`, `# Safety`, `# Memory` and `# Examples` sections; examples are asserting doctests. Private items use descriptive names; comments explain non-obvious invariants, hazards and measured choices. Update [shared semantics](conformance/semantics.md) with ordering, stability, panic or space changes, and explanations and simulation models with algorithm changes.
 
 ## AI-assisted contributions
 

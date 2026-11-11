@@ -18,23 +18,11 @@ Open questions:
 
 ## Engine
 
-The [structure analysis](docs/design/evidence.md#structure-analysis) states the open structural question, its yardstick and the current reading: local serial duplication has converged but minimality is not shown, and parallel completion is the largest open question. New work proceeds in this order: the [mechanism audit](#mechanism-audit), the [parallel completion study](#parallel-completion-study), then the [simplification candidates](#simplification-candidates) in their listed order; R3 continues in [PR #107](https://github.com/Yikai-Liao/tessera-sort/pull/107). The audit and the study change no engine code until a design is chosen, and no candidate is a prerequisite of either. [Acceptance debt](#acceptance-debt) stays open alongside them, and [Rayon](#rayon) coverage on further hosts waits for the study's completion design.
+The [structure analysis](docs/design/evidence.md#structure-analysis) states the open structural question, its yardstick and the current reading: local serial duplication has converged but minimality is not shown, and parallel completion is the largest open question. The [mechanism audit](docs/design/evidence.md#mechanism-audit) is complete. New work proceeds with the [parallel completion study](#parallel-completion-study), then the [simplification candidates](#simplification-candidates) in their listed order; R3 continues in [PR #107](https://github.com/Yikai-Liao/tessera-sort/pull/107). The study changes no engine code until a design is chosen, and no local candidate is its prerequisite. [Acceptance debt](#acceptance-debt) stays open alongside them, and [Rayon](#rayon) coverage on further hosts waits for the study's completion design.
 
 ### Acceptance debt
 
 The consolidated engine (shared root preparation, node planning and order confirmation; one half-key extractor; shared direct-key counting; segmented scratch; bounded tile planner; single SIMD backend) has measured losses that no exception compensates for; they are listed under [landed with open losses](docs/design/evidence.md#landed-with-open-losses). Done when the shared paths are validated against the pre-consolidation baseline with A/A and placement controls, the open losses are resolved or individually accepted, and a fresh current-head Actions run passes preparation, all four measurement shards, Cloud archival and publication. Raw artifacts alone do not satisfy publication acceptance.
-
-### Mechanism audit
-
-The audit looks for constructions that remove several mechanisms at once and tests the analysis's serial reading. It reads code and documents only, with no build or measurement. Its unit is a mechanism: a state, route, protocol or retained representation that a change would add or retire, such as `Order::Flat`, `plan_progress` or the owner-lock protocol, not a function or a file. It delivers a decision table, not an inventory of every mechanism.
-
-Trace the representative changes named in [`AGENTS.md`](AGENTS.md#engine-design-and-simplification) (sampling, tile capacity, partition selection, block layout and task size) and record the files, invariants and rule interpreters each one touches.
-
-Then look across mechanisms: which ones maintain the same invariant, which intermediate representations serve only the next stage, which record moves the information requires and which the implementation adds, which states exist only for one execution order, and which new invariant removing a boundary would require. Start with the ownership and recovery state that `finish.rs` and `compact.rs` maintain, which is the study's model C, rather than with small conditionals. Where the answers suggest one mechanism could replace several, write a short alternative-structure model comparing states, invariants, record moves and critical path with the current code.
-
-Record each modeled alternative as a row of a candidate-structure table in the [structure analysis](docs/design/evidence.md#structure-analysis): the mechanisms it removes and adds, the invariants it affects, its owner changes and whether it is worth a prototype. A row worth a prototype enters the [candidate table](#simplification-candidates) or, if it spans parallel completion, the study; a rule a trace finds interpreted in more than one place enters the candidate table directly, and a mechanism found without an owner gets one. One owner and one interpreter per rule show that the structure is easy to change, not that it is minimal. Finding no row worth a prototype is a valid result; record the blockers instead of creating refactoring work.
-
-Done when the traces and the candidate-structure table, with at least one cross-module group modeled, replace the serial reading in the structure analysis.
 
 ### Parallel completion study
 
@@ -44,7 +32,7 @@ Fixed constraints: auxiliary space stays within the [structure analysis](docs/de
 
 Steps form a research order, not gates; a model that meets a clear blocker is recorded and stops.
 
-1. Measure on the [baseline host](docs/design/evidence.md#parallel-completion-baseline), with peak heap, alongside the models. Inside the staging window, run both protocols at the baseline's equal root plans. Above the window, and on a skewed root whose largest bucket exceeds the limit, only materialization runs; time its block permutation, sequential compaction and leaf jobs separately. Large-input runs need the maintainer's approval of the measurement budget.
+1. Measure on an available host, recording its environment and peak heap alongside the models. The [historical baseline](docs/design/evidence.md#parallel-completion-baseline) supplies comparison context, not a required machine. Inside the staging window, run both protocols at equal root plans. Above the window, and on a skewed root whose largest bucket exceeds the limit, only materialization runs; time its block permutation, sequential compaction and leaf jobs separately. Large-input runs need the maintainer's approval of the measurement budget.
 2. Extend the audit's parallel completion rows with the work each mechanism avoids and whether it survives each candidate.
 3. Model C, from the audit: whether one ownership, recovery and completion-state protocol can serve both movement strategies and delete one protocol's responsibilities.
 4. Model A: auxiliary space, extra record moves and critical path, for independent and dependent segments, with P growing with the pool and R bounded by the root digit cap; a measured configuration does not establish a bound.
@@ -55,7 +43,7 @@ Done when one candidate retires a protocol while keeping its saving within the c
 
 ### Simplification candidates
 
-Local cleanups that replace a specialized mechanism with a more general one, ordered by expected value for risk. Each retires one mechanism and none settles the structural questions above; the [mechanism audit](#mechanism-audit) adds rows or records that the serial structure has none left. A candidate lands when one mechanism replaces at least two, the retired fast path's saving is kept or each loss is listed and accepted individually (up to 10% locally, never a performance budget), and structural and routing changes are separate commits under the [benchmark protocol](docs/development/benchmarking.md#run-an-experiment). Evaluate one candidate per PR against the preceding merged head, with three-block screens, and do not claim source causality without placement controls. Rejection completes an evaluation; it does not permit removing the saving another way without evidence.
+Local cleanups that replace a specialized mechanism with a more general one, ordered by expected value for risk. Each retires one mechanism and none settles the structural questions above; the [mechanism audit](docs/design/evidence.md#mechanism-audit) records the cross-module alternatives and adds N3 for shared equality classification. A candidate lands when one mechanism replaces at least two, the retired fast path's saving is kept or each loss is listed and accepted individually (up to 10% locally, never a performance budget), and structural and routing changes are separate commits under the [benchmark protocol](docs/development/benchmarking.md#run-an-experiment). Evaluate one candidate per PR against the preceding merged head, with three-block screens, and do not claim source causality without placement controls. Rejection completes an evaluation; it does not permit removing the saving another way without evidence.
 
 | ID | Retire | Replace with | Risk |
 |---|---|---|---|
@@ -63,6 +51,7 @@ Local cleanups that replace a specialized mechanism with a more general one, ord
 | R4 | The `INSERTION_MAX` root shortcut beside the budgeted probe | One insertion attempt owning its budget | Known short `random/1000` losses; measure first |
 | R5 | `Descending { strict }` | Always reverse stably | One extra scan on `reverse`; likely rejected, listed to measure once |
 | N1 | `plan_progress` and the equality fallback in the executor | A plan that carries its progress guarantee | Keep the inconsistent-key termination test |
+| N3 | Below/equal/above classification in serial equality partition and the parallel rank closure | One equality classifier | Preserve cached ranks, payload ownership and inconsistent-key progress; found by the mechanism audit after PR #78 |
 | N2 | `two_runs`, `NodePlan::Runs`, `split_ordered` | A block partition that detects non-decreasing bucket order and returns without moving | Loses the rotated `1*0*` form; `sorted_tail`, `bimodal`, `far_swaps`; speculative |
 | N4 | `partition_by` beside `partition_digit` | One entry taking a classifier and bucket count | A `&mut` classifier measured 40% slower; keep the closure owned |
 | X1 | `try_count_window_parallel` beside `try_count_window` and its `KeyHalf` forwards | One counting operation receiving the shard count | Flag-shaped; serial must keep no Rayon call |
@@ -73,7 +62,7 @@ Local cleanups that replace a specialized mechanism with a more general one, ord
 | P2 | `Config`, `BucketFinish` and `BoundedFinish` describing one root partition | One description consumed by the block layer | Follows the parallel completion study, which decides what the description holds |
 | P3 | `tile::Scratch`, `block::Buffers`, job `Pool` | One scratch owner per worker | Follows the study; check allocation counts in the memory tests, and do not assume one live buffer per worker under reentrant callbacks |
 
-Order: R3 and R4; then N1, X1, X2, N4; then X4, T1, X3; then speculative R5 and N2; P2 and P3 after the parallel completion study.
+Order: R3 and R4; then N1, X1, X2, N4; then X4, T1, X3; then speculative R5 and N2; then N3; P2 and P3 after the parallel completion study.
 
 ### Rayon
 

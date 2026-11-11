@@ -360,7 +360,7 @@ For each block, a variant's ratio is its time per sort divided by the mean of th
 
 The standard report panels show the 1M-key ranking, 1M and 1,000-key distribution comparisons, 1M element-type comparison, 1M per-type input panels and 10M-key peak heap. Ranking and cross-type geometric means use the ten common baseline distributions; per-type panels show every selected distribution at 1M, including targeted additions. Memory maxima include every selected 10M `u64` distribution. Keys admit stable and unstable opponents; record rankings admit stable opponents only. Speed panels anchor to `slice::sort` within the same blocks, with Portable SIMD shown separately. Every figure includes plotted values; [the figure guide](benchmark-figures.md) owns visual encoding and layout. Custom cases remain in full results even when no standard panel includes them.
 
-Hosted continuous comparisons use the same CLI alignment defaults for both feature configurations, as described in the [continuous benchmark guide](continuous-benchmarks.md).
+Hosted continuous comparisons use the same CLI alignment defaults for both revisions, as described in the [continuous benchmark guide](continuous-benchmarks.md).
 
 The [port record](../design/port.md) describes separate placement controls for source A/B investigations. The release comparison measures lengths of at least 1,000 with the default target; native-CPU builds, branch alignment and cold-cache investigations remain separate work.
 

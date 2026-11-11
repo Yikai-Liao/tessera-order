@@ -2,10 +2,9 @@
 
 //! Scalar and blocked adjacent-pair scans.
 //!
-//! Direct extraction uses the blocked scan for order confirmation and budgeted
-//! insertion probes in the default build; the compiler auto-vectorizes it at the target's baseline
-//! width. The scalar scan serves `f64`, which that width compares poorly, and
-//! keys for which the vector backend has no kernel.
+//! Blocked scans support keys outside the vector backend; the compiler can
+//! auto-vectorize them at the target's baseline width. Scalar scans also serve
+//! short inputs and keys for which the vector backend has no kernel.
 
 use crate::RadixKey;
 

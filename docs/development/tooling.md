@@ -21,7 +21,6 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Preview hosted benchmark jobs | `pnpm -s tools continuous matrix` |
 | Reproduce one paired shard | `pnpm -s tools compare commit main --plan continuous --shard 1/2` |
 | Upload completed paired JSON | `pnpm -s tools continuous submit --help` |
-
 | Regenerate an existing result | `pnpm -s tools report bench/results/SESSION` |
 | Read current main feedback | `pnpm -s tools status main` |
 | Read current PR feedback | `pnpm -s tools status --pr 123` |

@@ -47,16 +47,18 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 
 ## Benchmark investigations
 
-- Strengthen post-submission Bencher start-point validation to compare the intended branch identity as well as the exact commit hash. Queue preflight already checks the named baseline’s reports, but the publisher alone cannot distinguish two baseline branches sharing a hash.
+- Validate the hosted paired pipeline on Actions: retain cold/warm-cache full-suite duration, queue wait, paired median intervals, same-source false alerts and held-out detection evidence for both configurations before claiming hosted stability or tuning the per-case sample budget. Verify Cloud upload, fork PR publication, partial-job reruns and the main first-parent comparison. The fresh-process calibration in PR #96 (Actions run `42904693411`) completed all 70 cases per configuration with no same-source alerts; its four measurement jobs took 346–406 seconds. One calibration does not establish long-term false-alert or detection rates.
 
-- Validate the opt-in baseline-aware queue on hosted Actions without changing coverage or sampling. Retain arrival, queue-wait, measurement-duration and superseded-work evidence before claiming a latency improvement or choosing more measurement capacity. Queue recovery and archival must stay within Actions/API and artifact retention limits; no automatic sample reuse or cross-machine baseline equivalence is assumed.
+- Support intended PR changes to continuous plans or resolved boundary inventories without trusting PR-declared completeness or executing PR code in the publisher. Current publication requires the trusted default-branch inventory; validate changed selections locally until that authority is updated. Keep Rust as the sole case-expansion owner.
+
+- Restore PR trend figures only with an explicit baseline-compatible relative-history contract. Hosted ratios can use different merge bases; do not re-normalize them as absolute latency or a fixed-baseline time series. Retain raw evidence beyond Actions’ 14-day artifacts if longer-term regeneration becomes required.
 
 - Consolidate distribution-sensitive routing into general mechanisms. Child-order reuse and the bucket-order split replace the capped end-run route; evaluate both against current-head Default and Portable SIMD continuous feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
 
 - Extend the comparison to cold-cache experiments, additional seeds and threshold cases when an investigation needs them.
 - Add native-CPU placement controls for source A/B studies; existing CGU, alignment and engine-order screens remain process-level evidence.
-- Validate continuous alignment's dispersion and full-job budget on target Intel hardware. Revisit multi-layout cloud sampling only with held-out false-alert, detection and measured whole-job cost evidence.
-- Add hosted comparison groups using the existing Bencher queue after the local release report; retain complete per-type length groups for absolute scaling.
+- Validate continuous alignment’s dispersion across hosted CPU models. Revisit multi-layout sampling only with held-out false-alert, detection and measured whole-job cost evidence.
+- Add hosted algorithm comparison groups after the local release report; retain complete per-type length groups for absolute scaling and keep them separate from revision-ratio Cloud history.
 
 ## Integrations
 

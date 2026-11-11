@@ -57,7 +57,14 @@ export function validateLayoutBuilds(result: LayoutRun) {
   parseLayoutSeeds(result.layouts.map(({ seed }) => seed).join(","));
   const first = result.layouts[0].run;
   for (const { run } of result.layouts) {
-    for (const field of ["baseline", "head", "configuration", "rustc", "flags"] as const)
+    for (const field of [
+      "baseline",
+      "head",
+      "configuration",
+      "rustc",
+      "flags",
+      "protocol",
+    ] as const)
       if (run[field] !== first[field]) throw new Error(`Layout runs differ: ${field}`);
     if (JSON.stringify(run.source) !== JSON.stringify(first.source))
       throw new Error("Layout runs differ: sources");
@@ -78,8 +85,13 @@ export function summarizeLayouts(result: LayoutRun) {
   const summaries = result.layouts.map(({ run }) => summarizeLocal(run));
   return first.cases.map((id, index) => {
     const layouts = result.layouts.map(({ seed, run }, layout) => {
-      const baseline = run.blocks.map((block) => (block.baseline[id] + block.control[id]) / 2);
-      const current = run.blocks.map((block) => block.current[id]);
+      const paired = run.protocol === "paired-samples-v1" || run.protocol === "paired-samples-v2";
+      const baseline = paired
+        ? run.samples![id].map((s) => s.baseline)
+        : run.blocks.map((block) => (block.baseline[id] + block.control[id]) / 2);
+      const current = paired
+        ? run.samples![id].map((s) => s.current)
+        : run.blocks.map((block) => block.current[id]);
       return {
         seed,
         ...summaries[layout][index],

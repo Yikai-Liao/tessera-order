@@ -14,6 +14,35 @@ export function geomean(values: number[]) {
   return Math.exp(values.reduce((a, b) => a + Math.log(b), 0) / values.length);
 }
 
+/** Summarize adjacent A/B ratios with a distribution-free median interval.
+ *
+ * Exact binomial tails choose order statistics with at least 99% coverage under
+ * independent samples. Fresh process pairs capture process-state variation;
+ * correlated host interference and source-dependent placement remain outside this model.
+ * Require the entire interval to exceed the practical 5% regression threshold.
+ */
+export function summarizeRatios(ratios: number[]) {
+  if (ratios.length < 10 || ratios.some((v) => !Number.isFinite(v) || v <= 0))
+    throw new Error("Expected at least ten positive paired ratios");
+  const sorted = ratios.toSorted((a, b) => a - b);
+  const n = sorted.length;
+  let probability = 2 ** -n,
+    tail = probability,
+    k = 0;
+  while (k + 1 < n / 2) {
+    const next = (probability * (n - k)) / (k + 1);
+    if (2 * (tail + next) > 0.01) break;
+    probability = next;
+    tail += next;
+    k++;
+  }
+  const low = sorted[k],
+    high = sorted[n - k - 1];
+  const verdict: "faster" | "slower" | "within noise" =
+    high < 0.95 ? "faster" : low > 1.05 ? "slower" : "within noise";
+  return { ratio: median(sorted), low, high, verdict };
+}
+
 export interface PairedBlock {
   first: number;
   second: number;

@@ -3,10 +3,9 @@
 import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { arch, cpus, platform, release } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
-import { criterionGroup } from "../catalog.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
@@ -17,7 +16,6 @@ import {
   type Workspace,
   withWorkspace,
 } from "../workspace.ts";
-import { readEstimates } from "./criterion.ts";
 import {
   engineOrderingSymbols,
   type LayoutControl,
@@ -25,8 +23,9 @@ import {
   parseLayoutSeeds,
   validateLayoutBuilds,
 } from "./layout.ts";
-import { type LocalBlock, type LocalRun, summarizeLocal } from "./model.ts";
+import { type LocalRun, shardCases, summarizeLocal } from "./model.ts";
 import { renderLocalReport } from "./report.ts";
+import { measureSamples } from "./samples.ts";
 
 interface LocalOptions {
   root: string;
@@ -38,6 +37,7 @@ interface LocalOptions {
   cpu?: string;
   layoutSeeds?: number[];
   layoutControl?: LayoutControl;
+  shard?: { index: number; count: number };
 }
 
 /** Reject ambient worker controls that could change a requested experiment. */
@@ -51,6 +51,7 @@ export function assertWorkerEnvironment() {
     "TIME_DIVISOR",
     "STUDY_SETTINGS",
     "FIXED_SORTS",
+    "PAIRED",
   ])
     if (`TESSERA_BENCH_${name}` in process.env)
       throw new Error(`Unset TESSERA_BENCH_${name} before starting an experiment`);
@@ -172,9 +173,10 @@ export async function buildRevisions(
     return built;
   };
   const binaries = {
-    baseline: join(directory, `baseline-${layout?.baselineSeed ?? "default"}`),
-    current: join(directory, `current-${layout?.currentSeed ?? "default"}`),
+    baseline: join(directory, `baseline-${layout?.baselineSeed ?? "default"}`, "worker"),
+    current: join(directory, `current-${layout?.currentSeed ?? "default"}`, "worker"),
   };
+  for (const binary of Object.values(binaries)) await mkdir(dirname(binary), { recursive: true });
   const first = await build("baseline", layout?.baselineSeed);
   if (layout) {
     if (first.provenance.target !== "x86_64-unknown-linux-gnu")
@@ -184,7 +186,12 @@ export async function buildRevisions(
   await cp(first.executable, binaries.baseline);
   await rm(crate, { recursive: true });
   await copySnapshot(saved, crate, directory);
-  const second = await build("current", layout?.currentSeed);
+  // A tooling-only change has identical library inputs; rebuilding cannot add evidence.
+  // Layout experiments still retain their per-role link artifacts.
+  const second =
+    source.current === source.baseline && !layout
+      ? first
+      : await build("current", layout?.currentSeed);
   if (layout) await cp(map, join(layout.out, `layout-${layout.currentSeed}-current.map`));
   await cp(second.executable, binaries.current);
   for (const field of [
@@ -215,13 +222,18 @@ export async function selectedCases(
   planPath: string,
   pattern: string | undefined,
   cwd: string,
+  parallel = false,
 ) {
   const list = async (binary: string) =>
     (
       await command(binary, ["--bench"], {
         cwd,
         capture: true,
-        env: { TESSERA_BENCH_LIST: "1", TESSERA_BENCH_PLAN: planPath },
+        env: {
+          TESSERA_BENCH_LIST: "1",
+          TESSERA_BENCH_PLAN: planPath,
+          TESSERA_BENCH_PARALLEL: parallel ? "4" : undefined,
+        },
       })
     )
       .split("\n")
@@ -237,49 +249,34 @@ export async function selectedCases(
   return cases;
 }
 
-/** Measure one process-level block, cycling through the six possible orders. */
-async function measureBlock(
-  run: LocalRun,
-  binaries: { baseline: string; current: string },
-  workspace: Workspace,
-  options: LocalOptions,
-): Promise<LocalBlock> {
-  const values = {} as LocalBlock;
-  const roles = ["baseline", "control", "current"] as const;
-  const orders = [
-    [0, 1, 2],
-    [2, 1, 0],
-    [1, 2, 0],
-    [0, 2, 1],
-    [2, 0, 1],
-    [1, 0, 2],
-  ];
-  const groups = [...new Set(run.cases.map(criterionGroup))].join("\n");
-  for (const index of orders[run.blocks.length % orders.length]) {
-    const role = roles[index],
-      binary = role === "current" ? binaries.current : binaries.baseline;
-    const criterion = join(workspace.directory, "criterion");
-    await rm(criterion, { recursive: true, force: true });
-    diagnostic(`Block ${run.blocks.length + 1}/9: ${role}`);
-    const pattern = run.cases.map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-    const args = ["--bench", `^(?:${pattern})$`];
-    const { cpu } = options;
-    await command(cpu ? "taskset" : binary, cpu ? ["-c", cpu, binary, ...args] : args, {
-      cwd: workspace.tree,
-      env: {
-        CRITERION_HOME: criterion,
-        TESSERA_BENCH_GROUPS: groups,
-        TESSERA_BENCH_PLAN: join(options.out, "plan.json"),
-      },
-    });
-    values[role] = await readEstimates(criterion);
+/** Select exactly four allowed CPUs for parallel calls and retain their actual mask. */
+export async function comparisonCpus(parallel: boolean, requested?: string) {
+  if (!parallel) return requested;
+  if (platform() !== "linux") throw new Error("Four-thread comparisons require Linux");
+  const allowed =
+    (await readFile("/proc/self/status", "utf8")).match(/^Cpus_allowed_list:\s*(.+)$/m)?.[1] ?? "";
+  const selected = new Set<number>();
+  for (const range of (requested ?? allowed).split(",")) {
+    const [first, last = first] = range.split("-").map(Number);
+    for (let cpu = first; cpu <= last && selected.size < 4; cpu++) selected.add(cpu);
   }
-  return values;
+  const permits = (cpu: number) =>
+    allowed.split(",").some((range) => {
+      const [first, last = first] = range.split("-").map(Number);
+      return cpu >= first && cpu <= last;
+    });
+  if (selected.size !== 4 || [...selected].some((cpu) => !permits(cpu)))
+    throw new Error("Four-thread comparisons require four available CPUs");
+  return [...selected].join(",");
 }
 
 /** Compare an immutable working-tree snapshot with a commit, retaining only results. */
 export async function compareLocal(options: LocalOptions) {
-  const { root, out, simd, cpu } = options;
+  const { root, out, simd } = options;
+  // Probe before compiling; do not silently publish an uncontrolled ASLR run.
+  if (platform() === "linux") await command("setarch", ["-R", "true"]);
+  const cpu = await comparisonCpus(Boolean(options.plan.parallel?.length), options.cpu);
+  options = { ...options, cpu };
   if (options.layoutControl && !options.layoutSeeds)
     throw new Error("Layout controls require --layout-seeds");
   assertWorkerEnvironment();
@@ -317,17 +314,35 @@ export async function compareLocal(options: LocalOptions) {
         root,
         workspace,
         baseline,
-        simd ? ["portable-simd"] : [],
+        [...(simd ? ["portable-simd"] : []), ...(options.plan.parallel?.length ? ["rayon"] : [])],
         seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
         options.layoutControl,
       );
+      // Measure the retained copies, so downloads contain the exact executed files.
+      const binaryPaths = { baseline: "", current: "" };
+      for (const role of ["baseline", "current"] as const) {
+        const retained = join(out, "binaries", relative(workspace.directory, binaries[role]));
+        await mkdir(dirname(retained), { recursive: true });
+        await cp(binaries[role], retained);
+        binaries[role] = retained;
+        binaryPaths[role] = relative(out, retained);
+      }
+      const allCases = await selectedCases(
+        binaries,
+        planPath,
+        options.filter,
+        workspace.tree,
+        Boolean(options.plan.parallel?.length),
+      );
       const run: LocalRun = {
         schema: 1,
+        protocol: "paired-samples-v2",
         baseline,
         head,
         dirty,
         source,
         binaries: hashes,
+        binaryPaths,
         builds,
         rustc: builds.current.rustc,
         flags: builds.current.cargo_encoded_rustflags,
@@ -338,8 +353,12 @@ export async function compareLocal(options: LocalOptions) {
           arch: arch(),
           cpu: cpus()[0]?.model ?? "unknown",
           affinity: cpu ?? "inherited",
+          aslr: platform() === "linux" ? "disabled" : "uncontrolled",
         },
-        cases: await selectedCases(binaries, planPath, options.filter, workspace.tree),
+        cases: options.shard
+          ? shardCases(allCases, options.shard.index, options.shard.count)
+          : allCases,
+        ...(options.shard ? { shard: { ...options.shard, allCases } } : {}),
         blocks: [],
       };
       if (layouts.length && run.cases.join("\n") !== layouts[0].run.cases.join("\n"))
@@ -353,16 +372,10 @@ export async function compareLocal(options: LocalOptions) {
     if (result.schema === 2) validateLayoutBuilds(result);
     const save = () => writeFile(join(out, "local.json"), `${JSON.stringify(result, null, 2)}\n`);
     await save();
-    for (let block = 0; block < 9; block++) {
-      // Rotate layouts between blocks so one seed does not own one time interval.
-      for (let offset = 0; offset < layouts.length; offset++) {
-        const index = (block + offset) % layouts.length;
-        const { seed, run } = layouts[index];
-        if (linker) diagnostic(`Layout seed ${seed}`);
-        run.blocks.push(await measureBlock(run, executables[index], workspace, options));
-        if (run.blocks.length === 9) summarizeLocal(run);
-        await save();
-      }
+    for (const [index, { seed, run }] of layouts.entries()) {
+      if (linker) diagnostic(`Layout seed ${seed}`);
+      await measureSamples(run, executables[index], planPath, cpu, save);
+      summarizeLocal(run);
     }
     await renderLocalReport(out, result);
   });

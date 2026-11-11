@@ -94,6 +94,21 @@ test("snapshots preserve dirty sources and clean up failures", async () => {
       await command("git", ["status", "--porcelain"], { cwd: root, capture: true }),
       before,
     );
+    const cached = join(root, "../", `target-${process.pid}`);
+    const previous = process.env.TESSERA_BENCH_TARGET_DIR;
+    try {
+      process.env.TESSERA_BENCH_TARGET_DIR = cached;
+      await withWorkspace(root, async (workspace) => {
+        assert.equal(workspace.target, cached);
+        await mkdir(cached, { recursive: true });
+        await writeFile(join(cached, "dependency"), "cached");
+      });
+      assert.equal(await readFile(join(cached, "dependency"), "utf8"), "cached");
+    } finally {
+      if (previous === undefined) delete process.env.TESSERA_BENCH_TARGET_DIR;
+      else process.env.TESSERA_BENCH_TARGET_DIR = previous;
+      await rm(cached, { recursive: true, force: true });
+    }
     const escaping = join(crate, "src/escaping.rs");
     await symlink(process.execPath, escaping);
     await assert.rejects(

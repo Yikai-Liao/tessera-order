@@ -72,7 +72,7 @@ export function headline(s: ReportSummary, unavailable = false) {
   if (s.missing) parts.push(`${s.missing} new`);
   // Without a single compared case there is nothing to call unchanged.
   if (!s.regressions && !s.improvements)
-    parts.push(s.compared ? "no significant change" : "no baseline");
+    parts.push(s.compared ? "no regression alert" : "no baseline");
   return parts.join(", ");
 }
 
@@ -81,8 +81,12 @@ function unavailableBox(reason: string) {
   return `> [!WARNING]\n> **No comparable baseline:** ${reason}. The cases below were measured but not compared.  `;
 }
 
-function caseLine(r: Row) {
-  return `${r.label}, ${formatTime(r.baseline)} → **${formatTime(r.value)}**`;
+function metric(value: number | null, relative = false) {
+  return relative ? (value == null ? "—" : `${value.toFixed(4)}×`) : formatTime(value);
+}
+
+function caseLine(r: Row, relative = false) {
+  return `${r.label}, ${metric(r.baseline, relative)} → **${metric(r.value, relative)}**`;
 }
 
 // GitHub alert blocks render as coloured boxes, so the verdict is visible
@@ -97,7 +101,7 @@ function callouts(s: ReportSummary) {
       [
         "> [!CAUTION]",
         `> **${plural(s.regressions, "case")} slower${n ? `, ${n} by ${MAJOR * 100}% or more` : ""}.** ` +
-          `Worst: ${caseLine(s.worst)}, **${formatChange(s.worst.change)}**.  `,
+          `Worst: ${caseLine(s.worst, s.relative)}, **${formatChange(s.worst.change)}**.  `,
       ].join("\n"),
     );
   }
@@ -107,7 +111,7 @@ function callouts(s: ReportSummary) {
       [
         "> [!TIP]",
         `> **${plural(s.improvements, "case")} faster${n ? `, ${n} by ${MAJOR * 100}% or more` : ""}.** ` +
-          `Best: ${caseLine(s.best)}, **${formatChange(s.best.change)}**. Nice work.  `,
+          `Best: ${caseLine(s.best, s.relative)}, **${formatChange(s.best.change)}**. Nice work.  `,
       ].join("\n"),
     );
   }
@@ -134,13 +138,14 @@ function perfUrl(s: ReportSummary, benchmarks: string[], base = `${BENCHER}/perf
 }
 
 function links(s: ReportSummary) {
+  if (!s.project || !s.uuid) return [];
   const api = `${API}/projects/${s.project}`;
   const alerted = s.rows.filter((r) => r.verdict === "regression" || r.verdict === "improvement");
   const parts = [
     `[Report](${BENCHER}/perf/${s.project}/reports/${s.uuid})`,
     `[JSON](${api}/reports/${s.uuid})`,
   ];
-  if (alerted.length)
+  if (alerted.length && !s.relative)
     parts.push(
       `[History](${perfUrl(
         s,
@@ -175,7 +180,7 @@ function cell(text: string) {
 
 function inputCell(p: Row["parts"], s?: ReportSummary, r?: Row) {
   const input = cell(p.input + (p.seed && p.seed !== "s1" ? ` (seed ${p.seed.slice(1)})` : ""));
-  return s && r ? `[${input}](${perfUrl(s, [r.benchmark])} "${r.name}")` : input;
+  return s && r && !s.relative ? `[${input}](${perfUrl(s, [r.benchmark])} "${r.name}")` : input;
 }
 
 function caseCells(r: Row, s?: ReportSummary) {
@@ -192,7 +197,7 @@ function alertTable(rows: Row[], s: ReportSummary) {
   ];
   for (const r of rows) {
     lines.push(
-      `| ${caseCells(r, s)} | ${formatTime(r.baseline)} | ${formatTime(r.value)} | ${changeCell(r)} |`,
+      `| ${caseCells(r, s)} | ${metric(r.baseline, s.relative)} | ${metric(r.value, s.relative)} | ${changeCell(r)} |`,
     );
   }
   return lines.join("\n");
@@ -200,15 +205,16 @@ function alertTable(rows: Row[], s: ReportSummary) {
 
 const STATUS = { regression: "slower", improvement: "faster", missing: "new", within: "" };
 
-function fullTable(rows: Row[]) {
+function fullTable(rows: Row[], relative = false) {
   const lines = [
-    "| Input | Type | N | Mode | Baseline | Limits | Current | Change | Alert | ID |",
+    `| Input | Type | N | Mode | Baseline | ${relative ? "Median interval" : "Limits"} | Current | Change | Alert | ID |`,
     "|---|---|---:|---|---:|---:|---:|---:|---|---|",
   ];
   for (const r of rows) {
-    const limits = r.lower == null ? "—" : `${formatTime(r.lower)} – ${formatTime(r.upper)}`;
+    const limits =
+      r.lower == null ? "—" : `${metric(r.lower, relative)} – ${metric(r.upper, relative)}`;
     lines.push(
-      `| ${caseCells(r)} | ${formatTime(r.baseline)} | ${limits} | ${formatTime(r.value)} | ` +
+      `| ${caseCells(r)} | ${metric(r.baseline, relative)} | ${limits} | ${metric(r.value, relative)} | ` +
         `${formatChange(r.change)} | ${STATUS[r.verdict]} | \`${r.name}\` |`,
     );
   }
@@ -251,7 +257,7 @@ export function render(s: ReportSummary, options: RenderOptions) {
     "",
     `<details><summary>All ${s.rows.length} cases</summary>`,
     "",
-    fullTable(s.rows),
+    fullTable(s.rows, s.relative),
     "",
     "</details>",
   );
@@ -298,7 +304,7 @@ function combinedHeadline(configurations: ConfigurationResult[], rows: CaseRow[]
   if (faster) parts.push(`${faster} faster`);
   const measured = configurations.filter((c) => c.summary);
   if (!slower && !faster) {
-    parts.push(measured.some((c) => c.summary!.compared) ? "no significant change" : "no baseline");
+    parts.push(measured.some((c) => c.summary!.compared) ? "no regression alert" : "no baseline");
   }
   const fresh = caseRows(configurations).filter((row) =>
     row.cells.some((cell) => cell?.baseline === null),
@@ -435,8 +441,12 @@ function changedTable(configurations: ConfigurationResult[], rows: CaseRow[]) {
   for (const row of rows) {
     const first = row.cells.findIndex((c) => c);
     const s = configurations[first].summary!;
-    const cells = row.cells.map((r) =>
-      !r ? "—" : r.change == null ? "new" : `${cellText(r)} <sub>${formatTime(r.value)}</sub>`,
+    const cells = row.cells.map((r, index) =>
+      !r
+        ? "—"
+        : r.change == null
+          ? "new"
+          : `${cellText(r)} <sub>${metric(r.value, configurations[index].summary?.relative)}</sub>`,
     );
     lines.push(
       `| ${inputCell(row.parts, s, row.cells[first])} | ${cell(row.parts.type) || "—"} | ${row.parts.n || "—"} | ` +
@@ -510,7 +520,7 @@ export function renderCombined(configurations: ConfigurationResult[], options: C
       out.push(
         `**${c.name}** · \`${c.summary!.testbed.name}\``,
         "",
-        fullTable(c.summary!.rows),
+        fullTable(c.summary!.rows, c.summary!.relative),
         "",
       );
     out.push("</details>");

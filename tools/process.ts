@@ -4,6 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
 import { writeSync } from "node:fs";
 import { open } from "node:fs/promises";
+import { createInterface } from "node:readline";
 
 const commandLog = new AsyncLocalStorage<number>();
 
@@ -36,6 +37,8 @@ interface CommandOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   capture?: boolean;
+  /** A line-oriented worker exchange, owned and cancelled with this command. */
+  interact?: (exchange: (request: string) => Promise<string>) => Promise<void>;
 }
 
 /** Run a command, forwarding diagnostics and rejecting unsuccessful exits. */
@@ -53,17 +56,16 @@ export function command(
       cwd: options.cwd,
       env: { ...process.env, ...options.env, TESSERA_COMMAND_GROUP: "1" },
       stdio: [
-        "ignore",
-        options.capture ? "pipe" : (commandLog.getStore() ?? "inherit"),
+        options.interact ? "pipe" : "ignore",
+        options.capture || options.interact ? "pipe" : (commandLog.getStore() ?? "inherit"),
         commandLog.getStore() ?? "inherit",
       ],
     });
     let output = "";
-    child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
-      output += chunk;
-    });
-    let cancelled: CommandCancelledError | undefined;
-    let escalation: ReturnType<typeof setTimeout> | undefined;
+    if (!options.interact)
+      child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
+        output += chunk;
+      });
     const terminate = (signal: NodeJS.Signals) => {
       if (!ownsGroup) child.kill(signal);
       else if (child.pid) {
@@ -74,6 +76,30 @@ export function command(
         }
       }
     };
+    let interactionError: unknown;
+    const interaction = options.interact
+      ? (async () => {
+          const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+          try {
+            await options.interact!(async (request) => {
+              child.stdin!.write(`${request}\n`);
+              const line = await lines.next();
+              if (line.done) throw new Error(`${program} closed its response stream`);
+              return line.value;
+            });
+          } catch (error) {
+            interactionError = error;
+            terminate("SIGKILL");
+          } finally {
+            child.stdin!.end();
+          }
+        })()
+      : Promise.resolve();
+    child.stdin?.on("error", (error) => {
+      interactionError ??= error;
+    });
+    let cancelled: CommandCancelledError | undefined;
+    let escalation: ReturnType<typeof setTimeout> | undefined;
     const interrupt = (signal: NodeJS.Signals) => {
       if (cancelled) {
         terminate("SIGKILL");
@@ -89,7 +115,8 @@ export function command(
     process.on("SIGINT", interrupt);
     process.on("SIGTERM", interrupt);
     child.once("error", reject);
-    child.once("close", (code, signal) => {
+    child.once("close", async (code, signal) => {
+      await interaction;
       // Logged/inherited stdio can close with the direct child while a
       // descendant still runs. Finish cancellation before clearing its timer.
       if (cancelled) terminate("SIGKILL");
@@ -97,6 +124,7 @@ export function command(
       process.removeListener("SIGINT", interrupt);
       process.removeListener("SIGTERM", interrupt);
       if (cancelled) reject(cancelled);
+      else if (interactionError) reject(interactionError);
       else if (code === 0) resolve(output.trim());
       else {
         if (output) diagnostic(output.trimEnd());

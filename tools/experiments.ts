@@ -113,7 +113,9 @@ async function report(directories: string[], partial = false) {
   }
   if (local) {
     if (paths.length !== 1 || partial)
-      throw new Error("Local reports require one directory and nine complete blocks per layout");
+      throw new Error(
+        "Revision reports require one directory and complete recorded samples per layout",
+      );
     await renderLocalReport(paths[0]);
   } else await writeReport(paths, partial);
 }
@@ -147,10 +149,21 @@ export function experimentCommands(program: Command) {
         }
       },
     )
+    .option(
+      "--shard <index/count>",
+      "measure one balanced partition of the resolved cases",
+      (value) => {
+        const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(value);
+        if (!match || Number(match[1]) > Number(match[2]) || Number(match[2]) > 64)
+          throw new InvalidArgumentError("expected index/count with 1 <= index <= count <= 64");
+        return { index: Number(match[1]), count: Number(match[2]) };
+      },
+    )
     .action(
       async (
         baseline: string | undefined,
         options: MeasurementOptions & {
+          shard?: { index: number; count: number };
           filter?: string;
           layoutSeeds?: number[];
           layoutControl?: LayoutControl;
@@ -174,6 +187,7 @@ export function experimentCommands(program: Command) {
             filter: options.filter,
             layoutSeeds: options.layoutSeeds,
             layoutControl: options.layoutControl,
+            shard: options.shard,
           }),
         );
       },

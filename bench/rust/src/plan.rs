@@ -15,7 +15,34 @@ pub(crate) struct Catalog {
     types: Vec<RecordType>,
     smoke: Inventory,
     pub(crate) comparison: Inventory,
+    #[serde(rename = "revisionSampling")]
+    revision_sampling: Vec<RevisionSampling>,
 }
+/// Per-revision measurement budget shared with trusted report validation.
+#[derive(Deserialize)]
+pub struct RevisionSampling {
+    /// Inclusive record-count floor.
+    pub min_len: usize,
+    /// Total warm-up wall time.
+    pub warm_ms: u64,
+    /// Total sampling wall-time budget, excluding process startup.
+    pub window_ms: u64,
+    /// Number of adjacent A/B pairs.
+    pub samples: usize,
+}
+
+/// Selects the first matching descending length floor from the catalog.
+///
+/// # Panics
+/// Panics for zero records or a catalog without a matching budget.
+pub fn revision_sampling(len: usize) -> &'static RevisionSampling {
+    catalog()
+        .revision_sampling
+        .iter()
+        .find(|s| len >= s.min_len)
+        .expect("revision sampling budget")
+}
+
 /// An algorithm's identity, stability and executable adapter family.
 #[derive(Deserialize)]
 pub(crate) struct Algorithm {

@@ -35,46 +35,47 @@ fn sort_group<'records, T: Send, E: Extract<T> + Clone + Send>(
 }
 
 #[test]
-fn equality_ranks_keep_key_bounds_and_disable_filling() {
-    let pivot = 1u128 << 64;
-    let mut rank = EqualityRank {
-        extractor: Direct,
-        equal: pivot,
-    };
-    let mut records = [0u128, pivot - 1, pivot, pivot + 1, u128::MAX];
-    assert_eq!(records.map(|record| rank.key(&record)), [0, 0, 1, 2, 2]);
-    let original = records;
-    assert!(!rank.try_count_window(&mut records, 0, 2));
-    assert_eq!(records, original);
-    for (pivot, ranks) in [(0, [1, 2]), (u128::MAX, [0, 1])] {
-        let mut rank = EqualityRank {
-            extractor: Direct,
-            equal: pivot,
-        };
-        assert_eq!([0u128, u128::MAX].map(|record| rank.key(&record)), ranks);
-    }
-}
-
-#[test]
-fn equality_partition_keeps_exclusive_owned_records() {
-    let mut records: Vec<_> = [7u64, 3, 1, 3, 9, 2, 3, 6]
-        .into_iter()
-        .enumerate()
-        .map(|(id, key)| (Cell::new(key), Box::new(id)))
-        .collect();
-    let mut rank = EqualityRank {
-        extractor: ByKey(&|row: &(Cell<u64>, Box<usize>)| row.0.get()),
-        equal: 3,
-    };
-    let mut buffers = block::Buffers::new();
-    let ends = block::partition_digit(&mut records, 2, 0, &mut rank, &mut buffers, &mut |_, _| {});
-    assert_eq!(ends, [2, 5, 8, 8]);
-    assert_eq!(
-        records.iter().map(|row| *row.1).collect::<Vec<_>>(),
-        [2, 5, 1, 3, 6, 0, 4, 7]
-    );
-    for row in records {
-        assert_eq!(row.0.get(), [7, 3, 1, 3, 9, 2, 3, 6][*row.1]);
+#[cfg(not(miri))]
+fn equality_roots_match_serial_policy() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .unwrap();
+    for equal in [0, 7, 1u128 << 64, u128::MAX] {
+        let mut records: Vec<_> = (0..129)
+            .map(|id| {
+                let key = if id % 4 == 0 {
+                    (id as u128).wrapping_mul(u128::MAX / 127)
+                } else {
+                    equal
+                };
+                (Cell::new(key), Box::new(id))
+            })
+            .collect();
+        let mut serial = records.clone();
+        let mut expected = records.clone();
+        expected.sort_by_key(|row| row.0.get());
+        let mut extractor = ByKey(|row: &(Cell<u128>, Box<usize>)| row.0.get());
+        assert!(
+            matches!(plan_node(&records, u128::MAX, 1, &mut extractor), NodePlan::Equal(pivot) if pivot == equal)
+        );
+        Sorter {
+            scratch: &mut Scratch::new(),
+            extractor: &mut extractor,
+            tile_len: 1,
+        }
+        .partition_equal(&mut serial, equal, u128::MAX);
+        pool.install(|| {
+            sort_root(
+                &mut records,
+                &mut extractor,
+                &mut Scratch::new(),
+                u128::MAX,
+                1,
+            )
+        });
+        assert_eq!(records, serial);
+        assert_eq!(records, expected);
     }
 }
 

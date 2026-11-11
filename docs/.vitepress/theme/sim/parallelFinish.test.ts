@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { type FinishAction, simulateParallelFinish } from "./parallelFinish.ts";
 
 test("equality ranks preserve the shared sharded directory order", () => {
-  // EqualityRank uses the serial below/equal/above policy. This model checks
+  // The rank closure uses the serial below/equal/above policy. This model checks
   // its shared scatter/adoption semantics; materialized completion and Rayon
   // scheduling are covered by the native Rust tests, not this bounded model.
   const equal = 7;

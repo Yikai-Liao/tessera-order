@@ -3,7 +3,8 @@
 //! Parallel root partition and completion of materialized buckets.
 
 use super::*;
-use rayon::Scope;
+use crate::key::ByKey;
+use rayon::{Scope, prelude::*};
 
 /// The archived experiment did not reliably win at 512 KiB; keep 1 MiB as a
 /// starting cutoff until controlled measurements retune it.
@@ -144,15 +145,46 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync>(
     let digit = match plan_node(records, varying, tile_len, extractor) {
         NodePlan::Digit(digit) => digit,
         NodePlan::Equal(equal) => {
-            sort_repeated_root(
+            let equal = equal.to_u128();
+            let mut key = extractor.clone();
+            // Match the serial equality policy. ByKey caches classification and
+            // declines filling: equal ranks do not identify record payloads.
+            let rank = ByKey(move |record: &T| {
+                let value = key.key(record).to_u128();
+                u8::from(value >= equal) + u8::from(value > equal)
+            });
+            let ends = block::partition_digit_parallel(
                 records,
-                extractor,
-                scratch,
-                equal.to_u128(),
-                varying,
-                tile_len,
+                2,
+                0,
+                rank,
+                &mut scratch.block,
                 shards,
+                block::BucketFinish {
+                    limit: 0,
+                    sort: &|_| {},
+                    visit: &mut |_| {},
+                },
             );
+            // Materialization has retired all copy sources. Skip the equal band;
+            // the unused fourth bucket leaves the greater band through the end.
+            let (less, rest) = records.split_at_mut(ends[0]);
+            let (_, greater) = rest.split_at_mut(ends[1] - ends[0]);
+            scratch.block.recycle_ends(ends);
+            let mut right_extractor = extractor.clone();
+            [
+                (less, scratch, extractor),
+                (greater, &mut Scratch::new(), &mut right_extractor),
+            ]
+            .into_par_iter()
+            .for_each(|(records, scratch, extractor)| {
+                Sorter {
+                    scratch,
+                    extractor,
+                    tile_len,
+                }
+                .sort_child(records, varying);
+            });
             return;
         }
         plan => {
@@ -240,76 +272,6 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync>(
         }
         scratch.block.recycle_ends(ends);
     });
-}
-
-/// Encodes the three bands of `Sorter::partition_equal` as a two-bit digit.
-///
-/// The rank is not a record key, so counting/filling is never forwarded.
-#[derive(Clone)]
-struct EqualityRank<E> {
-    extractor: E,
-    equal: u128,
-}
-
-// SAFETY: the default CACHE_BUCKETS retains classifications before moving
-// records, so the wrapped extractor may panic or change its answers.
-unsafe impl<T, E: Extract<T>> Extract<T> for EqualityRank<E> {
-    type Value = u8;
-
-    fn key(&mut self, record: &T) -> u8 {
-        let key = self.extractor.key(record).to_u128();
-        u8::from(key >= self.equal) + u8::from(key > self.equal)
-    }
-}
-
-/// Materializes a sharded equality partition and sorts only its two outer bands.
-fn sort_repeated_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
-    records: &mut [T],
-    extractor: &mut E,
-    scratch: &mut Scratch<T>,
-    equal: u128,
-    varying: u128,
-    tile_len: usize,
-    shards: usize,
-) {
-    let ends = block::partition_digit_parallel(
-        records,
-        2,
-        0,
-        EqualityRank {
-            extractor: extractor.clone(),
-            equal,
-        },
-        &mut scratch.block,
-        shards,
-        block::BucketFinish {
-            limit: 0,
-            sort: &|_| {},
-            visit: &mut |_| {},
-        },
-    );
-    let (less, rest) = records.split_at_mut(ends[0]);
-    let (_, greater) = rest.split_at_mut(ends[1] - ends[0]);
-    scratch.block.recycle_ends(ends);
-    let mut right_extractor = extractor.clone();
-    rayon::join(
-        || {
-            Sorter::<T, E> {
-                scratch,
-                extractor,
-                tile_len,
-            }
-            .sort_child(less, varying)
-        },
-        || {
-            Sorter::<T, E> {
-                scratch: &mut Scratch::new(),
-                extractor: &mut right_extractor,
-                tile_len,
-            }
-            .sort_child(greater, varying);
-        },
-    );
 }
 
 /// Bounds staging to square-root space and declines infeasible root layouts.

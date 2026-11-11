@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { arch, cpus, platform, release } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
@@ -318,6 +318,15 @@ export async function compareLocal(options: LocalOptions) {
         seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
         options.layoutControl,
       );
+      // Measure the retained copies, so downloads contain the exact executed files.
+      const binaryPaths = { baseline: "", current: "" };
+      for (const role of ["baseline", "current"] as const) {
+        const retained = join(out, "binaries", relative(workspace.directory, binaries[role]));
+        await mkdir(dirname(retained), { recursive: true });
+        await cp(binaries[role], retained);
+        binaries[role] = retained;
+        binaryPaths[role] = relative(out, retained);
+      }
       const allCases = await selectedCases(
         binaries,
         planPath,
@@ -333,6 +342,7 @@ export async function compareLocal(options: LocalOptions) {
         dirty,
         source,
         binaries: hashes,
+        binaryPaths,
         builds,
         rustc: builds.current.rustc,
         flags: builds.current.cargo_encoded_rustflags,

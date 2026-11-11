@@ -53,6 +53,8 @@ export interface LocalRun {
   dirty: boolean;
   source: { baseline: string; current: string; harness: string; catalog: string };
   binaries: { baseline: string; current: string };
+  /** Executed files relative to the result directory; absent from older artifacts. */
+  binaryPaths?: { baseline: string; current: string };
   builds?: { baseline: BuildProvenance; current: BuildProvenance };
   rustc: string;
   flags: string;

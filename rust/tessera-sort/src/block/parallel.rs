@@ -6,7 +6,8 @@ use super::*;
 use rayon::prelude::*;
 
 mod compact;
-mod finish;
+#[cfg(test)]
+mod packing_tests;
 
 /// Finishes one privately staged bucket without retaining its record borrow.
 type BucketSort<'a, T> = &'a (dyn Fn(&mut [T]) + Sync);
@@ -193,21 +194,28 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     // completed the same pass and retain their recovery guards until adoption.
     let (mut global, ends) = unsafe { Partition::adopt_shards(input, tasks, buffers) };
     drop(local_buffers);
-    if let Some(finisher) = config.finish
-        && finish::try_finish(
-            &mut global,
-            &ends,
-            config.parallel,
-            finisher.limit,
-            finisher.sort,
-        )
-    {
-        return ends;
-    }
     compact::permute_blocks(&mut global, shards, config.parallel);
-    let panic = global.compact_with(&ends, visit);
-    if let Some(payload) = panic {
-        unwind::resume(payload);
+    compact::pack_buckets(
+        &mut global,
+        &ends,
+        shards,
+        config.parallel,
+        config.finish.as_ref().map(|finish| finish.sort),
+    );
+    if config.finish.is_none()
+        && let Some(callback) = visit
+    {
+        let mut start = 0;
+        for &end in &ends {
+            if end > start {
+                // SAFETY: all packing jobs joined and retired every source.
+                // These distinct final bands are never accessed again here.
+                let bucket =
+                    unsafe { core::slice::from_raw_parts_mut(input.add(start), end - start) };
+                callback(bucket);
+            }
+            start = end;
+        }
     }
     ends
 }

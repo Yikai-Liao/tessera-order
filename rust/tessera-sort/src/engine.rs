@@ -433,21 +433,6 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         self.sort_node(records, varying);
     }
 
-    /// Finishes a privately staged bucket, using its available record capacity.
-    /// The larger tile allowance is local to this operation and cursor-bounded.
-    #[cfg(feature = "rayon")]
-    fn sort_staged_child(&mut self, records: &mut [T], candidate: u128) {
-        Sorter::<T, E> {
-            scratch: self.scratch,
-            extractor: self.extractor,
-            tile_len: self
-                .tile_len
-                .max(records.len())
-                .min(crate::thresholds::MAX_TILE_RECORDS),
-        }
-        .sort_child(records, candidate);
-    }
-
     /// Routes a slice whose order has already been probed.
     fn sort_node(&mut self, records: &mut [T], varying: u128) {
         let len = records.len();

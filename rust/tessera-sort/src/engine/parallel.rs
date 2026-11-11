@@ -242,7 +242,7 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync>(
                 extractor: &mut key,
                 tile_len,
             }
-            .sort_staged_child(child, candidate);
+            .sort_child(child, candidate);
             pool_ref.give(scratch);
         };
         let limit = bucket_limit::<T>(records.len(), digit.width);

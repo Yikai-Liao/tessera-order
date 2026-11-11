@@ -131,16 +131,14 @@ fn send_only_records_sort() {
 
 #[test]
 #[cfg(not(miri))]
-fn bounded_callback_can_reenter() {
-    // This crosses bounded finishing's production cutoff with Send-only
-    // records, a Sync-but-not-Send callback, and nested Rayon work from a
-    // private staged bucket rather than the original input or root tail.
+fn callback_can_reenter() {
+    // Cross the production parallel cutoff with Send-only records and a
+    // Sync-but-not-Send callback. Packing-phase reentry is also exercised
+    // directly by the block-layer test, without assuming private staging.
     let len = (1usize << 21) + 37;
     let mut rows: Vec<_> = (0..len as u32)
         .map(|id| (id.wrapping_mul(7919) % 8192, Cell::new(id)))
         .collect();
-    let begin = rows.as_ptr() as usize;
-    let end = begin + rows.len() * core::mem::size_of_val(&rows[0]);
     let entered = AtomicBool::new(false);
     let offset = Mutex::new(0u32);
     let pool = rayon::ThreadPoolBuilder::new()
@@ -151,11 +149,7 @@ fn bounded_callback_can_reenter() {
         let guard = offset.lock().unwrap();
         let entered = &entered;
         par_stable_sort_by_key(&mut rows, move |row| {
-            let address = core::ptr::from_ref(row) as usize;
-            if !(begin..end).contains(&address)
-                && row.1.get() < len as u32 - 1024
-                && !entered.swap(true, Ordering::Relaxed)
-            {
+            if !entered.swap(true, Ordering::Relaxed) {
                 let (left, right) =
                     rayon::join(|| (0..1024u64).sum::<u64>(), || (0..1024u64).sum::<u64>());
                 assert_eq!(left, right);

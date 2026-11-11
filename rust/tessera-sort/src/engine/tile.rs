@@ -184,12 +184,22 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
         (records, ids)
     }
 
-    /// Partitions a tile through scratch, then finishes each bucket.
-    fn partition_tile(&mut self, records: &mut [T], digit: Digit, varying: u128) {
+    /// Runs one stable counting pass per digit, the last digit first, and
+    /// returns the largest bucket of the first digit.
+    ///
+    /// The records end in the tile, also when a key function panics. `cursor`
+    /// then holds each bucket's end for the first digit.
+    fn counting_passes(
+        &mut self,
+        records: &mut [T],
+        digits: &[Digit],
+        cursor: &mut MaybeUninit<[Cursor; MAX_DIGIT_BUCKETS]>,
+    ) -> Cursor {
         let len = records.len();
-        let (scratch, cache_tail) = self.reserve_scratch(len, 1 << digit.width);
-        let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
-        let counts_ptr = counts.as_mut_ptr().cast::<Cursor>();
+        debug_assert!(len <= MAX_TILE_RECORDS);
+        let widest = digits.iter().map(|digit| digit.width).max().unwrap_or(0);
+        let (scratch, cache_tail) = self.reserve_scratch(len, 1 << widest);
+        let cursor = cursor.as_mut_ptr().cast::<Cursor>();
         let tile = records.as_mut_ptr();
         let mut guard = RestoreTile {
             tile,
@@ -197,20 +207,34 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
             source: tile,
         };
         let mut destination = scratch;
-        // SAFETY: both buffers have len slots and the cursor/cache regions
-        // satisfy pass requirements. Extract guarantees safe re-evaluation
-        // whenever classification caching is disabled.
-        let largest = unsafe {
-            guard.pass::<E>(
-                &mut destination,
-                digit,
-                counts_ptr,
-                cache_tail,
-                self.extractor,
-            )
-        };
+        let mut largest = 0;
+        for &digit in digits.iter().rev() {
+            // SAFETY: scratch and tile are disjoint len-slot buffers, and the
+            // guard's source holds the records. Cached IDs fit in the cursor
+            // suffix or the reserved scratch tail. Extract guarantees safe
+            // re-evaluation whenever classification caching is disabled.
+            largest = unsafe {
+                counting_pass::<T, E>(
+                    guard.source,
+                    destination,
+                    len,
+                    digit,
+                    cursor,
+                    cache_tail,
+                    self.extractor,
+                )
+            };
+            // Only a completed pass makes its output the live record set.
+            core::mem::swap(&mut guard.source, &mut destination);
+        }
+        largest
+    }
 
-        drop(guard);
+    /// Partitions a tile through scratch, then finishes each bucket.
+    fn partition_tile(&mut self, records: &mut [T], digit: Digit, varying: u128) {
+        let len = records.len();
+        let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
+        let largest = self.counting_passes(records, &[digit], &mut counts);
         // With insertion-sized buckets, whole-tile insertion has the same inversion
         // count as separate bucket sorts and skips the boundary walk.
         if largest as usize <= INSERTION_MAX {
@@ -221,7 +245,9 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
         // measured 48% slower when there was roughly one bucket per record.
         let candidate = varying & !digit.mask::<E::Value>().to_u128();
         // SAFETY: a completed pass initialized exactly this cursor prefix.
-        let ends = unsafe { core::slice::from_raw_parts(counts_ptr, 1usize << digit.width) };
+        let ends = unsafe {
+            core::slice::from_raw_parts(counts.as_ptr().cast::<Cursor>(), 1usize << digit.width)
+        };
         let mut start = 0;
         for &end in ends {
             let end = end as usize;
@@ -244,49 +270,13 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
         if len < 2 || varying == 0 {
             return;
         }
-        let (digits, passes) = match plan_tile(records, varying, self.extractor) {
-            TilePlan::Insertion => {
-                self.extractor.finish_insertion(records);
-                return;
+        match plan_tile(records, varying, self.extractor) {
+            TilePlan::Insertion => self.extractor.finish_insertion(records),
+            TilePlan::Msd(digit) => self.partition_tile(records, digit, varying),
+            TilePlan::Lsd { digits, passes } => {
+                let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
+                self.counting_passes(records, &digits[..passes], &mut counts);
             }
-            TilePlan::Msd(digit) => {
-                self.partition_tile(records, digit, varying);
-                return;
-            }
-            TilePlan::Lsd { digits, passes } => (digits, passes),
-        };
-        let buckets = if E::CACHE_BUCKETS {
-            1 << digits[..passes]
-                .iter()
-                .map(|digit| digit.width)
-                .max()
-                .unwrap()
-        } else {
-            0
-        };
-        let (scratch_ptr, cache_tail) = self.reserve_scratch(len, buckets);
-        debug_assert!(len <= MAX_TILE_RECORDS);
-        let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
-        let counts_ptr = counts.as_mut_ptr().cast::<Cursor>();
-        let tile = records.as_mut_ptr();
-        let mut guard = RestoreTile {
-            tile,
-            len,
-            source: tile,
-        };
-        let mut destination = scratch_ptr;
-        for &digit in digits[..passes].iter().rev() {
-            // SAFETY: scratch and tile are disjoint len-slot buffers. Cached
-            // IDs fit in the cursor suffix or the reserved scratch tail.
-            unsafe {
-                guard.pass::<E>(
-                    &mut destination,
-                    digit,
-                    counts_ptr,
-                    cache_tail,
-                    self.extractor,
-                )
-            };
         }
     }
 }
@@ -300,41 +290,6 @@ struct RestoreTile<T> {
     tile: *mut T,
     len: usize,
     source: *mut T,
-}
-
-impl<T> RestoreTile<T> {
-    /// Runs one counting pass from `source` into `*destination`, then swaps
-    /// the two so `source` names the completed output.
-    ///
-    /// # Safety
-    ///
-    /// The requirements of [`counting_pass`], with `self.source` as the source
-    /// and `*destination` as the destination.
-    #[inline]
-    unsafe fn pass<E: Extract<T>>(
-        &mut self,
-        destination: &mut *mut T,
-        digit: Digit,
-        cursor: *mut Cursor,
-        cache_tail: *mut Cursor,
-        extractor: &mut E,
-    ) -> Cursor {
-        // SAFETY: the caller supplies initialized source records, disjoint writable
-        // output and cursor/cache storage as specified by this function's contract.
-        unsafe {
-            let largest = counting_pass::<T, E>(
-                self.source,
-                *destination,
-                self.len,
-                digit,
-                cursor,
-                cache_tail,
-                extractor,
-            );
-            core::mem::swap(&mut self.source, destination);
-            largest
-        }
-    }
 }
 
 impl<T> Drop for RestoreTile<T> {

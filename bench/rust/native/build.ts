@@ -36,15 +36,7 @@ async function build(out: string) {
   const jobs = Math.min(2, Number(process.env.CARGO_BUILD_JOBS ?? 2));
   if (!Number.isInteger(jobs) || jobs < 1) throw new Error("CARGO_BUILD_JOBS must be positive");
   const highway = join(out, "highway");
-  // CMake decides by source timestamps, which a newly fetched tree does not
-  // guarantee, so a different pin starts from a fresh build directory.
-  const pin = sources.highway?.sha256 ?? "";
-  const configured = await readFile(join(highway, "pin"), "utf8").then(
-    (recorded) => recorded === pin,
-    () => false,
-  );
-  if (!configured) await rm(highway, { recursive: true, force: true });
-  await command("cmake", [
+  const configure = [
     "-S",
     // The workspace's vendor link points to the retained, verified sources.
     // CMake can reuse its dependency graph when the snapshot directory changes.
@@ -59,10 +51,20 @@ async function build(out: string) {
     "-DHWY_ENABLE_IO=OFF",
     `-DCMAKE_CXX_COMPILER=${cxx}`,
     `-DCMAKE_CXX_FLAGS=${base.join(" ")}`,
-  ]);
+  ];
+  // CMake timestamps cannot detect an older source release or a compiler
+  // replaced at the same path. Reuse its tree only for identical build inputs.
+  const identity = JSON.stringify([sources.highway?.sha256, compilers.get(cxx), configure]);
+  const stamp = join(highway, "identity");
+  const configured = await readFile(stamp, "utf8").then(
+    (recorded) => recorded === identity,
+    () => false,
+  );
+  if (!configured) await rm(highway, { recursive: true, force: true });
+  await command("cmake", configure);
   await command("cmake", ["--build", highway, "--target", "hwy", "-j", String(jobs)]);
   await copyFile(join(highway, "libhwy.a"), join(out, "libhwy.a"));
-  await writeFile(join(highway, "pin"), pin);
+  await writeFile(stamp, identity);
   const cpp = ["-std=c++17", "-I.", `-I${vendor}/highway`, `-I${vendor}/x86simdsort/lib`];
   const tasks: TranslationUnit[] = [];
   const libs: Record<string, string[]> = { tessera_native: [], hwy_contrib: [], x86simdsort: [] };

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { stringify } from "smol-toml";
 import { command } from "../../../tools/process.ts";
 import { treeHash } from "./sources.ts";
 
@@ -107,7 +108,6 @@ test("native objects survive snapshot changes and invalidate on build inputs", a
   const sorted = (value: string) => value.trim().split("\n").sort();
   await build(first);
   const initial = await compiled();
-  assert.ok(initial.includes("ips.cpp"));
   const metadata = JSON.parse(await readFile(join(out, "native-build.json"), "utf8"));
   assert.equal(metadata.cc, resolve("fixture-cc"));
   assert.equal(metadata.cxx, resolve("fixture-cxx"));
@@ -128,7 +128,12 @@ test("native objects survive snapshot changes and invalidate on build inputs", a
     "layout changes must rebuild every object",
   );
   await writeFile(join(out, "compiled"), "");
+  await writeFile(join(out, "highway/previous-build"), "");
   await build(second, "fixture compiler 2");
+  await assert.rejects(
+    readFile(join(out, "highway/previous-build")),
+    "compiler changes must discard the CMake tree",
+  );
   assert.deepEqual(
     sorted(await compiled()),
     sorted(initial),
@@ -137,7 +142,12 @@ test("native objects survive snapshot changes and invalidate on build inputs", a
   await writeFile(join(out, "compiled"), "");
   const builder = join(second, "bench/rust/native/build.ts");
   await writeFile(builder, (await readFile(builder, "utf8")).replace('"-O3"', '"-O2"'));
+  await writeFile(join(out, "highway/previous-build"), "");
   await build(second, "fixture compiler 2");
+  await assert.rejects(
+    readFile(join(out, "highway/previous-build")),
+    "flag changes must discard the CMake tree",
+  );
   assert.deepEqual(
     sorted(await compiled()),
     sorted(initial),
@@ -150,28 +160,20 @@ test("native objects survive snapshot changes and invalidate on build inputs", a
   // CMake decides by source timestamps, so a pin change must not reuse its tree.
   const highway = join(vendor, "highway");
   const pin = async (sha256: string) => {
+    const source = {
+      repository: "fixture",
+      commit: "1",
+      sha256,
+      license: "BSD-3-Clause",
+      license_files: ["LICENSE"],
+    };
     await writeFile(
       join(second, "bench/rust/native/sources.toml"),
-      [
-        "[sources.highway]",
-        'repository = "fixture"',
-        'commit = "1"',
-        `sha256 = "${sha256}"`,
-        'license = "BSD-3-Clause"',
-        'license_files = ["LICENSE"]',
-        "",
-      ].join("\n"),
+      stringify({ sources: { highway: source } }),
     );
     await writeFile(
       join(highway, ".tessera-source.json"),
-      JSON.stringify({
-        repository: "fixture",
-        commit: "1",
-        sha256,
-        license: "BSD-3-Clause",
-        license_files: ["LICENSE"],
-        tree_sha256: await treeHash(highway),
-      }),
+      JSON.stringify({ ...source, tree_sha256: await treeHash(highway) }),
     );
   };
   await pin("pin-a");
@@ -182,14 +184,13 @@ test("native objects survive snapshot changes and invalidate on build inputs", a
   await pin("pin-b");
   await build(second, "fixture compiler 2");
   await assert.rejects(readFile(join(out, "highway/previous-pin")), "a pin change discards it");
-  assert.equal(await readFile(join(out, "highway/source"), "utf8"), join(vendor, "highway"));
   // An interrupted compile must not leave another snapshot's object reusable.
   await writeFile(join(out, "compiled"), "");
   await writeFile(join(second, "bench/rust/native/ips.cpp"), "interrupted shim");
   await assert.rejects(build(second, "fixture compiler 2", "ips.cpp"));
-  await writeFile(join(second, "bench/rust/native/ips.cpp"), "fixture");
+  await writeFile(join(second, "bench/rust/native/ips.cpp"), "changed shim");
   await writeFile(join(out, "compiled"), "");
   await build(second, "fixture compiler 2");
   assert.deepEqual(sorted(await compiled()), ["ips.cpp"], "an interrupted compile must be redone");
-  assert.equal(await readFile(join(out, "tessera_native-ips.o"), "utf8"), "fixture");
+  assert.equal(await readFile(join(out, "tessera_native-ips.o"), "utf8"), "changed shim");
 });

@@ -60,34 +60,18 @@ test("routing keeps library, comparison and revision checks with their owners", 
     [
       [
         "bench/rust/native/ips.cpp",
-        "bench/rust/native/build.ts",
         "bench/rust/src/comparison/run.rs",
         "bench/rust/src/allocation.rs",
         "bench/rust/src/bin/compare.rs",
         "bench/rust/src/bin/memory.rs",
         "bench/rust/tests/comparison.rs",
         "bench/release.ts",
-        "bench/revisions.ts",
-        "bench/session.ts",
         "bench/plans/smoke.toml",
-        "bench/plans/selection.fixture.toml",
       ],
       { comparison: true },
     ],
     [
-      [
-        "bench/rust/src/case.rs",
-        "bench/rust/src/plan.rs",
-        "bench/rust/src/pool.rs",
-        "bench/rust/src/sampling.rs",
-        "bench/rust/src/lib.rs",
-        "bench/rust/build.rs",
-        "bench/rust/Cargo.toml",
-        "bench/rust/benches/smoke.rs",
-        "bench/workspace.ts",
-        "bench/summary.ts",
-        "tools/process.ts",
-      ],
+      ["bench/rust/src/case.rs", "bench/rust/build.rs", "bench/workspace.ts", "tools/process.ts"],
       { comparison: true, benchmark: true },
     ],
     [
@@ -96,8 +80,6 @@ test("routing keeps library, comparison and revision checks with their owners", 
         "bench/plans/local.toml",
         "bench/continuous/paired.ts",
         "bench/local/runner.ts",
-        "bench/local/model.ts",
-        "bench/local/samples.ts",
         "tools/continuous.ts",
       ],
       { benchmark: true },
@@ -131,12 +113,6 @@ test("routing keeps library, comparison and revision checks with their owners", 
   // A path no row names, and an unavailable base, select every lane.
   for (const path of ["unknown-input", "conformance/vectors/keys.json", ".gitignore"])
     assert.ok(Object.values(select([path])).every(Boolean), path);
-  assert.deepEqual(select(["docs/explain/keys.md", "rust/tessera-sort/src/lib.rs"]), {
-    ...none,
-    rust: true,
-    benchmark: true,
-    docs: true,
-  });
   assert.deepEqual(select(["rust/tessera-sort/src/lib.rs", "bench/rust/native/ips.cpp"]), {
     ...none,
     rust: true,

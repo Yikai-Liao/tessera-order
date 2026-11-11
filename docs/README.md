@@ -24,8 +24,8 @@ Every fact has one owner. Other pages link to it and never restate its numbers o
 | Ordering, stability, panic and memory guarantees | [semantics](../conformance/semantics.md) | The public contract changes |
 | Routing rules, thresholds, digit planning, block size and the reasons for them | The [explanation page](explain/index.md#reading-order) of that stage, with its model in `docs/.vitepress/theme/sim/` | An algorithm rule or constant changes |
 | Code boundaries, invariants, ownership and recovery, parallel completion | [engine reference](design/engine.md) | A boundary or invariant changes, not a threshold |
-| Failed experiments, open measured losses, placement lessons | [engine evidence](design/evidence.md) | An experiment is rejected or an accepted change keeps a loss |
-| Accepted effect of a change | Its PR description | Never in the repository |
+| Failed experiments, open measured losses, placement lessons, structure analysis | [engine evidence](design/evidence.md) | An experiment is rejected, an accepted change keeps a loss, or a structural conclusion or its premise changes |
+| Measurements of an accepted change | Its PR description; a retained mechanism names the saving that justifies it at its owner | The change merges |
 | Unfinished work and its acceptance | [roadmap](../ROADMAP.md) | Work starts, lands or is rejected |
 | Measurement commands, statistics, inputs, result formats | [benchmark protocol](development/benchmarking.md) | A command, input or statistic changes |
 | Hosted benchmark pipeline, PR reports, alerts | [continuous benchmarks](development/continuous-benchmarks.md) | The hosted pipeline changes |

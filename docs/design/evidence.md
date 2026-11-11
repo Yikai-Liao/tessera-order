@@ -1,6 +1,6 @@
 # Engine evidence
 
-This page keeps only what code and Git history cannot: how to read a small-case result, which experiments failed or stalled and must not be repeated blindly, and which measured losses landed changes still carry. The measured effect of each accepted change belongs in its PR description; commands, hashes and raw-result paths belong with the raw data outside Git. Entries describe their recorded revision and environment, not current-head validation. Use the [benchmark protocol](../development/benchmarking.md#run-an-experiment) for new measurements, and delete an entry when a change makes it obsolete.
+This page keeps only what code and Git history cannot: how to read a small-case result, which experiments failed or stalled and must not be repeated blindly, which measured losses landed changes still carry, and how the engine's structure was judged. The full measurements of each accepted change belong in its PR description; commands, hashes and raw-result paths belong with the raw data outside Git. Entries describe their recorded revision and environment, not current-head validation. Use the [benchmark protocol](../development/benchmarking.md#run-an-experiment) for new measurements, and delete an entry when a change makes it obsolete.
 
 ## Reading small-case results
 

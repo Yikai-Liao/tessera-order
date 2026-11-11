@@ -56,6 +56,10 @@ These changes are in the engine; each measured loss below stays open and no dist
 
 Neutral or already accepted without a recorded loss: strictly descending reversal (1.24–1.56× on reverse inputs), direct finishing of insertion-sized roots (random `u64` 0.889, rows 0.943), the active block directory (0.998–1.001) and terminal parallel completion (0.9965). Parallel adoption latency was not measured.
 
+## Repeated-key root sharing
+
+PR #78 remains unaccepted. Its [pre-simplification paired screen](https://github.com/Yikai-Liao/tessera-sort/actions/runs/43033277279) (`c2c84d5` against `c168df3`) found serial `u64/random/49` and `u64/random/1000` 15.2% and 12.7% slower despite unchanged serial source; layout is a hypothesis, not an established cause. The smaller closure-based candidate requires fresh exact-head feedback and source-attribution controls. Historical dual-build and 10M gains remain in the [PR evidence](https://github.com/Yikai-Liao/tessera-sort/pull/78#issuecomment-6755255766), not current acceptance. The earlier cache-lock batching candidate was rejected.
+
 ## Parallel completion baseline
 
 Host: AMD Ryzen 7 8845H, CPUs `0,2,4,6,8,10,12,14` (one SMT sibling per core), `powersave`, boost and SMT on, Rust 1.99.1, release, `compare,rayon`. These are whole-call comparisons against the serial A/A pair, not source-attributed gains; the implementation is in the [engine reference](engine.md#parallel-root-completion). Speedup is the reciprocal of the paired median ratio; ranges span nine blocks; peak heap excludes input preparation, the pool and thread stacks.

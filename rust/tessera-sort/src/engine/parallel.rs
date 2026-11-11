@@ -3,7 +3,8 @@
 //! Parallel root partition and completion of materialized buckets.
 
 use super::*;
-use rayon::Scope;
+use crate::key::ByKey;
+use rayon::{Scope, prelude::*};
 
 /// The archived experiment did not reliably win at 512 KiB; keep 1 MiB as a
 /// starting cutoff until controlled measurements retune it.
@@ -143,6 +144,49 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync>(
     let shards = rayon::current_num_threads().min((node_bytes / MIN_TASK_BYTES).max(1));
     let digit = match plan_node(records, varying, tile_len, extractor) {
         NodePlan::Digit(digit) => digit,
+        NodePlan::Equal(equal) => {
+            let equal = equal.to_u128();
+            let mut key = extractor.clone();
+            // Match the serial equality policy. ByKey caches classification and
+            // declines filling: equal ranks do not identify record payloads.
+            let rank = ByKey(move |record: &T| {
+                let value = key.key(record).to_u128();
+                u8::from(value >= equal) + u8::from(value > equal)
+            });
+            let ends = block::partition_digit_parallel(
+                records,
+                2,
+                0,
+                rank,
+                &mut scratch.block,
+                shards,
+                block::BucketFinish {
+                    limit: 0,
+                    sort: &|_| {},
+                    visit: &mut |_| {},
+                },
+            );
+            // Materialization has retired all copy sources. Skip the equal band;
+            // the unused fourth bucket leaves the greater band through the end.
+            let (less, rest) = records.split_at_mut(ends[0]);
+            let (_, greater) = rest.split_at_mut(ends[1] - ends[0]);
+            scratch.block.recycle_ends(ends);
+            let mut right_extractor = extractor.clone();
+            [
+                (less, scratch, extractor),
+                (greater, &mut Scratch::new(), &mut right_extractor),
+            ]
+            .into_par_iter()
+            .for_each(|(records, scratch, extractor)| {
+                Sorter {
+                    scratch,
+                    extractor,
+                    tile_len,
+                }
+                .sort_child(records, varying);
+            });
+            return;
+        }
         plan => {
             Sorter::<T, E> {
                 scratch,

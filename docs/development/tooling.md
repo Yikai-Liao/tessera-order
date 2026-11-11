@@ -19,7 +19,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Resume a prepared algorithm comparison | `pnpm -s tools compare resume bench/results/SESSION` |
 | Reproduce the native comparison CI job | `pnpm -s tools check --native` |
 | Preview hosted benchmark jobs | `pnpm -s tools continuous matrix` |
-| Reproduce one paired shard | `pnpm -s tools compare commit main --plan continuous --shard 1/2` |
+| Reproduce one paired shard | `pnpm -s tools compare commit main --plan continuous --shard 1/8` |
 | Upload completed paired JSON | `pnpm -s tools continuous submit --help` |
 | Regenerate an existing result | `pnpm -s tools report bench/results/SESSION` |
 | Read current main feedback | `pnpm -s tools status main` |
@@ -64,7 +64,7 @@ The hosted jobs call the maintained revision comparison command, with the comple
 
 ```sh
 # New output directories; baseline can be any compatible local commit.
-pnpm tools compare commit main --plan continuous --shard 1/2 \
+pnpm tools compare commit main --plan continuous --shard 1/8 \
   --out bench/results/paired-portable-simd-1
 
 # Regenerate one completed shard without building or measuring.

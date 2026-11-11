@@ -6,16 +6,16 @@ Language files select their language. Shared contracts and unknown paths select 
 
 ## Lanes
 
-Use a bounded number of lanes: the account has 20 concurrent slots shared with benchmarks and repository checks. Continuous measurement uses six jobs; ordinary Rust CI keeps its independent platform, comparison, Miri and sanitizer lanes. There is no benchmark-to-test dependency or account-wide priority/preemption guarantee; multiple PRs and other repositories can still consume the account. See [continuous capacity](continuous-benchmarks.md#capacity-and-recovery).
+Use a bounded number of lanes: the account has 20 concurrent slots shared with benchmarks and repository checks. Continuous measurement uses eight jobs; ordinary Rust CI keeps its independent platform, comparison, Miri and sanitizer lanes. There is no benchmark-to-test dependency or account-wide priority/preemption guarantee; multiple PRs and other repositories can still consume the account. See [continuous capacity](continuous-benchmarks.md#capacity-and-recovery).
 
 | Check | Pull request | `main` |
 |---|---|---|
 | Repository-wide formatting, lints, type checks and CI scripts | `lint` | the same |
 | Rust tests | Linux stable and MSRV, macOS stable, Windows stable | all four platforms, stable and MSRV |
-| Miri: serial backend and Rayon ownership fixtures | one job | the same |
+| Miri: serial backend and Rayon ownership fixtures | two parallel jobs | the same |
 | AddressSanitizer | `asan` | the same |
 | `cargo package` | in `rust / lint` | the same |
-| Paired continuous measurement | six hosted complete-case shards, shared SIMD backend | the same, against the first parent |
+| Paired continuous measurement | eight hosted complete-case shards, shared SIMD backend | the same, against the first parent |
 | Native comparison smoke checks and report generation | `comparison`, using Clang | the same |
 
 The Rust lint job checks all workspace features with Clippy and rustdoc, including the benchmark's native-facing Rust code. These commands do not link executables, so they set `TESSERA_BENCH_CHECK_ONLY=1` to skip the benchmark build script's native compilation and linker inputs. The lint runner needs neither fetched native sources nor native build tools. The comparison job leaves the variable unset and compiles, links and exercises the native competitors, including the sequential-linkage check. Cargo tracks changes to the variable so a check-only build cannot suppress a later executable build's native setup.
@@ -24,7 +24,7 @@ The comparison job uses a cached Cargo target and matching release flags for its
 
 A cell's commands live in one composite action, [`rust-test`](../../.github/actions/rust-test/action.yml), which both the pull request cells and the extra `main` cells call. A job's `if` cannot branch on `matrix` — the matrix is expanded after the condition is evaluated — so the two sets of cells are two jobs over one action rather than one matrix with a skip per cell.
 
-Each cell tests the shared SIMD backend and optional `rayon` entry points, including on Rust 1.89. There are no separate scalar or no-std configurations. Rayon tests cover sharded root scatter, caller-pool bucket scheduling, the one-thread fallback, task panics and record preservation. The Miri job additionally interprets sequential ownership fixtures for parallel storage and bucket handoff; native tests cover threaded scheduling. The AddressSanitizer job exercises serial and Rayon builds. No test lane is added for the continuous benchmark's two API groups.
+Each cell tests the shared SIMD backend and optional `rayon` entry points, including on Rust 1.89. There are no separate scalar or no-std configurations. Rayon tests cover sharded root scatter, caller-pool bucket scheduling, the one-thread fallback, task panics and record preservation. The two Miri jobs interpret serial and Rayon ownership fixtures concurrently without dropping either configuration. The Rayon job additionally interprets sequential ownership fixtures for parallel storage and bucket handoff; native tests cover threaded scheduling. The AddressSanitizer job exercises serial and Rayon builds. No test lane is added for the continuous benchmark's two API groups.
 
 The unprivileged [benchmark diagnostics workflow](../../.github/workflows/bench-diagnostics.yml) collects fixed-work Callgrind signals for affected PRs and additionally samples five layouts on weekly main runs. Manual dispatch selects counters or layouts and an optional baseline. Both use the four serial inputs in [the diagnostics plan](../../bench/plans/diagnostics.toml). Results and logs are retained as 14-day Actions artifacts; shared-runner layout ranges are exploratory. The job has read-only repository permissions, no Bencher credentials or submissions, and a 45-minute timeout.
 

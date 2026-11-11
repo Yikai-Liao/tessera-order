@@ -19,7 +19,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Resume a prepared algorithm comparison | `pnpm -s tools compare resume bench/results/SESSION` |
 | Reproduce the native comparison CI job | `pnpm -s tools check --native` |
 | Preview hosted benchmark jobs | `pnpm -s tools continuous matrix` |
-| Reproduce one paired shard | `pnpm -s tools compare commit main --plan continuous --shard 1/8` |
+| Reproduce one paired shard | `pnpm -s tools compare commit main --plan continuous --shard 1/4` |
 | Upload completed paired JSON | `pnpm -s tools continuous submit --help` |
 | Regenerate an existing result | `pnpm -s tools report bench/results/SESSION` |
 | Read current main feedback | `pnpm -s tools status main` |
@@ -60,11 +60,13 @@ A successful `status` exit means the read succeeded, not that every workflow pas
 
 ## Reproduce continuous work locally
 
-The hosted jobs call the maintained revision comparison command, with the complete continuous plan and one partition of timed IDs. Linux and `taskset` with four available CPUs are required for the four-thread plan. Serial cases and parallel cases never overlap on a runner. Both revisions use the same current harness, lockfile, SIMD backend and toolchain; no Cloud history is needed.
+The hosted preparation job builds the two revisions once; measurement jobs reuse their frozen executables through the maintained prepared-comparison command, with the complete continuous plan and one partition of timed IDs. Linux and `taskset` with four available CPUs are required for the four-thread plan. Serial cases and parallel cases never overlap on a runner. Both revisions use the same current harness, lockfile, SIMD backend and toolchain; no Cloud history is needed.
 
 ```sh
-# New output directories; baseline can be any compatible local commit.
-pnpm tools compare commit main --plan continuous --shard 1/8 \
+# Build once; each measurement uses its own new result directory.
+pnpm tools compare commit main --plan continuous --prepare-only \
+  --out bench/results/prepared
+pnpm tools compare prepared bench/results/prepared --shard 1/4 \
   --out bench/results/paired-portable-simd-1
 
 # Regenerate one completed shard without building or measuring.

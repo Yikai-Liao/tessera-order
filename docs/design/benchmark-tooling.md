@@ -25,7 +25,7 @@ Status resolves the requested remote ref once and associates PR test-merge workf
 
 `local/model.ts` owns deterministic complete-case partitions; `continuous/paired.ts` owns the hosted shard count, complete-evidence validation and relative BMF adaptation. `statistics.ts` remains the paired-statistic owner. The catalog owns legacy absolute Testbeds and new `relativeTestbed` identities. Hosted jobs measure baseline and current together, so there is no baseline-readiness queue or cross-machine absolute-time calibration.
 
-Continuous jobs reuse `compare commit` for snapshots, two-revision builds, adjacent A/B measurement and retained reports. Workflows own event attribution, runner matrices and permissions. Unprivileged jobs run PR code without secrets. The privileged tracker uses trusted default-branch code and reads JSON only, recomputes summaries and publishes existing figures/checks before separately archiving BMF. Artifact provenance is self-reported, not proof against fabricated PR measurements. Trusted-base DCO uses dependency-free adapters without installing PR code.
+Continuous preparation reuses `compare commit --prepare-only` for snapshots and two-revision builds. Measurement reuses `compare prepared` for hash/listing verification, adjacent A/B sampling and retained reports, without compiling in each shard. The local runner owns both operations and the frozen-build boundary; host facts come from the measurement worker, not preparation. Workflows own event attribution, runner matrices and permissions. Unprivileged jobs run PR code without secrets. The privileged tracker uses trusted default-branch code and reads JSON only, recomputes summaries and publishes existing figures/checks before separately archiving BMF. Artifact provenance is self-reported, not proof against fabricated PR measurements. Trusted-base DCO uses dependency-free adapters without installing PR code.
 
 ## One catalog and plan contract
 
@@ -50,6 +50,8 @@ Use these paths to separate decisions that need coordination from rules already 
 - **CI check:** follow [routing, cells and aggregation](../development/ci.md); benchmark measurement filters and trusted tracking are separate from language routing. [CLI task support](../../tools/tasks.ts) owns checkout discovery and result locations, [process support](../../tools/process.ts) owns execution/cancellation, and [marker](../../bench/continuous/marker.ts) owns exact report identity without publisher policy. Reuse existing jobs; platform execution, credentials, artifact boundaries and publication serialization remain workflow responsibilities.
 
 ## Source comparison boundary
+
+A prepared revision pair owns its complete plan, provenance, inventory and frozen executable hashes. `compare prepared` rejects measured inputs, incompatible harness/catalog sources, escaping paths and modified executables before invoking the normal sample/report path. Shards consume complete cases and never reconstruct build settings.
 
 The workspace materializes current staged, unstaged and untracked sources without changing the caller's checkout. Internal links become regular snapshot contents; dangling/escaping links and directory cycles fail before building. Baseline links resolve within that commit's archive, never against the live checkout. Source hashing, backup and compilation see the same materialized inputs.
 

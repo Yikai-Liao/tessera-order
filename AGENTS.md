@@ -61,7 +61,7 @@ Use the `software-design-philosophy` skill for structural engine changes. Judge 
 
 ## Independent review
 
-Every PR must pass an independent subagent Agentic Review before merge. Use `yume/gpt-6.1-sol` for review; report unavailability rather than silently substituting a model. Structural engine reviews must evaluate the design principles above against representative modification tasks, identify which old mechanisms disappear and where their benefits are preserved, and assess the net understanding and change surface—not just correctness or duplicate lines. Resolve accepted findings and re-review material fixes. Tests and CI do not replace review of runtime paths, trust boundaries and documentation contracts. Review names each new consumer of a shared rule (case ID or mode, catalog field, native registry index, threshold) with its owner. Accepted debt that is not fixed in the PR goes to the [roadmap](ROADMAP.md).
+Every PR must pass an independent subagent Agentic Review before merge. Structural engine reviews must evaluate the design principles above against representative modification tasks, identify which old mechanisms disappear and where their benefits are preserved, and assess the net understanding and change surface—not just correctness or duplicate lines. Resolve accepted findings and re-review material fixes. Tests and CI do not replace review of runtime paths, trust boundaries and documentation contracts. Review names each new consumer of a shared rule (case ID or mode, catalog field, native registry index, threshold) with its owner. Accepted debt that is not fixed in the PR goes to the [roadmap](ROADMAP.md).
 
 ## Commands
 

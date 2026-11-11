@@ -42,33 +42,24 @@ export function topWindow(
   return { digit: { shift: low, width: high - low + 1 }, window };
 }
 
-/** Minimum-pass plan, minimizing bucket slots among plans with that pass count. */
-export function planDigits(varying: bigint, width: number, _bits: number): Digit[] {
-  const positions: number[] = [];
-  for (let bit = 0; bit < bitLen(varying); bit++) {
-    if ((varying & (1n << BigInt(bit))) !== 0n) positions.push(bit);
-  }
-  const cost = Array.from({ length: positions.length + 1 }, () => [0, 0]);
-  const previous = new Array<number>(positions.length + 1).fill(0);
-  for (let end = 1; end <= positions.length; end++) {
-    cost[end] = [Infinity, Infinity];
-    for (let start = end - 1; start >= 0; start--) {
-      const span = positions[end - 1] - positions[start] + 1;
-      if (span > width) break;
-      const candidate = [cost[start][0] + 1, cost[start][1] + 2 ** span];
-      if (
-        candidate[0] < cost[end][0] ||
-        (candidate[0] === cost[end][0] && candidate[1] < cost[end][1])
-      ) {
-        cost[end] = candidate;
-        previous[end] = start;
-      }
+/** One or two flat digits, or one MSD digit when flat completion needs more. */
+export function planDigits(varying: bigint, width: number, bits: number): Digit[] {
+  if (varying === 0n) return [];
+  const { digit: high, window } = topWindow(varying, width, bits);
+  const remaining = varying & ~window;
+  if (remaining === 0n) return [high];
+  const low = topWindow(remaining, bits, bits).digit;
+  if (low.width > width) return [high];
+  let digits = [high, low];
+  let slots = 2 ** high.width + 2 ** low.width;
+  for (let highWidth = 1; highWidth < high.width; highWidth++) {
+    const next = topWindow(varying, highWidth, bits);
+    const lower = topWindow(varying & ~next.window, bits, bits).digit;
+    const cost = 2 ** next.digit.width + 2 ** lower.width;
+    if (lower.width <= width && cost < slots) {
+      digits = [next.digit, lower];
+      slots = cost;
     }
-  }
-  const digits: Digit[] = [];
-  for (let end = positions.length; end > 0; end = previous[end]) {
-    const start = previous[end];
-    digits.push({ shift: positions[start], width: positions[end - 1] - positions[start] + 1 });
   }
   return digits;
 }
@@ -84,81 +75,17 @@ export function tileDigitBits(records: number, recordBytes: number): number {
 
 export type TileLeaf = "done" | "insertion" | "msd" | "lsd";
 
-/** Greedy count of width-bounded windows, without constructing a flat plan. */
-function digitPasses(varying: bigint, width: number, bits: number): number {
-  let passes = 0;
-  while (varying !== 0n) {
-    varying &= ~topWindow(varying, width, bits).window;
-    passes++;
-  }
-  return passes;
-}
-
-/** One partition and conditional child work, in sampled-record pass units. */
-export function partitionWork(
-  records: number,
-  varying: bigint,
-  digit: Digit,
-  sample: readonly bigint[],
-  recordBytes: number,
-  bits: number,
-): number {
-  const mask = ((1n << BigInt(digit.width)) - 1n) << BigInt(digit.shift);
-  const remaining = varying & ~mask;
-  const keys = [...sample].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  const singletonLen = Math.ceil(records / 2 ** digit.width);
-  const singletonPasses =
-    singletonLen <= 48 ? 0 : digitPasses(remaining, tileDigitBits(singletonLen, recordBytes), bits);
-  let work = 2 * keys.length;
-  for (let start = 0; start < keys.length; ) {
-    let end = start + 1;
-    while (end < keys.length && (keys[end] & mask) === (keys[start] & mask)) end++;
-    const len = end - start;
-    const childLen = Math.ceil((records * len) / keys.length);
-    if (len === 1) {
-      work += singletonPasses;
-    } else if (childLen > 48 && keys[start] !== keys[end - 1]) {
-      let childVarying = 0n;
-      for (let index = start; index < end; index++) childVarying |= keys[index] ^ keys[start];
-      childVarying &= remaining;
-      const width = tileDigitBits(childLen, recordBytes);
-      const passes = digitPasses(childVarying, width, bits);
-      const flat = len * passes;
-      work +=
-        passes > 2
-          ? Math.min(
-              flat,
-              partitionWork(
-                childLen,
-                childVarying,
-                topWindow(childVarying, width, bits).digit,
-                keys.slice(start, end),
-                recordBytes,
-                bits,
-              ),
-            )
-          : flat;
-    }
-    start = end;
-  }
-  return work;
-}
-
-/** Mirrors the planner's weighted child-work comparison; samples are advisory. */
+/** Mirrors the bounded planner: finish at most two flat passes, otherwise split. */
 export function chooseTileLeaf(
   records: number,
   varying: bigint,
   tableWidth: number,
-  sample: readonly bigint[],
   bits: number,
-  recordBytes = 8,
 ): TileLeaf {
   if (records < 2 || varying === 0n) return "done";
   if (records <= 48) return "insertion";
-  const passes = digitPasses(varying, tableWidth, bits);
-  if (passes <= 2) return "lsd";
-  const { digit } = topWindow(varying, tableWidth, bits);
-  return partitionWork(records, varying, digit, sample, recordBytes, bits) < sample.length * passes
-    ? "msd"
-    : "lsd";
+  const remaining = varying & ~topWindow(varying, tableWidth, bits).window;
+  return remaining === 0n || topWindow(remaining, bits, bits).digit.width <= tableWidth
+    ? "lsd"
+    : "msd";
 }

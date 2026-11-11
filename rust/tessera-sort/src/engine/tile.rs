@@ -270,7 +270,7 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
         if len < 2 || varying == 0 {
             return;
         }
-        match plan_tile(records, varying, self.extractor) {
+        match plan_tile::<T>(len, varying) {
             TilePlan::Insertion => self.extractor.finish_insertion(records),
             TilePlan::Msd(digit) => self.partition_tile(records, digit, varying),
             TilePlan::Lsd { digits, passes } => {

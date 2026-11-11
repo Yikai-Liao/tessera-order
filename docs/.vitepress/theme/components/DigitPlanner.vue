@@ -2,23 +2,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { bucketColor } from "../palette";
-import { chooseTileLeaf, type Digit, planDigits, topWindow } from "../sim/digits";
+import { chooseTileLeaf, type Digit, planDigits } from "../sim/digits";
 
 const BITS = 32;
 const varying = ref((1n << 32n) - 1n);
 const width = ref(14);
-const sampleShape = ref("repeated");
-const sample = computed(() => {
-  const topMask = varying.value === 0n ? 0n : (() => {
-    const { digit } = topWindow(varying.value, width.value, BITS);
-    return ((1n << BigInt(digit.width)) - 1n) << BigInt(digit.shift);
-  })();
-  return Array.from({ length: 128 }, (_, index) => {
-    const key = sampleShape.value === "repeated" ? BigInt(index % 4) * 0x55555555n : BigInt(index) * 0x9e3779b9n;
-    return key & varying.value & (sampleShape.value === "concentrated" ? ~topMask : varying.value);
-  });
-});
-const tileLeaf = computed(() => chooseTileLeaf(8192, varying.value, width.value, sample.value, BITS));
+const tileLeaf = computed(() => chooseTileLeaf(8192, varying.value, width.value, BITS));
 const tileLeafLabel = computed(() =>
   ({ done: "already ordered", insertion: "insertion sort", msd: "MSD", lsd: "LSD" })[tileLeaf.value],
 );
@@ -37,8 +26,9 @@ const isSet = (bit: number) => ((varying.value >> BigInt(bit)) & 1n) === 1n;
 const plan = computed(() => planDigits(varying.value, width.value, BITS));
 const tileLeafReason = computed(() => {
   if (varying.value === 0n) return "No key bits vary, so no pass is needed.";
-  if (plan.value.length <= 2) return "The plan needs at most two LSD passes, so the engine skips sampling.";
-  return "The model weights each sampled group's remaining work, including a confirming scan for sample-constant children. A sample does not certify actual child constancy.";
+  return tileLeaf.value === "lsd"
+    ? "At most two flat passes finish this tile; their split minimizes table slots."
+    : "One top-digit partition exposes actual child variation. Each child chooses its own finishing plan.";
 });
 /** Fixed windows of the full width from the top bit down, for comparison. */
 const fixed = computed<Digit[]>(() => {
@@ -66,14 +56,6 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
       <label>
         Widest digit (cursor table): {{ width }} bits
         <input v-model.number="width" type="range" min="6" max="14" />
-      </label>
-      <label>
-        Sampled keys
-        <select v-model="sampleShape">
-          <option value="repeated">Four repeated keys</option>
-          <option value="spread">Spread keys</option>
-          <option value="concentrated">Shared top digit, varying remainder</option>
-        </select>
       </label>
       <span>Presets:</span>
       <button v-for="[name, mask] in presets" :key="name" type="button" class="preset" @click="varying = mask">
@@ -137,7 +119,7 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
     </svg>
     <table class="tsr-table">
       <thead>
-        <tr><th>Plan</th><th>Passes</th><th>Digit widths, in LSD order</th><th>Bucket slots cleared and scanned</th></tr>
+        <tr><th>Plan</th><th>Selected passes</th><th>Digit widths, execution order</th><th>Selected bucket slots</th></tr>
       </thead>
       <tbody>
         <tr>
@@ -155,11 +137,11 @@ const xOf = (bit: number) => LEFT + (BITS - 1 - bit) * CW;
       </tbody>
     </table>
     <p class="tsr-note">
-      Passes run from the lowest window (pass 1) to the highest. A window may contain constant bits between varying ones,
-      but never starts or ends on one.
+      LSD passes run from the lowest window to the highest. An MSD plan shows only its first partition,
+      not the unknown child work. Windows may contain constant gaps, but their endpoints vary.
     </p>
     <p class="tsr-note">
-      For 8,192 <code>u64</code> keys with the selected {{ width }}-bit table limit, this sample selects
+      For 8,192 <code>u64</code> keys with the selected {{ width }}-bit table limit, the planner selects
       <strong>{{ tileLeafLabel }}</strong>. The engine itself uses a 14-bit limit at this tile size.
       {{ tileLeafReason }}
     </p>

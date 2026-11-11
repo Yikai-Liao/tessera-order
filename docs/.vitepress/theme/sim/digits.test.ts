@@ -2,16 +2,16 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chooseTileLeaf, partitionWork, planDigits, sampleKeys } from "./digits.ts";
+import { chooseTileLeaf, planDigits, sampleKeys } from "./digits.ts";
 
-test("digit planning balances shifted runs and covers sparse masks", () => {
+test("short flat plans balance shifted runs and sparse bits", () => {
   for (const shift of [0n, 17n, 96n]) {
-    const plan = planDigits(0xffff_ffffn << shift, 14, 128);
-    assert.equal(plan.length, 3);
-    assert.equal(
-      plan.reduce((slots, digit) => slots + 2 ** digit.width, 0),
-      5120,
+    const plan = planDigits(0xfffffn << shift, 14, 128);
+    assert.deepEqual(
+      plan.map((digit) => digit.width),
+      [10, 10],
     );
+    assert.equal(chooseTileLeaf(8192, 0xfffffn << shift, 14, 128), "lsd");
   }
   for (let mask = 1n; mask < 256n; mask++) {
     const plan = planDigits(mask, 3, 128);
@@ -22,44 +22,22 @@ test("digit planning balances shifted runs and covers sparse masks", () => {
       assert.ok(digit.width <= 3);
       covered |= bits;
     }
-    assert.equal(covered & mask, mask);
+    if (chooseTileLeaf(1024, mask, 3, 128) === "lsd") assert.equal(covered & mask, mask);
+    else assert.notEqual(covered & mask, 0n);
   }
+  const sparse = (1n << 127n) | 1n;
+  assert.deepEqual(planDigits(sparse, 14, 128), [
+    { shift: 127, width: 1 },
+    { shift: 0, width: 1 },
+  ]);
 });
 
-test("conditional child work preserves terminal groups without a fanout cutoff", () => {
+test("wide tiles partition without sampling and short tiles retain insertion", () => {
   const varying = (1n << 64n) - 1n;
-  const digit = { shift: 52, width: 12 };
-  for (const groups of [1, 2, 3, 4, 8, 16, 32, 64]) {
-    const records = Array.from({ length: 1024 }, (_, index) => BigInt(index % groups) << 56n);
-    const sample = sampleKeys(records);
-    assert.equal(partitionWork(1024, varying, digit, sample, 8, 64), 2 * sample.length);
-    assert.equal(chooseTileLeaf(1024, varying, 12, sample, 64), "msd");
-  }
-  const sample = sampleKeys(
-    Array.from(
-      { length: 1024 },
-      (_, index) => (BigInt(index) * 0x9e3779b97f4a7c15n) & ((1n << 52n) - 1n),
-    ),
-  );
-  assert.ok(partitionWork(1024, varying, digit, sample, 8, 64) > 2 * sample.length);
-  assert.equal(chooseTileLeaf(1024, varying, 12, sample, 64), "msd");
-  const mask = ((1n << 12n) - 1n) << 52n;
-  assert.equal(partitionWork(1024, mask, digit, sample, 8, 64), 2 * sample.length);
-  assert.ok(partitionWork(8192, varying, { shift: 63, width: 1 }, [0n], 8, 64) > 2);
-  assert.equal(chooseTileLeaf(8192, 0xfffffn, 14, [], 64), "lsd");
-  assert.equal(chooseTileLeaf(8192, 0n, 14, [], 64), "done");
-  assert.equal(chooseTileLeaf(48, varying, 6, [], 64), "insertion");
-});
-
-test("sampled child continuation retains recursive partition opportunities", () => {
-  for (const groups of [2n, 4n, 8n]) {
-    const records = Array.from({ length: 1024 }, (_, i) => {
-      const index = BigInt(i);
-      return ((index % groups) << 60n) | ((index * 0x9e3779b97f4a7c15n) & ((1n << 40n) - 1n));
-    });
-    const varying = records.reduce((mask, key) => mask | (key ^ records[0]), 0n);
-    assert.equal(chooseTileLeaf(records.length, varying, 12, sampleKeys(records), 64), "msd");
-  }
+  assert.equal(chooseTileLeaf(1024, varying, 12, 64), "msd");
+  assert.equal(chooseTileLeaf(8192, 0n, 14, 64), "done");
+  assert.equal(chooseTileLeaf(48, varying, 6, 64), "insertion");
+  assert.deepEqual(planDigits(varying, 12, 64), [{ shift: 52, width: 12 }]);
 });
 
 test("bounded sampling covers short inputs and does not alias periodic keys", () => {

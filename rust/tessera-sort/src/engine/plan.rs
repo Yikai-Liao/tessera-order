@@ -61,76 +61,6 @@ impl<V: Unsigned> KeySample<V> {
             .map(|run| run[0])
     }
 
-    /// Estimates one partition and its children in sampled-record pass units.
-    ///
-    /// Repeated groups estimate population and remaining variation together;
-    /// a sample-constant group needs a confirming scan, not more sorting passes.
-    /// A singleton cannot certify constancy: use the remaining candidate bits
-    /// and a uniform bucket population for that unobserved part of the sample.
-    /// Nonterminal groups compare flat work with the same estimate on their
-    /// remaining bits. Recursion only projects this retained sample: it neither
-    /// reads more records nor allocates, and every level consumes a digit.
-    /// All facts are advisory; actual child scans still decide completion.
-    fn partition_work(
-        sample: &[V],
-        records: usize,
-        varying: u128,
-        digit: Digit,
-        record_bytes: usize,
-    ) -> usize {
-        let mask = digit.mask::<V>();
-        let remaining = varying & !mask.to_u128();
-        let singleton_len = records.div_ceil(1 << digit.width);
-        let singleton_passes = if singleton_len <= INSERTION_MAX {
-            0
-        } else {
-            digit_passes(remaining, tile_digit_bits(singleton_len, record_bytes))
-        };
-        // All records pay a partition and either insertion or a confirming scan.
-        // Only children with work beyond that minimum need further estimation.
-        let mut work = 2 * sample.len();
-        let mut start = 0;
-        while start < sample.len() {
-            let bucket = sample[start] & mask;
-            let mut end = start + 1;
-            while end < sample.len() && sample[end] & mask == bucket {
-                end += 1;
-            }
-            let keys = &sample[start..end];
-            start = end;
-            if keys.len() == 1 {
-                work += singleton_passes;
-                continue;
-            }
-            let child_len = (records * keys.len()).div_ceil(sample.len());
-            if child_len <= INSERTION_MAX || keys.first() == keys.last() {
-                continue;
-            }
-            let first = keys[0].to_u128();
-            let varying = keys
-                .iter()
-                .fold(0, |bits, key| bits | (key.to_u128() ^ first))
-                & remaining;
-            let width = tile_digit_bits(child_len, record_bytes);
-            let passes = digit_passes(varying, width);
-            let flat = keys.len() * passes;
-            let continuation = if passes > 2 {
-                let (digit, _) = top_window(varying, width);
-                flat.min(Self::partition_work(
-                    keys,
-                    child_len,
-                    varying,
-                    digit,
-                    record_bytes,
-                ))
-            } else {
-                flat
-            };
-            work += continuation;
-        }
-        work
-    }
-
     /// Counts occupied top-digit buckets without a radix-sized bitmap.
     /// Above this digit keys are constant, so sorted sample projections are ordered.
     /// Inconsistent extractors may overestimate occupancy; no safety relies on it.
@@ -162,9 +92,6 @@ impl Digit {
     }
 }
 
-/// A minimum-pass plan cannot exceed the number of windows needed for all bits.
-const MAX_DIGITS: usize = (u128::BITS as usize).div_ceil(MIN_TILE_DIGIT_BITS);
-
 /// The window over the highest remaining bits that a pass of `width` bits
 /// clears, snapped to the lowest varying bit it contains: constant bits below the
 /// top one stay out of the digit. Returns the digit and the bits it clears.
@@ -179,66 +106,36 @@ fn top_window(remaining: u128, width: usize) -> (Digit, u128) {
     (digit, window)
 }
 
-/// Minimum number of width-bounded windows; greedy coverage is optimal for count.
-fn digit_passes(mut varying: u128, width: usize) -> usize {
-    let mut passes = 0;
-    while varying != 0 {
-        let (_, window) = top_window(varying, width);
-        varying &= !window;
-        passes += 1;
+/// Finishes in one or two flat passes, otherwise partitions the highest digit.
+/// Two-pass plans minimize table slots by checking at most `width` split points;
+/// longer plans inspect actual children instead of predicting their work.
+fn plan_digits(varying: u128, width: usize) -> TilePlan {
+    let (high, window) = top_window(varying, width);
+    let remaining = varying & !window;
+    if remaining == 0 {
+        return TilePlan::Lsd {
+            digits: [high; 2],
+            passes: 1,
+        };
     }
-    passes
-}
-
-/// Covers varying positions with the fewest passes, then the fewest bucket slots.
-///
-/// Every legal final window extends an optimal lower-bit prefix. This bounded
-/// search treats dense, shifted and sparse variation alike: constant gaps cost
-/// table slots only when keeping them avoids another record pass.
-fn plan_digits(varying: u128, width: usize, digits: &mut [Digit]) -> usize {
-    if varying == 0 {
-        return 0;
+    let (low, _) = top_window(remaining, 128);
+    if low.width > width {
+        return TilePlan::Msd(high);
     }
-    let (digit, window) = top_window(varying, width);
-    if varying & !window == 0 {
-        digits[0] = digit;
-        return 1;
-    }
-    let mut positions = [0u8; u128::BITS as usize];
-    let mut bits = varying;
-    let len = bits.count_ones() as usize;
-    for position in &mut positions[..len] {
-        *position = bits.trailing_zeros() as u8;
-        bits &= bits - 1;
-    }
-    let mut cost = [(0u8, 0u32); u128::BITS as usize + 1];
-    let mut previous = [0u8; u128::BITS as usize + 1];
-    for end in 1..=len {
-        cost[end] = (u8::MAX, u32::MAX);
-        for start in (0..end).rev() {
-            let span = (positions[end - 1] - positions[start]) as usize + 1;
-            if span > width {
-                break;
-            }
-            let candidate = (cost[start].0 + 1, cost[start].1 + (1 << span));
-            if candidate < cost[end] {
-                cost[end] = candidate;
-                previous[end] = start as u8;
+    let mut digits = [high, low];
+    let mut slots = (1 << high.width) + (1 << low.width);
+    for high_width in 1..high.width {
+        let (high, window) = top_window(varying, high_width);
+        let (low, _) = top_window(varying & !window, 128);
+        if low.width <= width {
+            let cost = (1 << high.width) + (1 << low.width);
+            if cost < slots {
+                digits = [high, low];
+                slots = cost;
             }
         }
     }
-    let mut end = len;
-    let mut passes = 0;
-    while end != 0 {
-        let start = previous[end] as usize;
-        digits[passes] = Digit {
-            shift: positions[start] as usize,
-            width: (positions[end - 1] - positions[start]) as usize + 1,
-        };
-        passes += 1;
-        end = start;
-    }
-    passes
+    TilePlan::Lsd { digits, passes: 2 }
 }
 
 /// Chooses the widest cursor table that fits beside the tile, capped by
@@ -386,52 +283,18 @@ fn plan_digit<T, E: Extract<T>>(
 }
 
 /// An executable tile decision; cursor layout and scratch remain private to tiles.
-#[allow(
-    clippy::large_enum_variant,
-    reason = "The bounded plan stays on the stack; boxing would allocate for every LSD tile"
-)]
 pub(super) enum TilePlan {
     Insertion,
     Msd(Digit),
-    Lsd {
-        digits: [Digit; MAX_DIGITS],
-        passes: usize,
-    },
+    Lsd { digits: [Digit; 2], passes: usize },
 }
 
 /// Chooses a leaf for a nonconstant, nonempty tile without allocating scratch.
-pub(super) fn plan_tile<T, E: Extract<T>>(
-    records: &[T],
-    varying: u128,
-    extractor: &mut E,
-) -> TilePlan {
-    let len = records.len();
+pub(super) fn plan_tile<T>(len: usize, varying: u128) -> TilePlan {
     if len <= INSERTION_MAX {
         return TilePlan::Insertion;
     }
-    // Widest counting table this tile can afford; LSD spreads it over passes.
-    let table_width = tile_digit_bits(len, core::mem::size_of::<T>());
-    let passes = digit_passes(varying, table_width);
-    // One partition plus child confirmation or insertion costs at least two
-    // passes in this estimate, so short flat plans need no sample.
-    if passes > 2 {
-        let (digit, _) = top_window(varying, table_width);
-        let sample = KeySample::collect(records, extractor);
-        if KeySample::partition_work(
-            &sample.keys[..sample.len],
-            len,
-            varying,
-            digit,
-            core::mem::size_of::<T>(),
-        ) < sample.len * passes
-        {
-            return TilePlan::Msd(digit);
-        }
-    }
-    let mut digits = [Digit { shift: 0, width: 0 }; MAX_DIGITS];
-    let passes = plan_digits(varying, table_width, &mut digits);
-
-    TilePlan::Lsd { digits, passes }
+    plan_digits(varying, tile_digit_bits(len, core::mem::size_of::<T>()))
 }
 
 #[cfg(test)]
@@ -475,121 +338,6 @@ mod tests {
         assert_eq!(choose_split_digit(records.len(), 16, 512, &sample).width, 8);
     }
 
-    #[test]
-    fn sampled_terminal_groups_generalize_low_fanout() {
-        for groups in [1, 2, 3, 4, 8, 16, 32, 64] {
-            let records: Vec<u64> = (0..1024)
-                .map(|index| ((index % groups) as u64) << 56)
-                .collect();
-            let sample = KeySample::collect(&records, &mut Direct);
-            let digit = Digit {
-                shift: 52,
-                width: 12,
-            };
-            // Constant children pay only their confirmation, regardless of how
-            // many groups the sample contains. No low-fanout cutoff is needed.
-            assert_eq!(
-                KeySample::partition_work(
-                    &sample.keys[..sample.len],
-                    records.len(),
-                    u64::MAX as u128,
-                    digit,
-                    8
-                ),
-                2 * sample.len
-            );
-            assert!(matches!(
-                plan_tile(&records, u64::MAX as u128, &mut Direct),
-                TilePlan::Msd(_)
-            ));
-        }
-    }
-
-    #[test]
-    fn concentrated_nonterminal_groups_keep_remaining_work() {
-        let records: Vec<u64> = (0..1024u64)
-            .map(|index| index.wrapping_mul(0x9e3779b97f4a7c15) & ((1 << 52) - 1))
-            .collect();
-        let sample = KeySample::collect(&records, &mut Direct);
-        let digit = Digit {
-            shift: 52,
-            width: 12,
-        };
-        assert!(
-            KeySample::partition_work(
-                &sample.keys[..sample.len],
-                records.len(),
-                u64::MAX as u128,
-                digit,
-                8
-            ) > 2 * sample.len
-        );
-        // Known-completed bits do not contribute to estimated child work.
-        assert_eq!(
-            KeySample::partition_work(
-                &sample.keys[..sample.len],
-                records.len(),
-                digit.mask::<u128>(),
-                digit,
-                8
-            ),
-            2 * sample.len
-        );
-        assert!(matches!(
-            plan_tile(&records, u64::MAX as u128, &mut Direct),
-            TilePlan::Msd(_)
-        ));
-        // One key in a bucket does not establish constancy when the estimated
-        // child still exceeds the insertion bound.
-        let singleton = KeySample {
-            keys: [0u64; KEY_SAMPLE_LEN],
-            len: 1,
-        };
-        assert!(
-            KeySample::partition_work(
-                &singleton.keys[..singleton.len],
-                8192,
-                u64::MAX as u128,
-                Digit {
-                    shift: 63,
-                    width: 1
-                },
-                8
-            ) > 2
-        );
-    }
-
-    #[test]
-    fn sampled_continuation_reuses_deeper_partition_opportunities() {
-        for groups in [2u64, 4, 8] {
-            let records: Vec<u64> = (0..1024u64)
-                .map(|index| {
-                    ((index % groups) << 60)
-                        | (index.wrapping_mul(0x9e3779b97f4a7c15) & ((1 << 40) - 1))
-                })
-                .collect();
-            let varying = records.iter().fold(0u128, |bits, key| {
-                bits | (*key as u128 ^ records[0] as u128)
-            });
-            let sample = KeySample::collect(&records, &mut Direct);
-            let width = tile_digit_bits(records.len(), 8);
-            let (digit, _) = top_window(varying, width);
-            let work = KeySample::partition_work(
-                &sample.keys[..sample.len],
-                records.len(),
-                varying,
-                digit,
-                8,
-            );
-            assert!(work > 2 * sample.len);
-            assert!(work < digit_passes(varying, width) * sample.len);
-            assert!(matches!(
-                plan_tile(&records, varying, &mut Direct),
-                TilePlan::Msd(_)
-            ));
-        }
-    }
-
     /// Exhaustively enumerates window partitions independently of the planner.
     fn optimal_digit_cost(bits: u128, width: usize) -> (usize, usize) {
         if bits == 0 {
@@ -607,53 +355,54 @@ mod tests {
     }
 
     #[test]
-    fn digit_plan_minimizes_passes_then_tables() {
+    fn digit_plan_finishes_short_plans_optimally() {
         for bits in 1..256u128 {
             for width in 1..=5 {
-                let mut digits = [Digit { shift: 0, width: 0 }; 128];
-                let len = plan_digits(bits, width, &mut digits);
-                let cost = (
-                    len,
-                    digits[..len].iter().map(|digit| 1 << digit.width).sum(),
-                );
-                assert_eq!(cost, optimal_digit_cost(bits, width));
-                assert_eq!(len, digit_passes(bits, width));
+                let optimum = optimal_digit_cost(bits, width);
+                match plan_digits(bits, width) {
+                    TilePlan::Lsd { digits, passes } => {
+                        assert!(optimum.0 <= 2);
+                        assert_eq!(
+                            (
+                                passes,
+                                digits[..passes].iter().map(|digit| 1 << digit.width).sum()
+                            ),
+                            optimum
+                        );
+                        let mut mask = 0;
+                        for digit in &digits[..passes] {
+                            assert_eq!(mask & digit.mask::<u128>(), 0);
+                            mask |= digit.mask::<u128>();
+                        }
+                        assert_eq!(mask & bits, bits);
+                    }
+                    TilePlan::Msd(digit) => {
+                        assert!(optimum.0 > 2);
+                        assert_ne!(bits & digit.mask::<u128>(), 0);
+                    }
+                    TilePlan::Insertion => unreachable!(),
+                }
             }
         }
         for shift in [0, 17, 96] {
-            let mut digits = [Digit { shift: 0, width: 0 }; MAX_DIGITS];
-            let len = plan_digits(0xffff_ffffu128 << shift, 14, &mut digits);
-            assert_eq!(len, 3);
-            assert_eq!(
-                digits[..len]
-                    .iter()
-                    .map(|digit| 1usize << digit.width)
-                    .sum::<usize>(),
-                5120
-            );
+            let TilePlan::Lsd { digits, passes } = plan_digits(0xffff_ffffu128 << shift, 16) else {
+                panic!("two-pass plan expected")
+            };
+            assert_eq!(passes, 2);
+            assert_eq!(digits[0].width, 16);
+            assert_eq!(digits[1].width, 16);
         }
-    }
-
-    #[test]
-    fn digit_plan_covers_varying_bits() {
-        for width in MIN_TILE_DIGIT_BITS..=MAX_TILE_DIGIT_BITS {
-            for varying in [
-                1,
-                1 << 127,
-                (1 << 127) | 1,
-                u128::MAX,
-                0x01010101010101010101010101010101,
-            ] {
-                let mut digits = [Digit { shift: 0, width: 0 }; MAX_DIGITS];
-                let len = plan_digits(varying, width, &mut digits);
-                let mut mask = 0;
-                for digit in &digits[..len] {
-                    let bits = digit.mask::<u128>();
-                    assert_eq!(mask & bits, 0);
-                    mask |= bits;
-                }
-                assert_eq!(mask & varying, varying);
-            }
-        }
+        let TilePlan::Lsd { digits, passes } = plan_digits((1 << 127) | 1, 14) else {
+            panic!("two sparse passes expected")
+        };
+        assert_eq!(passes, 2);
+        assert_eq!(
+            digits[0].mask::<u128>() | digits[1].mask::<u128>(),
+            (1 << 127) | 1
+        );
+        assert!(matches!(
+            plan_tile::<u64>(48, u64::MAX as u128),
+            TilePlan::Insertion
+        ));
     }
 }

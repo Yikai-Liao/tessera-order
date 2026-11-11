@@ -462,6 +462,28 @@ A three-block linked screen against `ce71415` covers direct/keyed u64, random/eq
 
 The earlier `before-linked-v3` screen compares the unchanged `ce71415` library against main `3db3860`, not this scan candidate. It reproduces random/49 regressions in both baseline placements: baseline/current ratios 0.694/0.696 for row_u32 and 0.811/0.803 for u64. Two preceding invocations failed before measurement (wrong plan kind, then an output-log filename collision); they provide no timing evidence.
 
+### Bounded tile planner
+
+The follow-up to `2c0ae42` removes tile sampling, conditional population estimates, singleton assumptions and recursive projected work. It tries a one-pass finish, then searches at most the table width's split points for an optimal two-pass finish; otherwise one MSD partition exposes actual children. The two-digit plan replaces the general dynamic-programming tables and 22-digit array. Actual constant children still terminate after confirmation, insertion-sized buckets avoid scans, and larger children retain candidate-masked recursive finishing. Node sampling is unchanged. This is a routing candidate, not a behavior-only refactor or a declaration of performance acceptance.
+
+Two three-block linked screens on the same host/settings as the candidate-masked scan compare with main `3db3860`. The first (`/tmp/pr97-work/simple-routing-linked`) removes only the tile sample model, retaining the old flat-plan optimizer; it covers u64/row_u64, random/bimodal/skew99/sparse_digits/sparse8/runs, 49/1,000/65,536 records. The second (`/tmp/pr97-work/two-pass-linked`) also uses the bounded planner and covers u32/u64/row_u32/row_u64, random/bimodal/sparse_digits at the same lengths. All outputs verify. These are complete selections, not whole-engine acceptance.
+
+Selected second-screen baseline/current ratios (both main placements) and current-B controls:
+
+| Case | Main A / B | Current B | A/A range |
+|---|---:|---:|---:|
+| row_u32/random/49 | 1.621 / 1.669 | 0.967 | 0.992–1.008 |
+| row_u64/random/49 | 1.807 / 1.848 | 0.995 | 0.995–1.005 |
+| u32/random/49 | 1.776 / 1.767 | 1.029 | 0.999–1.001 |
+| u64/random/49 | 1.916 / 1.881 | 0.995 | 0.913–1.087 |
+| row_u32/random/65536 | 0.977 / 0.982 | 0.997 | 0.990–1.010 |
+| row_u32/bimodal/65536 | 0.993 / 0.983 | 1.009 | 0.999–1.001 |
+| row_u32/sparse_digits/65536 | 0.992 / 0.992 | 0.996 | 0.998–1.003 |
+| u32/sparse_digits/65536 | 0.959 / 0.961 | 0.999 | 0.993–1.007 |
+| u64/bimodal/65536 | 0.977 / 0.990 | 0.988 | 0.985–1.015 |
+
+Short random cases improve substantially, but the listed large-input losses remain open individually. Current-copy sensitivity also remains: u64/bimodal/49 current B is 0.806, and u64/random/1000 has an A/A range of 0.769–1.231. These observations are not discarded or averaged away. Final cloud coverage, broader lengths/types, internal-body inspection and source-attribution controls remain outstanding. Serial workspace tests, Rayon tests, Clippy and documentation model/type checks pass at this candidate; Miri remains for CI.
+
 ### Conditional tile-work candidate
 
 The candidate after `cb6be7f` replaces uniform-depth estimation and the two-bucket override with sample-weighted child work. Structural review found the replacement preserves the reason for constant-child finishing, but performance remains unaccepted. Serial/Rayon tests, Clippy, site checks and all 17 engine Miri tests pass. A fixed-work comparison of clean `e3da30a` against `b8968b6` already showed additional random-input instructions: 8.62% / 6.28% at 1,000 records and 1.99% / 3.32% at 65,536, for direct `u64` / keyed rows. Identical baseline repeats had identical instruction totals; simulated events do not establish a latency cause.

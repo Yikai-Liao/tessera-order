@@ -8,7 +8,7 @@ The goal is fewer mechanisms in the core algorithm, not fewer lines: tests, comm
 
 ## Landed in this series
 
-These slices are structural and are still waiting for [cloud paired results](../development/continuous-benchmarks.md#read-feedback-from-a-pr); none has performance acceptance.
+The original slices have [cloud paired results](../development/continuous-benchmarks.md#read-feedback-from-a-pr) at `ce71415`: 21 slower cases against main, so performance acceptance remains blocked. Follow-up candidate checkpoints and their controls are recorded in the [port record](../design/port.md). The root scan now has one candidate-masked implementation; tile planning now attempts at most two flat passes, otherwise partitions actual children. Neither follow-up has final performance acceptance.
 
 | Slice | Mechanisms retired | Where the benefit remains |
 |---|---|---|
@@ -46,7 +46,7 @@ Ordered by expected value for the risk. "Cases" names the continuous shapes most
 |---|---|---|---|
 | N1 | `plan_progress` and the equality fallback in the executor | Let the plan carry its progress guarantee: an equality child is planned with equality disabled, so the executor never re-plans | Preserves the inconsistent-key termination test; no routing change for consistent keys |
 | N2 | `two_runs`, `NodePlan::Runs`, `split_ordered` | A block partition that detects non-decreasing bucket order while classifying and returns without moving records. This covers any number of already separated pieces | Loses the rotated `1*0*` form and adds a fallback rescan: `sorted_tail`, `bimodal`, `far_swaps`. Speculative |
-| N3 | Recursion and the singleton rule in `KeySample::partition_work` | A one-level estimate, if the recursive projection does not change decisions on measured inputs | Addresses the residual planning cost in roadmap E6; compare decisions before timing |
+| N3 | Recursive sample model and general digit-plan dynamic programming (removed in the current candidate) | One/two-pass flat completion, otherwise partition and inspect actual children | Local short-random losses improve, but large sparse and bimodal cases still need acceptance; see the port record |
 | N4 | `partition_by` beside `partition_digit` | One block entry taking a classifier and bucket count; the engine builds the digit classifier | The scatter closure must stay owned by the loop; a `&mut` classifier measured 40% slower |
 
 ### Extraction

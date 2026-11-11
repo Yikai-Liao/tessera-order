@@ -283,38 +283,6 @@ fn partition_pass<'records, T, E: Extract<T>>(
     ends
 }
 
-/// Returns the key bits that differ between at least two records of `records`.
-///
-/// # Panics
-///
-/// Panics if `records` is empty.
-pub(crate) fn varying_key_bits<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> u128 {
-    // The C reference scatters every digit, even digits that are constant in
-    // every key. The union and intersection of all keys find those digits
-    // without a histogram. A bit varies if it is set in the union but not in
-    // the intersection.
-    let mut union = extractor.key(&records[0]);
-    let mut intersection = union;
-    let full_mask = u128::MAX >> (128 - E::Value::BITS);
-    // Wide random keys vary in every bit within the first few records, so
-    // stop after a 1,025-record prefix if they already do. Otherwise finish
-    // with one uninterrupted, vectorizable scan.
-    let boundary = records.len().min(1025);
-    for item in &records[1..boundary] {
-        let key = extractor.key(item);
-        union |= key;
-        intersection = intersection & key;
-    }
-    if union.to_u128() ^ intersection.to_u128() != full_mask {
-        for item in &records[boundary..] {
-            let key = extractor.key(item);
-            union |= key;
-            intersection = intersection & key;
-        }
-    }
-    union.to_u128() ^ intersection.to_u128()
-}
-
 /// Branch hint for a condition that is almost never true, without a nightly
 /// feature. The cold marker tells the optimiser to keep this path out of line,
 /// so the hot loop falls through on the common case instead of taking a jump

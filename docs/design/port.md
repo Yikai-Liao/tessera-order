@@ -454,6 +454,14 @@ A maintained nine-block serial screen against `e4fea65` uses `--types u64,row_u6
 
 The first attempt (`block-directory-screen`) timed out before nine blocks; it has no complete verdict and is not pooled with the second run. This screen neither measures parallel adoption latency nor establishes whole-engine performance acceptance; one direct 65,536-record block also had a 17.37% excursion despite the median remaining within A/A.
 
+### Candidate-masked root and child scans
+
+The follow-up to `ce71415` removes the block layer's root-only variation scan. Roots and children use the engine's candidate-masked scan, starting with 64 keys after the first and doubling batches. This keeps early completion and long vectorizable stretches without two scan implementations. Serial and Rayon tests and Rayon Clippy pass. The adversarial owned-record fixture now schedules its changing pivot after the shared first batch; its classification, drop and permutation assertions are unchanged. Local Miri is unavailable (no rustup/Miri installation).
+
+A three-block linked screen against `ce71415` covers direct/keyed u64, random/equal/two_values/d16/sorted_tail, at 49 and 65,536 records. Raw results are retained outside Git in `/tmp/pr97-work/r1-linked` on the i7-10875H, CPU 2, Rust 1.99.1, shared alignment defaults, powersave governor, turbo and SMT enabled. Baseline/current ratios for `u64/random/65536` are 0.990/0.990 (A/A 0.999–1.001), but the second current copy is also 0.990. For `row_u64/sorted_tail/49` they are 0.804/0.800 (A/A 0.855–1.145), with current B 0.811. These losses and placement sensitivity remain unresolved; this screen is not performance acceptance. Larger sorted-tail ratios are 1.020/1.025 for direct keys and 1.014/1.018 for keyed records. Neither those improvements nor the mostly inconclusive narrow-key cases cancel the losses.
+
+The earlier `before-linked-v3` screen compares the unchanged `ce71415` library against main `3db3860`, not this scan candidate. It reproduces random/49 regressions in both baseline placements: baseline/current ratios 0.694/0.696 for row_u32 and 0.811/0.803 for u64. Two preceding invocations failed before measurement (wrong plan kind, then an output-log filename collision); they provide no timing evidence.
+
 ### Conditional tile-work candidate
 
 The candidate after `cb6be7f` replaces uniform-depth estimation and the two-bucket override with sample-weighted child work. Structural review found the replacement preserves the reason for constant-child finishing, but performance remains unaccepted. Serial/Rayon tests, Clippy, site checks and all 17 engine Miri tests pass. A fixed-work comparison of clean `e3da30a` against `b8968b6` already showed additional random-input instructions: 8.62% / 6.28% at 1,000 records and 1.99% / 3.32% at 65,536, for direct `u64` / keyed rows. Identical baseline repeats had identical instruction totals; simulated events do not establish a latency cause.

@@ -89,8 +89,9 @@ fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor
     let first = extractor.key(&records[0]);
     let (mut union, mut intersection) = (first, first);
     let mut index = 1;
+    let mut batch = 64;
     while index < records.len() {
-        let end = (index + 64).min(records.len());
+        let end = index + batch.min(records.len() - index);
         for record in &records[index..end] {
             let key = extractor.key(record);
             union |= key;
@@ -101,6 +102,8 @@ fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor
             break;
         }
         index = end;
+        // Early witnesses stay cheap; long scans get vectorizable stretches.
+        batch = batch.saturating_mul(2);
     }
     (union.to_u128() ^ intersection.to_u128()) & candidate
 }
@@ -211,7 +214,8 @@ fn prepare<T, E: Extract<T>>(
         }
         Order::Flat => {}
     }
-    let varying = block::varying_key_bits(records, extractor);
+    let candidate = u128::MAX >> (128 - E::Value::BITS);
+    let varying = scan_varying_bits(records, candidate, extractor);
     if varying == 0 {
         return None;
     }
@@ -670,6 +674,25 @@ mod tests {
             scan_varying_bits(&[0u64, u64::MAX], 0xff, &mut Direct),
             0xff
         );
+    }
+
+    #[test]
+    fn variation_covers_late_bits_and_key_widths() {
+        for len in [1, 64, 65, 192, 193, 1025] {
+            let mut records = alloc::vec![7u128; len];
+            records[len - 1] |= 1 << 127;
+            for candidate in [0, 0xff, u128::MAX] {
+                let expected = records
+                    .iter()
+                    .fold(0, |bits, key| bits | (key ^ records[0]));
+                assert_eq!(
+                    scan_varying_bits(&records, candidate, &mut Direct),
+                    expected & candidate
+                );
+            }
+            let narrow = alloc::vec![17u8; len];
+            assert_eq!(scan_varying_bits(&narrow, u8::MAX as u128, &mut Direct), 0);
+        }
     }
 
     #[test]

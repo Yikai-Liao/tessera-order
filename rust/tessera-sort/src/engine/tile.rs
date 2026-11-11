@@ -386,7 +386,7 @@ mod tests {
             let mut values: Vec<_> = (0..65).collect();
             let mut records: Vec<_> = values.iter_mut().enumerate().collect();
             let mut calls = 0u128;
-            let mut key = ByKey(|_: &(usize, &mut usize)| {
+            let key = ByKey(|_: &(usize, &mut usize)| {
                 calls += 1;
                 assert_ne!(Some(calls), panic_at);
                 calls << SHIFT
@@ -394,7 +394,7 @@ mod tests {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 Tile {
                     scratch: &mut Vec::new(),
-                    extractor: &mut crate::key::KeyHalf::<_, SHIFT>(&mut key),
+                    extractor: &mut crate::key::KeyHalf::<_, SHIFT>(key),
                 }
                 .partition_tile(&mut records, Digit { shift: 0, width: 6 }, 63);
             }));

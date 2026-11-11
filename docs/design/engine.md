@@ -52,7 +52,7 @@ An unsorted input that fits a tile and has at most 48 records goes directly to i
 
 ### 2. Varying bits
 
-One scan computes the bitwise union and intersection of all keys. Bits that are equal in every key cannot change the order and are excluded from every later digit. A constant input returns at this point. Wide keys whose variation fits in one 64-bit half are sorted by that half as a 64-bit key. The borrowed `KeyHalf` in `key.rs` and cloneable `Narrow` in `engine/parallel.rs` share one implementation of truncation and counting-window translation; each representation stays in its owning module. Other operations retain the narrowed extractor's defaults instead of forwarding the original-width backend. Tile and block scratch are created only after these root fast paths; budgeted insertion may already have allocated probe keys. Confirmed ordered and constant inputs do not allocate.
+One scan computes the bitwise union and intersection of all keys. Bits that are equal in every key cannot change the order and are excluded from every later digit. A constant input returns at this point. Wide keys whose variation fits in one 64-bit half are sorted by that half as a 64-bit key. Serial and parallel entries take the extractor by value and wrap it in the same owned `KeyHalf` from `key.rs`, which owns truncation and counting-window translation; it is cloneable whenever the wrapped extractor is, so parallel jobs need no second representation. Other operations retain the narrowed extractor's defaults instead of forwarding the original-width backend. Tile and block scratch are created only after these root fast paths; budgeted insertion may already have allocated probe keys. Confirmed ordered and constant inputs do not allocate.
 
 ### 3. Node partitioning
 

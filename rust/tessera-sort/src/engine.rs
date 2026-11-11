@@ -134,19 +134,19 @@ struct Sorter<'a, T, E> {
 ///
 /// Allocates tile and block buffers only after the order probe and varying-bit
 /// scan have not finished the sort.
-pub(crate) fn sort<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
+pub(crate) fn sort<T, E: Extract<T>>(records: &mut [T], extractor: E) {
     sort_with_tile_bytes::<T, E>(records, extractor, TILE_BYTES);
 }
 
 /// [`sort`] with a tile budget of `tile_bytes`, so tests can reach node routes
 /// with small inputs.
-fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], extractor: &mut E, tile_bytes: usize) {
+fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], mut extractor: E, tile_bytes: usize) {
     let record_bytes = core::mem::size_of::<T>();
     if records.len() < 2 || record_bytes == 0 {
         return;
     }
     let tile_len = tile_capacity::<T>(tile_bytes);
-    let Some(varying) = prepare(records, extractor, tile_len) else {
+    let Some(varying) = prepare(records, &mut extractor, tile_len) else {
         return;
     };
     let mut scratch = Scratch::new();
@@ -173,7 +173,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], extractor: &mut E, 
     }
     Sorter::<T, E> {
         scratch,
-        extractor,
+        extractor: &mut extractor,
         tile_len,
     }
     .sort_node(records, varying);
@@ -617,7 +617,7 @@ mod tests {
             let mut probe: Vec<_> = backing.iter_mut().enumerate().collect();
             sort_with_tile_bytes::<_, _>(
                 &mut probe,
-                &mut ByKey(|x: &(usize, &mut usize)| {
+                ByKey(|x: &(usize, &mut usize)| {
                     total += 1;
                     key(x.0)
                 }),
@@ -634,7 +634,7 @@ mod tests {
                 let outcome = catch_unwind(AssertUnwindSafe(|| {
                     sort_with_tile_bytes::<_, _>(
                         &mut records,
-                        &mut ByKey(|x: &(usize, &mut usize)| {
+                        ByKey(|x: &(usize, &mut usize)| {
                             calls += 1;
                             if !changing && calls == at {
                                 panic!("key failed");

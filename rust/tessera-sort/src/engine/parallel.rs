@@ -3,7 +3,6 @@
 //! Parallel root partition and completion of materialized buckets.
 
 use super::*;
-use crate::key::impl_key_half;
 use rayon::Scope;
 
 /// The archived experiment did not reliably win at 512 KiB; keep 1 MiB as a
@@ -15,7 +14,7 @@ const MIN_TASK_BYTES: usize = 256 * 1024;
 /// Sorts large inputs by handing complete root buckets to Rayon's current pool.
 pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
     records: &mut [T],
-    extractor: &mut E,
+    mut extractor: E,
 ) {
     let record_bytes = core::mem::size_of::<T>();
     let bytes = records.len().saturating_mul(record_bytes);
@@ -29,31 +28,25 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
 
     let tile_len = tile_capacity::<T>(TILE_BYTES);
     let mut scratch = Scratch::new();
-    let Some(varying) = prepare(records, extractor, tile_len) else {
+    let Some(varying) = prepare(records, &mut extractor, tile_len) else {
         return;
     };
 
     // Keep the existing narrow kernels when only one half of a 128-bit key varies.
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
-            let mut key = Narrow::<E, 0>(extractor.clone());
+            let mut key = KeyHalf::<E, 0>(extractor);
             sort_root::<T, _>(records, &mut key, &mut scratch, varying, tile_len);
             return;
         }
         if varying & ((1u128 << 64) - 1) == 0 {
-            let mut key = Narrow::<E, 64>(extractor.clone());
+            let mut key = KeyHalf::<E, 64>(extractor);
             sort_root::<T, _>(records, &mut key, &mut scratch, varying >> 64, tile_len);
             return;
         }
     }
-    sort_root::<T, E>(records, extractor, &mut scratch, varying, tile_len);
+    sort_root::<T, E>(records, &mut extractor, &mut scratch, varying, tile_len);
 }
-
-/// Owns a half-key view so parallel jobs can clone the original extractor.
-#[derive(Clone)]
-struct Narrow<E, const SHIFT: usize>(E);
-
-impl_key_half!(Narrow<E, SHIFT>);
 
 /// A batch of retired root buckets, retained as separate exclusive borrows.
 ///
@@ -257,27 +250,3 @@ fn spawn_job<'scope, T: Send + 'scope, E: Extract<T> + Clone + Send + 'scope>(
 
 #[cfg(test)]
 mod bucket_borrow_tests;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn owned_half_keys_keep_encoded_bits() {
-        let key = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210u128;
-        assert_eq!(Narrow::<_, 0>(Direct).key(&key), 0xfedc_ba98_7654_3210);
-        assert_eq!(Narrow::<_, 64>(Direct).key(&key), 0x0123_4567_89ab_cdef);
-    }
-
-    #[test]
-    fn owned_half_windows_keep_offsets_and_payloads() {
-        crate::key::tests::check_half_windows::<0>(
-            &mut Narrow::<_, 0>(Direct),
-            &mut Narrow::<_, 0>(crate::key::ByKey(|record: &(u128, usize)| record.0)),
-        );
-        crate::key::tests::check_half_windows::<64>(
-            &mut Narrow::<_, 64>(Direct),
-            &mut Narrow::<_, 64>(crate::key::ByKey(|record: &(u128, usize)| record.0)),
-        );
-    }
-}

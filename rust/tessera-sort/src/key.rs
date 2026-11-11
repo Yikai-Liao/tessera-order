@@ -438,72 +438,52 @@ impl<K: RadixKey> KeyCounts<K> {
     }
 }
 
-/// Borrows the 64 key bits starting at `SHIFT` when the other half is constant.
-pub(crate) struct KeyHalf<'a, E, const SHIFT: usize>(pub &'a mut E);
-
-/// Implements half-key rules for a tuple wrapper around the original extractor.
+/// Extracts the 64 key bits starting at `SHIFT` when the other half is constant.
+///
 /// Scans retain the defaults for the narrowed keys, not the inner key width.
-macro_rules! impl_key_half {
-    ($half:ty) => {
-        // SAFETY: the inner extractor owns repeatability; wrapping shifts cannot panic.
-        unsafe impl<T, E: $crate::key::Extract<T>, const SHIFT: usize> $crate::key::Extract<T>
-            for $half
-        {
-            const CACHE_BUCKETS: bool = E::CACHE_BUCKETS;
-            type Value = u64;
+#[derive(Clone)]
+pub(crate) struct KeyHalf<E, const SHIFT: usize>(pub E);
 
-            #[inline]
-            fn key(&mut self, record: &T) -> u64 {
-                $crate::key::Unsigned::to_u128(self.0.key(record)).wrapping_shr(SHIFT as u32) as u64
-            }
+// SAFETY: the inner extractor owns repeatability; wrapping shifts cannot panic.
+unsafe impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for KeyHalf<E, SHIFT> {
+    const CACHE_BUCKETS: bool = E::CACHE_BUCKETS;
+    type Value = u64;
 
-            fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
-                // The other half is constant, so this translated window still
-                // covers every difference in the underlying key.
-                self.0.try_count_window(records, low + SHIFT, width)
-            }
+    #[inline]
+    fn key(&mut self, record: &T) -> u64 {
+        self.0.key(record).to_u128().wrapping_shr(SHIFT as u32) as u64
+    }
 
-            #[cfg(feature = "rayon")]
-            fn try_count_window_parallel(
-                &mut self,
-                records: &mut [T],
-                low: usize,
-                width: usize,
-            ) -> bool
-            where
-                T: Send,
-            {
-                self.0
-                    .try_count_window_parallel(records, low + SHIFT, width)
-            }
-        }
-    };
+    fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
+        // The other half is constant, so this translated window still
+        // covers every difference in the underlying key.
+        self.0.try_count_window(records, low + SHIFT, width)
+    }
+
+    #[cfg(feature = "rayon")]
+    fn try_count_window_parallel(&mut self, records: &mut [T], low: usize, width: usize) -> bool
+    where
+        T: Send,
+    {
+        self.0
+            .try_count_window_parallel(records, low + SHIFT, width)
+    }
 }
 
-impl_key_half!(KeyHalf<'_, E, SHIFT>);
-#[cfg(feature = "rayon")]
-pub(crate) use impl_key_half;
-
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
     use alloc::vec::Vec;
 
     #[test]
     fn half_keys_keep_encoded_bits() {
         let key = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210u128;
-        assert_eq!(
-            KeyHalf::<_, 0>(&mut Direct).key(&key),
-            0xfedc_ba98_7654_3210
-        );
-        assert_eq!(
-            KeyHalf::<_, 64>(&mut Direct).key(&key),
-            0x0123_4567_89ab_cdef
-        );
+        assert_eq!(KeyHalf::<_, 0>(Direct).key(&key), 0xfedc_ba98_7654_3210);
+        assert_eq!(KeyHalf::<_, 64>(Direct).key(&key), 0x0123_4567_89ab_cdef);
     }
 
     /// Checks shared window and decline rules against independently sorted keys.
-    pub(crate) fn check_half_windows<const SHIFT: usize>(
+    fn check_half_windows<const SHIFT: usize>(
         direct_half: &mut impl Extract<u128, Value = u64>,
         keyed_half: &mut impl Extract<(u128, usize), Value = u64>,
     ) {
@@ -539,12 +519,12 @@ pub(crate) mod tests {
     #[test]
     fn half_windows_keep_offsets_and_payloads() {
         check_half_windows::<0>(
-            &mut KeyHalf::<_, 0>(&mut Direct),
-            &mut KeyHalf::<_, 0>(&mut ByKey(|record: &(u128, usize)| record.0)),
+            &mut KeyHalf::<_, 0>(Direct),
+            &mut KeyHalf::<_, 0>(ByKey(|record: &(u128, usize)| record.0)),
         );
         check_half_windows::<64>(
-            &mut KeyHalf::<_, 64>(&mut Direct),
-            &mut KeyHalf::<_, 64>(&mut ByKey(|record: &(u128, usize)| record.0)),
+            &mut KeyHalf::<_, 64>(Direct),
+            &mut KeyHalf::<_, 64>(ByKey(|record: &(u128, usize)| record.0)),
         );
     }
 

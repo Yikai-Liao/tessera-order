@@ -35,7 +35,7 @@ use crate::{RadixKey, engine};
 /// assert_eq!(keys, [3, 7, 7, 19, 42]);
 /// ```
 pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
-    engine::parallel::sort::<K, _>(values, &mut Direct);
+    engine::parallel::sort::<K, _>(values, Direct);
 }
 
 /// Sorts records stably by a key through the Rayon entry point.
@@ -80,5 +80,5 @@ where
     K: RadixKey,
     F: Fn(&T) -> K + Sync,
 {
-    engine::parallel::sort::<T, _>(values, &mut ByKey(&key));
+    engine::parallel::sort::<T, _>(values, ByKey(&key));
 }

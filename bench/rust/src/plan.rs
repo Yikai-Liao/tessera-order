@@ -552,7 +552,11 @@ mod tests {
         }));
 
         let parallel = continuous.parallel_inputs().unwrap();
-        assert_eq!(parallel.len(), 8);
+        assert_eq!(parallel.len(), 36);
+        assert_eq!(
+            parallel.iter().filter(|case| case.len == 1_000_000).count(),
+            32
+        );
         assert!(
             cases
                 .iter()
@@ -560,12 +564,56 @@ mod tests {
                 .all(|case| case.len <= 1_000_000)
         );
         for ty in ["u32", "row_u32", "u64", "row_u64"] {
+            require(&parallel, ty, "random", 65_536);
+        }
+        for ty in [
+            "u32",
+            "u64",
+            "u128",
+            "f64",
+            "row_u32",
+            "row_u64",
+            "rec128_u64",
+        ] {
             require(&parallel, ty, "random", 1_000_000);
         }
-        for distribution in ["sorted", "reverse", "equal"] {
+        for distribution in [
+            "sorted",
+            "reverse",
+            "sorted99",
+            "equal",
+            "far_swaps",
+            "d16",
+            "d4096",
+            "sparse_digits",
+            "zipf2",
+            "skew99",
+            "two_values",
+            "sorted_tail",
+            "runs",
+            "bimodal",
+        ] {
             require(&parallel, "u64", distribution, 1_000_000);
         }
-        require(&parallel, "row_u32", "skew99", 1_000_000);
+        for distribution in [
+            "sorted",
+            "reverse",
+            "equal",
+            "d16",
+            "hot50",
+            "skew99",
+            "sorted_tail",
+        ] {
+            require(&parallel, "row_u64", distribution, 1_000_000);
+        }
+        for (ty, distribution) in [
+            ("row_u32", "skew99"),
+            ("u128", "sparse8"),
+            ("f64", "finite_signed"),
+            ("rec128_u64", "sparse_digits"),
+        ] {
+            require(&parallel, ty, distribution, 1_000_000);
+        }
     }
 
     #[test]

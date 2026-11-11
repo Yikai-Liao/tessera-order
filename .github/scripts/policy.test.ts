@@ -66,8 +66,32 @@ test("routing selects dependencies without running Rust for presentation changes
     comparison: true,
   });
   assert.deepEqual(select(["cpp/include/sort.hpp"]), { ...none, cpp: true, comparison: true });
-  for (const path of ["conformance/semantics.md", "unknown-input"])
-    assert.ok(Object.values(select([path])).every(Boolean));
+  for (const path of [
+    "conformance/semantics.md",
+    "rust/tessera-sort/tests/memory.rs",
+    "fuzz/fuzz_targets/sort.rs",
+    ".github/dependabot.yml",
+    ".github/pull_request_template.md",
+  ])
+    assert.deepEqual(
+      select([path]),
+      path.endsWith(".md") && path.startsWith("conformance/")
+        ? { ...none, docs: true }
+        : path.startsWith("rust/")
+          ? { ...none, rust: true }
+          : none,
+      path,
+    );
+  // A path no row names, and an unavailable base, select every lane.
+  for (const path of ["unknown-input", "conformance/vectors/keys.json", ".gitignore"])
+    assert.ok(Object.values(select([path])).every(Boolean), path);
+  assert.deepEqual(select(["docs/explain/keys.md", "rust/tessera-sort/src/lib.rs"]), {
+    ...none,
+    rust: true,
+    comparison: true,
+    benchmark: true,
+    docs: true,
+  });
   assert.equal(changedPaths(undefined, "HEAD"), null);
   assert.equal(changedPaths("missing-base-ref", "HEAD"), null);
 });

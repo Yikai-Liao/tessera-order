@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { VARIANTS } from "../bench/catalog.ts";
-import { marker } from "../bench/continuous/marker.ts";
+import { marker, readConfigurations } from "../bench/continuous/marker.ts";
 import { command } from "./process.ts";
 
 interface Check {
@@ -178,8 +178,27 @@ export async function readStatus(
     pull ? api.pages<Comment[]>(`issues/${pull.number}/comments?per_page=100`) : [],
   ]);
   const candidates = checkPages.flatMap((page) => page.check_runs).sort((a, b) => b.id - a.id);
-  const checks = VARIANTS.map((variant) =>
-    candidates.find((check) => check.name === `Benchmarks (rust, ${variant.name})`),
+  const named = candidates.filter((check) =>
+    VARIANTS.some((variant) => check.name === `Benchmarks (rust, ${variant.name})`),
+  );
+  const latest = named[0];
+  const ids = readConfigurations(latest?.output.summary ?? "");
+  const active = ids?.every((id) => VARIANTS.some((variant) => variant.id === id));
+  let variants = active ? VARIANTS.filter((variant) => ids!.includes(variant.id)) : VARIANTS;
+  const publication =
+    active &&
+    latest.external_id &&
+    /^\d+$/.test(latest.external_id) &&
+    variants.some((variant) => latest.name === `Benchmarks (rust, ${variant.name})`)
+      ? latest.external_id
+      : undefined;
+  if (!publication) variants = VARIANTS;
+  const checks = variants.map((variant) =>
+    named.find(
+      (check) =>
+        check.name === `Benchmarks (rust, ${variant.name})` &&
+        (!publication || check.external_id === publication),
+    ),
   );
   const attached = checks.filter((check) => check !== undefined);
   const trackers = await Promise.all(
@@ -239,7 +258,7 @@ export async function readStatus(
           })),
       })),
     })),
-    benchmarks: VARIANTS.map((variant, index) => ({
+    benchmarks: variants.map((variant, index) => ({
       configuration: variant.id,
       state: checks[index] ? (checks[index].conclusion ?? checks[index].status) : "missing",
       title: checks[index]?.output.title ?? null,

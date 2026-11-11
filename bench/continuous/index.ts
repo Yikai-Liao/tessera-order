@@ -18,6 +18,7 @@ import {
   renderCombined,
   renderFailure,
 } from "./markdown.ts";
+import { configurationMarker } from "./marker.ts";
 import { type PairedSource, pairedSummary, publishedVariants, readPaired } from "./paired.ts";
 
 interface PublicationOptions {
@@ -42,9 +43,18 @@ interface PublicationOptions {
 export async function publishReport({ github, context, core, inputs }: PublicationOptions) {
   const { hash, baseHash, number, baseRef = "main", artifacts } = inputs;
   const runUrl = workflowUrl(context);
+  const variants = await publishedVariants(artifacts);
+  const configurationSummary = configurationMarker(variants.map((variant) => variant.id));
   const measured = await Promise.all(
-    (await publishedVariants(artifacts)).map(async (variant) => {
-      const checkId = await startReport({ github, context, core, hash, variant });
+    variants.map(async (variant) => {
+      const checkId = await startReport({
+        github,
+        context,
+        core,
+        hash,
+        variant,
+        configurationSummary,
+      });
       try {
         const expectedCases: string[] = JSON.parse(await readFile(inputs.inventory, "utf8"));
         const runs = await readPaired(artifacts, variant, { hash, baseHash }, expectedCases);
@@ -108,7 +118,7 @@ export async function publishReport({ github, context, core, inputs }: Publicati
       details_url: runUrl,
       output: {
         title: result.summary ? headline(result.summary) : "Measurement failed",
-        summary: body.slice(0, 65000),
+        summary: `${configurationSummary}\n${body}`.slice(0, 65000),
       },
     });
   }

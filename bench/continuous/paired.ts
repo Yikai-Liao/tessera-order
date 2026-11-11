@@ -59,19 +59,45 @@ export async function continuousInventory(root: string) {
   });
 }
 
-/** Select the configurations the downloaded artifacts claim to measure.
+/** Cargo environment names are the shared feature contract for producer generations. */
+function featureNames(variant: Variant) {
+  return variant.features
+    .map((feature) => `CARGO_FEATURE_${feature.toUpperCase().replaceAll("-", "_")}`)
+    .toSorted();
+}
+
+/** Select a producer generation using positive harness-feature evidence.
  *
- * Measurements that build one required backend upload only
- * `paired-<backend>-*` shards. Only that positive evidence, with no Default
- * shard, selects the single-backend identity; an empty or unreadable download
- * keeps every cataloged configuration so each fails as unmeasured. Each
- * selected configuration is still validated against its own exact features.
+ * Missing Default artifacts alone cannot identify a required-backend run: an
+ * incomplete legacy run may still have valid SIMD results. Unreadable or mixed
+ * evidence keeps the legacy configurations; readPaired validates every selected
+ * configuration fully before either publication or archival.
  */
 export async function publishedVariants(directory: string): Promise<Variant[]> {
   const names = await readdir(directory).catch(() => [] as string[]);
-  const has = (id: string) => names.some((name) => name.startsWith(`paired-${id}-`));
-  return has(REQUIRED_BACKEND.id) &&
-    !VARIANTS.some((variant) => has(variant.id) && variant.id !== REQUIRED_BACKEND.id)
+  if (
+    VARIANTS.some(
+      (variant) =>
+        variant.id !== REQUIRED_BACKEND.id &&
+        names.some((name) => name.startsWith(`paired-${variant.id}-`)),
+    )
+  )
+    return VARIANTS;
+  const shards = names.filter((name) => name.startsWith(`paired-${REQUIRED_BACKEND.id}-`));
+  const features = await Promise.all(
+    shards.map(async (name) => {
+      try {
+        const run = JSON.parse(await readFile(join(directory, name, "local.json"), "utf8"));
+        return run.builds?.current?.features;
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+  return features.length &&
+    features.every(
+      (value) => JSON.stringify(value) === JSON.stringify(featureNames(REQUIRED_BACKEND)),
+    )
     ? [REQUIRED_BACKEND]
     : VARIANTS;
 }
@@ -132,11 +158,7 @@ export async function readPaired(
         run.binaries.current,
       ].every((value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)) ||
       JSON.stringify(settings(run).baseline) !== JSON.stringify(settings(run).current) ||
-      run.builds.current.features.join(",") !==
-        variant.features
-          .map((feature) => `CARGO_FEATURE_${feature.toUpperCase().replaceAll("-", "_")}`)
-          .toSorted()
-          .join(",")
+      run.builds.current.features.join(",") !== featureNames(variant).join(",")
     )
       throw new Error("Missing source or configuration provenance");
     for (const id of run.cases) {

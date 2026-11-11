@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { marker } from "../bench/continuous/marker.ts";
+import { configurationMarker, marker } from "../bench/continuous/marker.ts";
 
 const cli = fileURLToPath(new URL("./index.ts", import.meta.url));
 
@@ -209,3 +209,59 @@ test("API failures fail the command instead of returning empty success", async (
   const f = await fixture(t, {});
   assert.throws(() => f.run("status", "missing"));
 });
+
+for (const scenario of ["fresh", "older-default", "in-progress", "partial-dual"] as const) {
+  test(`status uses the current publication check set: ${scenario}`, async (t) => {
+    const dual = scenario === "partial-dual";
+    const current = check(20, {
+      name: `Benchmarks (rust, ${dual ? "Default" : "Portable SIMD"})`,
+      external_id: "80",
+      status: scenario === "in-progress" ? "in_progress" : "completed",
+      conclusion: scenario === "in-progress" ? null : "success",
+      output: {
+        title: "Current publication",
+        summary: configurationMarker(dual ? ["default", "portable-simd"] : ["portable-simd"]),
+      },
+    });
+    const old =
+      scenario === "fresh"
+        ? []
+        : [
+            check(1, { external_id: "70", conclusion: "failure" }),
+            check(2, { name: "Benchmarks (rust, Portable SIMD)", external_id: "70" }),
+          ];
+    const f = await fixture(t, {
+      "commits/main": { sha: "current", html_url: "commit-url" },
+      "commits/current/check-runs?per_page=100": [{ check_runs: [...old, current] }],
+      "actions/runs?head_sha=current&per_page=100": [{ workflow_runs: [] }],
+      "actions/runs/80": run(80, {
+        workflow_id: 2,
+        name: "Track benchmarks",
+        event: "workflow_run",
+        head_sha: "trusted",
+      }),
+    });
+    const status = JSON.parse(f.run("status", "--details"));
+    assert.deepEqual(
+      status.benchmarks.map((c: { configuration: string; state: string }) => [
+        c.configuration,
+        c.state,
+      ]),
+      dual
+        ? [
+            ["default", "success"],
+            ["portable-simd", "missing"],
+          ]
+        : [["portable-simd", scenario === "in-progress" ? "in_progress" : "success"]],
+    );
+    assert.deepEqual(
+      status.workflows.map((w: { id: number }) => w.id),
+      [80],
+    );
+    assert.deepEqual(
+      status.details.checks.map((c: { id: number }) => c.id),
+      [20],
+    );
+    assert.ok(!(await f.requests()).includes("actions/runs/70"));
+  });
+}

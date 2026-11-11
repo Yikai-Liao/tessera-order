@@ -10,6 +10,7 @@ import { mockGitHub } from "./fixtures/github.ts";
 import { pairedRun, writePaired } from "./fixtures/paired.ts";
 import { baseHash, fixture, hash } from "./fixtures/report.ts";
 import { publishReport } from "./index.ts";
+import { readConfigurations } from "./marker.ts";
 import { pairedBmf } from "./paired.ts";
 
 async function publication(
@@ -189,6 +190,10 @@ test("required-backend evidence publishes one SIMD check without a Default build
     created.map((request) => request.body.name),
     ["Benchmarks (rust, Portable SIMD)"],
   );
+  for (const request of created)
+    assert.deepEqual(readConfigurations((request.body.output as { summary: string }).summary), [
+      "portable-simd",
+    ]);
   const completed = action.requests.filter(
     (request) => request.method === "PATCH" && request.path.includes("/check-runs/"),
   );
@@ -210,15 +215,31 @@ for (const damage of ["missing-shard", "wrong-features", "empty-download"] as co
     } else if (damage === "missing-shard") {
       await rm(join(directory, "paired-portable-simd-1"), { recursive: true });
     } else {
-      // A legacy opt-in SIMD build cannot masquerade as a required-backend run.
-      await writePaired(directory, VARIANTS[1], 1);
+      // Neither supported producer generation uses an empty harness feature set.
+      await writePaired(directory, { ...REQUIRED_BACKEND, features: [] }, 1);
     }
     await publishReport(action);
     const checks = action.requests.filter(
       (request) => request.method === "PATCH" && request.path.includes("/check-runs/"),
     );
-    assert.equal(checks.length, damage === "empty-download" ? VARIANTS.length : 1);
+    assert.equal(checks.length, damage === "missing-shard" ? 1 : VARIANTS.length);
     assert.ok(checks.every((request) => request.body.conclusion === "failure"));
     assert.match(action.summaries[0], /not measured/);
   });
 }
+
+test("missing Default artifacts preserve completed legacy SIMD evidence", async (t) => {
+  const action = await publication(t, false, false, 1);
+  for (const index of [1, 2])
+    await rm(join(action.inputs.artifacts, `paired-default-${index}`), { recursive: true });
+  await publishReport(action);
+  const checks = action.requests.filter(
+    (request) => request.method === "PATCH" && request.path.includes("/check-runs/"),
+  );
+  assert.deepEqual(
+    checks.map((request) => request.body.conclusion),
+    ["failure", "success"],
+  );
+  assert.match(action.summaries[0], /Default.*not measured/);
+  assert.match(action.summaries[0], /1.0000×/);
+});

@@ -91,13 +91,15 @@ export async function startReport({
   core,
   hash,
   variant,
-}: ActionArguments & { hash: string; variant: Variant }) {
+  configurationSummary,
+}: ActionArguments & { hash: string; variant: Variant; configurationSummary: string }) {
   const { data } = await github.rest.checks.create({
     ...context.repo,
     name: `Benchmarks (rust, ${variant.name})`,
     head_sha: hash,
     external_id: String(context.runId),
     status: "in_progress",
+    output: { title: "Measuring", summary: configurationSummary },
     details_url: workflowUrl(context),
   });
   core.setOutput(variant.id, String(data.id));

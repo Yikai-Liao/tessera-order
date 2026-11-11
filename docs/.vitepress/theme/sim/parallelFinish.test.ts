@@ -32,6 +32,49 @@ test("equality ranks preserve the shared sharded directory order", () => {
   }
 });
 
+test("streamed prefixes preserve records across interleaved final-band completion", () => {
+  let relocations = 0;
+  for (const [buckets, blockSize, shards, len, keySpace] of [
+    [2, 1, 2, 33, 256],
+    [4, 3, 4, 73, 256],
+    [8, 7, 2, 127, 4],
+  ]) {
+    const keys = Array.from({ length: len }, (_, id) => (id * 7919 + 73) % (buckets * keySpace));
+    const config = {
+      keys,
+      buckets,
+      blockSize,
+      shards,
+      classify: (key: number) => Math.floor(key / keySpace),
+      strategy: "streamed" as const,
+    };
+    const { sourceCounts } = simulateParallelFinish(config);
+    for (const reverse of [false, true]) {
+      const order = Array.from({ length: buckets }, (_, i) => (reverse ? buckets - 1 - i : i));
+      // Alternate individual prefix moves, including after another band has
+      // been sorted in place. This stresses shared physical boundary blocks.
+      const actions: FinishAction[] = [];
+      for (let prefix = 0; prefix < Math.max(...sourceCounts); prefix++) {
+        for (const bucket of order) {
+          if (prefix < sourceCounts[bucket]) actions.push({ phase: "prefix", bucket });
+        }
+      }
+      const result = simulateParallelFinish({ ...config, actions });
+      const expected = keys.map((key, id) => ({ key, id })).sort((a, b) => a.key - b.key);
+      assert.deepEqual(
+        result.output.map((record) => record.id),
+        expected.map((record) => record.id),
+      );
+      for (const frame of result.frames) {
+        assert.equal(frame.live.length, len, frame.action);
+        assert.equal(new Set(frame.live).size, len, frame.action);
+      }
+      relocations += result.relocations;
+    }
+  }
+  assert.ok(relocations > 0);
+});
+
 test("bounded finishing preserves records under immediate and suspended writes", () => {
   let relocations = 0;
   // Vary storage geometry independently of scheduling. Repeated keys in the

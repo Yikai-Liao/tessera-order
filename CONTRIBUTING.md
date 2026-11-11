@@ -8,16 +8,16 @@ Use stable Rust (MSRV in `Cargo.toml`), Node.js 24 and the pnpm version pinned i
 
 ### Refactoring
 
-A refactor reduces the concepts and coordinated edits needed to maintain the project. Retire obsolete representations and their consumers together; moving code between files alone does not simplify it. It keeps algorithm logic, generated inputs and the benchmark protocol unchanged; timed regions call the same library functions with the same record types and key extractors, with no added indirection. Keep behavior and performance changes independently reviewable. Pre-release tooling interfaces and result formats may change when that removes real complexity; document the break rather than retaining an unused compatibility layer. Moving or splitting engine code can change inlining and code placement, so it follows the measurement rule for [engine changes](#engine-changes).
+A refactor reduces the concepts and coordinated edits needed to maintain the project: retire obsolete representations and their consumers together, keep algorithm logic, generated inputs and the benchmark protocol unchanged, and keep behavior and performance changes independently reviewable. Pre-release tooling interfaces and result formats may change when that removes real complexity; document the break instead of keeping an unused compatibility layer. Moving or splitting engine code can change inlining and code placement, so it follows the measurement rule for [engine changes](#engine-changes).
 
 ### Engine changes
 
-Read the [engine reference](docs/design/engine.md) and [shared semantics](conformance/semantics.md) together. Routing, thresholds, digit planning and inlining also require the [measurement procedure](docs/development/benchmarking.md#run-an-experiment), its [source-attribution controls](docs/development/benchmarking.md#additional-source-attribution-controls) and relevant [engine evidence](docs/design/port.md) before implementation.
+Read the [engine reference](docs/design/engine.md), [shared semantics](conformance/semantics.md) and the [explanation page](docs/explain/index.md#reading-order) of the stage you change. Routing, thresholds, digit planning and inlining also require the [measurement procedure](docs/development/benchmarking.md#run-an-experiment), its [source-attribution controls](docs/development/benchmarking.md#additional-source-attribution-controls) and the relevant [engine evidence](docs/design/evidence.md) before implementation.
 
 1. Identify the affected stage and invariant in the reference, source and tests. Reproduce a bug before changing its implementation.
 2. Make the smallest complete change. Follow ownership through moves, panic recovery and inconsistent keys; preserve exactly one live owner. Explain each `unsafe` block with a `// SAFETY:` invariant and document `# Safety` on every `unsafe fn`.
 3. Add focused regression coverage at the changed boundary. Preserve panic, inconsistent-key, owned-record and `&mut`-record tests; extend them where affected rather than weakening them.
-4. Update semantics for intentional contract changes. Algorithm changes also update the explanation and the models in `docs/.vitepress/theme/sim/`.
+4. Update semantics for intentional contract changes. A changed rule or constant updates its one [owner](docs/README.md#who-owns-what): the explanation page and its model in `docs/.vitepress/theme/sim/`.
 
 ### Validation
 
@@ -39,17 +39,17 @@ Report the invariant preserved or contract changed, regression coverage, command
 
 ## Performance changes
 
-Use the maintained benchmark CLI and the [measurement procedure](docs/development/benchmarking.md#command-capabilities). The protocol defines paired timing, A/A ranges and the extra controls needed to attribute a source-change gain rather than compare algorithms. Include measured coverage, environment, control ranges and a results link; investigate changes outside the controls. Process-level screens and continuous alerts alone do not isolate source changes from code placement.
+Use the maintained benchmark CLI and its [protocol](docs/development/benchmarking.md#command-capabilities), which defines paired timing, A/A ranges and the extra controls needed to attribute a source-change gain rather than compare algorithms. Report measured coverage, environment, control ranges and a results link, and investigate changes outside the controls. Process-level screens and continuous alerts alone do not isolate source changes from code placement.
 
 When a measured choice keeps a separate copy of engine code, for example to preserve serial inlining contexts, its comment names the evidence, tests constrain the invariants both copies share, and the roadmap states what evidence would allow merging them.
 
 ## Documentation
 
-Use the [task index](docs/README.md) to find the current topic. Edit an existing topic before adding a document; a new page needs a distinct contract, procedure, explanation or evidence. Delete obsolete instructions, keep current rules and non-obvious rationale together, and retain reproducible measurement conditions. Git/PR history preserves superseded decisions; do not add a parallel decision record. Markdown paragraphs occupy one line.
+[`docs/README.md`](docs/README.md#who-owns-what) maps every fact to one owner; edit the owner, link from everywhere else and never restate its numbers or rules. Add a page only for a distinct contract, procedure, explanation or evidence, and delete obsolete instructions instead of annotating them. Git and PR history keep superseded decisions and the measured effect of accepted changes; the repository records only [failed experiments, open losses and placement lessons](docs/design/evidence.md) and unfinished work in the [roadmap](ROADMAP.md). Markdown paragraphs occupy one line.
 
-Keep a task's procedure and completion criteria in its existing topic, with the normal path before implementation details and exceptional branches. `AGENTS.md` lists the required first-read sections for agents; the [task index](docs/README.md) and site link to the same sources. Link directly to the relevant section, keep conditional references conditional, and let fact lookups skip procedures. Check representative tasks for unnecessary reading and discovery steps, not just document counts. Run the [site checks](docs/development/docs-site.md#commands) after changing pages or shared documents.
+Keep a task's procedure and completion criteria in its topic, normal path first. `AGENTS.md` lists the required first reads for agents; link directly to sections, keep conditional references conditional and let fact lookups skip procedures. Check representative tasks for unnecessary reading, not just document counts, and run the [site checks](docs/development/docs-site.md#commands) after changing pages.
 
-Public Rust items explain their contract with intra-doc links and applicable `# Key function`, `# Panics`, `# Safety`, `# Memory` and `# Examples` sections; examples are asserting doctests. Private items use descriptive names; comments explain non-obvious invariants, hazards and measured choices. Update [shared semantics](conformance/semantics.md) with ordering, stability, panic or space changes, and explanations and simulation models with algorithm changes.
+Public Rust items explain their contract with intra-doc links and applicable `# Key function`, `# Panics`, `# Safety`, `# Memory` and `# Examples` sections; examples are asserting doctests. Private items use descriptive names, and comments explain non-obvious invariants, hazards and measured choices.
 
 ## AI-assisted contributions
 

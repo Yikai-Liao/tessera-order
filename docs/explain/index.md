@@ -11,20 +11,20 @@ A radix sort reads digits of the key instead of comparing keys, so it runs in ti
 ## The idea in three sentences
 
 1. Split large inputs on their **top digit** with a stable **block partition** that recycles consumed input blocks as output blocks. It needs only 2R spare blocks and a small block table (R is the number of buckets).
-2. Once a bucket fits a **64 KiB tile**, finish it in a cache-resident scratch buffer with the cheapest leaf: insertion sort, a tile-local MSD partition, or LSD counting passes.
+2. Once a bucket fits a **cache-resident tile**, finish it in a cache-resident scratch buffer with the cheapest leaf: insertion sort, a tile-local MSD partition, or LSD counting passes.
 3. Before any of that, **skip work the data does not need**: sorted or reversed inputs, nearly sorted inputs, key bits that never change and heavily repeated keys. Reuse order confirmation when partitions expose monotone children.
 
 ## The pipeline
 
 <PipelineMap />
 
-The figure, as a list:
+The figure, as a list (the rules, thresholds and reasons for each stage are on [routing](routing.md), [the block partition](block-partition.md) and [tiles](tiles.md)):
 
-1. **Order probe.** Sample adjacent pairs. Ascending inputs return at once. Strictly descending inputs reverse directly; other descending inputs reverse stably.
-2. **Budgeted insertion.** Unsorted inputs get an insertion pass with a swap budget. Nearly sorted inputs finish here.
-3. **Varying bits.** One scan finds the bits that differ between keys. If none do, the input is done. Later digits cover only the varying bits.
-4. **Child order, then node or tile.** A partition child reuses full order confirmation without sampling, returning for ascending or constant keys and reversing stably for descending keys. The root skips this second gate because it was already probed. An unfinished slice larger than 64 KiB of records is a *node*, and anything smaller is a *tile*.
-5. **Node partitions.** A wide node with a repeated sampled key takes an equality partition first; the rest are split by a top-digit block partition. A node that holds the two runs of its top varying bit skips that block partition and is split there instead, which moves nothing (or one rotation when the upper run leads). Larger children return to the shared order gate. Tile-sized digit buckets finish directly during block compaction.
+1. **Order probe.** Sample adjacent pairs. Ascending inputs return at once, descending inputs reverse stably.
+2. **Budgeted insertion.** Unsorted inputs get an insertion pass with a swap budget, so nearly sorted inputs finish here.
+3. **Varying bits.** One scan finds the key bits that differ. If none do, the input is done; later digits cover only those bits.
+4. **Child order, then node or tile.** A partition child confirms order again before routing. An unfinished slice larger than a tile is a *node*, anything smaller a *tile*.
+5. **Node partitions.** A node with a repeated key takes an equality partition, a node already in two runs of its top bit is split there without moving records, and the rest take a top-digit block partition. Tile-sized buckets finish during block compaction.
 6. **Tile leaves.** A tile is finished by insertion sort, a tile-local MSD partition or LSD counting passes.
 
 ## Reading order
@@ -38,14 +38,6 @@ The figure, as a list:
 | [5. Finishing tiles](tiles.md) | Digit planning, the cost model, and the three tile leaves |
 | [6. Ownership and panics](safety.md) | Why any record type is safe, and what happens when a key function panics |
 
-## Memory at a glance
+## Memory
 
-| Part | Size | Where |
-|---|---|---|
-| Block partition | O(√n) records of scratch and block tables, for a fixed record size and digit width | heap |
-| Tile scratch | at most 64 KiB of records, at least one record | heap |
-| Cached bucket IDs | up to 2 bytes per tile record (`stable_sort_by_key` only) | heap |
-| Probe keys | at most 65,535 encoded keys | heap |
-| Cursor tables | up to 32 KiB per tile-local MSD level, at most 22 levels for 128-bit keys | stack |
-
-[`conformance/semantics.md`](../../conformance/semantics.md#space) states these bounds as part of the contract.
+Memory is O(√n) block scratch plus a fixed-size tile buffer and small tables, all on the heap except the tile-local cursor tables. [Ordering semantics](../../conformance/semantics.md#space) states the contract, and each part is explained where it arises: [block scratch](block-partition.md#choosing-the-block-size), [tile scratch and cursor tables](tiles.md).

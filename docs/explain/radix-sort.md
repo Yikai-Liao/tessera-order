@@ -16,7 +16,7 @@ Step 3 reads the input in order and fills each bucket in order. Records with the
 
 It also needs an output buffer as large as the input, because a record cannot be written to its bucket position until that position has been vacated, and nothing guarantees that it has. This buffer is what Tessera avoids.
 
-In the engine, this is `counting_pass` in [`engine.rs`](../../rust/tessera-sort/src/engine.rs). It is used only inside tiles, where the buffer is at most 64 KiB.
+In the engine, this is `counting_pass` in [`engine.rs`](../../rust/tessera-sort/src/engine.rs). It is used only inside tiles, where the buffer is small enough to stay in cache.
 
 ## Two ways to use more than one digit
 
@@ -45,13 +45,13 @@ What the figure shows:
 | | LSD | Stable MSD (buffered) | In-place MSD | Block LSD | Tessera |
 |---|---|---|---|---|---|
 | Stable | yes | yes | **no** | yes | yes |
-| Extra memory | n records | n records | O(R × depth) counters | O(√n) | O(√n) + one 64 KiB tile |
+| Extra memory | n records | n records | O(R × depth) counters | O(√n) | O(√n) + one tile |
 | Digit order | low → high | high → low | high → low | low → high | high digit split, then tiles |
 | Records moved | every pass moves all n | only buckets that still need sorting | only buckets that still need sorting | every pass moves all n | each split level moves its node once; tiles are sorted in cache |
 | Adapts to data | no | stops on small buckets | stops on small buckets | no | probes root and child order, drops constant bits, partitions repeated keys, picks a leaf per tile |
 | Cache behaviour on large n | each pass streams through n records twice | good once buckets are small | random swaps over the whole array | each pass streams through n records | one streaming split, then cache-resident tiles |
 
-Tessera takes **stability and O(√n) memory** from Block LSD, the **top-digit-first split** and early stop from MSD, and uses **LSD counting passes** only inside tiles, where the second buffer is at most 64 KiB.
+Tessera takes **stability and O(√n) memory** from Block LSD, the **top-digit-first split** and early stop from MSD, and uses **LSD counting passes** only inside tiles, where the second buffer is one tile.
 
 ## How much memory O(√n) is
 
@@ -64,4 +64,4 @@ For a top-digit split into R = 256 buckets, the block partition needs this much 
 | 10⁸ | 3.9 MiB | 763 MiB | 5.5 MiB | 1.5 GiB |
 | 10⁹ | 12 MiB | 7.5 GiB | 17 MiB | 15 GiB |
 
-The tile buffer (at most 64 KiB of records) and its cached bucket IDs come on top of these numbers. The [memory table](index.md#memory-at-a-glance) lists every part.
+The tile buffer and its cached bucket IDs come on top of these numbers; see [memory](index.md#memory).

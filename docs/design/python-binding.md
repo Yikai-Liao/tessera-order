@@ -1,6 +1,6 @@
-# Proposal: Python binding
+# Python binding design
 
-Status: accepted, not started. Date: 2026-11-06.
+Status: accepted, not started. This page records the decisions to implement; when the binding exists, its code and tests replace the sections they make true.
 
 The binding wraps the Rust crate and does not wait for the C++ implementation. It has its own package version and `python/vX.Y.Z` tags; its stable and unstable functions share that version.
 
@@ -87,38 +87,12 @@ Buffer access needs a separate safety design. A Python buffer export does not by
 
 ## Space and benchmarks
 
-Do not advertise O(√n) auxiliary memory for the whole Python package.
+Do not advertise O(√n) auxiliary memory for the whole package: contiguous numeric in-place sorting uses the core's O(√n) plus bounded adapter storage, a sorted copy adds O(n) output plus sorting scratch, argsort adds O(n) index output (record any key storage), and list sorting adds O(n) key/index/reference storage.
 
-| Path | Space accounting |
-|---|---|
-| Contiguous numeric in-place sorting | Core O(√n) auxiliary space plus bounded adapter/core storage |
-| Sorted copy | O(n) output, plus sorting scratch |
-| Argsort | O(n) index output; record any additional key storage |
-| List sorting | O(n) key/index/reference adaptation storage |
+Measure the entire public call (extraction, allocation, conversion, sort, writeback) against `list.sort()` for numeric lists, `list.sort(key=...)` for keyed lists, and `ndarray.sort(kind="stable")`, `np.sort(..., kind="stable")` and `np.argsort(..., kind="stable")` for arrays, with A/A controls, validated equivalent semantics, reported unsupported cases and conversion costs visible. No speed claim follows from using Rust or radix sort; prioritize contiguous numeric buffers, then measure the net benefit for lists.
 
-Measure the entire public call, including extraction, allocation, conversion, sort and writeback. Compare numeric lists to `list.sort()`, keyed object lists to `list.sort(key=...)`, NumPy in-place sorting to `ndarray.sort(kind="stable")`, sorted copies to `np.sort(..., kind="stable")`, and indices to `np.argsort(..., kind="stable")`. Include A/A controls, validate equivalent semantics and report unsupported cases. No speed claim follows merely from using Rust or radix sort; prioritize continuous numeric buffers, then measure the net benefit for lists. Array benchmarks also include an explicit matching standard-library or NumPy conversion baseline, with conversion cost visible.
+## Repository and release
 
-## Repository and release integration
+The binding lives in `python/` (maturin project, unpublished PyO3 crate, `tessera_sort` package with stubs and `py.typed`, tests) with benchmarks in `bench/python/`. The CI router treats Python independently of Rust and C++ and enables its checks only once the project manifests exist; Rust core changes then select Python validation without releasing it, and Python tags build only Python with the embedded core. Use a maturin wheel matrix for mainstream Linux, macOS and Windows, with NumPy present and absent. Wheel records name the package version, actual core version, source commit, ABI, Python version, toolchain and flags, and release verifies which core dependency source the wheels used (published versions for releases, the local core in development). Design the trusted publisher and install tests with the implementation.
 
-```text
-python/pyproject.toml             package metadata and maturin build settings
-python/Cargo.toml                 unpublished PyO3 extension crate
-python/src/                      Rust binding and adapters
-python/python/tessera_sort/       exports, type stubs and py.typed
-python/tests/                    API, identity, buffer and ordering tests
-bench/python/                    end-to-end benchmarks
-```
-
-The CI router reserves Python independently of Rust and C++. Enable Python checks only when its project manifests exist. Changes to the Rust core also select Python validation once the binding exists; they do not automatically release Python. Shared contract changes test each implemented language with its applicable adapter semantics. Python tags validate and build Python only, including the embedded Rust core needed by the binding.
-
-Use a maturin wheel matrix for mainstream Linux, macOS and Windows, with NumPy present and absent in API tests. Pin the build/toolchain policy at implementation time. Wheel build records identify Python package version, actual Rust core package version and source commit, binding commit, ABI, Python version, toolchain and build flags. Prefer versioned published core dependencies for releases while testing the local core in development. The release process must verify which dependency source the wheels actually used.
-
-### Delivery phases
-
-1. Specify and test numeric encodings, return types and exception behavior; audit buffer exclusivity with the selected binding versions.
-2. Implement continuous `array.array` and NumPy numeric paths and argsort.
-3. Implement list key extraction, identity-preserving writeback and the six symmetric functions, documenting stable-kernel aliases for unstable APIs.
-4. Validate identity and repeated references, exact key-call counts, extraction failure and callback mutation, integer bounds, mixed key rejection, float bits and stable reverse order, read-only/noncontiguous views, array widths, dtype errors and NumPy-free imports.
-5. Measure end-to-end costs, build/install/test platform wheels, and publish Python independently after its own release checks.
-
-Multidimensional `axis` and direct structured-dtype/multicolumn sorting remain deferred until real use cases justify them. Internal tile, digit and insertion parameters are not Python API.
+Order of work: specify and test numeric encodings, return types and exceptions while auditing buffer exclusivity; implement `array.array` and NumPy numeric paths with argsort; implement list key extraction, identity-preserving writeback and the six functions; validate identity and repeated references, key-call counts, extraction failure and callback mutation, integer bounds, mixed-key rejection, float bits, stable reverse order, read-only and noncontiguous views, dtype errors and NumPy-free imports; then measure, build wheels and publish independently. Multidimensional `axis` and structured-dtype or multicolumn sorting stay deferred until real use cases appear, and internal tile, digit and insertion parameters are not Python API.

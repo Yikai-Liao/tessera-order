@@ -125,7 +125,7 @@ export default defineConfig({
       {
         text: "Development",
         link: "/design/engine",
-        activeMatch: "^/(design|development|proposals)/|^/(CONTRIBUTING|RELEASING|ROADMAP)",
+        activeMatch: "^/(design|development)/|^/(CONTRIBUTING|RELEASING|ROADMAP)",
       },
     ],
     sidebar: {
@@ -178,9 +178,9 @@ function developmentSidebar() {
     {
       text: "Design",
       items: [
-        { text: "Engine design", link: "/design/engine" },
-        { text: "Port from the prototype", link: "/design/port" },
-        { text: "Comparison benchmarks", link: "/design/comparison-benchmarks" },
+        { text: "Engine reference", link: "/design/engine" },
+        { text: "Python binding design", link: "/design/python-binding" },
+        { text: "Engine evidence", link: "/design/evidence" },
         { text: "Benchmark tooling", link: "/design/benchmark-tooling" },
       ],
     },
@@ -198,14 +198,7 @@ function developmentSidebar() {
     },
     {
       text: "Planning",
-      items: [
-        { text: "Roadmap", link: "/ROADMAP" },
-        { text: "Python binding proposal", link: "/proposals/python-binding" },
-        {
-          text: "Engine simplification proposal",
-          link: "/proposals/engine-simplification",
-        },
-      ],
+      items: [{ text: "Roadmap", link: "/ROADMAP" }],
     },
   ];
 }

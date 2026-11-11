@@ -52,6 +52,7 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
       "cargo",
       [
         "test",
+        "--release",
         "--locked",
         "-p",
         "tessera-bench",

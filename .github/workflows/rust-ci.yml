@@ -85,10 +85,17 @@ jobs:
 
   comparison:
     runs-on: ubuntu-latest
+    env:
+      TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/comparison
+      # Match the CLI before testing so release builds can be reused unchanged.
+      RUSTFLAGS: -C llvm-args=-align-loops=64 -C llvm-args=-align-all-nofallthru-blocks=6
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target/comparison"
+          shared-key: comparison
       - name: Install native benchmark tools
         run: |
           sudo apt-get update

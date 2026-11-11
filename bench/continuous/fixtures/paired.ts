@@ -10,7 +10,7 @@ import { baseHash, hash } from "./report.ts";
 
 /** Synthetic blocks exercise protocol validation, not measured performance. */
 export function pairedRun(variant: Variant, index = 1, ratio = 1.2): LocalRun {
-  const allCases = [48, 49, 65536, 1000000, 10000000]
+  const allCases = [48, 49, 1000, 65536, 1000000, 10000000]
     .flatMap((len) => ["api", "par-4"].map((mode) => `rust/u64/random/${len}/s1/${mode}`))
     .sort();
   const cases = shardCases(allCases, index, CONTINUOUS_SHARDS);

@@ -51,7 +51,7 @@ Use these paths to separate decisions that need coordination from rules already 
 
 ## Source comparison boundary
 
-A prepared revision pair owns its complete plan, provenance, inventory and frozen executable hashes. `compare prepared` rejects measured inputs, incompatible harness/catalog sources, escaping paths and modified executables before invoking the normal sample/report path. Shards consume complete cases and never reconstruct build settings.
+A prepared revision pair records its complete plan, provenance, inventory and frozen executable hashes in `prepared.json`. The local executor and CI publisher share its reader in `local/model.ts`; `local.json` represents measurements only, never preparation. `compare prepared` rejects measured inputs, incompatible harness/catalog sources, escaping paths and modified executables before invoking the normal sample/report path. Shards consume complete cases and never reconstruct build settings.
 
 The workspace materializes current staged, unstaged and untracked sources without changing the caller's checkout. Internal links become regular snapshot contents; dangling/escaping links and directory cycles fail before building. Baseline links resolve within that commit's archive, never against the live checkout. Source hashing, backup and compilation see the same materialized inputs.
 

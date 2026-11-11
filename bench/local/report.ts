@@ -92,7 +92,7 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
     low === undefined || high === undefined ? "—" : `${low.toFixed(4)}–${high.toFixed(4)}`;
   const groups = runs.map(({ title, run }) => ({ title, summaries: summarizeLocal(run) }));
   const summaries = groups.flatMap(({ summaries }) => summaries);
-  const ratios = summaries.flatMap((s) => [s.low, s.high, s.aaLow ?? 1, s.aaHigh ?? 1]);
+  const ratios = summaries.flatMap((s) => [s.low, s.high]);
   const reach = 2 ** Math.ceil(Math.log2(Math.max(2, ...ratios.map((v) => Math.max(v, 1 / v)))));
   const ticks = [];
   for (let k = -Math.log2(reach); k <= Math.log2(reach); k++)

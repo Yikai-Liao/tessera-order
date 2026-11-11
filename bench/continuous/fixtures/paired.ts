@@ -3,7 +3,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseCriterionId, revisionSampling, type Variant } from "../../catalog.ts";
-import { type LocalRun, shardCases } from "../../local/model.ts";
+import { type LocalRun, type PreparedPair, shardCases } from "../../local/model.ts";
 import { loadPlan } from "../../plan.ts";
 import { CONTINUOUS_SHARDS } from "../paired.ts";
 import { baseHash, hash } from "./report.ts";
@@ -38,6 +38,7 @@ export function pairedRun(variant: Variant, index = 1, ratio = 1.2): LocalRun {
       catalog: "d".repeat(64),
     },
     binaries: { baseline: "e".repeat(64), current: "f".repeat(64) },
+    binaryPaths: { baseline: "binaries/baseline/worker", current: "binaries/current/worker" },
     builds: { baseline: build, current: build },
     rustc: build.rustc,
     flags: build.cargo_encoded_rustflags,
@@ -78,15 +79,14 @@ export async function writePaired(directory: string, variant: Variant, ratio = 1
     await writeFile(join(out, "plan.json"), JSON.stringify(await loadPlan("continuous")));
     runs.push(run);
   }
-  const prepared = { ...runs[0], cases: runs[0].shard!.allCases };
-  delete prepared.shard;
-  delete prepared.samples;
-  delete prepared.sampleCounts;
+  const { shard, samples: _samples, sampleCounts: _counts, host: _host, ...pair } = runs[0];
+  const prepared: PreparedPair = {
+    ...pair,
+    cases: shard!.allCases,
+    kind: "prepared-revisions",
+    plan: await loadPlan("continuous"),
+  };
   await mkdir(join(directory, "prepared"), { recursive: true });
-  await writeFile(join(directory, "prepared", "local.json"), JSON.stringify(prepared));
-  await writeFile(
-    join(directory, "prepared", "plan.json"),
-    JSON.stringify(await loadPlan("continuous")),
-  );
+  await writeFile(join(directory, "prepared", "prepared.json"), JSON.stringify(prepared));
   return runs;
 }

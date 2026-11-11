@@ -29,7 +29,7 @@ test("retained budgets survive catalog changes without accepting incomplete samp
     // Missing or incomplete budgets cannot be regenerated as complete evidence.
     for (const id of run.cases) run.samples![id].pop();
     assert.throws(() => summarizeLocal(run), /budget/);
-    delete run.sampleCounts;
+    delete (run as Partial<typeof run>).sampleCounts;
     assert.throws(() => summarizeLocal(run), /budget/);
   } finally {
     catalog.revisionSampling.forEach((s, i) => {

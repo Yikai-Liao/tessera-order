@@ -6,7 +6,7 @@ import { arch, cpus, platform, release } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
-import { type Plan, parsePlan, selectCaseIds } from "../plan.ts";
+import { type Plan, selectCaseIds } from "../plan.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
   buildBenchmark,
@@ -24,7 +24,14 @@ import {
   parseLayoutSeeds,
   validateLayoutBuilds,
 } from "./layout.ts";
-import { type LocalRun, shardCases, summarizeLocal } from "./model.ts";
+import {
+  type LocalRun,
+  type PreparedPair,
+  type RevisionPair,
+  readPrepared,
+  shardCases,
+  summarizeLocal,
+} from "./model.ts";
 import { renderLocalReport } from "./report.ts";
 import { measureSamples } from "./samples.ts";
 
@@ -292,6 +299,22 @@ function measurementHost(cpu?: string): LocalRun["host"] {
   };
 }
 
+/** Start a distinct measurement without changing the complete build inventory. */
+function measurementRun(
+  pair: RevisionPair,
+  cpu?: string,
+  shard?: { index: number; count: number },
+): LocalRun {
+  return {
+    ...pair,
+    host: measurementHost(cpu),
+    samples: {},
+    sampleCounts: {},
+    cases: shard ? shardCases(pair.cases, shard.index, shard.count) : pair.cases,
+    ...(shard ? { shard: { ...shard, allCases: pair.cases } } : {}),
+  };
+}
+
 /** Execute a retained revision pair without snapshots or compilation.
  *
  * Preparation is immutable; each shard gets its own result directory and host
@@ -309,28 +332,13 @@ export async function comparePrepared(options: {
   const { root, prepared, out } = options;
   assertWorkerEnvironment();
   if (platform() === "linux") await command("setarch", ["-R", "true"]);
-  const plan = parsePlan(JSON.parse(await readFile(join(prepared, "plan.json"), "utf8")));
-  if (plan.harness !== "smoke")
-    throw new Error("Prepared comparisons require a smoke harness plan");
-  const run = JSON.parse(await readFile(join(prepared, "local.json"), "utf8")) as LocalRun;
-  if (
-    run.schema !== 1 ||
-    run.protocol !== "paired-samples-v2" ||
-    run.shard ||
-    run.samples ||
-    run.sampleCounts ||
-    !run.cases.length ||
-    !run.builds ||
-    !run.binaryPaths ||
-    new Set(run.cases).size !== run.cases.length
-  )
-    throw new Error("Expected an unmeasured prepared revision pair");
+  const { kind: _kind, plan, ...pair } = await readPrepared(prepared);
   const catalogHash = createHash("sha256")
     .update(await readFile(join(root, "bench/catalog.toml")))
     .digest("hex");
   if (
-    run.source.harness !== (await sourceHash(join(root, "bench/rust"))) ||
-    run.source.catalog !== catalogHash
+    pair.source.harness !== (await sourceHash(join(root, "bench/rust"))) ||
+    pair.source.catalog !== catalogHash
   )
     throw new Error("Prepared pair requires its original harness and catalog");
   const cpu = await comparisonCpus(Boolean(plan.parallel?.length), options.cpu);
@@ -339,7 +347,7 @@ export async function comparePrepared(options: {
   await mkdir(out, { recursive: false });
   await writeFile(join(out, "plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
   for (const role of ["baseline", "current"] as const) {
-    const path = run.binaryPaths[role];
+    const path = pair.binaryPaths[role];
     if (typeof path !== "string" || !path || isAbsolute(path) || path.split(/[\\/]/).includes(".."))
       throw new Error("Prepared executable path must stay inside its directory");
     const input = await realpath(join(preparedRoot, path));
@@ -347,7 +355,7 @@ export async function comparePrepared(options: {
     if (within.split(sep)[0] === ".." || isAbsolute(within))
       throw new Error("Prepared executable path escapes its directory");
     const bytes = await readFile(input);
-    if (createHash("sha256").update(bytes).digest("hex") !== run.binaries[role])
+    if (createHash("sha256").update(bytes).digest("hex") !== pair.binaries[role])
       throw new Error("Prepared executable hash differs from build provenance");
     binaries[role] = join(out, path);
     await mkdir(dirname(binaries[role]), { recursive: true });
@@ -362,13 +370,9 @@ export async function comparePrepared(options: {
     root,
     Boolean(plan.parallel?.length),
   );
-  if (JSON.stringify(allCases) !== JSON.stringify(run.cases))
+  if (JSON.stringify(allCases) !== JSON.stringify(pair.cases))
     throw new Error("Prepared executable inventory differs from its recorded cases");
-  run.host = measurementHost(cpu);
-  run.cases = options.shard
-    ? shardCases(allCases, options.shard.index, options.shard.count)
-    : allCases;
-  if (options.shard) run.shard = { ...options.shard, allCases };
+  const run = measurementRun(pair, cpu, options.shard);
   const save = () => writeFile(join(out, "local.json"), `${JSON.stringify(run, null, 2)}\n`);
   await save();
   await measureSamples(run, binaries, join(out, "plan.json"), cpu, save);
@@ -445,7 +449,7 @@ export async function compareLocal(options: LocalOptions) {
         workspace.tree,
         Boolean(options.plan.parallel?.length),
       );
-      const run: LocalRun = {
+      const pair: RevisionPair = {
         schema: 1,
         protocol: "paired-samples-v2",
         baseline,
@@ -458,12 +462,15 @@ export async function compareLocal(options: LocalOptions) {
         rustc: builds.current.rustc,
         flags: builds.current.cargo_encoded_rustflags,
         configuration: "portable-simd",
-        host: measurementHost(cpu),
-        cases: options.shard
-          ? shardCases(allCases, options.shard.index, options.shard.count)
-          : allCases,
-        ...(options.shard ? { shard: { ...options.shard, allCases } } : {}),
+        cases: allCases,
       };
+      if (options.prepareOnly) {
+        const prepared: PreparedPair = { ...pair, kind: "prepared-revisions", plan: options.plan };
+        await writeFile(join(out, "prepared.json"), `${JSON.stringify(prepared, null, 2)}\n`);
+        await rm(planPath);
+        return { kind: "prepared-revisions", cases: allCases.length, baseline, head };
+      }
+      const run = measurementRun(pair, cpu, options.shard);
       if (layouts.length && run.cases.join("\n") !== layouts[0].run.cases.join("\n"))
         throw new Error("Layout runs must select identical cases");
       layouts.push({ seed: seed ?? 0, run });
@@ -475,8 +482,6 @@ export async function compareLocal(options: LocalOptions) {
     if (result.schema === 2) validateLayoutBuilds(result);
     const save = () => writeFile(join(out, "local.json"), `${JSON.stringify(result, null, 2)}\n`);
     await save();
-    if (options.prepareOnly)
-      return { kind: "prepared-revisions", cases: layouts[0].run.cases.length, baseline, head };
     for (const [index, { seed, run }] of layouts.entries()) {
       if (linker) diagnostic(`Layout seed ${seed}`);
       await measureSamples(run, executables[index], planPath, cpu, save);

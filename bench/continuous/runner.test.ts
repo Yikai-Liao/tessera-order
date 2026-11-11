@@ -103,7 +103,7 @@ for (const damage of [
       if (damage === "head") run.head = "c".repeat(40);
       if (damage === "baseline") run.baseline = hash;
       if (damage === "blocks") run.samples![run.cases[0]].pop();
-      if (damage === "missing-budget") delete run.sampleCounts;
+      if (damage === "missing-budget") delete (run as Partial<typeof run>).sampleCounts;
       if (damage === "budget") {
         run.sampleCounts![run.cases[0]]--;
         run.samples![run.cases[0]].pop();
@@ -125,12 +125,13 @@ test("report uses the prepared plan from its own run instead of a publisher pres
   t.after(() => rm(out, { recursive: true, force: true }));
   await writePaired(out, VARIANTS[0]);
   const prepared = join(out, "prepared");
-  const plan = JSON.parse(await readFile(join(prepared, "plan.json"), "utf8"));
+  const pair = JSON.parse(await readFile(join(prepared, "prepared.json"), "utf8"));
+  const plan = pair.plan;
   plan.include = [
     { types: ["u64"], distributions: ["random"], lengths: [48, 49, 1000, 65536, 1000000] },
   ];
+  await writeFile(join(prepared, "prepared.json"), JSON.stringify(pair));
   for (const dir of [
-    "prepared",
     ...Array.from({ length: CONTINUOUS_SHARDS }, (_, i) => `paired-${VARIANTS[0].id}-${i + 1}`),
   ])
     await writeFile(join(out, dir, "plan.json"), JSON.stringify(plan));

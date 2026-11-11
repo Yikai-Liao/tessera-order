@@ -9,7 +9,7 @@ import {
   revisionSampling,
   type Variant,
 } from "../catalog.ts";
-import { type LocalRun, shardCases, summarizeLocal } from "../local/model.ts";
+import { type LocalRun, readPrepared, shardCases, summarizeLocal } from "../local/model.ts";
 import { parsePlan } from "../plan.ts";
 import { type BencherReport, type Row, summarizeRows } from "./report.ts";
 
@@ -49,21 +49,14 @@ export async function readPaired(
   prepared: string,
 ) {
   const runs: LocalRun[] = [];
-  const reference = JSON.parse(await readFile(join(prepared, "local.json"), "utf8")) as LocalRun;
+  const reference = await readPrepared(prepared);
   const expectedCases = reference.cases;
-  const expectedPlan = JSON.stringify(
-    parsePlan(JSON.parse(await readFile(join(prepared, "plan.json"), "utf8"))),
-  );
+  const expectedPlan = JSON.stringify(reference.plan);
   if (
-    reference.schema !== 1 ||
-    reference.protocol !== "paired-samples-v2" ||
     reference.head !== source.hash ||
     reference.baseline !== source.baseHash ||
     reference.dirty ||
-    reference.configuration !== variant.id ||
-    reference.shard ||
-    reference.samples ||
-    reference.sampleCounts
+    reference.configuration !== variant.id
   )
     throw new Error("Expected this run’s unmeasured prepared pair");
   for (const name of await readdir(directory)) {

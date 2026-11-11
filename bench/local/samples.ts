@@ -19,10 +19,13 @@ export async function measureSamples(
   );
   run.samples = {};
   await save();
+  const mixed = (run.shard?.allCases ?? run.cases).some(
+    (id) => parseCriterionId(id).mode === "par-4",
+  );
   for (const id of run.cases) {
     diagnostic(`Sampling ${id}`);
     const parallel = parseCriterionId(id).mode === "par-4";
-    const mask = parallel ? cpu : cpu?.split(",")[0];
+    const mask = parallel || !mixed ? cpu : cpu?.split(",")[0];
     const count = run.sampleCounts[id];
     const worker = (
       role: keyof typeof binaries,

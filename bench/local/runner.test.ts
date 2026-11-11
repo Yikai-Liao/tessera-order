@@ -64,7 +64,7 @@ if (${JSON.stringify(process.platform)} === "linux") {
 if (${Boolean(mask)}) {
  const allowed = fs.readFileSync("/proc/self/status", "utf8").match(/^Cpus_allowed_list:\s*(.+)$/m)[1];
  const count = allowed.split(",").reduce((n,r) => {const [a,b=a]=r.split("-").map(Number);return n+b-a+1},0);
- require("node:assert/strict").equal(count, id.endsWith("/par-4") ? 4 : 1);
+ require("node:assert/strict").equal(count, fs.existsSync(dir + "/serial-only") ? 2 : id.endsWith("/par-4") ? 4 : 1);
 }
 const rl = readline.createInterface({input:process.stdin});
 rl.on("line", request => {
@@ -105,5 +105,13 @@ rl.on("line", request => {
   for (const role of ["baseline", "current"]) {
     const pid = Number(await readFile(join(directory, `${role}.pid`), "utf8"));
     assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  }
+  if (mask) {
+    await rm(join(directory, "fail"));
+    await writeFile(join(directory, "serial-only"), "");
+    run.cases = [run.cases[0]];
+    delete run.shard;
+    const serialMask = mask.split(",").slice(0, 2).join(",");
+    await measureSamples(run, binaries, "unused", serialMask, async () => {});
   }
 });

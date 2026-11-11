@@ -28,7 +28,7 @@ const API = "https://api.bencher.dev/v0";
 
 interface RenderOptions {
   language: string;
-  // The build configuration, such as "Portable SIMD"; it names the check.
+  // Optional build name for historical reports with multiple configurations.
   configuration?: string;
   runUrl: string;
   baseRef?: string;
@@ -274,9 +274,9 @@ export function render(s: ReportSummary, options: RenderOptions) {
 
 export function renderFailure({ language, configuration, hash, runUrl, reason }: FailureOptions) {
   return [
-    `### Benchmarks · ${[language, configuration, "measurement failed"].filter(Boolean).join(" · ")}`,
+    `### Benchmarks · ${[language, configuration, "results unavailable"].filter(Boolean).join(" · ")}`,
     "",
-    `**${short(hash)}** was not measured: ${reason}. See the [workflow run](${runUrl}).`,
+    `**${short(hash)}** results could not be validated: ${reason}. See the [workflow run](${runUrl}).`,
   ].join("\n");
 }
 
@@ -468,6 +468,12 @@ export interface CombinedOptions {
 }
 
 export function renderCombined(configurations: ConfigurationResult[], options: CombinedOptions) {
+  if (configurations.length === 1) {
+    const result = configurations[0];
+    return result.summary
+      ? render(result.summary, { ...options, unavailable: result.unavailable })
+      : renderFailure({ ...options, reason: result.reason ?? "Missing measurement results" });
+  }
   const { language, hash, runUrl, baseRef = "main", chartRef, trendRef } = options;
   // A build that was not measured stays in the overview and gets a line of
   // its own; the case lines, table and charts cover only measured builds, so

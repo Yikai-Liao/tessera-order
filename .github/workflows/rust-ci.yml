@@ -83,37 +83,6 @@ jobs:
           TESSERA_BENCH_CHECK_ONLY: "1"
       - run: cargo package -p tessera-sort
 
-  comparison:
-    runs-on: ubuntu-latest
-    env:
-      TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/comparison
-      # Match the CLI before testing so release builds can be reused unchanged.
-      RUSTFLAGS: -C llvm-args=-align-loops=64 -C llvm-args=-align-all-nofallthru-blocks=6
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target/comparison"
-          shared-key: comparison
-      - name: Install native benchmark tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang libtbb-dev
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm tools --verbose check --native --out bench/results/ci
-      - uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: comparison-check-log
-          path: bench/results/ci.log
-          if-no-files-found: ignore
-
   miri:
     name: miri (${{ matrix.mode }})
     runs-on: ubuntu-latest

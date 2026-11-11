@@ -53,7 +53,7 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 
 - Restore PR trend figures only with an explicit baseline-compatible relative-history contract. Hosted ratios can use different merge bases; do not re-normalize them as absolute latency or a fixed-baseline time series. Retain raw evidence beyond Actions’ 14-day artifacts if longer-term regeneration becomes required.
 
-- Consolidate distribution-sensitive routing into general mechanisms. Child-order reuse and the bucket-order split replace the capped end-run route; evaluate both against current-head Portable SIMD continuous feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
+- Consolidate distribution-sensitive routing into general mechanisms. Child-order reuse and the bucket-order split replace the capped end-run route; evaluate both against current-head continuous benchmark feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
 
 - Extend the comparison to cold-cache experiments, additional seeds and threshold cases when an investigation needs them.
 - Add native-CPU placement controls for source A/B studies; existing CGU, alignment and engine-order screens remain process-level evidence.

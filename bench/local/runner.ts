@@ -295,8 +295,9 @@ function measurementHost(cpu?: string): LocalRun["host"] {
 /** Execute a retained revision pair without snapshots or compilation.
  *
  * Preparation is immutable; each shard gets its own result directory and host
- * observations. Executable hashes and source/selection compatibility are checked
- * before any retained code runs. Sampling and reports use the ordinary runner.
+ * observations. Hashes, source compatibility and basenames are checked before
+ * execution; both listings must match before timing. Sampling and reports use
+ * the ordinary runner.
  */
 export async function comparePrepared(options: {
   root: string;

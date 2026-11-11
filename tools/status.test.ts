@@ -70,7 +70,7 @@ function run(id: number, overrides: object = {}) {
 function check(id: number, overrides: object = {}) {
   return {
     id,
-    name: `Benchmarks (rust, ${VARIANTS[0].name})`,
+    name: "Benchmarks (rust)",
     status: "completed",
     conclusion: "success",
     details_url: "https://github.com/owner/project/actions/runs/70",
@@ -106,17 +106,18 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
           run(93, {
             event: "workflow_dispatch",
             workflow_id: 2,
-            path: ".github/workflows/bench-track.yml@refs/heads/main",
+            path: ".github/workflows/bench-diagnostics.yml@refs/heads/main",
           }),
         ],
       },
       { workflow_runs: [run(11, { status: "in_progress", conclusion: null, run_attempt: 2 })] },
     ],
+    "actions/runs/93/jobs?per_page=100": [{ jobs: [] }],
     "actions/runs/11/jobs?per_page=100": [{ jobs: [] }],
     "actions/runs/70/jobs?per_page=100": [{ jobs: [] }],
     "actions/runs/70": run(70, {
       workflow_id: 2,
-      name: "Track benchmarks",
+      name: "Legacy tracker",
       event: "workflow_run",
       head_sha: "trusted",
       conclusion: "failure",
@@ -126,7 +127,7 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
   assert.equal(status.target.head, "current");
   assert.deepEqual(
     status.workflows.map((w: { id: number }) => w.id),
-    [11, 70],
+    [93, 11],
   );
   assert.equal(status.benchmarks[0].state, "failure");
   assert.equal(status.benchmarks[0].title, "Measurement failed");
@@ -134,7 +135,7 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
   assert.equal(status.report, null);
   assert.equal(status.details, undefined);
   assert.ok(JSON.stringify(status).length < 2000);
-  assert.ok(!(await f.requests()).some((path) => /\/(92|93)(\/|$)/.test(path)));
+  assert.ok(!(await f.requests()).some((path) => /\/(70|92)(\/|$)/.test(path)));
 });
 
 test("PR status joins merge workflows without accepting stale comments", async (t) => {
@@ -173,7 +174,7 @@ test("PR status joins merge workflows without accepting stale comments", async (
     ],
     "actions/runs/70": run(70, {
       workflow_id: 2,
-      name: "Track benchmarks",
+      name: "Legacy tracker",
       event: "workflow_dispatch",
       path: ".github/workflows/bench-track.yml",
       head_sha: "trusted",
@@ -187,7 +188,8 @@ test("PR status joins merge workflows without accepting stale comments", async (
   assert.equal(status.target.head, "current");
   assert.equal(status.target.merge, "merge");
   assert.equal(status.details.workflows[0].head, "merge");
-  assert.equal(status.workflows[1].state, "success");
+  assert.equal(status.workflows.length, 1);
+  assert.equal(status.workflows[0].state, "success");
   assert.equal(status.benchmarks[0].state, "failure");
   assert.equal(status.benchmarks[0].title, "2 slower");
   assert.equal(status.report, "current");

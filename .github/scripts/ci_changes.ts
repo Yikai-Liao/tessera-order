@@ -6,40 +6,75 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
-/** Select language checks from changed paths; unknown shared files fail open. */
+/** Select automatic checks once; known presentation tooling needs no Rust build. */
 export function select(paths: string[]) {
-  const selected = { rust: false, cpp: false };
+  const selected = { rust: false, cpp: false, comparison: false, benchmark: false, docs: false };
   for (const path of paths) {
+    if (path.startsWith("docs/") || path.endsWith(".md") || path.startsWith("assets/")) {
+      selected.docs = true;
+      if (!path.startsWith("conformance/")) continue;
+    }
     if (
-      ["docs/.vitepress/", "docs/public/", ".github/scripts/"].some((dir) =>
-        path.startsWith(dir),
-      ) ||
+      path.startsWith("rust/") ||
+      ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rust-toolchain"].includes(path) ||
+      path.startsWith(".cargo/")
+    ) {
+      selected.rust = selected.comparison = selected.benchmark = true;
+    } else if (
+      path.startsWith("cpp/") ||
+      path.startsWith("bench/cpp/") ||
+      ["CMakeLists.txt", "CMakePresets.json"].includes(path)
+    ) {
+      selected.cpp = selected.comparison = true;
+    } else if (
+      path.endsWith(".test.ts") ||
+      (path.startsWith("bench/continuous/") && path !== "bench/continuous/paired.ts") ||
+      path.startsWith("bench/report/") ||
+      path === "bench/local/report.ts" ||
+      path === "bench/local/counters.ts" ||
+      path === "bench/local/layout.ts" ||
+      path.startsWith("bench/plot/") ||
+      path.startsWith(".github/scripts/") ||
+      path === "tools/status.ts" ||
+      path === ".github/workflows/bench-diagnostics.yml"
+    ) {
+      if (path.startsWith("bench/plot/")) selected.docs = true;
+    } else if (path.startsWith("bench/rust/")) {
+      selected.rust = selected.comparison = true;
+      if (!path.startsWith("bench/rust/native/")) selected.benchmark = true;
+    } else if (path.startsWith("bench/plans/")) {
+      if (path === "bench/plans/continuous.toml") selected.benchmark = true;
+      else if (path !== "bench/plans/diagnostics.toml") selected.comparison = true;
+    } else if (path.startsWith("bench/") || path.startsWith("tools/")) {
+      selected.comparison = selected.benchmark = true;
+      if (path.startsWith("bench/catalog.")) selected.docs = true;
+    } else if (
       [
         "package.json",
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
         "tsconfig.json",
-        ".github/workflows/docs.yml",
         "biome.json",
       ].includes(path)
-    )
-      continue;
-    if (
-      ["rust/", "bench/rust/"].some((dir) => path.startsWith(dir)) ||
-      ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml"].includes(path)
+    ) {
+      selected.comparison = selected.benchmark = selected.docs = true;
+    } else if (path === ".github/workflows/docs.yml") {
+      selected.docs = true;
+    } else if (
+      path === "rustfmt.toml" ||
+      path === ".github/workflows/rust-ci.yml" ||
+      path.startsWith(".github/actions/rust-test/")
     ) {
       selected.rust = true;
-    } else if (
-      ["cpp/", "bench/cpp/"].some((dir) => path.startsWith(dir)) ||
-      ["CMakeLists.txt", "CMakePresets.json"].includes(path)
-    ) {
-      selected.cpp = true;
-    } else if (
-      path.startsWith("assets/") ||
-      (path.endsWith(".md") && !path.startsWith("conformance/"))
-    )
-      continue;
-    else selected.rust = selected.cpp = true;
+    } else {
+      Object.assign(selected, {
+        rust: true,
+        cpp: true,
+        comparison: true,
+        benchmark: true,
+        docs: true,
+      });
+    }
   }
   return selected;
 }
@@ -74,7 +109,7 @@ export async function routeChanges(base: string | undefined, head = "HEAD", out?
       return false;
     }
   };
-  const selected = paths === null ? { rust: true, cpp: true } : select(paths);
+  const selected = paths === null ? select(["unknown"]) : select(paths);
   const result = {
     ...selected,
     cpp_present: await present("cpp/CMakeLists.txt"),

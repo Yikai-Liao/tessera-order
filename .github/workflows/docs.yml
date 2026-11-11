@@ -1,38 +1,7 @@
 name: Docs
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "AGENTS.md"
-      - "docs/**"
-      - "conformance/**"
-      - "ROADMAP.md"
-      - "RELEASING.md"
-      - "CONTRIBUTING.md"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "tsconfig.json"
-      - "bench/catalog.*"
-      - "bench/plot/**"
-      - ".github/workflows/docs.yml"
-  pull_request:
-    paths:
-      - "AGENTS.md"
-      - "docs/**"
-      - "conformance/**"
-      - "ROADMAP.md"
-      - "RELEASING.md"
-      - "CONTRIBUTING.md"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "tsconfig.json"
-      - "bench/catalog.*"
-      - "bench/plot/**"
-      - ".github/workflows/docs.yml"
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

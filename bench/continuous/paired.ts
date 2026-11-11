@@ -10,15 +10,13 @@ import {
   type Variant,
 } from "../catalog.ts";
 import { type LocalRun, shardCases, summarizeLocal } from "../local/model.ts";
-import { selectedCases } from "../local/runner.ts";
-import { loadPlan, parsePlan } from "../plan.ts";
-import { buildBenchmark, withWorkspace } from "../workspace.ts";
+import { parsePlan } from "../plan.ts";
 import { type BencherReport, type Row, summarizeRows } from "./report.ts";
 
 /** Hosted matrix width; workflows obtain their matrix from this owner. */
 export const CONTINUOUS_SHARDS = 4;
 
-/** Exact source identity resolved independently by the trusted publisher. */
+/** Exact source identity captured by this CI run. */
 export interface PairedSource {
   hash: string;
   baseHash: string;
@@ -39,37 +37,36 @@ function settings(run: LocalRun) {
   return { baseline: select(run.builds.baseline), current: select(run.builds.current) };
 }
 
-/** Resolve the trusted selection with the existing Rust plan/threshold owner.
- *
- * Publication calls this only from its trusted checkout, before reading PR
- * artifacts. Listing generates no inputs and performs no timed measurement.
- */
-export async function continuousInventory(root: string) {
-  return withWorkspace(root, async ({ tree, target }) => {
-    const built = await buildBenchmark(tree, target, "smoke", ["rayon"]);
-    return selectedCases(
-      { baseline: built.executable, current: built.executable },
-      join(tree, "bench/plans/continuous.toml"),
-      undefined,
-      tree,
-      true,
-    );
-  });
-}
-
 /** Validate complete, disjoint shards before any upload or passing check.
  *
- * Results are untrusted JSON, never executable inputs. All shards must use one
- * harness, catalog, source pair and toolchain; runner identities may differ.
+ * This run’s prepared pair owns the plan, full inventory and build identity.
+ * Only JSON is read; measurement hosts may differ from the preparation host.
  */
 export async function readPaired(
   directory: string,
   variant: Variant,
   source: PairedSource,
-  expectedCases: string[],
+  prepared: string,
 ) {
   const runs: LocalRun[] = [];
-  const expectedPlan = JSON.stringify(await loadPlan("continuous"));
+  const reference = JSON.parse(await readFile(join(prepared, "local.json"), "utf8")) as LocalRun;
+  const expectedCases = reference.cases;
+  const expectedPlan = JSON.stringify(
+    parsePlan(JSON.parse(await readFile(join(prepared, "plan.json"), "utf8"))),
+  );
+  if (
+    reference.schema !== 1 ||
+    reference.protocol !== "paired-samples-v2" ||
+    reference.head !== source.hash ||
+    reference.baseline !== source.baseHash ||
+    reference.dirty ||
+    reference.configuration !== variant.id ||
+    reference.shard ||
+    reference.samples ||
+    reference.sampleCounts ||
+    reference.blocks.length
+  )
+    throw new Error("Expected this run’s unmeasured prepared pair");
   for (const name of await readdir(directory)) {
     if (!name.startsWith(`paired-${variant.id}-`)) continue;
     const plan = parsePlan(JSON.parse(await readFile(join(directory, name, "plan.json"), "utf8")));
@@ -78,8 +75,7 @@ export async function readPaired(
     runs.push(run);
   }
   if (!runs.length) throw new Error("No completed measurement shards");
-  const reference = runs[0];
-  const count = reference.shard?.count;
+  const count = runs[0].shard?.count;
   if (count !== CONTINUOUS_SHARDS || count !== runs.length)
     throw new Error("Missing measurement shards");
   const indexes = new Set<number>();
@@ -98,7 +94,8 @@ export async function readPaired(
       indexes.has(shard.index) ||
       JSON.stringify(shard.allCases) !== JSON.stringify(expectedCases) ||
       JSON.stringify(run.source) !== JSON.stringify(reference.source) ||
-      JSON.stringify(settings(run)) !== JSON.stringify(settings(reference)) ||
+      JSON.stringify(run.binaries) !== JSON.stringify(reference.binaries) ||
+      JSON.stringify(run.builds) !== JSON.stringify(reference.builds) ||
       JSON.stringify(run.cases) !== JSON.stringify(shardCases(shard.allCases, shard.index, count))
     )
       throw new Error("Incompatible, duplicate or misattributed measurement shards");

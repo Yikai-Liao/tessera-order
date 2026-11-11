@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { VARIANTS } from "../catalog.ts";
 import { mockGitHub } from "./fixtures/github.ts";
-import { pairedRun, writePaired } from "./fixtures/paired.ts";
+import { writePaired } from "./fixtures/paired.ts";
 import { baseHash, fixture, hash } from "./fixtures/report.ts";
 import { publishReport } from "./index.ts";
 import { pairedBmf } from "./paired.ts";
@@ -36,8 +36,6 @@ async function publication(t: TestContext, cloud = true, moved = false, ratio?: 
       await writeFile(join(dir, `bencher-${variant.id}.json`), JSON.stringify(report));
     }
   }
-  const inventory = join(dir, "cases.json");
-  await writeFile(inventory, JSON.stringify(pairedRun(VARIANTS[0]).shard!.allCases));
   const summaries: string[] = [];
   let id = 40;
   const mock = mockGitHub((request) => {
@@ -78,8 +76,7 @@ async function publication(t: TestContext, cloud = true, moved = false, ratio?: 
       number: "7",
       baseRef: "main",
       artifacts: dir,
-      reports: dir,
-      inventory,
+      prepared: join(dir, "prepared"),
     },
   };
 }
@@ -124,6 +121,7 @@ test("raw paired samples drive configured checks and the existing shared chart",
     .flatMap((request) => request.body.tree as { content: string }[]);
   assert.equal(images.length, 1);
   assert.match(images[0].content, /20/);
+  assert.doesNotMatch(body, /Portable SIMD|Adjacent A\/B|Cloud archival runs separately/);
   assert.equal(
     action.requests.filter(
       (request) => request.method === "POST" && request.path.endsWith("/issues/7/comments"),
@@ -135,7 +133,7 @@ test("raw paired samples drive configured checks and the existing shared chart",
 test("missing shards fail the configured build", async (t) => {
   const action = await publication(t);
   await rm(join(action.inputs.artifacts, `paired-${VARIANTS[0].id}-1`), { recursive: true });
-  await publishReport(action);
+  await assert.rejects(publishReport(action), /could not be validated/);
   const checks = action.requests.filter(
     (request) => request.method === "PATCH" && request.path.includes("/check-runs/"),
   );
@@ -149,7 +147,6 @@ test("missing shards fail the configured build", async (t) => {
 test("Cloud failure retains ratio tables and does not change performance checks", async (t) => {
   const action = await publication(t, false);
   await publishReport(action);
-  assert.match(action.summaries[0], /Cloud archival runs separately/);
   assert.match(action.summaries[0], /1.2000×/);
   assert.deepEqual(
     action.requests
@@ -161,14 +158,13 @@ test("Cloud failure retains ratio tables and does not change performance checks"
 
 test("Cloud contents cannot override performance evidence", async (t) => {
   const action = await publication(t);
-  const path = join(action.inputs.reports, `bencher-${VARIANTS[0].id}.json`);
+  const path = join(action.inputs.artifacts, `bencher-${VARIANTS[0].id}.json`);
   const report = fixture();
   report.testbed.name = VARIANTS[0].relativeTestbed;
   report.branch.name = "pr-7";
   report.results = [[]];
   await writeFile(path, JSON.stringify(report));
   await publishReport(action);
-  assert.match(action.summaries[0], /Cloud archival runs separately/);
   assert.match(action.summaries[0], /1.2000×/);
 });
 
@@ -182,4 +178,11 @@ test("superseded PR results stay in checks and summary, not a new comment", asyn
     0,
   );
   assert.equal(action.summaries.length, 1);
+});
+
+test("fork reports retain the summary without writes or credentials", async (t) => {
+  const action = await publication(t, false);
+  await publishReport({ ...action, inputs: { ...action.inputs, publish: false } });
+  assert.match(action.summaries[0], /1.2000×/);
+  assert.equal(action.requests.length, 0);
 });

@@ -22,6 +22,9 @@ jobs:
       rust: ${{ steps.changes.outputs.rust }}
       cpp: ${{ steps.changes.outputs.cpp }}
       cpp_present: ${{ steps.changes.outputs.cpp_present }}
+      comparison: ${{ steps.changes.outputs.comparison }}
+      benchmark: ${{ steps.changes.outputs.benchmark }}
+      docs: ${{ steps.changes.outputs.docs }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -67,14 +70,227 @@ jobs:
     if: needs.changes.outputs.cpp == 'true' && needs.changes.outputs.cpp_present == 'true'
     uses: ./.github/workflows/cpp-ci.yml
 
+  docs:
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    uses: ./.github/workflows/docs.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
   # The single required check for branch protection. Language jobs are skipped
   # when their paths did not change, so it passes on success or skip and fails
   # on any failure or cancellation.
   ci-ok:
     if: always()
-    needs: [changes, lint, rust, cpp]
+    needs: [changes, lint, rust, cpp, docs, comparison, prepare, measure, report]
     runs-on: ubuntu-latest
     steps:
       - env:
           NEEDS: ${{ toJSON(needs) }}
         run: jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<< "$NEEDS"
+
+  comparison:
+    needs: changes
+    if: needs.changes.outputs.comparison == 'true'
+    runs-on: ubuntu-latest
+    env:
+      TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/comparison
+      # Match the CLI before testing so functional builds can be reused unchanged.
+      RUSTFLAGS: -C llvm-args=-align-loops=64 -C llvm-args=-align-all-nofallthru-blocks=6
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target/comparison"
+          shared-key: comparison
+      - uses: actions/cache@v6
+        with:
+          path: bench/vendor
+          key: native-sources-${{ runner.os }}-${{ hashFiles('bench/rust/native/sources.toml') }}
+      - name: Install native benchmark tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang libtbb-dev
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm tools --verbose check --native --out bench/results/ci
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: comparison-check-log
+          path: bench/results/ci.log
+          if-no-files-found: ignore
+
+
+  prepare:
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.benchmark == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/continuous
+      RUSTFLAGS: -C llvm-args=-align-loops=64 -C llvm-args=-align-all-nofallthru-blocks=6
+    outputs:
+      matrix: ${{ steps.matrix.outputs.value }}
+      baseline: ${{ steps.build.outputs.baseline }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target/continuous"
+          shared-key: continuous
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - id: matrix
+        run: echo "value=$(pnpm -s tools continuous matrix)" >> "$GITHUB_OUTPUT"
+      - name: Build both revisions once
+        id: build
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          baseline=$(git merge-base "$PR_BASE" HEAD)
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+          pnpm tools compare commit "$baseline" --plan continuous --prepare-only \
+            --out bench/results/prepared
+      - uses: actions/upload-artifact@v7
+        with:
+          name: prepared-revisions
+          path: bench/results/prepared/
+          retention-days: 14
+          if-no-files-found: error
+
+  measure:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@v8
+        with:
+          name: prepared-revisions
+          path: bench/results/prepared
+      - name: Measure retained revisions without compiling
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          pnpm tools compare prepared bench/results/prepared --shard "$SHARD" \
+            --out bench/results/continuous
+      - name: Retain measurement log
+        if: always()
+        run: |
+          if [ -f bench/results/continuous.log ]; then
+            mkdir -p bench/results/continuous
+            cp bench/results/continuous.log bench/results/continuous/measurement.log
+          fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            bench/results/continuous/
+            !bench/results/continuous/binaries/**
+          retention-days: 14
+          if-no-files-found: warn
+
+  report:
+    needs: [prepare, measure]
+    if: always() && !cancelled() && needs.prepare.result == 'success'
+    runs-on: ubuntu-24.04
+    environment: benchmark
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      checks: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@v8
+        with:
+          name: prepared-revisions
+          path: ${{ runner.temp }}/prepared
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: paired-*
+          path: ${{ runner.temp }}/paired
+      - name: Publish paired checks and PR report
+        uses: actions/github-script@v9
+        env:
+          HASH: ${{ github.event.pull_request.head.sha }}
+          BASE_HASH: ${{ needs.prepare.outputs.baseline }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          PUBLISH: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        with:
+          script: |
+            const { publishReport } = require('./bench/continuous/index.ts');
+            const path = require('node:path');
+            await publishReport({ github, context, core, inputs: {
+              hash: process.env.HASH, baseHash: process.env.BASE_HASH,
+              number: process.env.PR_NUMBER, baseRef: process.env.BASE,
+              artifacts: path.join(process.env.RUNNER_TEMP, 'paired'),
+              prepared: path.join(process.env.RUNNER_TEMP, 'prepared'),
+              publish: process.env.PUBLISH === 'true',
+            } });
+      - uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d # v0.6.16
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        with:
+          version: 0.6.16
+      - name: Upload paired JSON to Bencher Cloud
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
+          BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
+          HASH: ${{ github.event.pull_request.head.sha }}
+          BASE_HASH: ${{ needs.prepare.outputs.baseline }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          pnpm tools continuous submit --project "$BENCHER_PROJECT" \
+            --hash "$HASH" --base-hash "$BASE_HASH" --pr "$PR_NUMBER" \
+            --prepared "$RUNNER_TEMP/prepared" --artifacts "$RUNNER_TEMP/paired" \
+            --out "$RUNNER_TEMP/submission"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: continuous-submission
+          path: |
+            ${{ runner.temp }}/submission/
+            ${{ runner.temp }}/submission.log
+          if-no-files-found: ignore

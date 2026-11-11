@@ -44,16 +44,30 @@ function replace(value: object, path: string[], replacement: unknown) {
   return copy;
 }
 
-test("routing selects languages conservatively and fails closed without a base", () => {
-  for (const [path, expected] of [
-    ["rust/tessera-sort/src/lib.rs", { rust: true, cpp: false }],
-    ["cpp/include/sort.hpp", { rust: false, cpp: true }],
-    ["conformance/semantics.md", { rust: true, cpp: true }],
-    ["unknown-input", { rust: true, cpp: true }],
-    ["docs/explain/keys.md", { rust: false, cpp: false }],
-  ] as const)
-    assert.deepEqual(select([path]), expected);
-  assert.deepEqual(select(["rust/a.rs", "cpp/b.hpp"]), { rust: true, cpp: true });
+test("routing selects dependencies without running Rust for presentation changes", () => {
+  const none = { rust: false, cpp: false, comparison: false, benchmark: false, docs: false };
+  for (const path of [
+    "tools/status.ts",
+    "bench/continuous/markdown.ts",
+    "bench/continuous/index.test.ts",
+  ])
+    assert.deepEqual(select([path]), none);
+  assert.deepEqual(select(["docs/explain/keys.md"]), { ...none, docs: true });
+  assert.deepEqual(select(["rust/tessera-sort/src/lib.rs"]), {
+    ...none,
+    rust: true,
+    comparison: true,
+    benchmark: true,
+  });
+  assert.deepEqual(select(["bench/plans/continuous.toml"]), { ...none, benchmark: true });
+  assert.deepEqual(select(["bench/rust/native/adapters.cpp"]), {
+    ...none,
+    rust: true,
+    comparison: true,
+  });
+  assert.deepEqual(select(["cpp/include/sort.hpp"]), { ...none, cpp: true, comparison: true });
+  for (const path of ["conformance/semantics.md", "unknown-input"])
+    assert.ok(Object.values(select([path])).every(Boolean));
   assert.equal(changedPaths(undefined, "HEAD"), null);
   assert.equal(changedPaths("missing-base-ref", "HEAD"), null);
 });

@@ -1,6 +1,6 @@
 # Continuous benchmarks
 
-Rust changes and pushes to `main` compare the required SIMD backend against an exact source baseline on GitHub-hosted runners. Each case alternates adjacent A/B and B/A samples; local `compare commit` uses the same protocol. Bencher Cloud archives relative results, not historical regression thresholds. These screens flag changes to investigate, not source-change causality independent of code placement.
+Affected pull requests compare the required SIMD backend against an exact source baseline on GitHub-hosted runners. Each case alternates adjacent A/B and B/A samples; local `compare commit` uses the same protocol. Bencher Cloud archives relative results, not historical regression thresholds. These screens flag changes to investigate, not source-change causality independent of code placement.
 
 ## Read feedback from a PR
 
@@ -13,8 +13,8 @@ pnpm -s tools status --pr 123 --details
 ```
 
 1. Match `target.head` to the requested commit. Stale-head feedback is not current evidence.
-2. Read `Benchmarks (rust, Portable SIMD)` and any other active verdicts in `benchmarks[]`. Missing or incomplete measurements cannot pass.
-3. Read `workflows[].state`. `Measure benchmarks` produces evidence; `Track benchmarks` publishes performance checks before attempting Cloud archival. An upload failure is a failed archival workflow, not a performance regression.
+2. Read `Benchmarks (rust)` in `benchmarks[]`. Missing or incomplete measurements cannot pass.
+3. Read `workflows[].state`. The normal `CI` run builds, measures, publishes the performance check and then archives to Cloud. An upload failure fails CI without changing the already published performance verdict.
 4. Use `--details` for the exact baseline and affected cases. Negative changes mean less time. Stacked PRs compare with their parent branch, not automatically with main.
 
 A read-only feedback request does not authorize new measurements. The [CLI guide](tooling.md#agent-output) defines output and authentication.
@@ -23,27 +23,27 @@ A read-only feedback request does not authorize new measurements. The [CLI guide
 
 The [dashboard](https://bencher.dev/perf/yikai-liao-s-project) stores current/baseline ratios, not absolute nanoseconds. A ratio of 1.10 means 10% more time than that run’s exact baseline. PR points with the same baseline can describe within-PR history; a rebase or retarget that changes the baseline starts a separate segment. Bencher’s native series does not enforce that segmentation: consult the exact baseline in the associated Actions report rather than reading an unqualified continuous trend.
 
-Main compares each commit with its first parent. Its points describe individual commit effects, not main’s absolute latency or cumulative speed; do not multiply ratios from different runners into a cumulative trend. No upload depends on an earlier Cloud sample, and no historical threshold decides the performance check.
+Automatic measurement and Cloud archival run on PRs only. Merging does not repeat the benchmark on main; main still runs correctness and site checks selected by its diff. Retained older main ratios describe individual parent-to-commit effects, not absolute or cumulative latency. No upload depends on an earlier Cloud sample, and no historical threshold decides the performance check.
 
 Legacy absolute-time Testbeds remain available. `pnpm tools continuous history --project yikai-liao-s-project --out bench/results/main-history` reads those histories without new measurements. Retained `history.json` regenerates with `pnpm tools report DIR`. That legacy analysis mixes source, placement and host variation.
 
 ## Pipeline
 
-- [Measure](../../.github/workflows/bench-build.yml) is unprivileged, including forks. One preparation job calls `compare commit --plan continuous --prepare-only` to build the revision pair once. Four complete-case shards reuse that pair through `compare prepared --shard INDEX/COUNT`; measurement jobs do not install Rust or compile. Both revisions use the current harness, lockfile and toolchain; only the baseline library is substituted. Timed IDs must match before measuring.
-- PR baselines use the merge base with the target SHA captured in the triggering event. The versioned native run title records PR/base/head identity. Publication checks eligibility without replacing the recorded target after retargeting or parent rewrites. Main and manual main runs use the first parent.
-- Each 14-day `paired-*` artifact retains the plan, complete inventory, shard selection, source and executable hashes, build/host provenance, raw sample pairs, the executed baseline/current binaries, report and log. `local.json` records their relative `binaryPaths` and SHA-256 hashes. Downloaded binaries are untrusted PR code: inspect provenance first and run only in an isolated environment without credentials. The publisher still reads JSON only. Partial evidence remains inspectable, not passable.
-- [Track](../../.github/workflows/bench-track.yml) runs trusted default-branch code. It builds/lists its trusted harness once per trusted source, compiler and platform, caches that JSON inventory in the default-branch trust scope, and validates complete, disjoint shards against that independent inventory. It reads artifact JSON only, never artifact code. Performance checks and the same-head PR report are published before Cloud archival.
-- `continuous submit` uploads JSON using the existing Cloud credential and verifies the returned identity and values. Failure is explicit, per configuration, and does not change the already published measurement verdict. There is no OCI image, remote execution slot, baseline-readiness queue or scheduler.
+- The ordinary [CI workflow](../../.github/workflows/ci.yml) uses the PR branch’s code for `prepare → measure → report`. The shared diff router selects measurement for engine, harness, plan and execution-tooling changes; presentation-only changes run tooling checks. There is no `workflow_run` publisher or second plan authority on main.
+- Preparation calls `compare commit --plan continuous --prepare-only` once. Both revisions use the PR’s current harness, lockfile and toolchain; the baseline library comes from the merge base with the target SHA captured in the triggering event. Preparation retains the complete plan, resolved inventory, build provenance, executable hashes and exact executables in `prepared-revisions`.
+- Four complete-case shards call `compare prepared --shard INDEX/COUNT` without installing Rust or compiling. Each checks executable hashes, harness/catalog compatibility and both inventories before timing. Fourteen-day `paired-*` artifacts retain JSON, reports and logs; the executable pair is stored once in `prepared-revisions`. Combine a shard’s `local.json` binary paths with that preparation artifact when inspecting retained binaries.
+- Report reads this run’s prepared plan and inventory, verifies complete disjoint shards and matching source/build/executable identity, and recomputes verdicts from raw samples. It does not build a worker or execute artifact binaries. Checks, same-head comments and summary are published before Cloud archival.
+- Same-repository PR report jobs use the `benchmark` environment and publish GitHub results and Bencher Cloud ratios. Forks retain measurement artifacts and job summaries; GitHub withholds secrets and write tokens, so they do not publish comments or upload to Cloud. `continuous submit` validates the returned Cloud identity and values. Failures remain explicit.
 
 Both revisions enable Rayon and use the runtime-dispatched SIMD backend. Historical libraries enable their opt-in feature; current libraries require that backend without a selector. There is no forced ISA or `target-cpu=native`. Linux revision workers run under `setarch -R`, disabling process address randomization without changing host-wide settings. Same-binary hosted calibration showed stable process-specific offsets even after fixing only the executable base. ASLR control covers executable, heap, stack and library address randomization, not source-dependent code layout or physical page placement. The runner probes support before building and before executing a prepared pair, records the control, and fails rather than silently measuring an uncontrolled Linux pair. New relative Testbeds do not compare against the old static-linking/JCC absolute-time samples.
 
 ### Capacity and recovery
 
-One preparation job and four measurement jobs cover the single required backend. Preparation retains both frozen executables and their full inventory; each measurement job checks their hashes and records its own host before sampling. Ordinary Rust CI retains its original parallelism; no test job waits for benchmarks. PR updates cancel obsolete measurements; main runs use distinct concurrency groups so a newer push cannot replace a pending first-parent comparison. GitHub still provides no global priority or preemption guarantee. Only publication serializes image-branch writes.
+One preparation job and four measurement jobs cover the single required backend. Preparation retains both frozen executables and their full inventory; each measurement job checks their hashes and records its own host before sampling. Ordinary Rust CI retains its original parallelism; no test job waits for benchmarks. PR updates cancel obsolete CI runs. GitHub still provides no global priority or preemption guarantee. Image publication has no global queue; a concurrent image-write failure leaves the numeric report available.
 
-Only preparation compiles. CI supplies `TESSERA_BENCH_TARGET_DIR` and uses `Swatinem/rust-cache` for the actual Cargo target, separated by build configuration. CLI alignment flags are set before compiling, avoiding the preliminary unaligned build. Temporary source snapshots still disappear; cached dependencies survive. Cargo validates source changes and rebuilds the measured crate. PR caches are scoped by GitHub; the privileged default-branch publisher cannot restore PR-scoped caches. Local caching is explicit and must not cross trust boundaries.
+Only preparation compiles. CI supplies `TESSERA_BENCH_TARGET_DIR` and uses `Swatinem/rust-cache` for the actual Cargo target, separated by build configuration. CLI alignment flags are set before compiling, avoiding the preliminary unaligned build. Temporary source snapshots still disappear; cached dependencies survive. Cargo validates source changes and rebuilds the measured crate. PR caches are scoped by GitHub. Local caching is explicit and must not cross trust boundaries.
 
-Rerun failed measurement jobs in their original Actions run, then the tracker if needed. Missing/expired artifacts cannot be replaced by historical samples. An archival retry can reuse complete retained artifacts without remeasurement. The feedback target is four minutes from triggering CI through publication. Four measurement shards distribute the unchanged warm-up and sampling work; compilation, process startup, input preparation and verification remain additional wall time. Measure the complete critical path, including publication, rather than treating the sampling budget or a cache hit as completion evidence. The 10-minute job timeout is a safety bound, not a completion-time measurement; cold/warm cache duration and queue wait are separate acceptance observations.
+Rerun failed jobs in their original CI run. Missing or expired artifacts require a new complete run; an archival retry can reuse complete retained artifacts without measuring again. A plan change is handled by that branch’s preparation and report code in the same run. The feedback target is four minutes from triggering CI through all selected checks and archival. Measure the complete critical path, including queues and publication; sampling budgets, cache hits and job timeouts are not completion evidence.
 
 ## Within-job scheduling
 
@@ -55,14 +55,14 @@ Each sample restores bounded batches, times only sort calls, then checks their o
 
 ## Cases
 
-The [continuous plan](../../bench/plans/continuous.toml) caps inputs at 1,000,000 records and selects 69 cases: 61 serial and eight four-thread. The former 10M serial random case is covered by the existing 1M case; all eight parallel shapes now use 1M records. Release and dedicated large-input experiments retain their own coverage. The [catalog](../../bench/catalog.toml) owns the per-revision warm-up, sample count and sampling budget, shared by Rust workers and trusted completeness checks. Both time budgets are divided by the sample count for each fresh worker; startup/input preparation and at least one complete measured batch add overhead, not another full-case budget:
+The [continuous plan](../../bench/plans/continuous.toml) caps inputs at 1,000,000 records and selects 69 cases: 61 serial and eight four-thread. The former 10M serial random case is covered by the existing 1M case; all eight parallel shapes now use 1M records. Release and dedicated large-input experiments retain their own coverage. The [catalog](../../bench/catalog.toml) owns the per-revision warm-up, sample count and sampling budget, shared by Rust workers and completeness checks. Both time budgets are divided by the sample count for each fresh worker; startup/input preparation and at least one complete measured batch add overhead, not another full-case budget:
 
 | Length | Warm-up | Paired samples | Sampling budget per revision |
 |---|---|---|---|
 | Below 1,000,000 | 0.5 s | 30 | 1.5 s |
 | 1,000,000 | 1 s | 40 | 4 s |
 
-There is no outer repetition. Each sample is a bounded batch measurement, not one sort. Preview coverage with `pnpm -s tools plan continuous`. Trusted publication resolves its own preset through Rust; intentional inventory changes must also be accepted by trusted default-branch code.
+There is no outer repetition. Each sample is a bounded batch measurement, not one sort. Preview coverage with `pnpm -s tools plan continuous`. Preparation resolves the full inventory through Rust; report uses that exact retained inventory.
 
 ## Alerts
 
@@ -72,17 +72,17 @@ Adjacent pairs reduce slow drift; AB/BA alternation balances order effects. Neit
 
 | Configuration | Testbed | Measure |
 |---|---|---|
-| Portable SIMD | `actions-screen-portable-simd-v1` | `paired-time-ratio` |
+| Tessera | `actions-screen-portable-simd-v1` | `paired-time-ratio` |
 
-Testbeds identify build configuration and protocol, not individual PRs or stable runner hardware. Bencher branches remain `pr-N` and `main`; hashes identify measured heads. BMF stores the median and interval endpoints. Exact baselines and raw pairs remain in the Actions evidence and report. Do not configure history-based thresholds on these Testbeds.
+Testbeds identify build configuration and protocol, not individual PRs or stable runner hardware. New submissions use Bencher branches `pr-N`; historical `main` points remain readable; hashes identify measured heads. BMF stores the median and interval endpoints. Exact baselines and raw pairs remain in the Actions evidence and report. Do not configure history-based thresholds on these Testbeds.
 
 ## Reports
 
-Existing comparison figures, numeric tables, image publication and same-head comment handling are reused. Builds are columns; cases are rows, with separate serial and parallel aggregates. Ratios display as ×, never nanoseconds. Missing measurements fail their performance check independently; image or Cloud failures do not erase valid numeric evidence.
+The single-backend report uses `Benchmarks (rust)`, with changed-case tables, a comparison figure when alerts exist, and the complete case table. Historical multi-build reports remain readable. Ratios display as ×, never nanoseconds. Missing measurements fail their performance check independently; image or Cloud failures do not erase valid numeric evidence.
 
 ### Report images
 
-The trusted publisher maintains the existing `benchmark-images` branch. Image failure leaves tables available; it does not alter performance verdicts.
+The report job maintains the existing `benchmark-images` branch. Image failure leaves tables available; it does not alter performance verdicts.
 
 ### PR history
 
@@ -90,11 +90,10 @@ Relative results do not use the legacy absolute-time trend renderer. Within-PR h
 
 ## Setup
 
-Keep `BENCHER_PROJECT`, `BENCHER_API_KEY` and the main-only `benchmark` environment. No dedicated runner, registry or scheduler variable is needed. Deploy measurement and tracker changes together: `workflow_run` uses default-branch code. Until the trusted publisher accepts this single configuration and its current harness feature provenance, a PR may retain valid raw measurements while publication rejects the configuration or reports a missing legacy Default build. That is a deployment failure, not passing performance evidence. Verify the head-attached Portable SIMD check and separate archival outcome after the trusted code is updated.
+Keep `BENCHER_PROJECT`, `BENCHER_API_KEY` and the `benchmark` environment. Its deployment branch policy allows `refs/pull/*/merge`, so same-repository PR report jobs can archive directly. Only the report job receives credentials and write permissions; prepare and measure have read-only access. This explicitly trusts same-repository PR code with publication credentials. Fork PRs receive neither secrets nor write permissions. No tracker deployment, dedicated runner or registry is needed.
 
 ## Local use
 
 Use the same `pnpm tools compare commit BASE --plan continuous` command, optionally selecting one shard or a smaller plan. There is no default nine-round local run. `pnpm tools report DIR` regenerates retained results offline; old recorded three- and nine-block reports remain readable. See [tooling](tooling.md#reproduce-continuous-work-locally) for commands and [benchmarking](benchmarking.md#working-tree-comparisons) for evidence limits.
-
 
 To reuse builds locally, run `compare commit BASE --plan continuous --prepare-only --out PREPARED`, then `compare prepared PREPARED --shard 1/4 --out RESULT`. Each result directory must be new. A prepared pair has no samples and is not passing evidence; it retains the complete plan, source/build provenance and executable hashes. Measurement requires the original harness and catalog, rejects modified or escaping executable paths, verifies both listings, and retains the exact executed copies. Preparation remains unchanged and can serve independent shards. Interrupted measurement is still not resumable.

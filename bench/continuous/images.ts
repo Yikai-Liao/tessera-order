@@ -24,8 +24,8 @@ interface ImageOptions {
 // Comments need image URLs, and artifacts are ZIP downloads. A separate
 // image-only branch supplies public SVGs; pinning each URL to its commit keeps
 // old reports intact. raw.githubusercontent.com serves them as image/svg+xml
-// and GitHub embeds that host without a redirect. The tracking workflow
-// serializes writers through its concurrency group.
+// and GitHub embeds that host without a redirect. Concurrent writes can fail
+// fast-forward checks; callers retain the numeric report if images fail.
 export async function publishImages({
   github,
   context,

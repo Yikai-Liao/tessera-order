@@ -10,7 +10,7 @@ import { baseHash, hash } from "./report.ts";
 
 /** Synthetic blocks exercise protocol validation, not measured performance. */
 export function pairedRun(variant: Variant, index = 1, ratio = 1.2): LocalRun {
-  const allCases = [48, 49, 1000, 65536, 1000000, 10000000]
+  const allCases = [48, 49, 1000, 65536, 1000000]
     .flatMap((len) => ["api", "par-4"].map((mode) => `rust/u64/random/${len}/s1/${mode}`))
     .sort();
   const cases = shardCases(allCases, index, CONTINUOUS_SHARDS);
@@ -79,5 +79,15 @@ export async function writePaired(directory: string, variant: Variant, ratio = 1
     await writeFile(join(out, "plan.json"), JSON.stringify(await loadPlan("continuous")));
     runs.push(run);
   }
+  const prepared = { ...runs[0], cases: runs[0].shard!.allCases };
+  delete prepared.shard;
+  delete prepared.samples;
+  delete prepared.sampleCounts;
+  await mkdir(join(directory, "prepared"), { recursive: true });
+  await writeFile(join(directory, "prepared", "local.json"), JSON.stringify(prepared));
+  await writeFile(
+    join(directory, "prepared", "plan.json"),
+    JSON.stringify(await loadPlan("continuous")),
+  );
   return runs;
 }

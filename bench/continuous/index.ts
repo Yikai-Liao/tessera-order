@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { readFile } from "node:fs/promises";
 import { VARIANTS } from "../catalog.ts";
 import { chartSvg } from "./chart.ts";
 import {
@@ -27,8 +26,8 @@ interface PublicationOptions {
   core: ActionsCore;
   inputs: PairedSource & {
     artifacts: string;
-    inventory: string;
-    reports: string;
+    prepared: string;
+    publish?: boolean;
     number?: string;
     baseRef?: string;
   };
@@ -36,19 +35,18 @@ interface PublicationOptions {
 
 /** Publish same-run comparisons from validated raw paired samples using trusted code.
  *
- * Only JSON is read from measurement artifacts. Missing shards and identity
- * mismatches fail their configuration; upload/image failures cannot turn absent
- * measurements into a pass or discard the other configuration's evidence.
+ * The branch’s prepare artifact owns selection and identity. Missing shards
+ * fail validation; image and Cloud failures leave numeric evidence available.
  */
 export async function publishReport({ github, context, core, inputs }: PublicationOptions) {
   const { hash, baseHash, number, baseRef = "main", artifacts } = inputs;
   const runUrl = workflowUrl(context);
   const measured = await Promise.all(
     VARIANTS.map(async (variant) => {
-      const checkId = await startReport({ github, context, core, hash, variant });
+      const checkId =
+        inputs.publish === false ? undefined : await startReport({ github, context, hash });
       try {
-        const expectedCases: string[] = JSON.parse(await readFile(inputs.inventory, "utf8"));
-        const runs = await readPaired(artifacts, variant, { hash, baseHash }, expectedCases);
+        const runs = await readPaired(artifacts, variant, { hash, baseHash }, inputs.prepared);
         return {
           variant,
           checkId,
@@ -76,16 +74,12 @@ export async function publishReport({ github, context, core, inputs }: Publicati
       language: "rust",
       hash,
       number,
-      images: svg ? [{ kind: "comparison", svg }] : [],
+      images: svg && inputs.publish !== false ? [{ kind: "comparison", svg }] : [],
     });
   } catch (error) {
     core.notice(`Benchmark images unavailable: ${String(error)}`);
     imagesUnavailable = true;
   }
-  const note =
-    "Adjacent A/B samples alternate AB/BA order. Median ratios use a distribution-free 99% median interval; an alert requires the entire interval outside 0.95–1.05. Coverage assumes independent samples, not immunity to code placement or interference. Each shard measures both revisions on one runner. Cloud archives results; it does not decide verdicts. Baseline changes split PR history; main points describe individual parent-to-commit changes, not absolute or cumulative performance.";
-  const footer =
-    "\n\nCloud archival runs separately after these checks. See the workflow for upload status; raw measurements remain in the Actions artifacts.";
   const options = {
     language: "rust",
     hash,
@@ -96,11 +90,9 @@ export async function publishReport({ github, context, core, inputs }: Publicati
   };
   for (const result of measured) {
     const body = result.summary
-      ? render(result.summary, { ...options, configuration: result.variant.name }) +
-        "\n\n" +
-        note +
-        footer
-      : renderFailure({ ...options, configuration: result.variant.name, reason: result.reason! });
+      ? render(result.summary, options)
+      : renderFailure({ ...options, reason: result.reason! });
+    if (result.checkId === undefined) continue;
     await github.rest.checks.update({
       ...context.repo,
       check_run_id: result.checkId,
@@ -108,14 +100,14 @@ export async function publishReport({ github, context, core, inputs }: Publicati
       conclusion: !result.summary || result.summary.regressions ? "failure" : "success",
       details_url: runUrl,
       output: {
-        title: result.summary ? headline(result.summary) : "Measurement failed",
+        title: result.summary ? headline(result.summary) : "Results could not be validated",
         summary: body.slice(0, 65000),
       },
     });
   }
-  const body = `${renderCombined(configurations, options)}\n\n${note}${footer}`;
+  const body = renderCombined(configurations, options);
   await core.summary.addRaw(body).write();
-  if (number)
+  if (number && inputs.publish !== false)
     await publishComment({
       github,
       repo: context.repo,
@@ -125,4 +117,6 @@ export async function publishReport({ github, context, core, inputs }: Publicati
       body,
       core,
     });
+  if (measured.some((result) => !result.summary))
+    throw new Error("Benchmark results could not be validated");
 }

@@ -11,7 +11,7 @@
 - [ ] Engine changes: Miri on the affected tests
 - [ ] Performance claims: results following `docs/development/benchmarking.md`, including the A/A range
 - [ ] Semantics changes: `conformance/semantics.md` updated
-- [ ] Documentation: edits are confined to the owners in `docs/README.md` ("Who owns what") of the changed facts; no new page or parallel record, and no numbers restated outside their owner
+- [ ] Documentation: edits are confined to the owners in `docs/README.md` ("Who owns what") of the changed facts, with no parallel record and no numbers restated outside their owner; conclusions later work depends on are recorded there, not only in this description
 
 ## AI assistance
 

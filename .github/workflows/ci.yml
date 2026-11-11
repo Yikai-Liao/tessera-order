@@ -84,17 +84,38 @@ jobs:
   # on any failure or cancellation.
   ci-ok:
     if: always()
-    needs: [changes, lint, rust, cpp, docs, comparison, prepare, measure, report]
+    needs: [changes, lint, rust, cpp, docs, comparison, registry-msvc, prepare, measure, report]
     runs-on: ubuntu-latest
     steps:
       - env:
           NEEDS: ${{ toJSON(needs) }}
         run: jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<< "$NEEDS"
 
-  comparison:
+  registry-msvc:
+    name: Native registry (MSVC)
     needs: changes
     if: needs.changes.outputs.comparison == 'true'
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compile native registry with both MSVC preprocessors
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installation = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$installation) { throw "MSVC installation not found" }
+          $setup = Join-Path $installation "Common7\Tools\VsDevCmd.bat"
+          foreach ($preprocessor in @("/Zc:preprocessor", "/Zc:preprocessor-")) {
+            cmd /c "call `"$setup`" -arch=x64 -host_arch=x64 && cl /nologo /std:c++17 /permissive- /W4 /WX $preprocessor /c bench\rust\native\registry.cpp /Fo`"$env:RUNNER_TEMP\registry.obj`""
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+  comparison:
+    name: Algorithm harness (Rust and C++)
+    needs: changes
+    if: needs.changes.outputs.comparison == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     env:
       TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/comparison
       # Match the CLI before testing so functional builds can be reused unchanged.
@@ -102,25 +123,67 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target/comparison"
-          shared-key: comparison
+          # Keep the native objects in tessera-bench's build-script output.
+          cache-workspace-crates: true
+          shared-key: comparison-native-${{ hashFiles('bench/rust/native/**', '!bench/rust/native/**/*.test.ts') }}
+          env-vars: CARGO CC CFLAGS CXX CMAKE RUST ImageOS ImageVersion
+      - run: cargo fmt --all --check
       - uses: actions/cache@v6
         with:
           path: bench/vendor
           key: native-sources-${{ runner.os }}-${{ hashFiles('bench/rust/native/sources.toml') }}
       - name: Install native benchmark tools
+        timeout-minutes: 5
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang libtbb-dev
+          clang --version
+          clang++ --version
+          if dpkg-query -W -f='${Status}' libtbb-dev 2>/dev/null | grep -q 'install ok installed'; then
+            exit 0
+          fi
+          # Hosted runners resolve the ubuntu.com DNS zone unreliably, and the other
+          # repositories the image configures must not gate this step. Install from
+          # one private source served by the Linux Kernel Archives mirror; apt still
+          # verifies Ubuntu's signed metadata with the image's keyrings.
+          mirror=https://mirrors.edge.kernel.org/ubuntu/
+          dir="$RUNNER_TEMP/apt"
+          mkdir -p "$dir/parts" "$dir/lists"
+          for suite in noble noble-updates noble-backports noble-security; do
+            printf 'deb %s %s main restricted universe multiverse\n' "$mirror" "$suite"
+          done > "$dir/ubuntu.list"
+          apt=(sudo apt-get
+            -o Acquire::Retries=2
+            -o Acquire::http::Timeout=10
+            -o Acquire::https::Timeout=10
+            -o Dir::Etc::SourceList="$dir/ubuntu.list"
+            -o Dir::Etc::SourceParts="$dir/parts"
+            -o Dir::State::lists="$dir/lists")
+          "${apt[@]}" update
+          "${apt[@]}" install -y --no-install-recommends libtbb-dev
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm tools --verbose check --native --out bench/results/ci
+      - name: Check benchmark Rust code without native linkage
+        env:
+          TESSERA_BENCH_CHECK_ONLY: "1"
+          RUSTDOCFLAGS: -D warnings
+        run: |
+          cargo clippy -p tessera-bench --all-targets --all-features --target-dir "$TESSERA_BENCH_TARGET_DIR" -- -D warnings
+          cargo doc -p tessera-bench --no-deps --all-features --target-dir "$TESSERA_BENCH_TARGET_DIR"
+      - name: Compile native registry with GCC and Clang
+        run: |
+          for compiler in g++ clang++; do
+            "$compiler" -std=c++17 -pedantic-errors -Wall -Wextra -Werror \
+              -c bench/rust/native/registry.cpp -o "$RUNNER_TEMP/registry.o"
+          done
+      - run: pnpm tools check --native --out bench/results/ci
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

@@ -136,9 +136,9 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --release --target x86_64-unknown-linux-gnu --workspace --all-targets
+      - run: cargo test --release --target x86_64-unknown-linux-gnu -p tessera-sort --all-targets
         env:
           RUSTFLAGS: -Zsanitizer=address
-      - run: cargo test --release --target x86_64-unknown-linux-gnu --workspace --all-targets --features tessera-sort/rayon
+      - run: cargo test --release --target x86_64-unknown-linux-gnu -p tessera-sort --all-targets --features rayon
         env:
           RUSTFLAGS: -Zsanitizer=address

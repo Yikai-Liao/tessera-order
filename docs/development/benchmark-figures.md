@@ -54,7 +54,7 @@ These rounded values come from the recorded `release-benchmark-raw-2d6fac2` sess
 | Which build regressed? | PR comparison matrix | Shared cases, one column per build, stems from zero |
 | What changed during a PR? | PR trend matrix | One time series per case and build, reference at the baseline |
 
-A new dataset does not require a new template. A genuinely different question may require one; the [extension boundary](../design/benchmark-tooling.md#figure-boundary) explains where that implementation belongs.
+A new dataset does not require a new template; a genuinely different question may.
 
 ## Fixed visual decisions
 
@@ -69,15 +69,7 @@ A new dataset does not require a new template. A genuinely different question ma
 - Thin rules separate groups. Titles and value columns carry hierarchy; avoid gradients, shadows, 3D effects and per-chart font choices.
 - Light and dark surfaces use the same semantic colours and separate neutral tokens. Standalone SVGs carry literal neutral colours for image viewers; ordinary CSS supplies browser dark mode. Every SVG includes a title and description.
 
-The row interface accepts no arbitrary style objects or drawing callbacks. The template owns column widths, row spacing, drawing order and legends; Observable Plot supplies scales, axes, collision placement and SVG marks, string-pixel-width supplies font metrics, and a private SVG document handles escaping and serialization. The input remains unchanged, so reactive callers can render it repeatedly.
-
-## Use from TypeScript or VitePress
-
-Import `renderRows` and `RowChart` from `bench/plot/rows.ts`. The renderer accepts the structure shown by the example above and returns an SVG string. Offline callers decide where to write it; browser callers decide where to display it. Templates import neither filesystem nor GitHub code; the Node catalog loader supplies presentation metadata to report callers.
-
-VitePress uses [`BenchmarkFigure.vue`](../.vitepress/theme/components/BenchmarkFigure.vue), a reactive image adapter with responsive sizing and alternative text. Its `chart` prop is a `RowChart`; changing the data regenerates the SVG. When inserting SVG markup inline rather than using the image adapter, supply a unique chart `id` so accessibility references remain distinct.
-
-Benchmark identifiers and human-readable names come from [the catalog](../../bench/catalog.toml). A caller should not invent another name map while preparing a figure.
+The row interface accepts no style objects or drawing callbacks; the [template](../../bench/plot/rows.ts) owns widths, spacing, drawing order and legends and never mutates its input, so reactive callers can re-render it. Import `renderRows` and `RowChart` from it to get an SVG string; offline callers decide where to write it. VitePress uses [`BenchmarkFigure.vue`](../.vitepress/theme/components/BenchmarkFigure.vue), a reactive image adapter taking a `RowChart`; for inline SVG supply a unique chart `id` so accessibility references stay distinct. Names come from [the catalog](../../bench/catalog.toml), never a second map. The [extension boundary](../design/benchmark-tooling.md#figure-boundary) says where new templates live.
 
 ## Add or change a template
 
@@ -88,6 +80,4 @@ Benchmark identifiers and human-readable names come from [the catalog](../../ben
 5. Render a reference example in light and dark appearance and inspect it at its actual display width. Check hierarchy, label fit, value alignment and whether the main finding is visible without reading every number.
 6. Keep the plotted-value table or equivalent accessible report alongside published figures.
 
-Automated tests protect report generation, numeric summaries and unavailable builds. They do not pin SVG snapshots, exact wording or layout coordinates. When changing rendering, generate before-and-after figures from the same recorded dataset and inspect light and dark appearance; synthetic fixtures exercise boundary cases and do not serve as performance evidence.
-
-Run `pnpm tools:test`, `pnpm tools:typecheck`, `pnpm docs:typecheck` and `pnpm docs:build` when the shared figure layer changes.
+Automated tests protect report generation, numeric summaries and unavailable builds, not SVG snapshots, wording or coordinates. When changing rendering, generate before-and-after figures from the same recorded dataset and inspect both appearances. Run `pnpm tools:test`, `pnpm tools:typecheck`, `pnpm docs:typecheck` and `pnpm docs:build` when the shared figure layer changes.

@@ -6,76 +6,70 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
-/** Select automatic checks once; known presentation tooling needs no Rust build. */
+const LANES = ["rust", "cpp", "comparison", "benchmark", "docs"] as const;
+type Lane = (typeof LANES)[number];
+
+/**
+ * One row per owner of a path: the lanes whose result that path can change. The
+ * first matching row decides, so specific rows precede their directory. A path
+ * that no row names selects every lane, and so does an unavailable base, because
+ * an unclassified file is not known to be harmless.
+ */
+const ROUTES: [RegExp, Lane[]][] = [
+  // Repository metadata that no automatic lane reads. `fuzz/` is outside the Cargo workspace.
+  [/^(\.github\/(ISSUE_TEMPLATE\/|pull_request_template\.md$|dependabot\.yml$)|fuzz\/)/, []],
+  // Prose, including the shared contract; a lane needs a row here once an executable consumer exists.
+  [/^(docs\/|assets\/)|\.md$/, ["docs"]],
+  // These workflows run independently of the automatic build/test pipeline.
+  [
+    /^\.github\/workflows\/(dco|pr-title|release|rust-release|cpp-release|bench-diagnostics)\.yml$/,
+    [],
+  ],
+  // Tests exercise the engine but are not the code that PR measurements compare.
+  [
+    /^rust\/[^/]+\/(tests\/|LICENSE$)|^(rustfmt\.toml|\.github\/workflows\/rust-ci\.yml|\.github\/actions\/rust-test\/)/,
+    ["rust"],
+  ],
+  [/^rust\//, ["rust", "benchmark"]],
+  [
+    /^\.cargo\/|^(Cargo\.toml|Cargo\.lock|rust-toolchain(\.toml)?)$/,
+    ["rust", "comparison", "benchmark"],
+  ],
+  [
+    /^(cpp\/|bench\/cpp\/)|^(CMakeLists\.txt|CMakePresets\.json|\.github\/workflows\/cpp-ci\.yml)$/,
+    ["cpp"],
+  ],
+  // Tooling that renders or reads results and never builds or times a sorting algorithm.
+  [/^bench\/plot\//, ["docs"]],
+  [
+    /\.test\.ts$|^bench\/(continuous\/(?!paired\.ts$)|report\/|local\/(report|counters|layout)\.ts$)|^\.github\/scripts\/|^tools\/(status|repository)\.ts$|^(biome|tsconfig)\.json$/,
+    [],
+  ],
+  [
+    /^bench\/continuous\/paired\.ts$|^bench\/local\/(runner|model|samples)\.ts$|^tools\/continuous\.ts$/,
+    ["benchmark"],
+  ],
+  [/^bench\/(release|session|revisions)\.ts$/, ["comparison"]],
+  [
+    /^bench\/rust\/(native\/|tests\/|src\/(comparison\/|allocation\.rs$|bin\/(compare|memory)\.rs$))/,
+    ["comparison"],
+  ],
+  [/^bench\/rust\//, ["comparison", "benchmark"]],
+  [/^bench\/plans\/(continuous|local)\.toml$/, ["benchmark"]],
+  [/^bench\/plans\/diagnostics\.toml$/, []],
+  [/^bench\/plans\//, ["comparison"]],
+  [/^bench\/catalog\./, ["comparison", "benchmark", "docs"]],
+  [/^(bench|tools)\//, ["comparison", "benchmark"]],
+  [/^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml)$/, ["comparison", "benchmark", "docs"]],
+  [/^\.github\/workflows\/docs\.yml$/, ["docs"]],
+];
+
+/** Select automatic checks once; paths no row names select every lane. */
 export function select(paths: string[]) {
   const selected = { rust: false, cpp: false, comparison: false, benchmark: false, docs: false };
-  for (const path of paths) {
-    if (path.startsWith("docs/") || path.endsWith(".md") || path.startsWith("assets/")) {
-      selected.docs = true;
-      if (!path.startsWith("conformance/")) continue;
-    }
-    if (
-      path.startsWith("rust/") ||
-      ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rust-toolchain"].includes(path) ||
-      path.startsWith(".cargo/")
-    ) {
-      selected.rust = selected.comparison = selected.benchmark = true;
-    } else if (
-      path.startsWith("cpp/") ||
-      path.startsWith("bench/cpp/") ||
-      ["CMakeLists.txt", "CMakePresets.json"].includes(path)
-    ) {
-      selected.cpp = selected.comparison = true;
-    } else if (
-      path.endsWith(".test.ts") ||
-      (path.startsWith("bench/continuous/") && path !== "bench/continuous/paired.ts") ||
-      path.startsWith("bench/report/") ||
-      path === "bench/local/report.ts" ||
-      path === "bench/local/counters.ts" ||
-      path === "bench/local/layout.ts" ||
-      path.startsWith("bench/plot/") ||
-      path.startsWith(".github/scripts/") ||
-      path === "tools/status.ts" ||
-      path === ".github/workflows/bench-diagnostics.yml"
-    ) {
-      if (path.startsWith("bench/plot/")) selected.docs = true;
-    } else if (path.startsWith("bench/rust/")) {
-      selected.rust = selected.comparison = true;
-      if (!path.startsWith("bench/rust/native/")) selected.benchmark = true;
-    } else if (path.startsWith("bench/plans/")) {
-      if (path === "bench/plans/continuous.toml") selected.benchmark = true;
-      else if (path !== "bench/plans/diagnostics.toml") selected.comparison = true;
-    } else if (path.startsWith("bench/") || path.startsWith("tools/")) {
-      selected.comparison = selected.benchmark = true;
-      if (path.startsWith("bench/catalog.")) selected.docs = true;
-    } else if (
-      [
-        "package.json",
-        "pnpm-lock.yaml",
-        "pnpm-workspace.yaml",
-        "tsconfig.json",
-        "biome.json",
-      ].includes(path)
-    ) {
-      selected.comparison = selected.benchmark = selected.docs = true;
-    } else if (path === ".github/workflows/docs.yml") {
-      selected.docs = true;
-    } else if (
-      path === "rustfmt.toml" ||
-      path === ".github/workflows/rust-ci.yml" ||
-      path.startsWith(".github/actions/rust-test/")
-    ) {
-      selected.rust = true;
-    } else {
-      Object.assign(selected, {
-        rust: true,
-        cpp: true,
-        comparison: true,
-        benchmark: true,
-        docs: true,
-      });
-    }
-  }
+  for (const path of paths)
+    for (const lane of ROUTES.find(([pattern]) => pattern.test(path))?.[1] ?? LANES)
+      selected[lane] = true;
   return selected;
 }
 

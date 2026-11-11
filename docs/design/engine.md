@@ -1,6 +1,6 @@
-# Design
+# Engine reference
 
-This document describes current routing and invariants in `rust/tessera-sort`; the [measurement record](port.md) covers the initial port and subsequent measured changes.
+This document describes the engine's boundaries and invariants in `rust/tessera-sort`. Routing rules live on the [explanation pages](../explain/index.md), and [engine evidence](evidence.md) keeps failed experiments and open measured losses.
 
 ## Vocabulary
 
@@ -12,14 +12,14 @@ This document describes current routing and invariants in `rust/tessera-sort`; t
 | Bucket | A logical, stable classification group. It may span physical blocks; after materialization it is a contiguous subproblem, not necessarily a task or a tile. |
 | Block | A physical storage and ownership-transfer unit used by the stable partition. Its size and directory costs belong to the block mechanism. |
 | Node | A subproblem larger than the tile capacity. Nodes are split by a stable block partition or existing ordered runs. |
-| Tile | A subproblem that fits a resource-bounded record capacity. The byte budget is converted once to `clamp(floor(bytes / record size), 1, 65,535)` records; routing compares lengths rather than reinterpreting cursor limits or byte products. The default budget is 64 KiB. Tiles are finished in scratch memory. |
-| Cursor table | One `u16` position per bucket. At 14 bits it occupies 32 KiB. |
+| Tile | A subproblem that fits a resource-bounded record capacity. The byte budget is converted once to a record count; routing compares lengths rather than reinterpreting cursor limits or byte products. [Tiles](../explain/tiles.md) defines the budget and limits. Tiles are finished in scratch memory. |
+| Cursor table | One `u16` position per bucket; its size is bounded by the tile budget. |
 
 ## Knowledge boundaries
 
 | Owner | Complete responsibility | Consumers need to know |
 |---|---|---|
-| `engine.rs` | Root preparation, candidate-bit progress, recursive node execution | Public sort contracts and complete partition/finishing operations |
+| `engine.rs` | Root preparation, candidate-bit progress, recursive node execution. Serial and parallel entries take the extractor by value and wrap it in one owned `KeyHalf` (`key.rs`), which owns truncation and counting-window translation and is cloneable whenever the wrapped extractor is | Public sort contracts and complete partition/finishing operations |
 | `engine/plan.rs` | Bounded sampling, node and tile decisions, digit work estimates | Records, candidate variation and effective tile capacity go in; an executable decision comes out |
 | `engine/tile.rs` | Capacity normalization, scratch allocation, cached classification, counting passes and restoration | Finish a cursor-bounded slice; no raw pointers, cursor layout or separately armed guard cross the boundary |
 | `block.rs` and `block/` | Physical block storage, stable partition, directory costs, compaction and recovery | Logical bucket boundaries and safe completion callbacks |
@@ -33,73 +33,40 @@ The planner separates exact work from advisory estimates and empirical budgets. 
 
 | Decision | Facts and constraints | Estimate or empirical policy |
 |---|---|---|
-| Flat digit plan | Remaining varying positions and maximum width | Finish in one or two passes; minimize table slots over legal two-pass splits |
-| Tile table width | Two bytes per cursor and actual tile bytes; 14-bit table cap | Six-bit minimum; at most four buckets per record |
-| Tile MSD versus LSD | Whether one or two width-bounded windows cover the remaining bits | Finish short flat plans; otherwise partition the highest digit and inspect actual children |
-| Node digit width | Effective tile capacity and block fan-out limit | Target half-tile children; widen a concentrated digit using sampled occupancy |
-| Equality partition | Repeated complete keys in the same bounded sample | A quarter-sample mode, sampled only when a node spans at least four tiles |
+| Flat digit plan | Remaining varying positions and maximum width | Fewest passes, then fewest table slots over legal splits |
+| Tile table width | Cursor size and actual tile bytes | A minimum width and a bucket-per-record cap |
+| Tile MSD versus LSD | Whether the width-bounded windows cover the remaining bits | Finish short flat plans; otherwise partition the highest digit and inspect actual children |
+| Node digit width | Effective tile capacity and block fan-out limit | Target children of a fraction of a tile; widen a concentrated digit using sampled occupancy |
+| Equality partition | Repeated complete keys in the same bounded sample | A sample-share threshold, sampled only when a node spans several tiles |
 | Block size | Descriptor bytes, bucket count, record size and input length | Storage owns its balanced-memory formula, scale and amortization floors |
+
+The values behind each row are on the [routing](../explain/routing.md), [tile](../explain/tiles.md) and [block partition](../explain/block-partition.md) pages; this table fixes only which facts and which policies the planner keeps apart.
 
 Node samples choose partitions, never certify ownership, equality of actual records or recursion completion. Tiles do not sample or estimate populations: full child scans restrict actual variation to the remaining candidate mask, and constant children finish after that scan. Node execution and parallel scheduling consume decisions without reproducing the planner’s thresholds.
 
 ## Pipeline
 
-### 1. Order probe
+The [explanation pages](../explain/index.md) own the routing rules, thresholds and their reasoning, and their figures run tested models of the same code. This table maps each stage to its page and code owner; change a stage's rule on its page, and the code, model and page move together.
 
-The engine chooses a stride of `max(1, floor(n / 4,096))`. At unit stride it enters the same confirmation used for sampled candidates and recursive children: first reject a mixed direction among up to three keys, the shortest possible witness, then find the direction past any leading ties. Descending confirmation retains strictness; ascending confirmation passes the already encoded predecessor and only the unchecked suffix to the extractor's scan, including its vector backend for direct keys. No prefix is rescanned and a constant slice returns as ascending. At larger strides it samples adjacent pairs to classify the input as ascending, descending, flat (every sampled pair equal) or unsorted. The 4,096-pair target determines the stride, not a hard sample limit. Unless unsortedness is found early, the loop visits `floor((n - 1) / stride)` pairs. An ascending or descending sample is confirmed by that same full scan. A confirmed ascending input returns immediately. A confirmed descending input is reversed stably. Strictly descending keys need only the whole-slice reversal; otherwise each run of equal keys is reversed back. A flat sample is confirmed after the varying-bit scan below, since a constant input stops there. `finish_ordered` owns ascending completion and strict or stable descending reversal for the initial probe, deferred flat confirmation and recursive children; callers do not reconstruct those cases.
+| Stage | Rule and rationale | Code owner |
+|---|---|---|
+| Order probe, budgeted insertion, varying bits, constant and flat inputs | [Routing an input](../explain/routing.md) | `engine.rs` |
+| Ordered children, bucket-order split, equality and top-digit partitions, counted window | [Nodes and tiles](../explain/routing.md#nodes-and-tiles) | `engine.rs`, `engine/plan.rs` |
+| Stable block partition, block size, scratch bound | [The block partition](../explain/block-partition.md) | `block.rs`, `block/` |
+| Tile leaves, digit planning, cached bucket IDs | [Finishing tiles](../explain/tiles.md) | `engine/tile.rs`, `engine/plan.rs` |
+| Key encoding and varying bits | [Keys as unsigned integers](../explain/keys.md) | `key.rs` |
 
-An unsorted input that fits a tile and has at most 48 records goes directly to insertion finishing, using the existing leaf threshold without a budget or varying-bit scan. Confirmed ordered inputs still finish in the order probe. A larger unsorted input gets a budgeted stable insertion pass. When the probe window, one tile of records, is shorter than the input, the pass first runs on a buffered copy of the window's keys to estimate the number of swaps, and only then touches the records with a budget scaled to the whole input. The scaling uses a wide intermediate product so that a valid budget cannot overflow on 32-bit targets. Each call owns this encoded-key buffer and releases it before the radix path continues. If the budget runs out, the input is left as a stable permutation of itself and the radix path continues. See [Insertion and scans](#insertion-and-scans) for how the pass finds inversions.
-
-### 2. Varying bits
-
-Root and child variation use one candidate-masked scan of key union and intersection. The root supplies all bits of the encoded key; children supply only unprocessed bits. Starting with 64 keys after the first, batches double in length: random keys can finish early, while long scans retain vectorizable stretches. A scan stops once every candidate bit has appeared in both states. Bits that are equal in every key cannot change the order and are excluded from every later digit. A constant input returns at this point. Wide keys whose variation fits in one 64-bit half are sorted by that half as a 64-bit key. Serial and parallel entries take the extractor by value and wrap it in the same owned `KeyHalf` from `key.rs`, which owns truncation and counting-window translation; it is cloneable whenever the wrapped extractor is, so parallel jobs need no second representation. Other operations retain the narrowed extractor's defaults instead of forwarding the original-width backend. Tile and block scratch are created only after these root fast paths; budgeted insertion may already have allocated probe keys. Confirmed ordered and constant inputs do not allocate.
-
-### 3. Node partitioning
-
-Partition children entering `sort_child` scan their remaining candidate bits; constant children finish there. Varying children use the root's full order confirmation without its preceding sample: ascending children finish, and descending children take the same strict or stable reversal as the root. This includes children reached after digit and equality partitions. The root enters `sort_node` directly because its order has already been probed. Only unordered children continue to tile and radix routing. The shared variation scan stops when all candidate bits have appeared in both states, and order confirmation stops at its first conflict, so continuing children pay for key reads; neither scan allocates or moves records unless descending order is confirmed. Tile-sized buckets finished during block compaction go directly to the tile leaf.
-
-A node whose remaining variation spans at most eight bits is one digit away from sorted, so that digit is chosen without sampling or run recognition. It is an ordinary digit route whose buckets are complete: child finishing returns at once because no candidate bits remain. When the records are their own keys (`Direct`), such a digit is finished by counting instead: one `usize` count and one remembered record per bucket, then each run is filled from its record. Every sealed encoding is a bijection on bit patterns, so equal keys mean equal records and a filled run is the same permutation the block partition would produce, without block tables or record moves. A user key function keeps payloads that its key does not identify, so `ByKey` declines and takes the block partition. The eight-bit cap bounds the stack table to 256 counts and records. The window must cover every remaining key difference or filling would merge distinct records.
-
-A node on the digit route may already consist of two runs separated by its top varying bit. A scan checks for `0*1*` or `1*0*`; the latter needs one rotation, and both runs retain their order. Recursion receives the bits below the split, avoiding block partitioning, tables and scratch. Nodes covered by one digit or split by equality do not reach this check. The scan stops at the first record that breaks the pattern, which unordered records reach within a few keys. Inputs that keep a separated block of keys above or below the body, in any number of pieces, need neither a detector nor a length cap.
-
-One shared `NodePlan` selects an equality pivot, existing runs or a digit for serial and parallel execution. The decision is consumed once: a parallel root taking an equality or existing-run route executes that decision serially without resampling. Both orientations of existing runs use this path. Run recognition precedes digit-width sampling, since a recognized run needs no digit table. Otherwise the node is split by one of two stable partitions. Equality sampling is tried only on nodes of at least four tiles, which amortize the bounded key sample:
-
-- **Repeated key.** The node samples up to 128 keys, one from each equal stratum at a golden-ratio offset, and sorts those encoded keys. If one value covers at least a quarter of the sample, an equality partition separates it from the rest, so heavily repeated keys stop costing passes. If changing keys leave the entire node below or above that sampled value, a digit partition consumes candidate bits instead of repeating an unchanged node.
-- **Top digit.** Otherwise [`choose_split_digit`](../../rust/tessera-sort/src/engine/plan.rs) targets children of half a tile. It starts with enough bits for `n / target` children, clamped to 3–8 bits and the available key bits. The same sorted key sample checks whether at least a quarter of the digit's buckets are occupied; a concentrated digit widens by two bits at a time, up to 12 or the available key bits. Every tested width projects this retained sample rather than extracting records again. Adjacent projected groups give occupancy without a radix-sized bitmap. Sampling is node-only; tile selection uses length and the remaining variation.
-
-The digit partition uses the block LSD scheme of Clausecker and Schintke. Buckets are filled block by block, consumed input blocks are reused as output blocks, and permutation metadata records their logical order. Stability holds without a full-size output buffer, and the extra space is O(√n) for a fixed digit width and record size. The block size in records is
-
-```
-max(1, 4 * ceil(sqrt(10n / (2 R s))), floor(1024 / s), 32)
-```
-
-where `n` is the input length, `s` the record size and `R` the number of buckets. An integer reference in tests checks square boundaries and agreement with the floating-point formula.
-
-The root is the paper's trade-off evaluated for this implementation. A block size `b` costs `2 R b s` bytes of scratch — one output block per bucket, plus as many in reserve, because an input block may only be recycled once every record in it has been read — and `10 n / b` bytes of tables, because a block position owns two `u32` block-order entries and one `u16` bucket id. The two terms are equal at that root, so it is the minimum of the sum: substituting `b = c b*` multiplies the total by `(c + 1/c) / 2`, which grows in both directions. The engine takes four times that root: the minimum is where memory is smallest, not where the sort is fastest, and a larger block amortises the random read that compaction pays per block.
-
-The lower bounds are not from the paper. The compaction pass moves a block with one copy, so a block holds at least a kilobyte of records; and the bookkeeping of a block does not shrink with the record, so a block holds at least 32 records whatever their width. Their cost does not depend on `n`, so the O(√n) bound holds for a fixed record size and digit width.
-
-Buckets that fit a tile are finished as tiles during compaction. Larger buckets become nodes and are partitioned again.
-
-### 4. Tile finishing
-
-A tile is finished by one of three leaves:
-
-- **Insertion sort** for tiles and buckets of at most 48 records.
-- **Tile-local MSD partition**, recursing into buckets with a cursor table on the stack.
-- **LSD counting passes** over a scratch buffer, with digit widths between 6 and 14 bits.
-
-A tile finishes in one or two LSD passes when two width-bounded windows can cover all remaining varying bits. The one-pass case needs no split search; the two-pass case checks at most the table width’s possible split points and minimizes total bucket slots. Otherwise the tile partitions its highest digit and finishes the actual children. This removes sampled population estimates, singleton assumptions, recursive work projection and the general dynamic-programming digit plan. Dense, shifted and sparse variation follow the same bounded rule. Constant children still need only confirmation, insertion-sized children still skip variation scans, and larger children re-plan from their actual remaining bits. Child scans return only the candidate mask, so inconsistent key functions cannot restore a processed digit. The choice is a measured routing candidate, not an assertion that MSD always beats longer LSD plans; current evidence and outstanding regressions remain in the [port record](port.md).
+Structural facts that cut across those pages: `finish_ordered` owns ascending completion and strict or stable descending reversal for the initial probe, deferred flat confirmation and recursive children; root and child variation share one candidate-masked scan; serial and parallel execution consume one `NodePlan` decision, once (a parallel root taking an equality or run route executes it serially without resampling); a `Direct` extractor may finish a covering digit by counting because every sealed encoding is a bijection on bit patterns, while `ByKey` declines because a user key does not identify the payload; and scratch is created only after the root fast paths, so confirmed ordered and constant inputs never allocate.
 
 ## Parallel root completion
 
 With the optional `rayon` feature, inputs below 1 MiB and one-thread pools use the serial engine. Larger roots use the same `prepare` operation as serial sorting for order confirmation, stable reversal, budgeted insertion and root variation, then scatter disjoint shards in the current pool. Preparation returns either completion or the varying-bit mask; the parallel layer does not maintain its own extractor wrapper or copy of that routing. The shard count is at most the pool width and approximately one per 256 KiB of input. Directory adoption concatenates each bucket's prefixes in original shard order and retains shard scratch as separate allocations. Block storage addresses scratch as equal power-of-two segments, one per scattered shard, so a serial pass is the one-segment case of the same lookup, not a second representation. The partition guard owns adoption through directory construction, scratch transfer and recovery handoff; execution consumes the resulting guard and record boundaries. Its active block range separates the free prefix and suffix from the live sequence. The prefix reserves one block per bucket in a shard, but one per bucket per shard after adoption; compaction and staging consume that block range, not a logical bucket count. Adoption reuses a shard's block-end table for logical bucket boundaries; bounded finishing reads those boundaries without interpreting shard counts or partial-block multiplicity.
 
-The materialized route permutes full blocks in parallel and compacts them. A bucket is passed to a scoped sorting job only after compaction retires its range as both destination and copy source. If the root digit leaves no candidate bits, both completion callbacks return without retaining bucket borrows, allocating jobs or taking scratch. Adjacent buckets remain distinct borrows even if their addresses touch. Jobs group at least 256 KiB of records when possible and reuse serial scratch. Both materialized jobs and bounded-staging callbacks enter the same child finisher as serial recursion: candidate variation, constant termination, order confirmation and stable reversal, then node or tile routing. Scheduling does not assemble a separate analysis pipeline. Serial tile-sized buckets still finish directly during compaction to retain cache-hot completion.
+The materialized route permutes full blocks in parallel, then compacts the root in one sequential pass. A bucket is passed to a scoped sorting job only after compaction retires its range as both destination and copy source. If the root digit leaves no candidate bits, both completion callbacks return without retaining bucket borrows, allocating jobs or taking scratch. Adjacent buckets remain distinct borrows even if their addresses touch. Jobs group at least 256 KiB of records when possible and reuse serial scratch. Both materialized jobs and bounded-staging callbacks enter the same child finisher as serial recursion: candidate variation, constant termination, order confirmation and stable reversal, then node or tile routing. Scheduling does not assemble a separate analysis pipeline. Serial tile-sized buckets still finish directly during compaction to retain cache-hot completion.
 
 ### Bounded staging
 
-For at least 2²¹ records of at most 16 bytes, offer bounded finishing with limit `L = 16 * floor(sqrt(n))`. Disable it if `L * R < n`, and decline after scatter if any actual bucket exceeds L. Eligible layouts use four times the balanced root block size `ceil(sqrt(20n / (2PRs)))`, with the existing 1,024-byte and 32-record floors. The factor 20 is derived as twice the representation's per-position descriptor cost, accounting for local and adopted directories coexisting. The multiplier amortizes per-source ownership work; the [measurements](port.md#eight-core-parallel-completion) cover the whole call, not an isolated causal attribution of this parameter.
+For at least 2²¹ records of at most 16 bytes, offer bounded finishing with limit `L = 16 * floor(sqrt(n))`. Disable it if `L * R < n`, and decline after scatter if any actual bucket exceeds L. With the minimum length, `L * R >= n` confines staging to the window 2²¹ ≤ n ≤ 256 R². The window is necessary, not sufficient: a uniform root near its upper end already has a bucket above L. Roots outside it use materialization. Eligible layouts use four times the balanced root block size `ceil(sqrt(20n / (2PRs)))`, with the existing 1,024-byte and 32-record floors. The factor 20 is derived as twice the representation's per-position descriptor cost, accounting for local and adopted directories coexisting. The multiplier amortizes per-source ownership work; the [measurements](evidence.md#parallel-completion-baseline) cover the whole call, not an isolated causal attribution of this parameter.
 
 A bounded bucket gathers all its prefixes into private `MaybeUninit<T>` staging in stable directory order. Each prefix is protected by its physical-owner mutex until the copy transfers ownership. Its source block is then free, and the staging slice becomes the unique live owner. The shared child finisher owns the staged-bucket allowance: it extends the effective tile capacity to the bucket length but at most 65,535 records, only for that operation. The scheduler neither interprets cursor limits nor repeats byte-to-record conversion.
 
@@ -109,7 +76,7 @@ Every bucket's free cache is registered before jobs begin and survives until all
 
 A key panic is caught per staged bucket after the serial sorter restores its record set. That bucket still writes its band, and other buckets may continue sorting. All jobs join before a caught key panic is resumed. If the outer execution itself unwinds, recovery completes unfinished bands without further key calls before resuming that panic. Completed bands are not written twice. Stale staging and source bytes are never treated as live records.
 
-Staging is released after each completed band. Ordinary scheduling retains only active buffers, but reentrant key callbacks can suspend up to R staged buckets. Root scratch uses O(√(nP)) space and staging adds O(R√n); R is fixed by the twelve-bit root cap. Together with bounded histogram storage, the conservative public bound is O(P√n), not a promise of P simultaneous buffers.
+Staging is released after each completed band. Ordinary scheduling retains only active buffers, but reentrant key callbacks can suspend up to R staged buckets, and since staging requires `L * R >= n` they can together approach the input size. Root scratch uses O(√(nP)) space and staging adds O(R√n); R is fixed by the twelve-bit root cap. Together with bounded histogram storage, the conservative public bound is O(P√n), not a promise of P simultaneous buffers.
 
 ### Narrow direct keys
 
@@ -130,7 +97,7 @@ The scan depends on the extractor, not on a backend feature:
 
 Slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time. Each direct key type supplies only its adjacent-pair scan; confirmation, probes and finishing are written once for all of them. The insertion loop is inlined into the dispatched function, so its scan runs with the selected target features.
 
-Dispatch stays inside one insertion pass: per-scan dispatch repeats overhead on short runs, and moving a SIMD token outside its target-feature context loses the intended code generation. Every build requires `std` and uses `fearless_simd`, with no backend feature switch. User-key tiles retain scalar callbacks rather than materializing a second key array. The [exploratory SIMD measurements](port.md#exploratory-simd-constraints) preserve historical evidence for these constraints but were not the full paired protocol and establish no formal speedup claim.
+Dispatch stays inside one insertion pass: per-scan dispatch repeats overhead on short runs, and moving a SIMD token outside its target-feature context loses the intended code generation. Every build requires `std` and uses `fearless_simd`, with no backend feature switch. User-key tiles retain scalar callbacks rather than materializing a second key array. The [SIMD constraints](evidence.md#rejected-or-on-hold) were measured outside the paired protocol and establish no formal speedup claim.
 
 ## Record handling
 
@@ -143,7 +110,7 @@ Each counting pass reads the keys twice: once for the histogram and once to scat
 
 The extractor owns this distinction through `Extract::CACHE_BUCKETS`, not an independent mode passed through the serial and parallel executors. Its unsafe implementation contract permits opting out only when key extraction is deterministic and panic-free; narrowed extractors inherit that guarantee. Tile allocation, histogram and scatter consume the same associated constant. Adding an extractor no longer requires choosing a cache mode at each sort entry.
 
-The research prototype skipped the stored bucket numbers for `Copy` records. It filled scratch with valid records on the first pass, so a misbehaving key function could duplicate or drop records but never expose uninitialized memory. The cost of storing bucket numbers for every record type is measured in the [port record](port.md#performance).
+The research prototype skipped the stored bucket numbers for `Copy` records by filling scratch with valid records on the first pass. The port stores them for every record type; the [measured cost](evidence.md#port-parity-baseline) is within 3% of the prototype forced onto cached IDs.
 
 ## Panic safety
 

@@ -35,10 +35,10 @@ Pull requests that touch the site or its pages run the same checks in `docs.yml`
 - Write plain Markdown with relative links, as for GitHub. The site turns a link to another page into a site link, and a link to source code, a directory or a file outside the site into a GitHub link.
 - A figure is a Vue component placed on its own line, for example `<BlockPartitionDemo />`. Register new components in `docs/.vitepress/theme/index.ts`.
 - The text around a figure must say everything the figure shows. Readers of the Markdown source, including agents, do not see the figures.
-- A figure that shows an algorithm runs a model in `theme/sim/` rather than scripted frames. The model follows the Rust source's index arithmetic and names the functions it follows. Focus reference tests on models that move records: check stable output and one live owner throughout partitioning and relocation. When the engine changes, update the model and its page in the same change.
+- A figure that shows an algorithm runs a model in `theme/sim/` rather than scripted frames. The model follows the Rust source's index arithmetic and names the functions it follows. Focus reference tests on models that move records: check stable output and one live owner throughout partitioning and relocation. When the engine's rules change, update the model and its page in the same change.
 - Formulas use `$…$` and `$$…$$` (MathJax).
 - New source files start with an SPDX header, as everywhere in the repository.
 
-## Explanation pages
+## Ownership
 
-`docs/explain/` teaches how the algorithm works, in reading order, for anyone. It does not replace the [engine design](../design/engine.md), which states the engine's decisions and constants for readers of the source. A change to a decision updates both.
+[`docs/README.md`](../README.md#who-owns-what) maps each fact to its single owner. `docs/explain/` owns the algorithm's rules, thresholds and reasons, in reading order for anyone, and its figures run models of the Rust source. The [engine reference](../design/engine.md) owns boundaries and invariants and states no threshold. A page that needs a number it does not own links to the owner, so a rule change edits the code, one explanation page and its model.

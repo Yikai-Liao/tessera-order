@@ -5,17 +5,23 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
-import { VARIANTS } from "../catalog.ts";
+import { REQUIRED_BACKEND, VARIANTS, type Variant } from "../catalog.ts";
 import { mockGitHub } from "./fixtures/github.ts";
 import { pairedRun, writePaired } from "./fixtures/paired.ts";
 import { baseHash, fixture, hash } from "./fixtures/report.ts";
 import { publishReport } from "./index.ts";
 import { pairedBmf } from "./paired.ts";
 
-async function publication(t: TestContext, cloud = true, moved = false, ratio?: number) {
+async function publication(
+  t: TestContext,
+  cloud = true,
+  moved = false,
+  ratio?: number,
+  variants: Variant[] = VARIANTS,
+) {
   const dir = await mkdtemp(join(tmpdir(), "tessera-paired-report-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  for (const [index, variant] of VARIANTS.entries()) {
+  for (const [index, variant] of variants.entries()) {
     const runs = await writePaired(dir, variant, ratio ?? (index ? 0.8 : 1.2));
     if (cloud) {
       const report = fixture();
@@ -172,3 +178,47 @@ test("superseded PR results stay in checks and summary, not a new comment", asyn
   );
   assert.equal(action.summaries.length, 1);
 });
+
+test("required-backend evidence publishes one SIMD check without a Default build", async (t) => {
+  const action = await publication(t, false, false, 1, [REQUIRED_BACKEND]);
+  await publishReport(action);
+  const created = action.requests.filter(
+    (request) => request.method === "POST" && request.path.endsWith("/check-runs"),
+  );
+  assert.deepEqual(
+    created.map((request) => request.body.name),
+    ["Benchmarks (rust, Portable SIMD)"],
+  );
+  const completed = action.requests.filter(
+    (request) => request.method === "PATCH" && request.path.includes("/check-runs/"),
+  );
+  assert.deepEqual(
+    completed.map((request) => request.body.conclusion),
+    ["success"],
+  );
+  assert.match(action.summaries[0], /1.0000×/);
+  assert.doesNotMatch(action.summaries[0], /Default|not measured/);
+});
+
+for (const damage of ["missing-shard", "wrong-features", "empty-download"] as const) {
+  test(`required-backend publication rejects ${damage}`, async (t) => {
+    const action = await publication(t, false, false, 1, [REQUIRED_BACKEND]);
+    const directory = action.inputs.artifacts;
+    if (damage === "empty-download") {
+      for (const index of [1, 2])
+        await rm(join(directory, `paired-portable-simd-${index}`), { recursive: true });
+    } else if (damage === "missing-shard") {
+      await rm(join(directory, "paired-portable-simd-1"), { recursive: true });
+    } else {
+      // A legacy opt-in SIMD build cannot masquerade as a required-backend run.
+      await writePaired(directory, VARIANTS[1], 1);
+    }
+    await publishReport(action);
+    const checks = action.requests.filter(
+      (request) => request.method === "PATCH" && request.path.includes("/check-runs/"),
+    );
+    assert.equal(checks.length, damage === "empty-download" ? VARIANTS.length : 1);
+    assert.ok(checks.every((request) => request.body.conclusion === "failure"));
+    assert.match(action.summaries[0], /not measured/);
+  });
+}

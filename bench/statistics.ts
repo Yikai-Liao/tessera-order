@@ -2,9 +2,14 @@
 
 import { catalog } from "./catalog.ts";
 
+/** Find the supported paired-block budget with `count` blocks, if any. */
+export function findPairedBudget(count: number) {
+  return Object.values(catalog.pairedBlocks).find((budget) => budget.count === count);
+}
+
 /** Resolve a supported paired-block budget without inferring it from partial observations. */
 export function pairedBudget(count: number) {
-  const budget = Object.values(catalog.pairedBlocks).find((budget) => budget.count === count);
+  const budget = findPairedBudget(count);
   if (!budget) throw new Error(`Unsupported paired-block budget: ${count}`);
   return budget;
 }

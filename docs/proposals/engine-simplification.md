@@ -8,7 +8,7 @@ The goal is fewer mechanisms in the core algorithm, not fewer lines: tests, comm
 
 ## Landed in this series
 
-The original slices have [cloud paired results](../development/continuous-benchmarks.md#read-feedback-from-a-pr) at `ce71415`: 21 slower cases against main, so performance acceptance remains blocked. Follow-up candidate checkpoints and their controls are recorded in the [port record](../design/port.md). The root scan now has one candidate-masked implementation; tile planning now attempts at most two flat passes, otherwise partitions actual children. Neither follow-up has final performance acceptance.
+The slices below landed. Their performance acceptance, the follow-up candidate checkpoints and their controls are recorded in the [port record](../design/port.md). The root scan has one candidate-masked implementation and tile planning attempts at most two flat passes, otherwise partitions actual children; the port record owns their measurements.
 
 | Slice | Mechanisms retired | Where the benefit remains |
 |---|---|---|
@@ -34,7 +34,6 @@ Ordered by expected value for the risk. "Cases" names the continuous shapes most
 
 | ID | Retire | Replace with | Risk and cases |
 |---|---|---|---|
-| R1 | `block::varying_key_bits` beside `scan_varying_bits` | One scan taking a candidate mask; the root passes all key bits. Check completion at geometrically growing intervals so a root keeps long vectorizable stretches and a child keeps its early exit | The scan is the whole cost of a constant root: `equal`, `two_values`, `d16` |
 | R2 | `Order::Flat` and the second confirmation after the variation scan | Treat an all-equal sample as a candidate order. `confirm_order` already returns ascending for a constant slice in one scan, which is the scan the variation pass spends today | A flat sample over unsorted keys would enter the insertion probe it now skips: `runs`, `two_values`, `hot50` |
 | R3 | Three copies of "ascending returns, descending reverses" (probe, flat, child) | One `finish_ordered` operation. With R2 the root tail becomes the child finisher | Structural after R2; inlining of the root path |
 | R4 | The `INSERTION_MAX` root shortcut beside the budgeted probe | One insertion attempt that owns its budget; a leaf-sized input is the unlimited-budget case | Short inputs carry the known `random/1000` losses; measure them first |
@@ -46,7 +45,6 @@ Ordered by expected value for the risk. "Cases" names the continuous shapes most
 |---|---|---|---|
 | N1 | `plan_progress` and the equality fallback in the executor | Let the plan carry its progress guarantee: an equality child is planned with equality disabled, so the executor never re-plans | Preserves the inconsistent-key termination test; no routing change for consistent keys |
 | N2 | `two_runs`, `NodePlan::Runs`, `split_ordered` | A block partition that detects non-decreasing bucket order while classifying and returns without moving records. This covers any number of already separated pieces | Loses the rotated `1*0*` form and adds a fallback rescan: `sorted_tail`, `bimodal`, `far_swaps`. Speculative |
-| N3 | Recursive sample model and general digit-plan dynamic programming (removed in the current candidate) | One/two-pass flat completion, otherwise partition and inspect actual children | Local short-random losses improve, but large sparse and bimodal cases still need acceptance; see the port record |
 | N4 | `partition_by` beside `partition_digit` | One block entry taking a classifier and bucket count; the engine builds the digit classifier | The scatter closure must stay owned by the loop; a `&mut` classifier measured 40% slower |
 
 ### Extraction
@@ -74,4 +72,4 @@ Ordered by expected value for the risk. "Cases" names the continuous shapes most
 
 ## Suggested order
 
-R1 through R3 share the root path and should be measured together after each lands separately. N1 and X1 are independent and small. P1 decides whether P2 is worth doing and should start with measurements, not code. N2, R5 and X3's generalization are the candidates most likely to be rejected.
+R2 and R3 share the root path and should be measured together after each lands separately. N1 and X1 are independent and small. P1 decides whether P2 is worth doing and should start with measurements, not code. N2, R5 and X3's generalization are the candidates most likely to be rejected.

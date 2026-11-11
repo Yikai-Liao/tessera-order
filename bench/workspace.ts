@@ -33,6 +33,14 @@ export const ALIGNMENT_RUSTFLAGS = [
 ];
 
 /** Read checkout modification state before creating operation outputs or logs. */
+/** Resolve a revision to its full commit SHA. */
+export function resolveCommit(root: string, ref: string) {
+  return command("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], {
+    cwd: root,
+    capture: true,
+  });
+}
+
 export async function workingTreeDirty(root: string) {
   return Boolean(await command("git", ["status", "--porcelain"], { cwd: root, capture: true }));
 }

@@ -87,7 +87,7 @@ The report job maintains the existing `benchmark-images` branch. Image failure l
 
 ### PR history
 
-Each PR submits to its `pr-N` Bencher branch without a Start Point or Head reset. No main measurement is needed. The report reads every run on that branch with the current Testbed and hardware specification, including Heads that earlier submissions created per baseline, so merging main or rebasing does not start a new trend. Each ratio is plotted directly against one over a fixed shared case cohort, and the figure names the latest baseline. The existing swing/current-regression focus rules and trend figure are retained. Cloud links select the current Head, which holds only the runs since the last reset. Cloud failure leaves the current measured point visible.
+Each PR submits to its `pr-N` Bencher branch without a Start Point or Head reset. No main measurement is needed. The report reads every run on that branch with the current Testbed and hardware specification, including runs that earlier submissions stored under per-baseline Heads, so merging main or rebasing does not start a new trend. Each ratio is plotted directly against one over a fixed shared case cohort, and the figure names the latest baseline. The existing swing/current-regression focus rules and trend figure are retained. Cloud links select the current Head, which holds only the runs submitted since earlier submissions stopped creating a Head per baseline. Cloud failure leaves the current measured point visible.
 
 ## Setup
 

@@ -6,7 +6,7 @@ import { basename, dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { z } from "zod";
 import { cpuListSchema } from "./affinity.ts";
-import { catalog } from "./catalog.ts";
+import { findPairedBudget } from "./statistics.ts";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const schema = z.strictObject({
@@ -18,10 +18,7 @@ const schema = z.strictObject({
   sampleMs: z.number().int().positive(),
   blocks: z
     .number()
-    .refine(
-      (count) => Object.values(catalog.pairedBlocks).some((budget) => budget.count === count),
-      "unsupported paired-block budget",
-    )
+    .refine((count) => findPairedBudget(count) !== undefined, "unsupported paired-block budget")
     .optional(),
   memoryMib: z.number().int().positive(),
   build: z.strictObject({

@@ -337,9 +337,7 @@ export function experimentCommands(program: Command) {
           algorithms: [
             "tessera",
             "std-stable",
-            "tessera-baseline",
-            "tessera-baseline-copy",
-            "tessera-copy",
+            ...catalog.algorithms.filter((a) => a.adapter === "revision").map((a) => a.id),
           ],
         });
         if (plan.harness !== "comparison")

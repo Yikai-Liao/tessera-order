@@ -4,7 +4,13 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command } from "../tools/process.ts";
-import { copyLibraryRevision, copySnapshot, simdFeatures, sourceHash } from "./workspace.ts";
+import {
+  copyLibraryRevision,
+  copySnapshot,
+  resolveCommit,
+  simdFeatures,
+  sourceHash,
+} from "./workspace.ts";
 
 /** Revisions linked into one executable; omitted current means the working snapshot. */
 export interface Revisions {
@@ -19,13 +25,8 @@ export async function prepareRevisions(
   revisions: Revisions,
   features = ["compare"],
 ) {
-  const commit = (ref: string) =>
-    command("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], {
-      cwd: root,
-      capture: true,
-    });
-  const baseline = await commit(revisions.baseline);
-  const current = revisions.current ? await commit(revisions.current) : undefined;
+  const baseline = await resolveCommit(root, revisions.baseline);
+  const current = revisions.current ? await resolveCommit(root, revisions.current) : undefined;
   // Fresh CI hosts need the locked registry metadata before offline path resolution.
   await command("cargo", ["fetch", "--locked"], { cwd: tree });
   const library = join(tree, "rust/tessera-sort");
@@ -56,22 +57,21 @@ export async function prepareRevisions(
     const path = join(destination, "Cargo.toml");
     const copy = parse(await readFile(path, "utf8"));
     (copy.package as { name: string }).name = name;
-    await writeFile(path, stringify(copy));
+    const text = stringify(copy);
+    await writeFile(path, text);
     dependencies[name] = {
       path: `../revision-libraries/${name}`,
-      features: [
-        ...simdFeatures(await readFile(path, "utf8")),
-        ...(features.includes("rayon") ? ["rayon"] : []),
-      ],
+      features: [...simdFeatures(text), ...(features.includes("rayon") ? ["rayon"] : [])],
     };
   }
   await writeFile(manifestPath, stringify(manifest));
   const provenance = {
     schema: 1,
     baseline,
-    current: current ?? (await commit("HEAD")),
+    current: current ?? (await resolveCommit(root, "HEAD")),
     workingTree: current === undefined,
-    currentSource: await sourceHash(library),
+    // The current copy was hashed from this library before its manifest rename.
+    currentSource: sources["revision-current-copy"],
     copies: sources,
   };
   const originalLock = await readFile(join(tree, "Cargo.lock"), "utf8");

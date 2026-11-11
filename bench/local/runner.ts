@@ -13,6 +13,7 @@ import {
   buildBenchmark,
   copyLibraryRevision,
   copySnapshot,
+  resolveCommit,
   simdFeatures,
   sourceHash,
   type Workspace,
@@ -411,10 +412,7 @@ export async function compareLocal(options: LocalOptions) {
       ),
     };
   }
-  const baseline = await command("git", ["rev-parse", "--verify", `${options.baseline}^{commit}`], {
-    cwd: root,
-    capture: true,
-  });
+  const baseline = await resolveCommit(root, options.baseline);
   const head = await command("git", ["rev-parse", "HEAD"], { cwd: root, capture: true });
   const dirty = Boolean(
     await command("git", ["status", "--porcelain"], { cwd: root, capture: true }),

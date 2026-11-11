@@ -85,13 +85,8 @@ export function summarizeLayouts(result: LayoutRun) {
   const summaries = result.layouts.map(({ run }) => summarizeLocal(run));
   return first.cases.map((id, index) => {
     const layouts = result.layouts.map(({ seed, run }, layout) => {
-      const paired = run.protocol === "paired-samples-v1" || run.protocol === "paired-samples-v2";
-      const baseline = paired
-        ? run.samples![id].map((s) => s.baseline)
-        : run.blocks.map((block) => (block.baseline[id] + block.control[id]) / 2);
-      const current = paired
-        ? run.samples![id].map((s) => s.current)
-        : run.blocks.map((block) => block.current[id]);
+      const baseline = run.samples![id].map((s) => s.baseline);
+      const current = run.samples![id].map((s) => s.current);
       return {
         seed,
         ...summaries[layout][index],

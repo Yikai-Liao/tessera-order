@@ -27,7 +27,7 @@ Groups are one type and distribution across lengths. A group is committed by its
 
 Memory runs before timing because its measured Tessera peak sets the `glidesort-sqrt` buffer. Its manifest is separate: both executables share source and configuration while their binary hashes differ. The timing executable checks that provenance before using the memory results.
 
-The report owns derived statistics. Both SVGs and Bencher Metric Format are computed from the same summaries, so the uploaded result and published figure have one definition of ratios, bounds and A/A noise. Raw samples remain sufficient to recompute them.
+A result has one build manifest and a timing/memory executable pair. The loader validates matching provenance and complete journals before reporting; legacy multi-build directories use their original tooling revision. The report owns derived statistics. Both SVGs and Bencher Metric Format are computed from the same summaries, so the uploaded result and published figure have one definition of ratios, bounds and A/A noise. Raw samples remain sufficient to recompute them.
 
 ## Native code
 
@@ -39,4 +39,4 @@ The memory executable wraps C allocation symbols and provides C++ new/delete def
 
 ## Verification
 
-Generator hashes retain the continuous suite's input identity. Harness tests cover input restoration after destructive sorts, stable and unstable payload checking, floating-point edge cases, partial journal recovery and allocation accounting. Report tests cover paired timing, the 8-of-9 decision, A/A noise, the SIMD anchor, raw-data round trips and invalid or incompatible directories. Synthetic SVG fixtures include losses, close competitors and long names.
+Generator hashes retain the continuous suite's input identity. Harness tests cover input restoration after destructive sorts, stable and unstable payload checking, floating-point edge cases, partial journal recovery and allocation accounting. Report tests cover paired timing, the 8-of-9 decision, A/A noise, the standard-sort anchor, raw-data round trips and invalid or incompatible directories. Synthetic SVG fixtures include losses, close competitors and long names.

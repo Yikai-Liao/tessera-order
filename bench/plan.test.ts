@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { decodeConfig } from "./config.ts";
 import { loadPlan, parsePlan, selectCaseIds } from "./plan.ts";
 
@@ -40,4 +42,22 @@ test("malformed and unsupported plans fail before execution", () => {
   const ids = ["rust/u64/random/65536/s1/api", "rust/u64/d16/65536/s1/api"];
   assert.deepEqual(selectCaseIds(ids, "/random/"), [ids[0]]);
   assert.throws(() => selectCaseIds(ids, "^never$"), /no supported cases/);
+});
+
+test("plan CLI defaults to JSON and retains explicit TOML export", async () => {
+  const expected = await loadPlan("local");
+  for (const format of ["json", "toml"]) {
+    const result = spawnSync(
+      process.execPath,
+      [
+        fileURLToPath(new URL("../tools/index.ts", import.meta.url)),
+        "plan",
+        "local",
+        ...(format === "toml" ? ["--format", format] : []),
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(parsePlan(decodeConfig(result.stdout, `plan.${format}`)), expected);
+  }
 });

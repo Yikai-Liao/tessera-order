@@ -5,11 +5,7 @@ import type { ReportSummary, Row } from "./report.ts";
 
 export { modeName } from "../catalog.ts";
 
-// One build configuration's measurement. A configuration is a separately
-// compiled executable with its own Testbed and baseline, such as Portable
-// SIMD. API variants of one executable (stable, later unstable or
-// parallel sorts) are not configurations: they are cases, named by the last
-// segment of the benchmark ID, so they add rows rather than columns.
+/** One column in a comparison figure; hosted reporting currently supplies one. */
 export interface Configuration {
   name: string;
   summary: ReportSummary | null;
@@ -77,17 +73,6 @@ export function changedRows(configurations: Configuration[]) {
         (isSlower(a) ? severity(b) - severity(a) : severity(a) - severity(b)) ||
         a.name.localeCompare(b.name),
     );
-}
-
-// Which configurations a set of alerts touched, in words: "both", "all", or
-// the names. Whether a change is shared or confined to one build is the
-// first clue to its cause, so the report states it instead of leaving the
-// reader to compare columns.
-export function attribution(configurations: Configuration[], hit: boolean[]) {
-  const names = configurations.filter((_, i) => hit[i]).map((c) => c.name);
-  if (configurations.length === 1) return null;
-  if (names.length === configurations.length) return configurations.length === 2 ? "both" : "all";
-  return `${names.join(", ")} only`;
 }
 
 // The geometric mean of current/baseline over a configuration's compared

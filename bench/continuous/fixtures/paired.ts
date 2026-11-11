@@ -52,7 +52,6 @@ export function pairedRun(variant: Variant, index = 1, ratio = 1.2): LocalRun {
     },
     cases,
     shard: { index, count: CONTINUOUS_SHARDS, allCases },
-    blocks: [],
     sampleCounts: Object.fromEntries(
       cases.map((id) => [id, revisionSampling(parseCriterionId(id).len).samples]),
     ),

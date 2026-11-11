@@ -23,7 +23,6 @@ function measured(ratio: number, uuid: string, time: string, head = "same-baseli
         {
           measure: { uuid: "ratio", name: "paired-time-ratio" },
           metric: { uuid: name, value: values["paired-time-ratio"].value },
-          boundary: null,
         },
       ],
     })),

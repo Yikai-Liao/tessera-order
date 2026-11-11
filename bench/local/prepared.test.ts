@@ -72,7 +72,6 @@ require('node:readline').createInterface({input: process.stdin}).on('line', requ
       affinity: "inherited",
     },
     cases: [id],
-    blocks: [],
   };
   for (const path of Object.values(run.binaryPaths!)) {
     await mkdir(join(prepared, path, ".."), { recursive: true });

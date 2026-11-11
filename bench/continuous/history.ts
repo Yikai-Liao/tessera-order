@@ -3,9 +3,9 @@
 import {
   type BencherReport,
   type ComparedRow,
+  cloudRows,
   type ReportSummary,
   type Row,
-  summarize,
 } from "./report.ts";
 
 const API = "https://api.bencher.dev/v0/projects";
@@ -86,7 +86,7 @@ export async function loadHistory(current: BencherReport, request: typeof fetch 
   return [...reports.values()];
 }
 
-function caseKey(row: Row) {
+function caseKey(row: Pick<Row, "benchmark" | "measure">) {
   return `${row.benchmark}/${row.measure}`;
 }
 
@@ -111,7 +111,7 @@ function comparableRuns(reports: BencherReport[], current: BencherReport, langua
       !report.results?.[0]?.length
     )
       continue;
-    const rows = summarize(report).rows.filter(
+    const rows = cloudRows(report).filter(
       (row) => row.name.startsWith(`${language}/`) && row.value > 0,
     );
     runs.push({
@@ -129,25 +129,6 @@ function comparableRuns(reports: BencherReport[], current: BencherReport, langua
   );
 }
 
-// Every run is compared with the baseline from the latest report, which
-// Bencher computes from the start point's own history: `main`, or the parent
-// PR of a stacked one. One fixed reference keeps rebases and force pushes out
-// of the calculation: an earlier run on an older base still shows how far that
-// code was from the base a reviewer would merge into. Cases new in the PR have
-// no baseline and stay in the table only. The cohort is also fixed across
-// runs, so a case added to or removed from the suite cannot move the overall
-// line.
-export function summarizeTrend(
-  reports: BencherReport[],
-  current: BencherReport,
-  language: string,
-): TrendSummary | null {
-  const runs = comparableRuns(reports, current, language);
-  if (!runs.length) return null;
-  const summary = summarize(current);
-  return summarizeRuns(runs, summary, current, language);
-}
-
 /** Summarize ratios only within the native Head keyed by protocol and exact baseline.
  *
  * The current point remains available when Cloud or history loading fails.
@@ -159,8 +140,7 @@ export function summarizePairedTrend(
   current?: BencherReport,
   reports: BencherReport[] = [],
 ): TrendSummary | null {
-  if (!summary.relative || !summary.baseHash)
-    throw new Error("Paired history needs an exact baseline");
+  if (!summary.baseHash) throw new Error("Paired history needs an exact baseline");
   if (!current) {
     return summarizeRuns(
       [
@@ -180,7 +160,7 @@ export function summarizePairedTrend(
       language,
     );
   }
-  const identities = new Map(summarize(current).rows.map((row) => [row.name, row]));
+  const identities = new Map(cloudRows(current).map((row) => [row.name, row]));
   const rows = summary.rows.map((row) => {
     const identity = identities.get(row.name);
     if (!identity) throw new Error("Cloud history lacks a current case");

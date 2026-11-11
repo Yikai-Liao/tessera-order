@@ -1,22 +1,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { caseLabel, caseParts } from "../catalog.ts";
+import type { caseParts } from "../catalog.ts";
 
 export { caseLabel, caseParts } from "../catalog.ts";
-
-export interface ThresholdModel {
-  test: string;
-  min_sample_size: number;
-  max_sample_size: number;
-  lower_boundary: number;
-  upper_boundary: number;
-}
-
-export interface Boundary {
-  baseline: number;
-  lower_limit: number | null;
-  upper_limit: number | null;
-}
 
 export interface BencherReport {
   uuid: string;
@@ -42,15 +28,8 @@ export interface BencherReport {
     measures: {
       measure: { uuid: string; name: string };
       metric: { uuid: string; value: number };
-      boundary: Boundary | null;
-      threshold?: { model: ThresholdModel } | null;
     }[];
   }[][];
-  alerts: {
-    metric: { uuid: string };
-    limit: "upper" | "lower";
-    status?: string;
-  }[];
 }
 
 interface CaseResult {
@@ -87,19 +66,10 @@ interface ReportIdentity {
   testbed: BencherReport["testbed"];
   project: string;
   uuid: string;
-  relative?: boolean;
 }
 
 export function short(hash: string | null) {
   return hash ? hash.slice(0, 7) : "unknown";
-}
-
-// Latency is in nanoseconds; three significant digits are enough for triage.
-export function formatTime(ns: number | null) {
-  if (ns == null || !Number.isFinite(ns)) return "—";
-  const [unit, scale] =
-    ns >= 1e9 ? ["s", 1e9] : ns >= 1e6 ? ["ms", 1e6] : ns >= 1e3 ? ["µs", 1e3] : ["ns", 1];
-  return `${(ns / scale).toPrecision(3)} ${unit}`;
 }
 
 export function formatPercent(v: number) {
@@ -129,65 +99,20 @@ export function isMajor(r: Row) {
   return Math.abs(r.change ?? 0) >= MAJOR;
 }
 
-// One row per benchmark and measure. Alerts are authoritative for the
-// verdict; boundaries only supply the numbers shown beside it.
-export function summarize(report: BencherReport) {
-  const alerts = new Map();
-  for (const alert of report.alerts ?? []) {
-    if (alert.status && alert.status !== "active") continue;
-    // An alert names the metric it fired on; that UUID is unique per result.
-    alerts.set(alert.metric.uuid, alert.limit);
-  }
-  const results = report.results?.[0] ?? [];
-  const measureCount = new Set(results.flatMap((r) => r.measures.map((m) => m.measure.uuid))).size;
-  const rows: Row[] = [];
-  for (const result of results) {
-    for (const m of result.measures) {
-      const value = m.metric?.value;
-      const boundary = m.boundary ?? null;
-      const baseline = boundary?.baseline ?? null;
-      const limit = alerts.get(m.metric?.uuid);
-      const verdict =
-        limit === "upper" ? "regression" : limit === "lower" ? "improvement" : "within";
-      const name = result.benchmark.name;
-      if (
-        !Number.isFinite(value) ||
-        value < 0 ||
-        (baseline !== null && (!Number.isFinite(baseline) || baseline <= 0))
-      ) {
-        throw new Error(`Invalid latency or baseline for ${name}`);
-      }
-      if (limit && baseline === null) {
-        throw new Error(`Alert has no baseline for ${name}`);
-      }
-      rows.push({
-        name,
-        parts: caseParts(name),
-        label: caseLabel(name) + (measureCount > 1 ? ` (${m.measure.name})` : ""),
+/** Decode Cloud history values; raw paired samples remain the verdict authority. */
+export function cloudRows(report: BencherReport) {
+  return (report.results?.[0] ?? []).flatMap((result) =>
+    result.measures.map((entry) => {
+      const value = entry.metric.value;
+      if (!Number.isFinite(value) || value <= 0) throw new Error("Invalid Cloud ratio");
+      return {
+        name: result.benchmark.name,
         benchmark: result.benchmark.uuid,
-        measure: m.measure.uuid,
+        measure: entry.measure.uuid,
         value,
-        lower: boundary?.lower_limit ?? null,
-        upper: boundary?.upper_limit ?? null,
-        ...(baseline === null
-          ? { baseline: null, change: null, verdict: "missing" as const }
-          : { baseline, change: value / baseline - 1, verdict }),
-      });
-    }
-  }
-  const head = report.branch.head;
-  const history = [{ branch: report.branch.uuid, head: head.uuid }];
-  if (head.start_point) {
-    history.unshift({ branch: head.start_point.branch, head: head.start_point.head });
-  }
-  return summarizeRows(rows, {
-    hash: head.version?.hash ?? null,
-    baseHash: head.start_point?.version?.hash ?? null,
-    history,
-    testbed: report.testbed,
-    project: report.project?.slug,
-    uuid: report.uuid,
-  });
+      };
+    }),
+  );
 }
 
 /** Order authoritative row verdicts and summarize each build independently. */

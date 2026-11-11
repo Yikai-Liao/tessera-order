@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { algorithm } from "../catalog.ts";
@@ -53,7 +53,8 @@ function parseManifest(value: unknown): Manifest {
     !["smoke", "release", "custom"].includes(String(value.suite))
   )
     throw new Error("unsupported measurement schema or suite");
-  if (!["default", "portable-simd"].includes(String(value.build))) throw new Error("unknown build");
+  if (value.build !== "default")
+    throw new Error("Only the current single-build format is supported");
   for (const name of [
     "commit",
     "rustc",
@@ -103,7 +104,8 @@ function parseManifest(value: unknown): Manifest {
   return value as unknown as Manifest;
 }
 export function validateRun(dataset: Dataset): void {
-  if (!dataset.manifests.has("default")) throw new Error("default build is missing");
+  const m = dataset.manifest;
+  const build = "default";
   const samples = new Map<string, Sample[]>(),
     identities = new Set<string>(),
     slots = new Set<string>();
@@ -117,9 +119,9 @@ export function validateRun(dataset: Dataset): void {
     assertInteger(s.slot);
     assertInteger(s.batch, 1);
     assertInteger(s.elapsed_ns, 1);
-    const m = dataset.manifests.get(s.build),
-      c = m?.cases.find((c) => caseId(c) === s.case_id);
+    const c = m.cases.find((c) => caseId(c) === s.case_id);
     if (
+      s.build !== build ||
       !c ||
       s.block >= 9 ||
       s.slot >= c.variants.length + 1 ||
@@ -143,32 +145,29 @@ export function validateRun(dataset: Dataset): void {
     assertString(o.group);
     assertString(o.build);
     assertInteger(o.unix_seconds);
-    if (!["start", "end"].includes(o.phase) || !dataset.manifests.has(o.build))
+    if (!["start", "end"].includes(o.phase) || o.build !== build)
       throw new Error("invalid host observation");
     const id = `${o.build}:${o.group}:${o.phase}`;
     if (observations.has(id)) throw new Error(`duplicate observation ${id}`);
     observations.set(id, o);
   }
-  for (const [build, m] of dataset.manifests) {
-    for (const c of m.cases) {
-      const has = [...c.variants, "tessera-aa"].map((v) =>
-        samples.get(measurementId(build, caseId(c), v)),
-      );
-      const group = `${build}:${c.ty}/${c.distribution}`;
-      if (
-        dataset.partial &&
-        has.every((s) => !s) &&
-        !observations.has(`${group}:start`) &&
-        !observations.has(`${group}:end`)
-      )
-        continue;
-      if (has.some((s) => s?.length !== 9))
-        throw new Error(`missing blocks: ${build}/${caseId(c)}`);
-      const start = observations.get(`${group}:start`),
-        end = observations.get(`${group}:end`);
-      if (!start || !end || end.unix_seconds < start.unix_seconds)
-        throw new Error(`incomplete group ${group}`);
-    }
+  for (const c of m.cases) {
+    const has = [...c.variants, "tessera-aa"].map((v) =>
+      samples.get(measurementId(build, caseId(c), v)),
+    );
+    const group = `${build}:${c.ty}/${c.distribution}`;
+    if (
+      dataset.partial &&
+      has.every((s) => !s) &&
+      !observations.has(`${group}:start`) &&
+      !observations.has(`${group}:end`)
+    )
+      continue;
+    if (has.some((s) => s?.length !== 9)) throw new Error(`missing blocks: ${build}/${caseId(c)}`);
+    const start = observations.get(`${group}:start`),
+      end = observations.get(`${group}:end`);
+    if (!start || !end || end.unix_seconds < start.unix_seconds)
+      throw new Error(`incomplete group ${group}`);
   }
   if (!dataset.samples.length) throw new Error("no measurements");
   const memories = new Set<string>();
@@ -179,78 +178,66 @@ export function validateRun(dataset: Dataset): void {
     assertString(r.variant);
     assertString(r.build);
     const id = measurementId(r.build, r.case_id, r.variant);
-    const c = dataset.manifests.get(r.build)?.cases.find((c) => caseId(c) === r.case_id);
-    if (r.verified !== true || !c?.variants.includes(r.variant) || memories.has(id))
+    const c = m.cases.find((c) => caseId(c) === r.case_id);
+    if (
+      r.build !== build ||
+      r.verified !== true ||
+      !c?.variants.includes(r.variant) ||
+      memories.has(id)
+    )
       throw new Error(`invalid or duplicate memory sample ${id}`);
     memories.add(id);
   }
-  for (const [build, m] of dataset.manifests) {
-    for (const c of m.cases) {
-      if (dataset.partial && !samples.has(measurementId(build, caseId(c), "tessera"))) continue;
-      for (const v of c.variants) {
-        const adapter =
-          m.variants.find((entry) => entry.name === v)?.adapter ?? algorithm(v).adapter;
-        if (
-          (c.len <= 1000000 || c.ty === "u64" || v === "tessera" || adapter === "tessera-par") &&
-          !memories.has(measurementId(build, caseId(c), v))
-        )
-          throw new Error(`missing memory sample ${build}/${caseId(c)}/${v}`);
-      }
+  for (const c of m.cases) {
+    if (dataset.partial && !samples.has(measurementId(build, caseId(c), "tessera"))) continue;
+    for (const v of c.variants) {
+      const adapter = m.variants.find((entry) => entry.name === v)?.adapter ?? algorithm(v).adapter;
+      if (
+        (c.len <= 1000000 || c.ty === "u64" || v === "tessera" || adapter === "tessera-par") &&
+        !memories.has(measurementId(build, caseId(c), v))
+      )
+        throw new Error(`missing memory sample ${build}/${caseId(c)}/${v}`);
     }
   }
 }
+/** Load current single-build runs, checking provenance before merging their journals. */
 export async function loadRun(directories: string[], partial = false): Promise<Dataset> {
-  const dataset: Dataset = {
-    host: {},
-    manifests: new Map(),
-    samples: [],
-    observations: [],
-    memory: [],
-    partial,
-  };
-  let first = true;
+  let dataset: Dataset | undefined;
   for (const directory of directories) {
+    if ((await readdir(directory)).some((name) => name.startsWith("manifest-")))
+      throw new Error(
+        "Multiple-build artifacts are unsupported; use their original revision to regenerate",
+      );
     const host = await readJson(join(directory, "host.json"));
     assertObject(host);
-    if (!first && !isDeepStrictEqual(host, dataset.host))
-      throw new Error("host fingerprints differ; cannot merge runs");
-    dataset.host = host;
-    first = false;
-    for (const build of ["default", "portable-simd"]) {
-      let value: unknown;
-      try {
-        value = await readJson(
-          join(directory, build === "default" ? "manifest.json" : `manifest-${build}.json`),
-        );
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
-        throw e;
-      }
-      const m = parseManifest(value);
-      if (m.build !== build) throw new Error("manifest build disagrees with file name");
-      if (dataset.manifests.has(build) && !isDeepStrictEqual(m, dataset.manifests.get(build)))
-        throw new Error(`build provenance differs: ${build}`);
-      const memory = await readJson(join(directory, `memory-manifest-${build}.json`));
-      assertObject(memory);
-      for (const field of [
-        "schema",
-        "source_sha256",
-        "rustc",
-        "target",
-        "profile",
-        "opt_level",
-        "debug",
-        "features",
-        "cargo_encoded_rustflags",
-        "cc",
-        "cxx",
-        "native_build",
-        "native_sources",
-      ]) {
-        if (!isDeepStrictEqual(memory[field], m[field]))
-          throw new Error(`memory provenance differs: ${build}/${field}`);
-      }
-      dataset.manifests.set(build, m);
+    const manifest = parseManifest(await readJson(join(directory, "manifest.json")));
+    if (dataset) {
+      if (!isDeepStrictEqual(host, dataset.host))
+        throw new Error("host fingerprints differ; cannot merge runs");
+      if (!isDeepStrictEqual(manifest, dataset.manifest))
+        throw new Error("build provenance differs");
+    } else {
+      dataset = { host, manifest, samples: [], observations: [], memory: [], partial };
+    }
+    const memory = await readJson(join(directory, "memory-manifest-default.json"));
+    assertObject(memory);
+    for (const field of [
+      "schema",
+      "source_sha256",
+      "rustc",
+      "target",
+      "profile",
+      "opt_level",
+      "debug",
+      "features",
+      "cargo_encoded_rustflags",
+      "cc",
+      "cxx",
+      "native_build",
+      "native_sources",
+    ]) {
+      if (!isDeepStrictEqual(memory[field], manifest[field]))
+        throw new Error(`memory provenance differs: default/${field}`);
     }
     for (const row of await readJsonLines(join(directory, "blocks.jsonl"))) {
       assertObject(row);
@@ -260,24 +247,7 @@ export async function loadRun(directories: string[], partial = false): Promise<D
     }
     dataset.memory.push(...((await readJsonLines(join(directory, "memory.jsonl"))) as Memory[]));
   }
-  const baseline = dataset.manifests.get("default"),
-    simd = dataset.manifests.get("portable-simd");
-  if (baseline && simd) {
-    for (const field of [
-      "commit",
-      "source_sha256",
-      "rustc",
-      "target",
-      "profile",
-      "opt_level",
-      "debug",
-      "cargo_encoded_rustflags",
-      "cargo_lock",
-    ]) {
-      if (!isDeepStrictEqual(baseline[field], simd[field]))
-        throw new Error(`builds do not share a source and compiler configuration: ${field}`);
-    }
-  }
+  if (!dataset) throw new Error("No result directories");
   validateRun(dataset);
   return dataset;
 }

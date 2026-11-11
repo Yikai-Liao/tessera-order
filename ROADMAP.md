@@ -45,6 +45,15 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 1. **C++ runner.** Measure the C++ implementation with the shared input specification and native-buffer timing. Add cross-language golden hashes in `conformance/vectors/` and verify them in both generators.
 2. **C++17 header-only implementation** for trivially copyable records, with CMake install and a consumer test. Done when it passes the shared vectors and has a direct comparison with Rust.
 
+## Benchmark tooling simplification
+
+Current tooling retains one algorithm build, the current paired revision protocol, shared PR report rendering and bounded machine-readable summaries. Follow-up work keeps sorting code and sampling changes independently reviewable:
+
+- Separate immutable prepared revision pairs from measured results in `bench/local/model.ts`; consolidate both consumers in the local runner and hosted validator before removing optional-state checks.
+- Let the Rust comparison manifest own the expected memory-case inventory, consumed by measurement and offline completeness validation. Preserve timing/memory process isolation.
+- Evaluate a single normalized worker request instead of parallel TS/Rust user-facing CLI rules. Keep the existing timed calls, inputs and recovery behavior; validate any Criterion removal with code-placement controls.
+- Expose structured current-head performance details through `status`, without parsing human report wording. The check publisher owns the machine summary; status validates its exact-head identity.
+
 ## Benchmark investigations
 
 - Validate the hosted paired pipeline on Actions: retain cold/warm-cache full-suite duration, queue wait, paired median intervals, same-source false alerts and held-out detection evidence for the required backend before claiming hosted stability or tuning the per-case sample budget. Verify direct PR Cloud upload, fork/Dependabot summary-only behavior and partial-job reruns. Automatic main measurements are disabled. The legacy dual-configuration calibration in PR #96 (Actions run `42904693411`) completed all 70 cases per configuration with no same-source alerts; its four measurement jobs took 346–406 seconds. One calibration does not establish long-term false-alert or detection rates.

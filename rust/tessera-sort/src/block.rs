@@ -351,33 +351,38 @@ struct BucketWriter<T> {
 // access; transferring the buffers never transfers a shared record borrow.
 unsafe impl<T: Send> Send for BucketWriter<T> {}
 
-/// Physical block storage: the input slice and a scratch allocation.
+/// Physical block storage: the input slice and scratch segments.
 ///
 /// Physical block IDs number the scratch blocks first, then the full input
-/// blocks. Unlike the C reference's integer pairs, `T` may have no valid
-/// all-zero value, so scratch stays uninitialized and only recorded live
-/// prefixes are read. `input_borrow` keeps the input exclusively borrowed
-/// while raw pointers address it.
+/// blocks. Scratch is one allocation per scattered shard: a serial pass has
+/// one segment, and an adopted root keeps each shard's segment where it was
+/// written. Every segment holds the same power-of-two number of blocks, so a
+/// scratch ID splits into segment and offset without a division. Unlike the C
+/// reference's integer pairs, `T` may have no valid all-zero value, so scratch
+/// stays uninitialized and only recorded live prefixes are read.
+/// `input_borrow` keeps the input exclusively borrowed while raw pointers
+/// address it.
 struct BlockStorage<'a, T> {
     input: *mut T,
     input_len: usize,
     block_size: usize,
     scratch_blocks: usize,
     block_count: usize,
-    scratch: Vec<MaybeUninit<T>>,
-    // Parallel root partitions adopt each shard's scratch allocation directly.
-    #[cfg(feature = "rayon")]
-    scratch_segments: Vec<Vec<MaybeUninit<T>>>,
+    scratch: Vec<Vec<MaybeUninit<T>>>,
+    /// Base-two logarithm of the blocks in one scratch segment.
+    segment_blocks_log2: u32,
     input_borrow: PhantomData<&'a mut [T]>,
 }
 
 impl<'a, T> BlockStorage<'a, T> {
+    /// Creates single-segment storage, reusing the first retained segment.
     fn new(
         input: &'a mut [T],
         bucket_count: usize,
         block_size: usize,
-        mut scratch: Vec<MaybeUninit<T>>,
+        mut scratch: Vec<Vec<MaybeUninit<T>>>,
     ) -> Self {
+        assert!(bucket_count.is_power_of_two());
         let scratch_blocks = 2 * bucket_count;
         let full_blocks = input.len() / block_size;
         let block_count = full_blocks
@@ -387,7 +392,12 @@ impl<'a, T> BlockStorage<'a, T> {
         let scratch_len = scratch_blocks
             .checked_mul(block_size)
             .expect("scratch size overflow");
-        scratch.resize_with(scratch_len, MaybeUninit::<T>::uninit);
+        scratch.truncate(1);
+        if scratch.is_empty() {
+            scratch.push(Vec::new());
+        }
+        let segment = &mut scratch[0];
+        segment.resize_with(scratch_len, MaybeUninit::<T>::uninit);
         // The input tail has no full physical block. Start it in scratch;
         // the first bucket_count scratch blocks remain free for output.
         let tail_len = input.len() % block_size;
@@ -396,7 +406,7 @@ impl<'a, T> BlockStorage<'a, T> {
         unsafe {
             ptr::copy_nonoverlapping(
                 input.as_ptr().add(full_blocks * block_size),
-                scratch
+                segment
                     .as_mut_ptr()
                     .cast::<T>()
                     .add(bucket_count * block_size),
@@ -410,42 +420,24 @@ impl<'a, T> BlockStorage<'a, T> {
             scratch_blocks,
             block_count,
             scratch,
-            #[cfg(feature = "rayon")]
-            scratch_segments: Vec::new(),
+            segment_blocks_log2: scratch_blocks.trailing_zeros(),
             input_borrow: PhantomData,
         }
     }
 
     fn block_ptr(&mut self, physical: usize) -> *mut T {
         assert!(physical < self.block_count);
-        // SAFETY: the bounds check selects a full block in one of the two
-        // allocations, which stay alive and are never resized during sorting.
+        // SAFETY: the bounds check selects a full block in the input or in a
+        // scratch segment; every segment holds `1 << segment_blocks_log2`
+        // blocks. The allocations stay alive and are never resized during
+        // sorting.
         unsafe {
             if physical < self.scratch_blocks {
-                self.scratch
+                let block = physical & ((1 << self.segment_blocks_log2) - 1);
+                self.scratch[physical >> self.segment_blocks_log2]
                     .as_mut_ptr()
                     .cast::<T>()
-                    .add(physical * self.block_size)
-            } else {
-                self.input
-                    .add((physical - self.scratch_blocks) * self.block_size)
-            }
-        }
-    }
-
-    /// Returns a block pointer when scratch is held in shard allocations.
-    #[cfg(feature = "rayon")]
-    fn block_ptr_segmented(&mut self, physical: usize) -> *mut T {
-        assert!(physical < self.block_count);
-        // SAFETY: physical is in bounds; each scratch segment contains the same
-        // number of complete blocks and remains allocated for the partition.
-        unsafe {
-            if physical < self.scratch_blocks {
-                let segment_blocks = self.scratch_blocks / self.scratch_segments.len();
-                self.scratch_segments[physical / segment_blocks]
-                    .as_mut_ptr()
-                    .cast::<T>()
-                    .add((physical % segment_blocks) * self.block_size)
+                    .add(block * self.block_size)
             } else {
                 self.input
                     .add((physical - self.scratch_blocks) * self.block_size)
@@ -458,7 +450,8 @@ impl<'a, T> BlockStorage<'a, T> {
 ///
 /// Each pass resizes and rewrites what it uses.
 pub(crate) struct Buffers<T> {
-    scratch: Vec<MaybeUninit<T>>,
+    /// Scratch segments; a pass reuses the first one.
+    scratch: Vec<Vec<MaybeUninit<T>>>,
     block_order: Vec<u32>,
     next_block_order: Vec<u32>,
     bucket_ids: Vec<u16>,
@@ -841,22 +834,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     fn compact_with(
         &mut self,
         ends: &[usize],
-        visit: Option<Visit<'_, 'a, T>>,
-    ) -> Option<unwind::Payload> {
-        #[cfg(feature = "rayon")]
-        if !self.blocks.scratch_segments.is_empty() {
-            return self.compact_with_access(ends, visit, |blocks, physical| {
-                blocks.block_ptr_segmented(physical)
-            });
-        }
-        self.compact_with_access(ends, visit, |blocks, physical| blocks.block_ptr(physical))
-    }
-
-    fn compact_with_access(
-        &mut self,
-        ends: &[usize],
         mut visit: Option<Visit<'_, 'a, T>>,
-        mut block_ptr: impl FnMut(&mut BlockStorage<'a, T>, usize) -> *mut T,
     ) -> Option<unwind::Payload> {
         // Sorting is finished. Reuse the output buffer as the inverse map:
         // physical block ID -> position in block_order.
@@ -902,8 +880,8 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             let source = self.block_order[input] as usize;
             if output > input && output < self.active_blocks.end {
                 debug_assert!(!self.active_blocks.contains(&free_logical));
-                let from = block_ptr(&mut self.blocks, destination);
-                let to = block_ptr(&mut self.blocks, free_physical);
+                let from = self.blocks.block_ptr(destination);
+                let to = self.blocks.block_ptr(free_physical);
                 // SAFETY: both physical IDs are valid full blocks. Free block
                 // receives live output which would otherwise be overwritten.
                 // ptr::copy preserves uninitialized padding without reading it
@@ -919,7 +897,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 output = block_positions[destination] as usize;
             }
             let length = self.next_block_len(input, &mut partial);
-            let from = block_ptr(&mut self.blocks, source);
+            let from = self.blocks.block_ptr(source);
             assert!(start + length <= self.blocks.input_len);
             // Completed partials can only shorten preceding output: start <=
             // (destination - scratch_blocks) * block_size, and
@@ -946,7 +924,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             let source = self.block_order[input] as usize;
             assert!(source < self.blocks.scratch_blocks);
             let length = self.next_block_len(input, &mut partial);
-            let from = block_ptr(&mut self.blocks, source);
+            let from = self.blocks.block_ptr(source);
             assert!(start + length <= self.blocks.input_len);
             // SAFETY: the remaining live prefix fits the checked output range;
             // ptr::copy permits overlap and preserves padding bytes.
@@ -973,6 +951,8 @@ impl<T> Drop for Partition<'_, '_, T> {
         if !self.input_materialized {
             self.compact();
         }
+        // An adopted root releases the other shards' segments here.
+        self.blocks.scratch.truncate(1);
         self.buffers.scratch = core::mem::take(&mut self.blocks.scratch);
         self.buffers.block_order = core::mem::take(&mut self.block_order);
         self.buffers.next_block_order = core::mem::take(&mut self.next_block_order);

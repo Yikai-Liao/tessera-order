@@ -323,8 +323,8 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 block_size,
                 scratch_blocks,
                 block_count,
-                scratch: Vec::new(),
-                scratch_segments: Vec::with_capacity(shards),
+                scratch: Vec::with_capacity(shards),
+                segment_blocks_log2: local_scratch.trailing_zeros(),
                 input_borrow: PhantomData,
             },
             active_blocks: head..active_end,
@@ -336,14 +336,14 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         };
 
         // Ownership transfer has no allocations, bounds checks, or user calls:
-        // scratch_segments has capacity for exactly tasks.len() allocations.
+        // scratch has capacity for one segment per task, in shard order.
         // Each moved Vec owns only MaybeUninit cells, so stale copies never drop T.
         // The global directory already names each live prefix exactly once.
         for task in &mut tasks {
             global
                 .blocks
-                .scratch_segments
-                .push(core::mem::take(&mut task.sorter.blocks.scratch));
+                .scratch
+                .append(&mut task.sorter.blocks.scratch);
             task.sorter.input_materialized = true;
         }
         global.input_materialized = false;

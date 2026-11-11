@@ -297,13 +297,7 @@ pub(super) fn try_finish<T: Send>(
     caches.push(Mutex::new(free));
     let storage = Storage {
         addresses: (0..count)
-            .map(|physical| {
-                if sorter.blocks.scratch_segments.is_empty() {
-                    sorter.blocks.block_ptr(physical)
-                } else {
-                    sorter.blocks.block_ptr_segmented(physical)
-                }
-            })
+            .map(|physical| sorter.blocks.block_ptr(physical))
             .collect(),
         input: sorter.blocks.input,
         full_blocks: input_len / block_size,

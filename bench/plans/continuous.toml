@@ -5,20 +5,48 @@ harness = "smoke"
 algorithms = [ "tessera" ]
 exclude = []
 
+# Small random inputs exercise parallel-entry overhead and serial fallback;
+# million-record inputs exercise root scatter and bucket scheduling.
 [[parallel]]
-types = ["u32", "row_u32", "u64", "row_u64"]
-distributions = ["random"]
-lengths = [1000000]
+types = [ "u32", "row_u32", "u64", "row_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
 
 [[parallel]]
-types = ["u64"]
-distributions = ["sorted", "reverse", "equal"]
-lengths = [1000000]
+types = [ "u32", "u64", "u128", "f64", "row_u32", "row_u64", "rec128_u64" ]
+distributions = [ "random" ]
+lengths = [ 1000000 ]
 
 [[parallel]]
-types = ["row_u32"]
-distributions = ["skew99"]
-lengths = [1000000]
+types = [ "u64" ]
+distributions = [ "sorted", "reverse", "sorted99", "equal", "far_swaps", "d16", "d4096", "sparse_digits", "zipf2", "skew99", "two_values", "sorted_tail", "runs", "bimodal" ]
+lengths = [ 1000000 ]
+
+# Keyed rows retain payload stability across fast paths and uneven buckets.
+[[parallel]]
+types = [ "row_u64" ]
+distributions = [ "sorted", "reverse", "equal", "d16", "hot50", "skew99", "sorted_tail" ]
+lengths = [ 1000000 ]
+
+[[parallel]]
+types = [ "row_u32" ]
+distributions = [ "skew99" ]
+lengths = [ 1000000 ]
+
+[[parallel]]
+types = [ "u128" ]
+distributions = [ "sparse8" ]
+lengths = [ 1000000 ]
+
+[[parallel]]
+types = [ "f64" ]
+distributions = [ "finite_signed" ]
+lengths = [ 1000000 ]
+
+[[parallel]]
+types = [ "rec128_u64" ]
+distributions = [ "sparse_digits" ]
+lengths = [ 1000000 ]
 
 [[include]]
 types = [ "u64", "row_u64" ]

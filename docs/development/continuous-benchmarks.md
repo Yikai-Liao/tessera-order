@@ -56,7 +56,17 @@ Each sample restores bounded batches, times only sort calls, then checks their o
 
 ## Cases
 
-The [continuous plan](../../bench/plans/continuous.toml) caps inputs at 1,000,000 records and selects 69 cases: 61 serial and eight four-thread. The former 10M serial random case is covered by the existing 1M case; all eight parallel shapes now use 1M records. Release and dedicated large-input experiments retain their own coverage. The [catalog](../../bench/catalog.toml) owns the per-revision warm-up, sample count and sampling budget, shared by Rust workers and completeness checks. Both time budgets are divided by the sample count for each fresh worker; startup/input preparation and at least one complete measured batch add overhead, not another full-case budget:
+The [continuous plan](../../bench/plans/continuous.toml) caps inputs at 1,000,000 records and selects 97 cases: the existing 61 serial cases and 36 four-thread cases. Release and dedicated large-input experiments retain their own coverage. Parallel coverage includes:
+
+- Random inputs at 1M records for every smoke record type: `u32`, `u64`, `u128`, `f64`, `row_u32`, `row_u64` and `rec128_u64`.
+- Fourteen non-random `u64` distributions at 1M, covering ordered, nearly ordered, repeated-key, skewed, sparse-digit and clustered inputs.
+- Seven keyed-row distributions at 1M for `row_u64`, plus `row_u32/skew99`, to check stable payload order through fast paths and uneven buckets.
+- Specialized `u128/sparse8`, `f64/finite_signed` and `rec128_u64/sparse_digits` inputs at 1M.
+- Random inputs at 65,536 records for `u32`, `u64`, `row_u32` and `row_u64`, covering parallel-entry overhead at smaller sizes, including serial fallback below the engine’s byte threshold.
+
+The four shards and per-case sampling budgets are unchanged. Compared with the former eight-case parallel selection, nominal warm-up plus sampling time for both revisions increases by 256 seconds in aggregate, approximately 64 seconds per shard. This excludes worker startup, input preparation and verification; the four-minute feedback target still requires hosted critical-path validation.
+
+The [catalog](../../bench/catalog.toml) owns the per-revision warm-up, sample count and sampling budget, shared by Rust workers and completeness checks. Both time budgets are divided by the sample count for each fresh worker; startup/input preparation and at least one complete measured batch add overhead, not another full-case budget:
 
 | Length | Warm-up | Paired samples | Sampling budget per revision |
 |---|---|---|---|

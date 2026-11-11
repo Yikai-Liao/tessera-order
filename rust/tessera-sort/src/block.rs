@@ -56,9 +56,7 @@ pub(crate) const MAX_RADIX_BITS: usize = 12;
 #[cfg(feature = "rayon")]
 mod parallel;
 #[cfg(feature = "rayon")]
-pub(crate) use parallel::{
-    BucketFinish, partition_digit_parallel_with_finish, partition_digit_parallel_with_visit,
-};
+pub(crate) use parallel::{BucketFinish, partition_digit_parallel};
 
 /// Logical input and output block cursors for the current pass.
 struct ScatterPosition {
@@ -128,20 +126,32 @@ const BLOCK_RECORDS_FLOOR: usize = 32;
 /// scratch and `O(R)` table entries — so the auxiliary memory stays
 /// `O(sqrt(n))` in `n` for a fixed record size and digit width.
 pub(crate) fn default_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
+    scaled_block_size(
+        balanced_block_size(len, record_bytes, radix),
+        record_bytes,
+        BLOCK_SCALE,
+    )
+}
+
+/// Applies a balanced-size multiple and the per-block amortization floors.
+/// Serial and parallel partitions share these floors with their own balance.
+fn scaled_block_size(balanced: usize, record_bytes: usize, scale: usize) -> usize {
     let floors = (BLOCK_BYTES_FLOOR / record_bytes).max(BLOCK_RECORDS_FLOOR);
-    balanced_block_size(len, record_bytes, radix)
-        .saturating_mul(BLOCK_SCALE)
-        .max(floors)
-        .max(1)
+    balanced.saturating_mul(scale).max(floors).max(1)
 }
 
 /// The balanced block size, rounded up.
 ///
 /// Evaluates `ceil(sqrt(10 n / (2 R s)))`; tests compare against an integer solve.
 fn balanced_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
-    let range = 1usize << radix;
-    let tables = DESCRIPTOR_BYTES_PER_POSITION as f64 * len as f64;
-    let scratch_per_record = 2.0 * range as f64 * record_bytes as f64;
+    balanced_size(len, record_bytes, 1 << radix, DESCRIPTOR_BYTES_PER_POSITION)
+}
+
+/// Solves `ceil(sqrt(d n / (2 B s)))` for `B` scratch buckets and `d` directory
+/// bytes per block position: the size at which both memory terms are equal.
+fn balanced_size(len: usize, record_bytes: usize, buckets: usize, directory_bytes: usize) -> usize {
+    let tables = directory_bytes as f64 * len as f64;
+    let scratch_per_record = 2.0 * buckets as f64 * record_bytes as f64;
     (tables / scratch_per_record).sqrt().ceil() as usize
 }
 
@@ -162,53 +172,32 @@ fn balanced_block_size_integer(len: usize, record_bytes: usize, radix: usize) ->
 /// Transfers a retired bucket borrow; later compaction never accesses it again.
 type Visit<'callback, 'records, T> = &'callback mut dyn FnMut(&'records mut [T]);
 
-/// Partitions `records` stably by the `radix`-bit digit of its keys at `shift`.
+/// A [`Visit`] that also receives the extractor, which classification has
+/// finished borrowing by the time buckets are visited.
+type KeyVisit<'callback, 'records, T, E> = &'callback mut dyn FnMut(&'records mut [T], &mut E);
+
+/// Partitions `records` stably by the `radix`-bit digit of its keys at `shift`
+/// and returns each bucket's cumulative end in records.
 ///
-/// Digit bits above the key width count as zero.
+/// Digit bits above the key width count as zero. `visit` is called on each
+/// bucket as soon as its records are contiguous in `records`, while they are
+/// still in cache.
+///
+/// Returns an empty vector for inputs of fewer than two records or zero-sized
+/// records.
 ///
 /// # Panics
 ///
 /// Panics if `radix` is not in `1..=MAX_RADIX_BITS` or `shift` is not below
-/// the key width. A key-function panic is resumed after every record is back
-/// in `records`.
-pub(crate) fn partition_digit<T, E: Extract<T>>(
-    records: &mut [T],
-    radix: usize,
-    shift: usize,
-    extractor: &mut E,
-    buffers: &mut Buffers<T>,
-) {
-    partition_digit_inner(records, radix, shift, extractor, buffers, None);
-}
-
-/// [`partition_digit`] that also returns each bucket's cumulative end in
-/// records, and calls `visit` on each bucket as soon as its records are
-/// contiguous in `records`, while they are still in cache.
-///
-/// Returns an empty vector for inputs of fewer than two records or zero-sized
-/// records. A `visit` panic is resumed after every record is back in `records`.
-pub(crate) fn partition_digit_with_ends<'records, T, E: Extract<T>>(
+/// the key width. A key-function or `visit` panic is resumed after every
+/// record is back in `records`.
+pub(crate) fn partition_digit<'records, T, E: Extract<T>>(
     records: &'records mut [T],
     radix: usize,
     shift: usize,
     extractor: &mut E,
     buffers: &mut Buffers<T>,
     visit: KeyVisit<'_, 'records, T, E>,
-) -> Vec<usize> {
-    partition_digit_inner(records, radix, shift, extractor, buffers, Some(visit))
-}
-
-/// A [`Visit`] that also receives the extractor, which classification has
-/// finished borrowing by the time buckets are visited.
-type KeyVisit<'callback, 'records, T, E> = &'callback mut dyn FnMut(&'records mut [T], &mut E);
-
-fn partition_digit_inner<'records, T, E: Extract<T>>(
-    records: &'records mut [T],
-    radix: usize,
-    shift: usize,
-    extractor: &mut E,
-    buffers: &mut Buffers<T>,
-    visit: Option<KeyVisit<'_, 'records, T, E>>,
 ) -> Vec<usize> {
     let record_bytes = core::mem::size_of::<T>();
     if records.len() < 2 || record_bytes == 0 {
@@ -226,8 +215,7 @@ fn partition_digit_inner<'records, T, E: Extract<T>>(
         extractor,
         buffers,
         move |extractor, record| ((extractor.key(record) & mask) >> shift).to_usize(),
-        visit.is_some(),
-        visit,
+        Some(visit),
     )
 }
 
@@ -258,35 +246,29 @@ pub(crate) fn partition_by<T, E: Extract<T>>(
         extractor,
         buffers,
         move |extractor, record| classify(extractor, record).min(buckets - 1),
-        true,
         None,
     )
 }
 
-/// Runs one block pass and compacts the result back into `records`.
-///
-/// Returns bucket ends when `want_ends` is set, and an empty vector otherwise.
+/// Runs one block pass, compacts the result back into `records` and returns
+/// each bucket's cumulative end in records.
 fn partition_pass<'records, T, E: Extract<T>>(
     records: &'records mut [T],
     buckets: usize,
     extractor: &mut E,
     buffers: &mut Buffers<T>,
     mut classify: impl FnMut(&mut E, &T) -> usize,
-    want_ends: bool,
     visit: Option<KeyVisit<'_, 'records, T, E>>,
 ) -> Vec<usize> {
     let radix = buckets.trailing_zeros() as usize;
     let block_size = default_block_size(records.len(), core::mem::size_of::<T>(), radix);
     let mut sorter = Partition::new(records, buckets, block_size, buffers);
     let classify_extractor = &mut *extractor;
-    let (panic, ends) = sorter.step_with_ends(
-        move |record| classify(classify_extractor, record),
-        want_ends,
-    );
-    if let Some(payload) = panic {
+    if let Some(payload) = sorter.step(move |record| classify(classify_extractor, record)) {
         sorter.compact();
         unwind::resume(payload);
     }
+    let ends = sorter.record_ends();
     // Classification has finished borrowing the extractor before any tile
     // callback starts; both phases use the same FnMut state in sequence.
     let panic = if let Some(visit) = visit {
@@ -299,38 +281,6 @@ fn partition_pass<'records, T, E: Extract<T>>(
         unwind::resume(payload);
     }
     ends
-}
-
-/// Returns the key bits that differ between at least two records of `records`.
-///
-/// # Panics
-///
-/// Panics if `records` is empty.
-pub(crate) fn varying_key_bits<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> u128 {
-    // The C reference scatters every digit, even digits that are constant in
-    // every key. The union and intersection of all keys find those digits
-    // without a histogram. A bit varies if it is set in the union but not in
-    // the intersection.
-    let mut union = extractor.key(&records[0]);
-    let mut intersection = union;
-    let full_mask = u128::MAX >> (128 - E::Value::BITS);
-    // Wide random keys vary in every bit within the first few records, so
-    // stop after a 1,025-record prefix if they already do. Otherwise finish
-    // with one uninterrupted, vectorizable scan.
-    let boundary = records.len().min(1025);
-    for item in &records[1..boundary] {
-        let key = extractor.key(item);
-        union |= key;
-        intersection = intersection & key;
-    }
-    if union.to_u128() ^ intersection.to_u128() != full_mask {
-        for item in &records[boundary..] {
-            let key = extractor.key(item);
-            union |= key;
-            intersection = intersection & key;
-        }
-    }
-    union.to_u128() ^ intersection.to_u128()
 }
 
 /// Branch hint for a condition that is almost never true, without a nightly
@@ -369,33 +319,38 @@ struct BucketWriter<T> {
 // access; transferring the buffers never transfers a shared record borrow.
 unsafe impl<T: Send> Send for BucketWriter<T> {}
 
-/// Physical block storage: the input slice and a scratch allocation.
+/// Physical block storage: the input slice and scratch segments.
 ///
 /// Physical block IDs number the scratch blocks first, then the full input
-/// blocks. Unlike the C reference's integer pairs, `T` may have no valid
-/// all-zero value, so scratch stays uninitialized and only recorded live
-/// prefixes are read. `input_borrow` keeps the input exclusively borrowed
-/// while raw pointers address it.
+/// blocks. Scratch is one allocation per scattered shard: a serial pass has
+/// one segment, and an adopted root keeps each shard's segment where it was
+/// written. Every segment holds the same power-of-two number of blocks, so a
+/// scratch ID splits into segment and offset without a division. Unlike the C
+/// reference's integer pairs, `T` may have no valid all-zero value, so scratch
+/// stays uninitialized and only recorded live prefixes are read.
+/// `input_borrow` keeps the input exclusively borrowed while raw pointers
+/// address it.
 struct BlockStorage<'a, T> {
     input: *mut T,
     input_len: usize,
     block_size: usize,
     scratch_blocks: usize,
     block_count: usize,
-    scratch: Vec<MaybeUninit<T>>,
-    // Parallel root partitions adopt each shard's scratch allocation directly.
-    #[cfg(feature = "rayon")]
-    scratch_segments: Vec<Vec<MaybeUninit<T>>>,
+    scratch: Vec<Vec<MaybeUninit<T>>>,
+    /// Base-two logarithm of the blocks in one scratch segment.
+    segment_blocks_log2: u32,
     input_borrow: PhantomData<&'a mut [T]>,
 }
 
 impl<'a, T> BlockStorage<'a, T> {
+    /// Creates single-segment storage, reusing the first retained segment.
     fn new(
         input: &'a mut [T],
         bucket_count: usize,
         block_size: usize,
-        mut scratch: Vec<MaybeUninit<T>>,
+        mut scratch: Vec<Vec<MaybeUninit<T>>>,
     ) -> Self {
+        assert!(bucket_count.is_power_of_two());
         let scratch_blocks = 2 * bucket_count;
         let full_blocks = input.len() / block_size;
         let block_count = full_blocks
@@ -405,7 +360,12 @@ impl<'a, T> BlockStorage<'a, T> {
         let scratch_len = scratch_blocks
             .checked_mul(block_size)
             .expect("scratch size overflow");
-        scratch.resize_with(scratch_len, MaybeUninit::<T>::uninit);
+        scratch.truncate(1);
+        if scratch.is_empty() {
+            scratch.push(Vec::new());
+        }
+        let segment = &mut scratch[0];
+        segment.resize_with(scratch_len, MaybeUninit::<T>::uninit);
         // The input tail has no full physical block. Start it in scratch;
         // the first bucket_count scratch blocks remain free for output.
         let tail_len = input.len() % block_size;
@@ -414,7 +374,7 @@ impl<'a, T> BlockStorage<'a, T> {
         unsafe {
             ptr::copy_nonoverlapping(
                 input.as_ptr().add(full_blocks * block_size),
-                scratch
+                segment
                     .as_mut_ptr()
                     .cast::<T>()
                     .add(bucket_count * block_size),
@@ -428,42 +388,24 @@ impl<'a, T> BlockStorage<'a, T> {
             scratch_blocks,
             block_count,
             scratch,
-            #[cfg(feature = "rayon")]
-            scratch_segments: Vec::new(),
+            segment_blocks_log2: scratch_blocks.trailing_zeros(),
             input_borrow: PhantomData,
         }
     }
 
     fn block_ptr(&mut self, physical: usize) -> *mut T {
         assert!(physical < self.block_count);
-        // SAFETY: the bounds check selects a full block in one of the two
-        // allocations, which stay alive and are never resized during sorting.
+        // SAFETY: the bounds check selects a full block in the input or in a
+        // scratch segment; every segment holds `1 << segment_blocks_log2`
+        // blocks. The allocations stay alive and are never resized during
+        // sorting.
         unsafe {
             if physical < self.scratch_blocks {
-                self.scratch
+                let block = physical & ((1 << self.segment_blocks_log2) - 1);
+                self.scratch[physical >> self.segment_blocks_log2]
                     .as_mut_ptr()
                     .cast::<T>()
-                    .add(physical * self.block_size)
-            } else {
-                self.input
-                    .add((physical - self.scratch_blocks) * self.block_size)
-            }
-        }
-    }
-
-    /// Returns a block pointer when scratch is held in shard allocations.
-    #[cfg(feature = "rayon")]
-    fn block_ptr_segmented(&mut self, physical: usize) -> *mut T {
-        assert!(physical < self.block_count);
-        // SAFETY: physical is in bounds; each scratch segment contains the same
-        // number of complete blocks and remains allocated for the partition.
-        unsafe {
-            if physical < self.scratch_blocks {
-                let segment_blocks = self.scratch_blocks / self.scratch_segments.len();
-                self.scratch_segments[physical / segment_blocks]
-                    .as_mut_ptr()
-                    .cast::<T>()
-                    .add((physical % segment_blocks) * self.block_size)
+                    .add(block * self.block_size)
             } else {
                 self.input
                     .add((physical - self.scratch_blocks) * self.block_size)
@@ -476,12 +418,15 @@ impl<'a, T> BlockStorage<'a, T> {
 ///
 /// Each pass resizes and rewrites what it uses.
 pub(crate) struct Buffers<T> {
-    scratch: Vec<MaybeUninit<T>>,
+    /// Scratch segments; a pass reuses the first one.
+    scratch: Vec<Vec<MaybeUninit<T>>>,
     block_order: Vec<u32>,
     next_block_order: Vec<u32>,
     bucket_ids: Vec<u16>,
     partial_blocks: Vec<PartialBlock>,
     writers: Vec<BucketWriter<T>>,
+    /// Per-bucket block counts during scatter, cumulative logical block ends
+    /// after directory construction. Adoption produces the same end offsets.
     counts: Vec<usize>,
     #[cfg(debug_assertions)]
     seen: Vec<bool>,
@@ -520,20 +465,20 @@ impl<T> Default for Buffers<T> {
 /// The state of one block partition over an input slice.
 ///
 /// At pass boundaries, `block_order` maps logical order to physical storage.
-/// Its `bucket_count..active_blocks_end` range holds the current record
-/// sequence; the prefix and suffix are free blocks. `partial_blocks` records
-/// the blocks whose live prefix is shorter than a block.
+/// `active_blocks` holds the current record sequence; the prefix and suffix
+/// are free blocks. Its start is a reserve length, not a logical bucket count:
+/// a single-shard pass reserves one block per bucket, and adoption retains
+/// every shard's reserve. `partial_blocks` records shorter live prefixes.
 struct Partition<'a, 'w, T> {
     buffers: &'w mut Buffers<T>,
     blocks: BlockStorage<'a, T>,
-    bucket_count: usize,
+    active_blocks: core::ops::Range<usize>,
     block_order: Vec<u32>,
     next_block_order: Vec<u32>,
     /// Bucket ID of each output block, used to build `next_block_order` after
     /// scatter. `u16` holds bucket IDs for digit widths up to `MAX_RADIX_BITS`.
     bucket_ids: Vec<u16>,
     partial_blocks: Vec<PartialBlock>,
-    active_blocks_end: usize,
     input_materialized: bool,
 }
 
@@ -585,12 +530,11 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         Self {
             buffers,
             blocks,
-            bucket_count,
+            active_blocks: bucket_count..active_blocks_end,
             block_order,
             next_block_order,
             bucket_ids,
             partial_blocks,
-            active_blocks_end,
             input_materialized: false,
         }
     }
@@ -616,7 +560,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             assert!(!seen[physical as usize]);
             seen[physical as usize] = true;
         }
-        assert!(self.active_blocks_end <= self.block_order.len());
+        assert!(self.active_blocks.end <= self.block_order.len());
         assert!(
             self.partial_blocks
                 .windows(2)
@@ -625,27 +569,26 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         assert!(
             self.partial_blocks
                 .iter()
-                .all(|p| p.order_index >= self.bucket_count
-                    && p.order_index < self.active_blocks_end
+                .all(|p| self.active_blocks.contains(&p.order_index)
                     && p.len < self.blocks.block_size)
         );
         let mut partial = 0;
-        let total: usize = (self.bucket_count..self.active_blocks_end)
+        let total: usize = self
+            .active_blocks
+            .clone()
             .map(|i| self.next_block_len(i, &mut partial))
             .sum();
         assert_eq!(total, self.blocks.input_len);
     }
 
-    /// Scatters one pass, optionally returning cumulative ends for recursion.
-    fn step_with_ends<F: FnMut(&T) -> usize>(
-        &mut self,
-        classify: F,
-        want_ends: bool,
-    ) -> (Option<unwind::Payload>, Vec<usize>) {
+    /// Scatters a single-shard pass and returns any caught classification panic.
+    /// Its free prefix reserves exactly one output block per logical bucket;
+    /// adopted directories have multiple shard reserves and only finish.
+    fn step<F: FnMut(&T) -> usize>(&mut self, classify: F) -> Option<unwind::Payload> {
         let (mut buckets, mut counts) = self.begin_pass();
         let mut position = ScatterPosition {
-            input: self.bucket_count,
-            output: self.bucket_count,
+            input: self.active_blocks.start,
+            output: self.active_blocks.start,
         };
         // The classifier is moved into the closure, not borrowed: a digit closure
         // keeps its mask and shift in registers only when the scatter owns it. A
@@ -667,7 +610,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 })
                 .sum();
             let mut partial = 0;
-            let before: usize = (self.bucket_count..position.input)
+            let before: usize = (self.active_blocks.start..position.input)
                 .map(|input| self.next_block_len(input, &mut partial))
                 .sum();
             let offset = written - before;
@@ -676,22 +619,49 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             // still follows the original read-before-reserve protocol.
             self.scatter(&mut buckets, &mut counts, &mut position, offset, |_| 0);
         }
-        self.active_blocks_end = position.output;
-        let ends = self.finish_pass(&buckets, counts, want_ends);
+        self.active_blocks.end = position.output;
+        self.finish_pass(&buckets, counts);
         self.buffers.writers = buckets;
         #[cfg(debug_assertions)]
         self.validate();
-        (panic, ends)
+        panic
     }
 
-    /// Reserves the first `bucket_count` free blocks, one per bucket, and gives
-    /// every bucket an empty write cursor. Counts start at one because that
-    /// block is already assigned to the bucket.
+    /// Logical blocks of `bucket` after a single-shard pass. Only the last
+    /// one is partial: a writer takes a new block as soon as it fills one.
+    fn bucket_blocks(&self, bucket: usize) -> core::ops::Range<usize> {
+        let start = match bucket.checked_sub(1) {
+            Some(previous) => self.partial_blocks[previous].order_index + 1,
+            None => self.active_blocks.start,
+        };
+        start..self.partial_blocks[bucket].order_index + 1
+    }
+
+    /// Each bucket's cumulative end in records after a single-shard pass.
+    ///
+    /// Record boundaries are not block boundaries. The directory already names
+    /// every bucket's blocks and partial length, so this is one pass over the
+    /// bucket table, not over the records.
+    fn record_ends(&mut self) -> Vec<usize> {
+        let mut ends = self.buffers.ends.pop().unwrap_or_default();
+        ends.clear();
+        ends.reserve_exact(self.partial_blocks.len());
+        let mut records = 0;
+        for (bucket, partial) in self.partial_blocks.iter().enumerate() {
+            let full_blocks = self.bucket_blocks(bucket).len() - 1;
+            records += full_blocks * self.blocks.block_size + partial.len;
+            ends.push(records);
+        }
+        ends
+    }
+
+    /// Gives each free-prefix block to one bucket with an empty write cursor.
+    /// Counts start at one because that block is already assigned.
     fn begin_pass(&mut self) -> (Vec<BucketWriter<T>>, Vec<usize>) {
         let mut buckets = core::mem::take(&mut self.buffers.writers);
         buckets.clear();
-        buckets.reserve(self.bucket_count);
-        for i in 0..self.bucket_count {
+        buckets.reserve(self.active_blocks.start);
+        for i in 0..self.active_blocks.start {
             let out = self.blocks.block_ptr(self.block_order[i] as usize);
             buckets.push(BucketWriter {
                 next: out,
@@ -702,51 +672,24 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         }
         let mut counts = core::mem::take(&mut self.buffers.counts);
         counts.clear();
-        counts.resize(self.bucket_count, 1);
+        counts.resize(self.active_blocks.start, 1);
         (buckets, counts)
     }
 
-    /// Rebuilds the logical block order from the order the buckets filled,
-    /// records each bucket's partially filled last block, and returns each
-    /// bucket's cumulative record end.
-    fn finish_pass(
-        &mut self,
-        buckets: &[BucketWriter<T>],
-        counts: Vec<usize>,
-        want_ends: bool,
-    ) -> Vec<usize> {
-        // Record boundaries are not block boundaries: a bucket's last block is
-        // usually partial, and a caller that wants to recurse on bucket slices
-        // needs the record offsets. The cursor knows how much of that last
-        // block is free, so this is one pass over the bucket table, not a pass
-        // over the records.
-        let mut record_ends = if want_ends {
-            self.buffers.ends.pop().unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-        if want_ends {
-            record_ends.clear();
-            record_ends.reserve_exact(counts.len());
-            let mut total = 0usize;
-            for (bucket, &blocks) in buckets.iter().zip(counts.iter()) {
-                // SAFETY: both pointers delimit the same bucket's output block.
-                let free = unsafe { bucket.end.offset_from(bucket.next) as usize };
-                total += blocks * self.blocks.block_size - free;
-                record_ends.push(total);
-            }
-        }
+    /// Rebuilds the logical block order from the order the buckets filled and
+    /// records each bucket's partially filled last block.
+    fn finish_pass(&mut self, buckets: &[BucketWriter<T>], counts: Vec<usize>) {
         // A separate starts Vec would allocate once per digit. Counts are dead
         // after scatter, so reuse their allocation for prefix offsets and then
         // advance those offsets while rebuilding the block order.
         let mut starts = counts;
-        let mut start = self.bucket_count;
+        let mut start = self.active_blocks.start;
         for count in &mut starts {
             let next = start + *count;
             *count = start;
             start = next;
         }
-        for i in 0..self.active_blocks_end {
+        for i in 0..self.active_blocks.end {
             let b = self.bucket_ids[i] as usize;
             let j = starts[b];
             starts[b] += 1;
@@ -761,16 +704,14 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 };
             }
         }
-        assert!(self.active_blocks_end + self.bucket_count <= self.block_order.len());
-        self.next_block_order[..self.bucket_count].copy_from_slice(
-            &self.block_order[self.active_blocks_end..self.active_blocks_end + self.bucket_count],
-        );
-        self.next_block_order[self.active_blocks_end + self.bucket_count..]
-            .copy_from_slice(&self.block_order[self.active_blocks_end + self.bucket_count..]);
-        self.active_blocks_end += self.bucket_count;
+        let active_end = self.active_blocks.end + self.active_blocks.start;
+        assert!(active_end <= self.block_order.len());
+        self.next_block_order[..self.active_blocks.start]
+            .copy_from_slice(&self.block_order[self.active_blocks.end..active_end]);
+        self.next_block_order[active_end..].copy_from_slice(&self.block_order[active_end..]);
+        self.active_blocks.end = active_end;
         core::mem::swap(&mut self.block_order, &mut self.next_block_order);
         self.buffers.counts = starts;
-        record_ends
     }
 
     // Pass setup and block reordering need state that scatter does not.
@@ -789,7 +730,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         let mut partial = self
             .partial_blocks
             .partition_point(|p| p.order_index < position.input);
-        while position.input < self.active_blocks_end {
+        while position.input < self.active_blocks.end {
             let input = position.input;
             let source = self.blocks.block_ptr(self.block_order[input] as usize);
             let length = self.next_block_len(input, &mut partial);
@@ -861,22 +802,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     fn compact_with(
         &mut self,
         ends: &[usize],
-        visit: Option<Visit<'_, 'a, T>>,
-    ) -> Option<unwind::Payload> {
-        #[cfg(feature = "rayon")]
-        if !self.blocks.scratch_segments.is_empty() {
-            return self.compact_with_access(ends, visit, |blocks, physical| {
-                blocks.block_ptr_segmented(physical)
-            });
-        }
-        self.compact_with_access(ends, visit, |blocks, physical| blocks.block_ptr(physical))
-    }
-
-    fn compact_with_access(
-        &mut self,
-        ends: &[usize],
         mut visit: Option<Visit<'_, 'a, T>>,
-        mut block_ptr: impl FnMut(&mut BlockStorage<'a, T>, usize) -> *mut T,
     ) -> Option<unwind::Payload> {
         // Sorting is finished. Reuse the output buffer as the inverse map:
         // physical block ID -> position in block_order.
@@ -917,15 +843,13 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         let mut free_logical = 0;
         let mut free_physical = self.block_order[free_logical] as usize;
         for destination in self.blocks.scratch_blocks..self.block_order.len() {
-            let input = destination - self.bucket_count;
+            let input = destination - self.active_blocks.start;
             let mut output = block_positions[destination] as usize;
             let source = self.block_order[input] as usize;
-            if output > input && output < self.active_blocks_end {
-                debug_assert!(
-                    free_logical < self.bucket_count || free_logical >= self.active_blocks_end
-                );
-                let from = block_ptr(&mut self.blocks, destination);
-                let to = block_ptr(&mut self.blocks, free_physical);
+            if output > input && output < self.active_blocks.end {
+                debug_assert!(!self.active_blocks.contains(&free_logical));
+                let from = self.blocks.block_ptr(destination);
+                let to = self.blocks.block_ptr(free_physical);
                 // SAFETY: both physical IDs are valid full blocks. Free block
                 // receives live output which would otherwise be overwritten.
                 // ptr::copy preserves uninitialized padding without reading it
@@ -941,7 +865,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 output = block_positions[destination] as usize;
             }
             let length = self.next_block_len(input, &mut partial);
-            let from = block_ptr(&mut self.blocks, source);
+            let from = self.blocks.block_ptr(source);
             assert!(start + length <= self.blocks.input_len);
             // Completed partials can only shorten preceding output: start <=
             // (destination - scratch_blocks) * block_size, and
@@ -964,11 +888,11 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 free_logical = output;
             }
         }
-        for input in self.block_order.len() - self.bucket_count..self.active_blocks_end {
+        for input in self.block_order.len() - self.active_blocks.start..self.active_blocks.end {
             let source = self.block_order[input] as usize;
             assert!(source < self.blocks.scratch_blocks);
             let length = self.next_block_len(input, &mut partial);
-            let from = block_ptr(&mut self.blocks, source);
+            let from = self.blocks.block_ptr(source);
             assert!(start + length <= self.blocks.input_len);
             // SAFETY: the remaining live prefix fits the checked output range;
             // ptr::copy permits overlap and preserves padding bytes.
@@ -995,6 +919,8 @@ impl<T> Drop for Partition<'_, '_, T> {
         if !self.input_materialized {
             self.compact();
         }
+        // An adopted root releases the other shards' segments here.
+        self.blocks.scratch.truncate(1);
         self.buffers.scratch = core::mem::take(&mut self.blocks.scratch);
         self.buffers.block_order = core::mem::take(&mut self.block_order);
         self.buffers.next_block_order = core::mem::take(&mut self.next_block_order);
@@ -1073,16 +999,14 @@ mod tests {
         let mut calls = 0;
         let panic = {
             let mut sorter = Partition::new(&mut records, 4, block_size, &mut buffers);
-            let (panic, ends) = sorter.step_with_ends(
-                |record: &(u32, u32)| {
-                    calls += 1;
-                    if calls == at {
-                        std::panic::panic_any(0x71u32);
-                    }
-                    (record.0 & 3) as usize
-                },
-                true,
-            );
+            let panic = sorter.step(|record: &(u32, u32)| {
+                calls += 1;
+                if calls == at {
+                    std::panic::panic_any(0x71u32);
+                }
+                (record.0 & 3) as usize
+            });
+            let ends = sorter.record_ends();
             assert!(panic.is_some(), "panic at {at} of {len} was not caught");
             // The recovery re-scatters unread records without the failed
             // extractor, which must not run a second time.
@@ -1172,9 +1096,9 @@ mod tests {
                 let mut visited = 0;
                 let payload = {
                     let mut sorter = Partition::new(&mut records, 4, block_size, &mut buffers);
-                    let (panic, ends) =
-                        sorter.step_with_ends(|record: &(u32, u32)| (record.0 & 3) as usize, true);
+                    let panic = sorter.step(|record: &(u32, u32)| (record.0 & 3) as usize);
                     assert!(panic.is_none());
+                    let ends = sorter.record_ends();
                     let mut callback = |bucket: &mut [(u32, u32)]| {
                         // Buckets materialize in order, so the slice must hold
                         // exactly the records of the bucket that just landed.

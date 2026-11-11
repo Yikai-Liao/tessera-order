@@ -53,6 +53,9 @@ test("sessions retain immutable executable pairs and settings", async (t) => {
   await recordValidation(directory, build, session);
   assert.equal(await isValidated(directory, build, session), true);
   assert.equal(await isValidated(directory, build, { ...session, group: "u64/hot50" }), false);
+  assert.equal(await isValidated(directory, build, { ...session, blocks: 3 }), false);
+  await writeFile(join(directory, "session.json"), JSON.stringify({ ...session, blocks: 3 }));
+  assert.equal((await loadSession(directory)).blocks, 3);
   assert.equal(
     await isValidated(directory, { ...build, compareSha256: "0".repeat(64) }, session),
     false,
@@ -76,6 +79,8 @@ test("resume rejects incomplete or altered experiments before execution", async 
     { ...session, build: undefined },
     { ...session, build: { ...session.build, name: "portable-simd" } },
     { ...session, sampleMs: 0 },
+    { ...session, blocks: 2 },
+    { ...session, blocks: "3" },
   ]) {
     await writeFile(join(directory, "session.json"), JSON.stringify(invalid));
     await assert.rejects(loadSession(directory));

@@ -10,7 +10,6 @@ import {
   buildArtifact,
   copyLibraryRevision,
   copySnapshot,
-  simdFeatures,
   sourceHash,
   withWorkspace,
 } from "./workspace.ts";
@@ -210,6 +209,32 @@ test("Cargo artifacts retain paths and build provenance", async (t) => {
         executable,
         provenance: { ...provenance, library_features },
       });
+      const revision = {
+        revisions: {
+          libraries: { "tessera-sort": library_features, "revision-baseline": ["portable-simd"] },
+        },
+      };
+      await writeFile(
+        join(directory, "provenance.json"),
+        JSON.stringify({ ...provenance, ...revision }),
+      );
+      await assert.rejects(buildArtifact(output, name), /features differ/);
+      const clone = {
+        reason: "compiler-artifact",
+        target: { name: "revision_baseline", kind: ["lib"] },
+        features: ["portable-simd"],
+      };
+      const linked = output + "\n" + JSON.stringify(clone);
+      assert.deepEqual(
+        (await buildArtifact(linked, name)).provenance.revisions,
+        revision.revisions,
+      );
+      clone.features = [];
+      await assert.rejects(
+        buildArtifact(output + "\n" + JSON.stringify(clone), name),
+        /features differ/,
+      );
+      await writeFile(join(directory, "provenance.json"), JSON.stringify(provenance));
       await assert.rejects(buildArtifact("", name), /Expected one/);
       await assert.rejects(
         buildArtifact(JSON.stringify(messages[2]), name),
@@ -231,24 +256,5 @@ test("Cargo artifacts retain paths and build provenance", async (t) => {
         /Expected one Tessera library artifact/,
       );
     }
-  }
-});
-
-test("revision comparison enables historical SIMD without changing current builds", () => {
-  assert.deepEqual(simdFeatures('[features]\nportable-simd = ["dep:fearless_simd"]\n'), [
-    "portable-simd",
-  ]);
-  for (const dependency of [
-    '"1.2"',
-    '{ version = "1.2" }',
-    '{ version = "1.2", optional = false }',
-  ]) {
-    assert.deepEqual(simdFeatures(`[dependencies]\nfearless_simd = ${dependency}`), []);
-  }
-  for (const manifest of [
-    "[dependencies]\n",
-    '[dependencies]\nfearless_simd = { version = "1.2", optional = true }',
-  ]) {
-    assert.throws(() => simdFeatures(manifest), /no supported SIMD backend/);
   }
 });

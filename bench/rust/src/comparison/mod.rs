@@ -33,8 +33,7 @@ struct Options {
     plan: crate::plan::Plan,
     plan_path: Option<PathBuf>,
     output_dir: PathBuf,
-    min_sample_ns: u64,
-    prepared_cap_bytes: usize,
+    sampling: run::Sampling,
 }
 impl Options {
     /// Parses the executable arguments into one comparison command.
@@ -55,8 +54,11 @@ impl Options {
             )?,
             plan_path: None,
             output_dir: "bench/results/local".into(),
-            min_sample_ns: 5_000_000,
-            prepared_cap_bytes: 256 << 20,
+            sampling: run::Sampling {
+                min_sample_ns: 5_000_000,
+                prepared_cap_bytes: 256 << 20,
+                blocks: catalog().paired_blocks.extended.count,
+            },
         };
         while let Some(key) = args.next() {
             if key == "--help" || key == "-h" {
@@ -71,15 +73,23 @@ impl Options {
                 "--group" => options.group = Some(value),
                 "--plan" => options.plan_path = Some(value.into()),
                 "--out" => options.output_dir = value.into(),
+                "--blocks" => {
+                    let count = value.parse::<usize>()?;
+                    let budgets = &catalog().paired_blocks;
+                    if count != budgets.short.count && count != budgets.extended.count {
+                        return Err(format!("unsupported paired-block budget: {count}").into());
+                    }
+                    options.sampling.blocks = count;
+                }
                 "--sample-ms" => {
-                    options.min_sample_ns = value
+                    options.sampling.min_sample_ns = value
                         .parse::<u64>()?
                         .checked_mul(1_000_000)
                         .filter(|&n| n > 0)
                         .ok_or("sample duration must be positive")?
                 }
                 "--memory-mib" => {
-                    options.prepared_cap_bytes = value
+                    options.sampling.prepared_cap_bytes = value
                         .parse::<usize>()?
                         .checked_mul(1 << 20)
                         .filter(|&n| n > 0)
@@ -105,7 +115,7 @@ impl Options {
                 && options.plan_path.is_some()
                 && !available.iter().any(|entry| entry.name == id)
             {
-                return Err(format!("algorithm {id} is unavailable; enable the required compare-native or rayon feature").into());
+                return Err(format!("algorithm {id} is unavailable; enable its compare-native/rayon feature or use tools compare revisions for revision adapters").into());
             }
         }
         Ok(options)
@@ -204,14 +214,21 @@ fn create_manifest(options: &Options, cases: &[InputCase]) -> Value {
                     .filter(|v| v.supports(&input))
                     .map(|v| v.name)
                     .collect();
-                json!({"ty":case.ty,"distribution":case.distribution,"len":case.len,"variants":supported})
+                let entry = json!({"ty":case.ty,"distribution":case.distribution,"len":case.len,"variants":supported});
+                #[cfg(tessera_bench_revisions)]
+                let entry = {
+                    let mut entry = entry;
+                    entry["revision_entry_offsets"] = json!(input.revision_entries());
+                    entry
+                };
+                entry
             })
             .collect::<Vec<_>>()
     );
     provenance["build"] = json!(BUILD);
-    provenance["min_sample_ns"] = json!(options.min_sample_ns);
-    provenance["prepared_cap_bytes"] = json!(options.prepared_cap_bytes);
-    provenance["blocks"] = json!(run::BLOCKS);
+    provenance["min_sample_ns"] = json!(options.sampling.min_sample_ns);
+    provenance["prepared_cap_bytes"] = json!(options.sampling.prepared_cap_bytes);
+    provenance["blocks"] = json!(options.sampling.blocks);
     provenance["variants"] = json!(
         options
             .variants()
@@ -310,6 +327,7 @@ fn verify_memory_build(options: &Options) -> Result<()> {
         "cxx",
         "native_build",
         "native_sources",
+        "revisions",
     ] {
         if memory[field] != timing[field] {
             return Err(
@@ -356,6 +374,7 @@ fn measure_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
     let exe = std::env::current_exe()?.with_file_name("memory");
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("--out").arg(&options.output_dir);
+    cmd.arg("--blocks").arg(options.sampling.blocks.to_string());
     if let Some(path) = &options.plan_path {
         cmd.arg("--plan").arg(path);
     } else {
@@ -378,7 +397,7 @@ fn measure_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
         .filter(|r| r["kind"] == "observation" && r["phase"] == "end" && r["build"] == BUILD)
         .filter_map(|r| r["group"].as_str().map(str::to_owned))
         .collect();
-    // An interrupted group is replaced as a unit so every retained group has nine complete blocks.
+    // Replace an interrupted group as a unit; retained groups have their full declared budget.
     let retained: Vec<_> = existing
         .into_iter()
         .filter(|r| {
@@ -403,8 +422,7 @@ fn measure_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
                 case,
                 &options.variants(),
                 bytes,
-                options.min_sample_ns,
-                options.prepared_cap_bytes,
+                &options.sampling,
                 BUILD,
                 |sample| append_record(&mut f, &sample),
             )?;
@@ -432,7 +450,7 @@ pub fn main(memory: bool) -> Result<()> {
             "compare <list|validate|run>"
         };
         println!(
-            "{command} [--suite smoke|release | --plan FILE] [--group TYPE/SHAPE] [--out DIR] [--sample-ms N] [--memory-mib N]"
+            "{command} [--suite smoke|release | --plan FILE] [--group TYPE/SHAPE] [--out DIR] [--sample-ms N] [--memory-mib N] [--blocks 3|9]"
         );
         return Ok(());
     }
@@ -618,8 +636,11 @@ mod tests {
                 .unwrap(),
             plan_path: None,
             output_dir,
-            min_sample_ns: 1_000_000,
-            prepared_cap_bytes: 1 << 20,
+            sampling: super::run::Sampling {
+                min_sample_ns: 1_000_000,
+                prepared_cap_bytes: 1 << 20,
+                blocks: super::catalog().paired_blocks.extended.count,
+            },
         };
         let path = options
             .output_dir

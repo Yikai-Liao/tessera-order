@@ -11,12 +11,28 @@ use tessera_sort::thresholds::{INSERTION_MAX, TILE_BYTES};
 #[derive(Deserialize)]
 pub(crate) struct Catalog {
     schema: u32,
+    #[cfg(feature = "compare")]
+    #[serde(rename = "pairedBlocks")]
+    pub(crate) paired_blocks: PairedBlocks,
     pub(crate) algorithms: Vec<Algorithm>,
     types: Vec<RecordType>,
     smoke: Inventory,
     pub(crate) comparison: Inventory,
     #[serde(rename = "revisionSampling")]
     revision_sampling: Vec<RevisionSampling>,
+}
+/// Supported short and extended paired measurement budgets.
+#[cfg(feature = "compare")]
+#[derive(Deserialize)]
+pub(crate) struct PairedBlocks {
+    pub(crate) short: BlockBudget,
+    pub(crate) extended: BlockBudget,
+}
+/// Number of blocks to retain; report statistics own agreement checks.
+#[cfg(feature = "compare")]
+#[derive(Deserialize)]
+pub(crate) struct BlockBudget {
+    pub(crate) count: usize,
 }
 /// Per-revision measurement budget shared with trusted report validation.
 #[derive(Deserialize)]

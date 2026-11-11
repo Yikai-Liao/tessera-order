@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Scalar and blocked adjacent-pair scans.
+//! Scalar and blocked adjacent-pair scans for `portable_simd`.
 //!
-//! Blocked scans support keys outside the vector backend; the compiler can
-//! auto-vectorize them at the target's baseline width. Scalar scans also serve
-//! short inputs and keys for which the vector backend has no kernel.
+//! Short scans and key types wider than a vector register use the scalar
+//! scan. `Reverse<K>` uses the blocked scan, which the compiler vectorizes at
+//! the width of the backend selected by the caller.
 
 use crate::RadixKey;
 
@@ -13,21 +13,13 @@ use crate::RadixKey;
 /// Scans 32 pairs per mask update. The inner loop has a fixed trip count and
 /// unchecked indexing, allowing LLVM to vectorize encodings supported by the
 /// ambient target. Building the mask locates the first inversion without a
-/// second pass over the block.
+/// second pass over the block. The caller has already checked the first few
+/// pairs one at a time.
 #[inline(always)]
-pub(crate) fn first_inversion<K: RadixKey>(keys: &[K]) -> Option<usize> {
+pub(crate) fn blocked<K: RadixKey>(keys: &[K]) -> Option<usize> {
     const BLOCK: usize = 32;
-    // Most inversions in unsorted input sit within the first few pairs, and a
-    // scalar check finds them without paying for a full block.
-    const PEEL: usize = 4;
     let pairs = keys.len().saturating_sub(1);
     let mut index = 0;
-    while index < PEEL.min(pairs) {
-        if keys[index].encode() > keys[index + 1].encode() {
-            return Some(index);
-        }
-        index += 1;
-    }
     while index + BLOCK <= pairs {
         let mut mask = 0u32;
         for offset in 0..BLOCK {

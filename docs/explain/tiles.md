@@ -1,54 +1,44 @@
 # 5. Finishing tiles
 
-A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so that one `u16` can hold any position in it. Its scratch buffer is the same size and stays in the L2 cache. Inside a tile, a second buffer is cheap, so Tessera can use ordinary counting passes. The open questions are which digits to use and whether to finish with MSD or LSD. This page follows `Sorter::sort_tile` in [`engine.rs`](../../rust/tessera-sort/src/engine.rs).
+A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so that one `u16` can hold any position in it. Its scratch buffer is the same size and stays in the L2 cache. Inside a tile, a second buffer is cheap, so Tessera can use ordinary counting passes. The open questions are which digits to use and whether to finish with MSD or LSD. Strategy selection belongs to [`engine/plan.rs`](../../rust/tessera-sort/src/engine/plan.rs); [`engine/tile.rs`](../../rust/tessera-sort/src/engine/tile.rs) executes the selected leaf and owns its scratch and panic recovery.
 
 ## Three leaves
 
 | Leaf | Used when | How it works |
 |---|---|---|
 | <span id="insertion">**Insertion sort**</span> | the tile has at most 48 records | stable insertion on encoded keys |
-| <span id="tile-msd">**Tile MSD**</span> | the LSD plan needs more than two passes, and a sample finds at most two top-digit buckets or the cost model expects MSD to win | one counting pass on the top digit through scratch, then each bucket is finished on its own: insertion for buckets of at most 48 records, `sort_tile` again for larger ones |
+| <span id="tile-msd">**Tile MSD**</span> | more than two width-bounded passes would be needed to finish flat | one counting pass on the top digit through scratch, then each bucket is finished on its own: insertion for buckets of at most 48 records, `sort_tile` again for larger ones |
 | <span id="tile-lsd">**Tile LSD**</span> | otherwise | one counting pass per planned digit, from the lowest digit up, alternating between the tile and scratch |
 
-Below 48 records, the work of clearing and scanning bucket tables costs more than insertion's shifts. The threshold is `INSERTION_MAX` in `lib.rs`.
+Below 48 records, the work of clearing and scanning bucket tables costs more than insertion's shifts. The threshold is `thresholds::INSERTION_MAX` in `lib.rs`.
 
 ## Digit planning
 
 The width of a counting digit is limited by its cursor table, one `u16` per bucket. `tile_digit_bits` picks the widest table that
 
 - is no larger than the tile itself in bytes (a 14-bit table is already 32 KiB);
-- has at most 8 buckets per record, or 4 for records wider than 8 bytes, so clearing and scanning empty buckets cannot dominate. A wider record fits fewer records in the same table budget, so its buckets would be mostly empty;
+- has at most 4 buckets per record, so clearing and scanning empty buckets cannot dominate. Records of at most 8 bytes already meet this through the byte limit; wider records fit fewer records in the same table budget, so the record limit decides for them;
 - is between 6 and 14 bits wide.
 
-`plan_digits` then covers the [varying bits](keys.md#varying-bits) with windows of at most that width, highest window first. Two rules shape the plan:
+The planner first tries to finish in one or two flat passes. One window suffices when all varying bits fit its width. Otherwise, it takes the widest top window and checks whether the remaining bits fit another. If they do, it searches the legal split points for the smallest total bucket table. At most 14 split points need consideration; no dynamic-programming table or sample of records is needed.
 
-1. **Windows skip constant bits.** A window starts at the highest remaining varying bit and is cut back to its lowest varying bit, so a pass never ends on bits that cannot change. Gaps between varying bits are jumped over.
-2. **Contiguous runs are tiled evenly.** If every bit below the top varying bit varies, the run is split into equal windows over the same number of passes. 32 bits with 14-bit tables become 11 + 11 + 10 instead of 14 + 14 + 4. Both plans move each record three times, but the even one clears and scans 5,120 bucket slots instead of 32,784.
+For example, 20 adjacent varying bits and a 14-bit limit use 10 + 10 bits, rather than 14 + 6. Both plans move each record twice, but balanced tables use 2,048 slots rather than 16,448. The rule also handles shifted runs and gaps: two far-apart varying bits need two one-bit passes.
 
-Toggle bits and change the table width to see both rules. The figure also models the finish choice for 8,192 `u64` keys with the selected table limit; the engine itself uses 14 bits at this size. Change the sample's distinct-bucket count to explore the low-fanout rule:
+When two windows cannot finish the tile, one MSD pass consumes the highest digit. Each child then chooses its own plan from its actual remaining variation. There is no predicted population, singleton assumption or recursive sample model. The figure shows the chosen flat plan or the first MSD partition; an MSD partition's child passes are not included in its table total.
 
 <DigitPlanner />
 
-## MSD or LSD: the cost model
+## Actual children instead of predicted work
 
-Both leaves move records with counting passes, so the model counts passes over the tile:
+An MSD partition preserves the savings that the planner previously tried to predict. An insertion-sized child needs no further variation scan. A larger constant child finishes after confirmation. A child that still has many varying bits can partition again; each partition removes its digit from the candidate mask. Concentrated distributions therefore keep recursive finishing without a recursive cost estimate.
 
-- **LSD** costs one pass per planned digit: `passes`.
-- **MSD** costs one pass per level it descends before the largest bucket falls to 48 records or fewer, plus one for the insertion finish at the bottom: `depth + 1`.
+This simpler routing may choose MSD where a longer LSD plan would be faster. The [measurement record](../design/port.md) lists those trade-offs and outstanding performance acceptance; removing an estimate is not proof that its choices never helped.
 
-To estimate the depth, the engine samples 128 keys on the top digit and counts distinct digit values. If every sampled key landed in a different bucket, the sample is too small to measure the spread, and the full bucket count is assumed. Otherwise the number of distinct values is the expected fan-out. The descent divides the tile size by the fan-out until it reaches 48.
-
-For plans longer than two passes, a sample with at most two distinct buckets selects MSD directly. That small sample cannot estimate the largest child reliably: one stable split may leave a dominant bucket constant or small enough for insertion, even when the average-fan-out estimate predicts no win. Other samples select MSD only when `depth + 1 < passes`. Plans of one or two passes skip the sample: one MSD level plus its finish already costs two passes.
-
-Charging an MSD level as more than one pass kept three-pass plans on LSD, which was 11–38% slower for 32-bit keys at 1K–64K records (`MSD_FINISH_PASSES` in `engine.rs`).
-
-Three examples, for 8-byte records (`u64`):
-
-| Tile | Varying bits | LSD plan | Top-digit sample | Decision |
-|---|---|---|---|---|
-| 8,192 random keys | 64 | 14-bit tables, tiled evenly: 13 + 13 + 13 + 13 + 12, 5 passes | 127 or 128 distinct 14-bit values: 1 or 2 levels | MSD: at most 2 + 1 = 3 < 5 |
-| 8,192 keys in 0..2²⁰ | 20 | 10 + 10, 2 passes | skipped | LSD |
-| 1,000 `u64` keys, `skew99` | broad span | six passes | at most two top-digit buckets | MSD: low-fanout sample selects one split, then the dominant bucket can stop |
+| Tile | Varying bits | Decision |
+|---|---|---|
+| 8,192 random u64 keys | 64 | Partition the highest 14-bit digit, then finish actual children |
+| 8,192 u64 keys in 0..2²⁰ | 20 | Two LSD passes of 10 bits |
+| 1,000 u64 keys with a dominant repeated key | broad span | Partition; constant children finish at confirmation |
 
 ## Inside a pass
 

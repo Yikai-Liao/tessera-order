@@ -4,6 +4,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { algorithm } from "../catalog.ts";
+import { pairedBudget } from "../statistics.ts";
 import {
   caseId,
   type Dataset,
@@ -49,10 +50,11 @@ function parseManifest(value: unknown): Manifest {
   if (
     value.schema !== 1 ||
     value.suite_version !== 1 ||
-    value.blocks !== 9 ||
     !["smoke", "release", "custom"].includes(String(value.suite))
   )
     throw new Error("unsupported measurement schema or suite");
+  assertInteger(value.blocks, 1);
+  pairedBudget(value.blocks);
   if (value.build !== "default")
     throw new Error("Only the current single-build format is supported");
   for (const name of [
@@ -105,6 +107,7 @@ function parseManifest(value: unknown): Manifest {
 }
 export function validateRun(dataset: Dataset): void {
   const m = dataset.manifest;
+  pairedBudget(m.blocks);
   const build = "default";
   const samples = new Map<string, Sample[]>(),
     identities = new Set<string>(),
@@ -123,7 +126,7 @@ export function validateRun(dataset: Dataset): void {
     if (
       s.build !== build ||
       !c ||
-      s.block >= 9 ||
+      s.block >= m.blocks ||
       s.slot >= c.variants.length + 1 ||
       s.verified !== true ||
       ![...c.variants, "tessera-aa"].includes(s.variant) ||
@@ -163,7 +166,8 @@ export function validateRun(dataset: Dataset): void {
       !observations.has(`${group}:end`)
     )
       continue;
-    if (has.some((s) => s?.length !== 9)) throw new Error(`missing blocks: ${build}/${caseId(c)}`);
+    if (has.some((s) => s?.length !== m.blocks))
+      throw new Error(`missing blocks: ${build}/${caseId(c)}`);
     const start = observations.get(`${group}:start`),
       end = observations.get(`${group}:end`);
     if (!start || !end || end.unix_seconds < start.unix_seconds)
@@ -223,6 +227,7 @@ export async function loadRun(directories: string[], partial = false): Promise<D
     assertObject(memory);
     for (const field of [
       "schema",
+      "blocks",
       "source_sha256",
       "rustc",
       "target",

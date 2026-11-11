@@ -90,6 +90,6 @@ export function trendSvg(trend: TrendSummary, base = "main") {
     rows,
     minimumSpan: MIN_SWING,
     reference: `${base} ${short(trend.base)} · runs ${short(trend.runs[0].hash)} → ${short(trend.runs.at(-1)!.hash)}`,
-    guide: `value: latest run against ${base} · one scale per row · —: no comparable history`,
+    guide: `value: latest run against its ${base} baseline · one scale per row · —: no comparable history`,
   });
 }

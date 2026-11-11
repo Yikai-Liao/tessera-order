@@ -2,6 +2,7 @@
 
 schema = 1
 
+pairedBlocks = { short = { count = 3, agreement = 3 }, extended = { count = 9, agreement = 8 } }
 # Descending length floors; one budget per revision, not per outer repetition.
 revisionSampling = [
   { min_len = 10000000, warm_ms = 1000, window_ms = 4000, samples = 20 },
@@ -11,6 +12,9 @@ revisionSampling = [
 
 algorithms = [
   { id = "tessera", label = "Tessera", stable = true, family = "radix", adapter = "common" },
+  { id = "tessera-baseline", label = "Tessera baseline A", stable = true, family = "radix", adapter = "revision" },
+  { id = "tessera-baseline-copy", label = "Tessera baseline B", stable = true, family = "radix", adapter = "revision" },
+  { id = "tessera-copy", label = "Tessera current B", stable = true, family = "radix", adapter = "revision" },
   { id = "std-stable", label = "slice::sort", stable = true, family = "comparison", adapter = "common" },
   { id = "radsort", label = "radsort", stable = true, family = "radix", adapter = "rust" },
   { id = "voracious", label = "voracious", stable = true, family = "radix", adapter = "rust" },

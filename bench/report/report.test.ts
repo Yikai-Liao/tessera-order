@@ -62,6 +62,18 @@ test("paired ratios respect noise", () => {
   );
 });
 
+test("revision placements retain their own measured verdict", () => {
+  const dataset = createFixture();
+  dataset.manifest.variants.push({ name: "tessera-baseline", stable: true, adapter: "revision" });
+  for (const row of dataset.samples)
+    if (row.variant === "std-stable") row.variant = "tessera-baseline";
+  const result = summarize(dataset).get(
+    measurementId("default", "u64/random/1000/s1", "tessera-baseline"),
+  )!;
+  assert.equal(result.verdict, "slower");
+  assert.equal(result.stable, true);
+});
+
 test("parallel Tessera is an opponent, not an A/A control", () => {
   const dataset = createFixture();
   const id = "u64/random/1000/s1";
@@ -155,6 +167,31 @@ test("invalid samples fail validation", () => {
   }
 });
 
+test("short reports retain their declared budget and reject missing or extra blocks", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-short-report-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const dataset = createFixture(3);
+  await writeFixture(directory, dataset);
+  const loaded = await loadRun([directory]);
+  assert.equal(loaded.manifest.blocks, 3);
+  await writeReport([directory]);
+  assert.match(
+    await readFile(join(directory, "report/index.md"), "utf8"),
+    /3 blocks per case.*short screen/,
+  );
+  loaded.samples[0].block = 3;
+  assert.throws(() => validateRun(loaded), /invalid or unverified/);
+  loaded.samples[0].block = 0;
+  loaded.samples.pop();
+  assert.throws(() => validateRun(loaded), /missing blocks/);
+  dataset.manifest.blocks = 9;
+  await writeFixture(directory, dataset);
+  await assert.rejects(loadRun([directory]), /missing blocks/);
+  dataset.manifest.blocks = 2;
+  await writeFixture(directory, dataset);
+  await assert.rejects(loadRun([directory]), /budget/);
+});
+
 test("raw results round trip", async () => {
   const dir = await mkdtemp(join(tmpdir(), "tessera-report-"));
   try {
@@ -192,8 +229,8 @@ test("optimization and debug settings must agree across timing and memory", asyn
   try {
     const dataset = await writeFixture(dir);
     await loadRun([dir]);
-    for (const field of ["opt_level", "debug"]) {
-      const different = field === "opt_level" ? "1" : "true";
+    for (const field of ["opt_level", "debug", "blocks"]) {
+      const different = field === "blocks" ? 3 : field === "opt_level" ? "1" : "true";
       {
         const manifest = dataset.manifest;
         const build = "default";

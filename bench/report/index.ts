@@ -2,7 +2,8 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { median } from "../statistics.ts";
+import { catalog } from "../catalog.ts";
+import { median, pairedBudget } from "../statistics.ts";
 import { resultSummary } from "../summary.ts";
 import { renderFigures } from "./charts.ts";
 import { loadRun } from "./load.ts";
@@ -65,7 +66,7 @@ export function collectWarnings(dataset: Dataset): string[] {
 }
 function renderResults(dataset: Dataset, summaries: Map<string, Summary>): string {
   let output =
-    "## Full results\n\nTimes include each sort's scratch allocation. Ratios divide the variant's time by the mean of Tessera's paired samples in the same block. Bounds are per-block minima and maxima. The A/A noise range spans both Tessera samples divided by their block mean, across all blocks. Faster/slower describes the variant relative to Tessera; it requires 8 of 9 blocks to agree and the median to fall outside that range. The tessera-aa row separately reports A2 / A1.\n\n";
+    "## Full results\n\nTimes include each sort's scratch allocation. Ratios divide the variant's time by the mean of Tessera's paired samples in the same block. Bounds are per-block minima and maxima. The A/A noise range spans both Tessera samples divided by their block mean, across all blocks. Faster/slower describes the variant relative to Tessera; it requires the declared budget's direction agreement and a median outside that range (see Measurement budget). A short screen is inconclusive when either condition fails. The tessera-aa row separately reports A2 / A1.\n\n";
   const variants = [...new Set(dataset.manifest.variants.map((v) => v.name)), "tessera-aa"];
   output +=
     "Each cell gives ratio, ns / element, per-block ratio bounds, verdict and peak extra heap bytes. A dash means the variant is outside that build or task. Full-precision values are in [summaries.json](summaries.json).\n\n";
@@ -144,8 +145,19 @@ export async function writeReport(directories: string[], partial = false) {
   await mkdir(out, { recursive: true });
   let markdown = `# Sorting comparison\n\n${partial ? "Partial suite; only completed groups are shown." : `${dataset.manifest.suite} suite, version 1.`} Every value is regenerated from the accompanying manifests, host fingerprint, blocks and memory samples.\n\n`;
   markdown +=
-    "Nine blocks reuse each case's seed-one input. Their range measures execution variability on that input; it does not measure variability across random inputs. Calibration can choose different batch sizes for different variants, changing the prepared-buffer working set and cache behavior.\n\n";
+    "All blocks reuse each case's seed-one input. Their range measures execution variability on that input; it does not measure variability across random inputs. Calibration can choose different batch sizes for different variants, changing the prepared-buffer working set and cache behavior.\n\n";
+  markdown += "## Measurement budget\n\n";
+  const { count, agreement } = pairedBudget(dataset.manifest.blocks);
+  markdown += `**${count} blocks per case${count === catalog.pairedBlocks.short.count ? " (short screen)" : ""}**; ${agreement} of ${count} must agree.\n`;
+  markdown +=
+    "\nNo blocks are added automatically after an inconclusive result. These observed ranges are not confidence intervals.\n\n";
   markdown += renderProvenance(dataset);
+  const revisions = dataset.manifest.revisions;
+  if (revisions) {
+    markdown +=
+      "## Linked revision controls\n\nTwo named crates represent each revision, alongside the repeated primary-current A/A call. Ratios divide each placement by the current A/A mean: a slower baseline row indicates a current improvement. Compare both baseline copies and the second current copy, not only one favorable placement. Adapter entry offsets prove distinct call boundaries, not distinct internal sort bodies; inspect the retained executable before source attribution. This is a serial comparison; parallel revision process screens use smoke plans with parallel rules.\n\n";
+    markdown += "```json\n" + JSON.stringify(revisions, null, 2) + "\n```\n\n";
+  }
   const conditions = collectWarnings(dataset);
   if (conditions.length)
     markdown += `## Observed conditions\n\n${conditions.map((w) => `- ${w}`).join("\n")}\n\n`;
@@ -180,7 +192,8 @@ export async function writeReport(directories: string[], partial = false) {
   return {
     kind: "algorithm-comparison",
     partial,
-    protocol: "nine-blocks-aa",
+    protocol: "paired-blocks-aa",
+    blocks: count,
     ratio: "algorithm / paired Tessera mean",
     range: "observed block range",
     ...resultSummary(

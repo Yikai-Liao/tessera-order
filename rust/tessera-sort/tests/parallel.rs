@@ -67,6 +67,51 @@ fn counted_keys_keep_bits() {
     });
 }
 
+/// Covering digits keep equal-key payload order without child finishing.
+#[test]
+#[cfg(not(miri))]
+fn covering_digit_keeps_payload_order() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    let mut rows: Vec<_> = (0..1usize << 17)
+        .map(|id| (((id * 7919) & 255) as u64, Cell::new(id)))
+        .collect();
+    pool.install(|| par_stable_sort_by_key(&mut rows, |row| row.0));
+    assert!(rows.windows(2).all(|pair| pair[0].0 < pair[1].0
+        || (pair[0].0 == pair[1].0 && pair[0].1.get() < pair[1].1.get())));
+    for row in &rows {
+        assert_eq!(row.0, ((row.1.get() * 7919) & 255) as u64);
+    }
+}
+
+/// Both orientations of pre-separated buckets use the same stable run split.
+#[test]
+#[cfg(not(miri))]
+fn separated_runs_match_serial() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    let len = 1usize << 17;
+    for set_first in [false, true] {
+        let mut rows: Vec<_> = (0..len)
+            .map(|id| {
+                let set = (id < len / 2) == set_first;
+                (((set as u64) << 63) | ((id as u64 * 7919) % 65521), id)
+            })
+            .collect();
+        let mut expected = rows.clone();
+        expected.sort_by_key(|row| row.0);
+        let mut serial = rows.clone();
+        tessera_sort::stable_sort_by_key(&mut serial, |row| row.0);
+        pool.install(|| par_stable_sort_by_key(&mut rows, |row| row.0));
+        assert_eq!(serial, expected);
+        assert_eq!(rows, expected);
+    }
+}
+
 #[test]
 fn send_only_records_sort() {
     // Cell makes the records Send but not Sync. A captured MutexGuard makes

@@ -70,7 +70,7 @@ fn permute_with_fault<T: Send>(
     fail_after: Option<usize>,
 ) {
     let count = sorter.block_order.len();
-    let head = sorter.bucket_count;
+    let head = sorter.active_blocks.start;
     let block_size = sorter.blocks.block_size;
     let workers = workers.max(1).min(count);
     // Each split cycle has at least cap blocks. There are at most count/cap
@@ -135,17 +135,7 @@ fn permute_with_fault<T: Send>(
     let mut snapshots = Snapshots(cells(boundaries.len().checked_mul(block_size).unwrap()));
     // Calling block_ptr repeatedly must not create fresh overlapping T borrows.
     // It returns pointers from the original input ancestor or Vec allocations.
-    let addresses = Addresses(
-        (0..count)
-            .map(|id| {
-                if sorter.blocks.scratch_segments.is_empty() {
-                    sorter.blocks.block_ptr(id)
-                } else {
-                    sorter.blocks.block_ptr_segmented(id)
-                }
-            })
-            .collect(),
-    );
+    let addresses = Addresses((0..count).map(|id| sorter.blocks.block_ptr(id)).collect());
     if parallel {
         let _ = rayon::current_num_threads();
     }
@@ -301,7 +291,7 @@ mod tests {
             let result = unwind::catch(|| {
                 let mut buffers = Buffers::new();
                 let mut sorter = Partition::new(&mut rows, 4, 3, &mut buffers);
-                assert!(sorter.step_with_ends(|row| row.key, false).0.is_none());
+                assert!(sorter.step(|row| row.key).is_none());
                 permute_with_fault(&mut sorter, 4, !cfg!(miri), fail);
                 sorter.compact();
             });
@@ -318,12 +308,7 @@ mod tests {
             let result = unwind::catch(|| {
                 let mut buffers = Buffers::new();
                 let mut sorter = Partition::new(&mut refs, 4, 3, &mut buffers);
-                assert!(
-                    sorter
-                        .step_with_ends(|row| **row * 37 % 4, false)
-                        .0
-                        .is_none()
-                );
+                assert!(sorter.step(|row| **row * 37 % 4).is_none());
                 permute_with_fault(&mut sorter, 4, !cfg!(miri), fail);
                 sorter.compact();
             });

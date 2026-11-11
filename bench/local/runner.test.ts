@@ -5,11 +5,12 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { catalog } from "../catalog.ts";
+import { catalog, criterionId } from "../catalog.ts";
 import { pairedRun } from "../continuous/fixtures/paired.ts";
+import { simdFeatures } from "../workspace.ts";
 import { summarizeLocal } from "./model.ts";
 import { renderLocalReport } from "./report.ts";
-import { comparisonCpus } from "./runner.ts";
+import { comparisonCpus, selectedCases, serialBaselineManifest } from "./runner.ts";
 import { measureSamples } from "./samples.ts";
 
 test("retained budgets survive catalog changes without accepting incomplete samples", async (t) => {
@@ -115,5 +116,68 @@ rl.on("line", request => {
     delete run.shard;
     const serialMask = mask.split(",").slice(0, 2).join(",");
     await measureSamples(run, binaries, "unused", serialMask, async () => {});
+  }
+});
+
+test("historical manifest completion never fabricates parallel support", () => {
+  const baseline = "[features]\n[dependencies]\n";
+  const current =
+    '[features]\nrayon = ["dep:rayon"]\n[dependencies]\nrayon = { version = "1.12", optional = true }\n';
+  assert.match(serialBaselineManifest(baseline, current), /rayon/);
+  assert.equal(serialBaselineManifest(current, current, true), current);
+  assert.throws(() => serialBaselineManifest(baseline, current, true), /Rayon-capable baseline/);
+});
+
+test("revision selection checks parallel IDs from both binaries", {
+  skip: process.platform === "win32",
+}, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-selection-"));
+  try {
+    const input = { ty: "u64", distribution: "random", len: 48 };
+    const serial = criterionId(input, "api"),
+      parallel = criterionId(input, "par-4");
+    const binaries = { baseline: join(directory, "baseline"), current: join(directory, "current") };
+    const plan = join(directory, "plan.json");
+    const source = (withParallel: boolean) => `#!${process.execPath}
+if (process.env.TESSERA_BENCH_LIST !== "1" || process.env.TESSERA_BENCH_PLAN !== ${JSON.stringify(plan)}) process.exit(1);
+console.log(${JSON.stringify(serial)});
+if (${withParallel} && process.env.TESSERA_BENCH_PARALLEL === "4") console.log(${JSON.stringify(parallel)});
+`;
+    for (const path of Object.values(binaries))
+      await writeFile(path, source(true), { mode: 0o755 });
+    assert.deepEqual(await selectedCases(binaries, plan, undefined, directory), [serial]);
+    assert.deepEqual(await selectedCases(binaries, plan, undefined, directory, true), [
+      serial,
+      parallel,
+    ]);
+    assert.deepEqual(await selectedCases(binaries, plan, "/par-4$", directory, true), [parallel]);
+    await writeFile(binaries.baseline, source(false));
+    await assert.rejects(selectedCases(binaries, plan, undefined, directory, true), /identical/);
+    await writeFile(binaries.current, source(false));
+    await assert.rejects(
+      selectedCases(binaries, plan, undefined, directory, true),
+      /four-thread cases/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("revision comparison enables historical SIMD without changing current builds", () => {
+  assert.deepEqual(simdFeatures('[features]\nportable-simd = ["dep:fearless_simd"]\n'), [
+    "portable-simd",
+  ]);
+  for (const dependency of [
+    '"1.2"',
+    '{ version = "1.2" }',
+    '{ version = "1.2", optional = false }',
+  ]) {
+    assert.deepEqual(simdFeatures("[dependencies]\nfearless_simd = " + dependency), []);
+  }
+  for (const manifest of [
+    "[dependencies]\n",
+    '[dependencies]\nfearless_simd = { version = "1.2", optional = true }',
+  ]) {
+    assert.throws(() => simdFeatures(manifest), /no supported SIMD backend/);
   }
 });

@@ -117,7 +117,8 @@ fn changing_pivot_keeps_records() {
             })
             .collect();
         let probe_len = 65_536 / std::mem::size_of::<Owned>();
-        let prelude = 4 + probe_len + 1025;
+        // Root and child variation now stop at the same first 64-key batch.
+        let prelude = 4 + probe_len + 65;
         let mut first_band = vec![false; len];
         let mut calls = 0;
         stable_sort_by_key(&mut records, |record| {
@@ -144,17 +145,17 @@ fn changing_pivot_keeps_records() {
             let offset = call - prelude;
             // The root was already probed. Subsequent children reject order
             // before scanning their remaining candidate bits.
-            let phase = offset % (64 + len + 4 + 65);
-            if phase < 64 {
+            let phase = offset % (128 + len + 4 + 65);
+            if phase < 128 {
                 if greater { 0 } else { u64::MAX }
-            } else if phase < 64 + len {
-                if offset < 64 + len {
+            } else if phase < 128 + len {
+                if offset < 128 + len {
                     assert!(!first_band[record.id], "record classified twice");
                     first_band[record.id] = true;
                 }
                 1
-            } else if phase < 64 + len + 4 {
-                [1, 0, 0, 1][phase - 64 - len]
+            } else if phase < 128 + len + 4 {
+                [1, 0, 0, 1][phase - 128 - len]
             } else if phase.is_multiple_of(2) {
                 0
             } else {

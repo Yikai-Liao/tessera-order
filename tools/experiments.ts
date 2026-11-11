@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { type Command, InvalidArgumentError, Option } from "commander";
 import { stringify as stringifyToml } from "smol-toml";
 import { cpuListSchema } from "../bench/affinity.ts";
+import { catalog } from "../bench/catalog.ts";
 import { compareCounters, reportCounters } from "../bench/local/counters.ts";
 import { LAYOUT_CONTROLS, type LayoutControl, parseLayoutSeeds } from "../bench/local/layout.ts";
 import { renderLocalReport } from "../bench/local/report.ts";
@@ -12,6 +13,7 @@ import { compareLocal, comparePrepared } from "../bench/local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
 import { checkAlgorithms, compareAlgorithms, resumeComparison } from "../bench/release.ts";
 import { writeReport } from "../bench/report/index.ts";
+import { pairedBudget } from "../bench/statistics.ts";
 import { workingTreeDirty } from "../bench/workspace.ts";
 import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
 
@@ -32,6 +34,18 @@ function parsePositiveInteger(value: string) {
   if (!Number.isSafeInteger(number) || number < 1)
     throw new InvalidArgumentError("expected a positive integer");
   return number;
+}
+
+function blockOption() {
+  return new Option("--blocks <number>", "paired blocks per case (3: short screen; 9: extended)")
+    .argParser((value) => {
+      try {
+        return pairedBudget(Number(value)).count;
+      } catch (error) {
+        throw new InvalidArgumentError((error as Error).message);
+      }
+    })
+    .default(catalog.pairedBlocks.short.count);
 }
 
 function parseShard(value: string) {
@@ -105,7 +119,7 @@ async function report(directories: string[], partial = false) {
   if (await exists(join(paths[0], "local.json"))) {
     if (!single)
       throw new Error(
-        "Revision reports require one directory and complete recorded samples per layout",
+        "Revision reports require one directory and a complete recorded budget per layout",
       );
     return renderLocalReport(paths[0]);
   }
@@ -246,6 +260,7 @@ export function experimentCommands(program: Command) {
     );
 
   measurement("algorithms", "Prepare, validate, measure and report a resumable comparison")
+    .addOption(blockOption())
     .option(
       "--sample-ms <number>",
       "minimum timed sample duration in milliseconds",
@@ -261,7 +276,12 @@ export function experimentCommands(program: Command) {
     .option("--group <type/shape>", "measure one complete group and report it as partial")
     .action(
       async (
-        options: MeasurementOptions & { group?: string; sampleMs: number; memoryMib: number },
+        options: MeasurementOptions & {
+          group?: string;
+          sampleMs: number;
+          memoryMib: number;
+          blocks: number;
+        },
       ) => {
         const plan = await loadPlan(options.plan ?? "smoke", selectAxes(options));
         if (plan.harness !== "comparison")
@@ -275,8 +295,61 @@ export function experimentCommands(program: Command) {
             cpu: options.cpu,
             plan,
             group: options.group,
+            blocks: options.blocks,
             sampleMs: options.sampleMs,
             memoryMib: options.memoryMib,
+          }),
+        );
+      },
+    );
+
+  measurement(
+    "revisions [baseline]",
+    "Compare revisions and independent linked copies in one process",
+  )
+    .addOption(blockOption())
+    .option("--current <revision>", "current library commit (default: working snapshot)")
+    .option(
+      "--sample-ms <number>",
+      "minimum timed sample duration in milliseconds",
+      parsePositiveInteger,
+      5,
+    )
+    .option("--memory-mib <number>", "prepared-buffer cap in MiB", parsePositiveInteger, 256)
+    .action(
+      async (
+        baseline: string | undefined,
+        options: MeasurementOptions & {
+          current?: string;
+          sampleMs: number;
+          memoryMib: number;
+          blocks: number;
+        },
+      ) => {
+        if (options.algorithms)
+          throw new Error("Revision comparisons select their own linked controls");
+        const plan = await loadPlan(options.plan ?? "smoke", {
+          ...selectAxes(options),
+          algorithms: [
+            "tessera",
+            "std-stable",
+            ...catalog.algorithms.filter((a) => a.adapter === "revision").map((a) => a.id),
+          ],
+        });
+        if (plan.harness !== "comparison")
+          throw new Error("Revision comparisons require a comparison harness plan");
+        const root = await repositoryRoot();
+        const out = resultDirectory(root, options.out);
+        await runTask(out, Boolean(program.opts().verbose), () =>
+          compareAlgorithms({
+            root,
+            out,
+            plan,
+            cpu: options.cpu,
+            blocks: options.blocks,
+            sampleMs: options.sampleMs,
+            memoryMib: options.memoryMib,
+            revisions: { baseline: baseline ?? "HEAD", current: options.current },
           }),
         );
       },

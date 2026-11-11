@@ -14,6 +14,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Compare fixed-work serial counters | `pnpm -s tools compare counters HEAD` |
 | Probe current-host PMU access | `pnpm -s tools continuous probe-counters --out bench/results/pmu` |
 | Sample local function-section layouts | `pnpm -s tools compare commit HEAD --layout-seeds 1,2,3,4,5` |
+| Compare linked serial revisions and placement copies | `pnpm -s tools compare revisions BASE --current HEAD` |
 | Compare sorting algorithms | `pnpm -s tools compare algorithms --plan smoke` |
 | Resume a prepared algorithm comparison | `pnpm -s tools compare resume bench/results/SESSION` |
 | Reproduce the native comparison CI job | `pnpm -s tools check --native` |
@@ -29,7 +30,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Fetch and verify pinned native sources | `pnpm -s tools native fetch` |
 | Validate a release tag | `pnpm -s tools release verify --tag rust/v0.1.0` |
 
-Use a task's `--help` for its options. Local comparisons accept a Linux CPU list or range with `--cpu`; the [parallel measurement contract](benchmarking.md#local-parallel-comparisons) explains pool timing, affinity and memory exclusions. `plan` and both comparison tasks share the [experiment selection model](benchmarking.md#experiment-plans). `check` is a functional smoke check with a one-millisecond sample target, not a performance experiment. It runs harness tests, validates the smoke suite, measures one `u64/random` group, verifies that native programs do not link parallel runtimes when `--native` is selected, and generates a partial report.
+Use a task's `--help` for its options. Algorithm and linked-revision comparisons default to three paired blocks; `--blocks 9` requests an extended run explicitly. Reports label the budget, inconclusive short screens do not trigger extra measurements, and resume retains the recorded count. `compare commit` instead uses the catalogued adjacent A/B sample budget without outer blocks. Local comparisons accept a Linux CPU list or range with `--cpu`; the [parallel measurement contract](benchmarking.md#local-parallel-comparisons) explains pool timing, affinity and memory exclusions. `plan` and both comparison tasks share the [experiment selection model](benchmarking.md#experiment-plans). `check` is a functional smoke check with a one-millisecond sample target, not a performance experiment. It materializes HEAD and working-tree revision copies, runs harness tests including generated adapters and memory-journal recovery, validates the smoke suite, measures one `u64/random` group, verifies that native programs do not link parallel runtimes when `--native` is selected, and generates a partial report.
 
 ## Agent output
 
@@ -59,7 +60,7 @@ A successful `status` exit means the read succeeded, not that every workflow pas
 
 ## Reproduce continuous work locally
 
-The hosted preparation job builds the two revisions once; measurement jobs reuse their frozen executables through the maintained prepared-comparison command, with the complete continuous plan and one partition of timed IDs. Linux and `taskset` with four available CPUs are required for the four-thread plan. Serial cases and parallel cases never overlap on a runner. Both revisions use the same current harness, lockfile, SIMD backend and toolchain; no Cloud history is needed.
+The hosted preparation job builds the two revisions once; measurement jobs reuse their frozen executables through the maintained prepared-comparison command, with the complete continuous plan and one partition of timed IDs. Linux and `taskset` with four available CPUs are required for the four-thread plan. Serial cases and parallel cases never overlap on a runner. Both revisions use the same current harness, lockfile, SIMD backend and toolchain; historical libraries enable their opt-in feature explicitly. No Cloud history is needed.
 
 ```sh
 # Build once; each measurement uses its own new result directory.

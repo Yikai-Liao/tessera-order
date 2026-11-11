@@ -143,6 +143,8 @@ export function simulateParallelFinish(config: {
         owners[physical] = FREE;
         free[bucket].push(physical);
       }
+      // The engine uses the shared child finisher here, including ordered-child
+      // completion; this ownership model treats the whole stable sort atomically.
       records.sort((a, b) => a.key - b.key);
       staged[bucket] = records;
       ready[bucket] = true;

@@ -57,6 +57,12 @@ fn main() {
         let path = read_command_output("git", &["rev-parse", "--git-path", name]);
         println!("cargo:rerun-if-changed={path}");
     }
+    println!("cargo:rustc-check-cfg=cfg(tessera_bench_revisions)");
+    println!("cargo:rerun-if-changed=revisions.json");
+    let revisions = Path::new("revisions.json").exists();
+    if revisions {
+        println!("cargo:rustc-cfg=tessera_bench_revisions");
+    }
     let out = env::var("OUT_DIR").unwrap();
     let mut digest = Sha256::new();
     for path in [
@@ -72,6 +78,10 @@ fn main() {
     ] {
         hash_tree(Path::new(path), &mut digest);
     }
+    if revisions {
+        hash_tree(Path::new("revisions.json"), &mut digest);
+        hash_tree(Path::new("../revision-libraries"), &mut digest);
+    }
     let mut features: Vec<_> = env::vars()
         .filter(|(k, _)| k.starts_with("CARGO_FEATURE_"))
         .map(|(k, _)| k)
@@ -86,6 +96,10 @@ fn main() {
         "cargo_lock": fs::read_to_string("../../Cargo.lock").unwrap(),
         "features": features,
     });
+    if revisions {
+        value["revisions"] =
+            serde_json::from_slice::<Value>(&fs::read("revisions.json").unwrap()).unwrap();
+    }
     for key in [
         "TARGET",
         "PROFILE",

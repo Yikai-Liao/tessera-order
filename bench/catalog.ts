@@ -5,6 +5,10 @@ import { z } from "zod";
 import { decodeConfig } from "./config.ts";
 
 const identity = z.object({ id: z.string(), label: z.string() });
+const blockBudget = z.object({
+  count: z.number().int().positive(),
+  agreement: z.number().int().positive(),
+});
 const inventory = z.object({
   types: z.array(z.string()),
   shapes: z.array(z.string()),
@@ -15,6 +19,7 @@ const inventory = z.object({
 export const catalog = z
   .object({
     schema: z.literal(1),
+    pairedBlocks: z.object({ short: blockBudget, extended: blockBudget }),
     revisionSampling: z
       .array(
         z.object({

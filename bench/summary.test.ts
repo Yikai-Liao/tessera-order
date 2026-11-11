@@ -28,4 +28,19 @@ test("compact results retain counts, denominator-independent evidence and trunca
   assert.equal(result.omittedChanges, 4);
   assert.equal(rows[0].id, "0");
   assert.equal(resultSummary([]).measured, 0);
+  const short = resultSummary([
+    {
+      id: "short",
+      ratio: 1.1,
+      low: 0.9,
+      high: 1.2,
+      verdict: "inconclusive",
+      aaLow: 0.8,
+      aaHigh: 1.2,
+    },
+  ]);
+  assert.equal(short.inconclusive, 1);
+  assert.equal(short.withinNoise, 0);
+  assert.equal(short.slower, 0);
+  assert.equal(short.focus[0].verdict, "inconclusive");
 });

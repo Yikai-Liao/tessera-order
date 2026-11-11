@@ -6,6 +6,7 @@ import { command, diagnostic } from "../tools/process.ts";
 import { catalog } from "./catalog.ts";
 import type { Plan } from "./plan.ts";
 import { writeReport } from "./report/index.ts";
+import { prepareRevisions, type Revisions } from "./revisions.ts";
 import { fetchNative } from "./rust/native/fetch.ts";
 import {
   executables,
@@ -17,6 +18,7 @@ import {
   type Session,
   withSessionLock,
 } from "./session.ts";
+import { pairedBudget } from "./statistics.ts";
 import { buildBenchmark, copySnapshot, type Workspace, withWorkspace } from "./workspace.ts";
 
 /** Acquire native sources and own their link inside an isolated build workspace. */
@@ -47,6 +49,7 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
   await mkdir(out, { recursive: false });
   await withComparisonWorkspace(root, native, async ({ tree, target }) => {
     const features = ["compare", "rayon", ...(native ? ["compare-native"] : [])];
+    await prepareRevisions(root, tree, { baseline: "HEAD" }, features);
     await command(
       "cargo",
       [
@@ -94,11 +97,14 @@ export interface ReleaseOptions {
   cpu?: string;
   group?: string;
   sampleMs: number;
+  blocks: number;
   memoryMib: number;
+  revisions?: Revisions;
 }
 
 /** Retain the executable pair, then validate, measure and report one experiment. */
 export async function compareAlgorithms(options: ReleaseOptions) {
+  pairedBudget(options.blocks);
   await mkdir(options.out, { recursive: false });
   return withSessionLock(options.out, async () => {
     await prepareComparison(options);
@@ -108,7 +114,7 @@ export async function compareAlgorithms(options: ReleaseOptions) {
 
 /** Build the timing/memory executable pair before starting any measurement. */
 async function prepareComparison(options: ReleaseOptions) {
-  const { root, out, plan, cpu, group, sampleMs, memoryMib } = options;
+  const { root, out, plan, cpu, group, sampleMs, memoryMib, blocks } = options;
   if (cpu) await command("taskset", ["-c", cpu, "true"]);
   const native = plan.algorithms.some((id) =>
     catalog.algorithms.some((entry) => entry.id === id && entry.adapter === "native"),
@@ -125,6 +131,7 @@ async function prepareComparison(options: ReleaseOptions) {
         ? ["rayon"]
         : []),
     ];
+    if (options.revisions) await prepareRevisions(root, tree, options.revisions, features);
     diagnostic("Building comparison workers");
     const { executable } = await buildBenchmark(tree, target, "compare", features);
     return retainBuild(out, executable);
@@ -136,6 +143,7 @@ async function prepareComparison(options: ReleaseOptions) {
     cpu,
     group,
     sampleMs,
+    blocks,
     memoryMib,
     build,
   };
@@ -158,6 +166,7 @@ async function measureComparison(out: string) {
     "--out",
     out,
     ...(group ? ["--group", group] : []),
+    ...(session.blocks === undefined ? [] : ["--blocks", String(session.blocks)]),
   ];
   const build = session.build;
   const binary = executables(out).compare;

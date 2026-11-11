@@ -6,6 +6,7 @@ import { basename, dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { z } from "zod";
 import { cpuListSchema } from "./affinity.ts";
+import { findPairedBudget } from "./statistics.ts";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const schema = z.strictObject({
@@ -15,6 +16,10 @@ const schema = z.strictObject({
   cpu: cpuListSchema.optional(),
   group: z.string().optional(),
   sampleMs: z.number().int().positive(),
+  blocks: z
+    .number()
+    .refine((count) => findPairedBudget(count) !== undefined, "unsupported paired-block budget")
+    .optional(),
   memoryMib: z.number().int().positive(),
   build: z.strictObject({
     compareSha256: digest,
@@ -104,7 +109,7 @@ export async function isValidated(out: string, build: Build, session: Session) {
 
 /** Bind a completed validation to the binary, plan and optional group restriction. */
 function validationReceipt(build: Build, session: Session) {
-  return `${JSON.stringify({ build, planSha256: session.planSha256, group: session.group })}\n`;
+  return `${JSON.stringify({ build, planSha256: session.planSha256, group: session.group, blocks: session.blocks })}\n`;
 }
 
 /** Persist a receipt only after every selected input has passed validation. */

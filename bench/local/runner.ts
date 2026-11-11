@@ -6,12 +6,14 @@ import { arch, cpus, platform, release } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
+import { parseCriterionId } from "../catalog.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
   buildBenchmark,
   copyLibraryRevision,
   copySnapshot,
+  resolveCommit,
   simdFeatures,
   sourceHash,
   type Workspace,
@@ -65,11 +67,12 @@ export function assertWorkerEnvironment() {
       throw new Error(`Unset TESSERA_BENCH_${name} before starting an experiment`);
 }
 
-/** Complete only unused optional metadata for pre-parallel serial baselines. */
-export function serialBaselineManifest(baseline: string, current: string) {
+/** Complete inactive optional metadata only for pre-parallel serial comparisons. */
+export function serialBaselineManifest(baseline: string, current: string, parallel = false) {
   const manifest = parse(baseline);
   const features = manifest.features as Record<string, unknown>;
   if ("rayon" in features) return baseline;
+  if (parallel) throw new Error("Parallel revision comparisons require a Rayon-capable baseline");
   const dependencies = manifest.dependencies as Record<string, unknown>;
   if ("rayon" in dependencies)
     throw new Error("Historical Rayon dependencies require explicit review");
@@ -105,13 +108,14 @@ export async function buildRevisions(
   await rm(crate, { recursive: true });
   await copyLibraryRevision(root, baseline, crate);
   // Cargo validates inactive forwarding and locks optional dependency edges.
-  // Keep the shared harness/lockfile; this metadata never enables a parallel API.
+  // Only serial baselines may receive the inactive optional dependency shim.
   const manifest = join(crate, "Cargo.toml");
   await writeFile(
     manifest,
     serialBaselineManifest(
       await readFile(manifest, "utf8"),
       await readFile(join(saved, "Cargo.toml"), "utf8"),
+      features.includes("rayon"),
     ),
   );
   source.baseline = await sourceHash(crate);
@@ -256,7 +260,10 @@ export async function selectedCases(
       .split("\n")
       .filter(Boolean)
       .sort();
-  const cases = selectCaseIds(await list(binaries.current), pattern);
+  const current = await list(binaries.current);
+  if (parallel && !current.some((id) => parseCriterionId(id).mode === "par-4"))
+    throw new Error("Parallel plan did not list any four-thread cases");
+  const cases = selectCaseIds(current, pattern);
   if (
     !cases.length ||
     new Set(cases).size !== cases.length ||
@@ -409,10 +416,7 @@ export async function compareLocal(options: LocalOptions) {
       ),
     };
   }
-  const baseline = await command("git", ["rev-parse", "--verify", `${options.baseline}^{commit}`], {
-    cwd: root,
-    capture: true,
-  });
+  const baseline = await resolveCommit(root, options.baseline);
   const head = await command("git", ["rev-parse", "HEAD"], { cwd: root, capture: true });
   const dirty = Boolean(
     await command("git", ["status", "--porcelain"], { cwd: root, capture: true }),
@@ -429,7 +433,7 @@ export async function compareLocal(options: LocalOptions) {
         root,
         workspace,
         baseline,
-        [...(options.plan.parallel?.length ? ["rayon"] : [])],
+        options.plan.parallel?.length ? ["rayon"] : [],
         seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
         options.layoutControl,
       );

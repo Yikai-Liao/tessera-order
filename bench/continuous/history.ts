@@ -24,7 +24,7 @@ export interface TrendSeries {
 }
 
 export interface TrendSummary {
-  // The base commit the latest report compared against.
+  // The base commit the latest report compared against; earlier runs may use older ones.
   base: string | null;
   // Current API groups, including groups without a comparable history yet.
   modes: string[];
@@ -43,8 +43,8 @@ interface MeasuredRun {
   values: Map<string, number>;
 }
 
-// Branch heads reset for each PR comparison. Listing by branch retains the
-// earlier heads and same-commit reruns that a one-head perf query would miss.
+// One PR branch holds every run of the PR, including reruns of a commit and
+// heads that earlier submissions created for other baselines.
 export async function loadHistory(current: BencherReport, request: typeof fetch = fetch) {
   const time = Date.parse(current.start_time ?? "");
   if (!Number.isFinite(time)) throw new Error("The report has no measurement time");
@@ -117,7 +117,9 @@ function comparableRuns(reports: BencherReport[], current: BencherReport, langua
   );
 }
 
-/** Summarize ratios only within the native Head keyed by protocol and exact baseline.
+/** Summarize the PR branch's runs, each as the ratio to its own exact baseline.
+ *
+ * Merging main changes the baseline but not the PR, so the trend continues.
  *
  * The current point remains available when Cloud or history loading fails.
  * Raw paired verdicts remain authoritative; Cloud supplies history and links.
@@ -149,11 +151,7 @@ export function summarizePairedTrend(
     if (!identity) throw new Error("Cloud history lacks a current case");
     return { ...row, benchmark: identity.benchmark, measure: identity.measure };
   });
-  const runs = comparableRuns(
-    reports.filter((report) => report.branch.head.uuid === current.branch.head.uuid),
-    current,
-    language,
-  );
+  const runs = comparableRuns(reports, current, language);
   return summarizeRuns(runs, { rows, baseHash: summary.baseHash }, language);
 }
 

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { CommandCancelledError, command, diagnostic } from "../../tools/process.ts";
 import { parseCriterionId } from "../catalog.ts";
 import type { Plan } from "../plan.ts";
-import { withWorkspace, workingTreeDirty } from "../workspace.ts";
+import { resolveCommit, withWorkspace, workingTreeDirty } from "../workspace.ts";
 import { assertWorkerEnvironment, buildRevisions, selectedCases } from "./runner.ts";
 
 /** Own a Docker process through failure/cancellation, including daemon-side cleanup. */
@@ -127,6 +127,8 @@ export async function compareCounters(options: {
   dirty?: boolean;
 }) {
   assertWorkerEnvironment();
+  if (options.plan.parallel?.length)
+    throw new Error("Counter comparisons support serial API plans only");
   if (process.platform !== "linux" || process.arch !== "x64")
     throw new Error("Counter comparisons require Linux x86-64 and Valgrind");
   if (!Number.isSafeInteger(options.sorts) || options.sorts < 1 || options.sorts > 1024)
@@ -140,10 +142,7 @@ export async function compareCounters(options: {
   const valgrind = image
     ? await runCounterContainer(["--network=none", image, "valgrind", "--version"])
     : await command("valgrind", ["--version"], { capture: true });
-  const baseline = await command("git", ["rev-parse", "--verify", `${options.baseline}^{commit}`], {
-    cwd: root,
-    capture: true,
-  });
+  const baseline = await resolveCommit(root, options.baseline);
   const head = await command("git", ["rev-parse", "HEAD"], { cwd: root, capture: true });
   const dirty = options.dirty ?? (await workingTreeDirty(root));
   await mkdir(out, { recursive: false });

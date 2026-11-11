@@ -11,7 +11,7 @@ import { writePaired } from "./fixtures/paired.ts";
 import { baseHash, fixture, hash } from "./fixtures/report.ts";
 import { pairedBmf } from "./paired.ts";
 
-test("submission archives ratios in a native Head keyed by protocol and exact baseline", async (t) => {
+test("submission archives ratios on the PR branch without resetting its Head", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-submission-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const runs = await writePaired(directory);
@@ -65,11 +65,6 @@ process.stdout.write(fs.readFileSync(path.join(process.env.SUBMISSION_FIXTURE, "
   });
   assert.equal(child.status, 0, child.stderr);
   const args = JSON.parse(await readFile(join(directory, "args.json"), "utf8")) as string[];
-  assert.ok(args.includes("--start-point-reset"));
-  assert.equal(
-    args[args.indexOf("--start-point-idempotency-key") + 1],
-    `paired-samples-v2:${baseHash}`,
-  );
   assert.equal(args[args.indexOf("--branch") + 1], "pr-7");
-  assert.ok(!args.includes("--start-point"));
+  assert.ok(!args.some((arg) => arg.startsWith("--start-point")));
 });

@@ -48,50 +48,15 @@ impl<T, E: Extract<T>> Shard<'_, '_, T, E> {
         let shift = E::Value::from_usize(shift);
         let mask = E::Value::from_usize((1usize << width) - 1) << shift;
         let key = &mut self.key;
-        let (panic, _) = self.sorter.step_with_ends(
-            move |record| ((key.key(record) & mask) >> shift).to_usize(),
-            false,
-        );
-        self.panic = panic;
+        self.panic = self
+            .sorter
+            .step(move |record| ((key.key(record) & mask) >> shift).to_usize());
         self
     }
 }
 
-pub(crate) fn partition_digit_parallel_with_visit<
-    'records,
-    T: Send,
-    E: Extract<T> + Clone + Send,
->(
-    arr: &'records mut [T],
-    radix: usize,
-    shift: usize,
-    key: E,
-    buffers: &mut Buffers<T>,
-    requested_shards: usize,
-    visit: Visit<'_, 'records, T>,
-) -> Vec<usize> {
-    partition_impl_with_visit(
-        arr,
-        radix,
-        shift,
-        key,
-        buffers,
-        Config {
-            shards: requested_shards,
-            block_size: None,
-            parallel: true,
-            finish: None,
-        },
-        Some(visit),
-    )
-}
-
 /// Partitions the root with an optional bounded pre-materialization finisher.
-pub(crate) fn partition_digit_parallel_with_finish<
-    'records,
-    T: Send,
-    E: Extract<T> + Clone + Send,
->(
+pub(crate) fn partition_digit_parallel<'records, T: Send, E: Extract<T> + Clone + Send>(
     records: &'records mut [T],
     width: usize,
     shift: usize,
@@ -146,33 +111,31 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     assert!(arr.len() >= 2);
     let bucket_count = 1usize << radix;
     let shards = config.shards.max(1).min(arr.len());
-    // Local and global directories coexist during adoption, so budget 20
-    // rather than 10 bytes per input block position.
     let record_bytes = core::mem::size_of::<T>();
-    let balanced = ((20.0 * arr.len() as f64)
-        / (2.0 * shards as f64 * bucket_count as f64 * record_bytes as f64))
-        .sqrt()
-        .ceil() as usize;
     let block_size = config.block_size.unwrap_or_else(|| {
-        let scale = if config
+        // Local and global directories coexist during adoption, so the balance
+        // charges two directories against one scratch reserve per shard bucket.
+        let balanced = balanced_size(
+            arr.len(),
+            record_bytes,
+            shards * bucket_count,
+            2 * DESCRIPTOR_BYTES_PER_POSITION,
+        );
+        let bounded = config
             .finish
             .as_ref()
-            .is_some_and(|finish| finish.limit > 0)
-        {
-            4
-        } else {
-            1
-        };
-        (scale * balanced)
-            .max(BLOCK_BYTES_FLOOR / record_bytes)
-            .max(BLOCK_RECORDS_FLOOR)
-            .max(1)
+            .is_some_and(|finish| finish.limit > 0);
+        scaled_block_size(
+            balanced,
+            record_bytes,
+            if bounded { BLOCK_SCALE } else { 1 },
+        )
     });
     let full_blocks = arr.len() / block_size;
     let shards = shards.min(full_blocks.max(1));
     if shards == 1 && config.block_size.is_none() {
         let mut key = key;
-        return partition_digit_with_ends(arr, radix, shift, &mut key, buffers, &mut |child, _| {
+        return partition_digit(arr, radix, shift, &mut key, buffers, &mut |child, _| {
             if let Some(callback) = visit.as_deref_mut() {
                 callback(child);
             }
@@ -225,124 +188,15 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
         unwind::resume(payload);
     }
 
-    let head = shards.checked_mul(bucket_count).expect("head overflow");
-    let scratch_blocks = head.checked_mul(2).expect("scratch overflow");
-    let block_count = full_blocks
-        .checked_add(scratch_blocks)
-        .expect("block overflow");
-    assert!(block_count <= u32::MAX as usize);
-    let allocated: usize = tasks
-        .iter()
-        .map(|task| task.sorter.active_blocks_end - bucket_count)
-        .sum();
-    let active_end = head + allocated;
-    assert!(active_end <= block_count);
-
-    // Until the final non-panicking transfer below, every local guard owns its
-    // shard and can recover it if allocation or directory construction fails.
-    let mut order = alloc::vec![0u32; block_count];
-    let next_order = alloc::vec![0u32; block_count];
-    // The adopted guard only compacts or finishes; it never scatters again.
-    let bucket_ids = Vec::new();
-    let mut partials = Vec::with_capacity(head);
-    let mut ends = Vec::with_capacity(bucket_count);
-    let mut output = head;
-    let mut records = 0;
-    let translate = |shard_index: usize, task: &Shard<'_, '_, T, E>, physical: u32| {
-        let physical = physical as usize;
-        if physical < 2 * bucket_count {
-            shard_index * 2 * bucket_count + physical
-        } else {
-            scratch_blocks + task.first_block + physical - 2 * bucket_count
-        }
-    };
-    for bucket in 0..bucket_count {
-        // Bucket-major, then ORIGINAL shard order. Completion order is never
-        // used, so equal keys retain their original cross-shard order.
-        for (index, task) in tasks.iter().enumerate() {
-            let start = if bucket == 0 {
-                bucket_count
-            } else {
-                task.sorter.buffers.counts[bucket - 1]
-            };
-            let end = task.sorter.buffers.counts[bucket];
-            let partial = task.sorter.partial_blocks[bucket];
-            assert_eq!(partial.order_index, end - 1);
-            for logical in start..end {
-                order[output] = translate(index, task, task.sorter.block_order[logical]) as u32;
-                output += 1;
-            }
-            partials.push(PartialBlock {
-                order_index: output - 1,
-                len: partial.len,
-            });
-            records += (end - start - 1) * block_size + partial.len;
-        }
-        ends.push(records);
-    }
-    assert_eq!(records, input_len);
-    assert_eq!(output, active_end);
-    let mut free = 0;
-    for (index, task) in tasks.iter().enumerate() {
-        for logical in
-            (0..bucket_count).chain(task.sorter.active_blocks_end..task.sorter.block_order.len())
-        {
-            if free == head {
-                free = active_end;
-            }
-            order[free] = translate(index, task, task.sorter.block_order[logical]) as u32;
-            free += 1;
-        }
-    }
-    if free == head {
-        free = active_end;
-    }
-    assert_eq!(free, block_count);
-    let mut global = Partition {
-        buffers,
-        blocks: BlockStorage {
-            input,
-            input_len,
-
-            block_size,
-            scratch_blocks,
-            block_count,
-            scratch: Vec::new(),
-            scratch_segments: Vec::with_capacity(shards),
-            input_borrow: PhantomData,
-        },
-        // For compaction this field means the free prefix length, not the
-        // number of semantic radix buckets. No scatter runs on this guard.
-        bucket_count: head,
-        block_order: order,
-        next_block_order: next_order,
-        bucket_ids,
-        partial_blocks: partials,
-        active_blocks_end: active_end,
-        input_materialized: true,
-    };
-
-    // Ownership transfer has no allocations, bounds checks, or user calls:
-    // scratch_segments has capacity for exactly tasks.len() allocations.
-    // Each moved Vec owns only MaybeUninit cells, so stale copies never drop T.
-    // The global directory already names each live prefix exactly once.
-    for task in &mut tasks {
-        global
-            .blocks
-            .scratch_segments
-            .push(core::mem::take(&mut task.sorter.blocks.scratch));
-        task.sorter.input_materialized = true;
-    }
-    global.input_materialized = false;
-    drop(tasks);
+    // SAFETY: shards cover consecutive disjoint block-aligned ranges built
+    // from this common ancestor, with only the last containing a tail. All
+    // completed the same pass and retain their recovery guards until adoption.
+    let (mut global, ends) = unsafe { Partition::adopt_shards(input, tasks, buffers) };
     drop(local_buffers);
-    #[cfg(debug_assertions)]
-    global.validate();
     if let Some(finisher) = config.finish
         && finish::try_finish(
             &mut global,
             &ends,
-            shards,
             config.parallel,
             finisher.limit,
             finisher.sort,
@@ -356,6 +210,148 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
         unwind::resume(payload);
     }
     ends
+}
+
+impl<'a, 'w, T> Partition<'a, 'w, T> {
+    /// Adopts successfully scattered shards in original input order.
+    /// All allocations and directory checks precede ownership transfer, so an
+    /// unwind restores records through either the shard or adopted guards.
+    ///
+    /// # Safety
+    ///
+    /// Tasks must be in original input order, each holding a completed,
+    /// not-yet-materialized single-shard partition and its recovery ownership.
+    /// Their slices must be consecutive and disjoint, with the same block size
+    /// and bucket count; only the last may have a tail. The first shard starts
+    /// at block zero, and every `first_block` is its actual block offset from
+    /// `input`. This pointer must be their common raw ancestor, still valid for
+    /// the complete input; deriving it from a shard would narrow its borrow.
+    unsafe fn adopt_shards<E>(
+        input: *mut T,
+        mut tasks: Vec<Shard<'a, '_, T, E>>,
+        buffers: &'w mut Buffers<T>,
+    ) -> (Self, Vec<usize>) {
+        let shards = tasks.len();
+        let local = &tasks[0].sorter;
+        let block_size = local.blocks.block_size;
+        let last = tasks.last().unwrap();
+        let input_len = last.first_block * block_size + last.sorter.blocks.input_len;
+        let full_blocks = input_len / block_size;
+        let bucket_count = local.buffers.counts.len();
+        let head = shards
+            .checked_mul(local.active_blocks.start)
+            .expect("head overflow");
+        let local_scratch = local.blocks.scratch_blocks;
+        let scratch_blocks = shards.checked_mul(local_scratch).expect("scratch overflow");
+        let block_count = full_blocks
+            .checked_add(scratch_blocks)
+            .expect("block overflow");
+        assert!(block_count <= u32::MAX as usize);
+        let allocated: usize = tasks
+            .iter()
+            .map(|task| task.sorter.active_blocks.len())
+            .sum();
+        let active_end = head + allocated;
+        assert!(active_end <= block_count);
+
+        // Until the final non-panicking transfer below, every local guard owns its
+        // shard and can recover it if allocation or directory construction fails.
+        let mut order = alloc::vec![0u32; block_count];
+        let next_order = alloc::vec![0u32; block_count];
+        // The adopted guard only compacts or finishes; it never scatters again.
+        let bucket_ids = Vec::new();
+        let mut partials = Vec::with_capacity(head);
+        let mut ends = Vec::with_capacity(bucket_count);
+        // Reuse one shard's block-end table for the adopted bucket directory.
+        // Local boundaries are available from their trailing partials below;
+        // recovery uses the live block sequence, not this pass-local table.
+        let mut block_ends = core::mem::take(&mut tasks[0].sorter.buffers.counts);
+        let mut output = head;
+        let mut records = 0;
+        let translate = |shard_index: usize, task: &Shard<'_, '_, T, E>, physical: u32| {
+            let physical = physical as usize;
+            if physical < local_scratch {
+                shard_index * local_scratch + physical
+            } else {
+                scratch_blocks + task.first_block + physical - local_scratch
+            }
+        };
+        for (bucket, block_end) in block_ends.iter_mut().enumerate() {
+            // Bucket-major, then ORIGINAL shard order. Completion order is never
+            // used, so equal keys retain their original cross-shard order.
+            for (index, task) in tasks.iter().enumerate() {
+                let blocks = task.sorter.bucket_blocks(bucket);
+                let partial = task.sorter.partial_blocks[bucket];
+                records += (blocks.len() - 1) * block_size + partial.len;
+                for logical in blocks {
+                    order[output] = translate(index, task, task.sorter.block_order[logical]) as u32;
+                    output += 1;
+                }
+                partials.push(PartialBlock {
+                    order_index: output - 1,
+                    len: partial.len,
+                });
+            }
+            ends.push(records);
+            *block_end = output;
+        }
+        assert_eq!(records, input_len);
+        assert_eq!(output, active_end);
+        let mut free = 0;
+        for (index, task) in tasks.iter().enumerate() {
+            for logical in (0..task.sorter.active_blocks.start)
+                .chain(task.sorter.active_blocks.end..task.sorter.block_order.len())
+            {
+                if free == head {
+                    free = active_end;
+                }
+                order[free] = translate(index, task, task.sorter.block_order[logical]) as u32;
+                free += 1;
+            }
+        }
+        if free == head {
+            free = active_end;
+        }
+        assert_eq!(free, block_count);
+        buffers.counts = block_ends;
+        let mut global = Partition {
+            buffers,
+            blocks: BlockStorage {
+                input,
+                input_len,
+
+                block_size,
+                scratch_blocks,
+                block_count,
+                scratch: Vec::with_capacity(shards),
+                segment_blocks_log2: local_scratch.trailing_zeros(),
+                input_borrow: PhantomData,
+            },
+            active_blocks: head..active_end,
+            block_order: order,
+            next_block_order: next_order,
+            bucket_ids,
+            partial_blocks: partials,
+            input_materialized: true,
+        };
+
+        // Ownership transfer has no allocations, bounds checks, or user calls:
+        // scratch has capacity for one segment per task, in shard order.
+        // Each moved Vec owns only MaybeUninit cells, so stale copies never drop T.
+        // The global directory already names each live prefix exactly once.
+        for task in &mut tasks {
+            global
+                .blocks
+                .scratch
+                .append(&mut task.sorter.blocks.scratch);
+            task.sorter.input_materialized = true;
+        }
+        global.input_materialized = false;
+        drop(tasks);
+        #[cfg(debug_assertions)]
+        global.validate();
+        (global, ends)
+    }
 }
 
 #[cfg(test)]

@@ -33,6 +33,14 @@ export const ALIGNMENT_RUSTFLAGS = [
 ];
 
 /** Read checkout modification state before creating operation outputs or logs. */
+/** Resolve a revision to its full commit SHA. */
+export function resolveCommit(root: string, ref: string) {
+  return command("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], {
+    cwd: root,
+    capture: true,
+  });
+}
+
 export async function workingTreeDirty(root: string) {
   return Boolean(await command("git", ["status", "--porcelain"], { cwd: root, capture: true }));
 }
@@ -54,6 +62,7 @@ export interface BuildProvenance {
   /** Resolved library features from Cargo; absent in historical result files. */
   library_features?: string[];
   rustc_args?: string[];
+  revisions?: { libraries: Record<string, string[]> };
 }
 
 /** Materialize repository-local links; reject escaping targets and directory cycles.
@@ -199,6 +208,19 @@ export async function buildArtifact(output: string, name: string) {
     await readFile(join(script.out_dir, "provenance.json"), "utf8"),
   ) as BuildProvenance;
   provenance.library_features = [...libraries[0].features].sort();
+  for (const [library, features] of Object.entries(provenance.revisions?.libraries ?? {})) {
+    const matches = messages.filter(
+      (value) =>
+        value.reason === "compiler-artifact" &&
+        value.target.name === library.replaceAll("-", "_") &&
+        value.target.kind?.includes("lib"),
+    );
+    if (
+      matches.length !== 1 ||
+      JSON.stringify([...matches[0].features].sort()) !== JSON.stringify(features)
+    )
+      throw new Error("Revision library features differ from prepared metadata: " + library);
+  }
   return { executable: artifact.executable as string, provenance };
 }
 

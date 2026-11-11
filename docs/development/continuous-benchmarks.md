@@ -21,7 +21,7 @@ A read-only feedback request does not authorize new measurements. The [CLI guide
 
 ## Read main and history
 
-The [dashboard](https://bencher.dev/perf/yikai-liao-s-project) stores current/baseline ratios, not absolute nanoseconds. A ratio of 1.10 means 10% more time than that run’s exact baseline. PR points with the same baseline can describe within-PR history; a rebase or retarget that changes the baseline starts a separate segment. The report and its Cloud links select the native Head for the exact baseline segment. Do not combine different Heads into an unqualified continuous trend.
+The [dashboard](https://bencher.dev/perf/yikai-liao-s-project) stores current/baseline ratios, not absolute nanoseconds. A ratio of 1.10 means 10% more time than that run’s exact baseline. A PR's points form one trend even when merging main or a retarget changes the baseline: each point is the PR at that run against the baseline it was measured with, so a step in the trend can come from the baseline moving. Do not compare these ratios with another PR's.
 
 Automatic measurement and Cloud archival run on PRs only. Merging does not repeat the benchmark on main; main still runs correctness and site checks selected by its diff. Retained older main ratios describe individual parent-to-commit effects, not absolute or cumulative latency. No upload depends on an earlier Cloud sample, and no historical threshold decides the performance check.
 
@@ -87,7 +87,7 @@ The report job maintains the existing `benchmark-images` branch. Image failure l
 
 ### PR history
 
-Bencher native Heads are keyed by the measured protocol and exact baseline commit using `--start-point-reset --start-point-idempotency-key`. No main measurement or Start Point is needed. The report reads only the current Head, testbed and hardware specification, so rebases start a separate trend segment. Ratios are plotted directly against one, over a fixed shared case cohort. The existing swing/current-regression focus rules and trend figure are retained. Legacy unsegmented Heads are not mixed into the new segment. Cloud failure leaves the current measured point visible.
+Each PR submits to its `pr-N` Bencher branch without a Start Point or Head reset. No main measurement is needed. The report reads every run on that branch with the current Testbed and hardware specification, including runs that earlier submissions stored under per-baseline Heads, so merging main or rebasing does not start a new trend. Each ratio is plotted directly against one over a fixed shared case cohort, and the figure names the latest baseline. The existing swing/current-regression focus rules and trend figure are retained. Cloud links select the current Head, which holds only the runs submitted since earlier submissions stopped creating a Head per baseline. Cloud failure leaves the current measured point visible.
 
 ## Setup
 

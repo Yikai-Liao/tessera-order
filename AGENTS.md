@@ -28,6 +28,17 @@ Use the maintained CLI from the repository root. Its compact output serves agent
 
 Start performance work with a small representative selection, then expand evidence to match the claim. Extend the shared pipeline when an experiment needs a missing capability. Keep raw measurements outside Git. Read-only feedback requests stay read-only; confirm host-wide system changes, credentials, publication and unusually expensive experiments with the operator.
 
+## Engine design and simplification
+
+Use the `software-design-philosophy` skill for structural engine changes. Judge maintainability by change amplification, cognitive load and hidden dependencies, not by line or file count.
+
+- **Trace real changes.** Before choosing a boundary, follow tasks such as changing sampling, tile capacity, partition selection, block layout or task size. Each rule has one owner; consumers do not reconstruct it. Use the [engine vocabulary](docs/design/engine.md#vocabulary): subproblems, buckets, tiles, blocks, primitives, cost models and scheduling are distinct.
+- **Deep operations, not wrappers.** A boundary hides decisions or owns a complete invariant-preserving operation. Do not add a type, trait or forwarding layer merely to name a concept.
+- **One analysis for serial and parallel.** Partition choice, bucket meaning and finishing rules have one authority; parallel code differs only in scheduling and ownership transfer.
+- **Generalize, don't delete.** Retire a fast path only when a more general mechanism keeps its savings. Do not discard known ranges, bounds or classifications, and audit every added scan, allocation or pass.
+- **Derive constants.** Separate representation limits, budgets and tuned parameters; derive values from existing constraints instead of adding distribution-specific exceptions.
+- **Report trade-offs.** A generalization may accept measured local losses if representative coverage improves; list the losses individually. Keep structural and performance commits separate, commit each verifiable stage, and record which checks ran and what acceptance is outstanding.
+
 ## Quality boundaries
 
 - Preserve ordering, stability, record ownership, panic recovery and the documented memory contract. Every unsafe operation explains its safety invariant. Keep the library's panic, inconsistent-key, owned-record and mutable-reference tests.

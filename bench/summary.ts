@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import type { PairedVerdict } from "./statistics.ts";
+
 /** A measured comparison; the enclosing report names its denominator and interval kind. */
 export interface ResultRow {
   id: string;
   ratio: number;
   low: number;
   high: number;
-  verdict: "faster" | "slower" | "within noise";
+  verdict: PairedVerdict;
   aaLow?: number;
   aaHigh?: number;
 }
@@ -26,6 +28,7 @@ export function resultSummary(rows: ResultRow[]) {
     slower: rows.filter((row) => row.verdict === "slower").length,
     faster: rows.filter((row) => row.verdict === "faster").length,
     withinNoise: rows.filter((row) => row.verdict === "within noise").length,
+    inconclusive: rows.filter((row) => row.verdict === "inconclusive").length,
     focus: changes.slice(0, 5).map(({ id, ratio, low, high, verdict, aaLow, aaHigh }) => ({
       id,
       ratio,

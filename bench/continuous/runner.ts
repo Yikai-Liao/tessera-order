@@ -17,8 +17,9 @@ export interface SubmissionOptions extends PairedSource {
 /** Upload validated JSON only; no executable, image, historical baseline or remote job.
  *
  * Cloud history stores the ratio to this run's exact baseline, not a
- * comparison with a previous run's ratio. A dedicated Testbed and Measure
- * isolate the old absolute-time histories.
+ * comparison with a previous run's ratio. The PR's reports share one branch
+ * history, so merging main does not start a new one. A dedicated Testbed and
+ * Measure isolate the old absolute-time histories.
  */
 export async function submitContinuous(options: SubmissionOptions) {
   if (!/^[a-f0-9]{40}$/.test(options.hash) || !/^[a-f0-9]{40}$/.test(options.baseHash))
@@ -38,10 +39,6 @@ export async function submitContinuous(options: SubmissionOptions) {
       options.project,
       "--branch",
       options.pr ? `pr-${options.pr}` : "main",
-      // Native Heads keep ratios from different baselines in separate histories.
-      "--start-point-reset",
-      "--start-point-idempotency-key",
-      `${runs[0].protocol}:${runs[0].baseline}`,
       "--hash",
       options.hash,
       "--testbed",

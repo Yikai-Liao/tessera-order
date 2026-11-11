@@ -1,5 +1,21 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { catalog } from "./catalog.ts";
+
+/** Find the supported paired-block budget with `count` blocks, if any. */
+export function findPairedBudget(count: number) {
+  return Object.values(catalog.pairedBlocks).find((budget) => budget.count === count);
+}
+
+/** Resolve a supported paired-block budget without inferring it from partial observations. */
+export function pairedBudget(count: number) {
+  const budget = findPairedBudget(count);
+  if (!budget) throw new Error(`Unsupported paired-block budget: ${count}`);
+  return budget;
+}
+
+export type PairedVerdict = "faster" | "slower" | "within noise" | "inconclusive";
+
 /** Return the median of a nonempty sample. */
 export function median(values: number[]) {
   if (!values.length) throw new Error("cannot summarize an empty sample");
@@ -49,9 +65,13 @@ export interface PairedBlock {
   value: number;
 }
 
-/** Summarize nine observations relative to their paired A/A means. */
-export function summarizePaired(blocks: PairedBlock[]) {
-  if (blocks.length !== 9) throw new Error("Paired summaries require nine blocks");
+/** Summarize a complete declared budget relative to its paired A/A means. */
+export function summarizePaired(
+  blocks: PairedBlock[],
+  expected = catalog.pairedBlocks.extended.count,
+) {
+  const { count, agreement } = pairedBudget(expected);
+  if (blocks.length !== count) throw new Error(`Paired summaries require ${count} complete blocks`);
   const ratios = blocks.map(({ first, second, value }) => value / ((first + second) / 2));
   const aa = blocks.flatMap(({ first, second }) => {
     const mean = (first + second) / 2;
@@ -60,12 +80,14 @@ export function summarizePaired(blocks: PairedBlock[]) {
   const ratio = median(ratios),
     aaLow = Math.min(...aa),
     aaHigh = Math.max(...aa);
-  const verdict: "faster" | "slower" | "within noise" =
-    ratio < aaLow && ratios.filter((value) => value < 1).length >= 8
+  const verdict: PairedVerdict =
+    ratio < aaLow && ratios.filter((value) => value < 1).length >= agreement
       ? "faster"
-      : ratio > aaHigh && ratios.filter((value) => value > 1).length >= 8
+      : ratio > aaHigh && ratios.filter((value) => value > 1).length >= agreement
         ? "slower"
-        : "within noise";
+        : count === catalog.pairedBlocks.short.count
+          ? "inconclusive"
+          : "within noise";
   return {
     ratios,
     ratio,

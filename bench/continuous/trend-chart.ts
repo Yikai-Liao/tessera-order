@@ -1,65 +1,43 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { modeName, modeOrder } from "../catalog.ts";
-import type { Headline } from "../plot/matrix.ts";
 import { renderTrends } from "../plot/trends.ts";
-import { MIN_SWING, type TrendSeries, type TrendSummary } from "./history.ts";
-import { caseParts, formatChange, MAJOR, short } from "./report.ts";
+import { MIN_SWING, type TrendSummary } from "./history.ts";
+import { BUILD, caseParts, formatChange, MAJOR, short } from "./report.ts";
 
-export interface ConfigurationTrend {
-  name: string;
-  trend: TrendSummary | null;
-}
 const swing = (changes: number[]) => (1 + Math.max(...changes)) / (1 + Math.min(...changes)) - 1;
+const cell = (changes: number[] | undefined) =>
+  changes
+    ? {
+        changes,
+        value: formatChange(changes.at(-1)!),
+        major: Math.abs(changes.at(-1)!) >= MAJOR,
+      }
+    : null;
 
 /** Select continuous history's focus cases and supply formatted, protocol-free rows. */
-export function trendSvg(configurations: ConfigurationTrend[], base = "main") {
-  const measured = configurations.filter((configuration) => configuration.trend);
-  if (!measured.length) return null;
-  const byName = configurations.map(
-    (configuration) =>
-      new Map((configuration.trend?.series ?? []).map((series) => [series.name, series])),
-  );
-  const selected = [
-    ...new Set(
-      configurations.flatMap(
-        (configuration) => configuration.trend?.focus.map((series) => series.name) ?? [],
-      ),
-    ),
-  ];
-  const largest = (name: string) =>
-    Math.max(
-      ...byName
-        .map((entries) => entries.get(name))
-        .filter((series): series is TrendSeries => !!series)
-        .map((series) => swing(series.changes)),
+export function trendSvg(trend: TrendSummary, base = "main") {
+  const series = new Map(trend.series.map((entry) => [entry.name, entry]));
+  const selected = trend.focus
+    .map((entry) => entry.name)
+    .sort(
+      (a, b) => swing(series.get(b)!.changes) - swing(series.get(a)!.changes) || a.localeCompare(b),
     );
-  selected.sort((a, b) => largest(b) - largest(a) || a.localeCompare(b));
-  const cell = (changes: number[] | undefined) =>
-    changes
-      ? {
-          changes,
-          value: formatChange(changes.at(-1)!),
-          major: Math.abs(changes.at(-1)!) >= MAJOR,
-        }
-      : null;
-  const apiModes = [...new Set(measured.flatMap((c) => c.trend!.modes))].sort(
+  const apiModes = [...trend.modes].sort(
     (a, b) => modeOrder(a) - modeOrder(b) || a.localeCompare(b),
   );
-  const aggregateModes = apiModes.length > 1 ? apiModes : [undefined];
-  const aggregate = (trend: TrendSummary | null, mode?: string) => {
-    if (!trend) return undefined;
+  const aggregate = (mode?: string) => {
     if (mode === undefined) return trend.overall;
-    const series = trend.series.filter((entry) => caseParts(entry.name).mode === mode);
-    if (!series.length) return undefined;
+    const inMode = trend.series.filter((entry) => caseParts(entry.name).mode === mode);
+    if (!inMode.length) return undefined;
     return trend.runs.map(
       (_, i) =>
         Math.exp(
-          series.reduce((sum, entry) => sum + Math.log1p(entry.changes[i]), 0) / series.length,
+          inMode.reduce((sum, entry) => sum + Math.log1p(entry.changes[i]), 0) / inMode.length,
         ) - 1,
     );
   };
-  const aggregates = aggregateModes.map((mode) => ({
+  const aggregates = (apiModes.length > 1 ? apiModes : [undefined]).map((mode) => ({
     name: {
       input: mode === undefined ? "Overall" : modeName(mode),
       tag: "",
@@ -67,12 +45,13 @@ export function trendSvg(configurations: ConfigurationTrend[], base = "main") {
       strong: true,
     },
     aggregate: true,
-    cells: configurations.map((configuration) => cell(aggregate(configuration.trend, mode))),
+    cells: [cell(aggregate(mode))],
   }));
   const rows = [
     ...aggregates,
     ...selected.map((name) => {
       const parts = caseParts(name);
+      const changes = series.get(name)!.changes;
       return {
         name: {
           input: parts.input,
@@ -83,60 +62,34 @@ export function trendSvg(configurations: ConfigurationTrend[], base = "main") {
           ]
             .filter(Boolean)
             .join(", "),
-          strong: byName.some(
-            (entries) => Math.abs(entries.get(name)?.changes.at(-1) ?? 0) >= MAJOR,
-          ),
+          strong: Math.abs(changes.at(-1)!) >= MAJOR,
         },
         aggregate: false,
-        cells: byName.map((entries) => cell(entries.get(name)?.changes)),
+        cells: [cell(changes)],
       };
     }),
   ];
-  const progress = (configuration: ConfigurationTrend) =>
-    configuration.trend
-      ? (1 + configuration.trend.overall.at(-1)!) / (1 + configuration.trend.overall[0]) - 1
-      : null;
-  const columns: Headline[] = configurations.map((configuration) => {
-    const value = progress(configuration);
-    return {
-      name: configuration.name,
-      value: formatChange(value),
-      detail: configuration.trend ? `${configuration.trend.runs.length} runs` : "no history",
-      tone: value == null ? "muted" : value < 0 ? "primary" : value > 0 ? "radix" : "text",
-    };
-  });
-  const bases = [...new Set(measured.map((configuration) => short(configuration.trend!.base)))];
-  const ranges = [
-    ...new Set(
-      measured.map(
-        (configuration) =>
-          `${short(configuration.trend!.runs[0].hash)} → ${short(configuration.trend!.runs.at(-1)!.hash)}`,
-      ),
-    ),
-  ];
+  const progress = (1 + trend.overall.at(-1)!) / (1 + trend.overall[0]) - 1;
   return renderTrends({
     title: { input: "Run time during this PR", sub: "first to latest run", tag: "", strong: true },
-    headline: `PR benchmark history: ${configurations
-      .map((configuration) =>
-        configuration.trend
-          ? `${configuration.name} ${formatChange(progress(configuration))} run time over ${configuration.trend.runs.length} runs`
-          : `${configuration.name} unavailable`,
+    headline: `PR benchmark history: ${BUILD} ${formatChange(progress)} run time over ${trend.runs.length} runs`,
+    description: rows
+      .map(
+        (row, index) =>
+          `${index < aggregates.length ? row.name.input : selected[index - aggregates.length]}: ${BUILD} ${row.cells[0]?.changes.map(formatChange).join(", ") ?? "—"}`,
       )
-      .join("; ")}`,
-    description: [
-      ...aggregates.map(
-        (row) =>
-          `${row.name.input}: ${configurations.map((configuration, index) => `${configuration.name} ${row.cells[index]?.changes.map(formatChange).join(", ") ?? "—"}`).join("; ")}`,
-      ),
-      ...selected.map(
-        (name, index) =>
-          `${name}: ${configurations.map((configuration, column) => `${configuration.name} ${rows[index + aggregates.length].cells[column]?.changes.map(formatChange).join(", ") ?? "—"}`).join("; ")}`,
-      ),
-    ].join(" | "),
-    columns,
+      .join(" | "),
+    columns: [
+      {
+        name: BUILD,
+        value: formatChange(progress),
+        detail: `${trend.runs.length} runs`,
+        tone: progress < 0 ? "primary" : progress > 0 ? "radix" : "text",
+      },
+    ],
     rows,
     minimumSpan: MIN_SWING,
-    reference: `${base} ${bases.join(", ")} · runs ${ranges.join(", ")}`,
+    reference: `${base} ${short(trend.base)} · runs ${short(trend.runs[0].hash)} → ${short(trend.runs.at(-1)!.hash)}`,
     guide: `value: latest run against ${base} · one scale per row · —: no comparable history`,
   });
 }

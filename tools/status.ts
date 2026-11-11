@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { VARIANTS } from "../bench/catalog.ts";
 import { BENCHMARK_CHECK, marker } from "../bench/continuous/marker.ts";
 import { command } from "./process.ts";
 
@@ -55,7 +54,7 @@ export interface RepositoryStatus {
     attempt: number;
     jobs: { name: string; state: string; steps: { name: string; state: string }[] }[];
   }[];
-  benchmarks: { configuration: string; state: string; title: string | null }[];
+  benchmark: { state: string; title: string | null };
   report: string | null;
   details?: {
     url: string;
@@ -156,8 +155,7 @@ export async function readStatus(
     pull ? api.pages<Comment[]>(`issues/${pull.number}/comments?per_page=100`) : [],
   ]);
   const candidates = checkPages.flatMap((page) => page.check_runs).sort((a, b) => b.id - a.id);
-  const checks = VARIANTS.map(() => candidates.find((check) => check.name === BENCHMARK_CHECK));
-  const attached = checks.filter((check) => check !== undefined);
+  const check = candidates.find((candidate) => candidate.name === BENCHMARK_CHECK);
   const currentRuns = runPages
     .flat()
     .flatMap((page) => page.workflow_runs)
@@ -204,17 +202,16 @@ export async function readStatus(
           })),
       })),
     })),
-    benchmarks: VARIANTS.map((variant, index) => ({
-      configuration: variant.id,
-      state: checks[index] ? (checks[index].conclusion ?? checks[index].status) : "missing",
-      title: checks[index]?.output.title ?? null,
-    })),
+    benchmark: {
+      state: check ? (check.conclusion ?? check.status) : "missing",
+      title: check?.output.title ?? null,
+    },
     report: comment?.url ?? null,
     ...(details
       ? {
           details: {
             url,
-            checks: attached.map(
+            checks: (check ? [check] : []).map(
               ({ id, name, status, conclusion, external_id, details_url, output }) => ({
                 id,
                 name,
@@ -260,9 +257,7 @@ export function formatStatus(status: RepositoryStatus) {
       for (const step of job.steps) lines.push(`    ${step.name}: ${step.state}`);
     }
   }
-  for (const check of status.benchmarks)
-    lines.push(
-      `Benchmark ${check.configuration}: ${check.state}${check.title ? ` · ${check.title}` : ""}`,
-    );
+  const { state, title } = status.benchmark;
+  lines.push(`Benchmark: ${state}${title ? ` · ${title}` : ""}`);
   return lines.join("\n");
 }

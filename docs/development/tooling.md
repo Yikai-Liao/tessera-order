@@ -55,7 +55,7 @@ pnpm -s tools status main --text
 
 Build and measurement tasks print one compact object containing `out`, `log` and `result`. Completed revision and algorithm comparisons return structured results: protocol, ratio denominator, interval meaning, measured counts, faster/slower/within-noise counts, and up to five changes with their numeric evidence. `omittedChanges` counts changes beyond that limit; full results remain in `summaries.json`. Algorithm counts describe opponent/input pairs and exclude the two Tessera controls. Layout results keep each layout separate rather than pooling verdicts. Preparation returns a prepared identity and case count, not a performance verdict. Subprocess output and progress go to the adjacent `OUT.log`, leaving machine-readable stdout free of Cargo, compiler and Criterion output. A failed operation exits nonzero with the log path. Each `compare resume` invocation uses a separate adjacent `OUT.resume-TIMESTAMP-PID.log`, preserving previous logs. Preparation, validation, memory and group progress go to these diagnostics, not machine-readable stdout. Use `--verbose` only for interactive diagnosis; it streams subprocess diagnostics instead and no longer guarantees JSON-only stdout. Report regeneration returns the same compact comparison summary without reading or rebuilding sources. Plans print compact JSON by default or editable TOML with `--format toml`.
 
-A successful `status` exit means the read succeeded, not that every workflow passed. An experiment's command exit describes execution, not proof of a speedup. Algorithm comparisons retain exact executable pairs and recorded settings before measuring; `compare resume DIR` accepts no selection or sampling overrides. See [recovery](benchmarking.md#resuming-algorithm-comparisons) for interruptions and locks. `continuous submit` records each configuration’s upload outcome in `outcomes.json`, attempts every active configuration even after a failure, and exits nonzero if any failed. It only reads validated JSON; paired regression checks are evaluated separately by report publication.
+A successful `status` exit means the read succeeded, not that every workflow passed. An experiment's command exit describes execution, not proof of a speedup. Algorithm comparisons retain exact executable pairs and recorded settings before measuring; `compare resume DIR` accepts no selection or sampling overrides. See [recovery](benchmarking.md#resuming-algorithm-comparisons) for interruptions and locks. `continuous submit` retains `bmf.json` and the Cloud response `bencher.json`, and exits nonzero if validation or upload fails. It only reads validated JSON; paired regression checks are evaluated separately by report publication.
 
 ## Reproduce continuous work locally
 
@@ -66,10 +66,10 @@ The hosted preparation job builds the two revisions once; measurement jobs reuse
 pnpm tools compare commit main --plan continuous --prepare-only \
   --out bench/results/prepared
 pnpm tools compare prepared bench/results/prepared --shard 1/4 \
-  --out bench/results/paired-portable-simd-1
+  --out bench/results/paired-1
 
 # Regenerate one completed shard without building or measuring.
-pnpm tools report bench/results/paired-portable-simd-1
+pnpm tools report bench/results/paired-1
 ```
 
 Each shard keeps adjacent A/B sample pairs and the full catalogued sampling budget for its selected cases, without outer repetition. Omit `--shard` to run all cases on one host. `--shard INDEX/COUNT` partitions a resolved listing deterministically; it does not shorten samples. Results record the full inventory and selected subset. Directories must be new; temporary snapshots and default builds are cleaned, retained results and adjacent logs remain. Set `TESSERA_BENCH_TARGET_DIR` to a caller-owned Cargo cache to retain builds across runs; do not share it across trust boundaries. CI caches this exact target directory by configuration and sets the CLI alignment defaults before building.

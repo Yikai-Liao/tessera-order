@@ -2,7 +2,6 @@
 
 import { resolve } from "node:path";
 import type { Command } from "commander";
-import { VARIANTS } from "../bench/catalog.ts";
 import { CONTINUOUS_SHARDS } from "../bench/continuous/paired.ts";
 import { type SubmissionOptions, submitContinuous } from "../bench/continuous/runner.ts";
 import { probeCounters } from "../bench/local/counters.ts";
@@ -19,13 +18,10 @@ export function continuousCommands(program: Command) {
     .action(() =>
       console.log(
         JSON.stringify({
-          include: VARIANTS.flatMap((variant) =>
-            Array.from({ length: CONTINUOUS_SHARDS }, (_, index) => ({
-              configuration: variant.id,
-              shard: `${index + 1}/${CONTINUOUS_SHARDS}`,
-              artifact: `paired-${variant.id}-${index + 1}`,
-            })),
-          ),
+          include: Array.from({ length: CONTINUOUS_SHARDS }, (_, index) => ({
+            shard: `${index + 1}/${CONTINUOUS_SHARDS}`,
+            artifact: `paired-${index + 1}`,
+          })),
         }),
       ),
     );
@@ -49,9 +45,8 @@ export function continuousCommands(program: Command) {
     .option("--pr <number>", "record under pr-N rather than main")
     .action(async (options: SubmissionOptions) => {
       const out = resolve(options.out);
-      const outcomes = await runTask(out, Boolean(program.opts().verbose), () =>
+      await runTask(out, Boolean(program.opts().verbose), () =>
         submitContinuous({ ...options, out, artifacts: resolve(options.artifacts) }),
       );
-      if (Object.values(outcomes).includes("failure")) process.exitCode = 1;
     });
 }

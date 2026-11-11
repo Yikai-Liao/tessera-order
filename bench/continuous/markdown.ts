@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { geomean, modeName, modes } from "./matrix.ts";
-import { formatChange, type ReportSummary, type Row, short } from "./report.ts";
+import { modeName } from "../catalog.ts";
+import { formatChange, geomean, modes, type ReportSummary, type Row, short } from "./report.ts";
 
 interface RenderOptions {
   language: string;
@@ -70,7 +70,6 @@ export function render(summary: ReportSummary, options: RenderOptions) {
         (!changed.length ? " No regression or improvement alerts." : ""),
     );
   }
-  const configurations = [{ name: "Tessera", summary }];
   const overview = (label: string, mode?: string) => {
     const value = geomean(summary, mode);
     const rows = summary.rows.filter((row) => mode === undefined || row.parts.mode === mode);
@@ -89,7 +88,7 @@ export function render(summary: ReportSummary, options: RenderOptions) {
     );
   };
   out.push("", "| | Change |", "|---|---:|", overview("**All cases**"));
-  const groups = modes(configurations);
+  const groups = modes(summary);
   if (groups.length > 1) for (const mode of groups) out.push(overview(modeName(mode), mode));
   if (summary.regressions) {
     out.push("", "> [!CAUTION]", `> **${summary.regressions} cases slower**.`);

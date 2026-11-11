@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
-import { VARIANTS } from "../catalog.ts";
+import { continuous } from "../catalog.ts";
 import { mockGitHub } from "./fixtures/github.ts";
 import { writePaired } from "./fixtures/paired.ts";
 import { baseHash, fixture, hash } from "./fixtures/report.ts";
@@ -15,25 +15,23 @@ import { pairedBmf } from "./paired.ts";
 async function publication(t: TestContext, cloud = true, moved = false, ratio?: number) {
   const dir = await mkdtemp(join(tmpdir(), "tessera-paired-report-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  for (const variant of VARIANTS) {
-    const runs = await writePaired(dir, variant, ratio ?? 1.2);
-    if (cloud) {
-      const report = fixture();
-      report.testbed.name = variant.relativeTestbed;
-      report.branch.name = "pr-7";
-      report.results = [
-        Object.entries(pairedBmf(runs)).map(([name, metric]) => ({
-          benchmark: { name, uuid: name },
-          measures: [
-            {
-              measure: { name: "paired-time-ratio", uuid: "ratio" },
-              metric: { uuid: name, value: metric["paired-time-ratio"].value },
-            },
-          ],
-        })),
-      ];
-      await writeFile(join(dir, `bencher-${variant.id}.json`), JSON.stringify(report));
-    }
+  const runs = await writePaired(dir, ratio ?? 1.2);
+  if (cloud) {
+    const report = fixture();
+    report.testbed.name = continuous.testbed;
+    report.branch.name = "pr-7";
+    report.results = [
+      Object.entries(pairedBmf(runs)).map(([name, metric]) => ({
+        benchmark: { name, uuid: name },
+        measures: [
+          {
+            measure: { name: "paired-time-ratio", uuid: "ratio" },
+            metric: { uuid: name, value: metric["paired-time-ratio"].value },
+          },
+        ],
+      })),
+    ];
+    await writeFile(join(dir, "bencher.json"), JSON.stringify(report));
   }
   const summaries: string[] = [];
   let id = 40;
@@ -109,7 +107,7 @@ test("improvements publish successful configured checks", async (t) => {
     action.requests
       .filter((request) => request.method === "PATCH")
       .map((request) => request.body.conclusion),
-    VARIANTS.map(() => "success"),
+    ["success"],
   );
   assert.match(action.summaries[0], /0.8000×/);
   assert.match(action.summaries[0], /Overall run time −20\.0%/);
@@ -128,7 +126,7 @@ test("raw paired samples drive configured checks and the existing shared chart",
   );
   assert.deepEqual(
     checks.map((request) => request.body.conclusion),
-    VARIANTS.map(() => "failure"),
+    ["failure"],
   );
   const body = action.summaries[0];
   assert.match(body, /Overall run time \+20\.0%/);
@@ -155,14 +153,14 @@ test("raw paired samples drive configured checks and the existing shared chart",
 
 test("missing shards fail the configured build", async (t) => {
   const action = await publication(t);
-  await rm(join(action.inputs.artifacts, `paired-${VARIANTS[0].id}-1`), { recursive: true });
+  await rm(join(action.inputs.artifacts, "paired-1"), { recursive: true });
   await assert.rejects(publishReport(action), /could not be validated/);
   const checks = action.requests.filter(
     (request) => request.method === "PATCH" && request.path.includes("/check-runs/"),
   );
   assert.deepEqual(
     checks.map((request) => request.body.conclusion),
-    VARIANTS.map(() => "failure"),
+    ["failure"],
   );
   assert.match(action.summaries[0], /Missing measurement shards/);
 });
@@ -175,15 +173,15 @@ test("Cloud failure retains ratio tables and does not change performance checks"
     action.requests
       .filter((request) => request.method === "PATCH")
       .map((request) => request.body.conclusion),
-    VARIANTS.map(() => "failure"),
+    ["failure"],
   );
 });
 
 test("Cloud contents cannot override performance evidence", async (t) => {
   const action = await publication(t);
-  const path = join(action.inputs.artifacts, `bencher-${VARIANTS[0].id}.json`);
+  const path = join(action.inputs.artifacts, "bencher.json");
   const report = fixture();
-  report.testbed.name = VARIANTS[0].relativeTestbed;
+  report.testbed.name = continuous.testbed;
   report.branch.name = "pr-7";
   report.results = [[]];
   await writeFile(path, JSON.stringify(report));
@@ -215,7 +213,7 @@ test("fork reports retain the summary without writes or credentials", async (t) 
 
 test("missing Cloud history metadata cannot discard a valid measured verdict", async (t) => {
   const action = await publication(t, true, false, 0.8);
-  const path = join(action.inputs.reports, `bencher-${VARIANTS[0].id}.json`);
+  const path = join(action.inputs.reports, "bencher.json");
   const report = JSON.parse(await readFile(path, "utf8"));
   delete report.start_time;
   await writeFile(path, JSON.stringify(report));
@@ -230,7 +228,7 @@ test("missing Cloud history metadata cannot discard a valid measured verdict", a
 
 test("a changed inventory without shared history retains both current figures", async (t) => {
   const action = await publication(t, true, false, 0.8);
-  const path = join(action.inputs.reports, `bencher-${VARIANTS[0].id}.json`);
+  const path = join(action.inputs.reports, "bencher.json");
   const previous = JSON.parse(await readFile(path, "utf8"));
   previous.uuid = "earlier";
   previous.start_time = "2026-11-07T01:00:00Z";

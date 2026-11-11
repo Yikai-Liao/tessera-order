@@ -81,10 +81,10 @@ modes = [
   { id = "par_unstable", label = "parallel unstable" },
 ]
 
-configurations = [
-  # One required backend retains the existing SIMD identity.
-  { id = "portable-simd", name = "Tessera", testbed = "intel-v1-portable-simd-hybrid-v1", relativeTestbed = "ci", features = ["rayon"] },
-]
+[continuous]
+# One required SIMD backend; Cloud history lives under this Testbed.
+testbed = "ci"
+features = ["rayon"]
 
 [comparison]
 types = ["u32","u64","f64","row_u64","record128","owned","row_u32"]

@@ -50,17 +50,7 @@ export const catalog = z
       }),
     ),
     modes: z.array(identity),
-    configurations: z
-      .array(
-        z.object({
-          id: z.string(),
-          name: z.string(),
-          testbed: z.string(),
-          relativeTestbed: z.string(),
-          features: z.array(z.string()),
-        }),
-      )
-      .length(1),
+    continuous: z.object({ testbed: z.string(), features: z.array(z.string()) }),
     smoke: inventory,
     comparison: inventory.extend({
       summaryShapes: z.array(z.string()),
@@ -84,9 +74,8 @@ export function revisionSampling(len: number) {
   return settings;
 }
 
-/** Continuous configurations and their shared publication identity. */
-export const VARIANTS = catalog.configurations;
-export type Variant = (typeof VARIANTS)[number];
+/** The one hosted build: its Cloud Testbed and required Cargo features. */
+export const continuous = catalog.continuous;
 
 function index<T extends { id: string }>(entries: T[]) {
   return new Map(entries.map((entry) => [entry.id, entry]));

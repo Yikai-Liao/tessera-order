@@ -7,7 +7,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { VARIANTS } from "../bench/catalog.ts";
 import { marker } from "../bench/continuous/marker.ts";
 
 const cli = fileURLToPath(new URL("./index.ts", import.meta.url));
@@ -129,9 +128,8 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
     status.workflows.map((w: { id: number }) => w.id),
     [93, 11],
   );
-  assert.equal(status.benchmarks[0].state, "failure");
-  assert.equal(status.benchmarks[0].title, "Measurement failed");
-  assert.equal(status.benchmarks.length, VARIANTS.length);
+  assert.equal(status.benchmark.state, "failure");
+  assert.equal(status.benchmark.title, "Measurement failed");
   assert.equal(status.report, null);
   assert.equal(status.details, undefined);
   assert.ok(JSON.stringify(status).length < 2000);
@@ -190,8 +188,8 @@ test("PR status joins merge workflows without accepting stale comments", async (
   assert.equal(status.details.workflows[0].head, "merge");
   assert.equal(status.workflows.length, 1);
   assert.equal(status.workflows[0].state, "success");
-  assert.equal(status.benchmarks[0].state, "failure");
-  assert.equal(status.benchmarks[0].title, "2 slower");
+  assert.equal(status.benchmark.state, "failure");
+  assert.equal(status.benchmark.title, "2 slower");
   assert.equal(status.report, "current");
   assert.equal(status.details.comment.body, marker("rust", "current"));
 });
@@ -204,7 +202,7 @@ test("missing workflows never become a clean verdict", async (t) => {
   });
   const status = JSON.parse(f.run("status", "feature/topic"));
   assert.deepEqual(status.workflows, []);
-  assert.ok(status.benchmarks.every((c: { state: string }) => c.state === "missing"));
+  assert.equal(status.benchmark.state, "missing");
   assert.match(f.run("status", "feature/topic", "--text"), /No workflow runs attached/);
 });
 

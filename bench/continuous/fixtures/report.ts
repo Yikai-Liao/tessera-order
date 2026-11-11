@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { VARIANTS } from "../../catalog.ts";
+import { continuous } from "../../catalog.ts";
 import type { BencherReport } from "../report.ts";
 
 export const hash = "a".repeat(40);
@@ -13,7 +13,7 @@ export function fixture(): BencherReport {
     start_time: "2026-11-07T02:00:00Z",
     end_time: "2026-11-07T02:01:00Z",
     project: { slug: "proj" },
-    testbed: { uuid: "t-1", name: VARIANTS[0].relativeTestbed, spec: { uuid: "spec-1" } },
+    testbed: { uuid: "t-1", name: continuous.testbed, spec: { uuid: "spec-1" } },
     branch: {
       uuid: "br-pr",
       name: "pr-8",

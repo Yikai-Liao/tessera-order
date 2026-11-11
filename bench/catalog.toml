@@ -85,6 +85,10 @@ configurations = [
   { id = "default", name = "Default", testbed = "intel-v1-hybrid-v1", relativeTestbed = "actions-screen-default-v1", features = ["rayon"] },
   { id = "portable-simd", name = "Portable SIMD", testbed = "intel-v1-portable-simd-hybrid-v1", relativeTestbed = "actions-screen-portable-simd-v1", features = ["portable-simd", "rayon"] },
 ]
+# Publication identity of a measurement that builds one required SIMD backend
+# (no Default build). Trusted code selects it only when the artifacts contain
+# Portable SIMD shards and no Default shard; see `publishedVariants`.
+requiredBackend = { id = "portable-simd", name = "Portable SIMD", testbed = "intel-v1-portable-simd-hybrid-v1", relativeTestbed = "actions-screen-portable-simd-v1", features = ["rayon"] }
 
 [comparison]
 types = ["u32","u64","f64","row_u64","record128","owned","row_u32"]

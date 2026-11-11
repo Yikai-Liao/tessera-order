@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { readFile } from "node:fs/promises";
-import { VARIANTS } from "../catalog.ts";
 import { chartSvg } from "./chart.ts";
 import {
   type ActionContext,
@@ -19,7 +18,7 @@ import {
   renderCombined,
   renderFailure,
 } from "./markdown.ts";
-import { type PairedSource, pairedSummary, readPaired } from "./paired.ts";
+import { type PairedSource, pairedSummary, publishedVariants, readPaired } from "./paired.ts";
 
 interface PublicationOptions {
   github: GitHub;
@@ -44,7 +43,7 @@ export async function publishReport({ github, context, core, inputs }: Publicati
   const { hash, baseHash, number, baseRef = "main", artifacts } = inputs;
   const runUrl = workflowUrl(context);
   const measured = await Promise.all(
-    VARIANTS.map(async (variant) => {
+    (await publishedVariants(artifacts)).map(async (variant) => {
       const checkId = await startReport({ github, context, core, hash, variant });
       try {
         const expectedCases: string[] = JSON.parse(await readFile(inputs.inventory, "utf8"));

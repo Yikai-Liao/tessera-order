@@ -98,3 +98,5 @@ Keep `BENCHER_PROJECT`, `BENCHER_API_KEY` and the main-only `benchmark` environm
 ## Local use
 
 Use the same `pnpm tools compare commit BASE --plan continuous` command, optionally selecting one shard or a smaller plan. There is no default nine-round local run. `pnpm tools report DIR` regenerates retained results offline; old nine-block reports remain readable. See [tooling](tooling.md#reproduce-continuous-work-locally) for commands and [benchmarking](benchmarking.md#working-tree-comparisons) for evidence limits.
+
+Publication also accepts a measurement that builds one required SIMD backend. When the artifacts contain Portable SIMD shards and no Default shard, trusted code publishes only `Benchmarks (rust, Portable SIMD)` and validates its catalog `requiredBackend` features; Default is neither reported nor created. An empty download or any Default shard keeps every cataloged configuration, so a missing build still fails. Both generations stay accepted until the dual-build catalog entries are retired.

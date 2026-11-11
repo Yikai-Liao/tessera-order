@@ -6,7 +6,9 @@ import {
   caseLabel,
   caseParts,
   parseCriterionId,
+  REQUIRED_BACKEND,
   revisionSampling,
+  VARIANTS,
   type Variant,
 } from "../catalog.ts";
 import { type LocalRun, shardCases, summarizeLocal } from "../local/model.ts";
@@ -55,6 +57,23 @@ export async function continuousInventory(root: string) {
       true,
     );
   });
+}
+
+/** Select the configurations the downloaded artifacts claim to measure.
+ *
+ * Measurements that build one required backend upload only
+ * `paired-<backend>-*` shards. Only that positive evidence, with no Default
+ * shard, selects the single-backend identity; an empty or unreadable download
+ * keeps every cataloged configuration so each fails as unmeasured. Each
+ * selected configuration is still validated against its own exact features.
+ */
+export async function publishedVariants(directory: string): Promise<Variant[]> {
+  const names = await readdir(directory).catch(() => [] as string[]);
+  const has = (id: string) => names.some((name) => name.startsWith(`paired-${id}-`));
+  return has(REQUIRED_BACKEND.id) &&
+    !VARIANTS.some((variant) => has(variant.id) && variant.id !== REQUIRED_BACKEND.id)
+    ? [REQUIRED_BACKEND]
+    : VARIANTS;
 }
 
 /** Validate complete, disjoint shards before any upload or passing check.

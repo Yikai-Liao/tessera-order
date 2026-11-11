@@ -3,8 +3,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { CommandCancelledError, command, diagnostic } from "../../tools/process.ts";
-import { VARIANTS } from "../catalog.ts";
-import { type PairedSource, pairedBmf, readPaired, validateCloud } from "./paired.ts";
+import {
+  type PairedSource,
+  pairedBmf,
+  publishedVariants,
+  readPaired,
+  validateCloud,
+} from "./paired.ts";
 
 export interface SubmissionOptions extends PairedSource {
   artifacts: string;
@@ -29,7 +34,7 @@ export async function submitContinuous(options: SubmissionOptions) {
   await mkdir(options.out, { recursive: false });
   const expectedCases: string[] = JSON.parse(await readFile(options.inventory, "utf8"));
   const outcomes: Record<string, "success" | "failure"> = {};
-  for (const variant of VARIANTS) {
+  for (const variant of await publishedVariants(options.artifacts)) {
     try {
       const runs = await readPaired(options.artifacts, variant, options, expectedCases);
       const file = resolve(options.out, `bmf-${variant.id}.json`);

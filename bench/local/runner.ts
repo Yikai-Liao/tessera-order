@@ -152,7 +152,7 @@ export async function buildRevisions(
       // Cargo resolves target/build config flags before exposing them to the
       // build script. Read that result before selecting its higher-precedence
       // encoded environment source, which would otherwise discard config flags.
-      const resolved = await benchmarkEnvironment(tree, target);
+      const resolved = await benchmarkEnvironment(tree);
       env = {
         CARGO_ENCODED_RUSTFLAGS: [resolved.CARGO_ENCODED_RUSTFLAGS, ...extraFlags]
           .filter(Boolean)

@@ -2,6 +2,7 @@
 
 import { createHash } from "node:crypto";
 import {
+  copyFile,
   cp,
   lstat,
   mkdir,
@@ -14,7 +15,8 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import lockfile from "proper-lockfile";
 import { parse } from "smol-toml";
 import { command } from "../tools/process.ts";
 
@@ -43,7 +45,6 @@ export const ALIGNMENT_RUSTFLAGS = [
   "llvm-args=-align-all-nofallthru-blocks=6",
 ];
 
-/** Read checkout modification state before creating operation outputs or logs. */
 /** Resolve a revision to its full commit SHA. */
 export function resolveCommit(root: string, ref: string) {
   return command("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], {
@@ -52,6 +53,7 @@ export function resolveCommit(root: string, ref: string) {
   });
 }
 
+/** Read checkout modification state before creating operation outputs or logs. */
 export async function workingTreeDirty(root: string) {
   return Boolean(await command("git", ["status", "--porcelain"], { cwd: root, capture: true }));
 }
@@ -241,7 +243,6 @@ export async function buildArtifact(output: string, name: string) {
  */
 export async function benchmarkEnvironment(
   tree: string,
-  target: string,
   options: { targetTriple?: string; env?: NodeJS.ProcessEnv } = {},
 ): Promise<NodeJS.ProcessEnv> {
   const encoded =
@@ -289,7 +290,7 @@ fn main() {
         "--manifest-path",
         join(probe, "Cargo.toml"),
         "--target-dir",
-        join(target, "flags"),
+        join(probe, "target"),
         "--message-format=json",
         ...(options.targetTriple ? ["--target", options.targetTriple] : []),
       ],
@@ -308,7 +309,25 @@ fn main() {
   }
 }
 
-/** Build a runnable benchmark, including the comparison memory worker, with its provenance. */
+/** Serialize CLI cache writers and finish reading cache-owned files before releasing.
+ * Do not nest leases; buildBenchmark returns private workers for use outside it.
+ */
+export async function withBuildCache<T>(target: string, operation: () => Promise<T>): Promise<T> {
+  await mkdir(target, { recursive: true });
+  const release = await lockfile.lock(target, {
+    lockfilePath: join(target, ".tessera-build-lock"),
+    retries: { forever: true, minTimeout: 100, maxTimeout: 1000 },
+  });
+  try {
+    return await operation();
+  } finally {
+    await release();
+  }
+}
+
+/** Build and freeze runnable workers with provenance before releasing the shared cache.
+ * Returned files belong to the enclosing workspace, never to mutable Cargo output.
+ */
 export async function buildBenchmark(
   tree: string,
   target: string,
@@ -325,30 +344,49 @@ export async function buildBenchmark(
     throw new Error("Explicit profiles are only supported for comparison builds");
   if (options.rustcArgs && name !== "smoke")
     throw new Error("Final rustc arguments require a smoke benchmark build");
-  const env = await benchmarkEnvironment(tree, target, options);
-  const result = await buildArtifact(
-    await command(
-      "cargo",
-      [
-        ...(name === "smoke"
-          ? options.rustcArgs
-            ? ["rustc", "--profile", "bench", "--bench", name]
-            : ["bench", "--bench", name, "--no-run"]
-          : ["build", "--profile", options.profile ?? "release", "--bin", name, "--bin", "memory"]),
-        "--locked",
-        "-p",
-        "tessera-bench",
-        "--message-format=json",
-        "--target-dir",
-        target,
-        ...(options.targetTriple ? ["--target", options.targetTriple] : []),
-        ...(features.length ? ["--features", features.join(",")] : []),
-        ...(options.rustcArgs ? ["--", ...options.rustcArgs] : []),
-      ],
-      { cwd: tree, capture: true, env },
-    ),
-    name,
-  );
-  if (options.rustcArgs) result.provenance.rustc_args = options.rustcArgs;
-  return result;
+  return withBuildCache(target, async () => {
+    const env = await benchmarkEnvironment(tree, options);
+    const result = await buildArtifact(
+      await command(
+        "cargo",
+        [
+          ...(name === "smoke"
+            ? options.rustcArgs
+              ? ["rustc", "--profile", "bench", "--bench", name]
+              : ["bench", "--bench", name, "--no-run"]
+            : [
+                "build",
+                "--profile",
+                options.profile ?? "release",
+                "--bin",
+                name,
+                "--bin",
+                "memory",
+              ]),
+          "--locked",
+          "-p",
+          "tessera-bench",
+          "--message-format=json",
+          "--target-dir",
+          target,
+          ...(options.targetTriple ? ["--target", options.targetTriple] : []),
+          ...(features.length ? ["--features", features.join(",")] : []),
+          ...(options.rustcArgs ? ["--", ...options.rustcArgs] : []),
+        ],
+        { cwd: tree, capture: true, env },
+      ),
+      name,
+    );
+    if (options.rustcArgs) result.provenance.rustc_args = options.rustcArgs;
+    // Cargo's own lock ends with its process. Keep our lease until provenance and
+    // both workers are private, so another experiment cannot substitute its build.
+    const frozen = await mkdtemp(join(dirname(tree), "build-"));
+    const executable = join(frozen, basename(result.executable));
+    await copyFile(result.executable, executable);
+    if (name === "compare") {
+      const memory = `memory${extname(executable)}`;
+      await copyFile(join(dirname(result.executable), memory), join(frozen, memory));
+    }
+    return { executable, provenance: result.provenance };
+  });
 }

@@ -24,6 +24,7 @@ import {
   buildBenchmark,
   copySnapshot,
   type Workspace,
+  withBuildCache,
   withWorkspace,
 } from "./workspace.ts";
 
@@ -56,24 +57,26 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
   await withComparisonWorkspace(root, native, async ({ tree, target }) => {
     const features = ["compare", "rayon", ...(native ? ["compare-native"] : [])];
     await prepareRevisions(root, tree, { baseline: "HEAD" }, features);
-    await command(
-      "cargo",
-      [
-        "test",
-        "--locked",
-        "-p",
-        "tessera-bench",
-        "--features",
-        features.join(","),
-        "--lib",
-        "--bin",
-        "memory",
-        "--test",
-        "comparison",
-        "--target-dir",
-        target,
-      ],
-      { cwd: tree, env: await benchmarkEnvironment(tree, target) },
+    await withBuildCache(target, async () =>
+      command(
+        "cargo",
+        [
+          "test",
+          "--locked",
+          "-p",
+          "tessera-bench",
+          "--features",
+          features.join(","),
+          "--lib",
+          "--bin",
+          "memory",
+          "--test",
+          "comparison",
+          "--target-dir",
+          target,
+        ],
+        { cwd: tree, env: await benchmarkEnvironment(tree) },
+      ),
     );
     const { executable } = await buildBenchmark(tree, target, "compare", features, {
       profile: "dev",

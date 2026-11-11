@@ -41,6 +41,10 @@ export async function submitContinuous(options: SubmissionOptions) {
           options.project,
           "--branch",
           options.pr ? `pr-${options.pr}` : "main",
+          // Native Heads keep ratios from different baselines in separate histories.
+          "--start-point-reset",
+          "--start-point-idempotency-key",
+          `${runs[0].protocol}:${runs[0].baseline}`,
           "--hash",
           options.hash,
           "--testbed",

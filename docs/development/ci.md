@@ -2,7 +2,7 @@
 
 [`ci.yml`](../../.github/workflows/ci.yml) decides which engine, comparison, benchmark and site checks a change needs, runs the repository-wide checks, and folds every result into the one required check, `ci-ok`. A language's checks are a reusable workflow that `ci.yml` calls only when its paths changed; [`ci_changes.ts`](../../.github/scripts/ci_changes.ts) holds the rules and its tests.
 
-The shared router uses the merge base. Engine changes select Rust validation, native functional checks and PR measurement. Continuous plan changes select measurement; native adapter changes select compilation and functional checks; report/status changes select tooling checks without platform tests, Miri, native compilation or timing. Markdown and site inputs select the reusable docs workflow. Unknown shared files and unavailable bases select all lanes conservatively. C++ checks activate when its manifest exists. `ci.yml` is the only automatic task selector.
+The shared router uses the merge base. Engine changes select Rust validation, native functional checks and PR measurement. Continuous plan changes select measurement; native adapter changes select compilation and functional checks; report/status changes select tooling checks without platform tests, Miri, native compilation or timing. Markdown and site inputs select the reusable docs workflow. Unknown shared files and unavailable bases select all lanes conservatively. C++ checks activate when its manifest exists. `ci.yml` is the only automatic task selector. PR updates cancel obsolete runs on the same PR. Every main push has an independent CI concurrency group, preserving a pending site deployment when a later non-docs push arrives.
 
 ## Lanes
 

@@ -245,8 +245,11 @@ export function render(s: ReportSummary, options: RenderOptions) {
   // their header.
   if (chartRef) out.push("", `![Changes against ${baseRef}](${chartRef})`);
   if (trendRef) out.push("", `![PR benchmark history](${trendRef})`);
-  const summaryLine = overall(s, baseRef);
-  if (summaryLine) out.push("", summaryLine);
+  if (s.relative) out.push("", overview([{ name: "Change", outcome: "success", summary: s }]));
+  else {
+    const summaryLine = overall(s, baseRef);
+    if (summaryLine) out.push("", summaryLine);
+  }
   if (slower.length) out.push("", "#### Slower", "", alertTable(slower, s));
   if (faster.length) out.push("", "#### Faster", "", alertTable(faster, s));
   // Measured but uncompared cases are not new cases; the warning says what is
@@ -338,7 +341,10 @@ function overviewCell(summary: ReportSummary, mode?: string) {
 // with that configuration's alert counts, so a change confined to one API
 // or one build stands out without reading any case.
 function overview(configurations: ConfigurationResult[]) {
-  const header = ["", ...configurations.map((c) => c.name)];
+  const header = [
+    "",
+    ...configurations.map((c) => (configurations.length === 1 ? "Change" : c.name)),
+  ];
   const lines = [
     `| ${header.join(" | ")} |`,
     `|---|${configurations.map(() => "---:").join("|")}|`,
@@ -433,7 +439,13 @@ function speedups(configurations: ConfigurationResult[], rows: CaseRow[]) {
 }
 
 function changedTable(configurations: ConfigurationResult[], rows: CaseRow[]) {
-  const head = ["Input", "Type", "N", "Mode", ...configurations.map((c) => c.name)];
+  const head = [
+    "Input",
+    "Type",
+    "N",
+    "Mode",
+    ...configurations.map((c) => (configurations.length === 1 ? "Change" : c.name)),
+  ];
   const lines = [
     `| ${head.join(" | ")} |`,
     `|---|---|---:|---|${configurations.map(() => "---:").join("|")}|`,
@@ -468,12 +480,11 @@ export interface CombinedOptions {
 }
 
 export function renderCombined(configurations: ConfigurationResult[], options: CombinedOptions) {
-  if (configurations.length === 1) {
-    const result = configurations[0];
-    return result.summary
-      ? render(result.summary, { ...options, unavailable: result.unavailable })
-      : renderFailure({ ...options, reason: result.reason ?? "Missing measurement results" });
-  }
+  if (configurations.length === 1 && !configurations[0].summary)
+    return renderFailure({
+      ...options,
+      reason: configurations[0].reason ?? "Missing measurement results",
+    });
   const { language, hash, runUrl, baseRef = "main", chartRef, trendRef } = options;
   // A build that was not measured stays in the overview and gets a line of
   // its own; the case lines, table and charts cover only measured builds, so
@@ -521,7 +532,11 @@ export function renderCombined(configurations: ConfigurationResult[], options: C
     );
   }
   if (measured.length) {
-    out.push("", "<details><summary>All cases, by build</summary>", "");
+    out.push(
+      "",
+      `<details><summary>${measured.length === 1 ? `All ${measured[0].summary!.rows.length} cases` : "All cases, by build"}</summary>`,
+      "",
+    );
     for (const c of measured)
       out.push(
         `**${c.name}** · \`${c.summary!.testbed.name}\``,

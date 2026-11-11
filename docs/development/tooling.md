@@ -36,7 +36,7 @@ Use a task's `--help` for its options. Local comparisons accept a Linux CPU list
 
 `status` prints one compact JSON object by default. It resolves a remote ref once, reports that exact `target.head`, keeps only the latest workflow run per workflow/event/branch, and lists only unfinished or failed jobs and active or failed steps. Benchmark verdicts are independent of workflow success: `Measurement failed`, `no comparable baseline` and a slowdown alert retain their published check titles rather than becoming one generic failure. A missing check has `state: "missing"`; an empty workflow list is not a passing verdict.
 
-For an open PR, CI may run against its test merge commit, while benchmarks attach to its head. `target.merge` records that distinction. A merged PR is still queried at its PR head; use `status main` for the squash commit. All current benchmark jobs belong to the normal CI run; the performance check is attached to the measured head. API or authentication failures exit nonzero instead of producing an empty successful result.
+For an open PR, CI may run against its test merge commit, while benchmarks attach to its head. `target.merge` records that distinction. A merged PR is still queried at its PR head; use `status main` for the squash commit. All current benchmark jobs belong to the normal CI run; the performance check is attached to the measured head. Historical checks retain their recorded tracker association so a later archival failure remains visible. API or authentication failures exit nonzero instead of producing an empty successful result.
 
 Start with the compact response:
 
@@ -84,7 +84,7 @@ pnpm tools continuous submit --project PROJECT \
   --artifacts ARTIFACTS --out bench/results/submission
 ```
 
-The command validates the prepared plan and inventory, disjoint shard coverage, exact revision pair, common source/build settings and positive complete sample pairs before uploading. Use the source version that created the prepared pair; no inventory build is needed. New relative Testbeds and the `paired-time-ratio` Measure keep old latency history untouched. Cloud receives paired median ratios and median intervals. Checks publish first; upload failure remains explicit in CI. Baseline changes split PR history. Artifact metadata catches inconsistent or incomplete evidence but cannot prove honest measurement by malicious PR code. Submission reads JSON only. Omitting `--pr` retains explicit legacy/manual main upload support; CI does not measure or archive main.
+The command validates the prepared plan and inventory, disjoint shard coverage, exact revision pair, common source/build settings and positive complete sample pairs before uploading. Use the source version that created the prepared pair; no inventory build is needed. New relative Testbeds and the `paired-time-ratio` Measure keep old latency history untouched. Cloud receives paired median ratios and median intervals. An upload is attempted first so successful reports include Cloud links; upload failure remains explicit without changing raw-sample verdicts. Native Bencher Heads keyed by protocol and baseline split PR history. Artifact metadata catches inconsistent or incomplete evidence but cannot prove honest measurement by malicious PR code. Submission reads JSON only. Omitting `--pr` retains explicit legacy/manual main upload support; CI does not measure or archive main.
 
 ## CI boundary
 

@@ -149,6 +149,7 @@ export function validateCloud(
   }
   if (
     !report.uuid ||
+    !report.branch.head.uuid ||
     report.results.length !== 1 ||
     report.branch.head.version?.hash !== runs[0].head ||
     report.testbed.name !== variant.relativeTestbed ||

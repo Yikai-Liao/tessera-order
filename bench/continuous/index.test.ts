@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
@@ -52,6 +52,8 @@ async function publication(t: TestContext, cloud = true, moved = false, ratio?: 
   });
   return {
     ...mock,
+    fetchHistory: async () =>
+      new Response("[]", { headers: { "content-type": "application/json" } }),
     summaries,
     core: {
       notice: () => {},
@@ -77,6 +79,7 @@ async function publication(t: TestContext, cloud = true, moved = false, ratio?: 
       baseRef: "main",
       artifacts: dir,
       prepared: join(dir, "prepared"),
+      reports: dir,
     },
   };
 }
@@ -86,6 +89,11 @@ test("a precise sub-threshold change is no alert, not statistical equivalence", 
   await publishReport(action);
   assert.doesNotMatch(action.summaries[0], /no significant change/);
   assert.match(action.summaries[0], /no regression alert/);
+  assert.match(action.summaries[0], /!\[Changes against main\]/);
+  assert.match(action.summaries[0], /!\[PR benchmark history\]/);
+  assert.match(action.summaries[0], /\| serial \|/);
+  assert.match(action.summaries[0], /\| parallel · 4 threads \|/);
+  assert.match(action.summaries[0], /`ci`/);
 });
 
 test("improvements publish successful configured checks", async (t) => {
@@ -98,6 +106,9 @@ test("improvements publish successful configured checks", async (t) => {
     VARIANTS.map(() => "success"),
   );
   assert.match(action.summaries[0], /0.8000×/);
+  assert.match(action.summaries[0], /\[Report\]\(/);
+  assert.match(action.summaries[0], /\[JSON\]\(/);
+  assert.match(action.summaries[0], /<details><summary>10 changed cases/);
 });
 
 test("raw paired samples drive configured checks and the existing shared chart", async (t) => {
@@ -119,7 +130,7 @@ test("raw paired samples drive configured checks and the existing shared chart",
   const images = action.requests
     .filter((request) => request.path.endsWith("/git/trees"))
     .flatMap((request) => request.body.tree as { content: string }[]);
-  assert.equal(images.length, 1);
+  assert.equal(images.length, 2);
   assert.match(images[0].content, /20/);
   assert.doesNotMatch(body, /Portable SIMD|Adjacent A\/B|Cloud archival runs separately/);
   assert.equal(
@@ -182,7 +193,57 @@ test("superseded PR results stay in checks and summary, not a new comment", asyn
 
 test("fork reports retain the summary without writes or credentials", async (t) => {
   const action = await publication(t, false);
-  await publishReport({ ...action, inputs: { ...action.inputs, publish: false } });
+  await assert.rejects(
+    publishReport({ ...action, inputs: { ...action.inputs, publish: false } }),
+    /regression alerts/,
+  );
   assert.match(action.summaries[0], /1.2000×/);
   assert.equal(action.requests.length, 0);
+});
+
+test("missing Cloud history metadata cannot discard a valid measured verdict", async (t) => {
+  const action = await publication(t, true, false, 0.8);
+  const path = join(action.inputs.reports, `bencher-${VARIANTS[0].id}.json`);
+  const report = JSON.parse(await readFile(path, "utf8"));
+  delete report.start_time;
+  await writeFile(path, JSON.stringify(report));
+  await publishReport(action);
+  assert.match(action.summaries[0], /0.8000×/);
+  assert.match(action.summaries[0], /!\[PR benchmark history\]/);
+  const check = action.requests.find(
+    (request) => request.method === "PATCH" && request.path.includes("/check-runs/"),
+  )!;
+  assert.equal(check.body.conclusion, "success");
+});
+
+test("a changed inventory without shared history retains both current figures", async (t) => {
+  const action = await publication(t, true, false, 0.8);
+  const path = join(action.inputs.reports, `bencher-${VARIANTS[0].id}.json`);
+  const previous = JSON.parse(await readFile(path, "utf8"));
+  previous.uuid = "earlier";
+  previous.start_time = "2026-11-07T01:00:00Z";
+  previous.results = [
+    [
+      {
+        benchmark: { name: "rust/u32/random/65536/s1/api", uuid: "other-case" },
+        measures: [
+          {
+            measure: { name: "paired-time-ratio", uuid: "ratio" },
+            metric: { uuid: "older-value", value: 1.2 },
+            boundary: null,
+          },
+        ],
+      },
+    ],
+  ];
+  await publishReport({
+    ...action,
+    fetchHistory: async () =>
+      new Response(JSON.stringify([previous]), { headers: { "content-type": "application/json" } }),
+  });
+  const images = action.requests
+    .filter((request) => request.path.endsWith("/git/trees"))
+    .flatMap((request) => request.body.tree as { content: string }[]);
+  assert.equal(images.length, 2);
+  assert.match(action.summaries[0], /!\[PR benchmark history\]/);
 });

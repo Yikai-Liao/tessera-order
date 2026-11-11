@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Only the diff. Every language job waits for these outputs, so nothing that
@@ -226,6 +226,8 @@ jobs:
     runs-on: ubuntu-24.04
     environment: benchmark
     timeout-minutes: 10
+    env:
+      PUBLISH: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
     permissions:
       contents: write
       checks: write
@@ -250,31 +252,15 @@ jobs:
         with:
           pattern: paired-*
           path: ${{ runner.temp }}/paired
-      - name: Publish paired checks and PR report
-        uses: actions/github-script@v9
-        env:
-          HASH: ${{ github.event.pull_request.head.sha }}
-          BASE_HASH: ${{ needs.prepare.outputs.baseline }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE: ${{ github.event.pull_request.base.ref }}
-          PUBLISH: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
-        with:
-          script: |
-            const { publishReport } = require('./bench/continuous/index.ts');
-            const path = require('node:path');
-            await publishReport({ github, context, core, inputs: {
-              hash: process.env.HASH, baseHash: process.env.BASE_HASH,
-              number: process.env.PR_NUMBER, baseRef: process.env.BASE,
-              artifacts: path.join(process.env.RUNNER_TEMP, 'paired'),
-              prepared: path.join(process.env.RUNNER_TEMP, 'prepared'),
-              publish: process.env.PUBLISH === 'true',
-            } });
       - uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d # v0.6.16
-        if: github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        if: env.PUBLISH == 'true'
         with:
           version: 0.6.16
       - name: Upload paired JSON to Bencher Cloud
-        if: github.event.pull_request.head.repo.full_name == github.repository
+        id: upload
+        continue-on-error: true
+        if: env.PUBLISH == 'true'
         env:
           BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
           BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
@@ -286,6 +272,25 @@ jobs:
             --hash "$HASH" --base-hash "$BASE_HASH" --pr "$PR_NUMBER" \
             --prepared "$RUNNER_TEMP/prepared" --artifacts "$RUNNER_TEMP/paired" \
             --out "$RUNNER_TEMP/submission"
+      - name: Publish paired checks and PR report
+        uses: actions/github-script@v9
+        env:
+          HASH: ${{ github.event.pull_request.head.sha }}
+          BASE_HASH: ${{ needs.prepare.outputs.baseline }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+        with:
+          script: |
+            const { publishReport } = require('./bench/continuous/index.ts');
+            const path = require('node:path');
+            await publishReport({ github, context, core, inputs: {
+              hash: process.env.HASH, baseHash: process.env.BASE_HASH,
+              number: process.env.PR_NUMBER, baseRef: process.env.BASE,
+              artifacts: path.join(process.env.RUNNER_TEMP, 'paired'),
+              prepared: path.join(process.env.RUNNER_TEMP, 'prepared'),
+              reports: path.join(process.env.RUNNER_TEMP, 'submission'),
+              publish: process.env.PUBLISH === 'true',
+            } });
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -294,3 +299,6 @@ jobs:
             ${{ runner.temp }}/submission/
             ${{ runner.temp }}/submission.log
           if-no-files-found: ignore
+      - name: Preserve Cloud archival failure
+        if: always() && steps.upload.outcome == 'failure'
+        run: exit 1

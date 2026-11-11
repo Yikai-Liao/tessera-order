@@ -97,6 +97,28 @@ function latestRuns(runs: WorkflowRun[]) {
   return [...latest.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** Associate historical checks with their separate archival run. */
+function legacyTrackerIds(checks: Check[], repo: string) {
+  const ids = new Set<string>();
+  for (const check of checks) {
+    if (check.external_id && /^\d+$/.test(check.external_id)) {
+      ids.add(check.external_id);
+      continue;
+    }
+    // Older checks record the workflow in their summary. GitHub can replace
+    // details_url with /runs/<check-id>, which is not an Actions run ID.
+    const links =
+      `${check.details_url} ${check.output.summary ?? ""}`.match(
+        /https?:\/\/[^\s)]+\/actions\/runs\/\d+/g,
+      ) ?? [];
+    for (const link of links) {
+      const path = new URL(link).pathname;
+      if (path.startsWith(`/${repo}/actions/runs/`)) ids.add(path.split("/").at(-1)!);
+    }
+  }
+  return [...ids];
+}
+
 function hasUnfinishedOrFailedResult(item: Step) {
   return item.conclusion
     ? !["success", "skipped", "neutral"].includes(item.conclusion)
@@ -162,12 +184,19 @@ export async function readStatus(
     ),
   );
   const attached = checks.filter((check) => check !== undefined);
-  const runs = latestRuns(
-    runPages
-      .flat()
-      .flatMap((page) => page.workflow_runs)
-      .filter((run) => heads.includes(run.head_sha) && run.event !== "workflow_run"),
+  const currentRuns = runPages
+    .flat()
+    .flatMap((page) => page.workflow_runs)
+    .filter((run) => heads.includes(run.head_sha) && run.event !== "workflow_run");
+  const legacy = await Promise.all(
+    legacyTrackerIds(
+      attached.filter((check) => check.name === LEGACY_BENCHMARK_CHECK),
+      api.repo,
+    )
+      .filter((id) => !currentRuns.some((run) => String(run.id) === id))
+      .map((id) => api.get<WorkflowRun>(`actions/runs/${id}`)),
   );
+  const runs = latestRuns([...currentRuns, ...legacy]);
   const workflows = await Promise.all(
     runs.map(async (run) => {
       const pages =

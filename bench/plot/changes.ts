@@ -26,7 +26,7 @@ export interface ChangeChart {
 
 const percent = new Intl.NumberFormat("en-US", {
   style: "percent",
-  maximumFractionDigits: 0,
+  maximumFractionDigits: 2,
   signDisplay: "exceptZero",
 });
 const tickLabel = (value: number) => (value === 0 ? "0" : percent.format(value).replace("-", "−"));
@@ -166,7 +166,7 @@ export function renderChanges(spec: ChangeChart) {
       stroke: ink.axis,
       strokeWidth: 1.5,
     }),
-    label("within limits", pad + 76, legendY, { size: 11, tone: ink.muted }),
+    label("no alert", pad + 76, legendY, { size: 11, tone: ink.muted }),
     Plot.dot([[pad + 158, legendY - 4]], { r: 5.5, fill: ink.text }),
     label(spec.majorLabel, pad + 169, legendY, { size: 11, tone: ink.muted }),
     label("more time →", width - pad, legendY, { size: 11, tone: ink.radix, anchor: "end" }),

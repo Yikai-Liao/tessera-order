@@ -2,7 +2,15 @@
 
 import { renderChanges } from "../plot/changes.ts";
 import type { NameCell } from "../plot/layout.ts";
-import { type CaseRow, type Configuration, changedRows, isFaster, modeName } from "./matrix.ts";
+import {
+  type CaseRow,
+  type Configuration,
+  changedRows,
+  geomean,
+  isFaster,
+  modeName,
+  modes,
+} from "./matrix.ts";
 import { formatChange, isMajor, MAJOR } from "./report.ts";
 
 // Small improvements fold only when another alert remains visible; regressions
@@ -22,7 +30,7 @@ export function nameCell(row: CaseRow, strong: boolean): NameCell {
 /** Select Bencher alerts and present their authoritative verdicts to the plot. */
 export function chartSvg(configurations: Configuration[], base = "main") {
   const changed = changedRows(configurations);
-  if (!changed.length) return null;
+  if (!configurations.some((configuration) => configuration.summary?.rows.length)) return null;
   const small = (row: CaseRow) =>
     isFaster(row) &&
     row.cells.every((cell) => cell?.verdict !== "improvement" || -cell.change! < FOLD_FASTER_BELOW);
@@ -57,6 +65,26 @@ export function chartSvg(configurations: Configuration[], base = "main") {
       })),
     }),
   );
+  // Quiet runs still show a compact mode summary; individual rows keep the
+  // existing alert selection and folding rules above.
+  if (!changed.length)
+    groups.push({
+      title: "OVERVIEW",
+      rows: modes(configurations).map((mode) => ({
+        name: { input: modeName(mode), sub: "geometric mean", tag: "", strong: true },
+        cells: configurations.map(({ summary }) => {
+          const value = summary && geomean(summary, mode);
+          return value
+            ? {
+                change: value.change,
+                value: formatChange(value.change),
+                status: "within" as const,
+                major: false,
+              }
+            : null;
+        }),
+      })),
+    });
   const counts = (summary: Configuration["summary"]) => {
     if (!summary) return "not measured";
     const parts = [

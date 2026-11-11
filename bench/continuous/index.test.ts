@@ -28,7 +28,6 @@ async function publication(t: TestContext, cloud = true, moved = false, ratio?: 
             {
               measure: { name: "paired-time-ratio", uuid: "ratio" },
               metric: { uuid: name, value: metric["paired-time-ratio"].value },
-              boundary: null,
             },
           ],
         })),
@@ -243,7 +242,6 @@ test("a changed inventory without shared history retains both current figures", 
           {
             measure: { name: "paired-time-ratio", uuid: "ratio" },
             metric: { uuid: "older-value", value: 1.2 },
-            boundary: null,
           },
         ],
       },

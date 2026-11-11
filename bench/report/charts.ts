@@ -110,57 +110,36 @@ function speedScale(ratios: number[]): Chart["scale"] {
 
 // Speed of one variant relative to slice::sort in the same blocks: the
 // slice::sort time over the variant's, per block, then the median.
-function speedOnCase(
-  summaries: Map<string, Summary>,
-  id: string,
-  variant: string,
-  build = "default",
-) {
-  const std = summaries.get(measurementId(build, id, "std-stable")),
-    s = summaries.get(measurementId(build, id, variant));
+function speedOnCase(summaries: Map<string, Summary>, id: string, variant: string) {
+  const std = summaries.get(measurementId("default", id, "std-stable")),
+    s = summaries.get(measurementId("default", id, variant));
   if (!std || !s) return null;
   return variant === "tessera" ? std.ratio : median(std.ratios.map((r, i) => r / s.ratios[i]));
 }
 
 // The geometric mean of those speeds over cases, or null if one is missing.
-function speedOver(
-  summaries: Map<string, Summary>,
-  ids: string[],
-  variant: string,
-  build = "default",
-) {
-  const values = ids.map((id) => speedOnCase(summaries, id, variant, build));
+function speedOver(summaries: Map<string, Summary>, ids: string[], variant: string) {
+  const values = ids.map((id) => speedOnCase(summaries, id, variant));
   return values.every((v): v is number => v !== null) ? geomean(values) : null;
 }
 const u64Cases = (n: number) =>
   shapes.map((shape) => caseId({ ty: "u64", distribution: shape, len: n }));
 
-const kindLegend = (simd: boolean): [Swatch[], string][] => [
+const kindLegend: [Swatch[], string][] = [
   [["primary"], "Tessera"],
-  ...(simd ? [[["alternate"], "Tessera, Portable SIMD"] as [Swatch[], string]] : []),
   [["radix"], "other radix sorts"],
   [["comparison"], "comparison sorts"],
 ];
 const SPEED_AXIS: [string, string] = ["← slower", "faster →"];
 
 function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figure | null {
-  const entries = dataset.manifests.get("default")!.variants.map((v) => ({
+  const entries = dataset.manifest.variants.map((v) => ({
     cell: sortName(v.name),
     kind: family(v.name),
     tone: toneOf(v.name),
-    simd: false,
     stable: v.stable,
     speeds: lengths.map((n) => speedOver(summaries, u64Cases(n), v.name)),
   }));
-  if (dataset.manifests.has("portable-simd"))
-    entries.push({
-      cell: { input: "Tessera, Portable SIMD", sub: "", tag: "", strong: true },
-      kind: "radix sort, SIMD build",
-      tone: "primary" as Tone,
-      simd: true,
-      stable: true,
-      speeds: lengths.map((n) => speedOver(summaries, u64Cases(n), "tessera", "portable-simd")),
-    });
   const at = lengths.indexOf(LARGE);
   const complete = entries
     .filter((e) => e.speeds.every((v) => v !== null))
@@ -172,7 +151,7 @@ function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figur
   const rank = 1 + others.filter((e) => e.speeds[at] > anchor.speeds[at]).length;
   const row = (e: (typeof complete)[number]): Row => ({
     name: e.cell,
-    marks: [{ value: e.speeds[at], tone: e.tone, hollow: e.simd }],
+    marks: [{ value: e.speeds[at], tone: e.tone }],
     cells: [times(e.speeds[at])],
     strong: e.cell.strong,
   });
@@ -194,7 +173,7 @@ function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figur
       ].filter((g) => g.rows.length),
       scale: speedScale(complete.map((e) => e.speeds[at])),
       axis: SPEED_AXIS,
-      legend: kindLegend(complete.some((e) => e.simd)),
+      legend: kindLegend,
     }),
     table: markdownTable(
       [
@@ -216,8 +195,6 @@ function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figur
 interface Standing {
   speeds: { variant: string; speed: number }[];
   tessera: number;
-  // The Portable SIMD build, anchored to slice::sort in its own process.
-  simd: number | null;
   rank: number;
 }
 // Where Tessera stands among every eligible sort on one row, all measured
@@ -238,7 +215,6 @@ function standing(
   return {
     speeds,
     tessera,
-    simd: speedOver(summaries, ids, "tessera", "portable-simd"),
     rank: 1 + speeds.filter((v) => v.speed > tessera).length,
   };
 }
@@ -251,7 +227,6 @@ function fieldRow(name: NameCell, s: Standing): Row {
       ...s.speeds
         .filter((v) => v.variant !== "std-stable")
         .map((v): Mark => ({ value: v.speed, tone: toneOf(v.variant) })),
-      ...(s.simd === null ? [] : [{ value: s.simd, tone: "primary" as Tone, hollow: true }]),
       { value: s.tessera, tone: "primary" },
     ],
     cells: [times(s.tessera), ordinal(s.rank)],
@@ -270,14 +245,12 @@ function fieldTitle(standings: Standing[], unit: string) {
 }
 
 function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
-  const simd = rows.some(([, s]) => s.simd !== null);
   return markdownTable(
     [
       "Row",
       ...(nsPerKey ? ["Tessera time per key"] : []),
       "Tessera rank",
       "Tessera speed vs slice::sort",
-      ...(simd ? ["Portable SIMD speed"] : []),
       "Other sorts, fastest first",
     ],
     rows.map(([label, s], i) => [
@@ -285,7 +258,6 @@ function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
       ...(nsPerKey ? [formatNs(nsPerKey[i])] : []),
       `${ordinal(s.rank)} of ${s.speeds.length + 1}`,
       times(s.tessera),
-      ...(simd ? [s.simd === null ? "—" : times(s.simd)] : []),
       [...s.speeds]
         .sort((a, b) => b.speed - a.speed)
         .map((v) => `${displayName(v.variant)} ${times(v.speed)}`)
@@ -303,7 +275,7 @@ function renderInputs(
   n: number,
   ty = "u64",
 ): Figure | null {
-  const manifest = dataset.manifests.get("default")!;
+  const manifest = dataset.manifest;
   const variants = manifest.variants;
   const patterns = manifest.cases
     .filter((input) => input.ty === ty && input.len === n)
@@ -344,11 +316,9 @@ function renderInputs(
       guide: `${formatLength(n)} ${ty === "u64" ? "u64 keys" : record.label}; each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to slice::sort`,
       columns: ["Speed", "Rank"],
       groups,
-      scale: speedScale(
-        standings.flatMap((s) => [s.tessera, s.simd ?? s.tessera, ...s.speeds.map((v) => v.speed)]),
-      ),
+      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
       axis: SPEED_AXIS,
-      legend: kindLegend(standings.some((s) => s.simd !== null)),
+      legend: kindLegend,
     }),
     table: fieldTable(plotted, nsPerKey),
   };
@@ -357,7 +327,7 @@ function renderInputs(
 // Each element type as a geometric mean over the ten inputs. Records admit
 // only stable sorts, because stability is observable there.
 function renderTypes(dataset: Dataset, summaries: Map<string, Summary>): Figure | null {
-  const variants = dataset.manifests.get("default")!.variants;
+  const variants = dataset.manifest.variants;
   const plotted: [string, Standing][] = [];
   const groups = TYPE_GROUPS.map((g) => ({
     title: g.title,
@@ -380,11 +350,9 @@ function renderTypes(dataset: Dataset, summaries: Map<string, Summary>): Figure 
       guide: `${formatLength(LARGE)} elements; speed relative to slice::sort, geometric mean over the 10 baseline input patterns`,
       columns: ["Speed", "Rank"],
       groups,
-      scale: speedScale(
-        standings.flatMap((s) => [s.tessera, s.simd ?? s.tessera, ...s.speeds.map((v) => v.speed)]),
-      ),
+      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
       axis: SPEED_AXIS,
-      legend: kindLegend(standings.some((s) => s.simd !== null)),
+      legend: kindLegend,
     }),
     table: fieldTable(plotted),
   };
@@ -392,9 +360,8 @@ function renderTypes(dataset: Dataset, summaries: Map<string, Summary>): Figure 
 
 function renderMemory(dataset: Dataset): Figure | null {
   const n = LARGEST;
-  const patterns = dataset.manifests
-    .get("default")!
-    .cases.filter((input) => input.ty === "u64" && input.len === n)
+  const patterns = dataset.manifest.cases
+    .filter((input) => input.ty === "u64" && input.len === n)
     .map((input) => input.distribution);
   if (!patterns.includes("random")) return null;
   const peaks = (variant: string) => {
@@ -411,9 +378,8 @@ function renderMemory(dataset: Dataset): Figure | null {
       ? { random: found[patterns.indexOf("random")], worst: Math.max(...found) }
       : null;
   };
-  const entries = dataset.manifests
-    .get("default")!
-    .variants.map((v) => ({ ...v, peak: peaks(v.name)! }))
+  const entries = dataset.manifest.variants
+    .map((v) => ({ ...v, peak: peaks(v.name)! }))
     .filter((e) => e.peak)
     .sort((a, b) => a.peak.worst - b.peak.worst);
   const anchor = entries.find((e) => e.name === "tessera");
@@ -461,7 +427,7 @@ function renderMemory(dataset: Dataset): Figure | null {
       },
       marker: { value: input, label: "input size" },
       axis: ["← less memory", "more memory →"],
-      legend: [...kindLegend(false), [["hollow"], "random input"], [["reference"], "input size"]],
+      legend: [...kindLegend, [["hollow"], "random input"], [["reference"], "input size"]],
     }),
     table: markdownTable(["Sort", "Random input", `Worst of ${patterns.length} inputs`], plotted),
   };
@@ -469,33 +435,30 @@ function renderMemory(dataset: Dataset): Figure | null {
 
 /** Plot selected inputs when a plan does not contain a complete release panel. */
 function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figure[] {
-  return dataset.manifests.get("default")!.cases.flatMap((input) => {
+  return dataset.manifest.cases.flatMap((input) => {
     const id = caseId(input);
-    const groups = [...dataset.manifests.keys()].flatMap((build) => {
-      const entries = dataset.manifests.get(build)!.variants.flatMap((variant) => {
-        const summary = summaries.get(measurementId(build, id, variant.name));
-        return summary ? [summary] : [];
-      });
-      if (!entries.length) return [];
-      return [
-        {
-          title: build,
-          rows: entries.map(
-            (summary): Row => ({
-              name: sortName(summary.variant),
-              marks: [{ value: summary.ratio, tone: toneOf(summary.variant) }],
-              span: [summary.low, summary.high],
-              cells: [
-                times(summary.ratio),
-                `${times(summary.low)}–${times(summary.high)}`,
-                `${summary.aaLow.toFixed(3)}–${summary.aaHigh.toFixed(3)}`,
-              ],
-            }),
-          ),
-        },
-      ];
+    const entries = dataset.manifest.variants.flatMap((variant) => {
+      const summary = summaries.get(measurementId("default", id, variant.name));
+      return summary ? [summary] : [];
     });
-    if (!groups.length) return [];
+    if (!entries.length) return [];
+    const groups = [
+      {
+        title: "Algorithms",
+        rows: entries.map(
+          (summary): Row => ({
+            name: sortName(summary.variant),
+            marks: [{ value: summary.ratio, tone: toneOf(summary.variant) }],
+            span: [summary.low, summary.high],
+            cells: [
+              times(summary.ratio),
+              `${times(summary.low)}–${times(summary.high)}`,
+              `${summary.aaLow.toFixed(3)}–${summary.aaHigh.toFixed(3)}`,
+            ],
+          }),
+        ),
+      },
+    ];
     const bounds = groups.flatMap((group) => group.rows.flatMap((row) => row.span!));
     const scale = speedScale(bounds);
     scale.ticks = scale.ticks.map((tick) =>
@@ -508,12 +471,12 @@ function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figu
         title,
         svg: renderRows({
           title,
-          guide: "Sort time / paired Tessera time · nine blocks per build",
+          guide: "Sort time / paired Tessera time · nine paired blocks",
           columns: ["Time ratio", "Block range", "A/A range"],
           groups,
           scale,
           legend: {
-            note: "dot: median · line: block range · triangle: off-scale · per-build Tessera control",
+            note: "dot: median · line: block range · triangle: off-scale · paired Tessera control",
           },
           axis: ["← less time", "more time →"],
         }),

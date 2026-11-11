@@ -9,27 +9,22 @@ import { cpuListSchema } from "./affinity.ts";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const schema = z.strictObject({
-  schema: z.literal(1),
+  schema: z.literal(2),
   platform: z.string(),
   planSha256: digest,
   cpu: cpuListSchema.optional(),
   group: z.string().optional(),
   sampleMs: z.number().int().positive(),
   memoryMib: z.number().int().positive(),
-  builds: z
-    .array(
-      z.strictObject({
-        name: z.enum(["default", "portable-simd"]),
-        compareSha256: digest,
-        memorySha256: digest,
-      }),
-    )
-    .min(1),
+  build: z.strictObject({
+    compareSha256: digest,
+    memorySha256: digest,
+  }),
 });
 
 /** Immutable measurement settings and executable identities for one session. */
 export type Session = z.infer<typeof schema>;
-export type Build = Session["builds"][number];
+export type Build = Session["build"];
 
 /** Allow one writer per session, reclaiming abandoned locks after the lease expires. */
 export async function withSessionLock<T>(out: string, operation: () => Promise<T>): Promise<T> {
@@ -49,27 +44,22 @@ export async function fileHash(path: string) {
 }
 
 /** Resolve the retained executable pair without depending on a temporary worktree. */
-export function executables(out: string, build: string) {
+export function executables(out: string) {
   const suffix = process.platform === "win32" ? ".exe" : "";
-  const directory = join(out, "bin", build);
+  const directory = join(out, "bin");
   return {
     compare: join(directory, `compare${suffix}`),
     memory: join(directory, `memory${suffix}`),
   };
 }
 
-/** Retain both executable roles before a subsequent feature build replaces them. */
-export async function retainBuild(
-  out: string,
-  name: Build["name"],
-  binary: string,
-): Promise<Build> {
-  const paths = executables(out, name);
+/** Retain both executable roles before removing the temporary build tree. */
+export async function retainBuild(out: string, binary: string): Promise<Build> {
+  const paths = executables(out);
   await mkdir(dirname(paths.compare), { recursive: true });
   await copyFile(binary, paths.compare);
   await copyFile(join(dirname(binary), basename(paths.memory)), paths.memory);
   return {
-    name,
     compareSha256: await fileHash(paths.compare),
     memorySha256: await fileHash(paths.memory),
   };
@@ -88,27 +78,22 @@ export async function loadSession(out: string): Promise<Session> {
     throw error;
   }
   const session = schema.parse(JSON.parse(document));
-  const names = session.builds.map((build) => build.name);
-  if (names[0] !== "default" || new Set(names).size !== names.length)
-    throw new Error("Session requires one default build and at most one Portable SIMD build");
   if (session.platform !== process.platform)
     throw new Error("Session platform differs from this host");
   if ((await fileHash(join(out, "plan.json"))) !== session.planSha256)
     throw new Error("Session plan changed; start a new experiment instead");
-  for (const build of session.builds) {
-    const paths = executables(out, build.name);
-    if (
-      (await fileHash(paths.compare)) !== build.compareSha256 ||
-      (await fileHash(paths.memory)) !== build.memorySha256
-    )
-      throw new Error(`Session executables changed: ${build.name}; start a new experiment instead`);
-  }
+  const paths = executables(out);
+  if (
+    (await fileHash(paths.compare)) !== session.build.compareSha256 ||
+    (await fileHash(paths.memory)) !== session.build.memorySha256
+  )
+    throw new Error("Session executables changed; start a new experiment instead");
   return session;
 }
 
 /** Skip validation only when its receipt matches this immutable build and selection. */
 export async function isValidated(out: string, build: Build, session: Session) {
-  const path = join(out, "bin", build.name, "validated.json");
+  const path = join(out, "bin", "validated.json");
   try {
     return (await readFile(path, "utf8")) === validationReceipt(build, session);
   } catch (error) {
@@ -124,8 +109,5 @@ function validationReceipt(build: Build, session: Session) {
 
 /** Persist a receipt only after every selected input has passed validation. */
 export async function recordValidation(out: string, build: Build, session: Session) {
-  await writeFile(
-    join(out, "bin", build.name, "validated.json"),
-    validationReceipt(build, session),
-  );
+  await writeFile(join(out, "bin", "validated.json"), validationReceipt(build, session));
 }

@@ -5,7 +5,6 @@ import { join, resolve } from "node:path";
 import { type Command, InvalidArgumentError, Option } from "commander";
 import { stringify as stringifyToml } from "smol-toml";
 import { cpuListSchema } from "../bench/affinity.ts";
-import { reportMainHistory } from "../bench/continuous/volatility.ts";
 import { compareCounters, reportCounters } from "../bench/local/counters.ts";
 import { LAYOUT_CONTROLS, type LayoutControl, parseLayoutSeeds } from "../bench/local/layout.ts";
 import { renderLocalReport } from "../bench/local/report.ts";
@@ -93,15 +92,6 @@ function selectAxes(options: MeasurementOptions): SelectionOptions {
 async function report(directories: string[], partial = false) {
   const paths = directories.map((path) => resolve(path));
   try {
-    await access(join(paths[0], "history.json"));
-    if (paths.length !== 1 || partial)
-      throw new Error("History reports require one result directory");
-    await reportMainHistory(paths[0]);
-    return;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  try {
     await access(join(paths[0], "counters.json"));
     if (paths.length !== 1 || partial)
       throw new Error("Counter reports require one complete result directory");
@@ -122,8 +112,8 @@ async function report(directories: string[], partial = false) {
       throw new Error(
         "Revision reports require one directory and complete recorded samples per layout",
       );
-    await renderLocalReport(paths[0]);
-  } else await writeReport(paths, partial);
+    return renderLocalReport(paths[0]);
+  } else return writeReport(paths, partial);
 }
 
 /** Register experiment selection, comparison, verification and regeneration tasks. */
@@ -308,7 +298,7 @@ export function experimentCommands(program: Command) {
   addSelectionOptions(program.command("plan [name-or-file]"))
     .description("Print a resolved plan without compiling or measuring")
     .addOption(
-      new Option("--format <format>", "output encoding").choices(["json", "toml"]).default("toml"),
+      new Option("--format <format>", "output encoding").choices(["json", "toml"]).default("json"),
     )
     .option("--schema", "print the plan JSON Schema")
     .action(
@@ -332,8 +322,8 @@ export function experimentCommands(program: Command) {
     .description("Regenerate figures and tables without building")
     .option("--partial", "allow completed groups of an algorithm suite")
     .action(async (directories: string[], options: { partial?: boolean }) => {
-      await report(directories, options.partial);
-      console.log(JSON.stringify({ out: resolve(directories[0]), result: "reported" }));
+      const result = await report(directories, options.partial);
+      console.log(JSON.stringify({ out: resolve(directories[0]), result: result ?? "reported" }));
     });
 
   program

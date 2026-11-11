@@ -3,6 +3,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { median } from "../statistics.ts";
+import { resultSummary } from "../summary.ts";
 import { renderFigures } from "./charts.ts";
 import { loadRun } from "./load.ts";
 import { caseId, type Dataset, measurementId, type Summary, summarize, types } from "./model.ts";
@@ -25,9 +26,7 @@ export function collectWarnings(dataset: Dataset): string[] {
     if (dataset.host[field] !== expected)
       warnings.push(`${field}: ${formatCell(dataset.host[field])}; recommended ${expected}`);
   }
-  const parallel = [...dataset.manifests.values()].some((manifest) =>
-    manifest.variants.some((v) => v.threads),
-  );
+  const parallel = dataset.manifest.variants.some((v) => v.threads);
   if (!parallel && !/^\d+$/.test(String(dataset.host.affinity)))
     warnings.push(
       `CPU affinity: ${formatCell(dataset.host.affinity)}; recommended one logical CPU`,
@@ -62,52 +61,37 @@ export function collectWarnings(dataset: Dataset): string[] {
         );
     }
   }
-  for (const c of dataset.manifests.get("default")!.cases) {
-    const times = (build: string) =>
-      dataset.samples
-        .filter((s) => s.build === build && s.case_id === caseId(c) && s.variant === "std-stable")
-        .map((s) => s.elapsed_ns / s.batch);
-    const d = times("default"),
-      p = times("portable-simd");
-    if (p.length && d.length && Math.abs(median(p) / median(d) - 1) > 0.05)
-      warnings.push(
-        `${caseId(c)}: slice::sort anchor drift ${(100 * (median(p) / median(d) - 1)).toFixed(1)}% between builds`,
-      );
-  }
   return warnings;
 }
 function renderResults(dataset: Dataset, summaries: Map<string, Summary>): string {
   let output =
     "## Full results\n\nTimes include each sort's scratch allocation. Ratios divide the variant's time by the mean of Tessera's paired samples in the same block. Bounds are per-block minima and maxima. The A/A noise range spans both Tessera samples divided by their block mean, across all blocks. Faster/slower describes the variant relative to Tessera; it requires 8 of 9 blocks to agree and the median to fall outside that range. The tessera-aa row separately reports A2 / A1.\n\n";
-  const variants = [
-    ...new Set([...dataset.manifests.values()].flatMap((m) => m.variants.map((v) => v.name))),
-    "tessera-aa",
-  ];
+  const variants = [...new Set(dataset.manifest.variants.map((v) => v.name)), "tessera-aa"];
   output +=
     "Each cell gives ratio, ns / element, per-block ratio bounds, verdict and peak extra heap bytes. A dash means the variant is outside that build or task. Full-precision values are in [summaries.json](summaries.json).\n\n";
   for (const ty of types) {
     const rows: string[][] = [];
-    for (const [build, manifest] of dataset.manifests) {
-      for (const c of manifest.cases.filter((c) => c.ty === ty)) {
-        const baseline = summaries.get(measurementId(build, caseId(c), "tessera"));
-        if (!baseline) continue;
-        rows.push([
-          c.distribution,
-          c.len.toLocaleString("en-US"),
-          build,
-          `${baseline.aaLow.toFixed(4)}–${baseline.aaHigh.toFixed(4)}`,
-          ...variants.map((variant) => {
-            const s = summaries.get(measurementId(build, caseId(c), variant));
-            if (!s) return "—";
-            const memory = dataset.memory.find(
-              (m) =>
-                measurementId(m.build, m.case_id, m.variant) ===
-                measurementId(build, caseId(c), variant),
-            );
-            return `${s.ratio.toFixed(4)}×<br>${s.ns.toFixed(3)} ns<br>[${s.low.toFixed(4)}, ${s.high.toFixed(4)}]<br>${s.verdict}<br>${memory ? `${memory.peak_extra_bytes} B` : "heap unmeasured"}`;
-          }),
-        ]);
-      }
+    const manifest = dataset.manifest;
+    const build = "default";
+    for (const c of manifest.cases.filter((c) => c.ty === ty)) {
+      const baseline = summaries.get(measurementId(build, caseId(c), "tessera"));
+      if (!baseline) continue;
+      rows.push([
+        c.distribution,
+        c.len.toLocaleString("en-US"),
+        build,
+        `${baseline.aaLow.toFixed(4)}–${baseline.aaHigh.toFixed(4)}`,
+        ...variants.map((variant) => {
+          const s = summaries.get(measurementId(build, caseId(c), variant));
+          if (!s) return "—";
+          const memory = dataset.memory.find(
+            (m) =>
+              measurementId(m.build, m.case_id, m.variant) ===
+              measurementId(build, caseId(c), variant),
+          );
+          return `${s.ratio.toFixed(4)}×<br>${s.ns.toFixed(3)} ns<br>[${s.low.toFixed(4)}, ${s.high.toFixed(4)}]<br>${s.verdict}<br>${memory ? `${memory.peak_extra_bytes} B` : "heap unmeasured"}`;
+        }),
+      ]);
     }
     if (rows.length)
       output += `<details>\n<summary>${ty}</summary>\n\n${renderTable(["Shape", "Length", "Build", "A/A range", ...variants], rows)}\n</details>\n\n`;
@@ -115,7 +99,7 @@ function renderResults(dataset: Dataset, summaries: Map<string, Summary>): strin
   return output;
 }
 function renderCapabilities(dataset: Dataset) {
-  const manifest = dataset.manifests.get("default")!;
+  const manifest = dataset.manifest;
   const rows = manifest.variants.map((v) => [
     v.name,
     v.stable ? "stable" : "unstable",
@@ -128,38 +112,37 @@ function renderCapabilities(dataset: Dataset) {
 }
 function renderProvenance(dataset: Dataset) {
   let out = `## Measurement environment\n\n${renderTable(["Condition", "Recorded value"], Object.entries(dataset.host))}\n`;
-  for (const [build, manifest] of dataset.manifests) {
-    out += `### ${build}\n\nCommit \`${manifest.commit}\` (${manifest.dirty ? "modified tree" : "clean tree"}), target \`${manifest.target}\`, profile \`${manifest.profile}\`, optimization level \`${manifest.opt_level}\`, debug \`${manifest.debug}\`. Source SHA-256: \`${manifest.source_sha256}\`. Executable SHA-256: \`${manifest.binary_sha256}\`.\n\n`;
-    out += `\`\`\`text\n${manifest.rustc}\n\`\`\`\n\n`;
-    for (const compiler of ["cc", "cxx"] as const) {
-      if (manifest[compiler])
-        out += `${compiler}:\n\n\`\`\`text\n${manifest[compiler]}\n\`\`\`\n\n`;
-    }
-    out += `Features: ${manifest.features.map(formatCell).join(", ")}. Rust flags: \`${formatCell(manifest.cargo_encoded_rustflags).replaceAll("\u001f", " ")}\`.\n\n`;
-    if (manifest.dispatch)
-      out += `${renderTable(["SIMD sort", "Dispatch target"], Object.entries(manifest.dispatch))}\n`;
-    if (manifest.native_sources)
-      out += `<details>\n<summary>Native sources, commits and licenses</summary>\n\n\`\`\`toml\n${manifest.native_sources}\n\`\`\`\n\n</details>\n\n`;
-    const packages = manifest.cargo_lock.split("[[package]]").flatMap((block) => {
-      const name = block.match(/^name = "(.+)"$/m)?.[1],
-        version = block.match(/^version = "(.+)"$/m)?.[1];
-      return name &&
-        version &&
-        ["radsort", "rdst", "glidesort", "voracious_radix_sort", "tessera-sort"].includes(name)
-        ? [[name, version]]
-        : [];
-    });
-    out += `${renderTable(["Rust crate", "Version"], packages)}\n`;
+  const manifest = dataset.manifest;
+  const build = "default";
+  out += `### ${build}\n\nCommit \`${manifest.commit}\` (${manifest.dirty ? "modified tree" : "clean tree"}), target \`${manifest.target}\`, profile \`${manifest.profile}\`, optimization level \`${manifest.opt_level}\`, debug \`${manifest.debug}\`. Source SHA-256: \`${manifest.source_sha256}\`. Executable SHA-256: \`${manifest.binary_sha256}\`.\n\n`;
+  out += `\`\`\`text\n${manifest.rustc}\n\`\`\`\n\n`;
+  for (const compiler of ["cc", "cxx"] as const) {
+    if (manifest[compiler]) out += `${compiler}:\n\n\`\`\`text\n${manifest[compiler]}\n\`\`\`\n\n`;
   }
+  out += `Features: ${manifest.features.map(formatCell).join(", ")}. Rust flags: \`${formatCell(manifest.cargo_encoded_rustflags).replaceAll("\u001f", " ")}\`.\n\n`;
+  if (manifest.dispatch)
+    out += `${renderTable(["SIMD sort", "Dispatch target"], Object.entries(manifest.dispatch))}\n`;
+  if (manifest.native_sources)
+    out += `<details>\n<summary>Native sources, commits and licenses</summary>\n\n\`\`\`toml\n${manifest.native_sources}\n\`\`\`\n\n</details>\n\n`;
+  const packages = manifest.cargo_lock.split("[[package]]").flatMap((block) => {
+    const name = block.match(/^name = "(.+)"$/m)?.[1],
+      version = block.match(/^version = "(.+)"$/m)?.[1];
+    return name &&
+      version &&
+      ["radsort", "rdst", "glidesort", "voracious_radix_sort", "tessera-sort"].includes(name)
+      ? [[name, version]]
+      : [];
+  });
+  out += `${renderTable(["Rust crate", "Version"], packages)}\n`;
   return out;
 }
-export async function writeReport(directories: string[], partial = false): Promise<void> {
+export async function writeReport(directories: string[], partial = false) {
   const dataset = await loadRun(directories, partial),
     summaries = summarize(dataset),
     charts = renderFigures(dataset, summaries);
   const out = join(directories[0], "report");
   await mkdir(out, { recursive: true });
-  let markdown = `# Sorting comparison\n\n${partial ? "Partial suite; only completed groups are shown." : `${dataset.manifests.get("default")!.suite} suite, version 1.`} Every value is regenerated from the accompanying manifests, host fingerprint, blocks and memory samples.\n\n`;
+  let markdown = `# Sorting comparison\n\n${partial ? "Partial suite; only completed groups are shown." : `${dataset.manifest.suite} suite, version 1.`} Every value is regenerated from the accompanying manifests, host fingerprint, blocks and memory samples.\n\n`;
   markdown +=
     "Nine blocks reuse each case's seed-one input. Their range measures execution variability on that input; it does not measure variability across random inputs. Calibration can choose different batch sizes for different variants, changing the prepared-buffer working set and cache behavior.\n\n";
   markdown += renderProvenance(dataset);
@@ -167,7 +150,7 @@ export async function writeReport(directories: string[], partial = false): Promi
   if (conditions.length)
     markdown += `## Observed conditions\n\n${conditions.map((w) => `- ${w}`).join("\n")}\n\n`;
   markdown += renderCapabilities(dataset);
-  if ([...dataset.manifests.values()].some((m) => m.variants.some((v) => v.threads)))
+  if (dataset.manifest.variants.some((v) => v.threads))
     markdown +=
       "## Parallel measurement scope\n\nPools are started and warmed before timing and allocation counting; each timed call includes pool dispatch and sort scratch allocation. Peak heap bytes exclude pre-existing pool/runtime storage and thread stacks. All workers exit before the next adapter. Ratios use the serial Tessera A/A pair, not a separate parallel A/A pair. The inverse ratio is whole-call speedup over serial Tessera, not source-change attribution or parallel-only noise control.\n\n";
   markdown +=
@@ -194,4 +177,16 @@ export async function writeReport(directories: string[], partial = false): Promi
     ]),
   );
   await writeFile(join(directories[0], "bmf.json"), `${JSON.stringify(bmf, null, 2)}\n`);
+  return {
+    kind: "algorithm-comparison",
+    partial,
+    protocol: "nine-blocks-aa",
+    ratio: "algorithm / paired Tessera mean",
+    range: "observed block range",
+    ...resultSummary(
+      [...summaries.values()]
+        .filter((row) => row.variant !== "tessera" && row.variant !== "tessera-aa")
+        .map((row) => ({ ...row, id: `${row.caseId}/${row.variant}` })),
+    ),
+  };
 }

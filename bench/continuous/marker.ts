@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-/** Current single-backend check name; former names remain readable in status. */
+/** Current single-backend check name. */
 export const BENCHMARK_CHECK = "Benchmarks (rust)";
-export const LEGACY_BENCHMARK_CHECK = "Benchmarks (rust, Portable SIMD)";
 
 export const MARKER = "tessera-bench-report";
 

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { VARIANTS } from "../bench/catalog.ts";
-import { LEGACY_BENCHMARK_CHECK, marker } from "../bench/continuous/marker.ts";
+import { marker } from "../bench/continuous/marker.ts";
 
 const cli = fileURLToPath(new URL("./index.ts", import.meta.url));
 
@@ -212,56 +212,3 @@ test("API failures fail the command instead of returning empty success", async (
   const f = await fixture(t, {});
   assert.throws(() => f.run("status", "missing"));
 });
-
-for (const association of ["external-id", "recorded-url"]) {
-  test(`legacy archival failures remain visible through ${association}`, async (t) => {
-    const f = await fixture(t, {
-      "commits/main": { sha: "current", html_url: "commit-url" },
-      "commits/current/check-runs?per_page=100": [
-        {
-          check_runs: [
-            check(1, {
-              name: LEGACY_BENCHMARK_CHECK,
-              ...(association === "external-id" ? { external_id: "70" } : {}),
-              details_url: "https://github.com/owner/project/runs/1",
-              output: {
-                title: "no alerts",
-                summary: "[Run](https://github.com/owner/project/actions/runs/70)",
-              },
-            }),
-          ],
-        },
-      ],
-      "actions/runs?head_sha=current&per_page=100": [{ workflow_runs: [run(15)] }],
-      "actions/runs/70": run(70, {
-        workflow_id: 2,
-        name: "Track benchmarks",
-        head_sha: "trusted",
-        event: "workflow_run",
-        conclusion: "failure",
-      }),
-      "actions/runs/70/jobs?per_page=100": [
-        {
-          jobs: [
-            {
-              name: "publish",
-              status: "completed",
-              conclusion: "failure",
-              html_url: "job-url",
-              steps: [{ name: "Upload to Cloud", status: "completed", conclusion: "failure" }],
-            },
-          ],
-        },
-      ],
-    });
-    const status = JSON.parse(f.run("status", "--details"));
-    assert.equal(status.benchmarks[0].state, "success");
-    const tracker = status.workflows.find((item: { id: number }) => item.id === 70);
-    assert.equal(tracker.state, "failure");
-    assert.deepEqual(tracker.jobs[0].steps, [{ name: "Upload to Cloud", state: "failure" }]);
-    assert.equal(
-      status.details.workflows.find((item: { id: number }) => item.id === 70).head,
-      "trusted",
-    );
-  });
-}

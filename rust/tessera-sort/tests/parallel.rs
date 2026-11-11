@@ -150,7 +150,7 @@ fn large_sort_uses_workers_and_recovers_task_panics() {
     let workers = Mutex::new(HashSet::new());
     pool.install(|| {
         par_stable_sort_by_key(&mut rows, |row| {
-            if calls.fetch_add(1, Ordering::Relaxed) % 4096 == 0 {
+            if calls.fetch_add(1, Ordering::Relaxed).is_multiple_of(4096) {
                 workers
                     .lock()
                     .unwrap()

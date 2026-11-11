@@ -57,8 +57,7 @@ pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
 ///
 /// If `key` panics, every record is restored to `values`, in an unspecified
 /// order, before the panic propagates to the caller. No record is dropped or
-/// duplicated. The `rayon` feature enables `std`, so recovery is available
-/// during block partitioning as well.
+/// duplicated.
 ///
 /// # Memory
 ///

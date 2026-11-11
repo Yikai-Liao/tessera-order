@@ -137,12 +137,7 @@ pub(crate) fn default_block_size(len: usize, record_bytes: usize, radix: usize) 
 
 /// The balanced block size, rounded up.
 ///
-/// `std` computes it as `ceil(sqrt(10 n / (2 R s)))`. `core` has neither
-/// `f64::sqrt` nor `f64::ceil`, so an integer solve of
-/// `m * m * (2 R s) >= 10 n` stands in for it. Both forms agree wherever the
-/// caller can reach them, which `balanced_forms_agree` in this file's tests
-/// checks.
-#[cfg(feature = "std")]
+/// Evaluates `ceil(sqrt(10 n / (2 R s)))`; tests compare against an integer solve.
 fn balanced_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
     let range = 1usize << radix;
     let tables = DESCRIPTOR_BYTES_PER_POSITION as f64 * len as f64;
@@ -150,16 +145,8 @@ fn balanced_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
     (tables / scratch_per_record).sqrt().ceil() as usize
 }
 
-#[cfg(not(feature = "std"))]
-fn balanced_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
-    balanced_block_size_integer(len, record_bytes, radix)
-}
-
-/// The integer form of [`balanced_block_size`].
-///
-/// A standard build compiles it only to compare it against the floating-point
-/// form in tests.
-#[cfg(any(not(feature = "std"), test))]
+/// Integer reference for checking the floating-point block size.
+#[cfg(test)]
 fn balanced_block_size_integer(len: usize, record_bytes: usize, radix: usize) -> usize {
     let numerator = DESCRIPTOR_BYTES_PER_POSITION as u128 * len as u128;
     let denominator = 2 * (1u128 << radix) * record_bytes as u128;
@@ -1045,14 +1032,12 @@ mod tests {
 
     /// Records carry a unique id so a permutation check also proves that no
     /// record was lost or duplicated.
-    #[cfg(feature = "std")]
     fn numbered(len: usize) -> Vec<(u32, u32)> {
         (0..len as u32)
             .map(|id| (id.wrapping_mul(0x9e37_79b9), id))
             .collect()
     }
 
-    #[cfg(feature = "std")]
     fn ids(records: &[(u32, u32)]) -> Vec<u32> {
         let mut ids: Vec<u32> = records.iter().map(|record| record.1).collect();
         ids.sort_unstable();
@@ -1062,7 +1047,6 @@ mod tests {
     /// Scatters until the key function panics at call `at`, then checks the
     /// recovered pass: the key is not called again, the unread records land in
     /// bucket 0, and compaction restores the input slice.
-    #[cfg(feature = "std")]
     fn scatter_until_panic(len: usize, block_size: usize, at: usize) {
         let mut records = numbered(len);
         // A pass reads records in input order. Records before the panicking
@@ -1118,7 +1102,6 @@ mod tests {
     /// make a production block longer than the whole short input, so the short
     /// case sets one. The long pairs are a production block with and without a
     /// tail, and a longer input where the root formula picks the block size.
-    #[cfg(feature = "std")]
     fn configs() -> Vec<(usize, usize)> {
         let record_bytes = core::mem::size_of::<(u32, u32)>();
         let mut configs = vec![(29, 4), (32, 4)];
@@ -1148,7 +1131,7 @@ mod tests {
     /// A scatter panic can leave the pass read up to any record. The recovery
     /// reconstructs the read offset from the bucket cursors and consumed input
     /// blocks, so every offset near a block boundary is checked.
-    #[cfg(feature = "std")]
+
     #[test]
     fn scatter_panic_keeps_records() {
         for (len, block_size) in configs() {
@@ -1178,7 +1161,7 @@ mod tests {
 
     /// A callback panic must not interrupt materialization: the remaining
     /// buckets are still copied back, and the payload is returned afterwards.
-    #[cfg(feature = "std")]
+
     #[test]
     fn callback_panic_keeps_records() {
         for (len, block_size) in configs() {
@@ -1226,7 +1209,7 @@ mod tests {
     /// The integer form must reproduce the floating-point block size: a
     /// different block size moves pass and tile boundaries, and so would leave
     /// the measurements behind the constant.
-    #[cfg(feature = "std")]
+
     #[test]
     fn balanced_forms_agree() {
         let lengths = (1..=600).chain([1 << 10, 4096, 10_000, 1 << 16, 1 << 20, 1 << 24]);

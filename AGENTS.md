@@ -34,11 +34,11 @@ Use `pnpm tools` for covered tasks; do not recreate its build/run/report orchest
 
 Replace uppercase placeholders. The [capability table](docs/development/benchmarking.md#command-capabilities) owns defaults, coverage options and evidence limits. A read-only feedback request does not authorize new measurements. Before a custom experiment, identify the concrete unsupported requirement and obtain operator agreement; prefer extending the maintained pipeline.
 
-Read main feedback with `pnpm -s tools status main`. Status is compact JSON: match `target.head`, read both `benchmarks[]` verdicts and `workflows[].state`; use `--details` for check summaries and the matching report body. A successful read is not a passing benchmark. The [CLI reference](docs/development/tooling.md) owns output and logging contracts.
+Read main feedback with `pnpm -s tools status main`. Status is compact JSON: match `target.head`, read all active `benchmarks[]` verdicts and `workflows[].state`; use `--details` for check summaries and the matching report body. A successful read is not a passing benchmark. The [CLI reference](docs/development/tooling.md) owns output and logging contracts.
 
 ## Always preserve
 
-- Stable Rust, no required dependencies; MSRV is in `Cargo.toml`.
+- Stable Rust; MSRV is in `Cargo.toml`. Changes to MSRV, required dependencies or std/no_std support require explicit operator approval and corresponding contract, documentation and CI updates.
 - Never copy third-party code into the repository. Keep the BSD-2-Clause SPDX header on new files and Clausecker's notice in `block.rs`; see [license policy](CONTRIBUTING.md#license).
 - Every `unsafe` block has a `// SAFETY:` comment; every `unsafe fn` has a `# Safety` section. Preserve panic, inconsistent-key, owned-record and `&mut`-record tests.
 - Routing, thresholds, digit planning and inlining change only with measurements under the benchmark protocol, including A/A ranges. Investigate changes outside the controls. Raw measurements and research harnesses stay outside Git.
@@ -62,4 +62,4 @@ pnpm docs:test && pnpm docs:typecheck && pnpm docs:build     # site / models
 pnpm tools:test && pnpm tools:typecheck                    # benchmark tooling
 ```
 
-Run applicable checks locally; engine feature and Miri checks are in [contributing](CONTRIBUTING.md#validation). Miri, MSRV, platform and benchmark checks also run in CI; [CI](docs/development/ci.md) explains coverage. A green tracking workflow is not a benchmark verdict: read both current-head benchmark checks.
+Run applicable checks locally; engine feature and Miri checks are in [contributing](CONTRIBUTING.md#validation). Miri, MSRV, platform and benchmark checks also run in CI; [CI](docs/development/ci.md) explains coverage. A green tracking workflow is not a benchmark verdict: read the current-head Portable SIMD benchmark check.

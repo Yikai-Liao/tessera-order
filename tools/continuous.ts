@@ -24,7 +24,6 @@ export function continuousCommands(program: Command) {
           include: VARIANTS.flatMap((variant) =>
             Array.from({ length: CONTINUOUS_SHARDS }, (_, index) => ({
               configuration: variant.id,
-              simd: variant.features.includes("portable-simd"),
               shard: `${index + 1}/${CONTINUOUS_SHARDS}`,
               artifact: `paired-${variant.id}-${index + 1}`,
             })),

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { VARIANTS } from "../bench/catalog.ts";
 import { marker } from "../bench/continuous/marker.ts";
 
 const cli = fileURLToPath(new URL("./index.ts", import.meta.url));
@@ -69,7 +70,7 @@ function run(id: number, overrides: object = {}) {
 function check(id: number, overrides: object = {}) {
   return {
     id,
-    name: "Benchmarks (rust, Default)",
+    name: `Benchmarks (rust, ${VARIANTS[0].name})`,
     status: "completed",
     conclusion: "success",
     details_url: "https://github.com/owner/project/actions/runs/70",
@@ -129,7 +130,7 @@ test("status pins remote refs and reads all feedback pages", async (t) => {
   );
   assert.equal(status.benchmarks[0].state, "failure");
   assert.equal(status.benchmarks[0].title, "Measurement failed");
-  assert.equal(status.benchmarks[1].state, "missing");
+  assert.equal(status.benchmarks.length, VARIANTS.length);
   assert.equal(status.report, null);
   assert.equal(status.details, undefined);
   assert.ok(JSON.stringify(status).length < 2000);

@@ -38,8 +38,8 @@ mod sealed {
 
     /// Scans and insertion passes for direct keys of one type.
     ///
-    /// The defaults are the default-build scans. Primitive keys override them
-    /// with the vector backend under `portable-simd`; `Reverse<K>` keeps the
+    /// Primitive keys override these scans with the vector backend;
+    /// `Reverse<K>` keeps the scalar/blocked
     /// defaults, so it needs no second set of vector kernels.
     pub trait Sealed: Copy {
         #[inline]
@@ -100,23 +100,19 @@ pub trait Unsigned:
     fn to_u128(self) -> u128;
 }
 
-/// Routes the scans of a primitive key to the vector backend under
-/// `portable-simd`. Expands to nothing in the default build.
+/// Routes primitive-key scans and insertion passes to the vector backend.
 macro_rules! vector_backend {
     () => {
-        #[cfg(feature = "portable-simd")]
         #[inline]
         fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool {
             crate::portable_simd::confirm_ascending(keys, previous)
         }
 
-        #[cfg(feature = "portable-simd")]
         #[inline]
         fn finish_insertion(keys: &mut [Self]) {
             crate::portable_simd::finish_insertion(keys)
         }
 
-        #[cfg(feature = "portable-simd")]
         #[inline]
         fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
             crate::portable_simd::insertion_sort(keys, budget)

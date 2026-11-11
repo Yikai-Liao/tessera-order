@@ -25,7 +25,7 @@ An inconsistent key function can therefore produce an unsorted result, but never
 
 ## Panicking key functions
 
-With the default `std` feature, a panic in the key function is caught, every record is moved back into the input slice, and the panic is resumed:
+A panic in the key function is caught, every record is moved back into the input slice, and the panic is resumed:
 
 - **During a block scatter**, the engine works out how far the pass got from the bucket cursors and the number of input blocks consumed. It then finishes the pass **without calling the key function again**, sending every unread record to bucket 0. The result is a valid, unsorted pass. Compaction then copies every record back into the input.
 - **During a tile pass**, `RestoreTile` copies the last complete record set back into the tile if it was in scratch. The interrupted pass only wrote stale copies into the other buffer.

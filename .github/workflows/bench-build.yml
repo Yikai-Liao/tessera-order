@@ -82,7 +82,6 @@ jobs:
       - name: Same-run revision comparison
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
-          SIMD: ${{ matrix.simd }}
           SHARD: ${{ matrix.shard }}
         run: |
           if [ -n "$PR_BASE" ]; then
@@ -90,10 +89,8 @@ jobs:
           else
             baseline=$(git rev-parse HEAD^)
           fi
-          args=()
-          if [ "$SIMD" = true ]; then args+=(--simd); fi
           pnpm tools compare commit "$baseline" --plan continuous --shard "$SHARD" \
-            --out bench/results/continuous "${args[@]}"
+            --out bench/results/continuous
       - name: Retain measurement log
         if: always()
         run: |

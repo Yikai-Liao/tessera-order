@@ -44,32 +44,23 @@
 //!
 //! Each call allocates scratch as needed and frees it before returning.
 //!
-//! # Cargo features
+//! # Backend and Cargo features
 //!
-//! `std` is enabled by default. Disable it for `no_std`: the crate then uses
-//! `core` and `alloc`, so it needs a global allocator. A key-function panic
-//! during block partitioning aborts rather than exposing partially moved
-//! records, even when the host enables unwinding. Panics elsewhere may unwind
-//! safely. Sorting, ordering and the memory bounds above are the same either way.
-//!
-//! `portable-simd` is off by default and requires `std` and Rust 1.89 or newer.
-//! It adds [`fearless_simd`](https://docs.rs/fearless_simd) for adjacent-key
+//! Tessera requires `std` and Rust 1.89 or newer. Every build uses
+//! [`fearless_simd`](https://docs.rs/fearless_simd) for adjacent-key
 //! scans, ascending-order confirmation and bucket-count prefix sums. On x86 it
 //! selects a supported instruction set at run time, once per insertion pass,
 //! ascending confirmation or prefix sum. Other targets use their compile-time
 //! baseline, including Arm Neon and WebAssembly SIMD when enabled for the
-//! target. Keys without a vector kernel use scalar scans. Results are the same
-//! with and without the feature.
+//! target. Keys without a vector kernel use scalar scans. There is no backend
+//! feature switch; `--no-default-features` uses this same implementation.
 //!
 //! `rayon` is off by default and enables `par_stable_sort` and
 //! `par_stable_sort_by_key`. Large inputs partition the root across disjoint
 //! shards and adopt them in input order. Bounded buckets sort before their
 //! final writes; other layouts sort buckets while compaction proceeds. Small
 //! inputs and one-thread pools use the serial engine. The feature requires
-//! `std`, `Send` records and a shared (`Fn + Sync`) key function. It also
-//! enables `std` when default features are disabled.
-
-#![cfg_attr(not(feature = "std"), no_std)]
+//! `Send` records and a shared (`Fn + Sync`) key function.
 
 extern crate alloc;
 
@@ -78,7 +69,6 @@ mod engine;
 mod key;
 #[cfg(feature = "rayon")]
 mod parallel;
-#[cfg(feature = "portable-simd")]
 mod portable_simd;
 mod scan;
 mod unwind;
@@ -128,8 +118,7 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 ///
 /// If `key` panics, the panic propagates to the caller after every record has
 /// been moved back into `values`, in an unspecified order. No record is
-/// dropped or duplicated. Without the `std` feature, a panic during block
-/// partitioning aborts; panics elsewhere may unwind with every record preserved.
+/// dropped or duplicated.
 ///
 /// # Memory
 ///

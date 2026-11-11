@@ -82,8 +82,8 @@ modes = [
 ]
 
 configurations = [
-  { id = "default", name = "Default", testbed = "intel-v1-hybrid-v1", relativeTestbed = "actions-screen-default-v1", features = ["rayon"] },
-  { id = "portable-simd", name = "Portable SIMD", testbed = "intel-v1-portable-simd-hybrid-v1", relativeTestbed = "actions-screen-portable-simd-v1", features = ["portable-simd", "rayon"] },
+  # One required backend retains the existing SIMD identity.
+  { id = "portable-simd", name = "Portable SIMD", testbed = "intel-v1-portable-simd-hybrid-v1", relativeTestbed = "actions-screen-portable-simd-v1", features = ["rayon"] },
 ]
 
 [comparison]

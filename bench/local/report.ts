@@ -12,7 +12,6 @@ import { type LocalRun, summarizeLocal } from "./model.ts";
 async function writeLayoutFigures(
   directory: string,
   summaries: ReturnType<typeof summarizeLayouts>,
-  blocks: number,
 ) {
   const figures: string[] = [];
   for (const [index, summary] of summaries.entries()) {
@@ -39,8 +38,8 @@ async function writeLayoutFigures(
     const filename = `layout-${index + 1}.svg`;
     const svg = renderRows({
       title: `Layout times · ${Object.values(rawCaseParts(summary.id)).filter(Boolean).join(" · ")}`,
-      guide: `Median time per sort · lines: observed ${blocks}-block ranges, not confidence intervals`,
-      columns: [`Median (${label})`, `Block range (${label})`],
+      guide: "Median time per sort · lines: observed sample ranges, not confidence intervals",
+      columns: [`Median (${label})`, `Observed range (${label})`],
       groups: [
         {
           title: "Fixed shuffle seeds",
@@ -62,7 +61,7 @@ async function writeLayoutFigures(
         clamp: false,
       },
       legend: {
-        note: "baseline: median of paired baseline means · current: median of current processes",
+        note: "baseline and current: medians of their recorded time observations",
       },
       axis: ["← less time", `${label} per sort →`],
     });
@@ -80,6 +79,7 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
   if (result.schema !== 1 && result.schema !== 2)
     throw new Error("Unsupported local result schema");
   const layoutSummaries = result.schema === 2 ? summarizeLayouts(result) : undefined;
+  const layoutFigures = layoutSummaries ? await writeLayoutFigures(directory, layoutSummaries) : "";
   const runs =
     result.schema === 2
       ? result.layouts.map(({ seed, run }) => ({
@@ -88,22 +88,25 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
         }))
       : [{ title: result.configuration, run: result }];
   const run = runs[0].run;
-  const { count, agreement } = pairedBudget(run.blockCount ?? catalog.pairedBlocks.extended.count);
-  const short = count === catalog.pairedBlocks.short.count;
-  const layoutFigures = layoutSummaries
-    ? await writeLayoutFigures(directory, layoutSummaries, count)
-    : "";
+  const paired = run.protocol === "paired-samples-v1" || run.protocol === "paired-samples-v2";
+  const budget = paired
+    ? undefined
+    : pairedBudget(run.blockCount ?? catalog.pairedBlocks.extended.count);
+  const range = (low: number | undefined, high: number | undefined) =>
+    low === undefined || high === undefined ? "—" : `${low.toFixed(4)}–${high.toFixed(4)}`;
   const groups = runs.map(({ title, run }) => ({ title, summaries: summarizeLocal(run) }));
   const summaries = groups.flatMap(({ summaries }) => summaries);
-  const ratios = summaries.flatMap((s) => [s.low, s.high, s.aaLow, s.aaHigh]);
+  const ratios = summaries.flatMap((s) => [s.low, s.high, s.aaLow ?? 1, s.aaHigh ?? 1]);
   const reach = 2 ** Math.ceil(Math.log2(Math.max(2, ...ratios.map((v) => Math.max(v, 1 / v)))));
   const ticks = [];
   for (let k = -Math.log2(reach); k <= Math.log2(reach); k++)
     ticks.push({ value: 2 ** k, label: `${2 ** k}×` });
   const svg = renderRows({
     title: "Working tree against commit",
-    guide: `Current / baseline run time · lower is better · ${count} process-level blocks per layout${short ? " · short screen" : ""}`,
-    columns: ["Time ratio", "A/A range"],
+    guide: paired
+      ? "Adjacent A/B sample ratios · lower is better · 99% median interval"
+      : `Current / baseline run time · lower is better · ${budget!.count} process-level blocks per layout`,
+    columns: ["Time ratio", paired ? "Median interval" : "A/A range"],
     groups: groups.map(({ title, summaries }) => ({
       title,
       rows: summaries.map((s) => ({
@@ -113,21 +116,23 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
         },
         marks: [{ value: s.ratio, tone: "primary" }],
         span: [s.low, s.high],
-        cells: [`${s.ratio.toFixed(4)}×`, `${s.aaLow.toFixed(4)}–${s.aaHigh.toFixed(4)}`],
+        cells: [`${s.ratio.toFixed(4)}×`, paired ? range(s.low, s.high) : range(s.aaLow, s.aaHigh)],
         strong: true,
       })),
     })),
     scale: { low: 1 / reach, high: reach, ticks, origin: 1, clamp: false },
-    legend: { note: "dot: median · line: block range" },
+    legend: {
+      note: paired ? "dot: median · line: median interval" : "dot: median · line: block range",
+    },
     axis: ["← less time", "more time →"],
   });
   const table = [
-    "| Layout | Case | Current / baseline | Block range | A/A range | Screen |",
+    `| Layout | Case | Current / baseline | ${paired ? "Median interval" : "Block range"} | A/A range | Screen |`,
     "| --- | --- | --- | --- | --- | --- |",
     ...groups.flatMap(({ title, summaries }) =>
       summaries.map(
         (s) =>
-          `| ${title} | ${s.id} | ${s.ratio.toFixed(4)} | ${s.low.toFixed(4)}–${s.high.toFixed(4)} | ${s.aaLow.toFixed(4)}–${s.aaHigh.toFixed(4)} | ${s.verdict} |`,
+          `| ${title} | ${s.id} | ${s.ratio.toFixed(4)} | ${s.low.toFixed(4)}–${s.high.toFixed(4)} | ${range(s.aaLow, s.aaHigh)} | ${s.verdict} |`,
       ),
     ),
   ].join("\n");
@@ -145,11 +150,11 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
 
 Baseline: \`${run.baseline}\`. Working-tree HEAD: \`${run.head}\` (${run.dirty ? "modified" : "clean"}).
 
-This is a development screen, not an in-process source-attribution claim. Each process measures Criterion's mean time per sort. Each block runs the baseline executable twice and the current executable once; ratios use the paired baseline mean. ${count} blocks per case${short ? " (short screen)" : ""}; a direction requires ${agreement} of ${count} blocks and a median outside the A/A range.${short ? " Conflicting directions or a median within the control range are inconclusive; no extra blocks are added automatically." : ""} All processes use the same input seed and current harness; they do not share an address space.
+${paired ? "Adjacent A/B samples alternate AB/BA order. The median ratio and its distribution-free 99% interval describe the paired samples; an alert requires the entire interval outside 0.95–1.05. Coverage assumes independent samples and does not include code-placement effects. Input restoration, verification and IPC are outside the sort clock. Raw pairs are retained; this is a regression screen, not proof of source-change causality." : `This is a historical process-level development screen, not an in-process source-attribution claim. Each process measures Criterion’s mean time per sort. Each block runs baseline twice and current once; ratios use the paired baseline mean. The recorded budget is ${budget!.count} blocks per case (${budget!.count === catalog.pairedBlocks.short.count ? "short screen" : "extended run"}). A direction requires ${budget!.agreement} of ${budget!.count} blocks and a median outside the A/A range.`}
 
 ${
   layoutSummaries
-    ? `Each fixed seed shuffles LLD's .text.* input sections for both revisions. Seeds rotate between blocks; every seed retains ${count} complete blocks and its own process-level A/A control. Equal seeds do not imply matching addresses between revisions. The cross-layout median and min/max describe only the observed sample, with no pooled regression verdict or confidence interval. Spreads are max/min minus one across each revision's per-layout median times; they include process and host variation. Link maps are retained as layout-<seed>-<revision>.map. Final rustc arguments are recorded separately from Cargo's dependency flags.
+    ? `Each fixed seed shuffles LLD’s .text.* input sections for both revisions. Every seed retains a complete comparison under its recorded protocol. Equal seeds do not imply matching addresses between revisions. The cross-layout median and min/max describe only the observed sample, with no pooled regression verdict or confidence interval. Spreads are max/min minus one across each revision's per-layout median times; they include process and host variation. Link maps are retained as layout-<seed>-<revision>.map. Final rustc arguments are recorded separately from Cargo's dependency flags.
 
 ${layoutTable}
 
@@ -165,7 +170,7 @@ ${table}
 ## Provenance
 
 \`\`\`json
-${JSON.stringify(result.schema === 2 ? { ...result, layouts: result.layouts.map(({ seed, run }) => ({ seed, run: { ...run, blocks: undefined } })) } : { ...run, blocks: undefined }, null, 2)}
+${JSON.stringify(result.schema === 2 ? { ...result, layouts: result.layouts.map(({ seed, run }) => ({ seed, run: { ...run, blocks: undefined, samples: undefined } })) } : { ...run, blocks: undefined, samples: undefined }, null, 2)}
 \`\`\`
 `;
   await writeFile(join(directory, "local.svg"), svg);

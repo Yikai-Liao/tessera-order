@@ -3,6 +3,12 @@
 schema = 1
 
 pairedBlocks = { short = { count = 3, agreement = 3 }, extended = { count = 9, agreement = 8 } }
+# Descending length floors; one budget per revision, not per outer repetition.
+revisionSampling = [
+  { min_len = 10000000, warm_ms = 1000, window_ms = 4000, samples = 20 },
+  { min_len = 1000000, warm_ms = 1000, window_ms = 4000, samples = 40 },
+  { min_len = 1, warm_ms = 500, window_ms = 1500, samples = 30 },
+]
 
 algorithms = [
   { id = "tessera", label = "Tessera", stable = true, family = "radix", adapter = "common" },
@@ -80,8 +86,8 @@ modes = [
 ]
 
 configurations = [
-  # Retain the existing SIMD Testbed history; there is no scalar build.
-  { id = "portable-simd", name = "Portable SIMD", testbed = "intel-v1-portable-simd-hybrid-v1", features = ["rayon"] },
+  # One required backend; keep the Portable SIMD publication identity.
+  { id = "portable-simd", name = "Portable SIMD", testbed = "intel-v1-portable-simd-hybrid-v1", relativeTestbed = "actions-screen-portable-simd-v1", features = ["rayon"] },
 ]
 
 [comparison]

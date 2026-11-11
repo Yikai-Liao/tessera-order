@@ -2,7 +2,7 @@
 
 # Engine planning convergence: work-in-progress handoff
 
-Temporary operator-requested handoff. Remove this file before opening the PR. The LFS evidence archive and its path-specific attribute are temporary transfer material too; preserve an external copy before removing them. Deleting them in a later commit does not remove LFS objects from branch history.
+Temporary operator-requested handoff. Retained in the Draft PR at the operator’s request; remove before marking it ready for review. The LFS evidence archive and its path-specific attribute are temporary transfer material too; preserve an external copy before removing them. Deleting them in a later commit does not remove LFS objects from branch history.
 
 ## Status and objective
 

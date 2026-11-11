@@ -19,9 +19,9 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Compare sorting algorithms | `pnpm -s tools compare algorithms --plan smoke` |
 | Resume a prepared algorithm comparison | `pnpm -s tools compare resume bench/results/SESSION` |
 | Reproduce the native comparison CI job | `pnpm -s tools check --native` |
-| Build both continuous artifacts | `pnpm -s tools continuous build --out bench/results/artifacts` |
-| Run the continuous scheduler locally | `pnpm -s tools continuous run bench/results/artifacts/portable-simd/bench` |
-| Submit a prepared image to Bencher | `pnpm -s tools continuous submit --help` |
+| Preview hosted benchmark jobs | `pnpm -s tools continuous matrix` |
+| Reproduce one paired shard | `pnpm -s tools compare commit main --plan continuous --shard 1/2` |
+| Upload completed paired JSON | `pnpm -s tools continuous submit --help` |
 | Regenerate an existing result | `pnpm -s tools report bench/results/SESSION` |
 | Read current main feedback | `pnpm -s tools status main` |
 | Read current PR feedback | `pnpm -s tools status --pr 123` |
@@ -31,7 +31,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Fetch and verify pinned native sources | `pnpm -s tools native fetch` |
 | Validate a release tag | `pnpm -s tools release verify --tag rust/v0.1.0` |
 
-Use a task's `--help` for its options. Local timing comparisons default to three paired blocks; `--blocks 9` requests an extended run explicitly. Reports label the budget, inconclusive short screens do not trigger extra measurements, and resume retains the recorded count. Local comparisons accept a Linux CPU list or range with `--cpu`; the [parallel measurement contract](benchmarking.md#local-parallel-comparisons) explains pool timing, affinity and memory exclusions. `plan` and both comparison tasks share the [experiment selection model](benchmarking.md#experiment-plans). `check` is a functional smoke check with a one-millisecond sample target, not a performance experiment. It materializes HEAD and working-tree revision copies, runs harness tests including generated adapters and memory-journal recovery, validates the smoke suite, measures one `u64/random` group, verifies that native programs do not link parallel runtimes when `--native` is selected, and generates a partial report.
+Use a task's `--help` for its options. Algorithm and linked-revision comparisons default to three paired blocks; `--blocks 9` requests an extended run explicitly. Reports label the budget, inconclusive short screens do not trigger extra measurements, and resume retains the recorded count. `compare commit` instead uses the catalogued adjacent A/B sample budget without outer blocks. Local comparisons accept a Linux CPU list or range with `--cpu`; the [parallel measurement contract](benchmarking.md#local-parallel-comparisons) explains pool timing, affinity and memory exclusions. `plan` and both comparison tasks share the [experiment selection model](benchmarking.md#experiment-plans). `check` is a functional smoke check with a one-millisecond sample target, not a performance experiment. It materializes HEAD and working-tree revision copies, runs harness tests including generated adapters and memory-journal recovery, validates the smoke suite, measures one `u64/random` group, verifies that native programs do not link parallel runtimes when `--native` is selected, and generates a partial report.
 
 ## Agent output
 
@@ -57,48 +57,43 @@ pnpm -s tools status main --text
 
 Build and measurement tasks print one compact object containing `out`, `log` and `result`. Subprocess output and progress go to the adjacent `OUT.log`, leaving machine-readable stdout free of Cargo, compiler and Criterion output. A failed operation exits nonzero with the log path. Each `compare resume` invocation uses a separate adjacent `OUT.resume-TIMESTAMP-PID.log`, preserving previous logs. Preparation, validation, memory and group progress go to these diagnostics, not machine-readable stdout. Use `--verbose` only for interactive diagnosis; it streams subprocess diagnostics instead and no longer guarantees JSON-only stdout. Report regeneration prints its output location without reading or rebuilding sources. Plans print TOML by default or compact JSON with `--format json`.
 
-A successful `status` exit means the read succeeded, not that every workflow passed. An experiment's command exit describes execution, not proof of a speedup. Algorithm comparisons retain exact executable pairs and recorded settings before measuring; `compare resume DIR` accepts no selection or sampling overrides. See [recovery](benchmarking.md#resuming-algorithm-comparisons) for interruptions and locks. `continuous submit` records each remote measurement's outcome in `outcomes.json`, exits nonzero if any active configuration failed; regression checks are evaluated by report publication.
+A successful `status` exit means the read succeeded, not that every workflow passed. An experiment's command exit describes execution, not proof of a speedup. Algorithm comparisons retain exact executable pairs and recorded settings before measuring; `compare resume DIR` accepts no selection or sampling overrides. See [recovery](benchmarking.md#resuming-algorithm-comparisons) for interruptions and locks. `continuous submit` records each configuration’s upload outcome in `outcomes.json`, attempts both even after a failure, and exits nonzero if either failed. It only reads validated JSON; paired regression checks are evaluated separately by report publication.
 
 ## Reproduce continuous work locally
 
-The local commands use the same implementation as CI, not a second script translating workflow steps. Static artifacts require Linux x86-64 with glibc, Cargo and GNU `ldd`. Scheduling requires Linux, `taskset` and two CPUs for serial-only artifacts or four CPUs when parallel IDs are listed. Four-thread cases run exclusively after serial workers exit; the supervisor records allowed masks and visible topology. Native checks additionally require the [native comparison toolchain](benchmarking.md#native-prerequisites). None of these operations needs Python.
+The hosted jobs call the maintained revision comparison command, with the complete continuous plan and one partition of timed IDs. Linux and `taskset` with four available CPUs are required for the four-thread plan. Serial cases and parallel cases never overlap on a runner. Both revisions use the same current harness, lockfile and toolchain with the SIMD backend; historical libraries enable their opt-in feature explicitly. No Cloud history is needed.
 
 ```sh
-# Build the shared backend in one isolated directory, removed afterward.
-pnpm -s tools continuous build --out bench/results/artifacts
+# New output directories; baseline can be any compatible local commit.
+pnpm tools compare commit main --plan continuous --shard 1/2 \
+  --out bench/results/paired-portable-simd-1
 
-# Use the executable's embedded continuous plan for full coverage.
-pnpm -s tools continuous run bench/results/artifacts/portable-simd/bench
-
-# Reproduce scheduling on one saved or preset selection during development.
-pnpm -s tools continuous run bench/results/artifacts/portable-simd/bench --plan local
+# Regenerate one completed shard without building or measuring.
+pnpm tools report bench/results/paired-portable-simd-1
 ```
 
-A plan override is saved as `plan.json`; captured Criterion output is retained as `criterion.txt`. It deliberately changes coverage and is not equivalent to the full cloud suite. Omit `--plan` to reproduce the embedded selection. All output directories must be new. Temporary snapshots and build products live under `~/code/tessera-bench/` or `TESSERA_BENCH_WORK` and are cleaned after success or a handled failure; outputs and logs remain.
+Each shard keeps adjacent A/B sample pairs and the full catalogued sampling budget for its selected cases, without outer repetition. Omit `--shard` to run all cases on one host. `--shard INDEX/COUNT` partitions a resolved listing deterministically; it does not shorten samples. Results record the full inventory and selected subset. Directories must be new; temporary snapshots and default builds are cleaned, retained results and adjacent logs remain. Set `TESSERA_BENCH_TARGET_DIR` to a caller-owned Cargo cache to retain builds across runs; do not share it across trust boundaries. CI caches this exact target directory by configuration and sets the CLI alignment defaults before building.
 
-Remote submission is explicit. Install the Bencher CLI used by CI, prepare an immutable image containing the SIMD executable and the [trusted worker image layout](../../bench/continuous/Dockerfile), and provide `BENCHER_API_KEY` through the environment:
+Upload is explicit and never executes code. Install the pinned Bencher CLI, download all four `paired-*` artifacts into separate directories under `ARTIFACTS`, and provide `BENCHER_API_KEY` through the environment:
 
 ```sh
-pnpm -s tools continuous submit \
-  --project PROJECT --hash COMMIT \
-  --image REGISTRY/PROJECT@sha256:DIGEST --out bench/results/remote
-
-# PRs compare with main or the parent PR's exact baseline.
-pnpm -s tools continuous submit \
-  --project PROJECT --hash COMMIT --pr 123 \
-  --start-point main --base-hash BASE_COMMIT \
-  --image REGISTRY/PROJECT@sha256:DIGEST --out bench/results/remote-pr
+# Run from a trusted checkout; this builds/lists, without timing any cases.
+pnpm tools continuous inventory --out bench/results/trusted-inventory
+pnpm tools continuous submit --project PROJECT \
+  --hash COMMIT --base-hash BASE_COMMIT --pr 123 \
+  --inventory bench/results/trusted-inventory/cases.json \
+  --artifacts ARTIFACTS --out bench/results/submission
 ```
 
-The command owns thresholds, Testbed identities, timeouts and per-build outcomes. Image publication, credentials, permissions and queue ordering remain with the operator or CI. The remote image runs only Node.js and the benchmark executables; it receives no API credentials.
+Omit `--pr` for main. The command validates the complete continuous plan, exact trusted inventory, disjoint shard coverage, exact revision pair, common source/build settings and positive complete sample pairs before uploading each configuration. Local dirty-tree or custom-plan results are reportable locally, not accepted as continuous publication evidence. New relative Testbeds and the `paired-time-ratio` Measure keep old latency history untouched. Cloud receives paired median ratios and their median intervals, not raw samples. Performance checks are published first and do not depend on archival success; upload failures remain explicit in the workflow. Baseline changes split PR history; main points are individual parent-to-commit effects, not a cumulative trend. Artifact source metadata is self-reported by the unprivileged measurement job: validation catches inconsistent or incomplete evidence but cannot prove that malicious PR-authored code measured honestly. The publisher never evaluates artifact scripts or configuration as code.
 
 ## CI boundary
 
 | Workflow | Shared operation | Workflow-only responsibilities |
 |---|---|---|
-| Build benchmarks | `continuous build` | Checkout attribution, artifact upload, permissions |
+| Measure benchmarks | `continuous matrix`, `compare commit --plan continuous --shard` | Checkout attribution, matrix runners, artifact upload, read-only permissions |
 | Native comparison | `check --native` | Install system tools, provision a runner |
-| Track benchmarks | `continuous submit`, trusted report modules | Resolve the triggering event, publish the image, hold the queue slot, publish checks |
+| Track benchmarks | `continuous inventory`, `continuous submit`, trusted report modules | Independently resolve the triggering event, download JSON, hold credentials, serialize image writes and publish checks |
 | Change routing | `ci changes` | Supply the event's base/head and collect Actions outputs |
 | PR title and DCO | `ci title`, `ci dco` | Supply the title and trusted checkout; fetch fork objects without running them |
 | Release | `release verify` | Registry authentication and actual publication |

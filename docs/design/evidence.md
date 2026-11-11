@@ -36,6 +36,10 @@ The engine is a Stable Rust port of the research prototype in `sort-research-rs`
   - A sixteen-lane prefix sum lost to eight lanes (cross-lane swizzle).
   - Stable three-way compress scatter of 64K `u32` took 460 µs against 147 µs for scalar cursor writes, and AVX-512CD conflict detection would double the 32 KiB cursor table.
 
+## Shared ordered finishing controls
+
+The R3 `finish_ordered` refactor keeps the flat-sample route and adds no scan, allocation or cached classification. Its short-input linked screens did not establish stable latency controls: at 48 records, `row_u64/equal` had baseline/current ratios 0.797 / 0.823 against A/A 0.764–1.236, `row_u64/sorted` 0.898 / 0.814 against 0.770–1.230, `row_u64/random` 1.043 / 0.927 against 0.996–1.004, and `u64/equal` 0.961 / 0.966 against 0.968–1.032. Increasing the sample duration did not stabilize the controls: row equal A/A widened to 0.659–1.341, reverse to 0.871–1.129 with current-copy median 1.164, and sorted baseline ratios were 0.950 / 0.978 against 0.975–1.025. Fixed-work row counts matched; `u64` added 0.30–0.56% instructions. These controls remain unresolved and do not establish source causality. Current-head hosted feedback and accepted effects belong in [PR #107](https://github.com/Yikai-Liao/tessera-sort/pull/107).
+
 ## Landed with open losses
 
 These changes are in the engine; each measured loss below stays open and no distribution or size exception compensates for it.

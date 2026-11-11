@@ -56,7 +56,7 @@ The [explanation pages](../explain/index.md) own the routing rules, thresholds a
 | Tile leaves, digit planning, cached bucket IDs | [Finishing tiles](../explain/tiles.md) | `engine/tile.rs`, `engine/plan.rs` |
 | Key encoding and varying bits | [Keys as unsigned integers](../explain/keys.md) | `key.rs` |
 
-Structural facts that cut across those pages: root and child variation share one candidate-masked scan; serial and parallel execution consume one `NodePlan` decision, once (parallel roots shard equality and digit partitions; existing-run splits execute serially without resampling); a `Direct` extractor may finish a covering digit by counting because every sealed encoding is a bijection on bit patterns, while `ByKey` declines because a user key does not identify the payload; and scratch is created only after the root fast paths, so confirmed ordered and constant inputs never allocate.
+Structural facts that cut across those pages: `finish_ordered` owns ascending completion and strict or stable descending reversal for the initial probe, deferred flat confirmation and recursive children; root and child variation share one candidate-masked scan; serial and parallel execution consume one `NodePlan` decision, once (parallel roots shard equality and digit partitions; existing-run splits execute serially without resampling); a `Direct` extractor may finish a covering digit by counting because every sealed encoding is a bijection on bit patterns, while `ByKey` declines because a user key does not identify the payload; and scratch is created only after the root fast paths, so confirmed ordered and constant inputs never allocate.
 
 ## Parallel root completion
 

@@ -190,29 +190,20 @@ fn prepare<T, E: Extract<T>>(
     tile_len: usize,
 ) -> Option<u128> {
     let sampled = probe_order(records, extractor);
-    match sampled {
-        Order::Ascending => return None,
-        Order::Descending { strict } => {
-            if strict {
-                reverse_strictly(records);
-            } else {
-                reverse_stably(records, extractor);
-            }
+    if finish_ordered(records, sampled, extractor) {
+        return None;
+    }
+    if sampled == Order::Unsorted {
+        // This input already fits the insertion leaf; a budget and varying-bit
+        // scan cannot select a different finishing algorithm.
+        if records.len() <= INSERTION_MAX && records.len() <= tile_len {
+            extractor.finish_insertion(records);
             return None;
         }
-        Order::Unsorted => {
-            // This input already fits the insertion leaf; a budget and varying-bit
-            // scan cannot select a different finishing algorithm.
-            if records.len() <= INSERTION_MAX && records.len() <= tile_len {
-                extractor.finish_insertion(records);
-                return None;
-            }
-            let probe_len = tile_len.max(2).min(records.len());
-            if insertion_probe(records, extractor, probe_len) {
-                return None;
-            }
+        let probe_len = tile_len.max(2).min(records.len());
+        if insertion_probe(records, extractor, probe_len) {
+            return None;
         }
-        Order::Flat => {}
     }
     let candidate = u128::MAX >> (128 - E::Value::BITS);
     let varying = scan_varying_bits(records, candidate, extractor);
@@ -220,15 +211,9 @@ fn prepare<T, E: Extract<T>>(
         return None;
     }
     if sampled == Order::Flat {
-        // A flat sample contains an equal adjacent pair, so confirmed descending
-        // keys here are not strict and must keep the stable reversal.
-        match confirm_order(records, extractor) {
-            Order::Ascending => return None,
-            Order::Descending { .. } => {
-                reverse_stably(records, extractor);
-                return None;
-            }
-            _ => {}
+        let order = confirm_order(records, extractor);
+        if finish_ordered(records, order, extractor) {
+            return None;
         }
     }
     Some(varying)
@@ -277,6 +262,24 @@ enum Order {
     /// Every sampled pair had equal keys; gaps may still contain differing keys.
     Flat,
     Unsorted,
+}
+
+/// Finishes a confirmed order without changing the order of equal-key records.
+/// Sampled flat and unordered inputs still need preparation or partitioning.
+#[inline]
+fn finish_ordered<T, E: Extract<T>>(records: &mut [T], order: Order, extractor: &mut E) -> bool {
+    match order {
+        Order::Ascending => true,
+        Order::Descending { strict } => {
+            if strict {
+                reverse_strictly(records);
+            } else {
+                reverse_stably(records, extractor);
+            }
+            true
+        }
+        Order::Flat | Order::Unsorted => false,
+    }
 }
 
 /// Target pair count used to choose the order gate's stride.
@@ -423,17 +426,9 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         if varying == 0 {
             return;
         }
-        match confirm_order(records, self.extractor) {
-            Order::Ascending => return,
-            Order::Descending { strict: true } => {
-                reverse_strictly(records);
-                return;
-            }
-            Order::Descending { strict: false } => {
-                reverse_stably(records, self.extractor);
-                return;
-            }
-            Order::Flat | Order::Unsorted => {}
+        let order = confirm_order(records, self.extractor);
+        if finish_ordered(records, order, self.extractor) {
+            return;
         }
         self.sort_node(records, varying);
     }

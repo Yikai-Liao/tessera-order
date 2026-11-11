@@ -59,7 +59,7 @@ Local cleanups that replace a specialized mechanism with a more general one, ord
 
 | ID | Retire | Replace with | Risk |
 |---|---|---|---|
-| R3 | Three copies of "ascending returns, descending reverses" | One `finish_ordered` that keeps the flat route ([R2 rejected](docs/design/evidence.md#rejected-or-on-hold)) | Inlining of the root path; in review as PR #107 |
+| R3 | Three copies of "ascending returns, descending reverses" | One `finish_ordered` that keeps the flat route ([R2 rejected](docs/design/evidence.md#rejected-or-on-hold)) | Implemented in PR #107; [short-input controls](docs/design/evidence.md#shared-ordered-finishing-controls) remain unresolved |
 | R4 | The `INSERTION_MAX` root shortcut beside the budgeted probe | One insertion attempt owning its budget | Known short `random/1000` losses; measure first |
 | R5 | `Descending { strict }` | Always reverse stably | One extra scan on `reverse`; likely rejected, listed to measure once |
 | N1 | `plan_progress` and the equality fallback in the executor | A plan that carries its progress guarantee | Keep the inconsistent-key termination test |

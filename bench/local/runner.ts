@@ -252,7 +252,6 @@ export async function selectedCases(
         env: {
           TESSERA_BENCH_LIST: "1",
           TESSERA_BENCH_PLAN: planPath,
-          TESSERA_BENCH_PARALLEL: parallel ? "4" : undefined,
         },
       })
     )

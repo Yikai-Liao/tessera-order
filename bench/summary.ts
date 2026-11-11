@@ -14,12 +14,12 @@ export interface ResultRow {
 }
 
 /** Return bounded, actionable evidence without loading a full report into model context. */
-export function resultSummary(rows: ResultRow[]) {
+export function resultSummary(rows: ResultRow[], priority: "slower" | "faster" = "slower") {
   const changes = rows
     .filter((row) => row.verdict !== "within noise")
     .toSorted(
       (a, b) =>
-        Number(b.verdict === "slower") - Number(a.verdict === "slower") ||
+        Number(b.verdict === priority) - Number(a.verdict === priority) ||
         Math.abs(Math.log(b.ratio)) - Math.abs(Math.log(a.ratio)) ||
         a.id.localeCompare(b.id),
     );

@@ -118,7 +118,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm tools --verbose check --native --out bench/results/ci
+      - run: pnpm tools --verbose ci check --native --out bench/results/ci
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
@@ -163,7 +163,7 @@ jobs:
         run: |
           baseline=$(git merge-base "$PR_BASE" HEAD)
           echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
-          pnpm tools compare commit "$baseline" --plan continuous --prepare-only \
+          pnpm tools continuous prepare "$baseline" \
             --out bench/results/prepared
       - uses: actions/upload-artifact@v7
         with:
@@ -198,7 +198,7 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          pnpm tools compare prepared bench/results/prepared --shard "$SHARD" \
+          pnpm tools continuous measure bench/results/prepared --shard "$SHARD" \
             --out bench/results/continuous
       - name: Retain measurement log
         if: always()

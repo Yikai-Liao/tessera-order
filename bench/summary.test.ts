@@ -23,6 +23,12 @@ test("compact results retain counts, denominator-independent evidence and trunca
     [result.measured, result.slower, result.faster, result.withinNoise],
     [10, 8, 1, 1],
   );
+  const algorithmResult = resultSummary(
+    [...rows, { id: "loss", ratio: 0.9, low: 0.8, high: 0.94, verdict: "faster" }],
+    "faster",
+  );
+  assert.equal(algorithmResult.focus[0].id, "loss");
+  assert.equal(algorithmResult.slower, rows.length);
   assert.equal(result.focus[0].id, "7");
   assert.deepEqual(result.focus[0].aaRange, [0.98, 1.02]);
   assert.equal(result.omittedChanges, 4);

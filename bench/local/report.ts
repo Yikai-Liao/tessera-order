@@ -181,6 +181,7 @@ ${JSON.stringify(result.schema === 2 ? { ...result, layouts: result.layouts.map(
     baseline: run.baseline,
     head: run.head,
     dirty: run.dirty,
+    affinity: run.host.affinity,
     ...(result.schema === 2
       ? { layouts: groups.map(({ title, summaries }) => ({ title, ...resultSummary(summaries) })) }
       : resultSummary(summaries)),

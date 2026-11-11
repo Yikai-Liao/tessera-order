@@ -4,29 +4,23 @@ import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { type Command, InvalidArgumentError, Option } from "commander";
 import { stringify as stringifyToml } from "smol-toml";
-import { cpuListSchema } from "../bench/affinity.ts";
 import { catalog } from "../bench/catalog.ts";
-import { compareCounters, reportCounters } from "../bench/local/counters.ts";
+import { compareCounters, probeCounters, reportCounters } from "../bench/local/counters.ts";
 import { LAYOUT_CONTROLS, type LayoutControl, parseLayoutSeeds } from "../bench/local/layout.ts";
 import { renderLocalReport } from "../bench/local/report.ts";
-import { compareLocal, comparePrepared } from "../bench/local/runner.ts";
+import { compareLocal } from "../bench/local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
-import { checkAlgorithms, compareAlgorithms, resumeComparison } from "../bench/release.ts";
+import { compareAlgorithms, resumeComparison } from "../bench/release.ts";
 import { writeReport } from "../bench/report/index.ts";
 import { pairedBudget } from "../bench/statistics.ts";
 import { workingTreeDirty } from "../bench/workspace.ts";
+import { parseLogicalCpu } from "./options.ts";
 import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
 
 interface MeasurementOptions extends SelectionOptions {
   plan?: string;
   out?: string;
   cpu?: string;
-}
-
-function parseLogicalCpu(value: string) {
-  if (!cpuListSchema.safeParse(value).success || process.platform !== "linux")
-    throw new InvalidArgumentError("expected a Linux CPU list, such as 2 or 0,2,4,6");
-  return value;
 }
 
 function parsePositiveInteger(value: string) {
@@ -46,13 +40,6 @@ function blockOption() {
       }
     })
     .default(catalog.pairedBlocks.short.count);
-}
-
-function parseShard(value: string) {
-  const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(value);
-  if (!match || Number(match[1]) > Number(match[2]) || Number(match[2]) > 64)
-    throw new InvalidArgumentError("expected index/count with 1 <= index <= count <= 64");
-  return { index: Number(match[1]), count: Number(match[2]) };
 }
 
 function parseCasePattern(value: string) {
@@ -78,17 +65,9 @@ function parseLengths(value: string) {
   return values;
 }
 
-function addSelectionOptions(command: Command) {
+function addSelectionOptions(command: Command, presets: string) {
   return command
-    .option(
-      "--plan <name-or-file>",
-      "JSON/TOML plan or local/continuous/smoke/release/parallel preset",
-    )
-    .option(
-      "--algorithms <ids>",
-      "comma-separated algorithms (required controls are retained)",
-      parseList,
-    )
+    .option("--plan <name-or-file>", `JSON/TOML plan or ${presets} preset`)
     .option("--types <ids>", "comma-separated record types", parseList)
     .option("--distributions <ids>", "comma-separated input distributions", parseList)
     .option("--lengths <numbers>", "comma-separated positive record counts", parseLengths);
@@ -129,13 +108,17 @@ async function report(directories: string[], partial = false) {
 /** Register experiment selection, comparison, verification and regeneration tasks. */
 export function experimentCommands(program: Command) {
   const compare = program.command("compare").description("Compare source revisions or algorithms");
-  const measurement = (name: string, description: string) =>
-    addSelectionOptions(compare.command(name))
+  const measurement = (name: string, description: string, presets: string) =>
+    addSelectionOptions(compare.command(name), presets)
       .description(description)
       .option("--out <directory>", "new result directory (default: bench/results/<timestamp>)")
       .option("--cpu <list>", "pin measurement to a CPU list or range (Linux)", parseLogicalCpu);
 
-  measurement("commit [revision]", "Compare the working tree with a commit (default: HEAD)")
+  measurement(
+    "commit [revision]",
+    "Compare the working tree with a commit (default: HEAD)",
+    "local/continuous",
+  )
     .option("--filter <regex>", "additional case ID pattern", parseCasePattern)
     .addOption(
       new Option(
@@ -154,18 +137,10 @@ export function experimentCommands(program: Command) {
         }
       },
     )
-    .option("--prepare-only", "retain a complete revision pair without timing")
-    .option(
-      "--shard <index/count>",
-      "measure one balanced partition of the resolved cases",
-      parseShard,
-    )
     .action(
       async (
         baseline: string | undefined,
         options: MeasurementOptions & {
-          shard?: { index: number; count: number };
-          prepareOnly?: boolean;
           filter?: string;
           layoutSeeds?: number[];
           layoutControl?: LayoutControl;
@@ -188,41 +163,24 @@ export function experimentCommands(program: Command) {
             filter: options.filter,
             layoutSeeds: options.layoutSeeds,
             layoutControl: options.layoutControl,
-            shard: options.shard,
-            prepareOnly: options.prepareOnly,
           }),
         );
       },
     );
 
   compare
-    .command("prepared <directory>")
-    .description("Measure and report a frozen revision pair without compiling")
-    .option("--out <directory>", "new result directory")
-    .option("--cpu <list>", "pin measurement to a CPU list", parseLogicalCpu)
-    .option("--shard <index/count>", "measure one complete-case partition", parseShard)
-    .action(
-      async (
-        directory: string,
-        options: { out?: string; cpu?: string; shard?: { index: number; count: number } },
-      ) => {
-        const root = await repositoryRoot();
-        const out = resultDirectory(root, options.out);
-        await runTask(out, Boolean(program.opts().verbose), () =>
-          comparePrepared({
-            root,
-            prepared: resolve(directory),
-            out,
-            cpu: options.cpu,
-            shard: options.shard,
-          }),
-        );
-      },
-    );
+    .command("probe-counters")
+    .description("Probe Linux PMU events; never changes permissions")
+    .requiredOption("--out <directory>", "new probe directory")
+    .action(async (options: { out: string }) => {
+      const out = resolve(options.out);
+      await runTask(out, Boolean(program.opts().verbose), () => probeCounters(out));
+    });
 
   measurement(
     "counters [revision]",
     "Compare fixed-work serial instruction and simulated event counts",
+    "local/continuous",
   )
     .option(
       "--valgrind-image <image>",
@@ -259,7 +217,16 @@ export function experimentCommands(program: Command) {
       },
     );
 
-  measurement("algorithms", "Prepare, validate, measure and report a resumable comparison")
+  measurement(
+    "algorithms",
+    "Build, measure and report a resumable comparison",
+    "smoke/release/parallel",
+  )
+    .option(
+      "--algorithms <ids>",
+      "comma-separated algorithms (required controls are retained)",
+      parseList,
+    )
     .addOption(blockOption())
     .option(
       "--sample-ms <number>",
@@ -306,6 +273,7 @@ export function experimentCommands(program: Command) {
   measurement(
     "revisions [baseline]",
     "Compare revisions and independent linked copies in one process",
+    "smoke/release/parallel",
   )
     .addOption(blockOption())
     .option("--current <revision>", "current library commit (default: working snapshot)")
@@ -326,8 +294,6 @@ export function experimentCommands(program: Command) {
           blocks: number;
         },
       ) => {
-        if (options.algorithms)
-          throw new Error("Revision comparisons select their own linked controls");
         const plan = await loadPlan(options.plan ?? "smoke", {
           ...selectAxes(options),
           algorithms: [
@@ -364,7 +330,15 @@ export function experimentCommands(program: Command) {
       await runTask(out, Boolean(program.opts().verbose), () => resumeComparison(out), log);
     });
 
-  addSelectionOptions(program.command("plan [name-or-file]"))
+  addSelectionOptions(
+    program.command("plan [name-or-file]"),
+    "local/continuous/smoke/release/parallel",
+  )
+    .option(
+      "--algorithms <ids>",
+      "comma-separated algorithms (required controls are retained)",
+      parseList,
+    )
     .description("Print a resolved plan without compiling or measuring")
     .addOption(
       new Option("--format <format>", "output encoding").choices(["json", "toml"]).default("json"),
@@ -393,18 +367,5 @@ export function experimentCommands(program: Command) {
     .action(async (directories: string[], options: { partial?: boolean }) => {
       const result = await report(directories, options.partial);
       console.log(JSON.stringify({ out: resolve(directories[0]), result: result ?? "reported" }));
-    });
-
-  program
-    .command("check")
-    .description("Reproduce CI's comparison harness checks, not a performance experiment")
-    .option("--native", "include native adapters and verify sequential linkage (Linux)")
-    .option("--out <directory>", "new result directory (default: bench/results/<timestamp>)")
-    .action(async (options: { native?: boolean; out?: string }) => {
-      const root = await repositoryRoot();
-      const out = resultDirectory(root, options.out);
-      await runTask(out, Boolean(program.opts().verbose), () =>
-        checkAlgorithms(root, out, Boolean(options.native)),
-      );
     });
 }

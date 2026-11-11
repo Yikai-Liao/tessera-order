@@ -196,10 +196,13 @@ export async function writeReport(directories: string[], partial = false) {
     blocks: count,
     ratio: "algorithm / paired Tessera mean",
     range: "observed block range",
+    affinity: dataset.host.affinity ?? "unknown",
+    // Ratios name the opponent: an opponent faster than Tessera is the actionable loss.
     ...resultSummary(
       [...summaries.values()]
         .filter((row) => row.variant !== "tessera" && row.variant !== "tessera-aa")
         .map((row) => ({ ...row, id: `${row.caseId}/${row.variant}` })),
+      "faster",
     ),
   };
 }

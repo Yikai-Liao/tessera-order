@@ -19,7 +19,7 @@ fn suite(c: &mut Criterion) {
     for case in plan().inputs().expect("nonempty benchmark plan") {
         measure_case(c, &case, "api");
     }
-    if parallel_enabled() {
+    if cfg!(feature = "rayon") {
         for case in plan().parallel_inputs().expect("valid parallel selection") {
             measure_case(c, &case, "par-4");
         }
@@ -39,15 +39,6 @@ fn measure_case(c: &mut Criterion, case: &InputCase, mode: &str) {
         "row_u64" => rows::<u64>(c, distribution, len, mode),
         "rec128_u64" => records(c, distribution, len, mode),
         _ => unreachable!("validated record type"),
-    }
-}
-
-/// Old trusted supervisors retain serial-only coverage until explicitly upgraded.
-fn parallel_enabled() -> bool {
-    match std::env::var("TESSERA_BENCH_PARALLEL").as_deref() {
-        Ok("4") => cfg!(feature = "rayon"),
-        Err(std::env::VarError::NotPresent) => false,
-        _ => panic!("TESSERA_BENCH_PARALLEL must be 4"),
     }
 }
 
@@ -269,7 +260,7 @@ fn plan() -> &'static Plan {
     })
 }
 
-/// Selects exact timed IDs; legacy group selection supports the pre-upgrade tracker.
+/// Lists the plan inventory or selects exact timed IDs before generating inputs.
 fn selected(id: &str, mode: &str) -> bool {
     let full = criterion_id!(id, mode);
     if std::env::var_os("TESSERA_BENCH_LIST").is_some() {
@@ -279,8 +270,7 @@ fn selected(id: &str, mode: &str) -> bool {
     if let Ok(ids) = std::env::var("TESSERA_BENCH_IDS") {
         return ids.lines().any(|selected| selected == full);
     }
-    std::env::var("TESSERA_BENCH_GROUPS")
-        .map_or(true, |groups| groups.lines().any(|group| group == id))
+    true
 }
 
 /// Runs Criterion with its standard command-line controls.

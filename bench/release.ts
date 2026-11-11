@@ -11,9 +11,7 @@ import { fetchNative } from "./rust/native/fetch.ts";
 import {
   executables,
   fileHash,
-  isValidated,
   loadSession,
-  recordValidation,
   retainBuild,
   type Session,
   withSessionLock,
@@ -111,7 +109,7 @@ export interface ReleaseOptions {
   revisions?: Revisions;
 }
 
-/** Retain the executable pair, then validate, measure and report one experiment. */
+/** Retain the executable pair, then measure verified batches and report one experiment. */
 export async function compareAlgorithms(options: ReleaseOptions) {
   pairedBudget(options.blocks);
   await mkdir(options.out, { recursive: false });
@@ -165,7 +163,7 @@ export async function resumeComparison(out: string) {
   return withSessionLock(out, () => measureComparison(out));
 }
 
-/** Validate immutable inputs, then let the native journal resume complete groups. */
+/** Check immutable inputs, then let the native journal resume verified groups. */
 async function measureComparison(out: string) {
   const session = await loadSession(out);
   const { cpu, group, sampleMs, memoryMib } = session;
@@ -177,15 +175,9 @@ async function measureComparison(out: string) {
     ...(group ? ["--group", group] : []),
     ...(session.blocks === undefined ? [] : ["--blocks", String(session.blocks)]),
   ];
-  const build = session.build;
   const binary = executables(out).compare;
   const execute = (args: string[]) =>
     command(cpu ? "taskset" : binary, cpu ? ["-c", cpu, binary, ...args] : args, { cwd: out });
-  if (!(await isValidated(out, build, session))) {
-    diagnostic("Validating algorithms");
-    await execute(["validate", ...selection]);
-    await recordValidation(out, build, session);
-  }
   diagnostic("Measuring; completed groups are retained");
   await execute([
     "run",

@@ -42,7 +42,6 @@ export async function measureSamples(
           TESSERA_BENCH_PAIRED: "1",
           TESSERA_BENCH_IDS: id,
           TESSERA_BENCH_PLAN: planPath,
-          TESSERA_BENCH_PARALLEL: parallel ? "4" : undefined,
         },
       });
     };

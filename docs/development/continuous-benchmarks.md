@@ -22,13 +22,13 @@ A read-only feedback request does not authorize new measurements.
 
 The [dashboard](https://bencher.dev/perf/yikai-liao-s-project) stores current/baseline ratios, not absolute nanoseconds: 1.10 means 10% more time than that run's exact baseline. A PR's points form one trend even when merging main or a retarget changes the baseline, so a step can come from the baseline moving. Do not compare ratios across PRs.
 
-Measurement and Cloud archival run on PRs only; main runs correctness and site checks selected by its diff. Retained older main ratios describe parent-to-commit effects, not cumulative latency, and no historical threshold decides the performance check.
+Measurement and Cloud archival run on PRs only; main runs correctness and site checks selected by its diff. With no attached benchmark check, `status main` returns `benchmark.state: "not_applicable"`; an unmeasured PR or another ref still returns `"missing"`. Retained older main ratios describe parent-to-commit effects, not cumulative latency, and no historical threshold decides the performance check.
 
 ## Pipeline
 
 - The [CI workflow](../../.github/workflows/ci.yml) runs `prepare → measure → report` with the PR branch's code; the [diff router](ci.md) selects measurement for engine, harness, plan and execution-tooling changes. There is no second publisher or plan authority on main.
-- **Prepare** calls `compare commit --plan continuous --prepare-only` once. Both revisions use the PR's harness, lockfile and toolchain; the baseline library comes from the merge base with the target SHA from the triggering event. It retains the plan, resolved inventory, provenance, hashes and executables as `prepared-revisions`.
-- **Measure**: four complete-case shards call `compare prepared --shard INDEX/COUNT` without Rust or compiling, checking hashes, harness/catalog compatibility and both inventories first. Fourteen-day `paired-*` artifacts keep JSON, reports and logs; combine a shard's `local.json` binary paths with `prepared-revisions` to inspect binaries.
+- **Prepare** calls `continuous prepare` once. Both revisions use the PR's harness, lockfile and toolchain; the baseline library comes from the merge base with the target SHA from the triggering event. It retains the plan, resolved inventory, provenance, hashes and executables as `prepared-revisions`.
+- **Measure**: four complete-case shards call `continuous measure --shard INDEX/COUNT` without Rust or compiling, checking hashes, harness/catalog compatibility and both inventories first. Fourteen-day `paired-*` artifacts keep JSON, reports and logs; combine a shard's `local.json` binary paths with `prepared-revisions` to inspect binaries.
 - **Report** reads this run's prepared plan and inventory, verifies complete disjoint shards and matching identity, and recomputes verdicts from raw samples without running artifact binaries. Cloud submission is attempted first so reports carry links; failure leaves the verdict, figures and summary intact.
 - Same-repository PR report jobs use the `benchmark` environment and publish checks and Cloud ratios. Forks and Dependabot get artifacts and summaries without Cloud publication; a regression still fails their report job.
 
@@ -83,16 +83,16 @@ Keep `BENCHER_PROJECT`, `BENCHER_API_KEY` and the `benchmark` environment, whose
 
 ## Local use
 
-`pnpm tools compare commit BASE --plan continuous` runs the same protocol (optionally one shard or a smaller plan); there is no default nine-round local run. To reuse builds:
+`pnpm tools compare commit BASE --plan continuous` runs the same protocol (optionally a smaller selection); there is no default nine-round local run. To reuse builds, separate preparation and sharding under `continuous`:
 
 ```sh
-# Build once; every result directory must be new.
-pnpm tools compare commit main --plan continuous --prepare-only --out bench/results/prepared
-pnpm tools compare prepared bench/results/prepared --shard 1/4 --out bench/results/paired-1
+# Build once; every result directory must be new. Use --plan local for a tiny selection.
+pnpm tools continuous prepare main --out bench/results/prepared
+pnpm tools continuous measure bench/results/prepared --shard 1/4 --out bench/results/paired-1
 pnpm tools report bench/results/paired-1    # regenerate offline
 ```
 
-A prepared pair holds the plan, provenance and executable hashes but no samples, so it is not evidence. `compare prepared` requires the original harness and catalog, rejects modified or escaping executable paths, verifies both listings and retains the executed copies. `--shard INDEX/COUNT` partitions the resolved listing deterministically, keeping each case's full sampling budget; omit it to run everything on one host. The four-thread plan needs Linux and `taskset` with four allowed CPUs, and serial and parallel cases never overlap. Interrupted measurement is not resumable. Builds reuse the checkout-local cache by default; `TESSERA_BENCH_TARGET_DIR` selects another caller-owned Cargo cache. Never share it across trust boundaries. Older protocols and absolute-time histories use their original tooling revision.
+A prepared pair holds the plan, provenance and executable hashes but no samples, so it is not evidence. `continuous measure` requires the original harness and catalog, rejects modified or escaping executable paths, verifies both listings and retains the executed copies. `--shard INDEX/COUNT` partitions the resolved listing deterministically, keeping each case's full sampling budget; omit it to run everything on one host. The four-thread plan needs Linux and `taskset` with four allowed CPUs, and serial and parallel cases never overlap. Interrupted measurement is not resumable. Builds reuse the checkout-local cache by default; `TESSERA_BENCH_TARGET_DIR` selects another caller-owned Cargo cache. Never share it across trust boundaries. Older protocols and absolute-time histories use their original tooling revision.
 
 Upload is explicit and never executes artifact code. With the pinned Bencher CLI, the `prepared-revisions` artifact in `PREPARED`, every `paired-*` artifact in separate directories under `ARTIFACTS` and `BENCHER_API_KEY` in the environment:
 

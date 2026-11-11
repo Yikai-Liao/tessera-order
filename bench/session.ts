@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { z } from "zod";
@@ -94,25 +94,4 @@ export async function loadSession(out: string): Promise<Session> {
   )
     throw new Error("Session executables changed; start a new experiment instead");
   return session;
-}
-
-/** Skip validation only when its receipt matches this immutable build and selection. */
-export async function isValidated(out: string, build: Build, session: Session) {
-  const path = join(out, "bin", "validated.json");
-  try {
-    return (await readFile(path, "utf8")) === validationReceipt(build, session);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
-
-/** Bind a completed validation to the binary, plan and optional group restriction. */
-function validationReceipt(build: Build, session: Session) {
-  return `${JSON.stringify({ build, planSha256: session.planSha256, group: session.group, blocks: session.blocks })}\n`;
-}
-
-/** Persist a receipt only after every selected input has passed validation. */
-export async function recordValidation(out: string, build: Build, session: Session) {
-  await writeFile(join(out, "bin", "validated.json"), validationReceipt(build, session));
 }

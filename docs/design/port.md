@@ -25,6 +25,25 @@ The hot50 and runs medians were within 0.5% of one for both types. The two-value
 
 Serial and Rayon library tests, all-feature workspace Clippy with `TESSERA_BENCH_CHECK_ONLY=1`, and the order-confirmation fixture under Miri passed for the rejected checkpoint. The native-enabled Clippy attempt without check-only mode stopped at missing fetched native sources, before completing; it is not a passing check. No R2 engine change is included in this documentation PR; its implementation is isolated in PR #105. R3 can still unify ordered finishing without changing the flat-sample route.
 
+### R3: shared ordered finishing
+
+One `finish_ordered` operation now owns confirmed ascending completion and strict or stable descending reversal at the initial root probe, deferred flat-sample confirmation and recursive children. Changing reversal policy touches one dispatch instead of three. R2 is not included: flat samples still skip insertion and constant roots still finish in the variation scan. No new scan, allocation or classification cache is added.
+
+The first maintained linked screen compared with `ef6c174`: `--types u64,row_u64 --distributions sorted,reverse,equal,random --lengths 48,65536 --blocks 3 --cpu 2`, retained at `/home/lyk/code/tessera-research/engine-simplification/r3-screen`. Host/compiler/alignment match the R2 screen above. All 16 inputs were verified. At 65,536 records, baseline-placement medians spanned 0.994–1.029; the largest current-copy median was 1.013. Short-input results were less stable and are not silently accepted:
+
+| Case | Baseline copies / current mean | Current copy | A/A range |
+|---|---:|---:|---:|
+| `row_u64/equal/48` | 0.797 / 0.823 | 0.790 | 0.764–1.236 |
+| `row_u64/sorted/48` | 0.898 / 0.814 | 0.802 | 0.770–1.230 |
+| `row_u64/random/48` | 1.043 / 0.927 | 1.045 | 0.996–1.004 |
+| `u64/equal/48` | 0.961 / 0.966 | 0.947 | 0.968–1.032 |
+
+A bounded four-input confirmation used only `row_u64`, the same four distributions, 48 records and three blocks, increasing `--sample-ms` from 5 to 25 (`r3-short` alongside the first screen). It did not stabilize the controls: equal A/A widened to 0.659–1.341, reverse to 0.871–1.129 with current-copy median 1.164, and sorted baseline medians were 0.950 / 0.978 with A/A 0.975–1.025. These disagreeing observations remain unresolved; no further timing rounds or nine-block matrix were added.
+
+A separate fixed-work comparison (`r3-counters`, `pnpm -s tools compare counters ef6c174 --types u64,row_u64 --distributions equal,sorted,reverse --lengths 48 --sorts 8 --cpu 2`) verified six prepared batches. Row instruction, data-read, data-write and conditional-branch counts matched exactly. The three `u64` batches each added 16 instructions and eight reads/writes across eight sorts: instruction increases of 0.30–0.56%, with zero instruction A/A change. This checks work volume, not latency or a layout-causal explanation; it does not erase timing uncertainty.
+
+Workspace tests/all targets and doctests, Rayon tests/doctests, check-only all-feature workspace Clippy, and all six engine fixtures under Miri passed. Existing public conformance, descending ties, no-allocation, owned-record, mutable-reference and recovery tests are retained. Independent source review found no correctness or coverage blockers. Final performance acceptance still needs current-head hosted feedback and inspection of its individual cases; these local screens do not establish it.
+
 ## Eight-core parallel completion
 
 These are local whole-call algorithm comparisons, not isolated source-change or placement-controlled claims. The portable bounded-finishing implementation and its fallback are described in the [engine reference](engine.md#parallel-root-completion).

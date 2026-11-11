@@ -37,7 +37,7 @@ Ordered by expected value for the risk. "Cases" names the continuous shapes most
 | ID | Retire | Replace with | Risk and cases |
 |---|---|---|---|
 | R2 | `Order::Flat` and the second confirmation after the variation scan | Confirm all sampled order candidates with the shared scan | [PR #105](https://github.com/Yikai-Liao/tessera-sort/pull/105) is open, not draft, and explicitly **do not merge**; constant-input losses exceed the ordinary limit, and a possible exception is not accepted |
-| R3 | Three copies of "ascending returns, descending reverses" (probe, flat, child) | One `finish_ordered` operation, retaining the flat-sample route while R2 is on hold | Structural; inlining of the root path |
+| R3 | Three copies of "ascending returns, descending reverses" (probe, flat, child) | Implemented by one `finish_ordered` operation, retaining the flat-sample route while R2 is on hold | [Targeted evidence](../design/port.md#r3-shared-ordered-finishing); final performance acceptance pending |
 | R4 | The `INSERTION_MAX` root shortcut beside the budgeted probe | One insertion attempt that owns its budget; a leaf-sized input is the unlimited-budget case | Short inputs carry the known `random/1000` losses; measure them first |
 | R5 | `Descending { strict }` | Always reverse stably | One extra key scan on `reverse`; likely a rejected candidate, listed so the cost is measured once |
 

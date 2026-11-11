@@ -30,7 +30,7 @@ The optional feature and bounded completion are implemented; current contracts b
 
 ### Measured engine refactors
 
-These are the engine items E1–E6 deferred from the completed tooling refactor, not permission to change hot paths without measurements. Preserve ownership and panic recovery; keep invariant tests for any copies retained for code placement.
+These are the engine items E1–E6 deferred from the completed tooling refactor, not permission to change hot paths without measurements. Unaccepted further candidates are in the [engine simplification proposal](docs/proposals/engine-simplification.md). Preserve ownership and panic recovery; keep invariant tests for any copies retained for code placement.
 
 | ID | Debt | Acceptance |
 |---|---|---|

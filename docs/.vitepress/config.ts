@@ -201,6 +201,10 @@ function developmentSidebar() {
       items: [
         { text: "Roadmap", link: "/ROADMAP" },
         { text: "Python binding proposal", link: "/proposals/python-binding" },
+        {
+          text: "Engine simplification proposal",
+          link: "/proposals/engine-simplification",
+        },
       ],
     },
   ];

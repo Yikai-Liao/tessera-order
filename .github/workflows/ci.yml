@@ -94,7 +94,8 @@ jobs:
   comparison:
     needs: changes
     if: needs.changes.outputs.comparison == 'true'
-    runs-on: ubuntu-latest
+    # Keep apt-provided Clang/TBB on an explicit LTS image, as in measurement.
+    runs-on: ubuntu-24.04
     env:
       TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/comparison
       # Match the CLI before testing so functional builds can be reused unchanged.

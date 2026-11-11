@@ -126,9 +126,9 @@ The scan depends on the extractor, not on a backend feature:
 | Key function (`stable_sort_by_key`) | One record at a time, keeping the previous key, so the key function runs once per scanned record |
 | Primitive direct keys, budgeted probe and insertion finish | Vector scan, with the instruction set selected once per pass |
 | Primitive direct keys, ascending confirmation | The vector scan, dispatched once after checking the encoded predecessor |
-| `Reverse<K>` | Blocked scans for confirmation and probes; scalar scans for insertion finishing |
+| `Reverse<K>` direct keys | The same passes and length rule as primitive keys; the scan is a blocked loop the compiler vectorizes under the selected instruction set |
 
-Slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time. The insertion loop is inlined into the dispatched function, so its scan runs with the selected target features.
+Slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time. Each direct key type supplies only its adjacent-pair scan; confirmation, probes and finishing are written once for all of them. The insertion loop is inlined into the dispatched function, so its scan runs with the selected target features.
 
 Dispatch stays inside one insertion pass: per-scan dispatch repeats overhead on short runs, and moving a SIMD token outside its target-feature context loses the intended code generation. Every build requires `std` and uses `fearless_simd`, with no backend feature switch. User-key tiles retain scalar callbacks rather than materializing a second key array. The [exploratory SIMD measurements](port.md#exploratory-simd-constraints) preserve historical evidence for these constraints but were not the full paired protocol and establish no formal speedup claim.
 

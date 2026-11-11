@@ -10,6 +10,7 @@
 //!
 //! The same generic code serves every key width and every backend.
 
+use crate::RadixKey;
 use crate::key::{ByKey, Extract};
 use fearless_simd::prelude::*;
 use fearless_simd::{Level, Simd, dispatch, u8x16, u16x8};
@@ -26,14 +27,19 @@ const SIMD_MIN: usize = 64;
 /// scalar check finds them without paying for a vector block.
 const PEEL: usize = 4;
 
-/// A key type whose slice can be scanned with `fearless_simd` vectors.
-pub(crate) trait SimdKey: crate::RadixKey {
+/// The adjacent-pair scan of one direct key type; also seals [`RadixKey`].
+///
+/// Every scan and insertion pass over direct keys enters this module and
+/// reaches the key type only through this hook, with the backend selected.
+pub trait SimdKey: Copy {
     /// Offset of the first descending adjacent pair in `values`.
-    fn scan_with<S: Simd>(simd: S, values: &[Self]) -> Option<usize>;
+    fn scan_with<S: Simd>(simd: S, values: &[Self]) -> Option<usize>
+    where
+        Self: RadixKey;
 }
 
 /// Sorts `keys` stably by insertion, without a swap limit.
-pub(crate) fn finish_insertion<K: SimdKey>(keys: &mut [K]) {
+pub(crate) fn finish_insertion<K: RadixKey>(keys: &mut [K]) {
     // Every slice the scan sees is a suffix of `keys`, so a short pass never
     // reaches the vector kernel and skips dispatch.
     if keys.len() < SIMD_MIN {
@@ -47,7 +53,7 @@ pub(crate) fn finish_insertion<K: SimdKey>(keys: &mut [K]) {
 ///
 /// Returns the number of swaps, or `None` when the budget is exhausted; in
 /// that case `keys` is a stable permutation of its input.
-pub(crate) fn insertion_sort<K: SimdKey>(keys: &mut [K], budget: usize) -> Option<usize> {
+pub(crate) fn insertion_sort<K: RadixKey>(keys: &mut [K], budget: usize) -> Option<usize> {
     if keys.len() < SIMD_MIN {
         return ByKey(|key: &K| *key).insertion_sort(keys, budget);
     }
@@ -58,7 +64,7 @@ pub(crate) fn insertion_sort<K: SimdKey>(keys: &mut [K], budget: usize) -> Optio
 struct VectorKeys<S>(S);
 
 // SAFETY: this insertion-only adapter retains the default cached classification policy.
-unsafe impl<S: Simd, K: SimdKey> crate::key::Extract<K> for VectorKeys<S> {
+unsafe impl<S: Simd, K: RadixKey> crate::key::Extract<K> for VectorKeys<S> {
     type Value = K::Encoded;
 
     #[inline(always)]
@@ -113,7 +119,7 @@ fn prefix_sum_with<S: Simd>(simd: S, counts: &mut [u16]) {
 /// Confirms ascending direct keys after an already encoded predecessor.
 // Keep short scalar suffixes in the caller; shared-order evidence is in port.md.
 #[inline]
-pub(crate) fn confirm_ascending<K: SimdKey>(values: &[K], previous: K::Encoded) -> bool {
+pub(crate) fn confirm_ascending<K: RadixKey>(values: &[K], previous: K::Encoded) -> bool {
     if values.len() < SIMD_MIN {
         return crate::engine::confirm_ascending(values, &mut ByKey(|value: &K| *value), previous);
     }
@@ -121,13 +127,13 @@ pub(crate) fn confirm_ascending<K: SimdKey>(values: &[K], previous: K::Encoded) 
 }
 
 /// Offset of the first adjacent pair that descends in key order.
-pub(crate) fn first_inversion<K: SimdKey>(values: &[K]) -> Option<usize> {
+pub(crate) fn first_inversion<K: RadixKey>(values: &[K]) -> Option<usize> {
     dispatch!(Level::new(), simd => first_inversion_with(simd, values))
 }
 
 /// Scan under an already dispatched backend.
 #[inline(always)]
-fn first_inversion_with<S: Simd, K: SimdKey>(simd: S, values: &[K]) -> Option<usize> {
+fn first_inversion_with<S: Simd, K: RadixKey>(simd: S, values: &[K]) -> Option<usize> {
     if values.len() < SIMD_MIN {
         return crate::scan::scalar(values);
     }
@@ -181,7 +187,7 @@ fn scan_int<S: Simd, T: SimdIntElement>(simd: S, values: &[T]) -> Option<usize> 
 #[inline(always)]
 fn scan_float<S: Simd, T>(simd: S, values: &[T]) -> Option<usize>
 where
-    T: SimdFloatElement + crate::RadixKey,
+    T: SimdFloatElement + RadixKey,
     <T as SimdFloatElement>::Native<S>: SimdFloat<S, Element = T>,
 {
     let lanes = T::Native::<S>::LEN;
@@ -249,6 +255,15 @@ macro_rules! wide_key {
 }
 wide_key!(u128, usize, i128, isize);
 
+/// `Reverse<K>` has no vector kernel of its own. Its fixed-count blocked scan
+/// is vectorized by the compiler under the selected backend's target features.
+impl<K: RadixKey> SimdKey for core::cmp::Reverse<K> {
+    #[inline(always)]
+    fn scan_with<S: Simd>(_simd: S, values: &[Self]) -> Option<usize> {
+        crate::scan::blocked(values)
+    }
+}
+
 impl SimdKey for f32 {
     #[inline(always)]
     fn scan_with<S: Simd>(simd: S, values: &[Self]) -> Option<usize> {
@@ -267,7 +282,7 @@ impl SimdKey for f64 {
 mod tests {
     use super::*;
 
-    fn check_sorted_scans<K: SimdKey>(mut values: Vec<K>) {
+    fn check_sorted_scans<K: RadixKey>(mut values: Vec<K>) {
         if let Some(first) = values.first() {
             assert!(confirm_ascending(&values, first.encode()));
             if let Some(larger) = values.iter().find(|value| value.encode() > first.encode()) {
@@ -279,7 +294,7 @@ mod tests {
                 dispatch!(level, simd => first_inversion_with(simd, &values)),
                 None
             );
-            assert_eq!(K::first_inversion(&values), None);
+            assert_eq!(first_inversion(&values), None);
             for index in 0..values.len().saturating_sub(1) {
                 // Miri still crosses the peel, vector blocks and scalar tail.
                 if cfg!(miri) && index % 16 > 1 && index != 4 && index + 2 != values.len() {
@@ -295,7 +310,7 @@ mod tests {
                     "level={level:?} len={} index={index}",
                     values.len()
                 );
-                assert_eq!(K::first_inversion(&values), Some(index));
+                assert_eq!(first_inversion(&values), Some(index));
                 if !cfg!(miri) || index == 4 {
                     assert!(!confirm_ascending(&values, values[0].encode()));
                 }
@@ -327,6 +342,10 @@ mod tests {
         check!(
             u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
         );
+        // `Reverse` reaches its blocked scan through the same dispatch.
+        for &length in lengths {
+            check_sorted_scans((0..length as u32).rev().map(core::cmp::Reverse).collect());
+        }
     }
 
     #[test]

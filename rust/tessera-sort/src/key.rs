@@ -26,60 +26,11 @@ use core::ops::{BitAnd, BitOrAssign, Not, Shl, Shr};
 /// | Signed integers | Sign bit flipped |
 /// | `f32`, `f64` | All bits inverted if the sign bit is set, otherwise the sign bit flipped; this matches `total_cmp` |
 /// | `Reverse<K>` | All bits of the encoding of `K` inverted |
-pub trait RadixKey: sealed::Sealed + Copy {
+pub trait RadixKey: crate::portable_simd::SimdKey + Copy {
     #[doc(hidden)]
     type Encoded: Unsigned;
     #[doc(hidden)]
     fn encode(self) -> Self::Encoded;
-}
-
-mod sealed {
-    use super::{Direct, RadixKey};
-
-    /// Scans and insertion passes for direct keys of one type.
-    ///
-    /// Primitive keys override these scans with the vector backend;
-    /// `Reverse<K>` keeps the scalar/blocked
-    /// defaults, so it needs no second set of vector kernels.
-    pub trait Sealed: Copy {
-        #[inline]
-        fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool
-        where
-            Self: RadixKey,
-        {
-            // Confirmation and insertion probes cross the same ordered runs.
-            keys.first().is_none_or(|key| previous <= key.encode())
-                && Self::first_inversion(keys).is_none()
-        }
-
-        #[inline(always)]
-        fn first_inversion(keys: &[Self]) -> Option<usize>
-        where
-            Self: RadixKey,
-        {
-            crate::scan::first_inversion(keys)
-        }
-
-        #[inline]
-        fn finish_insertion(keys: &mut [Self])
-        where
-            Self: RadixKey,
-        {
-            // Tile finishing crosses many short ordered runs, so a blocked scan
-            // would build a 32-pair mask for every inversion it finds. `ByKey`
-            // scans one pair at a time; budgeted probes keep the blocked scan
-            // for their long ordered stretches.
-            crate::engine::finish_insertion(keys, &mut super::ByKey(|key: &Self| *key));
-        }
-
-        #[inline]
-        fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize>
-        where
-            Self: RadixKey,
-        {
-            crate::engine::insertion_loop(keys, budget, &mut Direct)
-        }
-    }
 }
 
 /// Unsigned integer operations the engine needs on encoded keys.
@@ -100,31 +51,8 @@ pub trait Unsigned:
     fn to_u128(self) -> u128;
 }
 
-/// Routes primitive-key scans and insertion passes to the vector backend.
-macro_rules! vector_backend {
-    () => {
-        #[inline]
-        fn confirm_ascending(keys: &[Self], previous: <Self as RadixKey>::Encoded) -> bool {
-            crate::portable_simd::confirm_ascending(keys, previous)
-        }
-
-        #[inline]
-        fn finish_insertion(keys: &mut [Self]) {
-            crate::portable_simd::finish_insertion(keys)
-        }
-
-        #[inline]
-        fn insertion_sort(keys: &mut [Self], budget: usize) -> Option<usize> {
-            crate::portable_simd::insertion_sort(keys, budget)
-        }
-    };
-}
-
 macro_rules! unsigned {
     ($($ty:ty),* $(,)?) => {$(
-        impl sealed::Sealed for $ty {
-            vector_backend!();
-        }
         impl Unsigned for $ty {
             const BITS: usize = <$ty>::BITS as usize;
             #[inline] fn from_usize(value: usize) -> Self { value as Self }
@@ -141,9 +69,6 @@ unsigned!(u8, u16, u32, u64, u128, usize);
 
 macro_rules! signed {
     ($(($s:ty, $u:ty)),* $(,)?) => {$(
-        impl sealed::Sealed for $s {
-            vector_backend!();
-        }
         impl RadixKey for $s {
             type Encoded = $u;
             #[inline] fn encode(self) -> $u {
@@ -163,9 +88,6 @@ signed!(
 
 macro_rules! float {
     ($(($f:ty, $u:ty)),* $(,)?) => {$(
-        impl sealed::Sealed for $f {
-            vector_backend!();
-        }
         impl RadixKey for $f {
             type Encoded = $u;
             #[inline] fn encode(self) -> $u {
@@ -178,7 +100,6 @@ macro_rules! float {
 }
 float!((f32, u32), (f64, u64));
 
-impl<K: RadixKey> sealed::Sealed for Reverse<K> {}
 impl<K: RadixKey> RadixKey for Reverse<K> {
     type Encoded = K::Encoded;
     #[inline]
@@ -351,7 +272,7 @@ unsafe impl<K: RadixKey> Extract<K> for Direct {
 
     #[inline]
     fn confirm_ascending(&mut self, records: &[K], previous: Self::Value) -> bool {
-        K::confirm_ascending(records, previous)
+        crate::portable_simd::confirm_ascending(records, previous)
     }
 
     #[inline]
@@ -359,21 +280,14 @@ unsafe impl<K: RadixKey> Extract<K> for Direct {
         record.encode()
     }
 
-    // Inlined through `K::first_inversion` so each scan is not a call and the
-    // scan sees the caller's slice bounds.
-    #[inline(always)]
-    fn first_inversion(&mut self, records: &[K]) -> Option<usize> {
-        K::first_inversion(records)
-    }
-
     #[inline]
     fn finish_insertion(&mut self, records: &mut [K]) {
-        K::finish_insertion(records);
+        crate::portable_simd::finish_insertion(records);
     }
 
     #[inline]
     fn insertion_sort(&mut self, records: &mut [K], budget: usize) -> Option<usize> {
-        K::insertion_sort(records, budget)
+        crate::portable_simd::insertion_sort(records, budget)
     }
 }
 

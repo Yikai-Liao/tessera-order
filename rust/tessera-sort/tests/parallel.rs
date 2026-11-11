@@ -242,6 +242,96 @@ fn large_sort_uses_workers_and_recovers_task_panics() {
     assert_eq!(ids, (0..LEN as u32).collect::<Vec<_>>());
 }
 
+#[test]
+#[cfg(not(miri))]
+fn repeated_root_uses_workers_and_recovers_owned_records() {
+    let len = 1usize << 18;
+    let original: Vec<_> = (0..len)
+        .map(|id| {
+            let key = match id {
+                0 => 0,
+                16 => u64::MAX,
+                _ if id % 16 == 0 => mix(id as u64),
+                _ => 1 << 63,
+            };
+            (Cell::new(key), Box::new(id))
+        })
+        .collect();
+    let mut records = original.clone();
+    let mut expected = original.clone();
+    expected.sort_by_key(|row| row.0.get());
+    let calls = AtomicUsize::new(0);
+    let workers = Mutex::new(HashSet::new());
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    pool.install(|| {
+        par_stable_sort_by_key(&mut records, |row| {
+            if calls.fetch_add(1, Ordering::Relaxed).is_multiple_of(1024) {
+                let mut seen = workers.lock().unwrap();
+                seen.insert(rayon::current_thread_index().unwrap());
+                let alone = seen.len() == 1;
+                drop(seen);
+                if alone {
+                    // Let pending shards run on oversubscribed hosts without
+                    // holding engine metadata across a blocking callback.
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+            }
+            row.0.get()
+        });
+    });
+    assert_eq!(records, expected);
+    assert!(
+        workers.lock().unwrap().len() > 1,
+        "repeated root stayed serial"
+    );
+
+    records.clone_from(&original);
+    let offset = Mutex::new(0u64);
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        pool.install(|| {
+            // The guard makes this callback Sync but not Send.
+            let guard = offset.lock().unwrap();
+            par_stable_sort_by_key(&mut records, move |row| {
+                // Sampling misses the tail; 0 and MAX complete variation in
+                // the prefix. Fail in partition regardless of shard scheduling.
+                assert_ne!(*row.1, len - 1, "repeated-root partition key panic");
+                row.0.get().wrapping_add(*guard)
+            });
+        });
+    }));
+    assert!(result.is_err());
+    records.sort_by_key(|row| *row.1);
+    assert_eq!(records, original);
+}
+
+#[test]
+#[cfg(not(miri))]
+fn changing_repeated_keys_keep_records() {
+    let len = 1usize << 17;
+    let mut records: Vec<_> = (0..len).map(Box::new).collect();
+    let calls = AtomicUsize::new(0);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    pool.install(|| {
+        par_stable_sort_by_key(&mut records, |_| {
+            let call = calls.fetch_add(1, Ordering::Relaxed);
+            assert!(
+                call < 100 * len,
+                "changing equality keys did not make progress"
+            );
+            if call.is_multiple_of(16) { u64::MAX } else { 0 }
+        });
+    });
+    let mut ids: Vec<_> = records.into_iter().map(|record| *record).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, (0..len).collect::<Vec<_>>());
+}
+
 fn mix(value: u64) -> u64 {
     let mut value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);

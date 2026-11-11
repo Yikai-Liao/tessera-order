@@ -70,6 +70,8 @@ A bucket is contiguous in the input as soon as its last record has been copied. 
 
 The optional Rayon path scatters disjoint input shards independently. Its directory reads bucket 0 from the first shard, then bucket 0 from the second, and so on before bucket 1, which preserves input order inside every bucket whichever worker finishes first.
 
+A root with a frequent sampled key uses the same sharded scatter, classifying records below, equal to and above the key as ranks 0, 1 and 2. It materializes the partition, skips the equal band and finishes the two outer bands concurrently; see the [execution contract](../design/engine.md#parallel-root-completion).
+
 A bucket small enough for bounded staging need not become contiguous before sorting: a worker gathers its source prefixes in directory order into private staging, freeing those blocks, sorts, and writes the final band, first moving any unread source out of the blocks it will overwrite. Sources are tracked by owner and relocated under ordered locks, and no lock spans a key callback. Eligibility limits, locking, panic recovery and the space bound are in the [engine reference](../design/engine.md#bounded-staging). The tested [parallel finishing model](../.vitepress/theme/sim/parallelFinish.ts) adopts scattered frames from the serial model and replays staging, relocation and final-band writes in different bucket orders, checking stable output and record conservation (including suspended staged buckets). It models serial linearizations, not mutex scheduling, panic recovery or Rust pointer provenance.
 
 ## Why 2R scratch blocks

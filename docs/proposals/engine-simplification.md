@@ -2,6 +2,8 @@
 
 Status: proposed, not accepted. Date: 2026-11-11.
 
+R2 is published for discussion only: **do not merge**. Its focused screen found a 19–20% constant-`u64` loss, outside the series' ordinary 10% limit. The maintainer requested a regular, non-draft PR with an explicit hold; neither a constant-input exception nor the claim that only constant inputs regress has been accepted. See the [measurement record](../design/port.md#flat-sample-order-candidate-r2).
+
 This lists the remaining opportunities to replace a specialized engine mechanism with a more general one. It is a search result, not a plan of record: each candidate is adopted only if it meets the [acceptance rule](#acceptance-rule), and the [engine reference](../design/engine.md) continues to describe what the code does today. Delete an entry when it lands or is rejected; record accepted debt in the [roadmap](../../ROADMAP.md#measured-engine-refactors).
 
 The goal is fewer mechanisms in the core algorithm, not fewer lines: tests, comments and safety arguments are not reduction targets. Non-test engine source went from 3,591 to 3,358 lines over the five slices below, measured as the lines before each file's test module.

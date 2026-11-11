@@ -189,8 +189,7 @@ fn prepare<T, E: Extract<T>>(
     extractor: &mut E,
     tile_len: usize,
 ) -> Option<u128> {
-    let sampled = probe_order(records, extractor);
-    match sampled {
+    match probe_order(records, extractor) {
         Order::Ascending => return None,
         Order::Descending { strict } => {
             if strict {
@@ -212,24 +211,11 @@ fn prepare<T, E: Extract<T>>(
                 return None;
             }
         }
-        Order::Flat => {}
     }
     let candidate = u128::MAX >> (128 - E::Value::BITS);
     let varying = scan_varying_bits(records, candidate, extractor);
     if varying == 0 {
         return None;
-    }
-    if sampled == Order::Flat {
-        // A flat sample contains an equal adjacent pair, so confirmed descending
-        // keys here are not strict and must keep the stable reversal.
-        match confirm_order(records, extractor) {
-            Order::Ascending => return None,
-            Order::Descending { .. } => {
-                reverse_stably(records, extractor);
-                return None;
-            }
-            _ => {}
-        }
     }
     Some(varying)
 }
@@ -274,8 +260,6 @@ enum Order {
     Descending {
         strict: bool,
     },
-    /// Every sampled pair had equal keys; gaps may still contain differing keys.
-    Flat,
     Unsorted,
 }
 
@@ -303,9 +287,8 @@ fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
             return Order::Unsorted;
         }
     }
-    if ascending && descending {
-        return Order::Flat;
-    }
+    // Equal sampled pairs are an order candidate too: only confirmation can
+    // tell a constant slice from changes hidden between sampled pairs.
     confirm_order(records, extractor)
 }
 
@@ -433,7 +416,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
                 reverse_stably(records, self.extractor);
                 return;
             }
-            Order::Flat | Order::Unsorted => {}
+            Order::Unsorted => {}
         }
         self.sort_node(records, varying);
     }
@@ -607,6 +590,32 @@ mod tests {
         assert!(confirm_order(&values, &mut Direct) == Order::Unsorted);
         crate::stable_sort(&mut values);
         assert_eq!(values, (0..len as u64).collect::<Vec<_>>());
+    }
+
+    #[test]
+    #[cfg(not(miri))]
+    fn equal_sampled_pairs_do_not_certify_order() {
+        // Stride three checks (2, 3), (5, 6), ...; each sampled pair ties,
+        // while the gaps distinguish ordered, constant and unordered inputs.
+        let len = 3 * ORDER_SAMPLES;
+        for shape in 0..4 {
+            let mut records: Vec<_> = (0..len)
+                .map(|index| {
+                    let group = (index + 1) / 3;
+                    let key = match shape {
+                        0 => group,
+                        1 => len - group,
+                        2 => 0,
+                        _ => group % 2,
+                    };
+                    (key, index)
+                })
+                .collect();
+            let mut expected = records.clone();
+            expected.sort_by_key(|record| record.0);
+            sort(&mut records, ByKey(|record: &(usize, usize)| record.0));
+            assert_eq!(records, expected, "shape {shape}");
+        }
     }
 
     // Tiny tiles exercise block materialization and cache-hot callbacks under

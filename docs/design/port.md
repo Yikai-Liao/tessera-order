@@ -4,6 +4,23 @@ This page retains measured evidence behind engine choices, not current developme
 
 The engine in `rust/tessera-sort` is a Stable Rust port of the research prototype in `sort-research-rs` at commit `6c0877f0491dc3b8fc052aa529bce44bf8a53fa8`. The crate is unreleased (`0.0.0`, `publish = false`).
 
+## Flat-sample order candidate (R2)
+
+**Published for discussion; do not merge.** This candidate removes `Order::Flat` and its deferred confirmation: all surviving sample candidates enter the shared order confirmation before insertion and variation. It removes a root-only state and branch, but changes constant-input scanning from union/intersection variation to leading-tie confirmation. The maintainer asked to publish a regular PR with a merge hold after seeing the losses below. No exception to the ordinary 10% acceptance ceiling has been accepted.
+
+The command was `pnpm -s tools compare revisions ef6c174 --types u64,row_u64 --distributions equal,two_values,hot50,runs --lengths 65536 --blocks 3 --cpu 2 --out /home/lyk/code/tessera-research/engine-simplification/r2-screen`. All eight inputs were verified in one linked executable with two named copies per revision and repeated-current A/A. Intel Core i7-10875H, Rust 1.99.1 / LLVM 23.1.3, release, default target, 64-byte loop/block alignment, CPU 2, powersave, turbo and SMT on; no system settings changed. Raw observations, binaries, provenance and regenerated reports remain at that path. The engine patch measured against `ef6c174` is unchanged; this branch starts after the unrelated trend-chart fix in #103.
+
+Ratios divide each baseline placement by the current A/A mean; below one means the candidate is slower.
+
+| Case | Baseline copies | Current copy | A/A range | Observation |
+|---|---:|---:|---:|---|
+| `u64/equal/65536` | 0.839 / 0.834 | 0.999 | 0.994–1.006 | Primary current about 19–20% slower |
+| `row_u64/equal/65536` | 0.925 / 0.921 | 1.024 | 0.996–1.004 | Primary current about 8–9% slower; second placement worse |
+
+Hot50 and runs baseline-placement medians were within 0.5% of one for both types. Two-values baseline medians spanned 0.988–1.006, with ranges overlapping A/A. These results do not prove that only all-equal inputs can regress: sampled equal pairs may conceal nonconstant keys in the gaps, whose order confirmation and insertion routing also change. The added regression test covers stability and sorting for constant, ascending, descending and unordered gap shapes, not their timing. This bounded screen makes no source-causal claim; distinct wrappers alone do not prove distinct internal bodies. No nine-block matrix was run.
+
+Serial and Rayon library tests/doctests, check-only all-feature workspace Clippy, and the order-confirmation fixture under Miri passed for the measured checkpoint. A native-enabled Clippy attempt without check-only mode stopped at missing fetched native sources and is not a passing check. Full current-head CI, independent implementation review and the nonconstant flat-sample performance question remain merge gates.
+
 ## Eight-core parallel completion
 
 These are local whole-call algorithm comparisons, not isolated source-change or placement-controlled claims. The portable bounded-finishing implementation and its fallback are described in the [engine reference](engine.md#parallel-root-completion).

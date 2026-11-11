@@ -115,7 +115,7 @@ fn descending_children_keep_equal_key_order() {
             extractor: &mut ByKey(|row: &(u64, usize)| row.0),
             tile_len: 1,
         }
-        .sort_child(&mut records, 3);
+        .sort_staged_child(&mut records, 3);
         assert_eq!(records, expected);
     }
 }

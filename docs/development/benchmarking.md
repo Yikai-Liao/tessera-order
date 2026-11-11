@@ -17,7 +17,7 @@ CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment
 | Probe local PMU access | `pnpm tools continuous probe-counters --out DIR` | Read-only, per-event `perf` availability on the current host |
 | Compare algorithms | `pnpm tools compare algorithms` | Registered algorithms in one timing executable per configuration, nine shuffled blocks, two Tessera calls for A/A, output verification, allocation measurement and a report |
 | Local parallel comparison | `pnpm tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` | Serial controls, Tessera-8 and Rayon stable-8 in the shared paired harness; choose a CPU list appropriate to the host |
-| Full algorithm comparison | `pnpm tools compare algorithms --plan release --simd` | Release coverage, native opponents and a separate Portable SIMD build |
+| Full algorithm comparison | `pnpm tools compare algorithms --plan release` | Release coverage and native opponents with the shared SIMD backend |
 | Resume an interrupted algorithm comparison | `pnpm tools compare resume DIR` | Recorded selection, settings and exact retained builds; no rebuilding |
 | Preview or customize inputs | `pnpm -s tools plan NAME` | Validated selection without compiling or measuring |
 | Regenerate a report | `pnpm tools report DIR` | Statistics and figures from retained results, without new measurements |
@@ -45,8 +45,8 @@ CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment
    # Rust-only algorithm smoke comparison, including verification and reporting.
    pnpm tools compare algorithms
 
-   # Full algorithm comparison, including native opponents and a second SIMD build.
-   pnpm tools compare algorithms --plan release --simd --cpu 2
+   # Full algorithm comparison, including native opponents.
+   pnpm tools compare algorithms --plan release --cpu 2
    ```
 
    CPU 2 is an example, not a portable default. Both commands accept `--out DIR`, require a new directory and otherwise use `bench/results/<timestamp>`. Keep raw results and research harnesses outside Git. Algorithm comparisons accept `--sample-ms` (default 5) and `--memory-mib` (default 256); choose them before starting. Resume a prepared session with `pnpm tools compare resume DIR`, without changing its selection, settings or executables.
@@ -65,7 +65,7 @@ Before adding a custom experiment, identify the exact unmet requirement, explain
 
 `tools compare commit` and `tools compare algorithms` accept `--out DIR` and require a new directory. Their default output is `bench/results/<timestamp>`. They snapshot the current sources and clean up their temporary worktree and build directory under `~/code/tessera-bench/`; `TESSERA_BENCH_WORK` overrides that location. Repository-internal symlinks are materialized; escaping or dangling links and directory cycles are rejected before building. Current sources may use absolute links to internal files. Baseline links must resolve inside an archive of the selected commit; absolute links into the live checkout are rejected. Results are retained. The [direct executable commands](#direct-executable-sessions) support resumable algorithm sessions and custom investigations.
 
-`compare commit [COMMIT]` defaults to `HEAD` and uses any resolvable local commit compatible with the current crate API, harness and lockfile. Both revisions are built from the current benchmark harness with one toolchain and the same features; Linux revision workers use `setarch -R` to control process address randomization (support is checked before building); the baseline substitutes only `rust/tessera-sort` from the named commit. Selected timed IDs must match. The `local` plan measures only `rust/u64/random/65536/s1/api`; override its axes or choose another plan explicitly, rather than implicitly running the full continuous inventory. `--filter` optionally narrows the resulting timed IDs.
+`compare commit [COMMIT]` defaults to `HEAD` and uses any resolvable local commit compatible with the current crate API, harness and lockfile. Both revisions are built from the current benchmark harness with one toolchain and the same SIMD backend; historical libraries explicitly enable their opt-in feature, recorded as resolved `library_features` separately from harness `features`; Linux revision workers use `setarch -R` to control process address randomization (support is checked before building); the baseline substitutes only `rust/tessera-sort` from the named commit. Selected timed IDs must match. The `local` plan measures only `rust/u64/random/65536/s1/api`; override its axes or choose another plan explicitly, rather than implicitly running the full continuous inventory. `--filter` optionally narrows the resulting timed IDs.
 
 Fresh worker pairs measure adjacent A/B samples, reversing startup, warm-up and measurement order on every other pair. The catalog owns one total warm-up and one total sampling budget per revision; each is divided across samples, with no outer repetition. Input preparation repeats in each fresh process outside the clock. Report the median B/A ratio and its distribution-free 99% median interval; only an interval entirely outside 0.95–1.05 alerts. Nominal coverage assumes independent pairs and is per case, not family-wide. The [continuous protocol](continuous-benchmarks.md#within-job-scheduling) defines batching, clocks and interference limits. This is a development screen, not an in-process or placement-controlled source claim.
 
@@ -101,7 +101,7 @@ With layout seeds, `--layout-control cgu1` applies one code-generation unit to b
 
 The command defaults to `HEAD` and the `local` plan.
 
-`compare counters [COMMIT]` uses the current smoke harness for both library revisions, with the local-only `layout-study` feature and the default ISA build. It requires Linux x86-64 and Valgrind; `--simd` is rejected because a simulated ISA path is not the real host's dispatch. Select a small smoke plan with the usual axes, then run:
+`compare counters [COMMIT]` uses the current smoke harness for both library revisions, with the local-only `layout-study` feature and the shared SIMD backend. It requires Linux x86-64 and Valgrind; simulated ISA dispatch can differ from the real host. Select a small smoke plan with the usual axes, then run:
 
 ```sh
 pnpm tools compare counters HEAD --types u32,u64 --distributions random --lengths 48,65536 \
@@ -121,7 +121,6 @@ pnpm tools compare counters HEAD --types u32 --distributions random --lengths 48
 ```
 
 `continuous probe-counters --out DIR` separately tries `instructions:u`, `branch-misses:u`, `idq.dsb_uops:u`, `idq.mite_uops:u` and `baclears.any:u` with the host's `perf`. `probe.json` preserves each success/failure and raw output; Intel-specific aliases may be unavailable on AMD. The probe does not change `perf_event_paranoid`, request capabilities or infer cloud access from local access. Use the actual measured host before integrating PMU reads into a timed run.
-
 
 ## Experiment plans
 
@@ -169,7 +168,7 @@ The selectable case axes are `types`, `distributions` and `lengths`. Lengths are
 
 The `smoke` harness measures Tessera through its public sorting functions; its supported record representations and distributions are under `smoke` in [the catalog](../../bench/catalog.toml). The `comparison` harness measures supported algorithm/type pairs; its default types, distributions and lengths are under `comparison`. Criterion's serial IDs end in `/api`; optional `parallel` rules in a smoke plan independently select four-thread `/par-4` inputs for the continuous supervisor. They use the same input axes and shared exclusions, and axis overrides apply to both rule sets. Comparison plans reject these rules and retain their own algorithm selections. Comparison input IDs use `type/distribution/length/s1`; neither harness has a general mode selector. Inputs always use seed 1. A plan that selects nothing fails before timing.
 
-Algorithm comparisons retain `tessera`, `std-stable` and the separately timed Tessera A/A control, even when only additional opponents are named. Native algorithms automatically enable source acquisition and native compilation. Portable SIMD is requested with `--simd`; that additional build measures the shared Tessera and standard-library anchors, plus any selected parallel adapters; other competitors run in the default build. Unsupported adapter/type pairs are omitted from the manifest's per-input capabilities, not recorded as measurements.
+Algorithm comparisons retain `tessera`, `std-stable` and the separately timed Tessera A/A control, even when only additional opponents are named. Native algorithms automatically enable source acquisition and native compilation. All selected adapters run in one executable with the shared SIMD backend. Unsupported adapter/type pairs are omitted from the manifest's per-input capabilities, not recorded as measurements.
 
 ```sh
 # Preview a resolved plan without compiling or timing.
@@ -210,7 +209,7 @@ pnpm tools compare resume /tmp/tessera-parallel
 pnpm tools report /tmp/tessera-parallel
 ```
 
-The default opponents are `tessera-par-8` and `rayon-stable-8`, plus the required serial controls. With `--simd`, the parallel adapters also run in the additional Portable SIMD build, using the same pool widths. One-, two- and four-worker versions are explicit algorithm choices, for example `--algorithms tessera-par-1,tessera-par-2,tessera-par-4,tessera-par-8`; they do not run by default. Type, distribution and length overrides work unchanged.
+The default opponents are `tessera-par-8` and `rayon-stable-8`, plus the required serial controls. One-, two- and four-worker versions are explicit algorithm choices, for example `--algorithms tessera-par-1,tessera-par-2,tessera-par-4,tessera-par-8`; they do not run by default. Type, distribution and length overrides work unchanged.
 
 Each parallel adapter owns a pool of the recorded width. Pool construction and worker warm-up are outside timing and allocation counting; each sort includes `ThreadPool::install` and the complete public sort call. Workers inherit the process affinity mask; they are not individually pinned. Pools join all workers before the next adapter. Linux thread checks permit only the selected pool's workers plus the caller, preserving the one-thread check for sequential opponents. Pool widths and the effective affinity/topology are retained in the manifest and host fingerprint. Enough allowed CPUs and physical cores are the operator's responsibility; oversubscribed runs are not scaling evidence.
 
@@ -231,7 +230,7 @@ Native builds default to `clang` and `clang++`. For published comparisons, prefe
 `compare algorithms` builds and retains every selected configuration before starting measurements. Each configuration keeps its `compare` and `memory` executables under `bin/`; `session.json` records their hashes, the plan hash, CPU, optional group and sampling limits. Preparation removes its temporary source/build tree only after the executable pairs are retained. A session interrupted before `session.json` exists is not prepared; start a new output directory.
 
 ```sh
-pnpm tools compare algorithms --plan release --simd --cpu 2 --out bench/results/release
+pnpm tools compare algorithms --plan release --cpu 2 --out bench/results/release
 # After an interruption, use the same directory; no rebuild or selection overrides.
 pnpm tools compare resume bench/results/release
 ```
@@ -242,7 +241,7 @@ Only one session writer is allowed. After an abrupt parent exit, its lease must 
 
 ## Direct executable sessions
 
-For normal comparisons and recovery, use `pnpm tools compare algorithms` and `pnpm tools compare resume`. Use the binaries directly to split groups across compatible directories or investigate a lower-level harness issue. Keep default and Portable SIMD builds separate. The following commands show a native release session; omit `compare-native` and the fetch step for Rust-only opponents.
+For normal comparisons and recovery, use `pnpm tools compare algorithms` and `pnpm tools compare resume`. Use the binaries directly to split groups across compatible directories or investigate a lower-level harness issue. The following commands show a native release session; omit `compare-native` and the fetch step for Rust-only opponents.
 
 ```sh
 pnpm tools native fetch
@@ -278,18 +277,9 @@ The report requires the complete suite. `--partial` generates a report of the co
 
 ### Portable SIMD
 
-Build the Portable SIMD executable separately so the default executable remains available:
+Every build uses the SIMD backend; there is no `--simd` CLI option or Cargo feature to select. Algorithm sessions retain one `default` build with all selected adapters. Revision comparisons enable the historical library feature when needed, so both revisions use the vector backend; actual per-revision Cargo features remain in provenance. Revisions without a supported SIMD backend are rejected.
 
-```sh
-cargo build --release -p tessera-bench --features compare,portable-simd \
-  --target-dir target/compare-simd
-target/compare-simd/release/compare validate --suite smoke
-taskset -c 2 target/compare-simd/release/compare run \
-  --suite release --out bench/results/release
-pnpm tools report bench/results/release
-```
-
-This executable measures Tessera twice and `slice::sort` on the same cases, plus selected parallel adapters when the `rayon` feature is also enabled. Other competitors are measured in the default build. Each build has its own A/A control; `slice::sort` anchors the ranking to the same scale. The report records the absolute anchor drift between processes and flags differences above 5%. Both builds belong to the same session and use the same source revision, toolchain and target flags.
+Retained sessions with separate `default` and `portable-simd` builds remain readable and resumable using their recorded executables. Their report checks preserve the shared standard-library anchor and flag absolute anchor drift above 5%; no current build is substituted for those artifacts.
 
 ## Cases and suites
 
@@ -383,7 +373,7 @@ DIR/
   bin/BUILD/compare, memory       retained executable pair for each build
   bin/BUILD/validated.json        successful validation receipt
   manifest.json                   default timing build and complete case plan
-  manifest-portable-simd.json     optional SIMD timing build
+  manifest-portable-simd.json     historical optional SIMD timing build
   memory-manifest-BUILD.json      memory executable's build provenance
   host.json                       machine fingerprint
   blocks.jsonl                    verified samples and group observations
@@ -397,7 +387,7 @@ DIR/
 
 Manifests record the source revision and dirty state, source and executable SHA-256, `rustc -vV`, Cargo lockfile, features, target, profile, optimization level, debug setting and encoded Rust flags. Native manifests add compiler versions, source pins, licenses and translation-unit flags. A group's start and end observations record load, frequency, temperature and memory pressure separately from the host fingerprint.
 
-The memory and timing executable must agree on source, toolchain, target, profile, optimization level, debug setting, features, native build and actual C/C++ compiler versions (`cc` and `cxx`). Native manifests must include both compiler versions. Default and Portable SIMD builds must also agree on optimization level and debug setting. The report rejects incompatible manifests or hosts, unknown or unverified samples, duplicate samples or slots, missing blocks, incomplete groups, and missing required memory samples. Observations may vary; the report flags load, frequency or temperature deviations from the session median.
+The memory and timing executable must agree on source, toolchain, target, profile, optimization level, debug setting, features, native build and actual C/C++ compiler versions (`cc` and `cxx`). Native manifests must include both compiler versions. Retained historical Default and Portable SIMD builds must also agree on optimization level and debug setting. The report rejects incompatible manifests or hosts, unknown or unverified samples, duplicate samples or slots, missing blocks, incomplete groups, and missing required memory samples. Observations may vary; the report flags load, frequency or temperature deviations from the session median.
 
 ## Memory accounting
 

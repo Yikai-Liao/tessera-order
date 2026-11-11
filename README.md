@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/Yikai-Liao/tessera-sort/actions/workflows/ci.yml"><img src="https://github.com/Yikai-Liao/tessera-sort/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSD--2--Clause-blue.svg" alt="License: BSD-2-Clause"></a>
-  <img src="https://img.shields.io/badge/MSRV-1.85-orange.svg" alt="MSRV 1.85">
+  <img src="https://img.shields.io/badge/MSRV-1.89-orange.svg" alt="MSRV 1.89">
   <img src="https://img.shields.io/badge/status-pre--release-lightgrey.svg" alt="Status: pre-release">
   <a href="https://yikai-liao.github.io/tessera-sort/"><img src="https://img.shields.io/badge/docs-online-8b5cf6.svg" alt="Documentation"></a>
 </p>
@@ -29,7 +29,7 @@ An LSD radix sort is stable and runs in linear time, but it needs a second buffe
 - **Adaptive.** Sorted, reverse-sorted, nearly sorted and heavily repeated inputs take shortcuts, and constant key bits are skipped.
 - **Any record type.** No `Copy`, `Clone`, `Default` or `Ord` needed. Records are moved, never duplicated, even if the key function misbehaves or panics.
 - **Wide keys.** Integers up to 128 bits, `f32` and `f64` in `total_cmp` order, and `Reverse<K>`.
-- **No required dependencies.** Pure Rust; optional features add `fearless_simd` or Rayon. `std` is optional: without it the crate is `no_std` and needs `alloc`.
+- **One portable backend.** Uses `fearless_simd` for vector scans and prefix sums, selecting supported instructions automatically. Requires `std` and Rust 1.89; Rayon is optional.
 
 ## Quick start
 
@@ -40,12 +40,7 @@ An LSD radix sort is stable and runs in linear time, but it needs a second buffe
 tessera-sort = "0.1"
 ```
 
-In a `no_std` program, disable the default `std` feature. The crate then uses `core` and `alloc`, so a global allocator must exist. A key-function panic during block partitioning aborts, even when the host enables unwinding:
-
-```toml
-[dependencies]
-tessera-sort = { version = "0.1", default-features = false }
-```
+SIMD is always enabled; there is no `portable-simd` or `std` feature. Disabling default features does not change the backend or remove the `std` requirement.
 
 ```rust
 use std::cmp::Reverse;

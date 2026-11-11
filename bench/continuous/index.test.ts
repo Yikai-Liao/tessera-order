@@ -15,8 +15,8 @@ import { pairedBmf } from "./paired.ts";
 async function publication(t: TestContext, cloud = true, moved = false, ratio?: number) {
   const dir = await mkdtemp(join(tmpdir(), "tessera-paired-report-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  for (const [index, variant] of VARIANTS.entries()) {
-    const runs = await writePaired(dir, variant, ratio ?? (index ? 0.8 : 1.2));
+  for (const variant of VARIANTS) {
+    const runs = await writePaired(dir, variant, ratio ?? 1.2);
     if (cloud) {
       const report = fixture();
       report.testbed.name = variant.relativeTestbed;
@@ -91,7 +91,19 @@ test("a precise sub-threshold change is no alert, not statistical equivalence", 
   assert.match(action.summaries[0], /no regression alert/);
 });
 
-test("raw paired samples drive independent checks and the existing shared chart", async (t) => {
+test("improvements publish successful configured checks", async (t) => {
+  const action = await publication(t, true, false, 0.8);
+  await publishReport(action);
+  assert.deepEqual(
+    action.requests
+      .filter((request) => request.method === "PATCH")
+      .map((request) => request.body.conclusion),
+    VARIANTS.map(() => "success"),
+  );
+  assert.match(action.summaries[0], /0.8000×/);
+});
+
+test("raw paired samples drive configured checks and the existing shared chart", async (t) => {
   const action = await publication(t);
   await publishReport(action);
   const checks = action.requests.filter(
@@ -99,11 +111,10 @@ test("raw paired samples drive independent checks and the existing shared chart"
   );
   assert.deepEqual(
     checks.map((request) => request.body.conclusion),
-    ["failure", "success"],
+    VARIANTS.map(() => "failure"),
   );
   const body = action.summaries[0];
   assert.match(body, /1.2000×/);
-  assert.match(body, /0.8000×/);
   assert.ok(body.includes("Median interval"));
   assert.doesNotMatch(body, /1.20 ns|0.800 ns/);
   assert.match(body, /serial/);
@@ -121,16 +132,16 @@ test("raw paired samples drive independent checks and the existing shared chart"
   );
 });
 
-test("missing shards fail one build without hiding the completed build", async (t) => {
+test("missing shards fail the configured build", async (t) => {
   const action = await publication(t);
-  await rm(join(action.inputs.artifacts, "paired-default-1"), { recursive: true });
+  await rm(join(action.inputs.artifacts, `paired-${VARIANTS[0].id}-1`), { recursive: true });
   await publishReport(action);
   const checks = action.requests.filter(
     (request) => request.method === "PATCH" && request.path.includes("/check-runs/"),
   );
   assert.deepEqual(
     checks.map((request) => request.body.conclusion),
-    ["failure", "success"],
+    VARIANTS.map(() => "failure"),
   );
   assert.match(action.summaries[0], /Missing measurement shards/);
 });
@@ -139,26 +150,26 @@ test("Cloud failure retains ratio tables and does not change performance checks"
   const action = await publication(t, false);
   await publishReport(action);
   assert.match(action.summaries[0], /Cloud archival runs separately/);
-  assert.match(action.summaries[0], /0.8000×/);
+  assert.match(action.summaries[0], /1.2000×/);
   assert.deepEqual(
     action.requests
       .filter((request) => request.method === "PATCH")
       .map((request) => request.body.conclusion),
-    ["failure", "success"],
+    VARIANTS.map(() => "failure"),
   );
 });
 
 test("Cloud contents cannot override performance evidence", async (t) => {
   const action = await publication(t);
-  const path = join(action.inputs.reports, "bencher-portable-simd.json");
+  const path = join(action.inputs.reports, `bencher-${VARIANTS[0].id}.json`);
   const report = fixture();
-  report.testbed.name = VARIANTS[1].relativeTestbed;
+  report.testbed.name = VARIANTS[0].relativeTestbed;
   report.branch.name = "pr-7";
   report.results = [[]];
   await writeFile(path, JSON.stringify(report));
   await publishReport(action);
   assert.match(action.summaries[0], /Cloud archival runs separately/);
-  assert.match(action.summaries[0], /0.8000×/);
+  assert.match(action.summaries[0], /1.2000×/);
 });
 
 test("superseded PR results stay in checks and summary, not a new comment", async (t) => {

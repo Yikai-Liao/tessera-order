@@ -64,7 +64,7 @@ test("rejects a self-consistent but shortened inventory across every shard", asy
       ]),
     );
     await writeFile(
-      join(out, `paired-default-${run.shard!.index}`, "local.json"),
+      join(out, `paired-${VARIANTS[0].id}-${run.shard!.index}`, "local.json"),
       JSON.stringify(run),
     );
   }
@@ -94,9 +94,10 @@ for (const damage of [
     t.after(() => rm(out, { recursive: true, force: true }));
     const runs = await writePaired(out, VARIANTS[0]);
     const run = runs[0];
-    const path = join(out, "paired-default-1", "local.json");
+    const path = join(out, `paired-${VARIANTS[0].id}-1`, "local.json");
     if (damage === "missing") await rm(path);
-    else if (damage === "plan") await writeFile(join(out, "paired-default-1", "plan.json"), "{}");
+    else if (damage === "plan")
+      await writeFile(join(out, `paired-${VARIANTS[0].id}-1`, "plan.json"), "{}");
     else {
       if (damage === "duplicate") run.shard!.index = 2;
       if (damage === "aslr") delete run.host.aslr;
@@ -116,6 +117,6 @@ for (const damage of [
       await writeFile(path, JSON.stringify(run));
     }
     await assert.rejects(readPaired(out, VARIANTS[0], source, runs[1].shard!.allCases));
-    assert.ok(await readFile(join(out, "paired-default-2", "local.json"), "utf8"));
+    assert.ok(await readFile(join(out, `paired-${VARIANTS[0].id}-2`, "local.json"), "utf8"));
   });
 }

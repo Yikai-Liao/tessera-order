@@ -12,6 +12,7 @@ import {
   buildBenchmark,
   copyLibraryRevision,
   copySnapshot,
+  simdFeatures,
   sourceHash,
   type Workspace,
   withWorkspace,
@@ -33,7 +34,6 @@ interface LocalOptions {
   out: string;
   filter?: string;
   plan: Plan;
-  simd: boolean;
   cpu?: string;
   layoutSeeds?: number[];
   layoutControl?: LayoutControl;
@@ -130,19 +130,28 @@ export async function buildRevisions(
     control === "cgu1" ? ["-Ccodegen-units=1"] : control === "aligned" ? ALIGNMENT_RUSTFLAGS : [];
   let env: NodeJS.ProcessEnv | undefined;
   const build = async (role: "baseline" | "current", seed: number | undefined) => {
+    const selectedFeatures = [
+      ...features,
+      ...simdFeatures(await readFile(manifest, "utf8")).map((feature) => `tessera-sort/${feature}`),
+    ];
     const args = rustcArgs(seed);
     if (extraFlags.length && !env) {
       // Cargo resolves target/build config flags before exposing them to the
       // build script. Read that result before selecting its higher-precedence
       // encoded environment source, which would otherwise discard config flags.
-      const reference = await buildBenchmark(tree, target, "smoke", features, { rustcArgs: args });
+      const reference = await buildBenchmark(tree, target, "smoke", selectedFeatures, {
+        rustcArgs: args,
+      });
       env = {
         CARGO_ENCODED_RUSTFLAGS: [reference.provenance.cargo_encoded_rustflags, ...extraFlags]
           .filter(Boolean)
           .join("\x1f"),
       };
     }
-    let built = await buildBenchmark(tree, target, "smoke", features, { rustcArgs: args, env });
+    let built = await buildBenchmark(tree, target, "smoke", selectedFeatures, {
+      rustcArgs: args,
+      env,
+    });
     if (control === "engine-first") {
       if (!layout || !args) throw new Error("Engine ordering requires layout seeds");
       const views = await Promise.all(
@@ -159,7 +168,7 @@ export async function buildRevisions(
       const order = join(directory, "engine.order");
       await writeFile(order, `${symbols.join("\n")}\n`);
       await cp(order, join(layout.out, `layout-${seed}-${role}.order`));
-      built = await buildBenchmark(tree, target, "smoke", features, {
+      built = await buildBenchmark(tree, target, "smoke", selectedFeatures, {
         env,
         rustcArgs: [
           ...args,
@@ -272,7 +281,7 @@ export async function comparisonCpus(parallel: boolean, requested?: string) {
 
 /** Compare an immutable working-tree snapshot with a commit, retaining only results. */
 export async function compareLocal(options: LocalOptions) {
-  const { root, out, simd } = options;
+  const { root, out } = options;
   // Probe before compiling; do not silently publish an uncontrolled ASLR run.
   if (platform() === "linux") await command("setarch", ["-R", "true"]);
   const cpu = await comparisonCpus(Boolean(options.plan.parallel?.length), options.cpu);
@@ -314,7 +323,7 @@ export async function compareLocal(options: LocalOptions) {
         root,
         workspace,
         baseline,
-        [...(simd ? ["portable-simd"] : []), ...(options.plan.parallel?.length ? ["rayon"] : [])],
+        [...(options.plan.parallel?.length ? ["rayon"] : [])],
         seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
         options.layoutControl,
       );
@@ -346,7 +355,7 @@ export async function compareLocal(options: LocalOptions) {
         builds,
         rustc: builds.current.rustc,
         flags: builds.current.cargo_encoded_rustflags,
-        configuration: simd ? "portable-simd" : "default",
+        configuration: "portable-simd",
         host: {
           platform: platform(),
           release: release(),

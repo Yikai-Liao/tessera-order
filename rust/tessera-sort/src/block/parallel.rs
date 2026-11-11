@@ -338,17 +338,17 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     drop(local_buffers);
     #[cfg(debug_assertions)]
     global.validate();
-    if let Some(finisher) = config.finish {
-        if finish::try_finish(
+    if let Some(finisher) = config.finish
+        && finish::try_finish(
             &mut global,
             &ends,
             shards,
             config.parallel,
             finisher.limit,
             finisher.sort,
-        ) {
-            return ends;
-        }
+        )
+    {
+        return ends;
     }
     compact::permute_blocks(&mut global, shards, config.parallel);
     let panic = global.compact_with(&ends, visit);

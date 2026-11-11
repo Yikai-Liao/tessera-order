@@ -21,6 +21,7 @@ Install Node.js 24 and the pnpm version pinned in `package.json`, then run `pnpm
 | Preview hosted benchmark jobs | `pnpm -s tools continuous matrix` |
 | Reproduce one paired shard | `pnpm -s tools compare commit main --plan continuous --shard 1/2` |
 | Upload completed paired JSON | `pnpm -s tools continuous submit --help` |
+
 | Regenerate an existing result | `pnpm -s tools report bench/results/SESSION` |
 | Read current main feedback | `pnpm -s tools status main` |
 | Read current PR feedback | `pnpm -s tools status --pr 123` |
@@ -56,26 +57,24 @@ pnpm -s tools status main --text
 
 Build and measurement tasks print one compact object containing `out`, `log` and `result`. Subprocess output and progress go to the adjacent `OUT.log`, leaving machine-readable stdout free of Cargo, compiler and Criterion output. A failed operation exits nonzero with the log path. Each `compare resume` invocation uses a separate adjacent `OUT.resume-TIMESTAMP-PID.log`, preserving previous logs. Preparation, validation, memory and group progress go to these diagnostics, not machine-readable stdout. Use `--verbose` only for interactive diagnosis; it streams subprocess diagnostics instead and no longer guarantees JSON-only stdout. Report regeneration prints its output location without reading or rebuilding sources. Plans print TOML by default or compact JSON with `--format json`.
 
-A successful `status` exit means the read succeeded, not that every workflow passed. An experiment's command exit describes execution, not proof of a speedup. Algorithm comparisons retain exact executable pairs and recorded settings before measuring; `compare resume DIR` accepts no selection or sampling overrides. See [recovery](benchmarking.md#resuming-algorithm-comparisons) for interruptions and locks. `continuous submit` records each configuration’s upload outcome in `outcomes.json`, attempts both even after a failure, and exits nonzero if either failed. It only reads validated JSON; paired regression checks are evaluated separately by report publication.
+A successful `status` exit means the read succeeded, not that every workflow passed. An experiment's command exit describes execution, not proof of a speedup. Algorithm comparisons retain exact executable pairs and recorded settings before measuring; `compare resume DIR` accepts no selection or sampling overrides. See [recovery](benchmarking.md#resuming-algorithm-comparisons) for interruptions and locks. `continuous submit` records each configuration’s upload outcome in `outcomes.json`, attempts every active configuration even after a failure, and exits nonzero if any failed. It only reads validated JSON; paired regression checks are evaluated separately by report publication.
 
 ## Reproduce continuous work locally
 
-The hosted jobs call the maintained revision comparison command, with the complete continuous plan and one partition of timed IDs. Linux and `taskset` with four available CPUs are required for the four-thread plan. Serial cases and parallel cases never overlap on a runner. Both revisions use the same current harness, lockfile, features and toolchain; no Cloud history is needed.
+The hosted jobs call the maintained revision comparison command, with the complete continuous plan and one partition of timed IDs. Linux and `taskset` with four available CPUs are required for the four-thread plan. Serial cases and parallel cases never overlap on a runner. Both revisions use the same current harness, lockfile, SIMD backend and toolchain; no Cloud history is needed.
 
 ```sh
 # New output directories; baseline can be any compatible local commit.
 pnpm tools compare commit main --plan continuous --shard 1/2 \
-  --out bench/results/paired-default-1
-pnpm tools compare commit main --plan continuous --simd --shard 1/2 \
   --out bench/results/paired-portable-simd-1
 
 # Regenerate one completed shard without building or measuring.
-pnpm tools report bench/results/paired-default-1
+pnpm tools report bench/results/paired-portable-simd-1
 ```
 
 Each shard keeps adjacent A/B sample pairs and the full catalogued sampling budget for its selected cases, without outer repetition. Omit `--shard` to run all cases on one host. `--shard INDEX/COUNT` partitions a resolved listing deterministically; it does not shorten samples. Results record the full inventory and selected subset. Directories must be new; temporary snapshots and default builds are cleaned, retained results and adjacent logs remain. Set `TESSERA_BENCH_TARGET_DIR` to a caller-owned Cargo cache to retain builds across runs; do not share it across trust boundaries. CI caches this exact target directory by configuration and sets the CLI alignment defaults before building.
 
-Upload is explicit and never executes code. Install the pinned Bencher CLI, download all four `paired-*` artifacts into separate directories under `ARTIFACTS`, and provide `BENCHER_API_KEY` through the environment:
+Upload is explicit and never executes code. Install the pinned Bencher CLI, download both `paired-*` artifacts into separate directories under `ARTIFACTS`, and provide `BENCHER_API_KEY` through the environment:
 
 ```sh
 # Run from a trusted checkout; this builds/lists, without timing any cases.

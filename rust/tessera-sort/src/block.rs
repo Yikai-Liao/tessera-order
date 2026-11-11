@@ -128,20 +128,32 @@ const BLOCK_RECORDS_FLOOR: usize = 32;
 /// scratch and `O(R)` table entries — so the auxiliary memory stays
 /// `O(sqrt(n))` in `n` for a fixed record size and digit width.
 pub(crate) fn default_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
+    scaled_block_size(
+        balanced_block_size(len, record_bytes, radix),
+        record_bytes,
+        BLOCK_SCALE,
+    )
+}
+
+/// Applies a balanced-size multiple and the per-block amortization floors.
+/// Serial and parallel partitions share these floors with their own balance.
+fn scaled_block_size(balanced: usize, record_bytes: usize, scale: usize) -> usize {
     let floors = (BLOCK_BYTES_FLOOR / record_bytes).max(BLOCK_RECORDS_FLOOR);
-    balanced_block_size(len, record_bytes, radix)
-        .saturating_mul(BLOCK_SCALE)
-        .max(floors)
-        .max(1)
+    balanced.saturating_mul(scale).max(floors).max(1)
 }
 
 /// The balanced block size, rounded up.
 ///
 /// Evaluates `ceil(sqrt(10 n / (2 R s)))`; tests compare against an integer solve.
 fn balanced_block_size(len: usize, record_bytes: usize, radix: usize) -> usize {
-    let range = 1usize << radix;
-    let tables = DESCRIPTOR_BYTES_PER_POSITION as f64 * len as f64;
-    let scratch_per_record = 2.0 * range as f64 * record_bytes as f64;
+    balanced_size(len, record_bytes, 1 << radix, DESCRIPTOR_BYTES_PER_POSITION)
+}
+
+/// Solves `ceil(sqrt(d n / (2 B s)))` for `B` scratch buckets and `d` directory
+/// bytes per block position: the size at which both memory terms are equal.
+fn balanced_size(len: usize, record_bytes: usize, buckets: usize, directory_bytes: usize) -> usize {
+    let tables = directory_bytes as f64 * len as f64;
+    let scratch_per_record = 2.0 * buckets as f64 * record_bytes as f64;
     (tables / scratch_per_record).sqrt().ceil() as usize
 }
 

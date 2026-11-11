@@ -146,28 +146,25 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     assert!(arr.len() >= 2);
     let bucket_count = 1usize << radix;
     let shards = config.shards.max(1).min(arr.len());
-    // Local and global directories coexist during adoption. Keep this
-    // conservative two-directory budget derived from the block representation.
     let record_bytes = core::mem::size_of::<T>();
-    let table_bytes = 2 * DESCRIPTOR_BYTES_PER_POSITION;
-    let balanced = ((table_bytes as f64 * arr.len() as f64)
-        / (2.0 * shards as f64 * bucket_count as f64 * record_bytes as f64))
-        .sqrt()
-        .ceil() as usize;
     let block_size = config.block_size.unwrap_or_else(|| {
-        let scale = if config
+        // Local and global directories coexist during adoption, so the balance
+        // charges two directories against one scratch reserve per shard bucket.
+        let balanced = balanced_size(
+            arr.len(),
+            record_bytes,
+            shards * bucket_count,
+            2 * DESCRIPTOR_BYTES_PER_POSITION,
+        );
+        let bounded = config
             .finish
             .as_ref()
-            .is_some_and(|finish| finish.limit > 0)
-        {
-            4
-        } else {
-            1
-        };
-        (scale * balanced)
-            .max(BLOCK_BYTES_FLOOR / record_bytes)
-            .max(BLOCK_RECORDS_FLOOR)
-            .max(1)
+            .is_some_and(|finish| finish.limit > 0);
+        scaled_block_size(
+            balanced,
+            record_bytes,
+            if bounded { BLOCK_SCALE } else { 1 },
+        )
     });
     let full_blocks = arr.len() / block_size;
     let shards = shards.min(full_blocks.max(1));

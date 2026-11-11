@@ -247,14 +247,12 @@ fn tile_digit_bits(len: usize, record_bytes: usize) -> usize {
     let tile_bytes = len.saturating_mul(record_bytes);
     // The widest table that still fits beside the records.
     let widest = (tile_bytes / core::mem::size_of::<Cursor>()).max(1).ilog2() as usize;
-    // Limit empty-bucket work to at most eight times the record count, or four
-    // for a record wider than a machine word: the same table then holds half as
-    // many records, and the buckets it clears are mostly empty. 16-byte records,
-    // 10M random keys: 8.0% faster at four (15 of 15 rounds; the A/A pair
-    // disagrees by 23.6% on that case, so the direction is the result, not the
-    // size). 128-byte records are unchanged: the byte cap already decides.
-    let slack = if record_bytes > 8 { 2 } else { 3 };
-    let by_records = len.max(1).ilog2() as usize + slack;
+    // Limit empty-bucket work to at most four buckets per record. For records
+    // of at most eight bytes the cursor-byte cap already implies this bound;
+    // wider records need it. 16-byte records, 10M random keys: 8.0% faster at
+    // four than at eight (15 of 15 rounds; the A/A pair disagrees by 23.6% on
+    // that case, so the direction is the result, not the size).
+    let by_records = len.max(1).ilog2() as usize + 2;
     widest
         .min(by_records)
         .clamp(MIN_TILE_DIGIT_BITS, MAX_TILE_DIGIT_BITS)

@@ -34,7 +34,7 @@ The planner separates exact work from advisory estimates and empirical budgets. 
 | Decision | Facts and constraints | Estimate or empirical policy |
 |---|---|---|
 | Flat digit plan | Varying positions and maximum width; exact number of passes and total bucket slots | Minimize passes, then slots; no fitted coefficient |
-| Tile table width | Two bytes per cursor and actual tile bytes; 14-bit table cap | Six-bit minimum; at most eight buckets per record, or four for records wider than eight bytes |
+| Tile table width | Two bytes per cursor and actual tile bytes; 14-bit table cap | Six-bit minimum; at most four buckets per record |
 | Tile MSD versus LSD | Exact minimum LSD pass count; sampled group populations and remaining variation | Compare record-weighted child passes: partition, confirmation or insertion, then the cheaper of flat work and recursively projected partitions; singleton populations assume uniform spread |
 | Node digit width | Effective tile capacity and block fan-out limit | Target half-tile children; widen a concentrated digit using sampled occupancy |
 | Equality partition | Repeated complete keys in the same bounded sample | A quarter-sample mode, sampled only when a node spans at least four tiles |

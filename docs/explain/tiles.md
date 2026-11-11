@@ -17,7 +17,7 @@ Below 48 records, the work of clearing and scanning bucket tables costs more tha
 The width of a counting digit is limited by its cursor table, one `u16` per bucket. `tile_digit_bits` picks the widest table that
 
 - is no larger than the tile itself in bytes (a 14-bit table is already 32 KiB);
-- has at most 8 buckets per record, or 4 for records wider than 8 bytes, so clearing and scanning empty buckets cannot dominate. A wider record fits fewer records in the same table budget, so its buckets would be mostly empty;
+- has at most 4 buckets per record, so clearing and scanning empty buckets cannot dominate. Records of at most 8 bytes already meet this through the byte limit; wider records fit fewer records in the same table budget, so the record limit decides for them;
 - is between 6 and 14 bits wide.
 
 The planner covers varying bit positions with nonoverlapping windows no wider than that limit. It minimizes the number of record passes first, then the total bucket slots among equally short plans. A bounded search over at most 128 positions finds the cheapest lower-bit prefix for every legal next window. Dense, shifted and sparse variation follow the same rule; constant gaps only occupy a window when that avoids a pass or reduces total table work.

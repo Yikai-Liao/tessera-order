@@ -208,8 +208,15 @@ export async function buildBenchmark(
   target: string,
   name: "smoke" | "compare",
   features: string[],
-  options: { targetTriple?: string; env?: NodeJS.ProcessEnv; rustcArgs?: string[] } = {},
+  options: {
+    targetTriple?: string;
+    env?: NodeJS.ProcessEnv;
+    rustcArgs?: string[];
+    profile?: "dev" | "release";
+  } = {},
 ) {
+  if (options.profile && name !== "compare")
+    throw new Error("Explicit profiles are only supported for comparison builds");
   if (options.rustcArgs && name !== "smoke")
     throw new Error("Final rustc arguments require a smoke benchmark build");
   const build = async (env = options.env) =>
@@ -221,7 +228,15 @@ export async function buildBenchmark(
             ? options.rustcArgs
               ? ["rustc", "--profile", "bench", "--bench", name]
               : ["bench", "--bench", name, "--no-run"]
-            : ["build", "--release", "--bin", name, "--bin", "memory"]),
+            : [
+                "build",
+                "--profile",
+                options.profile ?? "release",
+                "--bin",
+                name,
+                "--bin",
+                "memory",
+              ]),
           "--locked",
           "-p",
           "tessera-bench",

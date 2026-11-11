@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { type BencherReport, type ComparedRow, type Row, summarize } from "./report.ts";
+import {
+  type BencherReport,
+  type ComparedRow,
+  type ReportSummary,
+  type Row,
+  summarize,
+} from "./report.ts";
 
 const API = "https://api.bencher.dev/v0/projects";
 const PAGE_SIZE = 100;
@@ -139,6 +145,61 @@ export function summarizeTrend(
   const runs = comparableRuns(reports, current, language);
   if (!runs.length) return null;
   const summary = summarize(current);
+  return summarizeRuns(runs, summary, current, language);
+}
+
+/** Summarize ratios only within the native Head keyed by protocol and exact baseline.
+ *
+ * The current point remains available when Cloud or history loading fails.
+ * Raw paired verdicts remain authoritative; Cloud supplies history and links.
+ */
+export function summarizePairedTrend(
+  summary: ReportSummary,
+  language: string,
+  current?: BencherReport,
+  reports: BencherReport[] = [],
+): TrendSummary | null {
+  if (!summary.relative || !summary.baseHash)
+    throw new Error("Paired history needs an exact baseline");
+  if (!current) {
+    return summarizeRuns(
+      [
+        {
+          uuid: summary.hash!,
+          hash: summary.hash,
+          time: "",
+          values: new Map(summary.rows.map((row) => [caseKey(row), row.value])),
+        },
+      ],
+      summary,
+      {
+        project: { slug: summary.project },
+        branch: { name: "" },
+        testbed: summary.testbed,
+      },
+      language,
+    );
+  }
+  const identities = new Map(summarize(current).rows.map((row) => [row.name, row]));
+  const rows = summary.rows.map((row) => {
+    const identity = identities.get(row.name);
+    if (!identity) throw new Error("Cloud history lacks a current case");
+    return { ...row, benchmark: identity.benchmark, measure: identity.measure };
+  });
+  const runs = comparableRuns(
+    reports.filter((report) => report.branch.head.uuid === current.branch.head.uuid),
+    current,
+    language,
+  );
+  return summarizeRuns(runs, { rows, baseHash: summary.baseHash }, current, language);
+}
+
+function summarizeRuns(
+  runs: MeasuredRun[],
+  summary: Pick<ReportSummary, "rows" | "baseHash">,
+  current: { project: { slug: string }; branch: { name: string }; testbed: { name: string } },
+  language: string,
+): TrendSummary | null {
   const shared = summary.rows.filter(
     (row): row is ComparedRow =>
       row.baseline !== null &&

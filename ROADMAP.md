@@ -37,7 +37,7 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 | E2 | Parallel preparation repeats serial tile geometry, probes and half dispatch | Consolidate only if separate serial inlining contexts retain their measured behavior |
 | E3 | Parallel direct-key counting repeats serial counting and fill | Constrain shared semantics and establish both configurations' performance before merging mechanisms |
 | E4 | Half-key views share window operations, but `RootExtractor` retains independent forwarding | Reduce remaining forwarding only without losing backend choices or independent call contexts; validate code generation |
-| E5 | Serial block storage contains Rayon scratch-segment state and a branch | Decide layout and tracking protocol explicitly: both continuous builds enable Rayon; the default feature set is a separate configuration |
+| E5 | Serial block storage contains Rayon scratch-segment state and a branch | Decide layout and tracking protocol explicitly: the continuous build enables Rayon; the library default without Rayon is a separate configuration |
 | E6 | `engine.rs` combines routing, sampling, planning, node/tile sorting and scratch | Split along mechanism/invariant boundaries only with inlining and placement controls |
 
 ## C++
@@ -47,13 +47,11 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 
 ## Benchmark investigations
 
-- Validate the hosted paired pipeline on Actions: retain cold/warm-cache full-suite duration, queue wait, paired median intervals, same-source false alerts and held-out detection evidence for both configurations before claiming hosted stability or tuning the per-case sample budget. Verify Cloud upload, fork PR publication, partial-job reruns and the main first-parent comparison. The fresh-process calibration in PR #96 (Actions run `42904693411`) completed all 70 cases per configuration with no same-source alerts; its four measurement jobs took 346–406 seconds. One calibration does not establish long-term false-alert or detection rates.
+- Validate the hosted paired pipeline on Actions: retain cold/warm-cache full-suite duration, queue wait, paired median intervals, same-source false alerts and held-out detection evidence for the required backend before claiming hosted stability or tuning the per-case sample budget. Verify direct PR Cloud upload, fork/Dependabot summary-only behavior and partial-job reruns. Automatic main measurements are disabled. The legacy dual-configuration calibration in PR #96 (Actions run `42904693411`) completed all 70 cases per configuration with no same-source alerts; its four measurement jobs took 346–406 seconds. One calibration does not establish long-term false-alert or detection rates.
 
-- Support intended PR changes to continuous plans or resolved boundary inventories without trusting PR-declared completeness or executing PR code in the publisher. Current publication requires the trusted default-branch inventory; validate changed selections locally until that authority is updated. Keep Rust as the sole case-expansion owner.
+- Retain raw paired evidence beyond Actions’ 14-day artifacts if longer-term offline regeneration becomes required. PR trend history uses native Bencher Heads segmented by protocol and exact baseline; do not reconnect segments as absolute latency.
 
-- Restore PR trend figures only with an explicit baseline-compatible relative-history contract. Hosted ratios can use different merge bases; do not re-normalize them as absolute latency or a fixed-baseline time series. Retain raw evidence beyond Actions’ 14-day artifacts if longer-term regeneration becomes required.
-
-- Consolidate distribution-sensitive routing into general mechanisms. Child-order reuse and the bucket-order split replace the capped end-run route; evaluate both against current-head Portable SIMD continuous feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
+- Consolidate distribution-sensitive routing into general mechanisms. Child-order reuse and the bucket-order split replace the capped end-run route; evaluate both against current-head continuous benchmark feedback. Investigate remaining near-order, sparse-digit and skewed-key deficits without per-distribution tuning.
 
 - Extend the comparison to cold-cache experiments, additional seeds and threshold cases when an investigation needs them.
 - Add native-CPU placement controls for source A/B studies; existing CGU, alignment and engine-order screens remain process-level evidence.

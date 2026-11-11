@@ -48,50 +48,15 @@ impl<T, E: Extract<T>> Shard<'_, '_, T, E> {
         let shift = E::Value::from_usize(shift);
         let mask = E::Value::from_usize((1usize << width) - 1) << shift;
         let key = &mut self.key;
-        let (panic, _) = self.sorter.step_with_ends(
-            move |record| ((key.key(record) & mask) >> shift).to_usize(),
-            false,
-        );
-        self.panic = panic;
+        self.panic = self
+            .sorter
+            .step(move |record| ((key.key(record) & mask) >> shift).to_usize());
         self
     }
 }
 
-pub(crate) fn partition_digit_parallel_with_visit<
-    'records,
-    T: Send,
-    E: Extract<T> + Clone + Send,
->(
-    arr: &'records mut [T],
-    radix: usize,
-    shift: usize,
-    key: E,
-    buffers: &mut Buffers<T>,
-    requested_shards: usize,
-    visit: Visit<'_, 'records, T>,
-) -> Vec<usize> {
-    partition_impl_with_visit(
-        arr,
-        radix,
-        shift,
-        key,
-        buffers,
-        Config {
-            shards: requested_shards,
-            block_size: None,
-            parallel: true,
-            finish: None,
-        },
-        Some(visit),
-    )
-}
-
 /// Partitions the root with an optional bounded pre-materialization finisher.
-pub(crate) fn partition_digit_parallel_with_finish<
-    'records,
-    T: Send,
-    E: Extract<T> + Clone + Send,
->(
+pub(crate) fn partition_digit_parallel<'records, T: Send, E: Extract<T> + Clone + Send>(
     records: &'records mut [T],
     width: usize,
     shift: usize,
@@ -170,7 +135,7 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     let shards = shards.min(full_blocks.max(1));
     if shards == 1 && config.block_size.is_none() {
         let mut key = key;
-        return partition_digit_with_ends(arr, radix, shift, &mut key, buffers, &mut |child, _| {
+        return partition_digit(arr, radix, shift, &mut key, buffers, &mut |child, _| {
             if let Some(callback) = visit.as_deref_mut() {
                 callback(child);
             }
@@ -315,14 +280,10 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             // Bucket-major, then ORIGINAL shard order. Completion order is never
             // used, so equal keys retain their original cross-shard order.
             for (index, task) in tasks.iter().enumerate() {
-                let start = if bucket == 0 {
-                    task.sorter.active_blocks.start
-                } else {
-                    task.sorter.partial_blocks[bucket - 1].order_index + 1
-                };
+                let blocks = task.sorter.bucket_blocks(bucket);
                 let partial = task.sorter.partial_blocks[bucket];
-                let end = partial.order_index + 1;
-                for logical in start..end {
+                records += (blocks.len() - 1) * block_size + partial.len;
+                for logical in blocks {
                     order[output] = translate(index, task, task.sorter.block_order[logical]) as u32;
                     output += 1;
                 }
@@ -330,7 +291,6 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                     order_index: output - 1,
                     len: partial.len,
                 });
-                records += (end - start - 1) * block_size + partial.len;
             }
             ends.push(records);
             *block_end = output;

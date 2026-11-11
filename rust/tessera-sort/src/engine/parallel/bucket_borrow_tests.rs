@@ -18,7 +18,7 @@ fn sort_group<'records, T: Send, E: Extract<T> + Clone + Send>(
     let mut visit = |bucket: &'records mut [T], _: &mut E| {
         pending.get_or_insert_with(Job::new).push(bucket);
     };
-    let ends = block::partition_digit_with_ends(
+    let ends = block::partition_digit(
         records,
         1,
         2,

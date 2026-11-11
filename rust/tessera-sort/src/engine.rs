@@ -468,20 +468,6 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
     /// Executes an already selected partition; parallel fallbacks do not resample.
     fn execute_node(&mut self, records: &mut [T], varying: u128, plan: NodePlan<E::Value>) {
         match plan {
-            NodePlan::Window(digit) => {
-                if !self
-                    .extractor
-                    .try_count_window(records, digit.shift, digit.width)
-                {
-                    block::partition_digit(
-                        records,
-                        digit.width,
-                        digit.shift,
-                        self.extractor,
-                        &mut self.scratch.block,
-                    );
-                }
-            }
             NodePlan::Equal(equal) => self.partition_equal(records, equal, varying),
             NodePlan::Runs { boundary, set } => self.split_ordered(records, boundary, set, varying),
             NodePlan::Digit(digit) => self.partition_digit(records, digit, varying),
@@ -493,6 +479,15 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         // Bucket boundaries come from the block engine. The split digit is
         // constant inside each child, so its bits are excluded from the next scan.
         let candidate = varying & !digit.mask::<E::Value>().to_u128();
+        // A digit covering all remaining variation leaves constant buckets;
+        // interchangeable records can be counted instead of moved.
+        if candidate == 0
+            && self
+                .extractor
+                .try_count_window(records, digit.shift, digit.width)
+        {
+            return;
+        }
         let tile_len = self.tile_len;
         let mut block_buffers = core::mem::take(&mut self.scratch.block);
         let mut visit = |child: &mut [T], extractor: &mut E| {
@@ -501,7 +496,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
                 self.scratch.tile.sort::<E>(child, varying, extractor);
             }
         };
-        let ends = block::partition_digit_with_ends(
+        let ends = block::partition_digit(
             records,
             digit.width,
             digit.shift,

@@ -328,7 +328,6 @@ fn two_runs<T, E: Extract<T>>(
 /// A node's partition decision, consumed by either execution path.
 /// Sampling and ordered-run recognition belong here, not in the scheduler.
 pub(super) enum NodePlan<V> {
-    Window(Digit),
     Equal(V),
     Runs { boundary: usize, set: bool },
     Digit(Digit),
@@ -341,10 +340,12 @@ pub(super) fn plan_node<T, E: Extract<T>>(
     tile_len: usize,
     extractor: &mut E,
 ) -> NodePlan<E::Value> {
+    // One digit that covers every remaining difference leaves finished
+    // buckets, so no sample or run check can select a cheaper partition.
     let low = varying.trailing_zeros() as usize;
     let span = bit_len(varying) - low;
     if span <= SPLIT_BITS {
-        return NodePlan::Window(Digit {
+        return NodePlan::Digit(Digit {
             shift: low,
             width: span,
         });

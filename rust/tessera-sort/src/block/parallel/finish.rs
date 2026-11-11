@@ -593,8 +593,7 @@ mod tests {
             let records =
                 unsafe { core::slice::from_raw_parts_mut(input.add(shard * SHARD_LEN), SHARD_LEN) };
             let mut part = Partition::new(records, BUCKETS, BLOCK, buffers);
-            let (panic, _) = part.step_with_ends(|record| record.0 as usize, false);
-            assert!(panic.is_none());
+            assert!(part.step(|record| record.0 as usize).is_none());
             parts.push(part);
         }
         let scratch_blocks = SHARDS * 2 * BUCKETS;

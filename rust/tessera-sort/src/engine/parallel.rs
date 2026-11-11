@@ -149,27 +149,6 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync>(
     }
     let shards = rayon::current_num_threads().min((node_bytes / MIN_TASK_BYTES).max(1));
     let digit = match plan_node(records, varying, tile_len, extractor) {
-        NodePlan::Window(digit) => {
-            if extractor.try_count_window_parallel(records, digit.shift, digit.width) {
-                return;
-            }
-            let limit = bucket_limit::<T>(records.len(), digit.width);
-            let ends = block::partition_digit_parallel_with_finish(
-                records,
-                digit.width,
-                digit.shift,
-                extractor.clone(),
-                &mut scratch.block,
-                shards,
-                block::BucketFinish {
-                    limit,
-                    sort: &|_| {},
-                    visit: &mut |_| {},
-                },
-            );
-            scratch.block.recycle_ends(ends);
-            return;
-        }
         NodePlan::Digit(digit) => digit,
         plan => {
             Sorter::<T, E> {
@@ -183,17 +162,8 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync>(
     };
 
     let candidate = varying & !digit.mask::<E::Value>().to_u128();
-    if candidate == 0 {
-        let ends = block::partition_digit_parallel_with_visit(
-            records,
-            digit.width,
-            digit.shift,
-            extractor.clone(),
-            &mut scratch.block,
-            shards,
-            &mut |_| {},
-        );
-        scratch.block.recycle_ends(ends);
+    // Finished buckets need no jobs' work; direct keys count them in parallel.
+    if candidate == 0 && extractor.try_count_window_parallel(records, digit.shift, digit.width) {
         return;
     }
 
@@ -231,7 +201,7 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync>(
             pool_ref.give(scratch);
         };
         let limit = bucket_limit::<T>(records.len(), digit.width);
-        let ends = block::partition_digit_parallel_with_finish(
+        let ends = block::partition_digit_parallel(
             records,
             digit.width,
             digit.shift,

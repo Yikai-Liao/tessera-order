@@ -301,7 +301,7 @@ mod tests {
             let result = unwind::catch(|| {
                 let mut buffers = Buffers::new();
                 let mut sorter = Partition::new(&mut rows, 4, 3, &mut buffers);
-                assert!(sorter.step_with_ends(|row| row.key, false).0.is_none());
+                assert!(sorter.step(|row| row.key).is_none());
                 permute_with_fault(&mut sorter, 4, !cfg!(miri), fail);
                 sorter.compact();
             });
@@ -318,12 +318,7 @@ mod tests {
             let result = unwind::catch(|| {
                 let mut buffers = Buffers::new();
                 let mut sorter = Partition::new(&mut refs, 4, 3, &mut buffers);
-                assert!(
-                    sorter
-                        .step_with_ends(|row| **row * 37 % 4, false)
-                        .0
-                        .is_none()
-                );
+                assert!(sorter.step(|row| **row * 37 % 4).is_none());
                 permute_with_fault(&mut sorter, 4, !cfg!(miri), fail);
                 sorter.compact();
             });

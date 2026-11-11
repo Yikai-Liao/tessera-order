@@ -20,33 +20,47 @@ const ROUTES: [RegExp, Lane[]][] = [
   [/^(\.github\/(ISSUE_TEMPLATE\/|pull_request_template\.md$|dependabot\.yml$)|fuzz\/)/, []],
   // Prose, including the shared contract; a lane needs a row here once an executable consumer exists.
   [/^(docs\/|assets\/)|\.md$/, ["docs"]],
+  // These workflows run independently of the automatic build/test pipeline.
+  [
+    /^\.github\/workflows\/(dco|pr-title|release|rust-release|cpp-release|bench-diagnostics)\.yml$/,
+    [],
+  ],
   // Tests exercise the engine but are not the code that PR measurements compare.
   [
     /^rust\/[^/]+\/(tests\/|LICENSE$)|^(rustfmt\.toml|\.github\/workflows\/rust-ci\.yml|\.github\/actions\/rust-test\/)/,
     ["rust"],
   ],
+  [/^rust\//, ["rust", "benchmark"]],
   [
-    /^(rust\/|\.cargo\/)|^(Cargo\.toml|Cargo\.lock|rust-toolchain(\.toml)?)$/,
+    /^\.cargo\/|^(Cargo\.toml|Cargo\.lock|rust-toolchain(\.toml)?)$/,
     ["rust", "comparison", "benchmark"],
   ],
-  [/^(cpp\/|bench\/cpp\/)|^(CMakeLists\.txt|CMakePresets\.json)$/, ["cpp", "comparison"]],
+  [
+    /^(cpp\/|bench\/cpp\/)|^(CMakeLists\.txt|CMakePresets\.json|\.github\/workflows\/cpp-ci\.yml)$/,
+    ["cpp"],
+  ],
   // Tooling that renders or reads results and never builds or times a sorting algorithm.
   [/^bench\/plot\//, ["docs"]],
   [
-    /\.test\.ts$|^bench\/(continuous\/(?!paired\.ts$)|report\/|local\/(report|counters|layout)\.ts$)|^\.github\/scripts\/|^tools\/status\.ts$|^\.github\/workflows\/bench-diagnostics\.yml$/,
+    /\.test\.ts$|^bench\/(continuous\/(?!paired\.ts$)|report\/|local\/(report|counters|layout)\.ts$)|^\.github\/scripts\/|^tools\/(status|repository)\.ts$|^(biome|tsconfig)\.json$/,
     [],
   ],
-  [/^bench\/rust\/native\//, ["rust", "comparison"]],
-  [/^bench\/rust\//, ["rust", "comparison", "benchmark"]],
-  [/^bench\/plans\/continuous\.toml$/, ["benchmark"]],
+  [
+    /^bench\/continuous\/paired\.ts$|^bench\/local\/(runner|model|samples)\.ts$|^tools\/continuous\.ts$/,
+    ["benchmark"],
+  ],
+  [/^bench\/(release|session|revisions)\.ts$/, ["comparison"]],
+  [
+    /^bench\/rust\/(native\/|tests\/|src\/(comparison\/|allocation\.rs$|bin\/(compare|memory)\.rs$))/,
+    ["comparison"],
+  ],
+  [/^bench\/rust\//, ["comparison", "benchmark"]],
+  [/^bench\/plans\/(continuous|local)\.toml$/, ["benchmark"]],
   [/^bench\/plans\/diagnostics\.toml$/, []],
   [/^bench\/plans\//, ["comparison"]],
   [/^bench\/catalog\./, ["comparison", "benchmark", "docs"]],
   [/^(bench|tools)\//, ["comparison", "benchmark"]],
-  [
-    /^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|biome\.json)$/,
-    ["comparison", "benchmark", "docs"],
-  ],
+  [/^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml)$/, ["comparison", "benchmark", "docs"]],
   [/^\.github\/workflows\/docs\.yml$/, ["docs"]],
 ];
 

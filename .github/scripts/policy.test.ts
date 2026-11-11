@@ -44,53 +44,80 @@ function replace(value: object, path: string[], replacement: unknown) {
   return copy;
 }
 
-test("routing selects dependencies without running Rust for presentation changes", () => {
+test("routing keeps library, comparison and revision checks with their owners", () => {
   const none = { rust: false, cpp: false, comparison: false, benchmark: false, docs: false };
-  for (const path of [
-    "tools/status.ts",
-    "bench/continuous/markdown.ts",
-    "bench/continuous/index.test.ts",
-  ])
-    assert.deepEqual(select([path]), none);
-  assert.deepEqual(select(["docs/explain/keys.md"]), { ...none, docs: true });
-  assert.deepEqual(select(["rust/tessera-sort/src/lib.rs"]), {
-    ...none,
-    rust: true,
-    comparison: true,
-    benchmark: true,
-  });
-  assert.deepEqual(select(["bench/plans/continuous.toml"]), { ...none, benchmark: true });
-  assert.deepEqual(select(["bench/rust/native/adapters.cpp"]), {
-    ...none,
-    rust: true,
-    comparison: true,
-  });
-  assert.deepEqual(select(["cpp/include/sort.hpp"]), { ...none, cpp: true, comparison: true });
-  for (const path of [
-    "conformance/semantics.md",
-    "rust/tessera-sort/tests/memory.rs",
-    "fuzz/fuzz_targets/sort.rs",
-    ".github/dependabot.yml",
-    ".github/pull_request_template.md",
-  ])
-    assert.deepEqual(
-      select([path]),
-      path.endsWith(".md") && path.startsWith("conformance/")
-        ? { ...none, docs: true }
-        : path.startsWith("rust/")
-          ? { ...none, rust: true }
-          : none,
-      path,
-    );
+  const owners: [string[], Partial<typeof none>][] = [
+    [
+      ["rust/tessera-sort/src/lib.rs", "rust/tessera-sort/Cargo.toml"],
+      { rust: true, benchmark: true },
+    ],
+    [["rust/tessera-sort/tests/memory.rs", ".github/actions/rust-test/action.yml"], { rust: true }],
+    [
+      ["Cargo.lock", "Cargo.toml", ".cargo/config.toml", "rust-toolchain.toml"],
+      { rust: true, comparison: true, benchmark: true },
+    ],
+    [["cpp/include/sort.hpp", ".github/workflows/cpp-ci.yml"], { cpp: true }],
+    [
+      [
+        "bench/rust/native/ips.cpp",
+        "bench/rust/src/comparison/run.rs",
+        "bench/rust/src/allocation.rs",
+        "bench/rust/src/bin/compare.rs",
+        "bench/rust/src/bin/memory.rs",
+        "bench/rust/tests/comparison.rs",
+        "bench/release.ts",
+        "bench/plans/smoke.toml",
+      ],
+      { comparison: true },
+    ],
+    [
+      ["bench/rust/src/case.rs", "bench/rust/build.rs", "bench/workspace.ts", "tools/process.ts"],
+      { comparison: true, benchmark: true },
+    ],
+    [
+      [
+        "bench/plans/continuous.toml",
+        "bench/plans/local.toml",
+        "bench/continuous/paired.ts",
+        "bench/local/runner.ts",
+        "tools/continuous.ts",
+      ],
+      { benchmark: true },
+    ],
+    [["docs/explain/keys.md", "conformance/semantics.md"], { docs: true }],
+    [
+      [
+        "tools/status.ts",
+        "tools/repository.ts",
+        "biome.json",
+        "tsconfig.json",
+        "bench/continuous/markdown.ts",
+        "bench/continuous/index.test.ts",
+        "bench/rust/native/build.test.ts",
+        "bench/plans/diagnostics.toml",
+        "fuzz/fuzz_targets/sort.rs",
+        ".github/dependabot.yml",
+        ".github/pull_request_template.md",
+        ".github/workflows/dco.yml",
+        ".github/workflows/pr-title.yml",
+        ".github/workflows/release.yml",
+        ".github/workflows/rust-release.yml",
+        ".github/workflows/cpp-release.yml",
+        ".github/workflows/bench-diagnostics.yml",
+      ],
+      {},
+    ],
+  ];
+  for (const [paths, expected] of owners)
+    for (const path of paths) assert.deepEqual(select([path]), { ...none, ...expected }, path);
   // A path no row names, and an unavailable base, select every lane.
   for (const path of ["unknown-input", "conformance/vectors/keys.json", ".gitignore"])
     assert.ok(Object.values(select([path])).every(Boolean), path);
-  assert.deepEqual(select(["docs/explain/keys.md", "rust/tessera-sort/src/lib.rs"]), {
+  assert.deepEqual(select(["rust/tessera-sort/src/lib.rs", "bench/rust/native/ips.cpp"]), {
     ...none,
     rust: true,
     comparison: true,
     benchmark: true,
-    docs: true,
   });
   assert.equal(changedPaths(undefined, "HEAD"), null);
   assert.equal(changedPaths("missing-base-ref", "HEAD"), null);

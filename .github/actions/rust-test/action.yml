@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 name: Rust test cell
 description: >-
-  Build and test the workspace with one toolchain. The pull request cells and
+  Build and test the library with one toolchain. The pull request cells and
   the main-only cells both call this action, so the command list has one home.
 
 inputs:
@@ -22,35 +22,10 @@ runs:
       with:
         toolchain: ${{ inputs.toolchain }}
     - uses: Swatinem/rust-cache@v2
-    # The standalone registry needs only layout.h and C++17, not fetched native
-    # competitors. Compile it on existing cells to check portable macro expansion.
-    - name: Compile native registry with GCC and Clang
-      if: inputs.toolchain == 'stable' && runner.os == 'Linux'
-      shell: bash
-      run: |
-        for compiler in g++ clang++; do
-          "$compiler" -std=c++17 -pedantic-errors -Wall -Wextra -Werror \
-            -c bench/rust/native/registry.cpp -o "$RUNNER_TEMP/registry.o"
-        done
-    - name: Compile native registry with both MSVC preprocessors
-      if: inputs.toolchain == 'stable' && runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-        $installation = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-        if (!$installation) { throw "MSVC installation not found" }
-        $setup = Join-Path $installation "Common7\Tools\VsDevCmd.bat"
-        foreach ($preprocessor in @("/Zc:preprocessor", "/Zc:preprocessor-")) {
-          cmd /c "call `"$setup`" -arch=x64 -host_arch=x64 && cl /nologo /std:c++17 /permissive- /W4 /WX $preprocessor /c bench\rust\native\registry.cpp /Fo`"$env:RUNNER_TEMP\registry.obj`""
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        }
-    # `--lib --tests` rather than `--all-targets`: the only extra target is the
-    # Criterion benchmark, which no test asserts on and which bench-build.yml
-    # compiles on the stable Linux runner for every change that touches Rust.
     - shell: bash
-      run: cargo test --workspace --lib --tests
+      run: cargo test -p tessera-sort --lib --tests
     - shell: bash
-      run: cargo test --workspace --doc
+      run: cargo test -p tessera-sort --doc
     # Exercise Rayon on every platform and the MSRV, including serial fallback.
     - shell: bash
       run: cargo test -p tessera-sort --lib --tests --features rayon

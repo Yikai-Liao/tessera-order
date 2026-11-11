@@ -6,6 +6,11 @@ on:
 permissions:
   contents: read
 
+# A newer push or title edit supersedes the check still running.
+concurrency:
+  group: dco-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   sign-off:
     runs-on: ubuntu-latest

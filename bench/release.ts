@@ -9,7 +9,6 @@ import { writeReport } from "./report/index.ts";
 import { prepareRevisions, type Revisions } from "./revisions.ts";
 import { fetchNative } from "./rust/native/fetch.ts";
 import {
-  type Build,
   executables,
   fileHash,
   isValidated,
@@ -103,17 +102,17 @@ export interface ReleaseOptions {
   revisions?: Revisions;
 }
 
-/** Retain immutable builds, then validate, measure and report one experiment. */
+/** Retain the executable pair, then validate, measure and report one experiment. */
 export async function compareAlgorithms(options: ReleaseOptions) {
   pairedBudget(options.blocks);
   await mkdir(options.out, { recursive: false });
-  await withSessionLock(options.out, async () => {
+  return withSessionLock(options.out, async () => {
     await prepareComparison(options);
-    await measureComparison(options.out);
+    return measureComparison(options.out);
   });
 }
 
-/** Build every selected configuration before starting any measurement. */
+/** Build the timing/memory executable pair before starting any measurement. */
 async function prepareComparison(options: ReleaseOptions) {
   const { root, out, plan, cpu, group, sampleMs, memoryMib, blocks } = options;
   if (cpu) await command("taskset", ["-c", cpu, "true"]);
@@ -122,8 +121,7 @@ async function prepareComparison(options: ReleaseOptions) {
   );
   const planPath = join(out, "plan.json");
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
-  const builds: Build[] = [];
-  await withComparisonWorkspace(root, native, async ({ tree, target }) => {
+  const build = await withComparisonWorkspace(root, native, async ({ tree, target }) => {
     const features = [
       "compare",
       ...(native ? ["compare-native"] : []),
@@ -134,13 +132,12 @@ async function prepareComparison(options: ReleaseOptions) {
         : []),
     ];
     if (options.revisions) await prepareRevisions(root, tree, options.revisions, features);
-    const name = "default";
-    diagnostic(`Building ${name}`);
+    diagnostic("Building comparison workers");
     const { executable } = await buildBenchmark(tree, target, "compare", features);
-    builds.push(await retainBuild(out, name, executable));
+    return retainBuild(out, executable);
   });
   const session: Session = {
-    schema: 1,
+    schema: 2,
     platform: process.platform,
     planSha256: await fileHash(planPath),
     cpu,
@@ -148,15 +145,15 @@ async function prepareComparison(options: ReleaseOptions) {
     sampleMs,
     blocks,
     memoryMib,
-    builds,
+    build,
   };
   await writeFile(join(out, "session.json"), `${JSON.stringify(session, null, 2)}\n`);
   diagnostic(`Prepared; resume with: pnpm tools compare resume ${out}`);
 }
 
-/** Resume with the retained selection, sampling settings and exact executable pairs. */
+/** Resume with the retained selection, sampling settings and exact executable pair. */
 export async function resumeComparison(out: string) {
-  await withSessionLock(out, () => measureComparison(out));
+  return withSessionLock(out, () => measureComparison(out));
 }
 
 /** Validate immutable inputs, then let the native journal resume complete groups. */
@@ -171,25 +168,24 @@ async function measureComparison(out: string) {
     ...(group ? ["--group", group] : []),
     ...(session.blocks === undefined ? [] : ["--blocks", String(session.blocks)]),
   ];
-  for (const build of session.builds) {
-    const binary = executables(out, build.name).compare;
-    const execute = (args: string[]) =>
-      command(cpu ? "taskset" : binary, cpu ? ["-c", cpu, binary, ...args] : args, { cwd: out });
-    if (!(await isValidated(out, build, session))) {
-      diagnostic(`Validating ${build.name}`);
-      await execute(["validate", ...selection]);
-      await recordValidation(out, build, session);
-    }
-    diagnostic(`Measuring ${build.name}; completed groups are retained`);
-    await execute([
-      "run",
-      ...selection,
-      "--sample-ms",
-      String(sampleMs),
-      "--memory-mib",
-      String(memoryMib),
-    ]);
+  const build = session.build;
+  const binary = executables(out).compare;
+  const execute = (args: string[]) =>
+    command(cpu ? "taskset" : binary, cpu ? ["-c", cpu, binary, ...args] : args, { cwd: out });
+  if (!(await isValidated(out, build, session))) {
+    diagnostic("Validating algorithms");
+    await execute(["validate", ...selection]);
+    await recordValidation(out, build, session);
   }
+  diagnostic("Measuring; completed groups are retained");
+  await execute([
+    "run",
+    ...selection,
+    "--sample-ms",
+    String(sampleMs),
+    "--memory-mib",
+    String(memoryMib),
+  ]);
   diagnostic("Generating the offline report");
-  await writeReport([out], Boolean(group));
+  return writeReport([out], Boolean(group));
 }

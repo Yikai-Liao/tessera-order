@@ -63,8 +63,7 @@ export async function readPaired(
     reference.configuration !== variant.id ||
     reference.shard ||
     reference.samples ||
-    reference.sampleCounts ||
-    reference.blocks.length
+    reference.sampleCounts
   )
     throw new Error("Expected this run’s unmeasured prepared pair");
   for (const name of await readdir(directory)) {
@@ -195,7 +194,6 @@ export function pairedSummary(runs: LocalRun[], variant: Variant, cloud?: Benche
     testbed: cloud?.testbed ?? { uuid: "", name: variant.relativeTestbed },
     project: cloud?.project.slug ?? "",
     uuid: cloud?.uuid ?? "",
-    relative: true,
   });
 }
 

@@ -66,7 +66,7 @@ export interface Memory {
 }
 export interface Dataset {
   host: Record<string, unknown>;
-  manifests: Map<string, Manifest>;
+  manifest: Manifest;
   samples: Sample[];
   observations: Observation[];
   memory: Memory[];
@@ -108,7 +108,7 @@ export function summarize(dataset: Dataset): Map<string, Summary> {
         second: second.get(sample.block)!,
         value: time(sample),
       })),
-      dataset.manifests.get(build)!.blocks,
+      dataset.manifest.blocks,
     );
     if (variant === "tessera-aa") {
       paired.ratios = samples.map((sample) => time(sample) / first.get(sample.block)!);
@@ -123,7 +123,7 @@ export function summarize(dataset: Dataset): Map<string, Summary> {
       variant,
       stable:
         variant === "tessera-aa" ||
-        dataset.manifests.get(build)!.variants.find((v) => v.name === variant)!.stable,
+        dataset.manifest.variants.find((v) => v.name === variant)!.stable,
       ...paired,
       ns: median(samples.map((s) => time(s) / len)),
     });

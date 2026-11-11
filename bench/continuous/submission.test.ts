@@ -26,7 +26,6 @@ test("submission archives ratios in a native Head keyed by protocol and exact ba
         {
           measure: { name: "paired-time-ratio", uuid: "ratio" },
           metric: { uuid: name, value: values["paired-time-ratio"].value },
-          boundary: null,
         },
       ],
     })),

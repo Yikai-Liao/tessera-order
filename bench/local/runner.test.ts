@@ -27,12 +27,10 @@ test("retained budgets survive catalog changes without accepting incomplete samp
     for (const settings of catalog.revisionSampling) settings.samples += 2;
     await renderLocalReport(directory);
     assert.equal(summarizeLocal(run).length, run.cases.length);
-    // Pre-metadata artifacts also keep their historical counts after catalog changes.
+    // Missing or incomplete budgets cannot be regenerated as complete evidence.
     for (const id of run.cases) run.samples![id].pop();
     assert.throws(() => summarizeLocal(run), /budget/);
     delete run.sampleCounts;
-    assert.equal(summarizeLocal(run).length, run.cases.length);
-    run.samples![run.cases[0]].pop();
     assert.throws(() => summarizeLocal(run), /budget/);
   } finally {
     catalog.revisionSampling.forEach((s, i) => {
@@ -96,9 +94,13 @@ rl.on("line", request => {
   assert.equal(new Set(pids).size, 2 * 30 * run.cases.length);
   assert.equal(summarizeLocal(run)[0].verdict, "slower");
   await writeFile(join(directory, "local.json"), JSON.stringify(run));
-  await renderLocalReport(directory);
+  const result = await renderLocalReport(directory);
+  assert.equal(result.kind, "revision-comparison");
+  assert.equal(result.ratio, "current / baseline");
+  assert.ok("slower" in result);
+  assert.equal(result.slower, run.cases.length);
   assert.match(await readFile(join(directory, "index.md"), "utf8"), /Adjacent A\/B/);
-  delete run.protocol;
+  Object.assign(run, { protocol: "paired-samples-v1" });
   assert.throws(() => summarizeLocal(run), /Unsupported/);
   run.protocol = "paired-samples-v2";
   await writeFile(join(directory, "fail"), "");

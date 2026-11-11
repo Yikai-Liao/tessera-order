@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { catalog } from "../catalog.ts";
 import { median } from "../statistics.ts";
 import { type LocalRun, summarizeLocal } from "./model.ts";
 
@@ -67,11 +66,6 @@ export function validateLayoutBuilds(result: LayoutRun) {
       "protocol",
     ] as const)
       if (run[field] !== first[field]) throw new Error(`Layout runs differ: ${field}`);
-    if (
-      (run.blockCount ?? catalog.pairedBlocks.extended.count) !==
-      (first.blockCount ?? catalog.pairedBlocks.extended.count)
-    )
-      throw new Error("Layout runs differ: block budget");
     if (JSON.stringify(run.source) !== JSON.stringify(first.source))
       throw new Error("Layout runs differ: sources");
     if (run.cases.join("\n") !== first.cases.join("\n"))
@@ -91,13 +85,8 @@ export function summarizeLayouts(result: LayoutRun) {
   const summaries = result.layouts.map(({ run }) => summarizeLocal(run));
   return first.cases.map((id, index) => {
     const layouts = result.layouts.map(({ seed, run }, layout) => {
-      const paired = run.protocol === "paired-samples-v1" || run.protocol === "paired-samples-v2";
-      const baseline = paired
-        ? run.samples![id].map((s) => s.baseline)
-        : run.blocks.map((block) => (block.baseline[id] + block.control[id]) / 2);
-      const current = paired
-        ? run.samples![id].map((s) => s.current)
-        : run.blocks.map((block) => block.current[id]);
+      const baseline = run.samples![id].map((s) => s.baseline);
+      const current = run.samples![id].map((s) => s.current);
       return {
         seed,
         ...summaries[layout][index],

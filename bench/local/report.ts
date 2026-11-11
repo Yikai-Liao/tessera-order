@@ -2,9 +2,9 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { catalog, rawCaseParts } from "../catalog.ts";
+import { rawCaseParts } from "../catalog.ts";
 import { renderRows } from "../plot/rows.ts";
-import { pairedBudget } from "../statistics.ts";
+import { resultSummary } from "../summary.ts";
 import { type LayoutRun, summarizeLayouts } from "./layout.ts";
 import { type LocalRun, summarizeLocal } from "./model.ts";
 
@@ -88,10 +88,6 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
         }))
       : [{ title: result.configuration, run: result }];
   const run = runs[0].run;
-  const paired = run.protocol === "paired-samples-v1" || run.protocol === "paired-samples-v2";
-  const budget = paired
-    ? undefined
-    : pairedBudget(run.blockCount ?? catalog.pairedBlocks.extended.count);
   const range = (low: number | undefined, high: number | undefined) =>
     low === undefined || high === undefined ? "—" : `${low.toFixed(4)}–${high.toFixed(4)}`;
   const groups = runs.map(({ title, run }) => ({ title, summaries: summarizeLocal(run) }));
@@ -103,10 +99,8 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
     ticks.push({ value: 2 ** k, label: `${2 ** k}×` });
   const svg = renderRows({
     title: "Working tree against commit",
-    guide: paired
-      ? "Adjacent A/B sample ratios · lower is better · 99% median interval"
-      : `Current / baseline run time · lower is better · ${budget!.count} process-level blocks per layout`,
-    columns: ["Time ratio", paired ? "Median interval" : "A/A range"],
+    guide: "Adjacent A/B sample ratios · lower is better · 99% median interval",
+    columns: ["Time ratio", "Median interval"],
     groups: groups.map(({ title, summaries }) => ({
       title,
       rows: summaries.map((s) => ({
@@ -116,23 +110,23 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
         },
         marks: [{ value: s.ratio, tone: "primary" }],
         span: [s.low, s.high],
-        cells: [`${s.ratio.toFixed(4)}×`, paired ? range(s.low, s.high) : range(s.aaLow, s.aaHigh)],
+        cells: [`${s.ratio.toFixed(4)}×`, range(s.low, s.high)],
         strong: true,
       })),
     })),
     scale: { low: 1 / reach, high: reach, ticks, origin: 1, clamp: false },
     legend: {
-      note: paired ? "dot: median · line: median interval" : "dot: median · line: block range",
+      note: "dot: median · line: median interval",
     },
     axis: ["← less time", "more time →"],
   });
   const table = [
-    `| Layout | Case | Current / baseline | ${paired ? "Median interval" : "Block range"} | A/A range | Screen |`,
-    "| --- | --- | --- | --- | --- | --- |",
+    `| Layout | Case | Current / baseline | Median interval | Screen |`,
+    "| --- | --- | --- | --- | --- |",
     ...groups.flatMap(({ title, summaries }) =>
       summaries.map(
         (s) =>
-          `| ${title} | ${s.id} | ${s.ratio.toFixed(4)} | ${s.low.toFixed(4)}–${s.high.toFixed(4)} | ${range(s.aaLow, s.aaHigh)} | ${s.verdict} |`,
+          `| ${title} | ${s.id} | ${s.ratio.toFixed(4)} | ${s.low.toFixed(4)}–${s.high.toFixed(4)} | ${s.verdict} |`,
       ),
     ),
   ].join("\n");
@@ -150,7 +144,7 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
 
 Baseline: \`${run.baseline}\`. Working-tree HEAD: \`${run.head}\` (${run.dirty ? "modified" : "clean"}).
 
-${paired ? "Adjacent A/B samples alternate AB/BA order. The median ratio and its distribution-free 99% interval describe the paired samples; an alert requires the entire interval outside 0.95–1.05. Coverage assumes independent samples and does not include code-placement effects. Input restoration, verification and IPC are outside the sort clock. Raw pairs are retained; this is a regression screen, not proof of source-change causality." : `This is a historical process-level development screen, not an in-process source-attribution claim. Each process measures Criterion’s mean time per sort. Each block runs baseline twice and current once; ratios use the paired baseline mean. The recorded budget is ${budget!.count} blocks per case (${budget!.count === catalog.pairedBlocks.short.count ? "short screen" : "extended run"}). A direction requires ${budget!.agreement} of ${budget!.count} blocks and a median outside the A/A range.`}
+Adjacent A/B samples alternate AB/BA order. The median ratio and its distribution-free 99% interval describe the paired samples; an alert requires the entire interval outside 0.95–1.05. Coverage assumes independent samples and does not include code-placement effects. Input restoration, verification and IPC are outside the sort clock. Raw pairs are retained; this is a regression screen, not proof of source-change causality.
 
 ${
   layoutSummaries
@@ -170,7 +164,7 @@ ${table}
 ## Provenance
 
 \`\`\`json
-${JSON.stringify(result.schema === 2 ? { ...result, layouts: result.layouts.map(({ seed, run }) => ({ seed, run: { ...run, blocks: undefined, samples: undefined } })) } : { ...run, blocks: undefined, samples: undefined }, null, 2)}
+${JSON.stringify(result.schema === 2 ? { ...result, layouts: result.layouts.map(({ seed, run }) => ({ seed, run: { ...run, samples: undefined } })) } : { ...run, samples: undefined }, null, 2)}
 \`\`\`
 `;
   await writeFile(join(directory, "local.svg"), svg);
@@ -179,4 +173,16 @@ ${JSON.stringify(result.schema === 2 ? { ...result, layouts: result.layouts.map(
     join(directory, "summaries.json"),
     `${JSON.stringify(layoutSummaries ?? summaries, null, 2)}\n`,
   );
+  return {
+    kind: result.schema === 2 ? "layout-comparison" : "revision-comparison",
+    protocol: "paired-samples-v2",
+    ratio: "current / baseline",
+    range: "99% median interval",
+    baseline: run.baseline,
+    head: run.head,
+    dirty: run.dirty,
+    ...(result.schema === 2
+      ? { layouts: groups.map(({ title, summaries }) => ({ title, ...resultSummary(summaries) })) }
+      : resultSummary(summaries)),
+  };
 }

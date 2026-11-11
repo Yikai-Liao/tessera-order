@@ -14,13 +14,7 @@ import {
 } from "./github.ts";
 import { loadHistory, summarizePairedTrend, type TrendSummary } from "./history.ts";
 import { type ChartLinks, publishImages } from "./images.ts";
-import {
-  type ConfigurationResult,
-  headline,
-  render,
-  renderCombined,
-  renderFailure,
-} from "./markdown.ts";
+import { headline, render, renderFailure } from "./markdown.ts";
 import { type PairedSource, pairedSummary, readPaired, validateCloud } from "./paired.ts";
 import type { BencherReport } from "./report.ts";
 import { trendSvg } from "./trend-chart.ts";
@@ -99,7 +93,7 @@ export async function publishReport({
       }
     }),
   );
-  const configurations: ConfigurationResult[] = measured.map((result) => ({
+  const configurations = measured.map((result) => ({
     name: result.variant.name,
     outcome: result.summary ? "success" : "failure",
     summary: result.summary,
@@ -140,10 +134,11 @@ export async function publishReport({
     trendRef: links.trend,
     imagesUnavailable,
   };
+  const first = measured[0];
+  const body = first.summary
+    ? render(first.summary, options)
+    : renderFailure({ ...options, reason: first.reason! });
   for (const result of measured) {
-    const body = result.summary
-      ? render(result.summary, options)
-      : renderFailure({ ...options, reason: result.reason! });
     if (result.checkId === undefined) continue;
     await github.rest.checks.update({
       ...context.repo,
@@ -157,7 +152,6 @@ export async function publishReport({
       },
     });
   }
-  const body = renderCombined(configurations, options);
   await core.summary.addRaw(body).write();
   if (number && inputs.publish !== false)
     await publishComment({

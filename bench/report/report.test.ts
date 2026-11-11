@@ -5,20 +5,16 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { renderFigures } from "./charts.ts";
 import { createFixture } from "./fixture.ts";
 import { collectWarnings, writeReport } from "./index.ts";
 import { loadRun, validateRun } from "./load.ts";
 import { measurementId, summarize } from "./model.ts";
 
-async function writeFixture(directory: string, simd = false, dataset = createFixture(simd)) {
+async function writeFixture(directory: string, dataset = createFixture()) {
   await Promise.all([
     writeFile(join(directory, "host.json"), JSON.stringify(dataset.host)),
-    ...[...dataset.manifests].flatMap(([build, manifest]) =>
-      [
-        build === "default" ? "manifest.json" : `manifest-${build}.json`,
-        `memory-manifest-${build}.json`,
-      ].map((file) => writeFile(join(directory, file), JSON.stringify(manifest))),
+    ...["manifest.json", "memory-manifest-default.json"].map((file) =>
+      writeFile(join(directory, file), JSON.stringify(dataset.manifest)),
     ),
     writeFile(
       join(directory, "blocks.jsonl"),
@@ -68,9 +64,7 @@ test("paired ratios respect noise", () => {
 
 test("revision placements retain their own measured verdict", () => {
   const dataset = createFixture();
-  for (const manifest of dataset.manifests.values()) {
-    manifest.variants.push({ name: "tessera-baseline", stable: true, adapter: "revision" });
-  }
+  dataset.manifest.variants.push({ name: "tessera-baseline", stable: true, adapter: "revision" });
   for (const row of dataset.samples)
     if (row.variant === "std-stable") row.variant = "tessera-baseline";
   const result = summarize(dataset).get(
@@ -83,8 +77,7 @@ test("revision placements retain their own measured verdict", () => {
 test("parallel Tessera is an opponent, not an A/A control", () => {
   const dataset = createFixture();
   const id = "u64/random/1000/s1";
-  for (const manifest of dataset.manifests.values())
-    manifest.variants.push({ name: "tessera-par-8", stable: true, threads: 8 });
+  dataset.manifest.variants.push({ name: "tessera-par-8", stable: true, threads: 8 });
   for (const sample of dataset.samples) {
     if (sample.variant !== "std-stable") continue;
     sample.variant = "tessera-par-8";
@@ -177,10 +170,10 @@ test("invalid samples fail validation", () => {
 test("short reports retain their declared budget and reject missing or extra blocks", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-short-report-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const dataset = createFixture(false, 3);
-  await writeFixture(directory, false, dataset);
+  const dataset = createFixture(3);
+  await writeFixture(directory, dataset);
   const loaded = await loadRun([directory]);
-  assert.equal(loaded.manifests.get("default")!.blocks, 3);
+  assert.equal(loaded.manifest.blocks, 3);
   await writeReport([directory]);
   assert.match(
     await readFile(join(directory, "report/index.md"), "utf8"),
@@ -191,11 +184,11 @@ test("short reports retain their declared budget and reject missing or extra blo
   loaded.samples[0].block = 0;
   loaded.samples.pop();
   assert.throws(() => validateRun(loaded), /missing blocks/);
-  dataset.manifests.get("default")!.blocks = 9;
-  await writeFixture(directory, false, dataset);
+  dataset.manifest.blocks = 9;
+  await writeFixture(directory, dataset);
   await assert.rejects(loadRun([directory]), /missing blocks/);
-  dataset.manifests.get("default")!.blocks = 2;
-  await writeFixture(directory, false, dataset);
+  dataset.manifest.blocks = 2;
+  await writeFixture(directory, dataset);
   await assert.rejects(loadRun([directory]), /budget/);
 });
 
@@ -203,7 +196,11 @@ test("raw results round trip", async () => {
   const dir = await mkdtemp(join(tmpdir(), "tessera-report-"));
   try {
     await writeFixture(dir);
-    await writeReport([dir]);
+    const summary = await writeReport([dir]);
+    assert.equal(summary.kind, "algorithm-comparison");
+    assert.equal(summary.ratio, "algorithm / paired Tessera mean");
+    assert.equal(summary.focus.length, 5);
+    assert.ok(summary.omittedChanges > 0);
     const bmf = JSON.parse(await readFile(join(dir, "bmf.json"), "utf8"));
     const s = bmf["compare/u64/random/1000/s1/std-stable/default"];
     assert.ok(Math.abs(s.latency.value - 10.816) < 0.01);
@@ -211,6 +208,9 @@ test("raw results round trip", async () => {
     assert.ok(bmf["compare/u64/random/1000/s1/tessera-aa/default"]);
     assert.match(await readFile(join(dir, "report/index.md"), "utf8"), /synthetic fixture/);
     await assert.rejects(loadRun([dir, dir]), /duplicate/);
+    await writeFile(join(dir, "manifest-portable-simd.json"), "{}");
+    await assert.rejects(loadRun([dir]), /Multiple-build/);
+    await rm(join(dir, "manifest-portable-simd.json"));
     const other = await mkdtemp(join(tmpdir(), "tessera-other-host-"));
     try {
       await writeFixture(other);
@@ -224,14 +224,16 @@ test("raw results round trip", async () => {
   }
 });
 
-test("optimization and debug settings must agree across timing, memory and SIMD", async () => {
+test("optimization and debug settings must agree across timing and memory", async () => {
   const dir = await mkdtemp(join(tmpdir(), "tessera-build-config-"));
   try {
-    const dataset = await writeFixture(dir, true);
+    const dataset = await writeFixture(dir);
     await loadRun([dir]);
     for (const field of ["opt_level", "debug", "blocks"]) {
       const different = field === "blocks" ? 3 : field === "opt_level" ? "1" : "true";
-      for (const [build, manifest] of dataset.manifests) {
+      {
+        const manifest = dataset.manifest;
+        const build = "default";
         const memoryPath = join(dir, `memory-manifest-${build}.json`);
         await writeFile(memoryPath, JSON.stringify({ ...manifest, [field]: different }));
         await assert.rejects(
@@ -240,26 +242,8 @@ test("optimization and debug settings must agree across timing, memory and SIMD"
         );
         await writeFile(memoryPath, JSON.stringify(manifest));
       }
-      const simd = dataset.manifests.get("portable-simd")!;
-      const simdPaths = ["manifest-portable-simd.json", "memory-manifest-portable-simd.json"];
-      for (const path of simdPaths)
-        await writeFile(join(dir, path), JSON.stringify({ ...simd, [field]: different }));
-      await assert.rejects(loadRun([dir]), new RegExp(`compiler configuration: ${field}`));
-      for (const path of simdPaths) await writeFile(join(dir, path), JSON.stringify(simd));
     }
   } finally {
     await rm(dir, { recursive: true });
   }
-});
-
-test("SIMD shares the anchor", () => {
-  const dataset = createFixture(true);
-  validateRun(dataset);
-  const charts = renderFigures(dataset, summarize(dataset));
-  assert.match(charts[0].table, /Tessera, Portable SIMD/);
-  const values = summarize(dataset);
-  const id = "u64/random/1000/s1";
-  const defaultStd = values.get(measurementId("default", id, "std-stable"))!.ratio;
-  const simdStd = values.get(measurementId("portable-simd", id, "std-stable"))!.ratio;
-  assert.ok(Math.abs(simdStd / defaultStd - 1.25) < 0.001);
 });

@@ -325,7 +325,6 @@ export async function comparePrepared(options: {
     run.shard ||
     run.samples ||
     run.sampleCounts ||
-    run.blocks.length ||
     !run.cases.length ||
     !run.builds ||
     !run.binaryPaths ||
@@ -380,7 +379,7 @@ export async function comparePrepared(options: {
   await save();
   await measureSamples(run, binaries, join(out, "plan.json"), cpu, save);
   summarizeLocal(run);
-  await renderLocalReport(out, run);
+  return renderLocalReport(out, run);
 }
 
 /** Compare an immutable working-tree snapshot with a commit, retaining only results. */
@@ -423,7 +422,7 @@ export async function compareLocal(options: LocalOptions) {
   await mkdir(out, { recursive: false });
   const planPath = join(out, "plan.json");
   await writeFile(planPath, `${JSON.stringify(options.plan, null, 2)}\n`);
-  await withWorkspace(root, async (workspace) => {
+  return withWorkspace(root, async (workspace) => {
     const layouts: LayoutRun["layouts"] = [];
     const executables: { baseline: string; current: string }[] = [];
     for (const seed of options.layoutSeeds ?? [undefined]) {
@@ -470,7 +469,6 @@ export async function compareLocal(options: LocalOptions) {
           ? shardCases(allCases, options.shard.index, options.shard.count)
           : allCases,
         ...(options.shard ? { shard: { ...options.shard, allCases } } : {}),
-        blocks: [],
       };
       if (layouts.length && run.cases.join("\n") !== layouts[0].run.cases.join("\n"))
         throw new Error("Layout runs must select identical cases");
@@ -483,12 +481,13 @@ export async function compareLocal(options: LocalOptions) {
     if (result.schema === 2) validateLayoutBuilds(result);
     const save = () => writeFile(join(out, "local.json"), `${JSON.stringify(result, null, 2)}\n`);
     await save();
-    if (options.prepareOnly) return;
+    if (options.prepareOnly)
+      return { kind: "prepared-revisions", cases: layouts[0].run.cases.length, baseline, head };
     for (const [index, { seed, run }] of layouts.entries()) {
       if (linker) diagnostic(`Layout seed ${seed}`);
       await measureSamples(run, executables[index], planPath, cpu, save);
       summarizeLocal(run);
     }
-    await renderLocalReport(out, result);
+    return renderLocalReport(out, result);
   });
 }

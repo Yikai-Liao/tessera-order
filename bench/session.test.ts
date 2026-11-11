@@ -24,17 +24,17 @@ async function prepared(directory: string) {
   const suffix = process.platform === "win32" ? ".exe" : "";
   await writeFile(join(source, `compare${suffix}`), "compare contents");
   await writeFile(join(source, `memory${suffix}`), "memory contents");
-  const build = await retainBuild(directory, "default", join(source, `compare${suffix}`));
+  const build = await retainBuild(directory, join(source, `compare${suffix}`));
   await writeFile(join(directory, "plan.json"), JSON.stringify(await loadPlan("smoke")));
   const session: Session = {
-    schema: 1,
+    schema: 2,
     platform: process.platform,
     planSha256: await fileHash(join(directory, "plan.json")),
     sampleMs: 20,
     memoryMib: 64,
     cpu: "0,2,4,6-8",
     group: "u64/random",
-    builds: [build],
+    build,
   };
   await writeFile(join(directory, "session.json"), JSON.stringify(session));
   return session;
@@ -47,8 +47,8 @@ test("sessions retain immutable executable pairs and settings", async (t) => {
   await rm(join(directory, "build"), { recursive: true });
   const session = await loadSession(directory);
   assert.deepEqual(session, expected);
-  assert.equal(await readFile(executables(directory, "default").memory, "utf8"), "memory contents");
-  const build = session.builds[0];
+  assert.equal(await readFile(executables(directory).memory, "utf8"), "memory contents");
+  const build = session.build;
   assert.equal(await isValidated(directory, build, session), false);
   await recordValidation(directory, build, session);
   assert.equal(await isValidated(directory, build, session), true);
@@ -67,19 +67,17 @@ test("resume rejects incomplete or altered experiments before execution", async 
   t.after(() => rm(directory, { recursive: true, force: true }));
   await assert.rejects(loadSession(directory), /preparation must finish/);
   const session = await prepared(directory);
-  for (const path of [
-    join(directory, "plan.json"),
-    ...Object.values(executables(directory, "default")),
-  ]) {
+  for (const path of [join(directory, "plan.json"), ...Object.values(executables(directory))]) {
     const original = await readFile(path);
     await writeFile(path, "changed");
     await assert.rejects(loadSession(directory), /changed/);
     await writeFile(path, original);
   }
   for (const invalid of [
+    { ...session, schema: 1 },
     { ...session, platform: "different-platform" },
-    { ...session, builds: [] },
-    { ...session, builds: [session.builds[0], session.builds[0]] },
+    { ...session, build: undefined },
+    { ...session, build: { ...session.build, name: "portable-simd" } },
     { ...session, sampleMs: 0 },
     { ...session, blocks: 2 },
     { ...session, blocks: "3" },

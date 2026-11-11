@@ -5,7 +5,6 @@ import type { Command } from "commander";
 import { VARIANTS } from "../bench/catalog.ts";
 import { CONTINUOUS_SHARDS } from "../bench/continuous/paired.ts";
 import { type SubmissionOptions, submitContinuous } from "../bench/continuous/runner.ts";
-import { readMainHistory } from "../bench/continuous/volatility.ts";
 import { probeCounters } from "../bench/local/counters.ts";
 import { runTask } from "./tasks.ts";
 
@@ -13,7 +12,7 @@ import { runTask } from "./tasks.ts";
 export function continuousCommands(program: Command) {
   const continuous = program
     .command("continuous")
-    .description("Read history or upload paired results");
+    .description("Prepare hosted jobs, probe counters or upload paired results");
   continuous
     .command("matrix")
     .description("Print the hosted measurement matrix without building or timing")
@@ -37,17 +36,6 @@ export function continuousCommands(program: Command) {
     .action(async (options: { out: string }) => {
       const out = resolve(options.out);
       await runTask(out, Boolean(program.opts().verbose), () => probeCounters(out));
-    });
-  continuous
-    .command("history")
-    .description("Read legacy absolute-time main history without changing thresholds")
-    .requiredOption("--project <slug>", "public Bencher project")
-    .requiredOption("--out <directory>", "new retained history directory")
-    .action(async (options: { project: string; out: string }) => {
-      const out = resolve(options.out);
-      await runTask(out, Boolean(program.opts().verbose), () =>
-        readMainHistory(options.project, out),
-      );
     });
   continuous
     .command("submit")

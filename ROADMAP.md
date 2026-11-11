@@ -39,12 +39,21 @@ These are the engine items E1–E6 deferred from the completed tooling refactor,
 | E4 | One owned half-key extractor serves serial and parallel roots; the root forwarding wrapper has been removed | Validate shared preparation code generation with the unified backend before performance acceptance |
 | E5 | Serial and adopted partitions address one segmented scratch representation; serial passes have one segment | Establish serial and Rayon scatter and compaction performance against the pre-consolidation baseline; serial-only library builds remain a separate configuration |
 | E6 | Tile planning now tries at most two flat passes, otherwise partitions actual children; the recursive sample model and general digit-plan dynamic programming are removed in the candidate | Complete main-relative acceptance of the [bounded tile planner](docs/design/port.md#bounded-tile-planner), including large sparse/bimodal losses and placement controls; investigate the [counting-pass inline candidate](docs/design/port.md#counting-pass-result-visibility)'s row_u64/random/1000 loss; preserve prior model evidence as historical, not current acceptance |
-| E7 | Active measurement uses one backend and revision builds select historical SIMD explicitly; retained dual-build sessions remain readable | Local static artifacts, comparison harness and historical SIMD provenance pass validation; validate a fresh current-head Actions run through preparation, all four measurement shards, Cloud archival and publication before final engine performance acceptance; raw artifacts alone do not satisfy publication acceptance |
+| E7 | Active measurement uses one backend and revision builds select historical SIMD explicitly; retained dual-build sessions require their original tooling revision for reading and recovery | Local static artifacts, comparison harness and historical SIMD provenance pass validation; validate a fresh current-head Actions run through preparation, all four measurement shards, Cloud archival and publication before final engine performance acceptance; raw artifacts alone do not satisfy publication acceptance |
 
 ## C++
 
 1. **C++ runner.** Measure the C++ implementation with the shared input specification and native-buffer timing. Add cross-language golden hashes in `conformance/vectors/` and verify them in both generators.
 2. **C++17 header-only implementation** for trivially copyable records, with CMake install and a consumer test. Done when it passes the shared vectors and has a direct comparison with Rust.
+
+## Benchmark tooling simplification
+
+Current tooling retains one algorithm build, the current paired revision protocol, shared PR report rendering and bounded machine-readable summaries. Follow-up work keeps sorting code and sampling changes independently reviewable:
+
+- Separate immutable prepared revision pairs from measured results in `bench/local/model.ts`; consolidate both consumers in the local runner and hosted validator before removing optional-state checks.
+- Let the Rust comparison manifest own the expected memory-case inventory, consumed by measurement and offline completeness validation. Preserve timing/memory process isolation.
+- Evaluate a single normalized worker request instead of parallel TS/Rust user-facing CLI rules. Keep the existing timed calls, inputs and recovery behavior; validate any Criterion removal with code-placement controls.
+- Expose structured current-head performance details through `status`, without parsing human report wording. The check publisher owns the machine summary; status validates its exact-head identity.
 
 ## Benchmark investigations
 

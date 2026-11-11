@@ -25,7 +25,6 @@ The [dashboard](https://bencher.dev/perf/yikai-liao-s-project) stores current/ba
 
 Automatic measurement and Cloud archival run on PRs only. Merging does not repeat the benchmark on main; main still runs correctness and site checks selected by its diff. Retained older main ratios describe individual parent-to-commit effects, not absolute or cumulative latency. No upload depends on an earlier Cloud sample, and no historical threshold decides the performance check.
 
-Legacy absolute-time Testbeds remain available. `pnpm tools continuous history --project yikai-liao-s-project --out bench/results/main-history` reads those histories without new measurements. Retained `history.json` regenerates with `pnpm tools report DIR`. That legacy analysis mixes source, placement and host variation.
 
 ## Pipeline
 
@@ -96,6 +95,6 @@ Keep `BENCHER_PROJECT`, `BENCHER_API_KEY` and the `benchmark` environment. Its d
 
 ## Local use
 
-Use the same `pnpm tools compare commit BASE --plan continuous` command, optionally selecting one shard or a smaller plan. There is no default nine-round local run. `pnpm tools report DIR` regenerates retained results offline; old recorded three- and nine-block reports remain readable. See [tooling](tooling.md#reproduce-continuous-work-locally) for commands and [benchmarking](benchmarking.md#working-tree-comparisons) for evidence limits.
+Use the same `pnpm tools compare commit BASE --plan continuous` command, optionally selecting one shard or a smaller plan. There is no default nine-round local run. `pnpm tools report DIR` regenerates retained results offline; older protocols and legacy absolute-time histories use their original tooling revision. See [tooling](tooling.md#reproduce-continuous-work-locally) for commands and [benchmarking](benchmarking.md#working-tree-comparisons) for evidence limits.
 
 To reuse builds locally, run `compare commit BASE --plan continuous --prepare-only --out PREPARED`, then `compare prepared PREPARED --shard 1/4 --out RESULT`. Each result directory must be new. A prepared pair has no samples and is not passing evidence; it retains the complete plan, source/build provenance and executable hashes. Measurement requires the original harness and catalog, rejects modified or escaping executable paths, verifies both listings, and retains the exact executed copies. Preparation remains unchanged and can serve independent shards. Interrupted measurement is still not resumable.

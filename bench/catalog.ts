@@ -55,15 +55,17 @@ export const catalog = z
       }),
     ),
     modes: z.array(identity),
-    configurations: z.array(
-      z.object({
-        id: z.string(),
-        name: z.string(),
-        testbed: z.string(),
-        relativeTestbed: z.string(),
-        features: z.array(z.string()),
-      }),
-    ),
+    configurations: z
+      .array(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          testbed: z.string(),
+          relativeTestbed: z.string(),
+          features: z.array(z.string()),
+        }),
+      )
+      .length(1),
     smoke: inventory,
     comparison: inventory.extend({
       summaryShapes: z.array(z.string()),

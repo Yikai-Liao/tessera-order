@@ -13,10 +13,9 @@ CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment
 | Compare working-tree code with a commit | `pnpm tools compare commit COMMIT` | Two revision builds, adjacent AB/BA sample pairs, verification, provenance and a report |
 | Sample revision comparisons across layouts | `pnpm tools compare commit COMMIT --layout-seeds 1,2,3,4,5` | One revision pair per fixed LLD seed, adjacent sample pairs, link maps and descriptive cross-layout ranges; Linux x86-64 GNU only |
 | Compare fixed-work counters | `pnpm tools compare counters COMMIT` | Verified serial batches, Callgrind instruction and simulated cache/branch counts, source/build provenance and offline reporting |
-| Inspect adjacent main changes | `pnpm tools continuous history --project PROJECT --out DIR` | Read-only existing Testbed histories restricted to each latest report's hardware spec, with retained responses for offline reporting |
 | Probe local PMU access | `pnpm tools continuous probe-counters --out DIR` | Read-only, per-event `perf` availability on the current host |
 | Compare linked source revisions | `pnpm tools compare revisions BASE --current HEAD` | Serial revisions and independently named copies in one process, repeated-current A/A, verification, allocation, retained executables and reports |
-| Compare algorithms | `pnpm tools compare algorithms` | Registered algorithms in one timing executable per configuration, three shuffled blocks by default, two Tessera calls for A/A, output verification, allocation measurement and a report |
+| Compare algorithms | `pnpm tools compare algorithms` | Registered algorithms in one timing executable, three shuffled blocks by default, two Tessera calls for A/A, output verification, allocation measurement and a report |
 | Local parallel comparison | `pnpm tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` | Serial controls, Tessera-8 and Rayon stable-8 in the shared paired harness; choose a CPU list appropriate to the host |
 | Full algorithm comparison | `pnpm tools compare algorithms --plan release` | Release coverage and native opponents with the shared SIMD backend |
 | Resume an interrupted algorithm comparison | `pnpm tools compare resume DIR` | Recorded selection, settings and exact retained builds; no rebuilding |
@@ -24,7 +23,7 @@ CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment
 | Regenerate a report | `pnpm tools report DIR` | Statistics and figures from retained results, without new measurements |
 | Read current main or PR feedback | `pnpm -s tools status main` or `pnpm -s tools status --pr NUMBER` | Exact-ref workflow and benchmark states; [read-only interpretation](continuous-benchmarks.md#read-feedback-from-a-pr) |
 
-`compare commit` defaults to `HEAD` and the `local` plan; `compare algorithms` defaults to the smoke algorithm plan. Replace uppercase placeholders. The [CLI reference](tooling.md) defines output, logs and CI commands. Use [plans and axis overrides](#experiment-plans) for custom coverage. `report` reads retained results without compiling or measuring; incomplete algorithm sessions require `--partial`, while revision reports require every case’s complete recorded sample budget (or the full recorded three- or nine-block budget for legacy results).
+`compare commit` defaults to `HEAD` and the `local` plan; `compare algorithms` defaults to the smoke algorithm plan. Replace uppercase placeholders. The [CLI reference](tooling.md) defines output, logs and CI commands. Use [plans and axis overrides](#experiment-plans) for custom coverage. `report` reads retained results without compiling or measuring; incomplete algorithm sessions require `--partial`, while revision reports require every case’s complete recorded sample budget.
 
 ## Run an experiment
 
@@ -58,9 +57,9 @@ CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment
 
 Algorithm comparisons from `compare algorithms` use the [paired timing contract](#timing-and-statistics) and report results for the measured inputs and environment. Attributing a gain to a source change rather than code placement additionally needs in-process revision comparisons and independent placement controls, as in the [engine measurements](../design/port.md). Process-level `compare commit` and continuous alerts alone do not provide that attribution evidence.
 
-`compare algorithms` compares registered implementations from the current source snapshot, not a baseline commit. `compare commit` accepts a baseline commit and builds two executables per selected layout; it alternates adjacent A/B samples without a separate A/A pass. `--layout-seeds` samples section ordering across builds, but does not put revisions in one address space or provide independent-layout A/A within a block. The CLI does not automatically register both revisions and independent layout copies in one timing executable.
+`compare algorithms` compares registered implementations from the current source snapshot, not a baseline commit. `compare commit` accepts a baseline commit and builds two executables per selected layout; it alternates adjacent A/B samples without a separate A/A pass. `--layout-seeds` samples section ordering across builds, but does not put revisions in one address space or provide independent-layout A/A within a block. This process-level command does not register both revisions and independent layout copies in one timing executable; use the linked-revision command below for that control.
 
-Before adding a custom experiment, identify the exact unmet requirement, explain why existing plans, options or adapters cannot meet it, and obtain operator agreement. Prefer extending the maintained comparison pipeline so verification, provenance and reporting remain shared. Historical harnesses record past evidence, not the default procedure for new measurements.
+For an unsupported experiment, identify the missing measurement capability and extend the maintained pipeline so verification, provenance and reporting remain shared. Start with a bounded prototype; confirm unusual resource costs or host-wide changes with the operator. Historical harnesses remain evidence for their recorded experiments.
 
 ## Linked revision comparisons
 
@@ -82,7 +81,7 @@ Fresh worker pairs measure adjacent A/B samples, reversing startup, warm-up and 
 
 `--shard INDEX/COUNT` optionally measures a deterministic partition of complete timed IDs, retaining their complete per-case sampling budget. The result records the complete inventory, shard identity and selected subset. Plans with `parallel` rules enable Rayon in both builds, select identical serial/four-thread IDs and require Linux with four allowed CPUs. Serial and parallel preparation never overlap; serial calls use one CPU, parallel calls four. Hosted CI uses this path with the continuous plan; layout sampling remains separate.
 
-The output contains the resolved `plan.json`, `local.json`, `summaries.json`, `index.md`, `local.svg` and the executed files under `binaries/`. `local.json.binaryPaths` locates each retained executable relative to the result directory; `binaries` records its SHA-256. Layout runs retain each seed separately. These host-specific executables need compatible runtime libraries, and downloaded PR executables must be treated as untrusted code. JSON-only report regeneration does not execute them. The JSON records revision and source hashes, executable hashes, both builds' actual Cargo provenance, configuration, host information, selected IDs, measurement-time sample counts and observations. Offline regeneration uses those retained counts, not the current catalog; early v1/v2 artifacts without counts retain their original fixed 20/30/40-sample contract. Compiler and encoded flags come from the build script, including `.cargo` target-specific settings and explicit `RUSTC`; mismatched build settings fail before measurement. Interrupted comparisons retain completed observations but cannot be resumed or reported as complete. Use `pnpm tools report DIR` to regenerate a completed report.
+The output contains the resolved `plan.json`, `local.json`, `summaries.json`, `index.md`, `local.svg` and the executed files under `binaries/`. `local.json.binaryPaths` locates each retained executable relative to the result directory; `binaries` records its SHA-256. Layout runs retain each seed separately. These host-specific executables need compatible runtime libraries, and downloaded PR executables must be treated as untrusted code. JSON-only report regeneration does not execute them. The JSON records revision and source hashes, executable hashes, both builds' actual Cargo provenance, configuration, host information, selected IDs, measurement-time sample counts and observations. Offline regeneration uses retained counts, not the current catalog. Reports accept paired-samples-v2 with explicit counts; regenerate older results using their source revision. Compiler and encoded flags come from the build script, including `.cargo` target-specific settings and explicit `RUSTC`; mismatched build settings fail before measurement. Interrupted comparisons retain completed cases but cannot be resumed or reported as complete. Use `pnpm tools report DIR` to regenerate a completed report.
 
 Standard algorithm-report figures show fixed slices and aggregates, not every measured case. A selected-input panel is generated only when no standard panel can be drawn. Custom lengths omitted from those figures remain in Full results and `summaries.json`.
 
@@ -104,7 +103,7 @@ For a same-source calibration, keep the working-tree library identical to `HEAD`
 
 Schema-2 `local.json` retains every seed's schema-1 revision run. Reports keep each seed’s paired median interval and verdict, then describe the median and min/max of the per-seed median ratios. Each revision's spread is max/min minus one across its per-seed median times. Per-case `layout-N.svg` figures show absolute median times and observed sample ranges for both revisions. These ranges describe the observed sample; they include host/process variation and are not confidence intervals or automatic regression thresholds. Equal seeds need not produce matching addresses across revisions, because section inventories and sizes can change. A few favorable seeds cannot establish source attribution or determine how many layouts suffice for a cloud budget. Function-section shuffling also does not independently vary block ordering inside a function or CGU/inlining choices.
 
-Use `pnpm tools report DIR` for either local schema; every seed must have its complete recorded sample budget (nine blocks only for legacy runs). Layout sampling does not change continuous Testbeds, thresholds, sampling windows or submission behavior.
+Use `pnpm tools report DIR` for either local schema; every seed must have its complete recorded sample budget. Layout sampling does not change continuous Testbeds, thresholds, sampling windows or submission behavior.
 
 With layout seeds, `--layout-control cgu1` applies one code-generation unit to both revisions, `aligned` explicitly requests the shared 64-byte alignment defaults, and `engine-first` relinks after selecting engine-owned out-of-line functions from matching raw/demangled `nm` views. Inline code stays in its callers. Default CLI alignment also applies to CGU and symbol-order experiments; these options do not establish isolated or combined performance gains. The result retains the chosen control, actual flags, link maps and, for `engine-first`, per-role `.order` files. Controls preserve Cargo-resolved flags and require Linux x86-64 GNU, `cc`, LLD and (for engine ordering) `nm`.
 
@@ -146,7 +145,7 @@ Benchmark workflows use schema-1 plans in [`bench/plans/`](../../bench/plans/). 
 | `release` | `comparison` | Rust and native competitors, 381 inputs across four lengths |
 | `parallel` | `comparison` | Serial controls, Tessera-8 and Rayon stable-8; 16 inputs at 1M records |
 
-`compare commit` defaults to `local`; `compare algorithms` defaults to `smoke`. The executable embeds `continuous.toml` at build time. Hosted comparisons additionally pass and retain the normalized plan. Editing coverage does not require another workflow case inventory; the trusted publisher must recognize the updated plan after merge.
+`compare commit` defaults to `local`; `compare algorithms` defaults to `smoke`. The executable embeds `continuous.toml` at build time. Hosted comparisons additionally pass and retain the normalized plan. Editing coverage does not require another workflow case inventory; the same-run publisher validates the prepared plan and inventory.
 
 A custom plan contains a union of products, followed by exclusions. For example:
 
@@ -187,7 +186,7 @@ Algorithm comparisons retain `tessera`, `std-stable` and the separately timed Te
 pnpm --silent tools plan local --types u32,u64 --distributions random,zipf2
 
 # Save that selection and reuse it against different commits.
-pnpm --silent tools plan local --types u32,u64 > my-plan.toml
+pnpm --silent tools plan local --types u32,u64 --format toml > my-plan.toml
 pnpm tools compare commit main --plan my-plan.toml
 pnpm tools compare commit HEAD~1 --plan my-plan.toml
 
@@ -202,7 +201,7 @@ pnpm tools compare algorithms --plan smoke --algorithms glidesort,radsort \
 pnpm --silent tools plan --schema > benchmark-plan.schema.json
 ```
 
-`--plan` accepts a preset name or a `.toml`/`.json` path relative to the current directory. `plan` prints TOML by default; `--format json` selects JSON. `--schema` always emits JSON Schema, which describes the decoded model for either format. The comma-separated CLI axes replace the corresponding axis in every inclusion rule; exclusions remain in force. `--algorithms` replaces the opponent list before required controls are added. Preview commands print the resolved selection, not a list of code-relative case IDs; the native harness expands those IDs using the measured code. Every result directory retains the normalized `plan.json`, regardless of the input encoding, and algorithm manifests retain the resolved case and capability lists. A selected subset is a complete experiment in its own right; `--group` instead runs one resumable group from that plan and marks the report partial.
+`--plan` accepts a preset name or a `.toml`/`.json` path relative to the current directory. `plan` prints compact JSON by default; `--format toml` produces an editable plan. `--schema` always emits JSON Schema, which describes the decoded model for either format. The comma-separated CLI axes replace the corresponding axis in every inclusion rule; exclusions remain in force. `--algorithms` replaces the opponent list before required controls are added. Preview commands print the resolved selection, not a list of code-relative case IDs; the native harness expands those IDs using the measured code. Every result directory retains the normalized `plan.json`, regardless of the input encoding, and algorithm manifests retain the resolved case and capability lists. A selected subset is a complete experiment in its own right; `--group` instead runs one resumable group from that plan and marks the report partial.
 
 The lower-level Rust binaries also accept `--plan FILE`; `--suite smoke|release` remains available for their built-in sessions.
 
@@ -239,7 +238,7 @@ Native builds default to `clang` and `clang++`. For published comparisons, prefe
 
 ## Resuming algorithm comparisons
 
-`compare algorithms` builds and retains every selected configuration before starting measurements. Each configuration keeps its `compare` and `memory` executables under `bin/`; `session.json` records their hashes, the plan hash, CPU, optional group, block budget and sampling limits. Preparation removes its temporary source/build tree only after the executable pairs are retained. A session interrupted before `session.json` exists is not prepared; start a new output directory.
+`compare algorithms` retains one `compare` / `memory` executable pair under `bin/` before measurement. Schema-2 `session.json` records their hashes, the plan hash, CPU, optional group, block budget and sampling limits. Older sessions use their original tooling revision for recovery. Preparation removes its temporary source/build tree only after the executable pairs are retained. A session interrupted before `session.json` exists is not prepared; start a new output directory.
 
 ```sh
 pnpm tools compare algorithms --plan release --cpu 2 --out bench/results/release
@@ -247,7 +246,7 @@ pnpm tools compare algorithms --plan release --cpu 2 --out bench/results/release
 pnpm tools compare resume bench/results/release
 ```
 
-Resume verifies retained files before executing them. Validation receipts bind each successful validation to its executable pair, plan, group and block budget. Historical sessions without a budget keep their original nine-block executable default. The Rust journal retains groups with their full recorded budget and complete memory rows; it replaces interrupted groups and drops an incomplete final JSONL write. Plans or executables changed after preparation require a new session. Rust also checks the recorded host and build provenance before measurement.
+Resume verifies retained files before executing them. Validation receipts bind each successful validation to its executable pair, plan, group and block budget. Schema-2 sessions without a budget keep their original nine-block executable default. The Rust journal retains groups with their full recorded budget and complete memory rows; it replaces interrupted groups and drops an incomplete final JSONL write. Plans or executables changed after preparation require a new session. Rust also checks the recorded host and build provenance before measurement.
 
 Only one session writer is allowed. After an abrupt parent exit, its lease must expire before another CLI writer can recover; a still-running comparison or memory worker retains its own kernel lock and blocks conflicting work. Handled cancellation rejects success and cleans up child processes. Neither a completed preparation nor a failed/cancelled measurement is a completed experiment.
 
@@ -291,7 +290,7 @@ The report requires the complete suite. `--partial` generates a report of the co
 
 Every build uses the SIMD backend; there is no `--simd` CLI option or Cargo feature to select. Algorithm sessions retain one `default` build with all selected adapters. Revision comparisons enable the historical library feature when needed, so both revisions use the vector backend; resolved per-revision library features remain in provenance as `library_features`, separate from harness `features`. Revisions without a supported SIMD backend are rejected.
 
-Retained sessions with separate `default` and `portable-simd` builds remain readable and resumable using their recorded executables. Their report checks preserve the shared standard-library anchor and flag absolute anchor drift above 5%; no current build is substituted for those artifacts.
+Algorithm comparisons use one shared-SIMD build. Retained dual-build results and schema-1 sessions use their original source revision for regeneration or recovery; current tooling rejects them rather than silently dropping a build.
 
 ## Cases and suites
 
@@ -370,7 +369,7 @@ Each case has its declared budget: three blocks for a local short screen, or nin
 
 For each block, a variant's ratio is its time per sort divided by the mean of the two Tessera times per sort. The report gives the median ratio, per-block minimum and maximum, and median nanoseconds per element. The A/A noise range is the minimum and maximum of both Tessera times divided by their block mean, across the declared blocks. This uses the same denominator as the variant ratios and is unchanged when the two control labels are exchanged. A variant is called faster or slower only when all three short-screen blocks (or at least eight of nine extended-run blocks) agree on that direction and its median is outside that range. Other short-screen outcomes are inconclusive; the empirical range is not a confidence interval and the short screen does not have nine-block evidence strength. For example, controls of 100 and 120 give a mean of 110 and a noise range of 100/110 to 120/110; an opponent time of 109 remains within noise. The `tessera-aa` row separately reports A2 / A1, with its own per-block bounds.
 
-The standard report panels show the 1M-key ranking, 1M and 1,000-key distribution comparisons, 1M element-type comparison, 1M per-type input panels and 10M-key peak heap. Ranking and cross-type geometric means use the ten common baseline distributions; per-type panels show every selected distribution at 1M, including targeted additions. Memory maxima include every selected 10M `u64` distribution. Keys admit stable and unstable opponents; record rankings admit stable opponents only. Speed panels anchor to `slice::sort` within the same blocks, with Portable SIMD shown separately. Every figure includes plotted values; [the figure guide](benchmark-figures.md) owns visual encoding and layout. Custom cases remain in full results even when no standard panel includes them.
+The standard report panels show the 1M-key ranking, 1M and 1,000-key distribution comparisons, 1M element-type comparison, 1M per-type input panels and 10M-key peak heap. Ranking and cross-type geometric means use the ten common baseline distributions; per-type panels show every selected distribution at 1M, including targeted additions. Memory maxima include every selected 10M `u64` distribution. Keys admit stable and unstable opponents; record rankings admit stable opponents only. Speed panels anchor to `slice::sort` within the same blocks of the current shared-SIMD build. Every figure includes plotted values; [the figure guide](benchmark-figures.md) owns visual encoding and layout. Custom cases remain in full results even when no standard panel includes them.
 
 Hosted continuous comparisons use the same CLI alignment defaults for both revisions, as described in the [continuous benchmark guide](continuous-benchmarks.md).
 
@@ -382,11 +381,10 @@ The [port record](../design/port.md) describes separate placement controls for s
 DIR/
   plan.json                       normalized experiment selection
   session.json                    immutable settings and executable hashes
-  bin/BUILD/compare, memory       retained executable pair for each build
-  bin/BUILD/validated.json        successful validation receipt
+  bin/compare, memory            retained timing/memory executable pair
+  bin/validated.json             successful validation receipt
   manifest.json                   default timing build and complete case plan
-  manifest-portable-simd.json     historical optional SIMD timing build
-  memory-manifest-BUILD.json      memory executable's build provenance
+  memory-manifest-default.json    memory executable's build provenance
   host.json                       machine fingerprint
   blocks.jsonl                    verified samples and group observations
   memory.jsonl                    verified peak extra allocation sizes
@@ -399,7 +397,7 @@ DIR/
 
 Manifests record the source revision and dirty state, source and executable SHA-256, `rustc -vV`, Cargo lockfile, features, target, profile, optimization level, debug setting and encoded Rust flags. Native manifests add compiler versions, source pins, licenses and translation-unit flags. A group's start and end observations record load, frequency, temperature and memory pressure separately from the host fingerprint.
 
-The memory and timing executable must agree on source, toolchain, target, profile, optimization level, debug setting, features, native build and actual C/C++ compiler versions (`cc` and `cxx`). Native manifests must include both compiler versions. Retained historical Default and Portable SIMD builds must also agree on optimization level and debug setting. The report rejects incompatible manifests or hosts, unknown or unverified samples, duplicate samples or slots, missing blocks, incomplete groups, and missing required memory samples. Observations may vary; the report flags load, frequency or temperature deviations from the session median.
+The memory and timing executable must agree on source, block budget, toolchain, target, profile, optimization level, debug setting, features, native build and actual C/C++ compiler versions (`cc` and `cxx`). Native manifests must include both compiler versions. Historical multi-build results require their original tooling revision for regeneration. The report rejects incompatible manifests or hosts, unknown or unverified samples, duplicate samples or slots, missing blocks, incomplete groups, and missing required memory samples. Observations may vary; the report flags load, frequency or temperature deviations from the session median.
 
 ## Memory accounting
 

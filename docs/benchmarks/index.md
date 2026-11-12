@@ -4,7 +4,7 @@
 import PerformanceHistory from "../.vitepress/theme/components/PerformanceHistory.vue";
 </script>
 
-This page tracks the absolute time to sort fixed inputs on main, measured on Bencher's Intel v1 Bare Metal runners. Select a case and time window, then hover over a point for its build. Points link to source commits; the table provides measurement evidence.
+This page tracks the absolute time to sort fixed inputs on main, measured on Bencher's Intel v1 Bare Metal runners. Select a case and time window, then hover over a point for its build. Points link to source commits. The [data branch](https://github.com/Yikai-Liao/tessera-sort/tree/benchmark-data/main) retains build provenance.
 
 <PerformanceHistory />
 
@@ -21,8 +21,4 @@ In another Vue-enabled Markdown page, import this component and use it directly:
 	</script>
 	<PerformanceHistory />
 
-Optional `source` (a data-directory URL ending in `/`) and `case-id` props select another compatible dataset or initial case. Ordinary webpages can embed this page with an iframe. GitHub Markdown does not run Vue or iframes; use the stable SVG preview linked to this page:
-
-	[![Main performance](https://raw.githubusercontent.com/Yikai-Liao/tessera-sort/benchmark-data/main/preview.svg)](https://yikai-liao.github.io/tessera-sort/benchmarks/)
-
-The SVG URL stays fixed; publication replaces its contents without rebuilding this website. GitHub's image cache may delay refreshes.
+Optional `source` (a data-directory URL ending in `/`) and `case-id` props select another compatible dataset or initial case. Ordinary webpages can embed this page with an iframe. GitHub Markdown uses the [README’s fixed SVG preview](../../README.md) instead. Publishing measurements does not rebuild this website.

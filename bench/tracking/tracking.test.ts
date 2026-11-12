@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { renderHistory } from "../plot/history.ts";
+import { renderHistory } from "./history.ts";
 import { appendRun } from "./publish.ts";
 import {
   indexSchema,
@@ -46,33 +45,30 @@ const run: TrackingRun = {
   rustflags: "",
   image: "registry.bencher.dev/example@sha256:" + "b".repeat(64),
   workflow: "https://github.com/test/repo/actions/runs/1",
-  plan_hash: "c".repeat(64),
-  executable_hash: "d".repeat(64),
-  lock_hash: "e".repeat(64),
 };
 
 test("only complete matching absolute reports enter history", () => {
   assert.deepEqual(run.values[PREVIEW_CASE], [10, 9, 11]);
-  const mutations = [
-    (r: ReturnType<typeof report>) => {
+  const mutations: ((r: ReturnType<typeof report>) => void)[] = [
+    (r) => {
       r.branch.head.version.hash = "0".repeat(40);
     },
-    (r: ReturnType<typeof report>) => {
+    (r) => {
       r.project.slug = "other";
     },
-    (r: ReturnType<typeof report>) => {
+    (r) => {
       r.testbed.name = "ci";
     },
-    (r: ReturnType<typeof report>) => {
+    (r) => {
       r.results = [[]];
     },
-    (r: ReturnType<typeof report>) => {
+    (r) => {
       r.results[0].push(r.results[0][0]);
     },
-    (r: ReturnType<typeof report>) => {
+    (r) => {
       r.results[0][0].measures[0].measure.slug = "paired-time-ratio";
     },
-    (r: ReturnType<typeof report>) => {
+    (r) => {
       r.results[0][0].measures[0].metric.lower_value = 12;
     },
   ];
@@ -102,15 +98,11 @@ test("publication is idempotent, combines months and keeps the README SVG URL st
   };
   await appendRun(dir, next);
   const index = indexSchema.parse(JSON.parse(await readFile(join(dir, "index.json"), "utf8")));
-  assert.deepEqual(
-    index.months.map((m) => m.month),
-    ["2026-10", "2026-11"],
-  );
+  assert.deepEqual(index.months, ["2026-10", "2026-11"]);
   assert.equal(index.cases[0].id, PREVIEW_CASE);
   const all = [];
-  for (const { file } of index.months) {
-    const text = await readFile(join(dir, file), "utf8");
-    assert.ok(file.includes(createHash("sha256").update(text).digest("hex")));
+  for (const month of index.months) {
+    const text = await readFile(join(dir, month + ".jsonl"), "utf8");
     all.push(...parseRuns(text));
   }
   assert.deepEqual(
@@ -118,5 +110,11 @@ test("publication is idempotent, combines months and keeps the README SVG URL st
     [run.time, next.time],
   );
   assert.notEqual(await readFile(join(dir, "preview.svg"), "utf8"), first);
-  assert.equal(renderHistory([]), "");
+  await appendRun(dir, { ...next, id: "01a1cdb1-9445-76dd-89c4-e4220d49e6f9" });
+  assert.equal(parseRuns(await readFile(join(dir, "2026-11.jsonl"), "utf8")).length, 2);
+  assert.deepEqual(
+    indexSchema.parse(JSON.parse(await readFile(join(dir, "index.json"), "utf8"))),
+    index,
+  );
+  assert.equal(renderHistory([], PREVIEW_CASE), "");
 });

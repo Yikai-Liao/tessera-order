@@ -21,28 +21,24 @@ const reportSchema = z.object({
     name: z.literal("baremetal-intel-v1-absolute-v1"),
     spec: z.object({ uuid: z.uuid(), slug: z.literal("intel-v1") }),
   }),
-  results: z
-    .array(
-      z
-        .array(
-          z.object({
-            benchmark: z.object({ name: z.string() }),
-            measures: z
-              .array(
-                z.object({
-                  measure: z.object({
-                    slug: z.literal("latency"),
-                    units: z.literal("nanoseconds (ns)"),
-                  }),
-                  metric,
-                }),
-              )
-              .length(1),
-          }),
-        )
-        .min(1),
-    )
-    .length(1),
+  results: z.tuple([
+    z
+      .array(
+        z.object({
+          benchmark: z.object({ name: z.string() }),
+          measures: z.tuple([
+            z.object({
+              measure: z.object({
+                slug: z.literal("latency"),
+                units: z.literal("nanoseconds (ns)"),
+              }),
+              metric,
+            }),
+          ]),
+        }),
+      )
+      .min(1),
+  ]),
 });
 
 export const runSchema = z.object({
@@ -57,9 +53,6 @@ export const runSchema = z.object({
     .regex(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+(?:\/attempts\/\d+)?$/),
   rustc: z.string(),
   rustflags: z.string(),
-  plan_hash: z.string(),
-  executable_hash: z.string(),
-  lock_hash: z.string(),
   values: z.record(
     z.string().min(1),
     z.tuple([positive, positive, positive]).refine(([v, lo, hi]) => lo <= v && v <= hi),
@@ -67,12 +60,7 @@ export const runSchema = z.object({
 });
 export type TrackingRun = z.infer<typeof runSchema>;
 export const indexSchema = z.object({
-  months: z.array(
-    z.object({
-      month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
-      file: z.string().regex(/^\d{4}-\d{2}-[a-f0-9]{64}\.jsonl$/),
-    }),
-  ),
+  months: z.array(z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)),
   cases: z.array(z.object({ id: z.string(), label: z.string() })),
 });
 

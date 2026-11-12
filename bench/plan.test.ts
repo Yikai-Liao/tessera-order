@@ -14,7 +14,7 @@ const fixture = decodeConfig(
 ) as { plan: Record<string, unknown> };
 
 test("presets load through the same validator and overrides replace selection", async () => {
-  for (const preset of ["local", "continuous", "smoke", "release", "parallel"])
+  for (const preset of ["local", "continuous", "main", "smoke", "release", "parallel"])
     assert.ok((await loadPlan(preset)).algorithms.includes("tessera"));
   const plan = await loadPlan("local", {
     types: ["u64"],

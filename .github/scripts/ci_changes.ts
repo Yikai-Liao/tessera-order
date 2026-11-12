@@ -22,7 +22,7 @@ const ROUTES: [RegExp, Lane[]][] = [
   [/^(docs\/|assets\/)|\.md$/, ["docs"]],
   // These workflows run independently of the automatic build/test pipeline.
   [
-    /^\.github\/workflows\/(dco|pr-title|release|rust-release|cpp-release|bench-diagnostics)\.yml$/,
+    /^\.github\/workflows\/(dco|pr-title|release|rust-release|cpp-release|bench-diagnostics|main-benchmarks)\.yml$/,
     [],
   ],
   // Tests exercise the engine but are not the code that PR measurements compare.
@@ -41,12 +41,13 @@ const ROUTES: [RegExp, Lane[]][] = [
   ],
   // Tooling that renders or reads results and never builds or times a sorting algorithm.
   [/^bench\/plot\//, ["docs"]],
+  [/^bench\/tracking\/(result|history)\.ts$/, ["benchmark", "docs"]],
   [
     /\.test\.ts$|^bench\/(continuous\/(?!paired\.ts$)|report\/|local\/(report|counters|layout)\.ts$)|^\.github\/scripts\/|^tools\/(status|repository)\.ts$|^(biome|tsconfig)\.json$/,
     [],
   ],
   [
-    /^bench\/continuous\/paired\.ts$|^bench\/local\/(runner|model|samples)\.ts$|^tools\/continuous\.ts$/,
+    /^bench\/tracking\/|^bench\/plans\/main\.toml$|^bench\/continuous\/paired\.ts$|^bench\/local\/(runner|model|samples)\.ts$|^tools\/continuous\.ts$/,
     ["benchmark"],
   ],
   [/^bench\/(release|session|revisions)\.ts$/, ["comparison"]],

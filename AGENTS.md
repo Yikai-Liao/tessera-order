@@ -24,7 +24,7 @@ Use the maintained CLI from the repository root. Its compact output serves agent
 - Compare working tree with a commit: `bun run --silent tools compare commit COMMIT`.
 - Compare sorting algorithms: `bun run --silent tools compare algorithms`.
 - Regenerate retained results: `bun run --silent tools report DIR`.
-- Read feedback: `bun run --silent tools status --pr NUMBER` or `bun run --silent tools status main`. Match the exact head; inspect benchmark verdicts separately from workflow states. Automatic measurements run on PRs, not main.
+- Read feedback: `bun run --silent tools status --pr NUMBER` or `bun run --silent tools status main`. Match the exact head; inspect benchmark verdicts separately from workflow states. PR comparisons run automatically; independent main tracking is opt-in ([contract](docs/development/continuous-benchmarks.md#main-long-term-tracking)).
 
 Start performance work with a small representative selection, then expand evidence to match the claim. Extend the shared pipeline when an experiment needs a missing capability. Keep raw measurements outside Git. Read-only feedback requests stay read-only; confirm host-wide system changes, credentials, publication and unusually expensive experiments with the operator.
 

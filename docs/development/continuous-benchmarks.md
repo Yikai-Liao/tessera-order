@@ -48,12 +48,13 @@ Each sample restores bounded batches (cap 2^18 elements, at least one complete i
 
 ## Cases
 
-The [continuous plan](../../bench/plans/continuous.toml) caps inputs at 1,000,000 records and selects 97 cases: 61 serial and 36 four-thread. Parallel coverage:
+The [continuous plan](../../bench/plans/continuous.toml) caps inputs at 4,194,304 records and selects 99 cases: 61 serial and 38 four-thread. Parallel coverage:
 
 - Random 1M inputs for every smoke record type: `u32`, `u64`, `u128`, `f64`, `row_u32`, `row_u64`, `rec128_u64`.
 - Fourteen non-random `u64` distributions at 1M (ordered, nearly ordered, repeated-key, skewed, sparse-digit, clustered).
 - Seven keyed-row distributions at 1M for `row_u64`, plus `row_u32/skew99`, to check stable payload order through fast paths and uneven buckets.
 - `u128/sparse8`, `f64/finite_signed` and `rec128_u64/sparse_digits` at 1M.
+- `u64/random` and `row_u64/skew99` at 4,194,304 (2²² records), above the 2²¹-record threshold where roots stage bounded buckets and scale their blocks; 1M roots never reach that route.
 - Random 65,536-record `u32`, `u64`, `row_u32` and `row_u64`, covering entry overhead and the serial fallback below the byte threshold.
 
 The [catalog](../../bench/catalog.toml) owns the per-revision budgets, divided across fresh workers; startup, input preparation and at least one complete batch add overhead beyond them. There is no outer repetition.
@@ -61,7 +62,7 @@ The [catalog](../../bench/catalog.toml) owns the per-revision budgets, divided a
 | Length | Warm-up | Paired samples | Sampling budget per revision |
 |---|---|---|---|
 | Below 1,000,000 | 0.5 s | 30 | 1.5 s |
-| 1,000,000 | 1 s | 40 | 4 s |
+| 1,000,000 or more | 1 s | 40 | 4 s |
 
 Preview coverage with `bun run --silent tools plan continuous`; preparation resolves the full inventory through Rust and report uses that retained inventory.
 

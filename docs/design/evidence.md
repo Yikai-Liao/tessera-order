@@ -40,6 +40,12 @@ The engine is a Stable Rust port of the research prototype in `sort-research-rs`
 
 The R3 `finish_ordered` refactor keeps the flat-sample route and adds no scan, allocation or cached classification. Its short-input linked screens did not establish stable latency controls: at 48 records, `row_u64/equal` had baseline/current ratios 0.797 / 0.823 against A/A 0.764–1.236, `row_u64/sorted` 0.898 / 0.814 against 0.770–1.230, `row_u64/random` 1.043 / 0.927 against 0.996–1.004, and `u64/equal` 0.961 / 0.966 against 0.968–1.032. Increasing the sample duration did not stabilize the controls: row equal A/A widened to 0.659–1.341, reverse to 0.871–1.129 with current-copy median 1.164, and sorted baseline ratios were 0.950 / 0.978 against 0.975–1.025. Fixed-work row counts matched; `u64` added 0.30–0.56% instructions. These controls remain unresolved and do not establish source causality. Current-head hosted feedback and accepted effects belong in [PR #107](https://github.com/Yikai-Liao/tessera-sort/pull/107).
 
+## Root insertion ownership
+
+R4 consolidates the complete root insertion attempt: the caller supplies effective tile capacity, while `insertion_probe` selects finishing or probing and owns the window and budget. It retains both low-level insertion entries (X4), the insertion-size predicate and every routing threshold; it reduces caller/callee coordination, not the number of insertion algorithms. Simply deleting the shortcut made `u64/random/48` about 49.5% slower in both linked baseline comparisons (baseline/current 0.6691 / 0.6692, A/A 0.9987–1.0013). Routing the unlimited leaf through the counted entry instead preserved the algorithm but changed generated-code work across the direct-extractor boundary. Keep the unit-return finishing entry inside the complete operation.
+
+The three-block linked screen against post-ledger main still leaves short-input controls unresolved: `row_u64/random/48` baseline/current 0.9917 / 0.8918 and current-copy 0.9218 (A/A 0.9935–1.0065); `u64/random/48` 0.9776 / 0.9805 (A/A 0.9912–1.0088); `u64/random/65536` 0.9926 / 0.9897 and current-copy 0.9866 (A/A 0.9959–1.0041). Near-order short controls are wider and do not resolve their differences. Retained disassembly shows distinct root bodies and the preserved finishing branch, not code identity; no source-causal speedup or performance acceptance is established.
+
 ## Landed with open losses
 
 These changes are in the engine; each measured loss below stays open and no distribution or size exception compensates for it.

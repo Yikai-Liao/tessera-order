@@ -61,6 +61,7 @@ Existing smaller candidates remain available; none is a prerequisite for S1 or P
 | R4 | The `INSERTION_MAX` root shortcut beside the budgeted probe | One insertion attempt owning its budget | Known short `random/1000` losses; measure first |
 | N2 | `two_runs`, `NodePlan::Runs`, `split_ordered` | A block partition that detects non-decreasing bucket order and returns without moving | Loses the rotated `1*0*` form; `sorted_tail`, `bimodal`, `far_swaps`; speculative |
 | X3 | Duplicated half-key dispatch in serial and parallel entries | One root helper, or `KeyHalf` over the narrowest covering unsigned type | The second is a routing change for narrow 64-bit variation |
+| T2 | Two-pass LSD tile planning and its split-point search | MSD-led tile finishing that keeps LSD's in-place ending | The simplest variant lost +55.5% on `u32/random/1M` ([evidence](docs/design/evidence.md#rejected-or-on-hold)); open variants listed there |
 | X4 | `finish_insertion` beside `insertion_sort(usize::MAX)` | One entry | Measured micro-choice on short tiles |
 | P2 | `Config`, `BucketFinish` and `BoundedFinish` describing one root partition | One description consumed by the block layer | Reassess after P1 so deleted staging policy does not acquire another wrapper |
 | P3 | `tile::Scratch`, `block::Buffers`, job `Pool` | A shared scratch lifecycle | Reassess after P1/P4; preserve nested/reentrant lifetimes and allocation reuse rather than assume one buffer per worker |

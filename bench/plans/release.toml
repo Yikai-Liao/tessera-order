@@ -6,10 +6,12 @@ algorithms = [ "tessera", "std-stable", "radsort", "voracious", "glidesort", "gl
 
 # Keep the original cross-type matrix for comparable aggregate figures.
 [[include]]
+types = [ "u32", "u64", "f64", "row_u64", "record128", "owned", "row_u32" ]
 distributions = [ "random", "d256", "d16", "zipf1.1", "zipf2", "skew99", "sorted", "reverse", "sorted99", "runs" ]
 
 # Cardinality, skew and disorder are distinct axes, shared by every record type.
 [[include]]
+types = [ "u32", "u64", "f64", "row_u64", "record128", "owned", "row_u32" ]
 distributions = [ "equal", "d4096", "two_values", "hot50", "far_swaps", "sorted_tail" ]
 lengths = [ 65536, 1000000 ]
 

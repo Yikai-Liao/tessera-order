@@ -4,7 +4,10 @@
 
 use super::InputCase;
 use crate::case::{Key, Row, generate};
-use std::{cmp::Ordering, rc::Rc};
+use std::{
+    cmp::{Ordering, Reverse},
+    rc::Rc,
+};
 
 /// Ordering and payload identity for one benchmark record representation.
 pub(super) trait BenchmarkRecord: Clone + Send + Sync + 'static {
@@ -39,6 +42,15 @@ macro_rules! key_element {
 key_element!(u32);
 key_element!(u64);
 key_element!(f64);
+
+impl<K: Key + Send + Sync + 'static> BenchmarkRecord for Reverse<K> {
+    fn order(&self, other: &Self) -> Ordering {
+        other.0.order(&self.0)
+    }
+    fn same(&self, other: &Self) -> bool {
+        self.0.same(&other.0)
+    }
+}
 
 /// A 128-byte C-layout record with a key and indexed payload.
 #[repr(C)]
@@ -152,6 +164,8 @@ pub(super) enum CaseInput {
     U32(Rc<PreparedRecords<u32>>),
     U64(Rc<PreparedRecords<u64>>),
     F64(Rc<PreparedRecords<f64>>),
+    ReverseU64(Rc<PreparedRecords<Reverse<u64>>>),
+    ReverseF64(Rc<PreparedRecords<Reverse<f64>>>),
     Row32(Rc<PreparedRecords<Row<u32>>>),
     Row64(Rc<PreparedRecords<Row<u64>>>),
     WideRecord(Rc<PreparedRecords<WideRecord>>),
@@ -173,6 +187,21 @@ impl CaseInput {
                 &c.distribution,
                 c.len,
             ))),
+            // Complementing integers and flipping float signs complements their
+            // encoded keys. Reverse complements them again, preserving the base
+            // generator's encoded-order geometry, including sorted inputs.
+            "reverse_u64" => Self::ReverseU64(PreparedRecords::new(
+                generate::<u64>(&c.distribution, c.len)
+                    .into_iter()
+                    .map(|key| Reverse(!key))
+                    .collect(),
+            )),
+            "reverse_f64" => Self::ReverseF64(PreparedRecords::new(
+                generate::<f64>(&c.distribution, c.len)
+                    .into_iter()
+                    .map(|key| Reverse(-key))
+                    .collect(),
+            )),
             "row_u32" => Self::Row32(PreparedRecords::new(
                 generate::<u32>(&c.distribution, c.len)
                     .into_iter()
@@ -213,5 +242,67 @@ impl CaseInput {
             )),
             _ => unreachable!("suite contains an unknown type"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tessera_sort::RadixKey;
+
+    #[test]
+    fn reverse_inputs_preserve_encoded_geometry() {
+        // Both representations must exercise the same disorder and variation,
+        // not turn the sorted scan control into a descending fast path.
+        for distribution in [
+            "random",
+            "sorted",
+            "sorted99",
+            "far_swaps",
+            "skew99",
+            "finite_signed",
+        ] {
+            for ty in ["reverse_u64", "reverse_f64"] {
+                let case = InputCase {
+                    ty: ty.into(),
+                    distribution: distribution.into(),
+                    len: 1000,
+                };
+                match CaseInput::new(&case) {
+                    CaseInput::ReverseU64(input) => {
+                        for (reverse, base) in input
+                            .original()
+                            .iter()
+                            .zip(generate::<u64>(distribution, case.len))
+                        {
+                            assert_eq!(reverse.encode(), base.encode(), "{ty}/{distribution}");
+                        }
+                    }
+                    CaseInput::ReverseF64(input) => {
+                        for (reverse, base) in input
+                            .original()
+                            .iter()
+                            .zip(generate::<f64>(distribution, case.len))
+                        {
+                            assert_eq!(reverse.encode(), base.encode(), "{ty}/{distribution}");
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn reverse_float_identity_is_bit_exact() {
+        let negative_zero = Reverse(-0.0f64);
+        let positive_zero = Reverse(0.0f64);
+        assert!(negative_zero.order(&positive_zero).is_gt());
+        assert!(!negative_zero.same(&positive_zero));
+        let nan = Reverse(f64::from_bits(0x7ff8_0000_0000_0001));
+        let other_nan = Reverse(f64::from_bits(0x7ff8_0000_0000_0002));
+        assert!(nan.same(&nan));
+        assert!(!nan.same(&other_nan));
+        assert!(nan.order(&other_nan).is_gt());
     }
 }

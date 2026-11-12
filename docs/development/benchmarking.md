@@ -92,6 +92,16 @@ The temporary workspace renames copied packages without rewriting Rust source an
 
 Ratios are **placement time / paired current time**: a slower baseline row indicates a current improvement. Inspect both baseline copies and current B, not just the favorable copy. Distinct entries are checked before measurement but do not prove distinct internal bodies: inspect the retained executable's symbols and disassembly before claiming source attribution, and reject folded paths as placement evidence. Repeated-current A/A bounds timing variability and same-source copies expose placement sensitivity; neither bounds all code placement.
 
+For direct-key scan experiments, select the opt-in comparison types `reverse_u64` and `reverse_f64`. They use Tessera's direct API in all four revision placements; standard and Glidesort adapters use the reversed total order. External radix and native adapters decline these types. They are not part of the smoke harness or the default smoke/release presets, so continuous coverage and retained aggregate figures stay unchanged. A bounded three-block screen is:
+
+```sh
+bun run tools compare revisions HEAD --types reverse_u64,reverse_f64 \
+  --distributions sorted,sorted99,far_swaps,random --lengths 63,64,1000 \
+  --blocks 3 --sample-ms 1 --memory-mib 16
+```
+
+This tests the comparison pipeline and selected whole calls; it does not establish scan throughput, code-generation quality or source attribution. Expand lengths and inspect actual dispatched bodies before evaluating a scan replacement.
+
 ## Working-tree comparisons
 
 `compare commit [COMMIT]` and `compare algorithms` snapshot the current staged, unstaged and untracked sources without touching the checkout, build under `~/code/tessera-bench/` (`TESSERA_BENCH_WORK` overrides) and clean up temporary sources. Builds reuse `target/tessera-bench` in the checkout by default; `TESSERA_BENCH_TARGET_DIR` overrides it (relative paths resolve from the repository root). Remove that cache for a cold build, and never share it across trust boundaries. Internal symlinks are materialized; escaping or dangling links and directory cycles are rejected. Baseline links must resolve inside an archive of the selected commit.
@@ -233,6 +243,7 @@ Case IDs are `type/distribution/length/s1`. A group is all lengths of one type a
 |---|---|---|
 | `u32`, `u64` | keys | Unsigned integers |
 | `f64` | keys | Arbitrary float bits, ordered by `total_cmp` |
+| `reverse_u64`, `reverse_f64` | keys (opt-in) | `Reverse<u64>`, `Reverse<f64>` through the direct-key API |
 | `row_u64` | rows | `{u64 key, u32 row}`, C layout, 16 bytes |
 | `record128` | records | `{u64 key, [u8; 120]}`, C layout, 128 bytes |
 | `owned` | owned records | `{u64 key, String}`, 16-character payload |
@@ -253,6 +264,8 @@ All nine new integer distributions also run on `u64` at 10M. Type restrictions p
 ### Input generation
 
 `case.rs` owns the seed-one generator shared by all executables and Criterion; tests pin every distribution's seed-one input hash, and float validation covers signed zeros, infinities, subnormals and NaNs of both signs with distinct payloads. The source is SplitMix64 from state 1: each draw adds `0x9e3779b97f4a7c15` and applies the xor-shift/multiply finalizer (shifts 30, 27, 31; multipliers `0xbf58476d1ce4e5b9`, `0x94d049bb133111eb`) in wrapping 64-bit arithmetic. `u32` takes the low 32 bits, `u64` the draw, `u128` two draws high word first, `f64` the draw as bits.
+
+The opt-in `Reverse` comparison inputs reuse the corresponding base generator, then wrap `!key` for `u64` or `-key` for `f64` in `Reverse`. Each transformation complements the encoded base key; `Reverse` complements it again. Thus each generated position has exactly the base input's encoded key, preserving sorted/near-sorted shapes and candidate-bit geometry while exercising a different direct-key representation. Float identity checks compare every bit, including zero signs and NaN signs/payloads. Existing base inputs are unchanged.
 
 - `random` draws each key over its full range; `dD` takes `next mod D` (D = 16, 256, 4,096).
 - `zipf2` selects ranks `k − 1` for k = 1…n by cumulative integer weights `floor(2^62 / k²)`; `zipf1.1` uses `floor(2^48 / (k · floor(256 · k^(1/10))))`, with the tenth root by integer binary search. A draw selects `floor(next · total / 2^64)` and the first cumulative weight above it.

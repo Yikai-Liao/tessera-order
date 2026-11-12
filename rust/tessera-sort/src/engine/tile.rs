@@ -24,6 +24,23 @@ pub(super) fn capacity<T>(tile_bytes: usize) -> usize {
     (tile_bytes / core::mem::size_of::<T>().max(1)).clamp(1, MAX_TILE_RECORDS)
 }
 
+/// Record-byte budget for finishing a complete parallel child as one tile.
+/// Retains the largest former staged-tile allowance without tying capacity to
+/// record width, root length, fan-out or a movement strategy.
+#[cfg(feature = "rayon")]
+const FINISH_TILE_BYTES: usize = 1024 * 1024;
+
+/// Enlarges capacity only when the whole child fits both the byte budget and
+/// the cursor representation. Larger nodes keep ordinary descendant tiles.
+#[cfg(feature = "rayon")]
+pub(super) fn finishing_capacity<T>(len: usize, ordinary: usize) -> usize {
+    if len <= capacity::<T>(FINISH_TILE_BYTES) {
+        ordinary.max(len)
+    } else {
+        ordinary
+    }
+}
+
 /// Reusable record scratch; each sort restores its complete record set before return.
 pub(super) struct Scratch<T>(Vec<MaybeUninit<T>>);
 
@@ -327,6 +344,25 @@ impl<T> Drop for RestoreTile<T> {
 mod tests {
     use super::*;
     use crate::key::ByKey;
+    #[test]
+    #[cfg(feature = "rayon")]
+    fn finishing_capacity_bounds_the_whole_child() {
+        fn check<T>() {
+            let ordinary = capacity::<T>(crate::thresholds::TILE_BYTES);
+            let limit = capacity::<T>(FINISH_TILE_BYTES);
+            for len in [0, ordinary, ordinary + 1, limit, limit + 1] {
+                let expected = if len <= limit {
+                    ordinary.max(len)
+                } else {
+                    ordinary
+                };
+                assert_eq!(finishing_capacity::<T>(len, ordinary), expected);
+            }
+        }
+        check::<u64>();
+        check::<[u8; 128]>();
+    }
+
     #[test]
     fn changing_keys_finish_tile() {
         let mut records: Vec<_> = (0..1000u64).collect();

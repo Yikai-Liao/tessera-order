@@ -124,15 +124,9 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
             shards * bucket_count,
             2 * DESCRIPTOR_BYTES_PER_POSITION,
         );
-        let bounded = config
-            .finish
-            .as_ref()
-            .is_some_and(|finish| finish.limit > 0);
-        scaled_block_size(
-            balanced,
-            record_bytes,
-            if bounded { BLOCK_SCALE } else { 1 },
-        )
+        // Source-ledger transfers pay per-block ownership work regardless of
+        // how the engine finishes a bucket. Use the shared amortization scale.
+        scaled_block_size(balanced, record_bytes, BLOCK_SCALE)
     });
     let full_blocks = arr.len() / block_size;
     let shards = shards.min(full_blocks.max(1));

@@ -2,6 +2,10 @@
 
 A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so that one `u16` can hold any position in it. Its scratch buffer is the same size and stays in the L2 cache. Inside a tile, a second buffer is cheap, so Tessera can use ordinary counting passes. The open questions are which digits to use and whether to finish with MSD or LSD. Strategy selection belongs to [`engine/plan.rs`](../../rust/tessera-sort/src/engine/plan.rs); [`engine/tile.rs`](../../rust/tessera-sort/src/engine/tile.rs) executes the selected leaf and owns its scratch and panic recovery.
 
+## Parallel child allowance
+
+A complete materialized parallel child may use a larger tile, up to a 1 MiB record-byte budget and the same cursor limit. `finishing_capacity` owns this allowance independently of block sizing or record delivery. It applies only when the entire child fits: larger nodes keep the ordinary capacity for their descendants. The byte budget retains the former largest staged-tile working set while also bounding wide records; it is an empirical budget, not a cache-size claim. Child variation and order confirmation still run before tile sorting.
+
 ## Three leaves
 
 | Leaf | Used when | How it works |

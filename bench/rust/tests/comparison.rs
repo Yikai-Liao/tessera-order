@@ -214,7 +214,7 @@ fn parallel_adapters_validate_records() {
             "schema": 1, "harness": "comparison",
             "algorithms": ["tessera-par-8", "rayon-stable-8"],
             "include": [{
-                "types": ["f64", "row_u64", "record128", "owned"],
+                "types": ["f64", "reverse_u64", "reverse_f64", "row_u64", "record128", "owned"],
                 "distributions": ["random", "d16"], "lengths": [131_073]
             }]
         }))

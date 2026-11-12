@@ -44,6 +44,8 @@ types = [
   { id = "u32", label = "u32", detail = "4-byte key", task = "keys", bytes = 4 },
   { id = "u64", label = "u64", detail = "8-byte key", task = "keys", bytes = 8 },
   { id = "f64", label = "f64", detail = "total order", task = "keys", bytes = 8 },
+  { id = "reverse_u64", label = "Reverse<u64>", detail = "descending direct key", task = "keys", bytes = 8 },
+  { id = "reverse_f64", label = "Reverse<f64>", detail = "descending total order", task = "keys", bytes = 8 },
   { id = "row_u64", label = "{u64, u32}", detail = "16-byte row", task = "records", compact = "{u64,u32}", bytes = 16 },
   { id = "record128", label = "128-byte record", detail = "u64 key", task = "records", bytes = 128 },
   { id = "owned", label = "owned record", detail = "{u64, String}", task = "records", bytes = 32 },
@@ -91,7 +93,7 @@ testbed = "ci"
 features = ["rayon"]
 
 [comparison]
-types = ["u32","u64","f64","row_u64","record128","owned","row_u32"]
+types = ["u32","u64","f64","row_u64","record128","owned","row_u32","reverse_u64","reverse_f64"]
 shapes = ["random","d256","d16","zipf1.1","zipf2","skew99","sorted","reverse","sorted99","runs","equal","d4096","two_values","hot50","sparse8","sparse_digits","bimodal","far_swaps","finite_signed","sorted_tail"]
 # Fixed cross-type aggregates; targeted inputs are plotted separately.
 summaryShapes = ["random","d256","d16","zipf1.1","zipf2","skew99","sorted","reverse","sorted99","runs"]

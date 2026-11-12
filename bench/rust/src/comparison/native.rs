@@ -229,21 +229,20 @@ mod tests {
                 threads: None,
             };
             for case in &cases {
-                assert!(
-                    matches!(
-                        case.ty.as_str(),
-                        "u32" | "u64" | "f64" | "row_u32" | "row_u64" | "record128" | "owned"
-                    ),
-                    "missing support expectation for record type {}",
-                    case.ty
-                );
-                // This independent oracle preserves the pre-refactor capability matrix.
-                let expected = match variant.name {
-                    "clausecker" => case.ty == "row_u32",
-                    "vqsort" | "x86simdsort" => matches!(case.ty.as_str(), "u32" | "u64"),
-                    "duckdb" => !matches!(case.ty.as_str(), "f64" | "owned"),
-                    "fluxsort" | "ips2ra" | "ips4o" | "crumsort" => case.ty != "owned",
-                    _ => panic!("missing support expectation for {}", variant.name),
+                // This independent oracle preserves native capabilities and
+                // verifies that opt-in Reverse keys decline every native kernel.
+                let expected = match case.ty.as_str() {
+                    "reverse_u64" | "reverse_f64" => false,
+                    "u32" | "u64" | "f64" | "row_u32" | "row_u64" | "record128" | "owned" => {
+                        match variant.name {
+                            "clausecker" => case.ty == "row_u32",
+                            "vqsort" | "x86simdsort" => matches!(case.ty.as_str(), "u32" | "u64"),
+                            "duckdb" => !matches!(case.ty.as_str(), "f64" | "owned"),
+                            "fluxsort" | "ips2ra" | "ips4o" | "crumsort" => case.ty != "owned",
+                            _ => panic!("missing support expectation for {}", variant.name),
+                        }
+                    }
+                    _ => panic!("missing support expectation for record type {}", case.ty),
                 };
                 let input = CaseInput::new(case);
                 let prepared = variant.prepare(&input, 0);

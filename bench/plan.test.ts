@@ -26,6 +26,23 @@ test("presets load through the same validator and overrides replace selection", 
   assert.deepEqual(parsePlan(decodeConfig(JSON.stringify(plan), "plan.json")), plan);
 });
 
+test("Reverse direct keys are opt-in comparison inputs", async () => {
+  const types = ["reverse_u64", "reverse_f64"];
+  const plan = await loadPlan("smoke", {
+    types,
+    distributions: ["sorted", "sorted99", "far_swaps", "random"],
+    lengths: [63, 64, 1000],
+  });
+  assert.ok(plan.include.every((rule) => rule.types?.join() === types.join()));
+  for (const preset of ["smoke", "release", "parallel"]) {
+    const defaults = await loadPlan(preset);
+    assert.ok(
+      defaults.include.every((rule) => rule.types && !rule.types.some((id) => types.includes(id))),
+    );
+  }
+  assert.throws(() => parsePlan({ ...plan, harness: "smoke", algorithms: ["tessera"] }));
+});
+
 test("malformed and unsupported plans fail before execution", () => {
   for (const invalid of [
     { ...fixture.plan, schema: 2 },

@@ -11,7 +11,7 @@ use super::{
 };
 use crate::case::Row;
 use rdst::RadixSort;
-use std::{hint::black_box, mem::MaybeUninit, rc::Rc};
+use std::{cmp::Reverse, hint::black_box, mem::MaybeUninit, rc::Rc};
 use voracious_radix_sort::{RadixSort as VoraciousSort, Radixable};
 
 /// Type-specific Tessera entry points, separate from record identity and ordering.
@@ -80,7 +80,7 @@ macro_rules! tessera_keys {
         }
     )+};
 }
-tessera_keys!(u32, u64, f64);
+tessera_keys!(u32, u64, f64, Reverse<u64>, Reverse<f64>);
 
 /// Keeps keyed-record adapters on Tessera's by-key entry points.
 macro_rules! tessera_records {
@@ -291,6 +291,11 @@ impl Variant {
                     radsort::sort_by_key(v, |r| r.key)
                 }))
             }
+            // External radix and native adapters do not accept Reverse keys.
+            // Common comparison sorts use BenchmarkRecord's reversed order;
+            // Tessera keeps the direct-key API in every revision copy.
+            (_, CaseInput::ReverseU64(v)) => try_prepare_common(self, Rc::clone(v), scratch_bytes),
+            (_, CaseInput::ReverseF64(v)) => try_prepare_common(self, Rc::clone(v), scratch_bytes),
             (_, CaseInput::OwnedRecord(v)) => try_prepare_common(self, Rc::clone(v), scratch_bytes),
             (_, CaseInput::U32(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
             (_, CaseInput::U64(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
@@ -313,6 +318,8 @@ impl CaseInput {
             Self::U32(_) => u32::revision_entries(),
             Self::U64(_) => u64::revision_entries(),
             Self::F64(_) => f64::revision_entries(),
+            Self::ReverseU64(_) => Reverse::<u64>::revision_entries(),
+            Self::ReverseF64(_) => Reverse::<f64>::revision_entries(),
             Self::Row32(_) => Row::<u32>::revision_entries(),
             Self::Row64(_) => Row::<u64>::revision_entries(),
             Self::WideRecord(_) => WideRecord::revision_entries(),
@@ -386,6 +393,35 @@ mod tests {
     }
 
     #[test]
+    fn reverse_adapters_preserve_inputs() {
+        for ty in ["reverse_u64", "reverse_f64"] {
+            for distribution in ["random", "sorted", "sorted99", "far_swaps", "equal"] {
+                for len in [63, 64, 1000] {
+                    let input = CaseInput::new(&InputCase {
+                        ty: ty.into(),
+                        distribution: distribution.into(),
+                        len,
+                    });
+                    for variant in list_variants().into_iter().filter(|v| v.threads.is_none()) {
+                        let kernel = variant.prepare(&input, 32768);
+                        let supported = ["common", "revision"].contains(&variant.adapter)
+                            || ["glidesort", "glidesort-sqrt", "std-unstable"]
+                                .contains(&variant.name);
+                        assert_eq!(kernel.is_some(), supported, "{ty}/{}", variant.name);
+                        if let Some(mut kernel) = kernel {
+                            kernel.restore(2);
+                            kernel.run_batch();
+                            kernel.check().unwrap_or_else(|error| {
+                                panic!("{ty}/{distribution}/{len}/{}: {error}", variant.name)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn batches_restore_shared_input() {
         let input = PreparedRecords::new(vec![3u64, 1, 2]);
         let mut k = prepare_kernel(Rc::clone(&input), true, |v| {
@@ -433,14 +469,19 @@ mod tests {
             .take(1000)
             .map(f64::from_bits)
             .collect();
-        let input = CaseInput::F64(PreparedRecords::new(input));
-        for v in list_variants() {
-            let Some(mut k) = v.prepare(&input, 32768) else {
-                continue;
-            };
-            k.restore(2);
-            k.run_batch();
-            k.check().unwrap_or_else(|e| panic!("{}: {e}", v.name));
+        let reversed = input.iter().copied().map(Reverse).collect();
+        for input in [
+            CaseInput::F64(PreparedRecords::new(input)),
+            CaseInput::ReverseF64(PreparedRecords::new(reversed)),
+        ] {
+            for v in list_variants() {
+                let Some(mut k) = v.prepare(&input, 32768) else {
+                    continue;
+                };
+                k.restore(2);
+                k.run_batch();
+                k.check().unwrap_or_else(|e| panic!("{}: {e}", v.name));
+            }
         }
     }
 }

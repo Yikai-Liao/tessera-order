@@ -7,10 +7,12 @@ exclude = []
 
 # Validate the release plan's type/distribution pairs at a small length.
 [[include]]
+types = [ "u32", "u64", "f64", "row_u64", "record128", "owned", "row_u32" ]
 distributions = [ "random", "d256", "d16", "zipf1.1", "zipf2", "skew99", "sorted", "reverse", "sorted99", "runs" ]
 lengths = [ 1000 ]
 
 [[include]]
+types = [ "u32", "u64", "f64", "row_u64", "record128", "owned", "row_u32" ]
 distributions = [ "equal", "d4096", "two_values", "hot50", "far_swaps", "sorted_tail" ]
 lengths = [ 1000 ]
 

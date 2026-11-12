@@ -34,17 +34,21 @@ type KeyValue<T, E> = <E as Extract<T>>::Value;
 /// Stably inserts inverted records until sorted or the swap budget runs out.
 /// A failed pass still leaves a stable permutation of the input.
 ///
-/// The SIMD extractor calls this from a target-feature context. Keeping the
+/// The scanner returns the earliest descending adjacent pair in its shared
+/// suffix, using the same extractor where it needs user keys. Direct-key
+/// callers instead capture the backend selected for this entire pass.
+/// The SIMD caller enters this from a target-feature context. Keeping the
 /// loop in that context avoids out-of-line calls for each vector operation.
 #[inline(always)]
 pub(crate) fn insertion_loop<T, E: Extract<T>>(
     records: &mut [T],
     budget: usize,
     extractor: &mut E,
+    mut first_inversion: impl FnMut(&[T], &mut E) -> Option<usize>,
 ) -> Option<usize> {
     let mut swaps = 0;
     let mut start = 0;
-    while let Some(offset) = extractor.first_inversion(&records[start..]) {
+    while let Some(offset) = first_inversion(&records[start..], extractor) {
         let index = start + offset + 1;
         let (prefix, tail) = records.split_at_mut(index);
         let (mut current, prefix) = prefix.split_last_mut().unwrap();
@@ -75,8 +79,12 @@ pub(crate) fn insertion_loop<T, E: Extract<T>>(
 /// The unit return keeps the unused swap total inside the inlined operation,
 /// so it can be discarded before returning across a target-feature boundary.
 #[inline(always)]
-pub(crate) fn finish_insertion<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
-    let _ = insertion_loop(records, usize::MAX, extractor);
+pub(crate) fn finish_insertion<T, E: Extract<T>>(
+    records: &mut [T],
+    extractor: &mut E,
+    first_inversion: impl FnMut(&[T], &mut E) -> Option<usize>,
+) {
+    let _ = insertion_loop(records, usize::MAX, extractor, first_inversion);
 }
 
 /// Scans until all candidate bits have appeared in both states, or the input ends.

@@ -665,7 +665,7 @@ mod tests {
             let records =
                 unsafe { core::slice::from_raw_parts_mut(input.add(shard * SHARD_LEN), SHARD_LEN) };
             let mut part = Partition::new(records, BUCKETS, BLOCK, buffers);
-            assert!(part.step(|record| record.0 as usize).is_none());
+            assert!(part.step((), |_, record| record.0 as usize).is_ok());
             parts.push(part);
         }
         let scratch_blocks = SHARDS * 2 * BUCKETS;
@@ -904,7 +904,7 @@ mod tests {
                 let result = unwind::catch(|| {
                     let mut buffers = Buffers::new();
                     let mut partition = Partition::new(&mut records, 4, 3, &mut buffers);
-                    assert!(partition.step(|record| record.id * 37 % 4).is_none());
+                    assert!(partition.step((), |_, record| record.id * 37 % 4).is_ok());
                     let ends = partition.record_ends();
                     complete_with_fault(
                         &mut partition,

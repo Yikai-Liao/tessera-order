@@ -120,9 +120,13 @@ fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor
 ///
 /// Serial and parallel equality partitions read this two-bit digit; the
 /// fourth bucket is unused, so the greater band runs to the end.
+///
+/// The rank is a full-width integer: byte arithmetic writes partial registers
+/// and made the scatter loop wait on the previous record's bucket pointer
+/// (1.5x slower on `u64/two_values/65536`).
 #[inline]
-fn equality_rank<V: Ord>(key: V, equal: V) -> u8 {
-    u8::from(key >= equal) + u8::from(key > equal)
+fn equality_rank<V: Ord>(key: V, equal: V) -> usize {
+    usize::from(key >= equal) + usize::from(key > equal)
 }
 
 /// Buffers shared by the nodes and tiles of one sort.
@@ -505,7 +509,8 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         }
         let tile_len = self.tile_len;
         let mut block_buffers = core::mem::take(&mut self.scratch.block);
-        let mut visit = |child: &mut [T], extractor: &mut E| {
+        let mut visit = |child: &mut [T], extractor: &mut &mut E| {
+            let extractor = &mut **extractor;
             if child.len() <= tile_len {
                 let varying = scan_varying_bits(child, candidate, extractor);
                 self.scratch.tile.sort::<E>(child, varying, extractor);
@@ -515,7 +520,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             records,
             digit.width,
             digit.shift,
-            self.extractor,
+            &mut *self.extractor,
             &mut block_buffers,
             &mut visit,
         );
@@ -538,15 +543,9 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         let extractor = &mut *self.extractor;
         // The same rank digit as the parallel root. ByKey caches classification
         // and declines filling: equal ranks do not identify record payloads.
-        let mut rank = ByKey(move |record: &T| equality_rank(extractor.key(record), equal));
-        let ends = block::partition_digit(
-            records,
-            2,
-            0,
-            &mut rank,
-            &mut self.scratch.block,
-            &mut |_, _| {},
-        );
+        let rank = ByKey(move |record: &T| equality_rank(extractor.key(record), equal));
+        let ends =
+            block::partition_digit(records, 2, 0, rank, &mut self.scratch.block, &mut |_, _| {});
         if ends[0] == records.len() || ends[1] == 0 {
             // A changing key can leave the whole node below or above the
             // sampled pivot. Force a digit partition to remove candidate bits

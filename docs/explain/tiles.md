@@ -44,7 +44,7 @@ This simpler routing may choose MSD where a longer LSD plan would be faster. [En
 
 Tile passes are the classic [counting pass](radix-sort.md#the-counting-pass) with two details:
 
-- **Bucket IDs are cached** when the key comes from a user function: the histogram stores each record's bucket as a `u16`, and the scatter reads it back instead of calling the key function again. The IDs go into the unused part of the cursor table when they fit, or after the records in the scratch allocation. [Ownership and panics](safety.md) explains why.
+- **Bucket IDs are cached** when the key comes from a user function: the histogram stores each record's bucket as a `u16`, and the scatter reads it back instead of calling the key function again. The IDs go after the records in the scratch allocation. [Ownership and panics](safety.md) explains why.
 - **A guard tracks the live copy.** After each pass, `RestoreTile` remembers whether the complete record set is in the tile or in scratch. If the plan ends in scratch, or a key function panics, it copies the records back into the tile.
 
 Before recursing, each child is scanned for varying bits only within the parent's remaining candidate mask. Already partitioned digits cannot reappear, even if a user key function changes its answers, so each recursive level removes key bits.

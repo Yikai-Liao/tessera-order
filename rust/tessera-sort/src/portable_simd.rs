@@ -15,9 +15,6 @@ use crate::key::{ByKey, Extract};
 use fearless_simd::prelude::*;
 use fearless_simd::{Level, Simd, dispatch, u8x16, u16x8};
 
-/// Pairs examined between mask checks.
-const BLOCK: usize = 32;
-
 /// Shortest slice worth a vector scan; below this the scalar loop wins.
 const SIMD_MIN: usize = 64;
 
@@ -27,15 +24,27 @@ const SIMD_MIN: usize = 64;
 /// scalar check finds them without paying for a vector block.
 const PEEL: usize = 4;
 
-/// The adjacent-pair scan of one direct key type; also seals [`RadixKey`].
+/// Native adjacent-pair comparison for direct keys; also seals [`RadixKey`].
 ///
-/// Every scan and insertion pass over direct keys enters this module and
-/// reaches the key type only through this hook, with the backend selected.
+/// The scan owns traversal and mask aggregation. Each key owns only the
+/// backend's lane count and comparison in its encoded order. One lane denotes
+/// a scalar fallback, used by wide and pointer-sized keys.
 pub trait SimdKey: Copy {
-    /// Offset of the first descending adjacent pair in `values`.
-    fn scan_with<S: Simd>(simd: S, values: &[Self]) -> Option<usize>
+    /// Number of pairs compared by [`Self::pair_mask`] under this backend,
+    /// from one through 64, matching the backend's native vector width.
+    fn lanes<S: Simd>() -> usize {
+        1
+    }
+
+    /// Bit i is set exactly when left[i]'s encoded key exceeds right[i]'s,
+    /// for the first [`Self::lanes`] pairs; all higher bits are zero.
+    /// Both slices contain at least that many records.
+    fn pair_mask<S: Simd>(_simd: S, left: &[Self], right: &[Self]) -> u64
     where
-        Self: RadixKey;
+        Self: RadixKey,
+    {
+        u64::from(left[0].encode() > right[0].encode())
+    }
 }
 
 /// Sorts `keys` stably by insertion, without a swap limit.
@@ -149,80 +158,35 @@ fn first_inversion_with<S: Simd, K: RadixKey>(simd: S, values: &[K]) -> Option<u
         }
         previous = current;
     }
-    K::scan_with(simd, &values[peel..]).map(|offset| offset + peel)
+    scan_pairs(simd, &values[peel..]).map(|offset| offset + peel)
 }
 
-/// Offset of the first descending adjacent pair of integers.
+/// One scan for every direct encoding, using explicit fearless SIMD pairs.
 #[inline(always)]
-fn scan_int<S: Simd, T: SimdIntElement>(simd: S, values: &[T]) -> Option<usize> {
-    let lanes = T::Native::<S>::LEN;
+fn scan_pairs<S: Simd, K: RadixKey>(simd: S, values: &[K]) -> Option<usize> {
+    const BLOCK: usize = 32;
+    let lanes = K::lanes::<S>();
+    if lanes == 1 {
+        return crate::scan::scalar(values);
+    }
     let vectors = (BLOCK / lanes).max(1);
-    let pairs = values.len() - 1;
+    let block_len = vectors * lanes;
+    let pairs = values.len().saturating_sub(1);
     let mut index = 0;
-    while index + vectors * lanes <= pairs {
-        // One mask check per block; the bitmask also locates the lane, so a
-        // block with an inversion needs no second pass over the keys.
-        // The block's fixed-length window lets every load below skip its bounds check.
-        let block = &values[index..=index + vectors * lanes];
+    while index + block_len <= pairs {
+        // A block holds 32 pairs or one wider native vector, at most 64 pairs.
+        // One mask check locates the first inversion without rereading keys.
+        let block = &values[index..=index + block_len];
         let mut bits = 0u64;
         for vector in 0..vectors {
             let at = vector * lanes;
-            let left = T::Native::<S>::from_slice(simd, &block[at..at + lanes]);
-            let right = T::Native::<S>::from_slice(simd, &block[at + 1..at + 1 + lanes]);
-            bits |= left.simd_gt(right).to_bitmask() << (vector * lanes);
+            bits |=
+                K::pair_mask(simd, &block[at..at + lanes], &block[at + 1..at + 1 + lanes]) << at;
         }
         if bits != 0 {
             return Some(index + bits.trailing_zeros() as usize);
         }
-        index += vectors * lanes;
-    }
-    while index < pairs {
-        if values[index] > values[index + 1] {
-            return Some(index);
-        }
-        index += 1;
-    }
-    None
-}
-
-/// Offset of the first descending adjacent pair of floats in total order.
-#[inline(always)]
-fn scan_float<S: Simd, T>(simd: S, values: &[T]) -> Option<usize>
-where
-    T: SimdFloatElement + RadixKey,
-    <T as SimdFloatElement>::Native<S>: SimdFloat<S, Element = T>,
-{
-    let lanes = T::Native::<S>::LEN;
-    let vectors = (BLOCK / lanes).max(1);
-    let pairs = values.len() - 1;
-    let width = core::mem::size_of::<T>() * 8;
-    // Flipping the sign bit orders non-negative values; inverting every bit
-    // orders negative ones below them. That is exactly `total_cmp`.
-    let scalar_sign = T::Bits::try_from(1u8).ok()? << (width - 1);
-    let zero: <T::Native<S> as SimdFloat<S>>::Bits = T::Bits::default().simd_into(simd);
-    let sign: <T::Native<S> as SimdFloat<S>>::Bits = scalar_sign.simd_into(simd);
-    let encode = |value: T::Native<S>| {
-        let bits = value.to_bits();
-        let negative = bits >> (width as u32 - 1);
-        bits ^ ((zero - negative) | sign)
-    };
-    let mut index = 0;
-    while index + vectors * lanes <= pairs {
-        let block = &values[index..=index + vectors * lanes];
-        let mut mask_bits = 0u64;
-        for vector in 0..vectors {
-            let at = vector * lanes;
-            let left = encode(T::Native::<S>::from_slice(simd, &block[at..at + lanes]));
-            let right = encode(T::Native::<S>::from_slice(
-                simd,
-                &block[at + 1..at + 1 + lanes],
-            ));
-            mask_bits |= left.simd_gt(right).to_bitmask() << (vector * lanes);
-        }
-        if mask_bits != 0 {
-            return Some(index + mask_bits.trailing_zeros() as usize);
-        }
-        index += vectors * lanes;
+        index += block_len;
     }
     while index < pairs {
         if values[index].encode() > values[index + 1].encode() {
@@ -237,47 +201,71 @@ macro_rules! integer_key {
     ($($ty:ty),* $(,)?) => {$(
         impl SimdKey for $ty {
             #[inline(always)]
-            fn scan_with<S: Simd>(simd: S, values: &[Self]) -> Option<usize> {
-                scan_int(simd, values)
+            fn lanes<S: Simd>() -> usize {
+                <Self as SimdIntElement>::Native::<S>::LEN
+            }
+
+            #[inline(always)]
+            fn pair_mask<S: Simd>(simd: S, left: &[Self], right: &[Self]) -> u64 {
+                let left = <Self as SimdIntElement>::Native::<S>::from_slice(simd, left);
+                let right = <Self as SimdIntElement>::Native::<S>::from_slice(simd, right);
+                // Native signed comparison has the same order as sign-flip encoding.
+                left.simd_gt(right).to_bitmask()
             }
         }
     )*};
 }
 integer_key!(u8, u16, u32, u64, i8, i16, i32, i64);
 
-/// Keys wider than a vector register reuse the scalar scan.
-macro_rules! wide_key {
-    ($($ty:ty),* $(,)?) => {$(
-        impl SimdKey for $ty {
+macro_rules! float_key {
+    ($(($f:ty, $u:ty)),* $(,)?) => {$(
+        impl SimdKey for $f {
             #[inline(always)]
-            fn scan_with<S: Simd>(_simd: S, values: &[Self]) -> Option<usize> {
-                crate::scan::scalar(values)
+            fn lanes<S: Simd>() -> usize {
+                <Self as SimdFloatElement>::Native::<S>::LEN
+            }
+
+            #[inline(always)]
+            fn pair_mask<S: Simd>(simd: S, left: &[Self], right: &[Self]) -> u64 {
+                let sign = (1 as $u) << (<$u>::BITS - 1);
+                let encode = |values: &[Self]| {
+                    let bits = <Self as SimdFloatElement>::Native::<S>::from_slice(simd, values).to_bits();
+                    let zero: <<Self as SimdFloatElement>::Native<S> as SimdFloat<S>>::Bits = (0 as $u).simd_into(simd);
+                    let sign: <<Self as SimdFloatElement>::Native<S> as SimdFloat<S>>::Bits = sign.simd_into(simd);
+                    // The sign is zero or one; subtraction expands it to
+                    // zero or all ones, preserving total_cmp including NaN bits.
+                    bits ^ ((zero - (bits >> (<$u>::BITS - 1))) | sign)
+                };
+                encode(left).simd_gt(encode(right)).to_bitmask()
             }
         }
     )*};
 }
-wide_key!(u128, usize, i128, isize);
+float_key!((f32, u32), (f64, u64));
 
-/// `Reverse<K>` has no vector kernel of its own. Its fixed-count blocked scan
-/// is vectorized by the compiler under the selected backend's target features.
+macro_rules! scalar_key {
+    ($($ty:ty),* $(,)?) => {$(impl SimdKey for $ty {})*};
+}
+scalar_key!(u128, usize, i128, isize);
+
 impl<K: RadixKey> SimdKey for core::cmp::Reverse<K> {
     #[inline(always)]
-    fn scan_with<S: Simd>(_simd: S, values: &[Self]) -> Option<usize> {
-        crate::scan::blocked(values)
+    fn lanes<S: Simd>() -> usize {
+        K::lanes::<S>()
     }
-}
 
-impl SimdKey for f32 {
     #[inline(always)]
-    fn scan_with<S: Simd>(simd: S, values: &[Self]) -> Option<usize> {
-        scan_float(simd, values)
-    }
-}
-
-impl SimdKey for f64 {
-    #[inline(always)]
-    fn scan_with<S: Simd>(simd: S, values: &[Self]) -> Option<usize> {
-        scan_float(simd, values)
+    fn pair_mask<S: Simd>(simd: S, left: &[Self], right: &[Self]) -> u64 {
+        // SAFETY: Reverse<K> is repr(transparent) over K, so both shared views
+        // have the same layout, alignment, validity and lifetimes as the inputs.
+        let (left, right) = unsafe {
+            (
+                core::slice::from_raw_parts(left.as_ptr().cast::<K>(), left.len()),
+                core::slice::from_raw_parts(right.as_ptr().cast::<K>(), right.len()),
+            )
+        };
+        // Complementing both encoded keys reverses >, including equal keys.
+        K::pair_mask(simd, right, left)
     }
 }
 
@@ -345,10 +333,23 @@ mod tests {
         check!(
             u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
         );
-        // `Reverse` reaches its blocked scan through the same dispatch.
-        for &length in lengths {
-            check_sorted_scans((0..length as u32).rev().map(core::cmp::Reverse).collect());
+        macro_rules! check_reverse {
+            ($($ty:ty),*) => {$(
+                for &length in lengths {
+                    let mut seed = 43u64;
+                    let mut values: Vec<$ty> = (0..length).map(|_| {
+                        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                        seed as $ty
+                    }).collect();
+                    values.sort();
+                    check_sorted_scans(values.iter().rev().copied().map(core::cmp::Reverse).collect());
+                    check_sorted_scans(values.into_iter().map(|key| core::cmp::Reverse(core::cmp::Reverse(key))).collect());
+                }
+            )*};
         }
+        check_reverse!(
+            u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
+        );
     }
 
     #[test]
@@ -380,12 +381,50 @@ mod tests {
                         <$f>::NAN,
                     ]);
                     values.sort_by(<$f>::total_cmp);
-                    check_sorted_scans(values);
+                    check_sorted_scans(values.clone());
+                    check_sorted_scans(
+                        values
+                            .iter()
+                            .rev()
+                            .copied()
+                            .map(core::cmp::Reverse)
+                            .collect(),
+                    );
+                    check_sorted_scans(
+                        values
+                            .into_iter()
+                            .map(|key| core::cmp::Reverse(core::cmp::Reverse(key)))
+                            .collect(),
+                    );
                 }
             }};
         }
         check!(f32, u32);
         check!(f64, u64);
+    }
+
+    #[test]
+    fn earliest_of_multiple_inversions() {
+        for level in [Level::baseline(), Level::new()] {
+            for (first, later) in [(4, 12), (7, 33), (31, 65), (35, 67), (67, 95)] {
+                let mut keys: Vec<u64> = (0..129).collect();
+                keys.swap(first, first + 1);
+                keys.swap(later, later + 1);
+                assert_eq!(
+                    dispatch!(level, simd => first_inversion_with(simd, &keys)),
+                    Some(first),
+                    "level={level:?} first={first} later={later}"
+                );
+                let keys: Vec<_> = keys
+                    .into_iter()
+                    .map(|key| core::cmp::Reverse(!key))
+                    .collect();
+                assert_eq!(
+                    dispatch!(level, simd => first_inversion_with(simd, &keys)),
+                    Some(first)
+                );
+            }
+        }
     }
 
     #[test]

@@ -7,8 +7,9 @@ use rayon::prelude::*;
 
 mod finish;
 
-/// Publishes an exclusive final band, independently of other bucket movement.
-type BucketVisit<'callback, 'records, T> = &'callback (dyn Fn(&'records mut [T]) + Sync);
+/// Publishes a bucket's index and exclusive final band, independently of other
+/// bucket movement.
+type BucketVisit<'callback, 'records, T> = &'callback (dyn Fn(usize, &'records mut [T]) + Sync);
 
 struct Shard<'a, 'w, T, E> {
     sorter: Partition<'a, 'w, T>,
@@ -112,11 +113,18 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     let shards = shards.min(full_blocks.max(1));
     if shards == 1 && config.block_size.is_none() {
         let mut key = key;
-        return partition_digit(arr, radix, shift, &mut key, buffers, &mut |_, child, _| {
-            if let Some(callback) = visit {
-                callback(child);
-            }
-        });
+        return partition_digit(
+            arr,
+            radix,
+            shift,
+            &mut key,
+            buffers,
+            &mut |bucket, child, _| {
+                if let Some(callback) = visit {
+                    callback(bucket, child);
+                }
+            },
+        );
     }
     let width = radix.min(E::Value::BITS - shift);
     let input_len = arr.len();
@@ -344,7 +352,7 @@ mod tests {
             ByKey(|row: &(u64, alloc::string::String)| row.0),
             &mut buffers,
             config(3, 7),
-            Some(&|child| {
+            Some(&|_, child| {
                 let mut pending = pending.lock().unwrap();
                 if let Some(previous) = pending.take() {
                     previous.sort_by_key(|row| row.0);
@@ -374,7 +382,7 @@ mod tests {
                 ByKey(|row: &(u64, alloc::string::String)| row.0),
                 &mut buffers,
                 config(3, 7),
-                Some(&|_| panic!("callback panic")),
+                Some(&|_, _| panic!("callback panic")),
             );
         }));
         assert!(result.is_err());
@@ -494,7 +502,7 @@ mod tests {
             ByKey(|r: &(u64, usize, &mut usize)| r.0),
             &mut Buffers::new(),
             config(3, 7),
-            Some(&|child| {
+            Some(&|_, child| {
                 callbacks.fetch_add(1, Ordering::Relaxed);
                 let mut pending = pending.lock().unwrap();
                 if let Some(previous) = pending.take() {
@@ -538,7 +546,7 @@ mod tests {
                 ByKey(|r: &(u64, usize, &mut usize)| r.0),
                 &mut Buffers::new(),
                 config(3, 7),
-                Some(&|child| {
+                Some(&|_, child| {
                     let mut pending = pending
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);

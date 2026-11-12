@@ -62,7 +62,7 @@ Structural facts that cut across those pages: `insertion_probe` owns root insert
 
 With the optional `rayon` feature, small inputs and one-thread pools use the serial engine. Larger roots share `prepare` with serial sorting, including order confirmation, stable reversal, budgeted insertion and variation. The [parallel layout](../explain/block-partition.md#parallel-roots) owns byte gates, shard clamps and block sizing. Directory adoption concatenates bucket prefixes in original shard order. Segmented block storage retains each shard's allocation, and the partition guard owns adoption through recovery handoff; no separate packed output is allocated.
 
-A repeated-key decision uses the shared `Rank` adapter as a two-bit below/equal/above digit, with cached classification. The fourth bucket is unused. Materialization retires copy sources before the executor splits mutable borrows, skips the equal band and finishes the outer bands in independent serial jobs. An unchanged equality partition consumes the replacement selected by `plan_after_equality` without sampling equality again.
+A repeated-key decision uses the shared `Rank` classifier as a two-bit digit, with cached classification: the below/equal/above rank plus the top varying bit. It runs through the same sharded partition and final-band callbacks as a digit decision; callbacks receive the bucket index and skip the complete equal bucket, and every other bucket continues without the top bit.
 
 Every adopted partition uses one relocatable-source ledger. A flat source table owns initialized prefix lengths and atomic physical locations; buckets hold source ranges and final input ranges, not private record buffers. Before copying a prefix, its movement task protects the whole destination interval, evacuating unread sources under physical-owner locks acquired in increasing ID order. Only then does it reload and validate the source location, since protection may have relocated that source. The prefix transfers directly to its final interval. Adjacent bands may share block fragments but never live record slots.
 
@@ -124,4 +124,4 @@ Every build catches a key-function panic during block partitioning, restores the
 
 ## Stack usage
 
-Each tile-local MSD level keeps a cursor table of up to 32 KiB on the stack. The depth is bounded by ⌈key bits / 6⌉, at most 22 levels for 128-bit keys. Actual frame sizes depend on the compiler.
+Each tile-local MSD level keeps a cursor table of up to 32 KiB on the stack. The depth is bounded by ⌈key bits / 6⌉, at most 22 levels for 128-bit keys. Node recursion is bounded by the key width as well: equality, run and digit splits all remove the top varying bit from every unfinished child, so a node nests at most once per key bit, together with its frame and partition boundary vector. Actual frame sizes depend on the compiler.

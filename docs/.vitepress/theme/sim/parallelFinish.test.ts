@@ -4,13 +4,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { simulateParallelFinish } from "./parallelFinish.ts";
 
-test("equality ranks preserve the shared sharded directory order", () => {
-  // The rank closure uses the serial below/equal/above policy. This model checks
-  // its shared scatter/adoption semantics; materialized completion and Rayon
-  // scheduling are covered by the native Rust tests, not this bounded model.
+test("equality digits preserve the shared sharded directory order", () => {
+  // The digit closure uses the serial below/equal/above rank plus the top
+  // varying bit, so all four buckets are occupied. This model checks its shared
+  // scatter/adoption semantics; materialized completion and Rayon scheduling
+  // are covered by the native Rust tests, not this bounded model.
   const equal = 7;
+  const top = 16;
   const keys = Array.from({ length: 129 }, (_, id) => (id % 16 === 0 ? id % 17 : equal));
-  const rank = (key: number) => Number(key >= equal) + Number(key > equal);
+  const rank = (key: number) =>
+    Number(key >= equal) + Number(key > equal) + Number((key & top) !== 0);
   const expected = keys.map((key, id) => ({ key, id })).sort((a, b) => rank(a.key) - rank(b.key));
   for (const blockSize of [1, 3, 7]) {
     for (const shards of [2, 4]) {

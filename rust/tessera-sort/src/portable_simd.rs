@@ -455,30 +455,25 @@ mod tests {
     fn insertion_encodings() {
         use crate::key::{ByKey, Extract};
 
-        fn check<K: RadixKey>(keys: Vec<K>) {
+        fn check<K: RadixKey>(keys: Vec<K>)
+        where
+            K::Encoded: core::fmt::Debug,
+        {
+            let encoded = |keys: &[K]| keys.iter().copied().map(K::encode).collect::<Vec<_>>();
             for budget in [0, 10, usize::MAX] {
                 let mut direct = keys.clone();
                 let mut scalar = keys.clone();
-                let actual = insertion_sort(&mut direct, budget);
-                let expected = ByKey(|key: &K| *key).insertion_sort(&mut scalar, budget);
-                assert_eq!(actual, expected);
-                assert!(
-                    direct
-                        .iter()
-                        .zip(&scalar)
-                        .all(|(a, b)| a.encode() == b.encode())
+                assert_eq!(
+                    insertion_sort(&mut direct, budget),
+                    ByKey(|key: &K| *key).insertion_sort(&mut scalar, budget),
                 );
+                assert_eq!(encoded(&direct), encoded(&scalar));
             }
-            let mut direct = keys.clone();
-            let mut scalar = keys;
-            finish_insertion(&mut direct);
-            ByKey(|key: &K| *key).finish_insertion(&mut scalar);
-            assert!(
-                direct
-                    .iter()
-                    .zip(&scalar)
-                    .all(|(a, b)| a.encode() == b.encode())
-            );
+            let mut expected = encoded(&keys);
+            expected.sort_unstable();
+            let mut finished = keys;
+            finish_insertion(&mut finished);
+            assert_eq!(encoded(&finished), expected);
         }
 
         // Cross the dispatch threshold with repeated keys and exact float bits,

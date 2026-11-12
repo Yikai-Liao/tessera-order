@@ -356,7 +356,7 @@ unsafe fn complete_with_fault<'records, T: Send>(
     // Every table is built. From here the ledger owns recovery: finishing all
     // buckets restores every record, so the shard guards must not compact.
     for shard in shards.iter_mut() {
-        shard.sorter.input_materialized = true;
+        shard.sorter.owns_recovery = false;
     }
     let completed = AtomicUsize::new(0);
     let run = |bucket: &mut Bucket| {
@@ -656,7 +656,7 @@ mod tests {
         // Transfer recovery responsibility to this controlled state-machine
         // fixture; all records are plain Copy values and are restored below.
         for shard in &mut shards {
-            shard.sorter.input_materialized = true;
+            shard.sorter.owns_recovery = false;
         }
         for helper in [0, 2, 4, 6] {
             buckets[helper].finish(&storage, None);

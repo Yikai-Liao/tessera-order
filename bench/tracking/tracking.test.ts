@@ -5,15 +5,12 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { renderHistory } from "./history.ts";
-import { appendRun } from "./publish.ts";
-import {
-  indexSchema,
-  PREVIEW_CASE,
-  parseRuns,
-  summarizeReport,
-  type TrackingRun,
-} from "./result.ts";
+import { parseHTML } from "linkedom/worker";
+import { latestValues, renderCaseHistory, renderMainOverview, renderMainTrend } from "./history.ts";
+import { appendRun, trackingCases } from "./publish.ts";
+import { indexSchema, parseRuns, summarizeReport, type TrackingRun } from "./result.ts";
+
+const PREVIEW_CASE = "rust/u64/random/65536/s1/api";
 
 const uuid = "01a1cdb1-9445-76dd-89c4-e4220d49e6f7";
 const source = "a".repeat(40);
@@ -99,7 +96,9 @@ test("publication is idempotent, combines months and keeps the README SVG URL st
   await appendRun(dir, next);
   const index = indexSchema.parse(JSON.parse(await readFile(join(dir, "index.json"), "utf8")));
   assert.deepEqual(index.months, ["2026-10", "2026-11"]);
-  assert.equal(index.cases[0].id, PREVIEW_CASE);
+  assert.deepEqual(index.cases, [
+    { id: PREVIEW_CASE, group: "serial", input: "random", sub: "u64 · 65,536", tag: "" },
+  ]);
   const all = [];
   for (const month of index.months) {
     const text = await readFile(join(dir, month + ".jsonl"), "utf8");
@@ -116,5 +115,96 @@ test("publication is idempotent, combines months and keeps the README SVG URL st
     indexSchema.parse(JSON.parse(await readFile(join(dir, "index.json"), "utf8"))),
     index,
   );
-  assert.equal(renderHistory([], PREVIEW_CASE), "");
+  assert.equal(renderCaseHistory([], index.cases[0]), "");
+  assert.equal(renderMainTrend([], index.cases), "");
+});
+
+const texts = (svg: string) =>
+  [...parseHTML(svg).document.querySelectorAll("text")].map((node) => node.textContent);
+const at = (i: number, values: Record<string, number>, spec = uuid): TrackingRun => ({
+  ...run,
+  id: `01a1cdb1-9445-76dd-89c4-e4220d49e${i.toString(16).padStart(3, "0")}`,
+  time: `2026-11-${String(i + 1).padStart(2, "0")}T00:00:00Z`,
+  hash: i.toString(16).padStart(40, "0"),
+  spec,
+  values: Object.fromEntries(Object.entries(values).map(([id, v]) => [id, [v, v, v]])),
+});
+
+test("cases follow mode, length, record type and catalog input order", () => {
+  const ids = [
+    "rust/u64/random/1000000/s1/par-4",
+    "rust/u64/sorted/65536/s1/api",
+    "rust/u32/random/1000000/s1/api",
+    "rust/u64/random/65536/s2/api",
+    "rust/u64/random/65536/s1/api",
+    "rust/u64/random/32/s1/api",
+  ];
+  const cases = trackingCases(ids);
+  assert.deepEqual(
+    cases.map((entry) => entry.id),
+    [
+      "rust/u64/random/32/s1/api",
+      "rust/u64/random/65536/s1/api",
+      "rust/u64/random/65536/s2/api",
+      "rust/u64/sorted/65536/s1/api",
+      "rust/u32/random/1000000/s1/api",
+      "rust/u64/random/1000000/s1/par-4",
+    ],
+  );
+  assert.equal(cases[2].tag, "seed 2");
+  assert.equal(cases[5].group, "parallel · 4 threads");
+  assert.equal(indexSchema.parse({ months: [], cases }).cases.length, ids.length);
+});
+
+test("the trend aligns gaps and chain-links aggregates across changing case sets", () => {
+  const a = "rust/u64/random/32/s1/api",
+    b = "rust/u64/random/65536/s1/api",
+    c = "rust/u64/sorted/65536/s1/api";
+  const cases = trackingCases([a, b, c]);
+  // c enters at the second run, misses the third and is twice as slow as the others.
+  const runs = [
+    at(0, { [a]: 100, [b]: 100 }),
+    at(1, { [a]: 110, [b]: 90, [c]: 400 }),
+    at(2, { [a]: 121, [b]: 81 }),
+    at(3, { [a]: 121, [b]: 81, [c]: 200 }),
+  ];
+  const text = texts(renderMainTrend(runs, cases, "t", (id) => "#" + id));
+  // Aggregate: sqrt(1.1·0.9) twice, then c returns across its gap: ·cbrt(1·1·0.5).
+  const overall = 1.1 * 0.9 * Math.cbrt(0.5) - 1;
+  assert.equal(text[text.indexOf("Overall") + 2], `−${(-overall * 100).toFixed(1)}%`);
+  assert.ok(text.includes("+21.0%") && text.includes("−19.0%") && text.includes("−50.0%"));
+  const svg = parseHTML(renderMainTrend(runs, cases, "t", (id) => "#" + id)).document;
+  assert.deepEqual(
+    [...svg.querySelectorAll(".trend-row-link a")].map((node) => node.getAttribute("href")),
+    [a, b, c].map((id) => "#" + id),
+  );
+  // Without links, the overview keeps only the mode aggregate.
+  const overview = texts(renderMainOverview(runs, cases));
+  assert.ok(overview.includes("Serial") && !overview.includes("random"));
+  assert.deepEqual(
+    latestValues(runs, cases).map((row) => [
+      row.entry.id,
+      row.value,
+      Number(row.change.toFixed(3)),
+    ]),
+    [
+      [a, 121, 0.21],
+      [b, 81, -0.19],
+      [c, 200, -0.5],
+    ],
+  );
+});
+
+test("only runs on the latest protocol and specification form the trend", () => {
+  const cases = trackingCases([PREVIEW_CASE]);
+  const other = "01a1cdb1-9445-76dd-89c4-e4220d49e000";
+  const runs = [
+    at(0, { [PREVIEW_CASE]: 50 }, other),
+    at(1, { [PREVIEW_CASE]: 100 }),
+    at(2, { [PREVIEW_CASE]: 110 }),
+  ];
+  assert.ok(texts(renderMainTrend(runs, cases)).includes("+10.0%"));
+  // The detail chart keeps every run, with other hardware as a separate line.
+  const detail = parseHTML(renderCaseHistory(runs, cases[0])).document;
+  assert.equal(detail.querySelectorAll("a[href*='/commit/']").length, 3);
 });

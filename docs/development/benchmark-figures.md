@@ -52,7 +52,8 @@ These rounded values come from the recorded `release-benchmark-raw-2d6fac2` sess
 | Where is Tessera among competitors? | Grouped rows with a field of marks | Competitor dots, Tessera emphasized, value and rank columns |
 | How much memory is required? | Named range rows | Ring for random input, dot for worst input, input-size reference |
 | Which build regressed? | PR comparison matrix | Shared cases, one column per build, stems from zero |
-| What changed during a PR? | PR trend matrix | One time series per case and build, reference at the baseline |
+| What changed during a PR or on main? | Trend matrix | One time series per case and build, reference at the baseline or first run |
+| How long does one case take over time? | Case history | Absolute time per run with its interval, one line per hardware specification |
 
 A new dataset does not require a new template; a genuinely different question may.
 
@@ -65,9 +66,9 @@ A new dataset does not require a new template; a genuinely different question ma
 - Blue emphasizes Tessera or less run time, orange identifies other radix sorts or more run time, and neutral grey provides context. A chart's legend states its meaning; colour alone does not carry the verdict.
 - Use dots and ranges for comparisons. A reference line makes the denominator visible. Ratio comparisons use logarithmic spacing; equal multiplicative changes occupy equal distances.
 - Tessera is drawn above the competitor field. Rings distinguish reference observations such as random-input memory from the worst case. The shared axis includes every plotted value; values outside 1/32×–32× use overflow triangles, with their numeric values retained in the accompanying tables. Selected-input figures also mark off-scale block-range endpoints, even when the median is in range, and print both bounds in the figure and table.
-- PR comparison and trend matrices group serial and parallel cases vertically under mode headings, with serial first. Each trend group starts with its own geometric mean; case labels reserve tags for qualifiers such as non-default seeds, not the mode.
+- Comparison and trend matrices group serial and parallel cases vertically under mode headings, with serial first. Each trend group starts with its own geometric mean; case labels reserve tags for qualifiers such as non-default seeds, not the mode.
 - Thin rules separate groups. Titles and value columns carry hierarchy; avoid gradients, shadows, 3D effects and per-chart font choices.
-- Light and dark surfaces use the same semantic colours and separate neutral tokens. Standalone SVGs carry literal neutral colours for image viewers; ordinary CSS supplies browser dark mode. Every SVG includes a title and description.
+- Light and dark surfaces use the same semantic colours and separate neutral tokens. Standalone SVGs carry literal neutral colours for image viewers; ordinary CSS supplies dark mode, following the system preference in a standalone image and the page's `dark` class on `<html>` when inlined, so the site's theme switch applies. Every SVG includes a title and description.
 
 The row interface accepts no style objects or drawing callbacks; the [template](../../bench/plot/rows.ts) owns widths, spacing, drawing order and legends and never mutates its input, so reactive callers can re-render it. Import `renderRows` and `RowChart` from it to get an SVG string; offline callers decide where to write it. VitePress uses [`BenchmarkFigure.vue`](../.vitepress/theme/components/BenchmarkFigure.vue), a reactive image adapter taking a `RowChart`; for inline SVG supply a unique chart `id` so accessibility references stay distinct. Names come from [the catalog](../../bench/catalog.toml), never a second map. The [extension boundary](../design/benchmark-tooling.md#figure-boundary) says where new templates live.
 

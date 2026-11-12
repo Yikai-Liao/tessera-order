@@ -2,9 +2,39 @@
 
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { caseLabel } from "../catalog.ts";
-import { renderHistory } from "./history.ts";
-import { PREVIEW_CASE, parseRuns, runSchema, type TrackingRun } from "./result.ts";
+import { caseParts, catalog, modeName, modeOrder } from "../catalog.ts";
+import { renderMainOverview } from "./history.ts";
+import { parseRuns, runSchema, type TrackingCase, type TrackingRun } from "./result.ts";
+
+const position = (list: { id: string }[], id: string) => list.findIndex((entry) => entry.id === id);
+
+/** Present cases from the catalog in reading order: mode, length, record type, then input.
+ *
+ * Journals outlive catalog entries, so unknown fields keep their raw names instead of failing.
+ */
+export function trackingCases(ids: string[]): TrackingCase[] {
+  return ids
+    .map((id) => {
+      const [, ty = "", distribution = "", len = "0", seed = "s1", mode = ""] = id.split("/");
+      return { id, key: { ty, distribution, len: Number(len), seed, mode }, parts: caseParts(id) };
+    })
+    .sort(
+      (a, b) =>
+        modeOrder(a.key.mode) - modeOrder(b.key.mode) ||
+        a.key.len - b.key.len ||
+        position(catalog.types, a.key.ty) - position(catalog.types, b.key.ty) ||
+        position(catalog.distributions, a.key.distribution) -
+          position(catalog.distributions, b.key.distribution) ||
+        a.id.localeCompare(b.id),
+    )
+    .map(({ id, key, parts }) => ({
+      id,
+      group: modeName(key.mode),
+      input: parts.input,
+      sub: [parts.type, parts.n].filter(Boolean).join(" · "),
+      tag: key.seed === "s1" ? "" : `seed ${key.seed.slice(1)}`,
+    }));
+}
 
 /** Append a validated report and regenerate the index/preview. Git owns atomic publication and retries. */
 export async function appendRun(directory: string, input: TrackingRun) {
@@ -32,12 +62,10 @@ export async function appendRun(directory: string, input: TrackingRun) {
     );
   const index = {
     months: [...months.keys()],
-    cases: [...new Set(runs.flatMap((entry) => Object.keys(entry.values)))]
-      .sort()
-      .map((id) => ({ id, label: caseLabel(id) })),
+    cases: trackingCases([...new Set(runs.flatMap((entry) => Object.keys(entry.values)))]),
   };
   await writeFile(join(directory, "index.json"), JSON.stringify(index) + "\n");
-  await writeFile(join(directory, "preview.svg"), renderHistory(runs, PREVIEW_CASE));
+  await writeFile(join(directory, "preview.svg"), renderMainOverview(runs, index.cases));
 }
 
 if (import.meta.main) {

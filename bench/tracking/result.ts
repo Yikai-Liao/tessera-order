@@ -2,8 +2,6 @@
 
 import { z } from "zod";
 
-export const PREVIEW_CASE = "rust/u64/random/65536/s1/api";
-
 const positive = z.number().finite().positive();
 const metric = z
   .object({ value: positive, lower_value: positive, upper_value: positive })
@@ -59,9 +57,19 @@ export const runSchema = z.object({
   ),
 });
 export type TrackingRun = z.infer<typeof runSchema>;
+/** A case's catalog presentation; the browser cannot read the catalog, so publication supplies it. */
+export const caseSchema = z.object({
+  id: z.string().min(1),
+  group: z.string().min(1),
+  input: z.string().min(1),
+  sub: z.string(),
+  tag: z.string(),
+});
+export type TrackingCase = z.infer<typeof caseSchema>;
+/** Months with journals, and cases in display order: grouped by mode, serial first. */
 export const indexSchema = z.object({
   months: z.array(z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)),
-  cases: z.array(z.object({ id: z.string(), label: z.string() })),
+  cases: z.array(caseSchema),
 });
 
 /** Accept a complete absolute-time report for this source and inventory, or fail publication. */

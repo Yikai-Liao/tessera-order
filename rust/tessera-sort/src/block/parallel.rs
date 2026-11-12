@@ -10,9 +10,8 @@ mod finish;
 /// Publishes an exclusive final band, independently of other bucket movement.
 type BucketVisit<'callback, 'records, T> = &'callback (dyn Fn(&'records mut [T]) + Sync);
 
-struct Shard<'a, 'w, T, E> {
+struct Shard<'a, 'w, T> {
     sorter: Partition<'a, 'w, T>,
-    key: E,
     panic: Option<unwind::Payload>,
     first_block: usize,
 }
@@ -26,37 +25,30 @@ struct Config {
 // SAFETY: each shard exclusively borrows a disjoint input slice and Buffers.
 // Its pointers address only those allocations. No shared references to its
 // records cross threads, and all records are restored by Partition on unwind.
-unsafe impl<T: Send, E: Send> Send for Shard<'_, '_, T, E> {}
+unsafe impl<T: Send> Send for Shard<'_, '_, T> {}
 
-impl<T, E: Extract<T>> Shard<'_, '_, T, E> {
-    fn scatter(mut self, width: usize, shift: usize) -> Self {
-        let shift = E::Value::from_usize(shift);
-        let mask = E::Value::from_usize((1usize << width) - 1) << shift;
-        self.panic = self
-            .sorter
-            .step(&mut self.key, move |key, record| {
-                ((key.key(record) & mask) >> shift).to_usize()
-            })
-            .err();
+impl<T> Shard<'_, '_, T> {
+    /// Scatters this shard with its own classifier, which the pass consumes.
+    fn scatter<C: Classify<T>>(mut self, classifier: C) -> Self {
+        self.panic = self.sorter.step(classifier).err();
         self
     }
 }
 
-/// Partitions the root and completes it through the shared source ledger.
-pub(crate) fn partition_digit_parallel<'records, T: Send, E: Extract<T> + Clone + Send>(
+/// Partitions the root into the `2^radix` buckets `classifier` assigns and
+/// completes it through the shared source ledger.
+pub(crate) fn partition_parallel<'records, T: Send, C: Classify<T> + Clone + Send>(
     records: &'records mut [T],
-    width: usize,
-    shift: usize,
-    key: E,
+    radix: usize,
+    classifier: C,
     buffers: &mut Buffers<T>,
     shards: usize,
     visit: BucketVisit<'_, 'records, T>,
 ) -> Vec<usize> {
     partition_impl_with_visit(
         records,
-        width,
-        shift,
-        key,
+        radix,
+        classifier,
         buffers,
         Config {
             shards,
@@ -68,28 +60,25 @@ pub(crate) fn partition_digit_parallel<'records, T: Send, E: Extract<T> + Clone 
 }
 
 #[cfg(test)]
-fn partition_impl<T: Send, E: Extract<T> + Clone + Send>(
+fn partition_impl<T: Send, C: Classify<T> + Clone + Send>(
     arr: &mut [T],
     radix: usize,
-    shift: usize,
-    key: E,
+    classifier: C,
     buffers: &mut Buffers<T>,
     config: Config,
 ) -> Vec<usize> {
-    partition_impl_with_visit(arr, radix, shift, key, buffers, config, None)
+    partition_impl_with_visit(arr, radix, classifier, buffers, config, None)
 }
 
-fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
+fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clone + Send>(
     arr: &'records mut [T],
     radix: usize,
-    shift: usize,
-    key: E,
+    classifier: C,
     buffers: &mut Buffers<T>,
     config: Config,
     visit: Option<BucketVisit<'_, 'records, T>>,
 ) -> Vec<usize> {
     assert!((1..=MAX_RADIX_BITS).contains(&radix));
-    assert!(shift < E::Value::BITS);
     assert!(core::mem::size_of::<T>() != 0);
     assert!(arr.len() >= 2);
     let bucket_count = 1usize << radix;
@@ -111,14 +100,12 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     let full_blocks = arr.len() / block_size;
     let shards = shards.min(full_blocks.max(1));
     if shards == 1 && config.block_size.is_none() {
-        let mut key = key;
-        return partition_digit(arr, radix, shift, &mut key, buffers, &mut |_, child, _| {
+        return partition(arr, radix, classifier, buffers, &mut |_, child, _| {
             if let Some(callback) = visit {
                 callback(child);
             }
         });
     }
-    let width = radix.min(E::Value::BITS - shift);
     let input_len = arr.len();
     let input = arr.as_mut_ptr();
     let mut local_buffers: Vec<_> = (0..shards).map(|_| Buffers::new()).collect();
@@ -139,24 +126,24 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
         // global compaction after these shard guards have been retired.
         let part =
             unsafe { core::slice::from_raw_parts_mut(input.add(first_block * block_size), len) };
-        tasks.push(Shard {
+        let shard = Shard {
             sorter: Partition::new(part, bucket_count, block_size, local),
-            key: key.clone(),
             panic: None,
             first_block,
-        });
+        };
+        tasks.push((shard, classifier.clone()));
         first_block += blocks;
     }
     let mut tasks: Vec<_> = if config.parallel {
         tasks
             .into_par_iter()
-            .map(|shard| shard.scatter(width, shift))
+            .map(|(shard, classifier)| shard.scatter(classifier))
             .collect()
     } else {
         // The same ownership/adoption path can run under Miri without Rayon.
         tasks
             .into_iter()
-            .map(|shard| shard.scatter(width, shift))
+            .map(|(shard, classifier)| shard.scatter(classifier))
             .collect()
     };
     if let Some(payload) = tasks.iter_mut().find_map(|task| task.panic.take()) {
@@ -188,9 +175,9 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     /// at block zero, and every `first_block` is its actual block offset from
     /// `input`. This pointer must be their common raw ancestor, still valid for
     /// the complete input; deriving it from a shard would narrow its borrow.
-    unsafe fn adopt_shards<E>(
+    unsafe fn adopt_shards(
         input: *mut T,
-        mut tasks: Vec<Shard<'a, '_, T, E>>,
+        mut tasks: Vec<Shard<'a, '_, T>>,
         buffers: &'w mut Buffers<T>,
     ) -> (Self, Vec<usize>) {
         let shards = tasks.len();
@@ -230,7 +217,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         let mut block_ends = core::mem::take(&mut tasks[0].sorter.buffers.counts);
         let mut output = head;
         let mut records = 0;
-        let translate = |shard_index: usize, task: &Shard<'_, '_, T, E>, physical: u32| {
+        let translate = |shard_index: usize, task: &Shard<'_, '_, T>, physical: u32| {
             let physical = physical as usize;
             if physical < local_scratch {
                 shard_index * local_scratch + physical
@@ -321,7 +308,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::key::ByKey;
+    use crate::key::{ByKey, KeyDigit};
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{
         Arc,
@@ -340,8 +327,7 @@ mod tests {
         partition_impl_with_visit(
             &mut rows,
             2,
-            4,
-            ByKey(|row: &(u64, alloc::string::String)| row.0),
+            KeyDigit::new(ByKey(|row: &(u64, alloc::string::String)| row.0), 4),
             &mut buffers,
             config(3, 7),
             Some(&|child| {
@@ -370,8 +356,7 @@ mod tests {
             partition_impl_with_visit(
                 &mut rows,
                 2,
-                4,
-                ByKey(|row: &(u64, alloc::string::String)| row.0),
+                KeyDigit::new(ByKey(|row: &(u64, alloc::string::String)| row.0), 4),
                 &mut buffers,
                 config(3, 7),
                 Some(&|_| panic!("callback panic")),
@@ -421,11 +406,13 @@ mod tests {
                 partition_impl(
                     &mut rows,
                     3,
-                    0,
-                    ByKey(|row: &Owned| {
-                        assert_ne!(row.id, fail, "injected key panic");
-                        row.key
-                    }),
+                    KeyDigit::new(
+                        ByKey(|row: &Owned| {
+                            assert_ne!(row.id, fail, "injected key panic");
+                            row.key
+                        }),
+                        0,
+                    ),
                     &mut Buffers::new(),
                     config(4, 5),
                 );
@@ -450,15 +437,17 @@ mod tests {
             partition_impl(
                 &mut records,
                 3,
-                0,
-                ByKey(|row: &(usize, &mut usize)| {
-                    let call = calls.fetch_add(1, Ordering::Relaxed);
-                    (if inconsistent {
-                        call ^ row.0
-                    } else {
-                        row.0 * 37
-                    }) as u64
-                }),
+                KeyDigit::new(
+                    ByKey(|row: &(usize, &mut usize)| {
+                        let call = calls.fetch_add(1, Ordering::Relaxed);
+                        (if inconsistent {
+                            call ^ row.0
+                        } else {
+                            row.0 * 37
+                        }) as u64
+                    }),
+                    0,
+                ),
                 &mut Buffers::new(),
                 config(4, 5),
             );
@@ -490,8 +479,7 @@ mod tests {
         partition_impl_with_visit(
             &mut rows,
             2,
-            4,
-            ByKey(|r: &(u64, usize, &mut usize)| r.0),
+            KeyDigit::new(ByKey(|r: &(u64, usize, &mut usize)| r.0), 4),
             &mut Buffers::new(),
             config(3, 7),
             Some(&|child| {
@@ -534,8 +522,7 @@ mod tests {
             partition_impl_with_visit(
                 &mut rows,
                 2,
-                4,
-                ByKey(|r: &(u64, usize, &mut usize)| r.0),
+                KeyDigit::new(ByKey(|r: &(u64, usize, &mut usize)| r.0), 4),
                 &mut Buffers::new(),
                 config(3, 7),
                 Some(&|child| {

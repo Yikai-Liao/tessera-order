@@ -11,15 +11,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 fn sort_group<T: Send, E: Extract<T> + Clone + Send>(records: &mut [T], extractor: E) {
     let mut scratch = Scratch::new();
     let mut child_scratch = Scratch::new();
-    let mut visit = |_: usize, bucket: &mut [T], extractor: &mut E| {
+    let mut visit = |_: usize, bucket: &mut [T], digit: &mut KeyDigit<E, E::Value>| {
         Sorter::<T, E> {
             scratch: &mut child_scratch,
-            extractor,
+            extractor: &mut digit.extractor,
             tile_len: tile_capacity::<T>(TILE_BYTES),
         }
         .sort_child(bucket, 3);
     };
-    block::partition_digit(records, 1, 2, extractor, &mut scratch.block, &mut visit);
+    let digit = KeyDigit::new(extractor, 2);
+    block::partition(records, 1, digit, &mut scratch.block, &mut visit);
 }
 
 #[test]

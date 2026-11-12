@@ -102,15 +102,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
             extractor: extractor.clone(),
             equal,
         };
-        let ends = block::partition_digit_parallel(
-            records,
-            2,
-            0,
-            rank,
-            &mut scratch.block,
-            shards,
-            &|_| {},
-        );
+        let ends = block::partition_parallel(records, 2, rank, &mut scratch.block, shards, &|_| {});
         match plan_after_equality(records, &ends, varying, tile_len, extractor) {
             Some(progress) => {
                 // The node is unchanged; continue with the bit-consuming plan.
@@ -178,11 +170,10 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
         .sort_child(child, candidate);
         pool.give(scratch);
     };
-    block::partition_digit_parallel(
+    block::partition_parallel(
         records,
         digit.width,
-        digit.shift,
-        extractor.clone(),
+        KeyDigit::new(extractor.clone(), digit.shift),
         &mut scratch.block,
         shards,
         &visit,

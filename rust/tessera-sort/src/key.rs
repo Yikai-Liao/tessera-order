@@ -31,6 +31,9 @@ pub trait RadixKey: crate::portable_simd::SimdKey + Copy {
     type Encoded: Unsigned;
     #[doc(hidden)]
     fn encode(self) -> Self::Encoded;
+    /// Inverts [`Self::encode`] bit for bit, including NaN payloads.
+    #[doc(hidden)]
+    fn decode(encoded: Self::Encoded) -> Self;
 }
 
 /// Unsigned integer operations the engine needs on encoded keys.
@@ -38,6 +41,8 @@ pub trait RadixKey: crate::portable_simd::SimdKey + Copy {
 pub trait Unsigned:
     RadixKey<Encoded = Self>
     + Copy
+    + Send
+    + Sync
     + Ord
     + BitAnd<Output = Self>
     + BitOrAssign
@@ -62,6 +67,7 @@ macro_rules! unsigned {
         impl RadixKey for $ty {
             type Encoded = Self;
             #[inline] fn encode(self) -> Self { self }
+            #[inline] fn decode(encoded: Self) -> Self { encoded }
         }
     )*};
 }
@@ -73,6 +79,9 @@ macro_rules! signed {
             type Encoded = $u;
             #[inline] fn encode(self) -> $u {
                 (self as $u) ^ (1 << (<$u>::BITS - 1))
+            }
+            #[inline] fn decode(encoded: $u) -> $s {
+                (encoded ^ (1 << (<$u>::BITS - 1))) as $s
             }
         }
     )*};
@@ -95,6 +104,12 @@ macro_rules! float {
                 let sign = 1 << (<$u>::BITS - 1);
                 if bits & sign != 0 { !bits } else { bits ^ sign }
             }
+            #[inline] fn decode(encoded: $u) -> $f {
+                // Encoded positive values keep the sign bit set; negative
+                // values had every bit inverted.
+                let sign = 1 << (<$u>::BITS - 1);
+                <$f>::from_bits(if encoded & sign != 0 { encoded ^ sign } else { !encoded })
+            }
         }
     )*};
 }
@@ -105,6 +120,10 @@ impl<K: RadixKey> RadixKey for Reverse<K> {
     #[inline]
     fn encode(self) -> Self::Encoded {
         !self.0.encode()
+    }
+    #[inline]
+    fn decode(encoded: Self::Encoded) -> Self {
+        Reverse(K::decode(!encoded))
     }
 }
 
@@ -315,36 +334,37 @@ unsafe impl<K: RadixKey> Extract<K> for Direct {
     }
 }
 
-/// A histogram retaining one interchangeable record per encoded-key bucket.
+/// A histogram of one encoded-key window, with the bits outside it.
 ///
 /// Sealed encodings are bijective on bits, including NaN payloads and signed
-/// zeros. When the window covers all variation, a representative stands for
-/// every record counted in its bucket. Serial and parallel finishing share this
-/// ownership-free summary; only collection and filling are scheduled differently.
-struct KeyCounts<K> {
+/// zeros. When the window covers all variation, every record counted in a
+/// bucket is the decoding of the shared outside bits with that bucket's digit.
+/// Serial and parallel finishing share this ownership-free summary; only
+/// collection and filling are scheduled differently.
+struct KeyCounts<K: RadixKey> {
+    low: usize,
     buckets: usize,
     counts: [usize; SMALL_WINDOW_BUCKETS],
-    representatives: [K; SMALL_WINDOW_BUCKETS],
+    /// One encoded key with its window bits cleared.
+    outside: K::Encoded,
 }
 
 impl<K: RadixKey> KeyCounts<K> {
     /// Counts a nonempty slice in a window of at most `SMALL_WINDOW_BITS` bits.
     fn count(records: &[K], low: usize, width: usize) -> Self {
-        let mut result = Self {
-            buckets: 1 << width,
-            counts: [0; SMALL_WINDOW_BUCKETS],
-            representatives: [records[0]; SMALL_WINDOW_BUCKETS],
-        };
-        let mask = K::Encoded::from_usize(result.buckets - 1);
+        let buckets = 1 << width;
+        let mask = K::Encoded::from_usize(buckets - 1);
         let shift = K::Encoded::from_usize(low);
+        let mut counts = [0; SMALL_WINDOW_BUCKETS];
         for &record in records {
-            let bucket = ((record.encode() >> shift) & mask).to_usize();
-            if result.counts[bucket] == 0 {
-                result.representatives[bucket] = record;
-            }
-            result.counts[bucket] += 1;
+            counts[((record.encode() >> shift) & mask).to_usize()] += 1;
         }
-        result
+        Self {
+            low,
+            buckets,
+            counts,
+            outside: records[0].encode() & !(mask << shift),
+        }
     }
 
     /// Combines disjoint shards counted with the same window.
@@ -352,27 +372,30 @@ impl<K: RadixKey> KeyCounts<K> {
     fn merge(mut self, other: Self) -> Self {
         debug_assert_eq!(self.buckets, other.buckets);
         for bucket in 0..self.buckets {
-            if other.counts[bucket] != 0 {
-                self.representatives[bucket] = other.representatives[bucket];
-                self.counts[bucket] += other.counts[bucket];
-            }
+            self.counts[bucket] += other.counts[bucket];
         }
         self
     }
 
-    /// Pairs each nonempty destination run with its representative.
+    /// Pairs each nonempty destination run with its decoded key.
     /// The slice must contain exactly the records summarized by this histogram.
     fn runs(self, records: &mut [K]) -> impl Iterator<Item = (&mut [K], K)> {
+        let (outside, shift) = (self.outside, K::Encoded::from_usize(self.low));
         self.counts
             .into_iter()
-            .zip(self.representatives)
             .take(self.buckets)
-            .scan(records, |remaining, (count, key)| {
+            .enumerate()
+            .scan(records, move |remaining, (bucket, count)| {
                 let (run, rest) = core::mem::take(remaining).split_at_mut(count);
                 *remaining = rest;
-                Some((run, key))
+                Some((run, bucket))
             })
             .filter(|(run, _)| !run.is_empty())
+            .map(move |(run, bucket)| {
+                let mut key = outside;
+                key |= K::Encoded::from_usize(bucket) << shift;
+                (run, K::decode(key))
+            })
     }
 }
 
@@ -463,6 +486,51 @@ mod tests {
         check_half_windows::<64>(
             &mut KeyHalf::<_, 64>(Direct),
             &mut KeyHalf::<_, 64>(ByKey(|record: &(u128, usize)| record.0)),
+        );
+    }
+
+    #[test]
+    fn decoding_inverts_every_encoding() {
+        fn round_trip<K: RadixKey>(key: K, same: impl Fn(K, K) -> bool) {
+            assert!(same(K::decode(key.encode()), key));
+        }
+        let bits = [
+            0u64,
+            1,
+            0x7ff8_0000_0000_0001,
+            0x8000_0000_0000_0000,
+            u64::MAX,
+        ];
+        for value in bits {
+            round_trip(value, |a, b| a == b);
+            round_trip(value as i64, |a, b| a == b);
+            round_trip(value as u8, |a, b| a == b);
+            round_trip(value as i8, |a, b| a == b);
+            round_trip((value as u128) << 64 | 3, |a, b| a == b);
+            round_trip(((value as u128) << 64) as i128, |a, b| a == b);
+            round_trip(f64::from_bits(value), |a, b| a.to_bits() == b.to_bits());
+            round_trip(f32::from_bits((value >> 32) as u32), |a, b| {
+                a.to_bits() == b.to_bits()
+            });
+            round_trip(Reverse(f64::from_bits(value)), |a, b| {
+                a.0.to_bits() == b.0.to_bits()
+            });
+            round_trip(Reverse(Reverse(value as i32)), |a, b| a == b);
+        }
+    }
+
+    #[test]
+    fn counted_floats_keep_exact_bits() {
+        // Negative NaN payloads that differ only inside the low window.
+        let mut negative: Vec<_> = (0..65)
+            .map(|index| f32::from_bits(0xffc0_0000 | (index as u32 * 37 % 256)))
+            .collect();
+        let mut expected: Vec<_> = negative.iter().map(|key| key.to_bits()).collect();
+        expected.sort_by_key(|&bits| f32::from_bits(bits).encode());
+        assert!(Direct.try_count_window(&mut negative, 0, 8));
+        assert_eq!(
+            negative.iter().map(|key| key.to_bits()).collect::<Vec<_>>(),
+            expected
         );
     }
 

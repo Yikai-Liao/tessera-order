@@ -123,7 +123,7 @@ jobs:
       - if: matrix.mode == 'rayon'
         run: >-
           cargo miri nextest run -p tessera-sort --features rayon
-          -E 'test(block::parallel::) | test(engine::parallel::bucket_borrow_tests::)'
+          -E 'test(block::parallel::) | test(block::finish::) | test(engine::parallel::bucket_borrow_tests::)'
       - run: cargo miri test -p tessera-sort --doc --features rayon
         if: matrix.mode == 'rayon'
       # Nextest does not run doctests.

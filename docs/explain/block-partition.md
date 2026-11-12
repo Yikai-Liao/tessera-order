@@ -1,6 +1,6 @@
 # 4. The block partition
 
-> **Legacy figures and walkthrough.** The interactive model below describes the former directory-based scatter. The Rust engine now reads the original contiguous input and links each bucket's blocks before building the completion directory; it no longer pre-copies the tail or stores per-block bucket IDs. Figure and sizing-chart updates are deferred. The current representation and memory formula are documented in [`block.rs`](../../rust/tessera-sort/src/block.rs).
+> **Legacy figures and walkthrough.** The interactive model below describes the former directory scatter and serial compaction. Rust now reads contiguous input into bucket chains and uses one protected-source completion ledger for both execution modes. Figure and sizing-chart updates are deferred. Current representation and memory costs belong to [`block.rs`](../../rust/tessera-sort/src/block.rs) and [`block/finish.rs`](../../rust/tessera-sort/src/block/finish.rs).
 
 The block partition is what lets Tessera split a large node stably without an n-record buffer. It is adapted from Robert Clausecker's `radixsort_permuted.c`, described in [*Parallel O(√n) Overhead LSD Radix Sort*](https://arxiv.org/abs/2607.05302) by Clausecker and Schintke, and lives in [`block.rs`](../../rust/tessera-sort/src/block.rs). Tessera runs one pass of it per node, on the node's top digit.
 

@@ -35,7 +35,7 @@ test("submission archives ratios on the PR branch without resetting its Head", a
   await mkdir(bin);
   await writeFile(
     join(bin, "bencher"),
-    `#!/usr/bin/env node
+    `#!/usr/bin/env bun
 // SPDX-License-Identifier: BSD-2-Clause
 const fs = require("node:fs");
 const path = require("node:path");

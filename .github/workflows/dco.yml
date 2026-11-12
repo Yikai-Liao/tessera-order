@@ -20,9 +20,10 @@ jobs:
           fetch-depth: 0
           # Check with the target branch's script, not PR-controlled code.
           ref: ${{ github.event.pull_request.base.sha }}
-      - uses: actions/setup-node@v7
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 24
+          # The trusted base may predate the Bun manifest pin.
+          bun-version: 1.4.4
       - name: Check Signed-off-by on every commit
         env:
           # Read-only access verifies individual Dependabot commits; it does
@@ -33,4 +34,4 @@ jobs:
         run: |
           # Fetch objects for fork heads without checking out or running them.
           git fetch --no-tags origin "$HEAD"
-          .github/scripts/check-dco.sh "$BASE" "$HEAD"
+          bun .github/scripts/check-dco.ts "$BASE" "$HEAD"

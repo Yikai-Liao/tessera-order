@@ -67,6 +67,6 @@ export async function verifySources(vendor: string, sources: Record<string, Nati
       ) ||
       stamp.tree_sha256 !== (await treeHash(path))
     )
-      throw new Error(`${name}: source tree differs; run pnpm tools native fetch`);
+      throw new Error(`${name}: source tree differs; run bun run tools native fetch`);
   }
 }

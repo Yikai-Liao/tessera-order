@@ -4,11 +4,11 @@ Affected pull requests compare the required SIMD backend against an exact source
 
 ## Read feedback from a PR
 
-Run from the repository root with Node.js 24, pinned dependencies and authenticated `gh`:
+Run from the repository root with the pinned Bun toolchain, installed dependencies and authenticated `gh`:
 
 ```sh
-pnpm -s tools status main
-pnpm -s tools status --pr 123 [--details]
+bun run --silent tools status main
+bun run --silent tools status --pr 123 [--details]
 ```
 
 1. Match `target.head` to the requested commit. Stale-head feedback is not current evidence.
@@ -63,7 +63,7 @@ The [catalog](../../bench/catalog.toml) owns the per-revision budgets, divided a
 | Below 1,000,000 | 0.5 s | 30 | 1.5 s |
 | 1,000,000 | 1 s | 40 | 4 s |
 
-Preview coverage with `pnpm -s tools plan continuous`; preparation resolves the full inventory through Rust and report uses that retained inventory.
+Preview coverage with `bun run --silent tools plan continuous`; preparation resolves the full inventory through Rust and report uses that retained inventory.
 
 ## Alerts
 
@@ -83,13 +83,13 @@ Keep `BENCHER_PROJECT`, `BENCHER_API_KEY` and the `benchmark` environment, whose
 
 ## Local use
 
-`pnpm tools compare commit BASE --plan continuous` runs the same protocol (optionally a smaller selection); there is no default nine-round local run. To reuse builds, separate preparation and sharding under `continuous`:
+`bun run tools compare commit BASE --plan continuous` runs the same protocol (optionally a smaller selection); there is no default nine-round local run. To reuse builds, separate preparation and sharding under `continuous`:
 
 ```sh
 # Build once; every result directory must be new. Use --plan local for a tiny selection.
-pnpm tools continuous prepare main --out bench/results/prepared
-pnpm tools continuous measure bench/results/prepared --shard 1/4 --out bench/results/paired-1
-pnpm tools report bench/results/paired-1    # regenerate offline
+bun run tools continuous prepare main --out bench/results/prepared
+bun run tools continuous measure bench/results/prepared --shard 1/4 --out bench/results/paired-1
+bun run tools report bench/results/paired-1    # regenerate offline
 ```
 
 A prepared pair holds the plan, provenance and executable hashes but no samples, so it is not evidence. `continuous measure` requires the original harness and catalog, rejects modified or escaping executable paths, verifies both listings and retains the executed copies. `--shard INDEX/COUNT` partitions the resolved listing deterministically, keeping each case's full sampling budget; omit it to run everything on one host. The four-thread plan needs Linux and `taskset` with four allowed CPUs, and serial and parallel cases never overlap. Interrupted measurement is not resumable. Builds reuse the checkout-local cache by default; `TESSERA_BENCH_TARGET_DIR` selects another caller-owned Cargo cache. Never share it across trust boundaries. Older protocols and absolute-time histories use their original tooling revision.
@@ -97,7 +97,7 @@ A prepared pair holds the plan, provenance and executable hashes but no samples,
 Upload is explicit and never executes artifact code. With the pinned Bencher CLI, the `prepared-revisions` artifact in `PREPARED`, every `paired-*` artifact in separate directories under `ARTIFACTS` and `BENCHER_API_KEY` in the environment:
 
 ```sh
-pnpm tools continuous submit --project PROJECT --hash COMMIT --base-hash BASE_COMMIT --pr 123 \
+bun run tools continuous submit --project PROJECT --hash COMMIT --base-hash BASE_COMMIT --pr 123 \
   --prepared PREPARED --artifacts ARTIFACTS --out bench/results/submission
 ```
 

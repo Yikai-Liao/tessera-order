@@ -60,7 +60,7 @@ const ROUTES: [RegExp, Lane[]][] = [
   [/^bench\/plans\//, ["comparison"]],
   [/^bench\/catalog\./, ["comparison", "benchmark", "docs"]],
   [/^(bench|tools)\//, ["comparison", "benchmark"]],
-  [/^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml)$/, ["comparison", "benchmark", "docs"]],
+  [/^(package\.json|bun\.lock)$/, ["comparison", "benchmark", "docs"]],
   [/^\.github\/workflows\/docs\.yml$/, ["docs"]],
 ];
 

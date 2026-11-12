@@ -19,15 +19,13 @@ jobs:
         with:
           # `lastUpdated` reads each page's commit date.
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v7
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm docs:test
-      - run: pnpm docs:typecheck
-      - run: pnpm docs:build
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run docs:test
+      - run: bun run docs:typecheck
+      - run: bun run docs:build
         env:
           # GitHub Pages serves a project site under /<repository>/.
           DOCS_BASE: /${{ github.event.repository.name }}/

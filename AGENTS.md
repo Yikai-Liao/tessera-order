@@ -20,11 +20,11 @@ Read the relevant sections as needed. [The task index](docs/README.md) covers ot
 
 Use the maintained CLI from the repository root. Its compact output serves agents first; reports and SVGs provide the detailed human view.
 
-- Preview selection: `pnpm -s tools plan NAME`.
-- Compare working tree with a commit: `pnpm -s tools compare commit COMMIT`.
-- Compare sorting algorithms: `pnpm -s tools compare algorithms`.
-- Regenerate retained results: `pnpm -s tools report DIR`.
-- Read feedback: `pnpm -s tools status --pr NUMBER` or `pnpm -s tools status main`. Match the exact head; inspect benchmark verdicts separately from workflow states. Automatic measurements run on PRs, not main.
+- Preview selection: `bun run --silent tools plan NAME`.
+- Compare working tree with a commit: `bun run --silent tools compare commit COMMIT`.
+- Compare sorting algorithms: `bun run --silent tools compare algorithms`.
+- Regenerate retained results: `bun run --silent tools report DIR`.
+- Read feedback: `bun run --silent tools status --pr NUMBER` or `bun run --silent tools status main`. Match the exact head; inspect benchmark verdicts separately from workflow states. Automatic measurements run on PRs, not main.
 
 Start performance work with a small representative selection, then expand evidence to match the claim. Extend the shared pipeline when an experiment needs a missing capability. Keep raw measurements outside Git. Read-only feedback requests stay read-only; confirm host-wide system changes, credentials, publication and unusually expensive experiments with the operator.
 
@@ -55,9 +55,9 @@ Run checks for the affected boundary:
 ```sh
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets && cargo test --workspace --doc
-pnpm install --frozen-lockfile && pnpm format
-pnpm tools:test && pnpm tools:typecheck
-pnpm docs:test && pnpm docs:typecheck && pnpm docs:build
+bun install --frozen-lockfile && bun run format
+bun run tools:test && bun run tools:typecheck
+bun run docs:test && bun run docs:typecheck && bun run docs:build
 ```
 
 Engine feature/Miri checks are in [validation](CONTRIBUTING.md#validation); platform and MSRV lanes run in CI. Report checks actually run and remaining gaps. Use Conventional Commits (64-character title limit), sign off with the configured identity, and include an `Assisted-by:` or `Co-authored-by:` trailer. Describe user-visible and compatibility changes in the PR.

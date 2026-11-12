@@ -12,7 +12,7 @@ import { repositoryRoot } from "./tasks.ts";
 /** Construct the task-oriented command surface without executing an operation. */
 export function createProgram() {
   const program = new Command()
-    .name("pnpm tools")
+    .name("bun run tools")
     .description("Experiments, continuous benchmark reproduction and CI feedback")
     .option("--verbose", "stream subprocess logs instead of retaining them in a file")
     .exitOverride();

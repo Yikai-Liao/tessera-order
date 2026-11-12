@@ -24,7 +24,7 @@ async function fixture(t: TestContext) {
   await writeFile(join(root, "bench/catalog.toml"), "fixture\n");
   const prepared = join(root, "prepared");
   const calls = join(root, "calls");
-  const worker = `#!/usr/bin/env node
+  const worker = `#!/usr/bin/env bun
 const fs = require('node:fs');
 const id = ${JSON.stringify(id)};
 fs.appendFileSync(${JSON.stringify(calls)}, 'worker\\n');

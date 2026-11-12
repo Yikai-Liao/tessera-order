@@ -85,6 +85,7 @@ test("routing keeps library, comparison and revision checks with their owners", 
       { benchmark: true },
     ],
     [["docs/explain/keys.md", "conformance/semantics.md"], { docs: true }],
+    [["package.json", "bun.lock"], { comparison: true, benchmark: true, docs: true }],
     [
       [
         "tools/status.ts",

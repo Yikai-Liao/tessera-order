@@ -49,11 +49,10 @@ S1 ([accepted](docs/design/evidence.md#shared-explicit-direct-key-scan)), shared
 
 Follow-up order: A serial trial of the enlarged capacity follows P1's evidence, under the same capacity owner, with separate routing acceptance. P5 has a restricted resource model and an outstanding serial traversal obligation; it is not an instruction to add recursive task spawning. Do not reopen flat-state removal, fused order/variation, block-only tiles or the rejected A/B constructions without a new saving-preserving construction ([evidence](docs/design/evidence.md#structure-analysis)).
 
-Existing smaller candidates remain available; none is a prerequisite for P1:
+P2's residual `Config` merger is [rejected](docs/design/evidence.md#p2-residual-partition-configuration-retained): requested sharding, explicit test geometry and serial/Miri execution remain independent inputs, with block sizing and actual shard clamps already owned together. The remaining smaller candidate is not a prerequisite for P1:
 
 | ID | Retire | Replace with | Risk |
 |---|---|---|---|
-| P2 | Residual partition configuration after P1 | One description consumed by the block layer | P1 retires `BucketFinish` and `BoundedFinish`; after its acceptance, reassess `Config` only if it duplicates policy rather than owning test geometry and execution controls |
 | P3 | `tile::Scratch`, `block::Buffers`, job `Pool` | A shared scratch lifecycle | Reassess after P1; preserve nested/reentrant lifetimes and allocation reuse rather than assume one buffer per worker |
 
 ### Rayon

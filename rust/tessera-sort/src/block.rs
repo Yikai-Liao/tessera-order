@@ -275,14 +275,10 @@ struct BucketWriter<T> {
 // access; transferring the buffers never transfers a shared record borrow.
 unsafe impl<T: Send> Send for BucketWriter<T> {}
 
-/// Physical block storage: the input slice and scratch segments.
+/// Physical block storage: the input slice and one scratch allocation.
 ///
 /// Physical block IDs number the scratch blocks first, then the full input
-/// blocks. Scratch is one allocation per scattered shard: a serial pass has
-/// one segment, and an adopted root keeps each shard's segment where it was
-/// written. Every segment holds the same power-of-two number of blocks, so a
-/// scratch ID splits into segment and offset without a division. Unlike the C
-/// reference's integer pairs, `T` may have no valid all-zero value, so scratch
+/// blocks. Unlike the C reference's integer pairs, `T` may have no valid all-zero value, so scratch
 /// stays uninitialized and only recorded live prefixes are read.
 /// `input_borrow` keeps the input exclusively borrowed while raw pointers
 /// address it.
@@ -292,19 +288,17 @@ struct BlockStorage<'a, T> {
     block_size: usize,
     scratch_blocks: usize,
     block_count: usize,
-    scratch: Vec<Vec<MaybeUninit<T>>>,
-    /// Base-two logarithm of the blocks in one scratch segment.
-    segment_blocks_log2: u32,
+    scratch: Vec<MaybeUninit<T>>,
     input_borrow: PhantomData<&'a mut [T]>,
 }
 
 impl<'a, T> BlockStorage<'a, T> {
-    /// Creates single-segment storage, reusing the first retained segment.
+    /// Creates storage, reusing the retained scratch allocation.
     fn new(
         input: &'a mut [T],
         bucket_count: usize,
         block_size: usize,
-        mut scratch: Vec<Vec<MaybeUninit<T>>>,
+        mut scratch: Vec<MaybeUninit<T>>,
     ) -> Self {
         assert!(bucket_count.is_power_of_two());
         let scratch_blocks = 2 * bucket_count;
@@ -316,12 +310,7 @@ impl<'a, T> BlockStorage<'a, T> {
         let scratch_len = scratch_blocks
             .checked_mul(block_size)
             .expect("scratch size overflow");
-        scratch.truncate(1);
-        if scratch.is_empty() {
-            scratch.push(Vec::new());
-        }
-        let segment = &mut scratch[0];
-        segment.resize_with(scratch_len, MaybeUninit::<T>::uninit);
+        scratch.resize_with(scratch_len, MaybeUninit::<T>::uninit);
         // The input tail has no full physical block. Start it in scratch;
         // the first bucket_count scratch blocks remain free for output.
         let tail_len = input.len() % block_size;
@@ -330,7 +319,7 @@ impl<'a, T> BlockStorage<'a, T> {
         unsafe {
             ptr::copy_nonoverlapping(
                 input.as_ptr().add(full_blocks * block_size),
-                segment
+                scratch
                     .as_mut_ptr()
                     .cast::<T>()
                     .add(bucket_count * block_size),
@@ -344,24 +333,21 @@ impl<'a, T> BlockStorage<'a, T> {
             scratch_blocks,
             block_count,
             scratch,
-            segment_blocks_log2: scratch_blocks.trailing_zeros(),
             input_borrow: PhantomData,
         }
     }
 
     fn block_ptr(&mut self, physical: usize) -> *mut T {
         assert!(physical < self.block_count);
-        // SAFETY: the bounds check selects a full block in the input or in a
-        // scratch segment; every segment holds `1 << segment_blocks_log2`
-        // blocks. The allocations stay alive and are never resized during
-        // sorting.
+        // SAFETY: the bounds check selects a full block in the input or in
+        // scratch, which holds `scratch_blocks` blocks. The allocations stay
+        // alive and are never resized during sorting.
         unsafe {
             if physical < self.scratch_blocks {
-                let block = physical & ((1 << self.segment_blocks_log2) - 1);
-                self.scratch[physical >> self.segment_blocks_log2]
+                self.scratch
                     .as_mut_ptr()
                     .cast::<T>()
-                    .add(block * self.block_size)
+                    .add(physical * self.block_size)
             } else {
                 self.input
                     .add((physical - self.scratch_blocks) * self.block_size)
@@ -374,8 +360,8 @@ impl<'a, T> BlockStorage<'a, T> {
 ///
 /// Each pass resizes and rewrites what it uses.
 pub(crate) struct Buffers<T> {
-    /// Scratch segments; a pass reuses the first one.
-    scratch: Vec<Vec<MaybeUninit<T>>>,
+    /// Scratch records, reused by each pass.
+    scratch: Vec<MaybeUninit<T>>,
     /// Logical-to-physical block directory of the active partition.
     block_order: Vec<u32>,
     /// The next pass's directory, then the inverse map during compaction.
@@ -387,7 +373,7 @@ pub(crate) struct Buffers<T> {
     partial_blocks: Vec<PartialBlock>,
     writers: Vec<BucketWriter<T>>,
     /// Per-bucket block counts during scatter, cumulative logical block ends
-    /// after directory construction. Adoption produces the same end offsets.
+    /// after directory construction.
     counts: Vec<usize>,
     #[cfg(debug_assertions)]
     seen: Vec<bool>,
@@ -420,9 +406,8 @@ impl<T> Default for Buffers<T> {
 /// The directory lives in the borrowed [`Buffers`]. At pass boundaries,
 /// `block_order` maps logical order to physical storage.
 /// `active_blocks` holds the current record sequence; the prefix and suffix
-/// are free blocks. Its start is a reserve length, not a logical bucket count:
-/// a single-shard pass reserves one block per bucket, and adoption retains
-/// every shard's reserve. `partial_blocks` records shorter live prefixes.
+/// are free blocks, and its start reserves one output block per bucket.
+/// `partial_blocks` records shorter live prefixes.
 struct Partition<'a, 'w, T> {
     buffers: &'w mut Buffers<T>,
     blocks: BlockStorage<'a, T>,
@@ -525,11 +510,8 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         assert_eq!(total, self.blocks.input_len);
     }
 
-    /// Scatters a single-shard pass and returns any caught classification panic.
-    /// Its free prefix reserves exactly one output block per logical bucket;
-    /// adopted directories have multiple shard reserves and only finish.
-    /// Runs one scatter pass and returns the classification state, or the
-    /// payload of a classification panic after completing the pass.
+    /// Runs one scatter pass and returns the classifier, or the payload of a
+    /// classification panic after completing the pass.
     fn step<C: Classify<T>>(&mut self, classifier: C) -> Result<C, unwind::Payload> {
         let (mut buckets, mut counts) = self.begin_pass();
         let mut position = ScatterPosition {
@@ -891,8 +873,6 @@ impl<T> Drop for Partition<'_, '_, T> {
         if !self.input_materialized {
             self.compact();
         }
-        // An adopted root releases the other shards' segments here.
-        self.blocks.scratch.truncate(1);
         self.buffers.scratch = core::mem::take(&mut self.blocks.scratch);
     }
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
-// Models block/parallel.rs directory adoption and parallel/finish.rs transfers.
+// Models block/parallel/finish.rs ledger construction and transfers.
 // Bucket orders are serial linearizations of direct-streamed completion;
 // mutex scheduling, key panics and raw-pointer provenance remain Rust tests.
 import { type Rec, simulate } from "./blockPartition.ts";
@@ -45,7 +45,7 @@ export function simulateParallelFinish(config: {
     firstBlock += blocks;
     return item;
   });
-  // Bucket-major and original shard order, exactly as the Rust adoption loop.
+  // Bucket-major and original shard order, exactly as the Rust ledger loop.
   for (let bucket = 0; bucket < R; bucket++) {
     for (let shard = 0; shard < shards; shard++) {
       const { frame, begin, firstBlock } = local[shard];

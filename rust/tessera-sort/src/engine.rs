@@ -27,7 +27,7 @@ use tile::capacity as tile_capacity;
 use alloc::vec::Vec;
 
 use crate::block;
-use crate::key::{Direct, Extract, KeyHalf, Rank, Unsigned};
+use crate::key::{self, Direct, Extract, KeyHalf, Rank, Unsigned};
 
 type KeyValue<T, E> = <E as Extract<T>>::Value;
 
@@ -528,11 +528,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         let candidate = varying & !digit.mask::<E::Value>().to_u128();
         // A digit covering all remaining variation leaves constant buckets;
         // interchangeable records can be counted instead of moved.
-        if candidate == 0
-            && self
-                .extractor
-                .try_count_window(records, digit.shift, digit.width)
-        {
+        if candidate == 0 && key::try_count_window::<T, E>(records, digit.shift, digit.width) {
             return;
         }
         let split = Split {

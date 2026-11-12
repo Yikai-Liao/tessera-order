@@ -159,7 +159,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
 
     let candidate = varying & !digit.mask::<E::Value>().to_u128();
     // Finished buckets need no child sorting; direct keys count them in parallel.
-    if candidate == 0 && extractor.try_count_window_parallel(records, digit.shift, digit.width) {
+    if candidate == 0 && key::try_count_window_parallel::<T, E>(records, digit.shift, digit.width) {
         return;
     }
 

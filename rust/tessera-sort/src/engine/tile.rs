@@ -74,7 +74,7 @@ struct Tile<'a, T, E> {
 /// One stable counting pass: histogram, prefix sum, then scatter from `source`
 /// to `destination`. Returns the size of the largest bucket.
 ///
-/// When `E::CACHE_BUCKETS`, the histogram stores each record's bucket and the scatter
+/// Without `E::DIRECT`, the histogram stores each record's bucket and the scatter
 /// reads it back, so a key function that changes its answer cannot send two
 /// records to one slot. Otherwise the scatter recomputes the key.
 ///
@@ -84,7 +84,7 @@ struct Tile<'a, T, E> {
 /// - `source` holds `len` initialized records; `destination` has `len`
 ///   writable slots in a separate allocation.
 /// - `cursor` has `MAX_DIGIT_BUCKETS` writable `Cursor` slots.
-/// - When `E::CACHE_BUCKETS`, `bucket_ids` has `len` aligned `Cursor` slots
+/// - Without `E::DIRECT`, `bucket_ids` has `len` aligned `Cursor` slots
 ///   disjoint from both record buffers and the cursor table.
 /// - If `key` panics, `destination` holds a partial copy that must be neither
 ///   read nor dropped.
@@ -113,7 +113,7 @@ unsafe fn counting_pass<T, E: Extract<T>>(
             // SAFETY: the caller guarantees `len` initialized records.
             let key = extractor.key(&*source.add(index));
             let bucket = ((key & mask) >> shift).to_usize();
-            if E::CACHE_BUCKETS {
+            if E::DIRECT.is_none() {
                 // SAFETY: the caller supplies len aligned Cursor slots.
                 *bucket_ids.add(index) = bucket as Cursor;
             }
@@ -128,7 +128,7 @@ unsafe fn counting_pass<T, E: Extract<T>>(
         crate::portable_simd::prefix_sum(starts);
         for index in 0..len {
             let record = source.add(index);
-            let bucket = if !E::CACHE_BUCKETS {
+            let bucket = if E::DIRECT.is_some() {
                 // Only sealed library encoders use the uncached path; their
                 // classification is deterministic and cannot panic.
                 ((extractor.key(&*record) & mask) >> shift).to_usize()
@@ -139,7 +139,7 @@ unsafe fn counting_pass<T, E: Extract<T>>(
             };
             let slot = *cursor.add(bucket);
             *cursor.add(bucket) = slot.wrapping_add(1);
-            let target = if E::CACHE_BUCKETS {
+            let target = if E::DIRECT.is_none() {
                 slot as usize
             } else {
                 (slot as usize).min(len - 1)
@@ -161,7 +161,7 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
     fn reserve_scratch(&mut self, len: usize) -> (*mut T, *mut Cursor) {
         // Cached IDs share the record allocation, without another allocation
         // or zero initialization.
-        if E::CACHE_BUCKETS {
+        if E::DIRECT.is_none() {
             let bytes = core::mem::size_of::<T>();
             let extra = (len * core::mem::size_of::<Cursor>() + core::mem::align_of::<Cursor>()
                 - 1)
@@ -178,7 +178,7 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
             self.scratch.resize_with(len, MaybeUninit::<T>::uninit);
         }
         let records = self.scratch.as_mut_ptr().cast::<T>();
-        let ids = if E::CACHE_BUCKETS {
+        let ids = if E::DIRECT.is_none() {
             // SAFETY: capacity includes len records followed by 2*len+1 bytes.
             // The allocation includes worst-case alignment padding after records.
             unsafe {

@@ -14,13 +14,13 @@ const FREE: usize = usize::MAX;
 const FINAL: usize = usize::MAX - 1;
 /// One initialized source prefix in the partition directory.
 struct Source {
-    logical: usize,
+    location: AtomicUsize,
     len: usize,
 }
 
 /// A bucket's source prefixes and temporary record ownership.
 struct Bucket<T> {
-    sources: Vec<Source>,
+    sources: core::ops::Range<usize>,
     start: usize,
     len: usize,
     records: Vec<MaybeUninit<T>>,
@@ -38,8 +38,7 @@ struct Storage<T> {
     scratch_blocks: usize,
     block_size: usize,
     owners: Vec<Mutex<usize>>,
-    locations: Vec<AtomicUsize>,
-    lengths: Vec<usize>,
+    sources: Vec<Source>,
     free: Vec<Mutex<Vec<usize>>>,
 }
 
@@ -77,15 +76,16 @@ impl<T> Storage<T> {
     }
 
     /// Transfers a live prefix to exclusively owned, non-overlapping output.
-    fn gather(&self, source: &Source, output: *mut T) -> usize {
+    fn gather(&self, logical: usize, output: *mut T) -> usize {
+        let source = &self.sources[logical];
         loop {
-            let physical = self.locations[source.logical].load(Ordering::Acquire);
+            let physical = source.location.load(Ordering::Acquire);
             let mut owner = lock(&self.owners[physical]);
-            if *owner != source.logical {
+            if *owner != logical {
                 continue;
             }
             // SAFETY: the verified owner mutex protects this initialized
-            // source prefix until it has moved to private staging.
+            // source prefix until ownership transfers to exclusive output.
             unsafe {
                 ptr::copy_nonoverlapping(self.addresses[physical], output, source.len);
             }
@@ -135,11 +135,13 @@ impl<T> Storage<T> {
                     ptr::copy_nonoverlapping(
                         self.addresses[physical],
                         self.addresses[free],
-                        self.lengths[logical],
+                        self.sources[logical].len,
                     );
                 }
                 *free_owner = logical;
-                self.locations[logical].store(free, Ordering::Release);
+                self.sources[logical]
+                    .location
+                    .store(free, Ordering::Release);
             } else {
                 local.push(free);
             }
@@ -198,11 +200,11 @@ impl<T> Bucket<T> {
             // capacity so ordinary scheduling retains only active buffers.
             self.records.resize_with(self.len, MaybeUninit::uninit);
             let mut offset = 0;
-            for source in &self.sources {
+            for logical in self.sources.clone() {
                 // SAFETY: staging has capacity for the concatenated prefixes.
                 let output = unsafe { self.records.as_mut_ptr().add(offset).cast() };
-                lock(&storage.free[self.cache]).push(storage.gather(source, output));
-                offset += source.len;
+                lock(&storage.free[self.cache]).push(storage.gather(logical, output));
+                offset += storage.sources[logical].len;
             }
             self.staged = true;
         }
@@ -244,16 +246,17 @@ impl<T> Bucket<T> {
         // waits for one of those blocks, at most g + 1 are final: with at least
         // two shards, the shared reserve still covers outstanding candidates.
         let mut offset = 0;
-        for source in &self.sources {
+        for logical in self.sources.clone() {
+            let len = storage.sources[logical].len;
             let mut free = lock(&storage.free[self.cache]);
-            storage.protect_band(self.start + offset, source.len, &mut free, self.cache);
+            storage.protect_band(self.start + offset, len, &mut free, self.cache);
             // SAFETY: the whole destination is final and therefore contains no
             // unread source. gather validates and locks the current source,
             // which is disjoint even if protection just relocated it.
             let output = unsafe { storage.input.add(self.start + offset) };
-            let physical = storage.gather(source, output);
+            let physical = storage.gather(logical, output);
             free.push(physical);
-            offset += source.len;
+            offset += len;
         }
         self.completed = true;
         self.records = Vec::new();
@@ -304,33 +307,32 @@ fn complete_with_fault<'records, T: Send>(
     let head = sorter.active_blocks.start;
     let input_len = sorter.blocks.input_len;
     let mut owners = vec![FREE; count];
-    let mut locations = Vec::new();
-    let mut lengths = Vec::new();
+    // One source entry owns both its live prefix length and relocatable
+    // position. Buckets retain ranges, not another copy of that directory.
+    let mut sources = Vec::with_capacity(sorter.active_blocks.len());
     let mut buckets = Vec::with_capacity(ends.len());
     let mut logical = head;
     let mut partial = 0;
     let mut start = 0;
     for (bucket, &end) in ends.iter().enumerate() {
         let logical_end = sorter.buffers.counts[bucket];
-        let mut sources = Vec::with_capacity(logical_end - logical);
+        let source_start = sources.len();
         while logical < logical_end {
             let len = sorter.next_block_len(logical, &mut partial);
             if len != 0 {
                 let physical = sorter.block_order[logical] as usize;
-                let source = locations.len();
+                let source = sources.len();
                 sources.push(Source {
-                    logical: source,
+                    location: AtomicUsize::new(physical),
                     len,
                 });
                 owners[physical] = source;
-                locations.push(AtomicUsize::new(physical));
-                lengths.push(len);
             }
             logical += 1;
         }
         buckets.push(Bucket {
             cache: bucket,
-            sources,
+            sources: source_start..sources.len(),
             start,
             len: end - start,
             records: Vec::new(),
@@ -363,8 +365,7 @@ fn complete_with_fault<'records, T: Send>(
         scratch_blocks: sorter.blocks.scratch_blocks,
         block_size,
         owners: owners.into_iter().map(Mutex::new).collect(),
-        locations,
-        lengths,
+        sources,
         free: caches,
     };
     let completed = AtomicUsize::new(0);
@@ -585,8 +586,13 @@ mod tests {
             scratch_blocks: 2,
             block_size: 1,
             owners: [FREE, FREE, 0, FREE].into_iter().map(Mutex::new).collect(),
-            locations: [2, 3].into_iter().map(AtomicUsize::new).collect(),
-            lengths: vec![1, 1],
+            sources: [2, 3]
+                .into_iter()
+                .map(|physical| Source {
+                    location: AtomicUsize::new(physical),
+                    len: 1,
+                })
+                .collect(),
             free: vec![
                 Mutex::new(Vec::with_capacity(1)),
                 Mutex::new(vec![3]),
@@ -597,8 +603,7 @@ mod tests {
             let storage = &storage;
             scope.spawn(move || {
                 let mut staged_first = MaybeUninit::uninit();
-                let physical =
-                    storage.gather(&Source { logical: 0, len: 1 }, staged_first.as_mut_ptr());
+                let physical = storage.gather(0, staged_first.as_mut_ptr());
                 let mut free = lock(&storage.free[0]);
                 free.push(physical);
                 storage.write(1, staged_first.as_ptr(), 1, &mut free, 0);
@@ -677,11 +682,10 @@ mod tests {
             unsafe { input.add(block * BLOCK) }
         }));
         let mut owners = vec![FREE; count];
-        let mut locations = Vec::new();
-        let mut lengths = Vec::new();
+        let mut sources = Vec::new();
         let mut buckets = Vec::new();
         for bucket in 0..BUCKETS {
-            let mut sources = Vec::new();
+            let source_start = sources.len();
             for (shard, part) in parts.iter().enumerate() {
                 let start = if bucket == 0 {
                     BUCKETS
@@ -704,17 +708,18 @@ mod tests {
                     } else {
                         scratch_blocks + shard * (SHARD_LEN / BLOCK) + local - 2 * BUCKETS
                     };
-                    let logical = locations.len();
-                    sources.push(Source { logical, len });
-                    locations.push(AtomicUsize::new(physical));
-                    lengths.push(len);
+                    let logical = sources.len();
+                    sources.push(Source {
+                        location: AtomicUsize::new(physical),
+                        len,
+                    });
                     owners[physical] = logical;
                 }
             }
-            assert_eq!(sources.len(), 68);
+            assert_eq!(sources.len() - source_start, 68);
             buckets.push(Bucket {
                 cache: bucket,
-                sources,
+                sources: source_start..sources.len(),
                 start: bucket * BUCKET_LEN,
                 len: BUCKET_LEN,
                 records: Vec::new(),
@@ -743,8 +748,7 @@ mod tests {
             scratch_blocks,
             block_size: BLOCK,
             owners: owners.into_iter().map(Mutex::new).collect(),
-            locations,
-            lengths,
+            sources,
             free: caches,
         };
         // Transfer recovery responsibility to this controlled state-machine
@@ -755,11 +759,11 @@ mod tests {
         for bucket in buckets.iter_mut().step_by(2) {
             bucket.records.resize_with(bucket.len, MaybeUninit::uninit);
             let mut offset = 0;
-            for source in &bucket.sources {
+            for logical in bucket.sources.clone() {
                 // SAFETY: staging covers the concatenated source prefixes.
                 let target = unsafe { bucket.records.as_mut_ptr().add(offset).cast() };
-                lock(&storage.free[bucket.cache]).push(storage.gather(source, target));
-                offset += source.len;
+                lock(&storage.free[bucket.cache]).push(storage.gather(logical, target));
+                offset += storage.sources[logical].len;
             }
             bucket.staged = true;
         }

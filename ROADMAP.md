@@ -47,13 +47,9 @@ S1 ([accepted](docs/design/evidence.md#shared-explicit-direct-key-scan)), shared
 |---|---|---|
 | P5 | Resource model available; implementation deferred | First bound serial equality continuation metadata by retiring boundaries before the largest-child tail transfer, without adding a second execution/analysis pipeline. The [model](docs/design/evidence.md#p5-recursive-parallel-nodes) permits one parallel phase at a time, not an unrestricted active frontier. Require a simplification payoff before implementation and preserve the public space/progress contract under reentrant suspension. Then measure skewed and balanced roots, thread counts, wide records and expensive extraction. Keep partition analysis shared; do not infer a bound from worker count or fixed digit depth. |
 
-Follow-up order: A serial trial of the enlarged capacity follows P1's evidence, under the same capacity owner, with separate routing acceptance. P5 has a restricted resource model and an outstanding serial traversal obligation; it is not an instruction to add recursive task spawning. Do not reopen flat-state removal, fused order/variation, block-only tiles or the rejected A/B constructions without a new saving-preserving construction ([evidence](docs/design/evidence.md#structure-analysis)).
+Follow-up order: A serial trial of the enlarged capacity follows P1's evidence, under the same capacity owner, with separate routing acceptance. P5 has a restricted resource model and an outstanding serial traversal obligation; it is not an instruction to add recursive task spawning. Do not reopen flat-state removal, fused order/variation, block-only tiles or the rejected A/B constructions without a new saving-preserving construction ([evidence](docs/design/evidence.md#structure-analysis)). P3's [shared-lifecycle evaluation](docs/design/evidence.md#p3-shared-scratch-lifecycle-rejected) is rejected: tile and block storage overlap during finishing, while the per-call pool recycles inactive aggregates; flattening or job-local initialization does not delete their recovery and reuse obligations.
 
-P2's residual `Config` merger is [rejected](docs/design/evidence.md#p2-residual-partition-configuration-retained): requested sharding, explicit test geometry and serial/Miri execution remain independent inputs, with block sizing and actual shard clamps already owned together. The remaining smaller candidate is not a prerequisite for P1:
-
-| ID | Retire | Replace with | Risk |
-|---|---|---|---|
-| P3 | `tile::Scratch`, `block::Buffers`, job `Pool` | A shared scratch lifecycle | Reassess after P1; preserve nested/reentrant lifetimes and allocation reuse rather than assume one buffer per worker |
+P2's residual `Config` merger is [rejected](docs/design/evidence.md#p2-residual-partition-configuration-retained): requested sharding, explicit test geometry and serial/Miri execution remain independent inputs, with block sizing and actual shard clamps already owned together.
 
 ### Rayon
 

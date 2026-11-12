@@ -106,36 +106,16 @@ fn top_window(remaining: u128, width: usize) -> (Digit, u128) {
     (digit, window)
 }
 
-/// Finishes in one or two flat passes, otherwise partitions the highest digit.
-/// Two-pass plans minimize table slots by checking at most `width` split points;
-/// longer plans inspect actual children instead of predicting their work.
+/// Finishes with one counting pass when a width-bounded window covers every
+/// varying bit, otherwise partitions the highest digit and lets each child
+/// plan from its actual remaining variation.
 fn plan_digits(varying: u128, width: usize) -> TilePlan {
     let (high, window) = top_window(varying, width);
-    let remaining = varying & !window;
-    if remaining == 0 {
-        return TilePlan::Lsd {
-            digits: [high; 2],
-            passes: 1,
-        };
+    if varying & !window == 0 {
+        TilePlan::Count(high)
+    } else {
+        TilePlan::Msd(high)
     }
-    let (low, _) = top_window(remaining, 128);
-    if low.width > width {
-        return TilePlan::Msd(high);
-    }
-    let mut digits = [high, low];
-    let mut slots = (1 << high.width) + (1 << low.width);
-    for high_width in 1..high.width {
-        let (high, window) = top_window(varying, high_width);
-        let (low, _) = top_window(varying & !window, 128);
-        if low.width <= width {
-            let cost = (1 << high.width) + (1 << low.width);
-            if cost < slots {
-                digits = [high, low];
-                slots = cost;
-            }
-        }
-    }
-    TilePlan::Lsd { digits, passes: 2 }
 }
 
 /// Chooses the widest cursor table that fits beside the tile, capped by
@@ -285,8 +265,10 @@ fn plan_digit<T, E: Extract<T>>(
 /// An executable tile decision; cursor layout and scratch remain private to tiles.
 pub(super) enum TilePlan {
     Insertion,
+    /// Partition by the top digit, then finish each bucket.
     Msd(Digit),
-    Lsd { digits: [Digit; 2], passes: usize },
+    /// One pass over a digit covering all variation finishes the tile.
+    Count(Digit),
 }
 
 /// Chooses a leaf for a nonconstant, nonempty tile without allocating scratch.
@@ -338,68 +320,26 @@ mod tests {
         assert_eq!(choose_split_digit(records.len(), 16, 512, &sample).width, 8);
     }
 
-    /// Exhaustively enumerates window partitions independently of the planner.
-    fn optimal_digit_cost(bits: u128, width: usize) -> (usize, usize) {
-        if bits == 0 {
-            return (0, 0);
-        }
-        let high = bit_len(bits);
-        (1..=width.min(high))
-            .map(|span| {
-                let remaining = bits & !(u128::MAX << (high - span));
-                let (passes, slots) = optimal_digit_cost(remaining, width);
-                (passes + 1, slots + (1 << span))
-            })
-            .min()
-            .unwrap()
-    }
-
     #[test]
-    fn digit_plan_finishes_short_plans_optimally() {
+    fn digit_plan_counts_only_covering_windows() {
         for bits in 1..256u128 {
             for width in 1..=5 {
-                let optimum = optimal_digit_cost(bits, width);
+                let high = bit_len(bits);
+                let low = bits.trailing_zeros() as usize;
                 match plan_digits(bits, width) {
-                    TilePlan::Lsd { digits, passes } => {
-                        assert!(optimum.0 <= 2);
-                        assert_eq!(
-                            (
-                                passes,
-                                digits[..passes].iter().map(|digit| 1 << digit.width).sum()
-                            ),
-                            optimum
-                        );
-                        let mut mask = 0;
-                        for digit in &digits[..passes] {
-                            assert_eq!(mask & digit.mask::<u128>(), 0);
-                            mask |= digit.mask::<u128>();
-                        }
-                        assert_eq!(mask & bits, bits);
+                    TilePlan::Count(digit) => {
+                        assert!(high - low <= width);
+                        assert_eq!(digit.mask::<u128>() & bits, bits);
                     }
                     TilePlan::Msd(digit) => {
-                        assert!(optimum.0 > 2);
-                        assert_ne!(bits & digit.mask::<u128>(), 0);
+                        assert!(high - low > width);
+                        assert!(digit.width <= width);
+                        assert_ne!(bits & digit.mask::<u128>() & (1 << (high - 1)), 0);
                     }
                     TilePlan::Insertion => unreachable!(),
                 }
             }
         }
-        for shift in [0, 17, 96] {
-            let TilePlan::Lsd { digits, passes } = plan_digits(0xffff_ffffu128 << shift, 16) else {
-                panic!("two-pass plan expected")
-            };
-            assert_eq!(passes, 2);
-            assert_eq!(digits[0].width, 16);
-            assert_eq!(digits[1].width, 16);
-        }
-        let TilePlan::Lsd { digits, passes } = plan_digits((1 << 127) | 1, 14) else {
-            panic!("two sparse passes expected")
-        };
-        assert_eq!(passes, 2);
-        assert_eq!(
-            digits[0].mask::<u128>() | digits[1].mask::<u128>(),
-            (1 << 127) | 1
-        );
         assert!(matches!(
             plan_tile::<u64>(48, u64::MAX as u128),
             TilePlan::Insertion

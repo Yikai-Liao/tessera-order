@@ -177,52 +177,48 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
         (records, ids)
     }
 
-    /// Runs one stable counting pass per digit, the last digit first, and
-    /// returns the largest bucket of the first digit.
+    /// Runs one stable counting pass through scratch and returns its largest
+    /// bucket.
     ///
     /// The records end in the tile, also when a key function panics. `cursor`
-    /// then holds each bucket's end for the first digit.
-    // Keep the result at its consumer: LSD discards the histogram maximum,
-    // so optimization can remove its per-record update without a second loop.
+    /// then holds each bucket's end.
+    // Keep the result at its consumer: a finishing pass discards the histogram
+    // maximum, so optimization can remove its per-record update.
     // Counter and placement evidence: port.md, "Counting-pass result visibility".
     #[inline(always)]
-    fn counting_passes(
+    fn counting_pass(
         &mut self,
         records: &mut [T],
-        digits: &[Digit],
+        digit: Digit,
         cursor: &mut MaybeUninit<[Cursor; MAX_DIGIT_BUCKETS]>,
     ) -> Cursor {
         let len = records.len();
         debug_assert!(len <= MAX_TILE_RECORDS);
         let (scratch, bucket_ids) = self.reserve_scratch(len);
-        let cursor = cursor.as_mut_ptr().cast::<Cursor>();
         let tile = records.as_mut_ptr();
         let mut guard = RestoreTile {
             tile,
             len,
             source: tile,
         };
-        let mut destination = scratch;
-        let mut largest = 0;
-        for &digit in digits.iter().rev() {
-            // SAFETY: scratch and tile are disjoint len-slot buffers, and the
-            // guard's source holds the records. Cached IDs use the reserved
-            // scratch tail. Extract guarantees safe
-            // re-evaluation whenever classification caching is disabled.
-            largest = unsafe {
-                counting_pass::<T, E>(
-                    guard.source,
-                    destination,
-                    len,
-                    digit,
-                    cursor,
-                    bucket_ids,
-                    self.extractor,
-                )
-            };
-            // Only a completed pass makes its output the live record set.
-            core::mem::swap(&mut guard.source, &mut destination);
-        }
+        // SAFETY: scratch and tile are disjoint len-slot buffers, and the
+        // guard's source holds the records. Cached IDs use the reserved
+        // scratch tail. Extract guarantees safe re-evaluation whenever
+        // classification caching is disabled.
+        let largest = unsafe {
+            counting_pass::<T, E>(
+                tile,
+                scratch,
+                len,
+                digit,
+                cursor.as_mut_ptr().cast::<Cursor>(),
+                bucket_ids,
+                self.extractor,
+            )
+        };
+        // Only a completed pass makes scratch the live record set; the guard
+        // copies it back into the tile.
+        guard.source = scratch;
         largest
     }
 
@@ -230,7 +226,7 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
     fn partition_tile(&mut self, records: &mut [T], digit: Digit, varying: u128) {
         let len = records.len();
         let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
-        let largest = self.counting_passes(records, &[digit], &mut counts);
+        let largest = self.counting_pass(records, digit, &mut counts);
         // With insertion-sized buckets, whole-tile insertion has the same inversion
         // count as separate bucket sorts and skips the boundary walk.
         if largest as usize <= INSERTION_MAX {
@@ -260,7 +256,7 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
         }
     }
 
-    /// Finishes a tile by insertion, an MSD partition, or LSD counting passes.
+    /// Finishes a tile by insertion, an MSD partition, or one covering counting pass.
     fn sort_tile(&mut self, records: &mut [T], varying: u128) {
         let len = records.len();
         if len < 2 || varying == 0 {
@@ -269,9 +265,9 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
         match plan_tile::<T>(len, varying) {
             TilePlan::Insertion => self.extractor.finish_insertion(records),
             TilePlan::Msd(digit) => self.partition_tile(records, digit, varying),
-            TilePlan::Lsd { digits, passes } => {
+            TilePlan::Count(digit) => {
                 let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
-                self.counting_passes(records, &digits[..passes], &mut counts);
+                self.counting_pass(records, digit, &mut counts);
             }
         }
     }

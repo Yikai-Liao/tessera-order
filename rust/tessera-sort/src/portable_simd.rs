@@ -126,19 +126,11 @@ pub(crate) fn first_inversion<K: RadixKey>(values: &[K]) -> Option<usize> {
 #[inline(always)]
 fn first_inversion_with<S: Simd, K: RadixKey>(simd: S, values: &[K]) -> Option<usize> {
     if values.len() < SIMD_MIN {
-        return crate::scan::scalar(values);
+        return crate::scan::by_key(values, &mut Direct);
     }
-    let pairs = values.len() - 1;
-    let peel = PEEL.min(pairs);
-    // Keep the previous encoded key instead of encoding both sides of every
-    // pair; float encoding is not free.
-    let mut previous = values[0].encode();
-    for (index, value) in values[1..=peel].iter().enumerate() {
-        let current = value.encode();
-        if previous > current {
-            return Some(index);
-        }
-        previous = current;
+    let peel = PEEL.min(values.len() - 1);
+    if let Some(index) = crate::scan::by_key(&values[..=peel], &mut Direct) {
+        return Some(index);
     }
     scan_pairs(simd, &values[peel..]).map(|offset| offset + peel)
 }
@@ -149,7 +141,7 @@ fn scan_pairs<S: Simd, K: RadixKey>(simd: S, values: &[K]) -> Option<usize> {
     const BLOCK: usize = 32;
     let lanes = K::lanes::<S>();
     if lanes == 1 {
-        return crate::scan::scalar(values);
+        return crate::scan::by_key(values, &mut Direct);
     }
     let vectors = (BLOCK / lanes).max(1);
     let block_len = vectors * lanes;

@@ -18,8 +18,8 @@ export interface SubmissionOptions extends PairedSource {
  *
  * Cloud history stores the ratio to this run's exact baseline, not a
  * comparison with a previous run's ratio. The PR's reports share one branch
- * history, so merging main does not start a new one. A dedicated Testbed and
- * Measure isolate the old absolute-time histories.
+ * history, so merging main does not start a new one. The paired-time-ratio
+ * Measure distinguishes ratios from absolute latency.
  */
 export async function submitContinuous(options: SubmissionOptions) {
   if (!/^[a-f0-9]{40}$/.test(options.hash) || !/^[a-f0-9]{40}$/.test(options.baseHash))

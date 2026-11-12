@@ -21,6 +21,12 @@ const out = join(root, "bench/results/main");
 await runTask(out, false, async () => {
   if (await workingTreeDirty(root)) throw new Error("Tracking requires a clean committed checkout");
   const source = await resolveCommit(root, "HEAD");
+  const commitTime = new Date(
+    await command("git", ["show", "-s", "--format=%cI", source], {
+      cwd: root,
+      capture: true,
+    }),
+  ).toISOString();
   const project = process.env.BENCHER_PROJECT ?? "";
   if (!/^[a-z0-9-]+$/.test(project) || process.env.GITHUB_SHA !== source)
     throw new Error("Expected Bencher project and exact Actions source");
@@ -76,7 +82,7 @@ await runTask(out, false, async () => {
         `--project=${project}`,
         "--branch=main",
         `--hash=${source}`,
-        "--testbed=baremetal-intel-v1-absolute-v1",
+        "--testbed=main",
         "--spec=intel-v1",
         `--image=${image}`,
         "--job-timeout=300",
@@ -90,6 +96,7 @@ await runTask(out, false, async () => {
     await writeFile(join(out, "bencher.json"), response);
     const run = runSchema.parse({
       ...summarizeReport(JSON.parse(response), source, project, ids),
+      commit_time: commitTime,
       protocol: "criterion-main-v1",
       image,
       workflow: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`,

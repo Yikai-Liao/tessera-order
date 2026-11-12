@@ -54,7 +54,9 @@ export function renderFigure(options: FigureOptions, layers: Plot.PlotOptions[])
   root.setAttribute("role", "img");
   const titleId = id ? `${id}-title` : "t";
   const descriptionId = id ? `${id}-description` : "d";
-  root.setAttribute("aria-labelledby", `${titleId} ${descriptionId}`);
+  // The title names the figure; the longer description stays a description.
+  root.setAttribute("aria-labelledby", titleId);
+  root.setAttribute("aria-describedby", descriptionId);
   for (const [name, value, elementId] of [
     ["title", title, titleId],
     ["desc", description, descriptionId],
@@ -96,8 +98,11 @@ export function renderFigure(options: FigureOptions, layers: Plot.PlotOptions[])
     );
   }
   // SVG image viewers may ignore CSS variables. Literal presentation colours
-  // keep the standalone image readable; ordinary CSS supplies browser dark mode.
+  // keep the standalone image readable; ordinary CSS supplies dark mode. A
+  // standalone image follows the system preference; inlined in an HTML page,
+  // the page's `dark` class on <html> decides, as VitePress sets it.
   const darkRules = new Set<string>();
+  const pageRules = new Set<string>();
   for (const attribute of ["fill", "stroke"] as const) {
     for (const element of root.querySelectorAll(`[${attribute}]`)) {
       const value = element.getAttribute(attribute)!;
@@ -112,6 +117,12 @@ export function renderFigure(options: FigureOptions, layers: Plot.PlotOptions[])
       darkRules.add(
         `.benchmark-figure .${className} { ${attribute}: ${theme.palette.dark[key]}; }`,
       );
+      pageRules.add(
+        `html:not(.dark) .benchmark-figure .${className} { ${attribute}: ${theme.palette.light[key]}; }`,
+      );
+      pageRules.add(
+        `html.dark .benchmark-figure .${className} { ${attribute}: ${theme.palette.dark[key]}; }`,
+      );
     }
   }
   style.textContent = `
@@ -119,6 +130,7 @@ export function renderFigure(options: FigureOptions, layers: Plot.PlotOptions[])
     .benchmark-figure [font-size="10.5"] { letter-spacing: 1.1px; }
     .benchmark-figure [font-size="28"] { font-feature-settings: "pnum"; letter-spacing: -.6px; }
     @media (prefers-color-scheme: dark) { ${[...darkRules].join("\n")} }
+    ${[...pageRules].join("\n")}
   `;
   return root.outerHTML;
 }

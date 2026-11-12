@@ -3,6 +3,7 @@
 import { type caseParts, modeOrder } from "../catalog.ts";
 
 export { caseLabel, caseParts } from "../catalog.ts";
+export { formatChange } from "../plot/annotations.ts";
 
 export interface BencherReport {
   uuid: string;
@@ -73,12 +74,6 @@ export const BUILD = "Tessera";
 
 export function short(hash: string | null) {
   return hash ? hash.slice(0, 7) : "unknown";
-}
-
-export function formatChange(change: number | null) {
-  if (change == null || !Number.isFinite(change)) return "—";
-  const pct = change * 100;
-  return `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%`;
 }
 
 const VERDICTS = {

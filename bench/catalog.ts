@@ -204,6 +204,36 @@ export function caseParts(id: string) {
   };
 }
 
+/** Name a case's figure row: input, then record type and length, tagging a non-default seed. */
+export function caseName(id: string) {
+  const parts = caseParts(id);
+  return {
+    input: parts.input,
+    sub: [parts.type, parts.n].filter(Boolean).join(" · "),
+    tag: parts.seed && parts.seed !== "s1" ? `seed ${parts.seed.slice(1)}` : "",
+  };
+}
+
+/** Order case IDs for reading: mode, length, record type, input, then seed; unknown entries last. */
+export function compareCases(a: string, b: string) {
+  const key = (id: string) => {
+    const [, ty = "", shape = "", length = "", seed = "", mode = ""] = id.split("/");
+    const rank = (list: { id: string }[], value: string) => {
+      const found = list.findIndex((entry) => entry.id === value);
+      return found < 0 ? list.length : found;
+    };
+    return [
+      modeOrder(mode),
+      Number(length) || Number.MAX_SAFE_INTEGER,
+      rank(catalog.types, ty),
+      rank(catalog.distributions, shape),
+      Number(seed.slice(1)) || Number.MAX_SAFE_INTEGER,
+    ];
+  };
+  const [x, y] = [key(a), key(b)];
+  return x.reduce((order, value, i) => order || value - y[i], 0) || a.localeCompare(b);
+}
+
 /** Format a case's readable label while preserving unknown identifiers. */
 export function caseLabel(id: string) {
   const parts = caseParts(id);

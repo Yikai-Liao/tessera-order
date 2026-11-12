@@ -41,6 +41,16 @@
   --tsr-focus: #ff7a79;
 }
 
+/* The performance dashboard uses the desktop viewport, including after zooming
+   out. Ordinary documentation keeps VitePress's centered reading column. */
+.performance-page {
+  --vp-layout-max-width: 100%;
+}
+
+.performance-page .vp-doc > p {
+  max-width: 80ch;
+}
+
 /* Explanation pages give the diagrams the full content width. */
 .tsr-figure {
   margin: 24px 0;

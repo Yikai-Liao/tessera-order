@@ -50,7 +50,7 @@ A node then looks at its varying bits. If they span at most 8 bits, the node is 
 
 ### Counted window
 
-A record sorted by its own key is interchangeable with every record of the same key: equal encoded keys are equal bit patterns. For those inputs — `stable_sort`, not `stable_sort_by_key` — the engine counts the records of each value in the window, remembers one record per value, and fills each run with it. The runs come out in key order, and no block table or record move is needed.
+A record sorted by its own key is interchangeable with every record of the same key: equal encoded keys are equal bit patterns. For those inputs — `stable_sort`, not `stable_sort_by_key` — the engine counts the records of each value in the window and fills each run with the key decoded from that value and the bits all keys share outside the window. The runs come out in key order, and no block table or record move is needed.
 
 Records sorted by a key function keep their payloads: two records with key 7 may hold different data and in a fixed order between them. Counting would drop that, so `stable_sort_by_key` takes the [block partition](block-partition.md) below instead.
 

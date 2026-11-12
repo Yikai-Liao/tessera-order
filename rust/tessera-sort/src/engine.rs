@@ -161,9 +161,7 @@ impl Split {
         let tile = &mut scratch.tile;
         let mut visit = |bucket: usize, child: &mut [T], classifier: &mut C| {
             if child.len() <= tile_len && self.finished != Some(bucket) {
-                let extractor = lend(classifier);
-                let varying = scan_varying_bits(child, self.candidate, extractor);
-                tile.sort::<E>(child, varying, extractor);
+                tile.finish_child(child, self.candidate, lend(classifier));
             }
         };
         block::partition_digit(

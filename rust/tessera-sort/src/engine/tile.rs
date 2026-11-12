@@ -47,6 +47,22 @@ impl<T> Scratch<T> {
         }
         .sort_tile(records, varying);
     }
+
+    /// Finishes a cursor-bounded partition child whose remaining variation
+    /// lies within `candidate`. Node and tile partitions share this rule.
+    pub(super) fn finish_child<E: Extract<T>>(
+        &mut self,
+        records: &mut [T],
+        candidate: u128,
+        extractor: &mut E,
+    ) {
+        debug_assert!(records.len() <= MAX_TILE_RECORDS);
+        Tile::<T, E> {
+            scratch: &mut self.0,
+            extractor,
+        }
+        .finish_child(records, candidate);
+    }
 }
 
 /// One active tile operation, including recursive MSD children.
@@ -248,15 +264,22 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
         for &end in ends {
             let end = end as usize;
             debug_assert!(start <= end && end <= len);
-            // Insertion-sized children need no variation scan.
-            if end - start > INSERTION_MAX {
-                let child = &records[start..end];
-                let varying = scan_varying_bits(child, candidate, self.extractor);
-                self.sort_tile(&mut records[start..end], varying);
-            } else if end > start + 1 {
-                self.extractor.finish_insertion(&mut records[start..end]);
-            }
+            self.finish_child(&mut records[start..end], candidate);
             start = end;
+        }
+    }
+
+    /// Finishes a partition child. Insertion-sized children skip the variation
+    /// scan, which would cost about as much as the insertion pass it could save.
+    fn finish_child(&mut self, records: &mut [T], candidate: u128) {
+        if candidate == 0 || records.len() < 2 {
+            return;
+        }
+        if records.len() > INSERTION_MAX {
+            let varying = scan_varying_bits(records, candidate, self.extractor);
+            self.sort_tile(records, varying);
+        } else {
+            self.extractor.finish_insertion(records);
         }
     }
 

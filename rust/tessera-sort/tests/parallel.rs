@@ -131,13 +131,15 @@ fn send_only_records_sort() {
 
 #[test]
 #[cfg(not(miri))]
-fn bounded_callback_can_reenter() {
-    // This crosses bounded finishing's production cutoff with Send-only
-    // records, a Sync-but-not-Send callback, and nested Rayon work from a
-    // private staged bucket rather than the original input or root tail.
+fn materialized_tile_callback_can_reenter() {
+    // Exercise the whole-child tile allowance with Send-only records and a
+    // Sync-but-not-Send callback. Reenter from tile scratch rather than the
+    // original input or the root scatter's tail buffer.
     let len = (1usize << 21) + 37;
     let mut rows: Vec<_> = (0..len as u32)
-        .map(|id| (id.wrapping_mul(7919) % 8192, Cell::new(id)))
+        // Broad variation needs a second tile pass, so extraction actually
+        // visits tile scratch after direct final-band delivery.
+        .map(|id| ((id / 2).wrapping_mul(7919), Cell::new(id)))
         .collect();
     let begin = rows.as_ptr() as usize;
     let end = begin + rows.len() * core::mem::size_of_val(&rows[0]);
@@ -168,7 +170,7 @@ fn bounded_callback_can_reenter() {
     for row in &rows {
         let id = row.1.get() as usize;
         assert!(!core::mem::replace(&mut seen[id], true));
-        assert_eq!(row.0, (id as u32).wrapping_mul(7919) % 8192);
+        assert_eq!(row.0, (id as u32 / 2).wrapping_mul(7919));
     }
     for pair in rows.windows(2) {
         assert!(pair[0].0 <= pair[1].0);

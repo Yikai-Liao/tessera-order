@@ -61,8 +61,7 @@ fn streamed_child_can_reenter_and_panic() {
                     }
                     row.0
                 });
-                // This is below staging eligibility; an ordinary digit root
-                // must finish through the direct streamed callback.
+                // Finish a digit root through the direct final-band callback.
                 sort_root(
                     &mut records,
                     &mut extractor,
@@ -173,9 +172,9 @@ fn descending_children_keep_equal_key_order() {
         Sorter::<_, _> {
             scratch: &mut Scratch::new(),
             extractor: &mut ByKey(|row: &(u64, usize)| row.0),
-            tile_len: 1,
+            tile_len: tile::finishing_capacity::<(u64, usize)>(records.len(), 1),
         }
-        .sort_staged_child(&mut records, 3);
+        .sort_child(&mut records, 3);
         assert_eq!(records, expected);
     }
 }

@@ -3,9 +3,8 @@
 //! Rayon entry points for stable sorting.
 //!
 //! The parallel engine shares the serial probes and node/tile sorting.
-//! Large inputs partition the root across disjoint shards. Bounded buckets
-//! sort in staging and write directly to final bands; other layouts retain
-//! parallel block permutation and overlapping materialized-bucket sorting.
+//! Large inputs partition the root across disjoint shards, then transfer each
+//! bucket directly into its exclusive final band and finish it in that task.
 //! Small inputs and one-thread pools use the serial engine.
 
 use crate::key::{ByKey, Direct};
@@ -21,11 +20,12 @@ use crate::{RadixKey, engine};
 /// # Memory
 ///
 /// For pool width `P`, auxiliary space is O(P√n) for fixed record size and
-/// key width. Root scratch and directories use O(√(nP)); bounded bucket
-/// staging adds O(R√n), where the fixed root fan-out `R` is at most 4096.
-/// Reentrant callbacks may suspend more staged buckets than there are workers.
-/// Direct counting uses O(PR) histogram storage. No contiguous n-record output
-/// buffer is allocated. Rayon runtime storage and thread stacks are separate.
+/// key width. Root scratch and directories use O(√(nP)). Up to the fixed root
+/// fan-out R of 4096 finishers can retain serial scratch, including suspended
+/// callbacks; checked-out and pooled allocations both count. Whole-child tiles
+/// have bounded byte and cursor capacity, independent of n. Direct counting
+/// uses O(PR) histogram storage. No contiguous n-record output or private bucket
+/// staging is allocated. Rayon runtime storage and thread stacks are separate.
 ///
 /// # Examples
 ///
@@ -63,7 +63,9 @@ pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
 ///
 /// Uses the same O(P√n) auxiliary-space bound as [`par_stable_sort`] for
 /// pool width `P` and fixed record size and key width. Reentrant callbacks can
-/// retain staging for up to the fixed root fan-out, not just `P` buckets.
+/// retain serial scratch for up to the fixed root fan-out, not just `P` buckets.
+/// A nested public call owns its own scratch; suspended outer buffers remain
+/// charged to the outer call.
 ///
 /// # Examples
 ///

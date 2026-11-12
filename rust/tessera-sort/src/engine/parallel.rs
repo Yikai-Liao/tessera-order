@@ -109,11 +109,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
             rank,
             &mut scratch.block,
             shards,
-            block::BucketFinish {
-                limit: 0,
-                sort: &|_| {},
-                visit: &mut |_| {},
-            },
+            &|_| {},
         );
         match plan_after_equality(records, &ends, varying, tile_len, extractor) {
             Some(progress) => {
@@ -171,32 +167,17 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
         }
         // Movement retired every source and released its locks before lending
         // this final band. Finish in that task instead of handing it to a second
-        // queue. Unlike private staging, it keeps the ordinary tile allowance.
+        // queue. Tile storage owns whether the whole child fits one tile.
         let mut key = child_extractor.clone();
         let mut scratch = pool.take();
         Sorter::<T, E> {
             scratch: &mut scratch,
             extractor: &mut key,
-            tile_len,
+            tile_len: tile::finishing_capacity::<T>(child.len(), tile_len),
         }
         .sort_child(child, candidate);
         pool.give(scratch);
     };
-    let finish = |child: &mut [T]| {
-        if candidate == 0 {
-            return;
-        }
-        let mut key = child_extractor.clone();
-        let mut scratch = pool.take();
-        Sorter::<T, E> {
-            scratch: &mut scratch,
-            extractor: &mut key,
-            tile_len,
-        }
-        .sort_staged_child(child, candidate);
-        pool.give(scratch);
-    };
-    let limit = bucket_limit::<T>(records.len(), digit.width);
     block::partition_digit_parallel(
         records,
         digit.width,
@@ -204,26 +185,8 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
         extractor.clone(),
         &mut scratch.block,
         shards,
-        block::BucketFinish {
-            limit,
-            sort: &finish,
-            visit: &visit,
-        },
+        &visit,
     );
-}
-
-/// Bounds staging to square-root space and declines infeasible root layouts.
-///
-/// The 1M/10M paired screens keep the existing small-input route. The cap
-/// admits balanced 10M roots with 256 buckets while bounding suspended
-/// staging; it deliberately declines larger or concentrated buckets.
-fn bucket_limit<T>(len: usize, width: usize) -> usize {
-    let limit = len.isqrt().saturating_mul(16);
-    if len < (1 << 21) || core::mem::size_of::<T>() > 16 || limit.saturating_mul(1 << width) < len {
-        0
-    } else {
-        limit
-    }
 }
 
 #[cfg(test)]

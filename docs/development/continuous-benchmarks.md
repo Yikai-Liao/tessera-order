@@ -54,7 +54,7 @@ The [continuous plan](../../bench/plans/continuous.toml) caps inputs at 4,194,30
 - Fourteen non-random `u64` distributions at 1M (ordered, nearly ordered, repeated-key, skewed, sparse-digit, clustered).
 - Seven keyed-row distributions at 1M for `row_u64`, plus `row_u32/skew99`, to check stable payload order through fast paths and uneven buckets.
 - `u128/sparse8`, `f64/finite_signed` and `rec128_u64/sparse_digits` at 1M.
-- `u64/random` and `row_u64/skew99` at 4,194,304 (2²² records), above the 2²¹-record threshold where roots stage bounded buckets and scale their blocks; 1M roots never reach that route.
+- `u64/random` and `row_u64/skew99` at 4,194,304 (2²² records), retaining balanced and concentrated large-root coverage. These cases exercised the former bounded-staging route and remain controls for direct completion, child capacity and root layout.
 - Random 65,536-record `u32`, `u64`, `row_u32` and `row_u64`, covering entry overhead and the serial fallback below the byte threshold.
 
 The [catalog](../../bench/catalog.toml) owns the per-revision budgets, divided across fresh workers; startup, input preparation and at least one complete batch add overhead beyond them. There is no outer repetition.

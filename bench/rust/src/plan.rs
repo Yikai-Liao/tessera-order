@@ -552,17 +552,15 @@ mod tests {
         }));
 
         let parallel = continuous.parallel_inputs().unwrap();
-        assert_eq!(parallel.len(), 36);
+        assert_eq!(parallel.len(), 38);
         assert_eq!(
             parallel.iter().filter(|case| case.len == 1_000_000).count(),
             32
         );
-        assert!(
-            cases
-                .iter()
-                .chain(&parallel)
-                .all(|case| case.len <= 1_000_000)
-        );
+        assert!(cases.iter().all(|case| case.len <= 1_000_000));
+        assert!(parallel.iter().all(|case| case.len <= 1 << 22));
+        require(&parallel, "u64", "random", 1 << 22);
+        require(&parallel, "row_u64", "skew99", 1 << 22);
         for ty in ["u32", "row_u32", "u64", "row_u64"] {
             require(&parallel, ty, "random", 65_536);
         }

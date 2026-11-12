@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 // Models block/parallel.rs directory adoption and parallel/finish.rs transfers.
-// Actions are serial linearizations of staged or direct-streamed completion;
+// Bucket orders are serial linearizations of direct-streamed completion;
 // mutex scheduling, key panics and raw-pointer provenance remain Rust tests.
 import { type Rec, simulate } from "./blockPartition.ts";
-
-export interface FinishAction {
-  phase: "stage" | "write" | "stream";
-  bucket: number;
-}
 
 interface Source {
   logical: number;
@@ -21,7 +16,7 @@ export function simulateParallelFinish(config: {
   blockSize: number;
   shards: number;
   classify: (key: number) => number;
-  actions?: FinishAction[];
+  order?: number[];
 }) {
   const { keys, buckets: R, blockSize: b, classify } = config;
   const fullBlocks = Math.floor(keys.length / b);
@@ -38,8 +33,7 @@ export function simulateParallelFinish(config: {
   const locations: number[] = [];
   const sources: Source[][] = Array.from({ length: R }, () => []);
   const frames: { action: string; live: number[] }[] = [];
-  const staged: (Rec | null)[][] = Array.from({ length: R }, () => []);
-  const ready = Array<boolean>(R).fill(false);
+  const completed = Array<boolean>(R).fill(false);
   let firstBlock = 0;
   const local = Array.from({ length: shards }, (_, shard) => {
     const blocks = Math.floor(fullBlocks / shards) + Number(shard < fullBlocks % shards);
@@ -91,13 +85,13 @@ export function simulateParallelFinish(config: {
   const snapshot = (action: string) => {
     frames.push({
       action,
-      live: [...cells.flat(), ...tail, ...staged.flat()]
+      live: [...cells.flat(), ...tail]
         .filter((record) => record !== null)
         .map((record) => record.id),
     });
   };
   let relocations = 0;
-  const recordTransfers = { staging: 0, final: 0, relocation: 0 };
+  const recordTransfers = { final: 0, relocation: 0 };
   const takeFree = (bucket: number) => {
     for (const cache of [
       bucket,
@@ -143,58 +137,25 @@ export function simulateParallelFinish(config: {
     }
   };
   snapshot("adopt");
-  const actions =
-    config.actions ??
-    Array.from({ length: R }, (_, bucket) => [
-      { phase: "stage", bucket } as const,
-      { phase: "write", bucket } as const,
-    ]).flat();
-  for (const { phase, bucket } of actions) {
-    if (phase === "stage") {
-      if (ready[bucket]) throw new Error("Bucket staged twice");
-      const records: Rec[] = [];
-      for (const source of sources[bucket]) {
-        const physical = locations[source.logical];
-        if (owners[physical] !== source.logical) throw new Error("Source owner changed");
-        records.push(...(cells[physical].slice(0, source.len) as Rec[]));
-        recordTransfers.staging += source.len;
-        cells[physical] = Array<Rec | null>(b).fill(null);
-        owners[physical] = FREE;
-        free[bucket].push(physical);
-      }
-      // The engine uses the shared child finisher here, including ordered-child
-      // completion; this ownership model treats the whole stable sort atomically.
-      records.sort((a, b) => a.key - b.key);
-      staged[bucket] = records;
-      ready[bucket] = true;
-    } else if (phase === "write") {
-      if (!ready[bucket]) throw new Error("Bucket written before staging");
-      protectBand(starts[bucket], staged[bucket].length, bucket);
-      staged[bucket].forEach((record, offset) => {
-        writeRecord(record!, starts[bucket] + offset);
-        staged[bucket][offset] = null;
+  for (const bucket of config.order ?? Array.from({ length: R }, (_, bucket) => bucket)) {
+    if (completed[bucket]) throw new Error("Bucket already completed");
+    let start = starts[bucket];
+    for (const source of sources[bucket]) {
+      protectBand(start, source.len, bucket);
+      // Protection can relocate this source. Resolve it only afterwards.
+      const physical = locations[source.logical];
+      if (owners[physical] !== source.logical) throw new Error("Source owner changed");
+      const records = cells[physical].slice(0, source.len) as Rec[];
+      cells[physical] = Array<Rec | null>(b).fill(null);
+      owners[physical] = FREE;
+      free[bucket].push(physical);
+      records.forEach((record, offset) => {
+        writeRecord(record, start + offset);
       });
-    } else {
-      if (ready[bucket]) throw new Error("Bucket already completed or staged");
-      let start = starts[bucket];
-      for (const source of sources[bucket]) {
-        protectBand(start, source.len, bucket);
-        // Protection can relocate this source. Resolve it only afterwards.
-        const physical = locations[source.logical];
-        if (owners[physical] !== source.logical) throw new Error("Source owner changed");
-        const records = cells[physical].slice(0, source.len) as Rec[];
-        cells[physical] = Array<Rec | null>(b).fill(null);
-        owners[physical] = FREE;
-        free[bucket].push(physical);
-        records.forEach((record, offset) => {
-          writeRecord(record, start + offset);
-        });
-        start += source.len;
-        snapshot(`stream prefix ${bucket}`);
-      }
-      ready[bucket] = true;
+      start += source.len;
+      snapshot(`stream prefix ${bucket}`);
     }
-    snapshot(`${phase} ${bucket}`);
+    completed[bucket] = true;
   }
   const output = [...cells.slice(scratchBlocks).flat(), ...tail].filter(
     (record) => record !== null,

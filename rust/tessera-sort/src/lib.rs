@@ -57,8 +57,8 @@
 //!
 //! `rayon` is off by default and enables `par_stable_sort` and
 //! `par_stable_sort_by_key`. Large inputs partition the root across disjoint
-//! shards and adopt them in input order. Bounded buckets sort before their
-//! final writes; other layouts sort buckets while compaction proceeds. Small
+//! shards and adopt them in input order. Buckets transfer directly to exclusive
+//! final bands and sort there while peers continue moving their records. Small
 //! inputs and one-thread pools use the serial engine. The feature requires
 //! `Send` records and a shared (`Fn + Sync`) key function.
 

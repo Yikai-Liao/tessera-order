@@ -7,23 +7,8 @@ use rayon::prelude::*;
 
 mod finish;
 
-/// Finishes one privately staged bucket without retaining its record borrow.
-type BucketSort<'a, T> = &'a (dyn Fn(&mut [T]) + Sync);
 /// Publishes an exclusive final band, independently of other bucket movement.
 type BucketVisit<'callback, 'records, T> = &'callback (dyn Fn(&'records mut [T]) + Sync);
-
-/// Root completion: stage eligible buckets or stream exclusive final bands.
-pub(crate) struct BucketFinish<'callback, 'records, T> {
-    pub limit: usize,
-    pub sort: BucketSort<'callback, T>,
-    pub visit: BucketVisit<'callback, 'records, T>,
-}
-
-/// Staged sorting callback and size cap; absent for stream-only partitions.
-struct BoundedFinish<'a, T> {
-    limit: usize,
-    sort: BucketSort<'a, T>,
-}
 
 struct Shard<'a, 'w, T, E> {
     sorter: Partition<'a, 'w, T>,
@@ -32,11 +17,10 @@ struct Shard<'a, 'w, T, E> {
     first_block: usize,
 }
 
-struct Config<'a, T> {
+struct Config {
     shards: usize,
     block_size: Option<usize>,
     parallel: bool,
-    finish: Option<BoundedFinish<'a, T>>,
 }
 
 // SAFETY: each shard exclusively borrows a disjoint input slice and Buffers.
@@ -66,7 +50,7 @@ pub(crate) fn partition_digit_parallel<'records, T: Send, E: Extract<T> + Clone 
     key: E,
     buffers: &mut Buffers<T>,
     shards: usize,
-    finish: BucketFinish<'_, 'records, T>,
+    visit: BucketVisit<'_, 'records, T>,
 ) -> Vec<usize> {
     partition_impl_with_visit(
         records,
@@ -78,12 +62,8 @@ pub(crate) fn partition_digit_parallel<'records, T: Send, E: Extract<T> + Clone 
             shards,
             block_size: None,
             parallel: true,
-            finish: Some(BoundedFinish {
-                limit: finish.limit,
-                sort: finish.sort,
-            }),
         },
-        Some(finish.visit),
+        Some(visit),
     )
 }
 
@@ -94,7 +74,7 @@ fn partition_impl<T: Send, E: Extract<T> + Clone + Send>(
     shift: usize,
     key: E,
     buffers: &mut Buffers<T>,
-    config: Config<'_, T>,
+    config: Config,
 ) -> Vec<usize> {
     partition_impl_with_visit(arr, radix, shift, key, buffers, config, None)
 }
@@ -105,7 +85,7 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     shift: usize,
     key: E,
     buffers: &mut Buffers<T>,
-    config: Config<'_, T>,
+    config: Config,
     visit: Option<BucketVisit<'_, 'records, T>>,
 ) -> Vec<usize> {
     assert!((1..=MAX_RADIX_BITS).contains(&radix));
@@ -124,15 +104,9 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
             shards * bucket_count,
             2 * DESCRIPTOR_BYTES_PER_POSITION,
         );
-        let bounded = config
-            .finish
-            .as_ref()
-            .is_some_and(|finish| finish.limit > 0);
-        scaled_block_size(
-            balanced,
-            record_bytes,
-            if bounded { BLOCK_SCALE } else { 1 },
-        )
+        // Source-ledger transfers pay per-block ownership work regardless of
+        // how the engine finishes a bucket. Use the shared amortization scale.
+        scaled_block_size(balanced, record_bytes, BLOCK_SCALE)
     });
     let full_blocks = arr.len() / block_size;
     let shards = shards.min(full_blocks.max(1));
@@ -196,14 +170,7 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     // completed the same pass and retain their recovery guards until adoption.
     let (mut global, ends) = unsafe { Partition::adopt_shards(input, tasks, buffers) };
     drop(local_buffers);
-    finish::complete(
-        &mut global,
-        &ends,
-        config.parallel,
-        config.finish.as_ref().map_or(0, |finish| finish.limit),
-        config.finish.as_ref().map(|finish| finish.sort),
-        visit,
-    );
+    finish::complete(&mut global, &ends, config.parallel, visit);
     ends
 }
 
@@ -415,12 +382,11 @@ mod tests {
         assert_eq!(rows, expected);
     }
 
-    fn config<'a, T>(shards: usize, block_size: usize) -> Config<'a, T> {
+    fn config(shards: usize, block_size: usize) -> Config {
         Config {
             shards,
             block_size: Some(block_size),
             parallel: !cfg!(miri),
-            finish: None,
         }
     }
 

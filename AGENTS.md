@@ -28,6 +28,15 @@ Use the maintained CLI from the repository root. Its compact output serves agent
 
 Start performance work with a small representative selection, then expand evidence to match the claim. Extend the shared pipeline when an experiment needs a missing capability. Keep raw measurements outside Git. Read-only feedback requests stay read-only; confirm host-wide system changes, credentials, publication and unusually expensive experiments with the operator.
 
+## Disk use
+
+`/tmp` is a RAM-backed tmpfs shared by every session on the host; filling it breaks all of them. Leave the machine as you found it.
+
+- **One scratch directory per task.** Put experiment builds, logs, screenshots, downloaded data and browser profiles under `target/scratch/TASK/` in your checkout: ignored by Git and removed with the worktree. Use `/tmp` only for small files deleted within the same task, inside one `mktemp -d` directory; never write loose files to `/tmp` or the home directory.
+- **Reuse build caches.** Build in the checkout's `target/`. A separate `--target-dir` is for experiments that need isolation; place it under the task's scratch directory. Check free space with `df -h` before multi-gigabyte builds or raw-sample collection.
+- **Clean up before you report.** Delete the scratch you created and stop the dev servers, browsers and databases you started. Keep only what the operator asked for or what an unfinished claim depends on, and name its path and size in the report.
+- **Delete only what you created.** When space runs out, list the largest entries and their apparent owners, and ask the operator before removing anything else.
+
 ## Engine design and simplification
 
 Use the `software-design-philosophy` skill for structural engine changes. Judge maintainability by change amplification, cognitive load and hidden dependencies, not by line or file count.

@@ -20,7 +20,7 @@ At larger strides, the sample rejects most unsorted inputs within a few pairs. T
 
 ## Budgeted insertion
 
-An unsorted input that fits a tile and is insertion-sized ([the leaf's threshold](tiles.md#three-leaves)) is already small enough for the insertion leaf. It goes directly to insertion finishing: trying a budget and scanning varying bits would only lead back to the same algorithm. The order probe still runs first, so ascending and descending inputs keep their existing return and reversal paths. The [executable stage model](../.vitepress/theme/sim/rootInsertion.ts) mirrors this choice.
+An unsorted input that fits a tile and is insertion-sized ([the leaf's threshold](tiles.md#three-leaves)) is already small enough for the insertion leaf. It goes directly to insertion finishing: trying a budget and scanning varying bits would only lead back to the same algorithm. The order probe still runs first, so ascending and descending inputs keep their existing return and reversal paths. One insertion attempt owns the tile-fit check, probe window and budget; root preparation only decides whether to attempt insertion.
 
 A larger unsorted input may still be *nearly* sorted: a sorted log with a few late entries, for example. Insertion sort finishes such an input in linear time, but on a random input it is quadratic. Tessera therefore gives it a **swap budget** and abandons it when the budget runs out.
 

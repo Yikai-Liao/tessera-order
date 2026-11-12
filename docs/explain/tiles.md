@@ -1,10 +1,10 @@
 # 5. Finishing tiles
 
-A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so that one `u16` can hold any position in it. Its scratch buffer is the same size and stays in the L2 cache. Inside a tile, a second buffer is cheap, so Tessera can use ordinary counting passes. The open questions are which digits to use and whether to finish with MSD or LSD. Strategy selection belongs to [`engine/plan.rs`](../../rust/tessera-sort/src/engine/plan.rs); [`engine/tile.rs`](../../rust/tessera-sort/src/engine/tile.rs) executes the selected leaf and owns its scratch and panic recovery.
+A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so that one `u16` can hold any position in it. Its scratch buffer is the same size and stays in the L2 cache. Inside a tile a second buffer is cheap, so Tessera uses ordinary counting passes; the questions are which digits to use and whether to finish with MSD or LSD. [`engine/plan.rs`](../../rust/tessera-sort/src/engine/plan.rs) selects the leaf; [`engine/tile.rs`](../../rust/tessera-sort/src/engine/tile.rs) executes it and owns its scratch and panic recovery.
 
 ## Parallel child allowance
 
-A complete materialized parallel child may use a larger tile, up to a 1 MiB record-byte budget and the same cursor limit. `finishing_capacity` owns this allowance independently of block sizing or record delivery. It applies only when the entire child fits: larger nodes keep the ordinary capacity for their descendants. The byte budget retains the former largest staged-tile working set while also bounding wide records; it is an empirical budget, not a cache-size claim. Child variation and order confirmation still run before tile sorting.
+A complete child of a parallel root may use a larger tile: up to 1 MiB of records, within the same cursor limit. `finishing_capacity` owns this allowance. It applies only when the whole child fits; a larger child keeps the ordinary capacity for its descendants. The budget is empirical, not a cache-size claim. Child variation and order confirmation still run first.
 
 ## Three leaves
 
@@ -34,7 +34,7 @@ When two windows cannot finish the tile, one MSD pass consumes the highest digit
 
 ## Actual children instead of predicted work
 
-An MSD partition preserves the savings that the planner previously tried to predict. An insertion-sized child needs no further variation scan. A larger constant child finishes after confirmation. Node partitions finish their tile-sized children by the same rule. A child that still has many varying bits can partition again; each partition removes its digit from the candidate mask. Concentrated distributions therefore keep recursive finishing without a recursive cost estimate.
+An MSD partition preserves the savings a cost estimate would predict. An insertion-sized child needs no variation scan. A larger child scans its remaining bits and is done if they are constant. Node partitions finish their tile-sized children by the same rule (`finish_child`). A child that still has many varying bits can partition again; each partition removes its digit from the candidate mask. Concentrated distributions therefore keep recursive finishing without a recursive cost estimate.
 
 This simpler routing may choose MSD where a longer LSD plan would be faster. [Engine evidence](../design/evidence.md#landed-with-open-losses) lists the measured trade-offs; removing an estimate is not proof that its choices never helped.
 
@@ -42,7 +42,7 @@ This simpler routing may choose MSD where a longer LSD plan would be faster. [En
 |---|---|---|
 | 8,192 random u64 keys | 64 | Partition the highest 14-bit digit, then finish actual children |
 | 8,192 u64 keys in 0..2²⁰ | 20 | Two LSD passes of 10 bits |
-| 1,000 u64 keys with a dominant repeated key | broad span | Partition; constant children finish at confirmation |
+| 1,000 u64 keys with a dominant repeated key | broad span | Partition; constant children finish after their variation scan |
 
 ## Inside a pass
 

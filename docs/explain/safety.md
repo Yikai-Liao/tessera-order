@@ -8,7 +8,7 @@ Records move by bitwise copies between the input slice and scratch memory of typ
 
 At every point, each record has exactly one **live** copy, and the engine always knows which copy it is:
 
-- in the block partition, the block table plus the partial-block lengths name every live record ([invariants](block-partition.md#invariants));
+- in the block partition, the bucket chains and then the completion ledger name every live block prefix ([invariants](block-partition.md#invariants));
 - in a tile, the `RestoreTile` guard remembers whether the complete set is in the tile or in scratch.
 
 The key function only ever borrows a live record.
@@ -27,13 +27,13 @@ An inconsistent key function can therefore produce an unsorted result, but never
 
 A panic in the key function is caught, every record is moved back into the input slice, and the panic is resumed:
 
-- **During a block scatter**, the engine works out how far the pass got from the bucket cursors and the number of input blocks consumed. It then finishes the pass **without calling the key function again**, sending every unread record to bucket 0. The result is a valid, unsorted pass. Compaction then copies every record back into the input.
+- **During a block scatter**, the engine works out how far the pass got from the bucket cursors and the number of input blocks consumed. It then finishes the pass **without calling the key function again**, sending every unread record to bucket 0. The result is a valid, unsorted pass, and the [completion ledger](block-partition.md#completion) copies every record back into the input.
 - **During a tile pass**, `RestoreTile` copies the last complete record set back into the tile if it was in scratch. The interrupted pass only wrote stale copies into the other buffer.
-- **During a compaction callback** (a tile finished while cache-hot), compaction continues without further callbacks. The panic is resumed once the input holds every record again.
+- **During a completion callback** (a band finished while cache-hot), the ledger completes the remaining bands without further callbacks. The panic is resumed once the input holds every record again.
 
 Afterwards the slice holds every record exactly once, in an unspecified order.
 
-Without `std`, the crate cannot catch a panic. If the key function panics while records are spread over blocks, unwinding would run destructors over an incomplete block table, which could free a record twice. An abort-on-unwind guard turns such a panic into an abort instead. Panics elsewhere unwind normally with every record in place ([engine reference](../design/engine.md#panic-safety)).
+Every build requires `std`, so this recovery always applies; there is no abort-only variant ([engine reference](../design/engine.md#panic-safety)).
 
 ## Where this is tested
 

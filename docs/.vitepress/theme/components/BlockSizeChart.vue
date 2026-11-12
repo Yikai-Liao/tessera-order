@@ -2,9 +2,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-// `default_block_size` in block.rs: scratch 2·R·b·s bytes plus 10·n/b bytes
-// of block tables, balanced at b* = ceil(sqrt(10n / (2Rs))), scaled by 4, then
-// floored at max(1024 / s, 32) records.
+// `default_block_size` in block.rs: scratch 2·R·b·s bytes plus d·n/b bytes
+// of ledger metadata, balanced at b* = ceil(sqrt(dn / (2Rs))), scaled by 4, then
+// floored at max(1024 / s, 32) records. d is `finish::serial_descriptor_bytes`
+// on a 64-bit target: a chain link, a block address, an owner cell, a source
+// and a free-cache slot.
+const DESCRIPTOR_BYTES = 52;
 const logN = ref(7);
 const recordBytes = ref(8);
 const radix = ref(8);
@@ -12,10 +15,10 @@ const radix = ref(8);
 const n = computed(() => Math.round(10 ** logN.value));
 const R = computed(() => 2 ** radix.value);
 const scratch = (b: number) => 2 * R.value * b * recordBytes.value;
-const tables = (b: number) => (10 * n.value) / b;
+const tables = (b: number) => (DESCRIPTOR_BYTES * n.value) / b;
 const total = (b: number) => scratch(b) + tables(b);
 const balanced = computed(() =>
-  Math.ceil(Math.sqrt((10 * n.value) / (2 * R.value * recordBytes.value))),
+  Math.ceil(Math.sqrt((DESCRIPTOR_BYTES * n.value) / (2 * R.value * recordBytes.value))),
 );
 const floors = computed(() => Math.max(Math.floor(1024 / recordBytes.value), 32));
 const chosen = computed(() => Math.max(1, 4 * balanced.value, floors.value));
@@ -47,7 +50,7 @@ const path = (f: (b: number) => number) =>
 
 const series = computed(() => [
   { name: "scratch blocks 2Rbs", color: "#2a78d6", d: path(scratch), dash: "" },
-  { name: "block tables 10n/b", color: "#eb6834", d: path(tables), dash: "" },
+  { name: `ledger ${DESCRIPTOR_BYTES}n/b`, color: "#eb6834", d: path(tables), dash: "" },
   { name: "total", color: "#1baf7a", d: path(total), dash: "" },
 ]);
 
@@ -147,7 +150,7 @@ function onMove(event: PointerEvent) {
           <rect width="180" height="64" rx="6" fill="var(--vp-c-bg)" stroke="var(--tsr-line)" />
           <text x="8" y="16" font-size="11" style="fill: var(--vp-c-text-1)" font-weight="600">b = {{ hover }}</text>
           <text x="8" y="31" font-size="10" style="fill: var(--vp-c-text-1)">scratch {{ bytes(scratch(hover)) }}</text>
-          <text x="8" y="44" font-size="10" style="fill: var(--vp-c-text-1)">tables {{ bytes(tables(hover)) }}</text>
+          <text x="8" y="44" font-size="10" style="fill: var(--vp-c-text-1)">ledger {{ bytes(tables(hover)) }}</text>
           <text x="8" y="57" font-size="10" style="fill: var(--vp-c-text-1)">total {{ bytes(total(hover)) }}</text>
         </g>
       </g>
@@ -157,11 +160,11 @@ function onMove(event: PointerEvent) {
     </div>
     <p class="tsr-caption">
       At b = {{ chosen }}, one block partition needs {{ bytes(total(chosen)) }} beyond the input
-      ({{ bytes(scratch(chosen)) }} of scratch blocks and {{ bytes(tables(chosen)) }} of tables). An LSD pass would need
+      ({{ bytes(scratch(chosen)) }} of scratch blocks and {{ bytes(tables(chosen)) }} of ledger metadata). An LSD pass would need
       a {{ bytes(lsdBuffer) }} buffer, {{ Math.round(lsdBuffer / total(chosen)).toLocaleString('en-US') }}× as much.
     </p>
     <table class="tsr-table">
-      <thead><tr><th>b</th><th>scratch 2Rbs</th><th>tables 10n/b</th><th>total</th></tr></thead>
+      <thead><tr><th>b</th><th>scratch 2Rbs</th><th>ledger {{ DESCRIPTOR_BYTES }}n/b</th><th>total</th></tr></thead>
       <tbody>
         <tr v-for="b in tableRows" :key="b">
           <td>{{ b }}{{ b === chosen ? ' (used)' : b === balanced ? ' (b*)' : '' }}</td>

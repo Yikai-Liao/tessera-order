@@ -141,7 +141,7 @@ export function tessera(input: Item[]): Stage[] {
     {
       label: "Block partition on the tens digit",
       items: first,
-      extra: "2R blocks + block tables: O(√n)",
+      extra: "2R blocks + block ledger: O(√n)",
       groups,
     },
     {

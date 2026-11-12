@@ -46,10 +46,9 @@ const frame = computed<Frame>(
 
 const phaseLabels: Record<Phase, string> = {
   setup: "1 · Set up blocks",
-  scatter: "2 · Scatter by digit",
-  finish: "3 · Rebuild block order",
-  compact: "4 · Compact into input",
-  done: "5 · Done",
+  scatter: "2 · Scatter into chains",
+  complete: "3 · Complete through the ledger",
+  done: "4 · Done",
 };
 const marks = computed(() => {
   const seen = new Set<Phase>();
@@ -73,7 +72,8 @@ const blockStride = computed(() => blockWidth.value + GAP);
 const ROW_SCRATCH_A = 30;
 const ROW_SCRATCH_B = 110;
 const ROW_INPUT = 200;
-const ROW_ORDER = 300;
+const ROW_CHAINS = 300;
+const CHAIN_ROW = 30;
 
 const scratchBlocks = computed(() => result.value.scratchBlocks);
 const fullBlocks = computed(() => result.value.fullBlocks);
@@ -108,27 +108,23 @@ function cellPosition(loc: Loc): { x: number; y: number } {
   return { x: LEFT + block * blockStride.value + (loc.index % b) * CW, y: ROW_INPUT };
 }
 
+const CHIP = 46;
 const width = computed(() => {
   const inputRight = tailX.value + tailLen.value * CW;
   const scratchRight = LEFT + BUCKETS * blockStride.value;
-  const orderRight = 16 + result.value.blockCount * 46;
-  return Math.max(inputRight, scratchRight, orderRight) + 16;
+  const chainsRight = LEFT + (fullBlocks.value + 1) * CHIP;
+  return Math.max(inputRight, scratchRight, chainsRight) + 16;
 });
-
-const positions = computed(() => {
-  const pos: number[] = [];
-  for (const [logical, physical] of frame.value.order.entries()) pos[physical] = logical;
-  return pos;
-});
+const height = computed(() => ROW_CHAINS + BUCKETS * CHAIN_ROW + 24);
 
 function role(physical: number): { text: string; color?: string } {
   const f = frame.value;
   const writer = f.writers?.findIndex((w) => w.physical === physical) ?? -1;
   if (writer >= 0) return { text: `→ bucket ${writer}`, color: bucketColor(writer, BUCKETS) };
-  const logical = positions.value[physical];
-  if (f.phase === "compact" || f.phase === "done") return { text: "" };
-  if (logical < BUCKETS || logical >= f.activeEnd) return { text: "free" };
-  return { text: "" };
+  const owner = f.owners?.[physical];
+  if (owner === undefined) return { text: "" };
+  if (typeof owner === "number") return { text: `source`, color: bucketColor(owner, BUCKETS) };
+  return { text: owner };
 }
 
 const sameLoc = (a: Loc | null, b: Loc) => !!a && a.region === b.region && a.index === b.index;
@@ -168,14 +164,16 @@ function cellFill(cell: Cell): string {
   return "transparent";
 }
 
-const orderChips = computed(() =>
-  frame.value.order.map((physical, logical) => ({
-    logical,
-    physical,
-    name: blockName(physical, scratchBlocks.value),
-    bucket: frame.value.bucketIds[logical],
-    active: logical >= BUCKETS && logical < frame.value.activeEnd,
-  })),
+const chainChips = computed(() =>
+  frame.value.chains.flatMap((chain, bucket) =>
+    chain.map((prefix, position) => ({
+      key: `${bucket}-${position}`,
+      x: LEFT + position * CHIP,
+      y: ROW_CHAINS + bucket * CHAIN_ROW,
+      bucket,
+      label: `${blockName(prefix.physical, scratchBlocks.value)}·${prefix.len}`,
+    })),
+  ),
 );
 
 function reshuffle() {
@@ -207,10 +205,10 @@ function reshuffle() {
     </div>
 
     <svg
-      :viewBox="`0 0 ${width} ${ROW_ORDER + 64}`"
+      :viewBox="`0 0 ${width} ${height}`"
       :width="width"
       role="img"
-      aria-label="Block partition: scratch blocks, input blocks and the logical block order"
+      aria-label="Block partition: scratch blocks, input blocks and each bucket's chain of source prefixes"
     >
       <text x="0" :y="ROW_SCRATCH_A + 22" font-size="12">Scratch</text>
       <text x="0" :y="ROW_SCRATCH_A + 38" font-size="10" opacity="0.7">S0–S{{ BUCKETS - 1 }}</text>
@@ -223,9 +221,6 @@ function reshuffle() {
       <g v-for="box in blocks" :key="box.physical">
         <text :x="box.x" :y="box.y - 6" font-size="11" opacity="0.8">
           {{ blockName(box.physical, scratchBlocks) }}
-          <tspan v-if="frame.phase !== 'compact' && frame.phase !== 'done'" opacity="0.7" font-size="10">
-            · L{{ positions[box.physical] }}
-          </tspan>
         </text>
         <rect
           :x="box.x - 2"
@@ -247,7 +242,7 @@ function reshuffle() {
           <tspan v-if="role(box.physical).color" :fill="role(box.physical).color">■ </tspan>{{ role(box.physical).text }}
         </text>
       </g>
-      <!-- The input tail is not a physical block: it starts in scratch. -->
+      <!-- The input tail is not a physical block: it is read, never claimed. -->
       <rect
         v-if="tailLen"
         :x="tailX - 2"
@@ -299,35 +294,37 @@ function reshuffle() {
         </template>
       </g>
 
-      <!-- Logical block order -->
-      <text x="0" :y="ROW_ORDER - 14" font-size="12">Logical block order (the block table)</text>
-      <g v-for="chip in orderChips" :key="chip.logical">
+      <!-- Bucket chains -->
+      <text x="0" :y="ROW_CHAINS - 14" font-size="12">Source prefixes of each bucket, in stable order (block·records)</text>
+      <text
+        v-for="b in BUCKETS"
+        :key="`label${b}`"
+        x="0"
+        :y="ROW_CHAINS + (b - 1) * CHAIN_ROW + 17"
+        font-size="11"
+      >
+        bucket {{ b - 1 }}
+      </text>
+      <g v-for="chip in chainChips" :key="chip.key">
         <rect
-          :x="16 + chip.logical * 46"
-          :y="ROW_ORDER"
-          width="42"
-          height="26"
+          :x="chip.x"
+          :y="chip.y"
+          :width="CHIP - 4"
+          height="24"
           rx="5"
-          :fill="chip.bucket !== null && chip.bucket !== undefined ? bucketColor(chip.bucket, BUCKETS) : 'transparent'"
-          :stroke="chip.active ? 'var(--vp-c-text-2)' : 'var(--tsr-line)'"
-          :stroke-dasharray="chip.active ? undefined : '3 3'"
+          :fill="bucketColor(chip.bucket, BUCKETS)"
+          stroke="var(--vp-c-text-2)"
         />
         <text
-          :x="16 + chip.logical * 46 + 21"
-          :y="ROW_ORDER + 17"
+          :x="chip.x + (CHIP - 4) / 2"
+          :y="chip.y + 16"
           text-anchor="middle"
           font-size="11"
-          :style="{ fill: chip.bucket !== null && chip.bucket !== undefined ? 'var(--tsr-ink)' : 'var(--vp-c-text-1)' }"
+          style="fill: var(--tsr-ink)"
         >
-          {{ chip.name }}
-        </text>
-        <text :x="16 + chip.logical * 46 + 21" :y="ROW_ORDER + 40" text-anchor="middle" font-size="9" opacity="0.6">
-          L{{ chip.logical }}
+          {{ chip.label }}
         </text>
       </g>
-      <text x="16" :y="ROW_ORDER + 58" font-size="10" opacity="0.7">
-        Solid outline: active blocks L{{ BUCKETS }}–L{{ frame.activeEnd - 1 }}. Dashed: free blocks. Fill: the bucket that filled the block.
-      </text>
     </svg>
 
     <p class="tsr-caption" aria-live="polite"><strong>{{ phaseLabels[frame.phase] }}.</strong> {{ frame.caption }}</p>

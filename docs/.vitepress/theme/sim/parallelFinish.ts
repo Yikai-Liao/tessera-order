@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 // Models block/parallel.rs directory adoption and parallel/finish.rs transfers.
-// Actions are serial linearizations of whole-bucket staging and final writes;
+// Actions are serial linearizations of staged or direct-streamed completion;
 // mutex scheduling, key panics and raw-pointer provenance remain Rust tests.
 import { type Rec, simulate } from "./blockPartition.ts";
 
 export interface FinishAction {
-  phase: "stage" | "write";
+  phase: "stage" | "write" | "stream";
   bucket: number;
 }
 
@@ -14,7 +14,7 @@ interface Source {
   len: number;
 }
 
-/** Replays bounded finishing from the serial model's scattered shard frames. */
+/** Replays source-ledger completion from the serial model's scattered shards. */
 export function simulateParallelFinish(config: {
   keys: number[];
   buckets: number;
@@ -97,6 +97,7 @@ export function simulateParallelFinish(config: {
     });
   };
   let relocations = 0;
+  const recordTransfers = { staging: 0, final: 0, relocation: 0 };
   const takeFree = (bucket: number) => {
     for (const cache of [
       bucket,
@@ -115,6 +116,7 @@ export function simulateParallelFinish(config: {
     if (source === FINAL) return;
     if (source !== FREE) {
       const target = takeFree(bucket);
+      recordTransfers.relocation += cells[physical].filter((record) => record !== null).length;
       cells[target] = cells[physical];
       cells[physical] = Array<Rec | null>(b).fill(null);
       owners[target] = source;
@@ -123,6 +125,22 @@ export function simulateParallelFinish(config: {
     }
     owners[physical] = FINAL;
     snapshot("protect");
+  };
+  const writeRecord = (record: Rec, position: number) => {
+    const block = Math.floor(position / b);
+    if (block < fullBlocks) {
+      cells[scratchBlocks + block][position % b] = record;
+    } else {
+      tail[position % b] = record;
+    }
+    recordTransfers.final++;
+  };
+  const protectBand = (start: number, len: number, bucket: number) => {
+    for (let position = start; position < start + len; ) {
+      const block = Math.floor(position / b);
+      if (block < fullBlocks) protect(scratchBlocks + block, bucket);
+      position += Math.min(b - (position % b), start + len - position);
+    }
   };
   snapshot("adopt");
   const actions =
@@ -139,6 +157,7 @@ export function simulateParallelFinish(config: {
         const physical = locations[source.logical];
         if (owners[physical] !== source.logical) throw new Error("Source owner changed");
         records.push(...(cells[physical].slice(0, source.len) as Rec[]));
+        recordTransfers.staging += source.len;
         cells[physical] = Array<Rec | null>(b).fill(null);
         owners[physical] = FREE;
         free[bucket].push(physical);
@@ -148,25 +167,37 @@ export function simulateParallelFinish(config: {
       records.sort((a, b) => a.key - b.key);
       staged[bucket] = records;
       ready[bucket] = true;
-    } else {
+    } else if (phase === "write") {
       if (!ready[bucket]) throw new Error("Bucket written before staging");
+      protectBand(starts[bucket], staged[bucket].length, bucket);
       staged[bucket].forEach((record, offset) => {
-        const position = starts[bucket] + offset;
-        const block = Math.floor(position / b);
-        if (block < fullBlocks) {
-          const physical = scratchBlocks + block;
-          protect(physical, bucket);
-          cells[physical][position % b] = record;
-        } else {
-          tail[position % b] = record;
-        }
+        writeRecord(record!, starts[bucket] + offset);
         staged[bucket][offset] = null;
       });
+    } else {
+      if (ready[bucket]) throw new Error("Bucket already completed or staged");
+      let start = starts[bucket];
+      for (const source of sources[bucket]) {
+        protectBand(start, source.len, bucket);
+        // Protection can relocate this source. Resolve it only afterwards.
+        const physical = locations[source.logical];
+        if (owners[physical] !== source.logical) throw new Error("Source owner changed");
+        const records = cells[physical].slice(0, source.len) as Rec[];
+        cells[physical] = Array<Rec | null>(b).fill(null);
+        owners[physical] = FREE;
+        free[bucket].push(physical);
+        records.forEach((record, offset) => {
+          writeRecord(record, start + offset);
+        });
+        start += source.len;
+        snapshot(`stream prefix ${bucket}`);
+      }
+      ready[bucket] = true;
     }
     snapshot(`${phase} ${bucket}`);
   }
   const output = [...cells.slice(scratchBlocks).flat(), ...tail].filter(
     (record) => record !== null,
   );
-  return { output, frames, relocations };
+  return { output, frames, relocations, recordTransfers };
 }

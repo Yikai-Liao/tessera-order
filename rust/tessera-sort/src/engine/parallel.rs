@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::key::ByKey;
-use rayon::{Scope, prelude::*};
+use rayon::prelude::*;
 
 /// The archived experiment did not reliably win at 512 KiB; keep 1 MiB as a
 /// starting cutoff until controlled measurements retune it.
@@ -49,53 +49,7 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
     sort_root::<T, E>(records, &mut extractor, &mut scratch, varying, tile_len);
 }
 
-/// A batch of retired root buckets, retained as separate exclusive borrows.
-///
-/// Compaction transfers each borrow only after retiring its destination and
-/// copy sources. The Rayon scope joins every job before the input is reused.
-struct Job<'records, T> {
-    records: usize,
-    buckets: Vec<&'records mut [T]>,
-}
-
-impl<'records, T> Job<'records, T> {
-    fn new() -> Self {
-        Self {
-            records: 0,
-            buckets: Vec::new(),
-        }
-    }
-
-    fn push(&mut self, bucket: &'records mut [T]) {
-        self.records += bucket.len();
-        self.buckets.push(bucket);
-    }
-
-    fn bytes(&self) -> usize {
-        self.records.saturating_mul(core::mem::size_of::<T>())
-    }
-
-    fn run<E: Extract<T> + Clone + Send>(
-        &mut self,
-        mut extractor: E,
-        candidate: u128,
-        tile_len: usize,
-        pool: &Pool<T>,
-    ) {
-        let mut scratch = pool.take();
-        let mut sorter = Sorter::<T, E> {
-            scratch: &mut scratch,
-            extractor: &mut extractor,
-            tile_len,
-        };
-        for child in &mut self.buckets {
-            sorter.sort_child(child, candidate);
-        }
-        pool.give(scratch);
-    }
-}
-
-/// Recycles scratch between jobs without holding the lock during user code.
+/// Recycles scratch between bucket finishers without locking during user code.
 struct Pool<T> {
     free: std::sync::Mutex<Vec<Scratch<T>>>,
 }
@@ -123,9 +77,9 @@ impl<T> Pool<T> {
     }
 }
 
-/// Partitions the root and sorts each bucket as soon as compaction releases it.
-fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync>(
-    records: &'records mut [T],
+/// Partitions the root and finishes each bucket in its movement task.
+fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
+    records: &mut [T],
     extractor: &mut E,
     scratch: &mut Scratch<T>,
     varying: u128,
@@ -199,88 +153,59 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync>(
     };
 
     let candidate = varying & !digit.mask::<E::Value>().to_u128();
-    // Finished buckets need no jobs' work; direct keys count them in parallel.
+    // Finished buckets need no child sorting; direct keys count them in parallel.
     if candidate == 0 && extractor.try_count_window_parallel(records, digit.shift, digit.width) {
         return;
     }
 
     let pool = Pool::new();
-    let pool_ref = &pool;
-    let root_extractor = extractor.clone();
     let child_extractor = extractor.clone();
-    rayon::scope(move |scope| {
-        let pending = std::sync::Mutex::new(None::<Job<'records, T>>);
-        let visit = |bucket: &'records mut [T]| {
-            // A covering digit already finished these records; do not retain
-            // borrows or allocate jobs whose child finisher would return.
-            if candidate == 0 {
-                return;
-            }
-            let job = {
-                let mut pending = pending
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let mut job = pending.take().unwrap_or_else(Job::new);
-                job.push(bucket);
-                if job.bytes() < MIN_TASK_BYTES {
-                    *pending = Some(job);
-                    return;
-                }
-                job
-            };
-            // No batch lock crosses scheduling or a user key callback.
-            spawn_job::<T, E>(
-                scope,
-                job,
-                candidate,
-                child_extractor.clone(),
-                tile_len,
-                pool_ref,
-            );
-        };
-        let finish = |child: &mut [T]| {
-            if candidate == 0 {
-                return;
-            }
-            let mut key = child_extractor.clone();
-            let mut scratch = pool_ref.take();
-            Sorter::<T, E> {
-                scratch: &mut scratch,
-                extractor: &mut key,
-                tile_len,
-            }
-            .sort_staged_child(child, candidate);
-            pool_ref.give(scratch);
-        };
-        let limit = bucket_limit::<T>(records.len(), digit.width);
-        let ends = block::partition_digit_parallel(
-            records,
-            digit.width,
-            digit.shift,
-            root_extractor,
-            &mut scratch.block,
-            shards,
-            block::BucketFinish {
-                limit,
-                sort: &finish,
-                visit: &visit,
-            },
-        );
-        if let Some(job) = pending
-            .into_inner()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-        {
-            spawn_job::<T, E>(
-                scope,
-                job,
-                candidate,
-                child_extractor.clone(),
-                tile_len,
-                pool_ref,
-            );
+    let visit = |child: &mut [T]| {
+        if candidate == 0 {
+            return;
         }
-        scratch.block.recycle_ends(ends);
-    });
+        // Movement retired every source and released its locks before lending
+        // this final band. Finish in that task instead of handing it to a second
+        // queue. Unlike private staging, it keeps the ordinary tile allowance.
+        let mut key = child_extractor.clone();
+        let mut scratch = pool.take();
+        Sorter::<T, E> {
+            scratch: &mut scratch,
+            extractor: &mut key,
+            tile_len,
+        }
+        .sort_child(child, candidate);
+        pool.give(scratch);
+    };
+    let finish = |child: &mut [T]| {
+        if candidate == 0 {
+            return;
+        }
+        let mut key = child_extractor.clone();
+        let mut scratch = pool.take();
+        Sorter::<T, E> {
+            scratch: &mut scratch,
+            extractor: &mut key,
+            tile_len,
+        }
+        .sort_staged_child(child, candidate);
+        pool.give(scratch);
+    };
+    let limit = bucket_limit::<T>(records.len(), digit.width);
+    let ends = block::partition_digit_parallel(
+        records,
+        digit.width,
+        digit.shift,
+        extractor.clone(),
+        &mut scratch.block,
+        shards,
+        block::BucketFinish {
+            limit,
+            sort: &finish,
+            visit: &visit,
+        },
+    );
+    scratch.block.recycle_ends(ends);
 }
 
 /// Bounds staging to square-root space and declines infeasible root layouts.
@@ -295,18 +220,6 @@ fn bucket_limit<T>(len: usize, width: usize) -> usize {
     } else {
         limit
     }
-}
-
-/// Queues a group of complete buckets on the current Rayon scope.
-fn spawn_job<'scope, T: Send + 'scope, E: Extract<T> + Clone + Send + 'scope>(
-    scope: &Scope<'scope>,
-    mut job: Job<'scope, T>,
-    candidate: u128,
-    extractor: E,
-    tile_len: usize,
-    pool: &'scope Pool<T>,
-) {
-    scope.spawn(move |_| job.run::<E>(extractor, candidate, tile_len, pool));
 }
 
 #[cfg(test)]

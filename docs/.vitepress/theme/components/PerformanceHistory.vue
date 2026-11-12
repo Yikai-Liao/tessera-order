@@ -26,10 +26,33 @@ const range = ref<(typeof WINDOWS)[number][0]>("90");
 const error = ref("");
 const loading = ref(true);
 const since = computed(() =>
-  range.value === "all"
-    ? ""
-    : new Date(Date.now() - Number(range.value) * 86400000).toISOString(),
+  range.value === "all" ? "" : new Date(Date.now() - Number(range.value) * 86400000).toISOString(),
 );
+
+/** A failure readers can act on; the underlying cause goes to the console only. */
+class DataError extends Error {}
+async function download(source: string, file: string, signal: AbortSignal) {
+  let response: Response;
+  try {
+    response = await fetch(source + file, { signal, cache: "no-cache" });
+  } catch (cause) {
+    if (signal.aborted) throw cause;
+    throw new DataError(
+      "The performance data could not be reached. Check the connection and reload the page.",
+      { cause },
+    );
+  }
+  if (!response.ok)
+    throw new DataError(`The performance data could not be downloaded (HTTP ${response.status}). Reload the page to try again.`);
+  return response.text();
+}
+function readable<T>(read: () => T) {
+  try {
+    return read();
+  } catch (cause) {
+    throw new DataError("The published performance data has a format this page cannot read.", { cause });
+  }
+}
 onMounted(() =>
   watch(
     [() => props.source, since],
@@ -38,20 +61,27 @@ onMounted(() =>
       cleanup(() => controller.abort());
       loading.value = true;
       error.value = "";
-      async function download(file: string) {
-        const response = await fetch(source + file, { signal: controller.signal, cache: "no-cache" });
-        if (!response.ok) throw new Error("Performance data unavailable (HTTP " + response.status + ")");
-        return response.text();
-      }
       try {
-        const snapshot = indexSchema.parse(JSON.parse(await download("index.json")));
+        const text = await download(source, "index.json", controller.signal);
+        const snapshot = readable(() => indexSchema.parse(JSON.parse(text)));
         const months = snapshot.months.filter((month) => !start || month >= start.slice(0, 7));
- const batches = await Promise.all(months.map(async (month) => parseRuns(await download(month + ".jsonl"))));
+        const batches = await Promise.all(
+          months.map(async (month) => {
+            const journal = await download(source, month + ".jsonl", controller.signal);
+            return readable(() => parseRuns(journal));
+          }),
+        );
         if (controller.signal.aborted) return;
- index.value = snapshot;
+        index.value = snapshot;
         loaded.value = batches.flat();
       } catch (cause) {
- if (!controller.signal.aborted) error.value = String(cause);
+        if (controller.signal.aborted) return;
+        console.error("Performance history:", cause);
+        error.value =
+          cause instanceof DataError ? cause.message : "The performance data could not be displayed.";
+        // Never show earlier data under the newly selected window.
+        index.value = null;
+        loaded.value = [];
       } finally {
         if (!controller.signal.aborted) loading.value = false;
       }
@@ -65,10 +95,14 @@ const cases = computed(() => index.value?.cases ?? []);
 // The URL hash owns the selected case, so the browser's history and shared links both work.
 // Row links are ordinary anchors: the site router and plain pages both emit hashchange.
 const link = (id: string) => "#case=" + encodeURIComponent(id);
-const hashCase = () => {
+function hashCase() {
   const match = /^#case=(.+)$/.exec(location.hash);
-  return match ? decodeURIComponent(match[1]) : "";
-};
+  try {
+    return match ? decodeURIComponent(match[1]) : "";
+  } catch {
+    return "";
+  }
+}
 const requested = ref(props.caseId);
 const selected = computed(
   () => cases.value.find((entry) => entry.id === requested.value) ?? cases.value[0],
@@ -77,9 +111,8 @@ const detail = useTemplateRef<HTMLElement>("detail");
 const overview = useTemplateRef<HTMLElement>("overview");
 function follow() {
   const id = hashCase();
-  if (!id) return;
-  requested.value = id;
-  nextTick(() => detail.value?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  requested.value = id || props.caseId;
+  if (id) nextTick(() => detail.value?.scrollIntoView({ behavior: "smooth", block: "start" }));
 }
 onMounted(() => {
   requested.value = hashCase() || props.caseId;
@@ -100,13 +133,18 @@ const history = computed(() =>
   selected.value ? renderCaseHistory(runs.value, selected.value, historyId) : "",
 );
 const table = computed(() => latestValues(runs.value, cases.value));
-// Mark the selected row after each render of the overview.
+// After each render, mark the selected row. The figure is an image to assistive
+// technology, so its row links stay out of the focus order; the table's links
+// offer the same selection by keyboard.
 watch(
   [trend, selected],
   async () => {
     await nextTick();
-    for (const anchor of overview.value?.querySelectorAll(".trend-row-link a") ?? [])
+    for (const anchor of overview.value?.querySelectorAll(".trend-row-link a") ?? []) {
       anchor.classList.toggle("selected", anchor.getAttribute("href") === link(selected.value?.id ?? ""));
+      anchor.setAttribute("tabindex", "-1");
+      anchor.setAttribute("aria-hidden", "true");
+    }
   },
   { flush: "post" },
 );
@@ -117,20 +155,20 @@ watch(
     <div class="toolbar">
       <fieldset class="windows" aria-label="Time window">
         <button
-   v-for="[value, name] in WINDOWS"
+          v-for="[value, name] in WINDOWS"
           :key="value"
           type="button"
-   :aria-pressed="range === value"
+          :aria-pressed="range === value"
           @click="range = value"
         >
           {{ name }}
- </button>
+        </button>
       </fieldset>
       <span v-if="loading" role="status">Loading performance history…</span>
     </div>
-    <p v-if="error" role="alert">{{ error }}. Refresh to load the latest data index.</p>
-    <p v-else-if="index && !index.months.length">No main measurements have been published yet.</p>
-    <p v-else-if="!loading && index && !runs.length">No observations in this window.</p>
+    <p v-if="error" class="notice" role="alert">{{ error }}</p>
+    <p v-else-if="index && !index.months.length" class="notice">No main measurements have been published yet.</p>
+    <p v-else-if="!loading && index && !runs.length" class="notice">No observations in this window.</p>
     <!-- The shared renderer escapes labels through DOM text nodes. -->
     <div v-if="trend" ref="overview" class="chart" v-html="trend" />
     <div v-if="history" ref="detail" class="chart detail" v-html="history" />
@@ -139,24 +177,24 @@ watch(
       <table>
         <thead>
           <tr>
-     <th>Case</th>
-     <th>Mode</th>
+            <th>Case</th>
+            <th>Mode</th>
             <th class="number">Latest</th>
-     <th class="number">Interval</th>
-     <th class="number">Change</th>
+            <th class="number">Interval</th>
+            <th class="number">Change</th>
           </tr>
         </thead>
         <tbody>
-   <tr v-for="row in table" :key="row.entry.id">
-     <td>
-       <a :href="link(row.entry.id)">{{ [row.entry.input, row.entry.sub, row.entry.tag].filter(Boolean).join(" · ") }}</a>
+          <tr v-for="row in table" :key="row.entry.id">
+            <td><a :href="link(row.entry.id)">{{ row.entry.label }}</a></td>
+            <td>{{ row.entry.group }}</td>
+            <td class="number">
+              {{ formatTime(row.value) }}<span v-if="!row.current" class="stale"> ({{ row.time.slice(0, 10) }})</span>
             </td>
-     <td>{{ row.entry.group }}</td>
-            <td class="number">{{ formatTime(row.value) }}</td>
-     <td class="number">{{ formatTime(row.lower) }} – {{ formatTime(row.upper) }}</td>
-     <td class="number">{{ formatChange(row.change) }}</td>
-   </tr>
- </tbody>
+            <td class="number">{{ formatTime(row.lower) }} – {{ formatTime(row.upper) }}</td>
+            <td class="number">{{ formatChange(row.change) }}</td>
+          </tr>
+        </tbody>
       </table>
     </details>
   </section>
@@ -213,6 +251,17 @@ watch(
 }
 .detail {
   scroll-margin-top: calc(var(--vp-nav-height) + 16px);
+}
+.notice {
+  margin: 0 0 20px;
+  padding: 12px 16px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  color: var(--vp-c-text-2);
+  font-size: 14px;
+}
+.stale {
+  color: var(--vp-c-text-3);
 }
 details table {
   font-size: 13px;

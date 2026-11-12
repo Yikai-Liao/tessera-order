@@ -54,7 +54,9 @@ export function renderFigure(options: FigureOptions, layers: Plot.PlotOptions[])
   root.setAttribute("role", "img");
   const titleId = id ? `${id}-title` : "t";
   const descriptionId = id ? `${id}-description` : "d";
-  root.setAttribute("aria-labelledby", `${titleId} ${descriptionId}`);
+  // The title names the figure; the longer description stays a description.
+  root.setAttribute("aria-labelledby", titleId);
+  root.setAttribute("aria-describedby", descriptionId);
   for (const [name, value, elementId] of [
     ["title", title, titleId],
     ["desc", description, descriptionId],

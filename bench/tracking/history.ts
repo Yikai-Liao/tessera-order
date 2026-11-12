@@ -79,7 +79,8 @@ export function latestValues(input: TrackingRun[], cases: TrackingCase[]) {
     if (!last) return [];
     const [value, lower, upper] = last.values[entry.id];
     const change = caseChanges(runs, entry.id).findLast((value) => value !== null) ?? 0;
-    return [{ entry, value, lower, upper, change }];
+    // A case absent from the latest run reports its own last measurement, with its time.
+    return [{ entry, value, lower, upper, change, time: last.time, current: last === runs.at(-1) }];
   });
 }
 
@@ -148,7 +149,7 @@ function mainTrend(
           const name = [group.title, row.name.input, row.name.sub, row.name.tag]
             .filter(Boolean)
             .join(" · ");
-          return `${name}: ${row.cells[0].changes.map(formatChange).join(", ")}`;
+          return `${name}: ${row.cells[0].value}`;
         }),
       )
       .join(" | "),
@@ -230,8 +231,10 @@ export function renderCaseHistory(runs: TrackingRun[], entry: TrackingCase, id =
   const tick = (value: number) => formatTime(value, unit);
   const marginLeft =
     pad + 10 + Math.max(textWidth(tick(mid + span / 2), 11), textWidth(tick(mid - span / 2), 11));
-  const change = last.value / first.value - 1;
-  const firstDay = day(first.time.toISOString()),
+  // Relative change stays within the latest series, like the trend; other series are context.
+  const since = points.find((point) => point.series === last.series)!;
+  const change = last.value / since.value - 1;
+  const firstDay = day(since.time.toISOString()),
     lastDay = day(last.time.toISOString());
   const latest = formatTime(last.value);
   const nameRight = width - pad - textWidth(latest, theme.font.headline) - 12;
@@ -245,7 +248,7 @@ export function renderCaseHistory(runs: TrackingRun[], entry: TrackingCase, id =
     label(latest, width - pad, 50, { size: theme.font.headline, strong: true, anchor: "end" }),
     label("latest run", nameRight, 36, { strong: true, anchor: "end" }),
     label(
-      points.length > 1 ? `${formatChange(change)} since ${firstDay}` : `measured ${lastDay}`,
+      since !== last ? `${formatChange(change)} since ${firstDay}` : `measured ${lastDay}`,
       nameRight,
       51,
       { size: 11, tone: ink.muted, anchor: "end" },
@@ -277,7 +280,7 @@ export function renderCaseHistory(runs: TrackingRun[], entry: TrackingCase, id =
       width,
       height,
       id,
-      title: `Main performance history: ${[entry.input, entry.sub, entry.group].filter(Boolean).join(" · ")}, latest ${latest}`,
+      title: `Main performance history: ${entry.label}, ${entry.group}, latest ${latest}`,
       description: points
         .map(
           (point) =>

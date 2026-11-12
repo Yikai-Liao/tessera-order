@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { modeName, modeOrder } from "../catalog.ts";
+import { caseName, modeName, modeOrder } from "../catalog.ts";
 import { renderTrends, type TrendChart } from "../plot/trends.ts";
 import { MIN_SWING, type TrendSummary } from "./history.ts";
 import { BUILD, caseParts, formatChange, MAJOR, short } from "./report.ts";
@@ -47,15 +47,9 @@ export function trendSvg(trend: TrendSummary, base = "main") {
       ...selected
         .filter((name) => caseParts(name).mode === mode)
         .map((name) => {
-          const parts = caseParts(name);
           const changes = series.get(name)!.changes;
           return {
-            name: {
-              input: parts.input,
-              sub: [parts.type, parts.n].filter(Boolean).join(" · "),
-              tag: parts.seed && parts.seed !== "s1" ? `seed ${parts.seed.slice(1)}` : "",
-              strong: Math.abs(changes.at(-1)!) >= MAJOR,
-            },
+            name: { ...caseName(name), strong: Math.abs(changes.at(-1)!) >= MAJOR },
             aggregate: false,
             cells: [cell(changes)],
           };

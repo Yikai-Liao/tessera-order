@@ -57,9 +57,13 @@ export const runSchema = z.object({
   ),
 });
 export type TrackingRun = z.infer<typeof runSchema>;
-/** A case's catalog presentation; the browser cannot read the catalog, so publication supplies it. */
+/** A case's catalog presentation; the browser cannot read the catalog, so publication supplies it.
+ *
+ * `label` keeps the first index format readable, so readers of either version share one file.
+ */
 export const caseSchema = z.object({
   id: z.string().min(1),
+  label: z.string().min(1),
   group: z.string().min(1),
   input: z.string().min(1),
   sub: z.string(),

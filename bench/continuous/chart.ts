@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { modeName, modeOrder } from "../catalog.ts";
+import { caseName, modeName, modeOrder } from "../catalog.ts";
 import { type ChangeChart, renderChanges } from "../plot/changes.ts";
 import type { NameCell } from "../plot/layout.ts";
 import {
@@ -19,12 +19,7 @@ import {
 const FOLD_FASTER_BELOW = 0.05;
 
 function nameCell(row: ComparedRow, strong: boolean): NameCell {
-  return {
-    input: row.parts.input,
-    strong,
-    tag: row.parts.seed && row.parts.seed !== "s1" ? `seed ${row.parts.seed.slice(1)}` : "",
-    sub: [row.parts.type, row.parts.n].filter(Boolean).join(" · "),
-  };
+  return { ...caseName(row.name), strong };
 }
 
 /** Select alerted cases and present their authoritative verdicts to the plot. */

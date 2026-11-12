@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parseHTML } from "linkedom/worker";
+import { z } from "zod";
 import { latestValues, renderCaseHistory, renderMainOverview, renderMainTrend } from "./history.ts";
 import { appendRun, trackingCases } from "./publish.ts";
 import { indexSchema, parseRuns, summarizeReport, type TrackingRun } from "./result.ts";
@@ -97,7 +98,14 @@ test("publication is idempotent, combines months and keeps the README SVG URL st
   const index = indexSchema.parse(JSON.parse(await readFile(join(dir, "index.json"), "utf8")));
   assert.deepEqual(index.months, ["2026-10", "2026-11"]);
   assert.deepEqual(index.cases, [
-    { id: PREVIEW_CASE, group: "serial", input: "random", sub: "u64 · 65,536", tag: "" },
+    {
+      id: PREVIEW_CASE,
+      label: "u64 · random · 65,536",
+      group: "serial",
+      input: "random",
+      sub: "u64 · 65,536",
+      tag: "",
+    },
   ]);
   const all = [];
   for (const month of index.months) {
@@ -111,6 +119,18 @@ test("publication is idempotent, combines months and keeps the README SVG URL st
   assert.notEqual(await readFile(join(dir, "preview.svg"), "utf8"), first);
   await appendRun(dir, { ...next, id: "01a1cdb1-9445-76dd-89c4-e4220d49e6f9" });
   assert.equal(parseRuns(await readFile(join(dir, "2026-11.jsonl"), "utf8")).length, 2);
+  assert.deepEqual(
+    indexSchema.parse(JSON.parse(await readFile(join(dir, "index.json"), "utf8"))),
+    index,
+  );
+  // The first page version reads only `id` and `label`, so the new index stays readable to it.
+  const firstReader = z.object({
+    cases: z.array(z.object({ id: z.string(), label: z.string() })),
+  });
+  assert.doesNotThrow(() => firstReader.parse(index));
+  // Re-publishing an identical report regenerates derived files without remeasuring.
+  await rm(join(dir, "index.json"));
+  await appendRun(dir, next);
   assert.deepEqual(
     indexSchema.parse(JSON.parse(await readFile(join(dir, "index.json"), "utf8"))),
     index,
@@ -207,4 +227,12 @@ test("only runs on the latest protocol and specification form the trend", () => 
   // The detail chart keeps every run, with other hardware as a separate line.
   const detail = parseHTML(renderCaseHistory(runs, cases[0])).document;
   assert.equal(detail.querySelectorAll("a[href*='/commit/']").length, 3);
+  // Its heading compares within the latest series, as the trend does.
+  assert.ok(
+    texts(renderCaseHistory(runs, cases[0])).some((text) => text?.startsWith("+10.0% since")),
+  );
+  assert.deepEqual(
+    latestValues(runs, cases).map((row) => row.current),
+    [true],
+  );
 });

@@ -193,17 +193,8 @@ fn prepare<T, E: Extract<T>>(
     if finish_ordered(records, sampled, extractor) {
         return None;
     }
-    if sampled == Order::Unsorted {
-        // This input already fits the insertion leaf; a budget and varying-bit
-        // scan cannot select a different finishing algorithm.
-        if records.len() <= INSERTION_MAX && records.len() <= tile_len {
-            extractor.finish_insertion(records);
-            return None;
-        }
-        let probe_len = tile_len.max(2).min(records.len());
-        if insertion_probe(records, extractor, probe_len) {
-            return None;
-        }
+    if sampled == Order::Unsorted && insertion_probe(records, extractor, tile_len) {
+        return None;
     }
     let candidate = u128::MAX >> (128 - E::Value::BITS);
     let varying = scan_varying_bits(records, candidate, extractor);
@@ -222,18 +213,26 @@ fn prepare<T, E: Extract<T>>(
 /// Tries to finish `records` with a budgeted insertion pass and returns whether it
 /// did.
 ///
-/// An input of at most `probe_len` records gets a budget of `probe_len` swaps.
-/// A longer input first insertion-sorts the keys of its first `probe_len`
-/// records in a local key buffer, and scales that window's swap count to the
-/// whole input as the budget for the records.
+/// An insertion-sized tile gets an unlimited budget; another tile gets one
+/// swap per record. A longer input first insertion-sorts one tile of keys in a
+/// local buffer, and scales that window's swap count to the whole input as the
+/// budget for the records.
 /// A window that needs no swaps says nothing about the rest, so the records are
 /// not touched. A pass that runs out of budget leaves `records` a stable
 /// permutation of its input.
 fn insertion_probe<T, E: Extract<T>>(
     records: &mut [T],
     extractor: &mut E,
-    probe_len: usize,
+    tile_len: usize,
 ) -> bool {
+    // A failed limited pass on an insertion leaf would scan varying bits
+    // only to select insertion again. The finishing entry also avoids carrying
+    // an unused swap count across the direct extractor's dispatch boundary.
+    if records.len() <= INSERTION_MAX && records.len() <= tile_len {
+        extractor.finish_insertion(records);
+        return true;
+    }
+    let probe_len = tile_len.max(2).min(records.len());
     if probe_len == records.len() {
         return extractor.insertion_sort(records, probe_len).is_some();
     }

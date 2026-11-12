@@ -111,6 +111,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
             shards,
             block::BucketFinish {
                 limit: 0,
+                scale_blocks: false,
                 sort: &|_| {},
                 visit: &mut |_| {},
             },
@@ -196,7 +197,10 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
         .sort_staged_child(child, candidate);
         pool.give(scratch);
     };
-    let limit = bucket_limit::<T>(records.len(), digit.width);
+    // P1 experiment: keep the block scale that staging eligibility selects,
+    // but stream every final band instead of staging it.
+    let scale_blocks = bucket_limit::<T>(records.len(), digit.width) > 0;
+    let limit = 0;
     block::partition_digit_parallel(
         records,
         digit.width,
@@ -206,6 +210,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
         shards,
         block::BucketFinish {
             limit,
+            scale_blocks,
             sort: &finish,
             visit: &visit,
         },

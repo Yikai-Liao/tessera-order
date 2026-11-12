@@ -15,6 +15,9 @@ type BucketVisit<'callback, 'records, T> = &'callback (dyn Fn(&'records mut [T])
 /// Root completion: stage eligible buckets or stream exclusive final bands.
 pub(crate) struct BucketFinish<'callback, 'records, T> {
     pub limit: usize,
+    /// P1 experiment: scales blocks as for bounded finishing, independently
+    /// of whether any bucket is staged.
+    pub scale_blocks: bool,
     pub sort: BucketSort<'callback, T>,
     pub visit: BucketVisit<'callback, 'records, T>,
 }
@@ -35,6 +38,7 @@ struct Shard<'a, 'w, T, E> {
 struct Config<'a, T> {
     shards: usize,
     block_size: Option<usize>,
+    scale_blocks: bool,
     parallel: bool,
     finish: Option<BoundedFinish<'a, T>>,
 }
@@ -77,6 +81,7 @@ pub(crate) fn partition_digit_parallel<'records, T: Send, E: Extract<T> + Clone 
         Config {
             shards,
             block_size: None,
+            scale_blocks: finish.scale_blocks,
             parallel: true,
             finish: Some(BoundedFinish {
                 limit: finish.limit,
@@ -124,10 +129,7 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
             shards * bucket_count,
             2 * DESCRIPTOR_BYTES_PER_POSITION,
         );
-        let bounded = config
-            .finish
-            .as_ref()
-            .is_some_and(|finish| finish.limit > 0);
+        let bounded = config.scale_blocks;
         scaled_block_size(
             balanced,
             record_bytes,
@@ -419,6 +421,7 @@ mod tests {
         Config {
             shards,
             block_size: Some(block_size),
+            scale_blocks: false,
             parallel: !cfg!(miri),
             finish: None,
         }

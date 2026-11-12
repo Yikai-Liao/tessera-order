@@ -434,6 +434,7 @@ mod tests {
             Config {
                 shards,
                 block_size: Some(block_size),
+                scale_blocks: false,
                 parallel: !cfg!(miri),
                 finish: Some(BoundedFinish {
                     limit: usize::MAX,
@@ -835,6 +836,7 @@ mod tests {
                         Config {
                             shards,
                             block_size: Some(block_size),
+                            scale_blocks: false,
                             parallel: !cfg!(miri),
                             finish: Some(BoundedFinish {
                                 limit: 0,
@@ -944,6 +946,7 @@ mod tests {
             Config {
                 shards: 3,
                 block_size: Some(5),
+                scale_blocks: false,
                 parallel: !cfg!(miri),
                 finish: Some(BoundedFinish {
                     limit: 0,

@@ -12,21 +12,21 @@ The documentation site is built with [VitePress](https://vitepress.dev) from the
 | `docs/.vitepress/theme/components/` | Vue components used by the explanation pages |
 | `docs/.vitepress/theme/sim/` | TypeScript models of the engine that drive the figures, with their tests |
 | `docs/public/` | Static files, such as the logo (a copy of `assets/logo.svg`) |
-| `package.json`, `pnpm-lock.yaml` | The site's pinned toolchain, at the repository root |
+| `package.json`, `bun.lock` | The site's pinned toolchain, at the repository root |
 
 ## Commands
 
-Run these from the repository root, with Node.js 24 or later. The pnpm project sits at the root so that pages outside `docs/`, such as `ROADMAP.md`, resolve the same dependencies.
+Run these from the repository root with the Bun version pinned in `package.json`. The package manifest sits at the root so that pages outside `docs/`, such as `ROADMAP.md`, resolve the same dependencies. Site scripts explicitly use Bun for VitePress and the TypeScript compiler as well as the simulation tests; a separate Node installation is not required.
 
 ```sh
-pnpm install --frozen-lockfile  # install the pinned toolchain
-pnpm docs:dev                   # local server with hot reload
-pnpm docs:test                  # check algorithm ownership models
-pnpm docs:typecheck             # type-check the config, theme and components
-pnpm docs:build                 # build into docs/.vitepress/dist; fails on dead links
+bun install --frozen-lockfile  # install the pinned toolchain
+bun run docs:dev               # local server with hot reload
+bun run docs:test              # check ownership models and type-checker diagnostics
+bun run docs:typecheck         # type-check the config, theme and components
+bun run docs:build             # build into docs/.vitepress/dist; fails on dead links
 ```
 
-The pinned TypeScript compiler and Vue content mapper check SFC scripts and templates; `--runExternalCode` enables the mapper registered in `docs/.vitepress/tsconfig.json`.
+`vue-tsc` checks Vue SFC scripts, templates and component props under Bun. Its entry point, `docs/.vitepress/typecheck.ts`, selects the pinned TypeScript 6 JS compiler API (`typescript6`); tooling checks still use native TypeScript 7. The native compiler's Vue content-mapper path is not used: its synchronous API requires Node-private subprocess pipe handles unavailable in Bun. This keeps Node out of the development toolchain without suppressing SFC diagnostics or patching dependencies. `docs:test` verifies that the checker accepts valid components and rejects script, template and component-prop type errors.
 
 Pull requests that touch the site or its pages run the same checks in `docs.yml`. Pushes to `main` also deploy the site. The repository's Pages source must be set to *GitHub Actions* once, under *Settings → Pages*.
 

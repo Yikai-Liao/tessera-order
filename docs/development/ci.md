@@ -63,12 +63,12 @@ Run the [commands in `AGENTS.md`](../../AGENTS.md#commands) before pushing: a pu
 
 | Task | Command |
 |---|---|
-| Reproduce change routing | `pnpm -s tools ci changes --base main --head HEAD` |
-| Validate a PR title | `pnpm -s tools ci title 'fix(bench): validate source snapshots'` |
-| Check every commit's DCO sign-off | `pnpm -s tools ci dco main HEAD` |
-| Preview hosted benchmark jobs | `pnpm -s tools continuous matrix` |
-| Reproduce the comparison checks | `pnpm -s tools ci check --native` |
-| Fetch and verify pinned native sources | `pnpm -s tools native fetch` |
-| Validate a release tag | `pnpm -s tools release verify --tag rust/v0.1.0` |
+| Reproduce change routing | `bun run --silent tools ci changes --base main --head HEAD` |
+| Validate a PR title | `bun run --silent tools ci title 'fix(bench): validate source snapshots'` |
+| Check every commit's DCO sign-off | `bun run --silent tools ci dco main HEAD` |
+| Preview hosted benchmark jobs | `bun run --silent tools continuous matrix` |
+| Reproduce the comparison checks | `bun run --silent tools ci check --native` |
+| Fetch and verify pinned native sources | `bun run --silent tools native fetch` |
+| Validate a release tag | `bun run --silent tools release verify --tag rust/v0.1.0` |
 
 Benchmark commands are in the [protocol](benchmarking.md#command-capabilities). `ci check` is a functional smoke check (one-millisecond samples, not an experiment): it materializes HEAD and working-tree copies, runs harness tests and doctests, validates the smoke suite, measures one `u64/random` group, verifies that native programs link no parallel runtime under `--native`, and generates a partial report. The comparison job additionally formats the workspace and checks the benchmark crate with every feature. Routing, title and DCO have dependency-free bootstrap entry points in `.github/scripts/` that call the same functions; DCO runs the base commit's trusted code without installing PR code. Rust feature tests, Miri and sanitizers stay in their workflows and composite action.

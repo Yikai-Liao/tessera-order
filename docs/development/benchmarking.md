@@ -4,26 +4,43 @@ The comparison runner in `bench/rust` measures sorting algorithms on one machine
 
 ## Command capabilities
 
-Run `pnpm tools` from the repository root with Node.js 24 and the pinned pnpm and Rust toolchains (`pnpm install --frozen-lockfile`). Use `pnpm -s tools` to suppress pnpm's banner when an agent reads stdout, and a task's `--help` for its options. [CI](ci.md#reproducing-locally) lists the non-benchmark commands.
+Run `bun run tools` from the repository root with the Bun version pinned in `package.json` and the Rust toolchain (`bun install --frozen-lockfile`). Bun runs the TypeScript sources directly; there is no Node CLI fallback or compilation step. Use `bun run --silent tools` to suppress the script banner when an agent reads stdout, and a task's `--help` for its options. [CI](ci.md#reproducing-locally) lists the non-benchmark commands.
 
 | Task | Command | What it provides |
 |---|---|---|
-| Compare working-tree code with a commit | `pnpm tools compare commit COMMIT` | Two revision builds, adjacent AB/BA sample pairs, verification, provenance and a report |
-| Sample revision comparisons across layouts | `pnpm tools compare commit COMMIT --layout-seeds 1,2,3,4,5` | One revision pair per fixed LLD seed and descriptive cross-layout ranges; Linux x86-64 GNU only |
-| Compare fixed-work counters | `pnpm tools compare counters COMMIT` | Verified serial batches with Callgrind instruction and simulated cache/branch counts |
-| Probe local PMU access | `pnpm tools compare probe-counters --out DIR` | Read-only, per-event `perf` availability on the current host |
-| Compare linked source revisions | `pnpm tools compare revisions BASE --current HEAD` | Serial revisions and independently named copies in one process, repeated-current A/A, verification, allocation and retained executables |
-| Compare algorithms | `pnpm tools compare algorithms` | Registered algorithms in one timing executable, three shuffled blocks by default, two Tessera calls for A/A, verification and allocation measurement |
-| Local parallel comparison | `pnpm tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` | Serial controls, Tessera-8 and Rayon stable-8 in the same harness; choose a CPU list for the host |
-| Full algorithm comparison | `pnpm tools compare algorithms --plan release` | Release coverage and native opponents |
-| Resume an interrupted comparison | `pnpm tools compare resume DIR` | Recorded selection, settings and exact retained builds; no rebuilding |
-| Preview or customize inputs | `pnpm -s tools plan NAME` | Validated selection without compiling or measuring |
-| Regenerate a report | `pnpm tools report DIR` | Statistics and figures from retained results, without new measurements |
-| Read main or PR feedback | `pnpm -s tools status main` or `pnpm -s tools status --pr NUMBER` | Exact-ref workflow and benchmark states; [read-only interpretation](continuous-benchmarks.md#read-feedback-from-a-pr) |
+| Compare working-tree code with a commit | `bun run tools compare commit COMMIT` | Two revision builds, adjacent AB/BA sample pairs, verification, provenance and a report |
+| Sample revision comparisons across layouts | `bun run tools compare commit COMMIT --layout-seeds 1,2,3,4,5` | One revision pair per fixed LLD seed and descriptive cross-layout ranges; Linux x86-64 GNU only |
+| Compare fixed-work counters | `bun run tools compare counters COMMIT` | Verified serial batches with Callgrind instruction and simulated cache/branch counts |
+| Probe local PMU access | `bun run tools compare probe-counters --out DIR` | Read-only, per-event `perf` availability on the current host |
+| Compare linked source revisions | `bun run tools compare revisions BASE --current HEAD` | Serial revisions and independently named copies in one process, repeated-current A/A, verification, allocation and retained executables |
+| Compare algorithms | `bun run tools compare algorithms` | Registered algorithms in one timing executable, three shuffled blocks by default, two Tessera calls for A/A, verification and allocation measurement |
+| Local parallel comparison | `bun run tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` | Serial controls, Tessera-8 and Rayon stable-8 in the same harness; choose a CPU list for the host |
+| Full algorithm comparison | `bun run tools compare algorithms --plan release` | Release coverage and native opponents |
+| Resume an interrupted comparison | `bun run tools compare resume DIR` | Recorded selection, settings and exact retained builds; no rebuilding |
+| Preview or customize inputs | `bun run --silent tools plan NAME` | Validated selection without compiling or measuring |
+| Regenerate a report | `bun run tools report DIR` | Statistics and figures from retained results, without new measurements |
+| Read main or PR feedback | `bun run --silent tools status main` or `bun run --silent tools status --pr NUMBER` | Exact-ref workflow and benchmark states; [read-only interpretation](continuous-benchmarks.md#read-feedback-from-a-pr) |
 
 `compare commit` defaults to `HEAD` and the `local` plan; `compare algorithms` defaults to the `smoke` plan. Replace uppercase placeholders. `report` reads retained results without compiling or measuring; incomplete algorithm sessions require `--partial`, while revision reports require every case's complete recorded sample budget.
 
 CLI benchmark builds default to 64-byte loop and non-fallthrough block alignment (`-C llvm-args=-align-loops=64`, `-C llvm-args=-align-all-nofallthru-blocks=6`) for both revisions, Rust competitors and memory workers. A dependency-free Cargo probe resolves environment, build and target configuration before the single benchmark build. The builder prepends the defaults to those resolved flags, so explicitly configured values override them, and records the effective flags in provenance. Direct Cargo commands keep their own configuration; hosted comparisons use the CLI defaults.
+
+### Optional local AOT CLI
+
+For frequent CLI calls, developers and agents can optionally compile a local executable with [Bun AOT](https://bun.com/docs/compiler/aot) after installing the pinned project dependencies. This further reduces startup and module-loading work; it does not speed up the Rust sorting kernels. The normal `bun run tools` entry runs current sources and does not require AOT.
+
+AOT requires a Bun version that provides `bun compile`. Local validation used `1.4.4-canary.1+447ff870b`; stable `1.4.4` does not provide that command. AOT is experimental and builds for the host platform; validation so far covers Linux x86-64. With a compatible Bun on `PATH`, run from the repository root:
+
+```sh
+bun run tools:aot:build
+./target/dev-tools/tessera-tools plan local
+```
+
+The build script embeds the source-relative TOML resources and forbids runtime code generation from strings, including indirect evaluation paths. Zod uses its existing regular parser without changing schemas or maintaining a runtime-specific validator. The executable still includes Bun support code; AOT does not mean runtime-free.
+
+The binary is a snapshot: rebuild after changing CLI sources or imported TypeScript modules, dependencies, or embedded configuration files. There is no automatic freshness check or rebuild. When editing tooling, use `bun run tools` so that a stale binary cannot validate old selection or reporting logic.
+
+This is an optional internal development artifact under the ignored `target/` directory, not a GitHub Release asset. CI uses the pinned stable Bun directly, never this local binary or the AOT canary toolchain. Offline plan, metadata and small real-report paths and dedicated process probes have been checked; real AOT build orchestration and larger-report coverage remain [open validation work](../../ROADMAP.md#benchmark-tooling-and-investigations). Do not implicitly reuse a local AOT binary in CI measurement tasks.
 
 ## Command output
 
@@ -36,7 +53,7 @@ A command's exit status describes execution, not a speedup: a successful `status
 1. State the hypothesis, baseline or opponents, relevant inputs and expected unaffected controls. Preview the selection with the preset and overrides you intend to measure:
 
    ```sh
-   pnpm -s tools plan local --types u64,row_u64 --distributions random,zipf2
+   bun run --silent tools plan local --types u64,row_u64 --distributions random,zipf2
    ```
 
    Use `local` for revision comparisons, `smoke` for a small algorithm comparison, `release` for full coverage.
@@ -46,13 +63,13 @@ A command's exit status describes execution, not a speedup: a successful `status
 
    ```sh
    # Revision comparison; HEAD~1 must have a compatible API and harness.
-   pnpm tools compare commit HEAD~1 --types u64,row_u64 --distributions random,zipf2 --cpu 2
+   bun run tools compare commit HEAD~1 --types u64,row_u64 --distributions random,zipf2 --cpu 2
 
    # Rust-only algorithm smoke comparison, including verification and reporting.
-   pnpm tools compare algorithms
+   bun run tools compare algorithms
 
    # Full algorithm comparison, including native opponents.
-   pnpm tools compare algorithms --plan release --cpu 2
+   bun run tools compare algorithms --plan release --cpu 2
    ```
 
    CPU 2 is an example, not a portable default. Both commands accept `--out DIR`, require a new directory and otherwise use `bench/results/<timestamp>`. Algorithm comparisons accept `--sample-ms` (default 5) and `--memory-mib` (default 256); choose them before starting. Keep raw results and research harnesses outside Git.
@@ -69,7 +86,7 @@ For an unsupported experiment, identify the missing measurement capability and e
 
 ## Linked revision comparisons
 
-`pnpm tools compare revisions BASE --current HEAD` uses the algorithm pipeline with two named crates per serial revision: `tessera` and `tessera-copy` for current, `tessera-baseline` and `tessera-baseline-copy` for baseline. Repeated-current `tessera-aa` and `std-stable` are controls. Omit `--current` to use the materialized working snapshot. It uses the algorithm pipeline's axes, `--sample-ms`, `--memory-mib`, affinity, verification, block budget, allocation measurement, retention, resume and reports; it chooses its own adapters, rejects `--algorithms` and selects no parallel APIs.
+`bun run tools compare revisions BASE --current HEAD` uses the algorithm pipeline with two named crates per serial revision: `tessera` and `tessera-copy` for current, `tessera-baseline` and `tessera-baseline-copy` for baseline. Repeated-current `tessera-aa` and `std-stable` are controls. Omit `--current` to use the materialized working snapshot. It uses the algorithm pipeline's axes, `--sample-ms`, `--memory-mib`, affinity, verification, block budget, allocation measurement, retention, resume and reports; it chooses its own adapters, rejects `--algorithms` and selects no parallel APIs.
 
 The temporary workspace renames copied packages without rewriting Rust source and may add local lock entries only; external registry/Git entries must remain identical. Provenance retains resolved commits, original and generated source hashes and all four libraries' resolved features, checked against Cargo artifacts. Incompatible baselines fail before timing. Historical libraries enable their opt-in SIMD feature explicitly.
 
@@ -94,7 +111,7 @@ Standard algorithm-report figures show fixed slices and aggregates, not every ca
 Calibrate on identical sources before comparing an engine change, with sensitive small inputs and large random controls:
 
 ```sh
-pnpm tools compare commit HEAD --types u32,u64 --distributions random --lengths 48,65536 \
+bun run tools compare commit HEAD --types u32,u64 --distributions random --lengths 48,65536 \
   --layout-seeds 1,2,3,4,5 --out bench/results/layout-calibration
 ```
 
@@ -105,7 +122,7 @@ Each seed runs the adjacent-pair protocol sequentially, so work grows linearly w
 `compare counters [COMMIT]` uses the smoke harness with the local-only `layout-study` feature. It requires Linux x86-64 and Valgrind (simulated ISA dispatch can differ from the host):
 
 ```sh
-pnpm tools compare counters HEAD --types u32,u64 --distributions random --lengths 48,65536 \
+bun run tools compare counters HEAD --types u32,u64 --distributions random --lengths 48,65536 \
   --sorts 8 --out bench/results/counters-null
 ```
 
@@ -150,12 +167,12 @@ Values within an axis are alternatives; axes within a rule form a Cartesian prod
 The `smoke` harness measures Tessera through its public functions; its types and distributions are under `smoke` in [the catalog](../../bench/catalog.toml), those of `comparison` under `comparison`. Criterion IDs end in `/api`; optional `parallel` rules in a smoke plan select four-thread `/par-4` inputs on the same axes when built with Rayon. The plan is the only runtime parallel-selection authority; no parallel-enable environment variable is needed. Comparison plans reject `parallel` rules. Inputs always use seed 1, and a plan that selects nothing fails before timing. Algorithm comparisons always retain `tessera`, `std-stable` and the Tessera A/A control; native algorithms enable source acquisition and native compilation. Unsupported adapter/type pairs are omitted from the manifest's capabilities, not recorded as measurements.
 
 ```sh
-pnpm -s tools plan local --types u32,u64 --distributions random,zipf2           # preview
-pnpm -s tools plan local --types u32,u64 --format toml > my-plan.toml           # save, then reuse:
-pnpm tools compare commit main --plan my-plan.toml
-pnpm tools compare algorithms --plan smoke --algorithms glidesort,radsort \
+bun run --silent tools plan local --types u32,u64 --distributions random,zipf2           # preview
+bun run --silent tools plan local --types u32,u64 --format toml > my-plan.toml           # save, then reuse:
+bun run tools compare commit main --plan my-plan.toml
+bun run tools compare algorithms --plan smoke --algorithms glidesort,radsort \
   --types u64 --distributions random,zipf2 --lengths 1234,65536                  # override
-pnpm -s tools plan --schema > benchmark-plan.schema.json                         # editor schema
+bun run --silent tools plan --schema > benchmark-plan.schema.json                         # editor schema
 ```
 
 `--plan` takes a preset name or a `.toml`/`.json` path. Comma-separated CLI axes replace that axis in every inclusion rule; exclusions stay. Only `compare algorithms` and `plan` accept `--algorithms`, replacing the opponent list before the controls are added. Revision and counter experiments accept smoke-harness plans (`local` or `continuous`); algorithm and linked-revision experiments accept comparison-harness plans (`smoke`, `release` or `parallel`). `--group` runs one resumable group and marks the report partial. Every result retains the normalized `plan.json`.
@@ -165,7 +182,7 @@ pnpm -s tools plan --schema > benchmark-plan.schema.json                        
 The `parallel` plan shares preparation, verification, block budget, serial A/A, memory worker, resume and reports with other algorithm comparisons and enables the `rayon` feature. Hosted comparisons use their own four-thread cases instead. Iterate with one representative input and one logical CPU per physical core (`lscpu -e=CPU,CORE`; on the Ryzen 7 8845H, adjacent CPU pairs are SMT siblings):
 
 ```sh
-pnpm tools compare algorithms --plan parallel \
+bun run tools compare algorithms --plan parallel \
   --types row_u64 --distributions random --lengths 10000000 \
   --cpu 0,2,4,6,8,10,12,14 --out /tmp/tessera-parallel
 ```
@@ -176,7 +193,7 @@ The report's ratio is variant time over paired serial Tessera time, its inverse 
 
 ## Native prerequisites
 
-Rust competitors need Cargo's stable toolchain. Native competitors additionally need Linux x86-64 with glibc, Node.js 24, Clang with C++17, CMake, GNU binutils and TBB headers (`libtbb-dev`; the pinned IPS²Ra/IPS⁴o headers include TBB declarations, but nothing links TBB or OpenMP). The CLI fetches and verifies sources before building; later builds use them offline.
+Rust competitors need Cargo's stable toolchain. Native competitors additionally need Linux x86-64 with glibc, Bun, Clang with C++17, CMake, GNU binutils and TBB headers (`libtbb-dev`; the pinned IPS²Ra/IPS⁴o headers include TBB declarations, but nothing links TBB or OpenMP). The CLI fetches and verifies sources before building; later builds use them offline.
 
 For static checks without the native toolchain, use `TESSERA_BENCH_CHECK_ONLY=1 cargo clippy --workspace --all-targets --all-features` or the matching `cargo doc`. This omits native compilation and linker inputs; leave it unset for builds, tests and measurements that link native competitors.
 
@@ -187,8 +204,8 @@ Native builds default to `clang` and `clang++`; for published comparisons use th
 `compare algorithms` retains one `compare` / `memory` executable pair under `bin/` before measuring. Schema-2 `session.json` records their hashes, the plan hash, CPU, group, block budget and sampling limits; preparation removes its temporary tree only afterwards. A session interrupted before `session.json` exists is not prepared; start a new directory.
 
 ```sh
-pnpm tools compare algorithms --plan release --cpu 2 --out bench/results/release
-pnpm tools compare resume bench/results/release   # same directory; no rebuild or overrides
+bun run tools compare algorithms --plan release --cpu 2 --out bench/results/release
+bun run tools compare resume bench/results/release   # same directory; no rebuild or overrides
 ```
 
 Resume verifies retained files before executing them. Memory sorts, calibration and every timed batch check their outputs; there is no separate automatic validation pass or validation receipt. The direct `validate` command remains available for functional checks without a full measurement. The Rust journal keeps groups with their full budget and complete memory rows, replaces interrupted groups and drops an incomplete final JSONL write. Changed plans or executables need a new session; Rust also rechecks the host and build provenance. Only one session writer is allowed: after an abrupt parent exit its lease must expire before another CLI writer can recover, and a still-running worker keeps its kernel lock. A completed preparation or a failed/cancelled measurement is not a completed experiment.
@@ -198,13 +215,13 @@ Resume verifies retained files before executing them. Memory sorts, calibration 
 Use the binaries directly only to split groups across directories or debug the harness; omit `compare-native` and the fetch step for Rust-only opponents.
 
 ```sh
-pnpm tools native fetch
+bun run tools native fetch
 cargo build --release -p tessera-bench --features compare,compare-native --target-dir target/compare-default
 taskset -c 2 target/compare-default/release/compare run --suite release --out bench/results/release
-pnpm tools report bench/results/release
+bun run tools report bench/results/release
 ```
 
-`compare list` and `compare validate --suite smoke|release` check support and correctness. Direct binaries default to nine blocks (`--blocks 3` for a short screen, passed to timing and memory alike); a retained manifest fixes the budget. `compare run` first invokes the sibling `memory` executable, which repairs its journal and measures missing rows; `memory` also runs alone. `--group TYPE/SHAPE` selects one group (for example `u64/random`); a repeated run skips completed groups and replaces an interrupted one. A change to the executable, build provenance, suite or host fingerprint needs a new directory. Groups measured in separate directories report together when host fingerprints and manifests agree (`pnpm tools report DIR1 DIR2`; the first directory receives `report/`). The report needs the complete suite unless `--partial` is given, and writes `bmf.json` for the Bencher CLI.
+`compare list` and `compare validate --suite smoke|release` check support and correctness. Direct binaries default to nine blocks (`--blocks 3` for a short screen, passed to timing and memory alike); a retained manifest fixes the budget. `compare run` first invokes the sibling `memory` executable, which repairs its journal and measures missing rows; `memory` also runs alone. `--group TYPE/SHAPE` selects one group (for example `u64/random`); a repeated run skips completed groups and replaces an interrupted one. A change to the executable, build provenance, suite or host fingerprint needs a new directory. Groups measured in separate directories report together when host fingerprints and manifests agree (`bun run tools report DIR1 DIR2`; the first directory receives `report/`). The report needs the complete suite unless `--partial` is given, and writes `bmf.json` for the Bencher CLI.
 
 Every build uses the SIMD backend; no option or feature selects it. Revisions without a supported backend, dual-build results and schema-1 sessions are rejected; recover them with their original source revision.
 

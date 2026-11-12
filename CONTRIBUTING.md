@@ -4,7 +4,7 @@ Tessera is pre-release. Bug reports, real-workload experience and measurements o
 
 ## Development
 
-Use stable Rust (MSRV in `Cargo.toml`), Node.js 24 and the pnpm version pinned in `package.json`. Run the applicable [local checks](AGENTS.md#commands). [CI](docs/development/ci.md) covers platform, MSRV, Miri and sanitizer checks.
+Use stable Rust (MSRV in `Cargo.toml`) and the Bun version pinned in `package.json`. Install dependencies with `bun install --frozen-lockfile`; `bun.lock` is the only JavaScript dependency lockfile. Run the applicable [local checks](AGENTS.md#commands). [CI](docs/development/ci.md) covers platform, MSRV, Miri and sanitizer checks.
 
 ### Refactoring
 
@@ -33,7 +33,7 @@ cargo +nightly miri test -p tessera-sort
 cargo +nightly miri test -p tessera-sort --lib --features rayon block::parallel::
 ```
 
-Run `pnpm docs:test` when simulation models change and the [site checks](docs/development/docs-site.md#commands) when their pages change. CI owns the remaining platform, MSRV and sanitizer lanes; the [Rust workflow](.github/workflows/rust-ci.yml) is the command source for reproducing a lane. It uses cargo-nextest for test processes and runs doctests separately.
+Run `bun run docs:test` when simulation models change and the [site checks](docs/development/docs-site.md#commands) when their pages change. CI owns the remaining platform, MSRV and sanitizer lanes; the [Rust workflow](.github/workflows/rust-ci.yml) is the command source for reproducing a lane. It uses cargo-nextest for test processes and runs doctests separately.
 
 Report the invariant preserved or contract changed, regression coverage, commands actually run and anything left to CI or unavailable locally. For performance choices, include paired evidence with A/A ranges and investigate results outside the controls under the protocol below.
 

@@ -33,12 +33,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v7
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --ignore-scripts
       - run: sudo apt-get update -qq && sudo apt-get install -y valgrind lld
       # Keep results and logs ignored so provenance describes the source checkout.
       - name: Fixed-work attribution signals
@@ -46,7 +44,7 @@ jobs:
         env:
           BASELINE: ${{ inputs.baseline || github.event.pull_request.base.sha || github.sha }}
         run: >-
-          pnpm tools compare counters "$BASELINE"
+          bun run tools compare counters "$BASELINE"
           --plan bench/plans/diagnostics.toml
           --sorts 8 --out bench/results/diagnostics/counters
       - name: Placement sample (shared runner; exploratory)
@@ -54,7 +52,7 @@ jobs:
         env:
           BASELINE: ${{ inputs.baseline || github.sha }}
         run: >-
-          pnpm tools compare commit "$BASELINE"
+          bun run tools compare commit "$BASELINE"
           --plan bench/plans/diagnostics.toml
           --layout-seeds 11,12,13,14,15 --out bench/results/diagnostics/layout
       - uses: actions/upload-artifact@v7

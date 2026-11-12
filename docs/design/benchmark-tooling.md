@@ -1,6 +1,6 @@
 # Benchmark tooling
 
-`pnpm tools` exposes dirty-tree/commit screening, algorithm comparisons, exact main/PR feedback and shared CI operations. Commands and measurement contracts are in the [protocol](../development/benchmarking.md); this page says where to change behavior and which module owns each rule.
+`bun run tools` exposes dirty-tree/commit screening, algorithm comparisons, exact main/PR feedback and shared CI operations. Commands and measurement contracts are in the [protocol](../development/benchmarking.md); this page says where to change behavior and which module owns each rule.
 
 ## Ownership
 
@@ -32,7 +32,7 @@ Repository selections use TOML and custom plans accept JSON; decode syntax once 
 The [validation commands](../../AGENTS.md#commands) and [CI coverage](../development/ci.md) apply to the changed boundary.
 
 - **Record type:** catalog metadata/inventories and [record semantics](../../bench/rust/src/comparison/record.rs); [adapters](../../bench/rust/src/comparison/variant.rs) pick direct-key versus by-key entries; a new scalar key also needs [generation](../../bench/rust/src/case.rs). Continuous `Wide` is not comparison `WideRecord`. Native support: unsafe `NativeRecord` binds Rust layout to type identity, C++ `NATIVE_RECORDS` owns layouts and `NATIVE_KERNELS` supported pairs; extend layout calls and support expectations deliberately. Type/length exclusions are [release coverage](../../bench/plans/release.toml) policy.
-- **Distribution:** implement generation, catalog presentation and [plan](../../bench/plans/) coverage separately; a generator does not add a continuous case. Preview with `pnpm -s tools plan NAME` and exercise it through the maintained harness.
+- **Distribution:** implement generation, catalog presentation and [plan](../../bench/plans/) coverage separately; a generator does not add a continuous case. Preview with `bun run --silent tools plan NAME` and exercise it through the maintained harness.
 - **Algorithm:** catalog metadata names it and `Variant::prepare` owns capability decisions. Native additions need [pinned acquisition/build](../../bench/rust/native/build.ts), wrappers, Rust enum/name mapping and C++ algorithm/pair entries (each pair generates declaration and binding together).
 - **Mode or grammar:** catalog modes and the ID owner do not implement an API or grant a worker lane; Rust's typed dispatch, listing validation and the runner's exclusive four-thread phase are explicit decisions. For grammar changes compare complete serial-only and parallel listings for both builds and check shard partitioning and the shared fixture.
 - **Figure:** follow the [figure guide](../development/benchmark-figures.md).
@@ -72,6 +72,8 @@ Renderers return deterministic SVG strings with no filesystem, network or global
 
 ## Dependencies and verification
 
-Node 24 runs TypeScript directly; the pinned native TypeScript compiler checks tooling and Vue's content mapper checks SFCs. Commander owns CLI parsing, Zod the strict plan schema, smol-toml/JSON decoding, `catalog.revisionSampling` the revision budget; archives are hash-verified before extraction with the tar library and re-verified during offline compilation. Tooling uses no Python. Do not maintain parallel parsers, registries, drawing engines or statistical definitions.
+Bun, pinned in `package.json`, owns dependency installation (`bun.lock`), direct TypeScript execution, tests and package scripts. There is no Node CLI fallback or emitted-JavaScript build tree. The native TypeScript compiler checks tooling; [site checks](../development/docs-site.md#commands) own Vue SFC validation. Commander owns CLI parsing, Zod the strict plan schema, smol-toml/JSON decoding, `catalog.revisionSampling` the revision budget; archives are hash-verified before extraction with the tar library and re-verified during offline compilation. Tooling uses no Python. Do not maintain parallel parsers, registries, drawing engines or statistical definitions.
+
+Direct Bun execution is the normal path because it reduces fresh-process startup and module-loading work without an emitted-JavaScript tree, resource-copy step or stale-build state. Controlled CLI comparisons also found it faster than Node executing TypeScript 7.1-precompiled JavaScript, not only faster than the pnpm launcher. These are CLI savings, not sorting-kernel speedups. [Local AOT](../development/benchmarking.md#optional-local-aot-cli) is an optional snapshot, not a prerequisite or an Actions artifact.
 
 Tests cover result compatibility, statistics, report generation, external trust and recovery boundaries, input restoration after destructive sorts, stable and unstable payload checks, float edge cases, journal recovery and allocation accounting, plus the paired timing, 8-of-9 decision, A/A noise and standard-sort anchor. They do not pin SVG geometry or library attribute order. Visual acceptance renders old and new figures from the same recorded results in light and dark; synthetic fixtures cover edge cases, not performance. Raw results, vendor trees and generated reports stay out of Git.

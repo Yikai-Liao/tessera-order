@@ -80,4 +80,4 @@ The row interface accepts no style objects or drawing callbacks; the [template](
 5. Render a reference example in light and dark appearance and inspect it at its actual display width. Check hierarchy, label fit, value alignment and whether the main finding is visible without reading every number.
 6. Keep the plotted-value table or equivalent accessible report alongside published figures.
 
-Automated tests protect report generation, numeric summaries and unavailable builds, not SVG snapshots, wording or coordinates. When changing rendering, generate before-and-after figures from the same recorded dataset and inspect both appearances. Run `pnpm tools:test`, `pnpm tools:typecheck`, `pnpm docs:typecheck` and `pnpm docs:build` when the shared figure layer changes.
+Automated tests protect report generation, numeric summaries and unavailable builds, not SVG snapshots, wording or coordinates. When changing rendering, generate before-and-after figures from the same recorded dataset and inspect both appearances. Run `bun run tools:test`, `bun run tools:typecheck`, `bun run docs:typecheck` and `bun run docs:build` when the shared figure layer changes.

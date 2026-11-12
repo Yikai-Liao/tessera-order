@@ -142,10 +142,10 @@ fn native(out: &Path) {
     );
     assert!(
         Path::new("../vendor/highway/.tessera-source.json").exists(),
-        "run pnpm tools native fetch before building compare-native"
+        "run bun run tools native fetch before building compare-native"
     );
     println!("cargo:rerun-if-changed=../vendor");
-    let status = Command::new("node")
+    let status = Command::new("bun")
         .args(["native/build.ts"])
         .arg(out)
         .status()

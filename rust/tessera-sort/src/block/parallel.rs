@@ -48,10 +48,12 @@ impl<T, E: Extract<T>> Shard<'_, '_, T, E> {
     fn scatter(mut self, width: usize, shift: usize) -> Self {
         let shift = E::Value::from_usize(shift);
         let mask = E::Value::from_usize((1usize << width) - 1) << shift;
-        let key = &mut self.key;
         self.panic = self
             .sorter
-            .step(move |record| ((key.key(record) & mask) >> shift).to_usize());
+            .step(&mut self.key, move |key, record| {
+                ((key.key(record) & mask) >> shift).to_usize()
+            })
+            .err();
         self
     }
 }

@@ -8,7 +8,7 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-fn sort_group<T: Send, E: Extract<T> + Clone + Send>(records: &mut [T], mut extractor: E) {
+fn sort_group<T: Send, E: Extract<T> + Clone + Send>(records: &mut [T], extractor: E) {
     let mut scratch = Scratch::new();
     let mut child_scratch = Scratch::new();
     let mut visit = |bucket: &mut [T], extractor: &mut E| {
@@ -19,14 +19,7 @@ fn sort_group<T: Send, E: Extract<T> + Clone + Send>(records: &mut [T], mut extr
         }
         .sort_child(bucket, 3);
     };
-    let ends = block::partition_digit(
-        records,
-        1,
-        2,
-        &mut extractor,
-        &mut scratch.block,
-        &mut visit,
-    );
+    let ends = block::partition_digit(records, 1, 2, extractor, &mut scratch.block, &mut visit);
     scratch.block.recycle_ends(ends);
 }
 

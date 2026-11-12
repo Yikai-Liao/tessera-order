@@ -32,7 +32,7 @@
 //! <https://arxiv.org/abs/2607.05302>
 //!
 //! The engine uses one pass of this sort as a stable partition by one digit
-//! ([`partition_digit`]) or by a caller's classification ([`partition_by`]).
+//! ([`partition_digit`]).
 //! Buckets are filled block by block, consumed input blocks are recycled as
 //! output blocks, and a block order records the logical sequence, so a pass
 //! needs O(√n) scratch instead of a second buffer of the input's size.
@@ -195,7 +195,7 @@ pub(crate) fn partition_digit<'records, T, E: Extract<T>>(
     records: &'records mut [T],
     radix: usize,
     shift: usize,
-    extractor: &mut E,
+    extractor: E,
     buffers: &mut Buffers<T>,
     visit: KeyVisit<'_, 'records, T, E>,
 ) -> Vec<usize> {
@@ -209,75 +209,22 @@ pub(crate) fn partition_digit<'records, T, E: Extract<T>>(
     let width = radix.min(bits - shift);
     let shift = E::Value::from_usize(shift);
     let mask = E::Value::from_usize((1usize << width) - 1) << shift;
-    partition_pass(
-        records,
-        1 << radix,
-        extractor,
-        buffers,
-        move |extractor, record| ((extractor.key(record) & mask) >> shift).to_usize(),
-        Some(visit),
-    )
-}
-
-/// Partitions `records` stably into `buckets` buckets chosen by `classify` and
-/// returns each bucket's cumulative end in records.
-///
-/// Classes at or above `buckets` go to the last bucket.
-///
-/// # Panics
-///
-/// Panics if `buckets` is not a power of two in `2..=1 << MAX_RADIX_BITS`. A
-/// key-function panic is resumed after every record is back in `records`.
-pub(crate) fn partition_by<T, E: Extract<T>>(
-    records: &mut [T],
-    buckets: usize,
-    extractor: &mut E,
-    buffers: &mut Buffers<T>,
-    mut classify: impl FnMut(&mut E, &T) -> usize,
-) -> Vec<usize> {
-    let record_bytes = core::mem::size_of::<T>();
-    if records.len() < 2 || record_bytes == 0 {
-        return alloc::vec![0; buckets];
-    }
-    assert!(buckets.is_power_of_two() && (2..=1 << MAX_RADIX_BITS).contains(&buckets));
-    partition_pass(
-        records,
-        buckets,
-        extractor,
-        buffers,
-        move |extractor, record| classify(extractor, record).min(buckets - 1),
-        None,
-    )
-}
-
-/// Runs one block pass, compacts the result back into `records` and returns
-/// each bucket's cumulative end in records.
-fn partition_pass<'records, T, E: Extract<T>>(
-    records: &'records mut [T],
-    buckets: usize,
-    extractor: &mut E,
-    buffers: &mut Buffers<T>,
-    mut classify: impl FnMut(&mut E, &T) -> usize,
-    visit: Option<KeyVisit<'_, 'records, T, E>>,
-) -> Vec<usize> {
-    let radix = buckets.trailing_zeros() as usize;
-    let block_size = default_block_size(records.len(), core::mem::size_of::<T>(), radix);
-    let mut sorter = Partition::new(records, buckets, block_size, buffers);
-    let classify_extractor = &mut *extractor;
-    if let Some(payload) = sorter.step(move |record| classify(classify_extractor, record)) {
-        sorter.compact();
-        unwind::resume(payload);
-    }
-    let ends = sorter.record_ends();
-    // Classification has finished borrowing the extractor before any tile
-    // callback starts; both phases use the same FnMut state in sequence.
-    let panic = if let Some(visit) = visit {
-        let mut callback = |child: &'records mut [T]| visit(child, extractor);
-        sorter.compact_with(&ends, Some(&mut callback))
-    } else {
-        sorter.compact_with(&ends, None)
+    let block_size = default_block_size(records.len(), record_bytes, radix);
+    let mut sorter = Partition::new(records, 1 << radix, block_size, buffers);
+    let classify =
+        move |extractor: &mut E, record: &T| ((extractor.key(record) & mask) >> shift).to_usize();
+    let mut extractor = match sorter.step(extractor, classify) {
+        Ok(extractor) => extractor,
+        Err(payload) => {
+            sorter.compact();
+            unwind::resume(payload);
+        }
     };
-    if let Some(payload) = panic {
+    let ends = sorter.record_ends();
+    // Classification has returned the extractor before any tile callback
+    // starts; both phases use the same FnMut state in sequence.
+    let mut callback = |child: &'records mut [T]| visit(child, &mut extractor);
+    if let Some(payload) = sorter.compact_with(&ends, Some(&mut callback)) {
         unwind::resume(payload);
     }
     ends
@@ -580,20 +527,26 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     /// Scatters a single-shard pass and returns any caught classification panic.
     /// Its free prefix reserves exactly one output block per logical bucket;
     /// adopted directories have multiple shard reserves and only finish.
-    fn step<F: FnMut(&T) -> usize>(&mut self, classify: F) -> Option<unwind::Payload> {
+    /// Runs one scatter pass and returns the classification state, or the
+    /// payload of a classification panic after completing the pass.
+    fn step<C, F: FnMut(&mut C, &T) -> usize>(
+        &mut self,
+        state: C,
+        classify: F,
+    ) -> Result<C, unwind::Payload> {
         let (mut buckets, mut counts) = self.begin_pass();
         let mut position = ScatterPosition {
             input: self.active_blocks.start,
             output: self.active_blocks.start,
         };
-        // The classifier is moved into the closure, not borrowed: a digit closure
-        // keeps its mask and shift in registers only when the scatter owns it. A
-        // &mut here cost 40 % on a digit-only sort (sparse8, 10M).
-        let panic = unwind::catch(|| {
-            self.scatter(&mut buckets, &mut counts, &mut position, 0, classify);
-        })
-        .err();
-        if panic.is_some() {
+        // The classifier and its state are moved into the scatter, not
+        // borrowed: a digit closure keeps its mask and shift, and a rank its
+        // sampled key, in registers only when the scatter owns them. A &mut
+        // here cost 40 % on a digit-only sort (sparse8, 10M).
+        let result = unwind::catch(|| {
+            self.scatter(&mut buckets, &mut counts, &mut position, 0, state, classify)
+        });
+        if result.is_err() {
             // Reconstruct the offset in the current input block: records written
             // across all buckets minus records in fully consumed input blocks.
             let written: usize = buckets
@@ -613,14 +566,21 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             // Do not call a failed extractor again. Appending every unread
             // record to bucket zero completes a valid (unsorted) pass. Recycling
             // still follows the original read-before-reserve protocol.
-            self.scatter(&mut buckets, &mut counts, &mut position, offset, |_| 0);
+            self.scatter(
+                &mut buckets,
+                &mut counts,
+                &mut position,
+                offset,
+                (),
+                |_, _| 0,
+            );
         }
         self.active_blocks.end = position.output;
         self.finish_pass(&buckets, counts);
         self.buffers.writers = buckets;
         #[cfg(debug_assertions)]
         self.validate();
-        panic
+        result
     }
 
     /// Logical blocks of `bucket` after a single-shard pass. Only the last
@@ -718,14 +678,15 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     // Keep their optimization regions separate so that state does not force
     // digit masks and bucket cursors out of registers in the hot loop.
     #[inline(never)]
-    fn scatter<F: FnMut(&T) -> usize>(
+    fn scatter<C, F: FnMut(&mut C, &T) -> usize>(
         &mut self,
         buckets: &mut [BucketWriter<T>],
         counts: &mut [usize],
         position: &mut ScatterPosition,
         first_offset: usize,
+        mut state: C,
         mut classify: F,
-    ) {
+    ) -> C {
         let mut begin = first_offset;
         let mut partial = self
             .buffers
@@ -743,7 +704,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 // Borrow the actual live record. Never materialize a second T:
                 // it may own a String, Box, Rc, or other non-Copy payload.
                 // This borrow ends before the bitwise move below.
-                let b = classify(unsafe { &*source.add(offset) });
+                let b = classify(&mut state, unsafe { &*source.add(offset) });
                 // SAFETY: bucket_count is 1 << radix and mask keeps the width
                 // bits below radix, so the index is in bounds; the check would
                 // otherwise run once per record in the hot loop.
@@ -789,6 +750,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             position.input += 1;
             begin = 0;
         }
+        state
     }
 
     /// Moves every live record back into the input, without callbacks.
@@ -1000,13 +962,15 @@ mod tests {
         let mut calls = 0;
         let panic = {
             let mut sorter = Partition::new(&mut records, 4, block_size, &mut buffers);
-            let panic = sorter.step(|record: &(u32, u32)| {
-                calls += 1;
-                if calls == at {
-                    std::panic::panic_any(0x71u32);
-                }
-                (record.0 & 3) as usize
-            });
+            let panic = sorter
+                .step((), |_, record: &(u32, u32)| {
+                    calls += 1;
+                    if calls == at {
+                        std::panic::panic_any(0x71u32);
+                    }
+                    (record.0 & 3) as usize
+                })
+                .err();
             let ends = sorter.record_ends();
             assert!(panic.is_some(), "panic at {at} of {len} was not caught");
             // The recovery re-scatters unread records without the failed
@@ -1097,8 +1061,8 @@ mod tests {
                 let mut visited = 0;
                 let payload = {
                     let mut sorter = Partition::new(&mut records, 4, block_size, &mut buffers);
-                    let panic = sorter.step(|record: &(u32, u32)| (record.0 & 3) as usize);
-                    assert!(panic.is_none());
+                    let panic = sorter.step((), |_, record: &(u32, u32)| (record.0 & 3) as usize);
+                    assert!(panic.is_ok());
                     let ends = sorter.record_ends();
                     let mut callback = |bucket: &mut [(u32, u32)]| {
                         // Buckets materialize in order, so the slice must hold

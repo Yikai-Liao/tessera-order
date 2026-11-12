@@ -3,7 +3,6 @@
 //! Parallel root partition and completion of materialized buckets.
 
 use super::*;
-use crate::key::ByKey;
 use rayon::prelude::*;
 
 /// The archived experiment did not reliably win at 512 KiB; keep 1 MiB as a
@@ -103,10 +102,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
             let mut key = extractor.clone();
             // Match the serial equality policy. ByKey caches classification and
             // declines filling: equal ranks do not identify record payloads.
-            let rank = ByKey(move |record: &T| {
-                let value = key.key(record).to_u128();
-                u8::from(value >= equal) + u8::from(value > equal)
-            });
+            let rank = ByKey(move |record: &T| equality_rank(key.key(record).to_u128(), equal));
             let ends = block::partition_digit_parallel(
                 records,
                 2,

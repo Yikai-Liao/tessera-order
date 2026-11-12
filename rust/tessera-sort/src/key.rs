@@ -193,6 +193,46 @@ pub(crate) unsafe trait Extract<T> {
     }
 }
 
+/// Lends an extractor to an operation that takes its classification state by
+/// value, such as a block pass, without changing its scans or caching policy.
+// SAFETY: forwards every method, including the caching contract, unchanged.
+unsafe impl<T, E: Extract<T>> Extract<T> for &mut E {
+    const CACHE_BUCKETS: bool = E::CACHE_BUCKETS;
+    type Value = E::Value;
+
+    #[inline]
+    fn key(&mut self, record: &T) -> Self::Value {
+        (**self).key(record)
+    }
+
+    fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
+        (**self).try_count_window(records, low, width)
+    }
+
+    #[cfg(feature = "rayon")]
+    fn try_count_window_parallel(&mut self, records: &mut [T], low: usize, width: usize) -> bool
+    where
+        T: Send,
+    {
+        (**self).try_count_window_parallel(records, low, width)
+    }
+
+    #[inline]
+    fn confirm_ascending(&mut self, records: &[T], previous: Self::Value) -> bool {
+        (**self).confirm_ascending(records, previous)
+    }
+
+    #[inline]
+    fn finish_insertion(&mut self, records: &mut [T]) {
+        (**self).finish_insertion(records);
+    }
+
+    #[inline]
+    fn insertion_sort(&mut self, records: &mut [T], budget: usize) -> Option<usize> {
+        (**self).insertion_sort(records, budget)
+    }
+}
+
 /// Extracts keys with a user key function, which may panic or be inconsistent.
 #[derive(Clone)]
 pub(crate) struct ByKey<F>(pub F);

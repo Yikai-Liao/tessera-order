@@ -303,7 +303,7 @@ fn complete_with_fault<'records, T: Send>(
         fits
     });
     let block_size = sorter.blocks.block_size;
-    let count = sorter.block_order.len();
+    let count = sorter.buffers.block_order.len();
     let head = sorter.active_blocks.start;
     let input_len = sorter.blocks.input_len;
     let mut owners = vec![FREE; count];
@@ -320,7 +320,7 @@ fn complete_with_fault<'records, T: Send>(
         while logical < logical_end {
             let len = sorter.next_block_len(logical, &mut partial);
             if len != 0 {
-                let physical = sorter.block_order[logical] as usize;
+                let physical = sorter.buffers.block_order[logical] as usize;
                 let source = sources.len();
                 sources.push(Source {
                     location: AtomicUsize::new(physical),
@@ -690,9 +690,9 @@ mod tests {
                 let start = if bucket == 0 {
                     BUCKETS
                 } else {
-                    part.partial_blocks[bucket - 1].order_index + 1
+                    part.buffers.partial_blocks[bucket - 1].order_index + 1
                 };
-                let partial = &part.partial_blocks[bucket];
+                let partial = &part.buffers.partial_blocks[bucket];
                 for logical in start..=partial.order_index {
                     let len = if logical == partial.order_index {
                         partial.len
@@ -702,7 +702,7 @@ mod tests {
                     if len == 0 {
                         continue;
                     }
-                    let local = part.block_order[logical] as usize;
+                    let local = part.buffers.block_order[logical] as usize;
                     let physical = if local < 2 * BUCKETS {
                         shard * 2 * BUCKETS + local
                     } else {

@@ -420,9 +420,14 @@ impl<'a, T> BlockStorage<'a, T> {
 pub(crate) struct Buffers<T> {
     /// Scratch segments; a pass reuses the first one.
     scratch: Vec<Vec<MaybeUninit<T>>>,
+    /// Logical-to-physical block directory of the active partition.
     block_order: Vec<u32>,
+    /// The next pass's directory, then the inverse map during compaction.
     next_block_order: Vec<u32>,
+    /// Bucket ID of each output block, used to build `next_block_order` after
+    /// scatter. `u16` holds bucket IDs for digit widths up to `MAX_RADIX_BITS`.
     bucket_ids: Vec<u16>,
+    /// Shorter live prefixes, one per bucket, in directory order.
     partial_blocks: Vec<PartialBlock>,
     writers: Vec<BucketWriter<T>>,
     /// Per-bucket block counts during scatter, cumulative logical block ends
@@ -464,7 +469,8 @@ impl<T> Default for Buffers<T> {
 
 /// The state of one block partition over an input slice.
 ///
-/// At pass boundaries, `block_order` maps logical order to physical storage.
+/// The directory lives in the borrowed [`Buffers`]. At pass boundaries,
+/// `block_order` maps logical order to physical storage.
 /// `active_blocks` holds the current record sequence; the prefix and suffix
 /// are free blocks. Its start is a reserve length, not a logical bucket count:
 /// a single-shard pass reserves one block per bucket, and adoption retains
@@ -473,12 +479,6 @@ struct Partition<'a, 'w, T> {
     buffers: &'w mut Buffers<T>,
     blocks: BlockStorage<'a, T>,
     active_blocks: core::ops::Range<usize>,
-    block_order: Vec<u32>,
-    next_block_order: Vec<u32>,
-    /// Bucket ID of each output block, used to build `next_block_order` after
-    /// scatter. `u16` holds bucket IDs for digit widths up to `MAX_RADIX_BITS`.
-    bucket_ids: Vec<u16>,
-    partial_blocks: Vec<PartialBlock>,
     input_materialized: bool,
 }
 
@@ -498,7 +498,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             core::mem::take(&mut buffers.scratch),
         );
         let active_blocks_end = bucket_count + full_blocks + 1;
-        let mut block_order = core::mem::take(&mut buffers.block_order);
+        let block_order = &mut buffers.block_order;
         block_order.resize(blocks.block_count, 0);
         for (i, block) in block_order.iter_mut().enumerate() {
             *block = if i < bucket_count {
@@ -509,7 +509,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 i - (active_blocks_end - 1) + bucket_count
             } as u32;
         }
-        let mut partial_blocks = core::mem::take(&mut buffers.partial_blocks);
+        let partial_blocks = &mut buffers.partial_blocks;
         partial_blocks.clear();
         partial_blocks.resize(
             bucket_count,
@@ -523,27 +523,21 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             len: tail_len,
         };
         let block_count = blocks.block_count;
-        let mut next_block_order = core::mem::take(&mut buffers.next_block_order);
-        next_block_order.resize(block_count, 0);
-        let mut bucket_ids = core::mem::take(&mut buffers.bucket_ids);
-        bucket_ids.resize(block_count, 0);
+        buffers.next_block_order.resize(block_count, 0);
+        buffers.bucket_ids.resize(block_count, 0);
         Self {
             buffers,
             blocks,
             active_blocks: bucket_count..active_blocks_end,
-            block_order,
-            next_block_order,
-            bucket_ids,
-            partial_blocks,
             input_materialized: false,
         }
     }
 
     fn next_block_len(&self, logical: usize, partial: &mut usize) -> usize {
-        if *partial < self.partial_blocks.len()
-            && self.partial_blocks[*partial].order_index == logical
+        if *partial < self.buffers.partial_blocks.len()
+            && self.buffers.partial_blocks[*partial].order_index == logical
         {
-            let length = self.partial_blocks[*partial].len;
+            let length = self.buffers.partial_blocks[*partial].len;
             *partial += 1;
             length
         } else {
@@ -555,19 +549,21 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     fn validate(&mut self) {
         let seen = &mut self.buffers.seen;
         seen.clear();
-        seen.resize(self.block_order.len(), false);
-        for &physical in &self.block_order {
+        seen.resize(self.buffers.block_order.len(), false);
+        for &physical in &self.buffers.block_order {
             assert!(!seen[physical as usize]);
             seen[physical as usize] = true;
         }
-        assert!(self.active_blocks.end <= self.block_order.len());
+        assert!(self.active_blocks.end <= self.buffers.block_order.len());
         assert!(
-            self.partial_blocks
+            self.buffers
+                .partial_blocks
                 .windows(2)
                 .all(|p| p[0].order_index < p[1].order_index)
         );
         assert!(
-            self.partial_blocks
+            self.buffers
+                .partial_blocks
                 .iter()
                 .all(|p| self.active_blocks.contains(&p.order_index)
                     && p.len < self.blocks.block_size)
@@ -631,10 +627,10 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     /// one is partial: a writer takes a new block as soon as it fills one.
     fn bucket_blocks(&self, bucket: usize) -> core::ops::Range<usize> {
         let start = match bucket.checked_sub(1) {
-            Some(previous) => self.partial_blocks[previous].order_index + 1,
+            Some(previous) => self.buffers.partial_blocks[previous].order_index + 1,
             None => self.active_blocks.start,
         };
-        start..self.partial_blocks[bucket].order_index + 1
+        start..self.buffers.partial_blocks[bucket].order_index + 1
     }
 
     /// Each bucket's cumulative end in records after a single-shard pass.
@@ -645,9 +641,9 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     fn record_ends(&mut self) -> Vec<usize> {
         let mut ends = self.buffers.ends.pop().unwrap_or_default();
         ends.clear();
-        ends.reserve_exact(self.partial_blocks.len());
+        ends.reserve_exact(self.buffers.partial_blocks.len());
         let mut records = 0;
-        for (bucket, partial) in self.partial_blocks.iter().enumerate() {
+        for (bucket, partial) in self.buffers.partial_blocks.iter().enumerate() {
             let full_blocks = self.bucket_blocks(bucket).len() - 1;
             records += full_blocks * self.blocks.block_size + partial.len;
             ends.push(records);
@@ -662,13 +658,13 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         buckets.clear();
         buckets.reserve(self.active_blocks.start);
         for i in 0..self.active_blocks.start {
-            let out = self.blocks.block_ptr(self.block_order[i] as usize);
+            let out = self.blocks.block_ptr(self.buffers.block_order[i] as usize);
             buckets.push(BucketWriter {
                 next: out,
                 // SAFETY: block_ptr() returns storage for block_size elements.
                 end: unsafe { out.add(self.blocks.block_size) },
             });
-            self.bucket_ids[i] = i as u16;
+            self.buffers.bucket_ids[i] = i as u16;
         }
         let mut counts = core::mem::take(&mut self.buffers.counts);
         counts.clear();
@@ -690,14 +686,14 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             start = next;
         }
         for i in 0..self.active_blocks.end {
-            let b = self.bucket_ids[i] as usize;
+            let b = self.buffers.bucket_ids[i] as usize;
             let j = starts[b];
             starts[b] += 1;
-            self.next_block_order[j] = self.block_order[i];
-            let base = self.blocks.block_ptr(self.block_order[i] as usize);
+            self.buffers.next_block_order[j] = self.buffers.block_order[i];
+            let base = self.blocks.block_ptr(self.buffers.block_order[i] as usize);
             // SAFETY: next/end belong to the same block-sized allocation.
             if unsafe { base.add(self.blocks.block_size) } == buckets[b].end {
-                self.partial_blocks[b] = PartialBlock {
+                self.buffers.partial_blocks[b] = PartialBlock {
                     order_index: j,
                     // SAFETY: next points within the block starting at base.
                     len: unsafe { buckets[b].next.offset_from(base) as usize },
@@ -705,12 +701,16 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             }
         }
         let active_end = self.active_blocks.end + self.active_blocks.start;
-        assert!(active_end <= self.block_order.len());
-        self.next_block_order[..self.active_blocks.start]
-            .copy_from_slice(&self.block_order[self.active_blocks.end..active_end]);
-        self.next_block_order[active_end..].copy_from_slice(&self.block_order[active_end..]);
+        assert!(active_end <= self.buffers.block_order.len());
+        self.buffers.next_block_order[..self.active_blocks.start]
+            .copy_from_slice(&self.buffers.block_order[self.active_blocks.end..active_end]);
+        self.buffers.next_block_order[active_end..]
+            .copy_from_slice(&self.buffers.block_order[active_end..]);
         self.active_blocks.end = active_end;
-        core::mem::swap(&mut self.block_order, &mut self.next_block_order);
+        core::mem::swap(
+            &mut self.buffers.block_order,
+            &mut self.buffers.next_block_order,
+        );
         self.buffers.counts = starts;
     }
 
@@ -728,11 +728,14 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     ) {
         let mut begin = first_offset;
         let mut partial = self
+            .buffers
             .partial_blocks
             .partition_point(|p| p.order_index < position.input);
         while position.input < self.active_blocks.end {
             let input = position.input;
-            let source = self.blocks.block_ptr(self.block_order[input] as usize);
+            let source = self
+                .blocks
+                .block_ptr(self.buffers.block_order[input] as usize);
             let length = self.next_block_len(input, &mut partial);
             let mut write = |offset: usize| {
                 // SAFETY: only the initialized, unread suffix is read. Blocks
@@ -758,13 +761,13 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                     debug_assert!(position.output <= input);
                     let out = self
                         .blocks
-                        .block_ptr(self.block_order[position.output] as usize);
+                        .block_ptr(self.buffers.block_order[position.output] as usize);
                     *bucket = BucketWriter {
                         next: out,
                         // SAFETY: block_ptr reserves a complete block.
                         end: unsafe { out.add(self.blocks.block_size) },
                     };
-                    self.bucket_ids[position.output] = b as u16;
+                    self.buffers.bucket_ids[position.output] = b as u16;
                     counts[b] += 1;
                     position.output += 1;
                 }
@@ -806,9 +809,9 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     ) -> Option<unwind::Payload> {
         // Sorting is finished. Reuse the output buffer as the inverse map:
         // physical block ID -> position in block_order.
-        let mut block_positions = core::mem::take(&mut self.next_block_order);
-        for i in 0..self.block_order.len() {
-            block_positions[self.block_order[i] as usize] = i as u32;
+        let mut block_positions = core::mem::take(&mut self.buffers.next_block_order);
+        for i in 0..self.buffers.block_order.len() {
+            block_positions[self.buffers.block_order[i] as usize] = i as u32;
         }
         let input_ptr = self.blocks.input;
         let mut remaining = ends;
@@ -841,11 +844,11 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         let mut start = 0;
         let mut partial = 0;
         let mut free_logical = 0;
-        let mut free_physical = self.block_order[free_logical] as usize;
-        for destination in self.blocks.scratch_blocks..self.block_order.len() {
+        let mut free_physical = self.buffers.block_order[free_logical] as usize;
+        for destination in self.blocks.scratch_blocks..self.buffers.block_order.len() {
             let input = destination - self.active_blocks.start;
             let mut output = block_positions[destination] as usize;
-            let source = self.block_order[input] as usize;
+            let source = self.buffers.block_order[input] as usize;
             if output > input && output < self.active_blocks.end {
                 debug_assert!(!self.active_blocks.contains(&free_logical));
                 let from = self.blocks.block_ptr(destination);
@@ -857,8 +860,8 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 unsafe {
                     ptr::copy(from, to, self.blocks.block_size);
                 }
-                self.block_order[free_logical] = destination as u32;
-                self.block_order[output] = free_physical as u32;
+                self.buffers.block_order[free_logical] = destination as u32;
+                self.buffers.block_order[output] = free_physical as u32;
                 block_positions[free_physical] = output as u32;
                 block_positions[destination] = free_logical as u32;
                 free_logical = output;
@@ -877,8 +880,8 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             unsafe {
                 ptr::copy(from, self.blocks.input.add(start), length);
             }
-            self.block_order[input] = destination as u32;
-            self.block_order[output] = source as u32;
+            self.buffers.block_order[input] = destination as u32;
+            self.buffers.block_order[output] = source as u32;
             block_positions[source] = output as u32;
             block_positions[destination] = input as u32;
             start += length;
@@ -888,8 +891,10 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 free_logical = output;
             }
         }
-        for input in self.block_order.len() - self.active_blocks.start..self.active_blocks.end {
-            let source = self.block_order[input] as usize;
+        for input in
+            self.buffers.block_order.len() - self.active_blocks.start..self.active_blocks.end
+        {
+            let source = self.buffers.block_order[input] as usize;
             assert!(source < self.blocks.scratch_blocks);
             let length = self.next_block_len(input, &mut partial);
             let from = self.blocks.block_ptr(source);
@@ -906,7 +911,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         debug_assert!(visit.is_none() || remaining.is_empty());
         assert_eq!(start, self.blocks.input_len);
         self.input_materialized = true;
-        self.next_block_order = block_positions;
+        self.buffers.next_block_order = block_positions;
         callback_panic
     }
 }
@@ -922,10 +927,6 @@ impl<T> Drop for Partition<'_, '_, T> {
         // An adopted root releases the other shards' segments here.
         self.blocks.scratch.truncate(1);
         self.buffers.scratch = core::mem::take(&mut self.blocks.scratch);
-        self.buffers.block_order = core::mem::take(&mut self.block_order);
-        self.buffers.next_block_order = core::mem::take(&mut self.next_block_order);
-        self.buffers.bucket_ids = core::mem::take(&mut self.bucket_ids);
-        self.buffers.partial_blocks = core::mem::take(&mut self.partial_blocks);
     }
 }
 

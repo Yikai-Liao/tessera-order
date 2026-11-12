@@ -274,10 +274,11 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             // used, so equal keys retain their original cross-shard order.
             for (index, task) in tasks.iter().enumerate() {
                 let blocks = task.sorter.bucket_blocks(bucket);
-                let partial = task.sorter.partial_blocks[bucket];
+                let partial = task.sorter.buffers.partial_blocks[bucket];
                 records += (blocks.len() - 1) * block_size + partial.len;
                 for logical in blocks {
-                    order[output] = translate(index, task, task.sorter.block_order[logical]) as u32;
+                    order[output] =
+                        translate(index, task, task.sorter.buffers.block_order[logical]) as u32;
                     output += 1;
                 }
                 partials.push(PartialBlock {
@@ -293,12 +294,13 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         let mut free = 0;
         for (index, task) in tasks.iter().enumerate() {
             for logical in (0..task.sorter.active_blocks.start)
-                .chain(task.sorter.active_blocks.end..task.sorter.block_order.len())
+                .chain(task.sorter.active_blocks.end..task.sorter.buffers.block_order.len())
             {
                 if free == head {
                     free = active_end;
                 }
-                order[free] = translate(index, task, task.sorter.block_order[logical]) as u32;
+                order[free] =
+                    translate(index, task, task.sorter.buffers.block_order[logical]) as u32;
                 free += 1;
             }
         }
@@ -307,6 +309,10 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         }
         assert_eq!(free, block_count);
         buffers.counts = block_ends;
+        buffers.block_order = order;
+        buffers.next_block_order = next_order;
+        buffers.bucket_ids = bucket_ids;
+        buffers.partial_blocks = partials;
         let mut global = Partition {
             buffers,
             blocks: BlockStorage {
@@ -321,10 +327,6 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 input_borrow: PhantomData,
             },
             active_blocks: head..active_end,
-            block_order: order,
-            next_block_order: next_order,
-            bucket_ids,
-            partial_blocks: partials,
             input_materialized: true,
         };
 

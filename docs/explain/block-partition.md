@@ -1,5 +1,7 @@
 # 4. The block partition
 
+> **Legacy figures and walkthrough.** The interactive model below describes the former directory-based scatter. The Rust engine now reads the original contiguous input and links each bucket's blocks before building the completion directory; it no longer pre-copies the tail or stores per-block bucket IDs. Figure and sizing-chart updates are deferred. The current representation and memory formula are documented in [`block.rs`](../../rust/tessera-sort/src/block.rs).
+
 The block partition is what lets Tessera split a large node stably without an n-record buffer. It is adapted from Robert Clausecker's `radixsort_permuted.c`, described in [*Parallel O(√n) Overhead LSD Radix Sort*](https://arxiv.org/abs/2607.05302) by Clausecker and Schintke, and lives in [`block.rs`](../../rust/tessera-sort/src/block.rs). Tessera runs one pass of it per node, on the node's top digit.
 
 ## The idea
@@ -70,13 +72,13 @@ A bucket is contiguous in the input as soon as its last record has been copied. 
 
 The optional Rayon path uses the serial engine below 1 MiB or in a one-thread pool. A larger root scatters disjoint input shards independently, requesting at most the pool width and about one shard per 256 KiB. Actual sharding is also clamped by the number of complete blocks. Its directory reads bucket 0 from the first shard, then bucket 0 from the second, and so on before bucket 1, preserving input order whichever worker finishes first.
 
-Block storage owns its size independently of how children sort. With q requested shards, fan-out R and record size s, the initial balance charges both local and adopted directories: `ceil(sqrt(20n / (2qRs)))` records. As in serial compaction, the shared factor of four amortizes per-source ownership work, with the existing byte and record floors. The shard clamp then uses that block size. Enlarging a child's tile allowance does not change the root block layout.
+Block storage owns its size independently of how children sort. With q requested shards, fan-out R and record size s, the initial balance charges the shard directories and the completion ledger as two directories: `ceil(sqrt(20n / (2qRs)))` records. As in serial compaction, the shared factor of four amortizes per-source ownership work, with the existing byte and record floors. The shard clamp then uses that block size. Enlarging a child's tile allowance does not change the root block layout.
 
 A root with a frequent sampled key uses the same sharded scatter and final-band completion, with the [equality digit](routing.md#repeated-key) as its classification. The equal bucket's callback returns at once; see the [execution contract](../design/engine.md#parallel-root-completion).
 
 Each movement task transfers one bucket's prefixes directly into its final band in directory order. Before copying, it protects the complete destination interval by relocating unread sources, then resolves the source's possibly changed location. Once the band is complete, its callback may sort it while peers continue moving their disjoint records. The [whole-child tile allowance](tiles.md#parallel-child-allowance) does not depend on a staging buffer, root size window or an all-buckets-fit test. Locking, recovery and suspended scratch accounting belong to the [engine reference](../design/engine.md#parallel-root-completion).
 
-The tested [parallel finishing model](../.vitepress/theme/sim/parallelFinish.ts) adopts scattered frames from the serial model and replays protection, relocation and direct final writes in different bucket orders. It checks stable source order and one live owner after each action, counts direct and evacuation transfers, and bounds evacuation by the initialized prefixes of protected input blocks. It models serial linearizations, not mutex scheduling, panic recovery or Rust pointer provenance.
+The tested [parallel finishing model](../.vitepress/theme/sim/parallelFinish.ts) orders scattered frames from the serial model into the ledger and replays protection, relocation and direct final writes in different bucket orders. It checks stable source order and one live owner after each action, counts direct and evacuation transfers, and bounds evacuation by the initialized prefixes of protected input blocks. It models serial linearizations, not mutex scheduling, panic recovery or Rust pointer provenance.
 
 ## Why 2R scratch blocks
 

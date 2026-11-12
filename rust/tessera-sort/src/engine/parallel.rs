@@ -98,11 +98,11 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
     let digit = match plan_node(records, varying, tile_len, extractor) {
         NodePlan::Digit(digit) => digit,
         NodePlan::Equal(equal) => {
-            let equal = equal.to_u128();
-            let mut key = extractor.clone();
-            // Match the serial equality policy. ByKey caches classification and
-            // declines filling: equal ranks do not identify record payloads.
-            let rank = ByKey(move |record: &T| equality_rank(key.key(record).to_u128(), equal));
+            // The same rank digit as serial equality partitions.
+            let rank = Rank {
+                extractor: extractor.clone(),
+                equal,
+            };
             let ends = block::partition_digit_parallel(
                 records,
                 2,

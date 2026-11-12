@@ -27,7 +27,7 @@ use tile::capacity as tile_capacity;
 use alloc::vec::Vec;
 
 use crate::block;
-use crate::key::{ByKey, Direct, Extract, KeyHalf, Unsigned};
+use crate::key::{Direct, Extract, KeyHalf, Rank, Unsigned};
 
 type KeyValue<T, E> = <E as Extract<T>>::Value;
 
@@ -116,19 +116,6 @@ fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor
     (union.to_u128() ^ intersection.to_u128()) & candidate
 }
 
-/// Ranks a key below (0), equal to (1) or above (2) a sampled key.
-///
-/// Serial and parallel equality partitions read this two-bit digit; the
-/// fourth bucket is unused, so the greater band runs to the end.
-///
-/// The rank is a full-width integer: byte arithmetic writes partial registers
-/// and made the scatter loop wait on the previous record's bucket pointer
-/// (1.5x slower on `u64/two_values/65536`).
-#[inline]
-fn equality_rank<V: Ord>(key: V, equal: V) -> usize {
-    usize::from(key >= equal) + usize::from(key > equal)
-}
-
 /// Buffers shared by the nodes and tiles of one sort.
 struct Scratch<T> {
     /// Tile-owned record scratch and cached classification storage.
@@ -144,6 +131,49 @@ impl<T> Scratch<T> {
             tile: tile::Scratch::new(),
             block: block::Buffers::new(),
         }
+    }
+}
+
+/// How a stable block partition leaves its children.
+#[derive(Clone, Copy)]
+struct Split {
+    /// The classification digit.
+    digit: Digit,
+    /// Key bits that may still vary inside each unfinished child.
+    candidate: u128,
+    /// A bucket that is already complete, such as an equality partition's
+    /// equal band.
+    finished: Option<usize>,
+}
+
+impl Split {
+    /// Partitions `records` by `classifier` and finishes tile-sized children
+    /// while they are cache-hot, using the extractor `lend` returns for child
+    /// work. Returns each bucket's end; larger children remain.
+    fn partition<T, E: Extract<T>, C: Extract<T>>(
+        self,
+        records: &mut [T],
+        classifier: C,
+        lend: fn(&mut C) -> &mut E,
+        scratch: &mut Scratch<T>,
+        tile_len: usize,
+    ) -> Vec<usize> {
+        let tile = &mut scratch.tile;
+        let mut visit = |bucket: usize, child: &mut [T], classifier: &mut C| {
+            if child.len() <= tile_len && self.finished != Some(bucket) {
+                let extractor = lend(classifier);
+                let varying = scan_varying_bits(child, self.candidate, extractor);
+                tile.sort::<E>(child, varying, extractor);
+            }
+        };
+        block::partition_digit(
+            records,
+            self.digit.width,
+            self.digit.shift,
+            classifier,
+            &mut scratch.block,
+            &mut visit,
+        )
     }
 }
 
@@ -495,8 +525,8 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
 
     /// Partitions by digit, then sorts each unfinished child.
     fn partition_digit(&mut self, records: &mut [T], digit: Digit, varying: u128) {
-        // Bucket boundaries come from the block engine. The split digit is
-        // constant inside each child, so its bits are excluded from the next scan.
+        // The split digit is constant inside each child, so its bits are
+        // excluded from the next scan.
         let candidate = varying & !digit.mask::<E::Value>().to_u128();
         // A digit covering all remaining variation leaves constant buckets;
         // interchangeable records can be counted instead of moved.
@@ -507,59 +537,62 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         {
             return;
         }
-        let tile_len = self.tile_len;
-        let mut block_buffers = core::mem::take(&mut self.scratch.block);
-        let mut visit = |child: &mut [T], extractor: &mut &mut E| {
-            let extractor = &mut **extractor;
-            if child.len() <= tile_len {
-                let varying = scan_varying_bits(child, candidate, extractor);
-                self.scratch.tile.sort::<E>(child, varying, extractor);
-            }
+        let split = Split {
+            digit,
+            candidate,
+            finished: None,
         };
-        let ends = block::partition_digit(
+        let ends = split.partition(
             records,
-            digit.width,
-            digit.shift,
             &mut *self.extractor,
-            &mut block_buffers,
-            &mut visit,
+            |extractor| &mut **extractor,
+            self.scratch,
+            self.tile_len,
         );
-        self.scratch.block = block_buffers;
-        let mut start = 0;
-        for &end in &ends {
-            if end > start {
-                let child = &mut records[start..end];
-                if child.len() > tile_len {
-                    self.sort_child(child, candidate);
-                }
-            }
-            start = end;
-        }
-        self.scratch.block.recycle_ends(ends);
+        self.finish_children(records, ends, split);
     }
 
     /// Partitions below, equal to, and above a sampled key. The equal band is done.
     fn partition_equal(&mut self, records: &mut [T], equal: KeyValue<T, E>, parent_varying: u128) {
-        let extractor = &mut *self.extractor;
-        // The same rank digit as the parallel root. ByKey caches classification
-        // and declines filling: equal ranks do not identify record payloads.
-        let rank = ByKey(move |record: &T| equality_rank(extractor.key(record), equal));
-        let ends =
-            block::partition_digit(records, 2, 0, rank, &mut self.scratch.block, &mut |_, _| {});
+        // Outer bands keep every candidate bit; the equal band is complete.
+        let split = Split {
+            digit: Digit { shift: 0, width: 2 },
+            candidate: parent_varying,
+            finished: Some(1),
+        };
+        let rank = Rank {
+            extractor: &mut *self.extractor,
+            equal,
+        };
+        let ends = split.partition(
+            records,
+            rank,
+            |rank| &mut *rank.extractor,
+            self.scratch,
+            self.tile_len,
+        );
         if ends[0] == records.len() || ends[1] == 0 {
             // A changing key can leave the whole node below or above the
             // sampled pivot. Force a digit partition to remove candidate bits
             // rather than repeat the same equality partition indefinitely.
+            // That single band exceeds the tile, so no visit finished it.
             self.scratch.block.recycle_ends(ends);
             let plan = plan_progress(records, parent_varying, self.tile_len, self.extractor);
             self.execute_node(records, parent_varying, plan);
             return;
         }
-        for range in [0..ends[0], ends[1]..records.len()] {
-            let child = &mut records[range];
-            if child.len() > 1 {
-                self.sort_child(child, parent_varying);
+        self.finish_children(records, ends, split);
+    }
+
+    /// Sorts the partition children that exceed the tile; the partition
+    /// finished smaller ones while they were cache-hot.
+    fn finish_children(&mut self, records: &mut [T], ends: Vec<usize>, split: Split) {
+        let mut start = 0;
+        for (bucket, &end) in ends.iter().enumerate() {
+            if end - start > self.tile_len && split.finished != Some(bucket) {
+                self.sort_child(&mut records[start..end], split.candidate);
             }
+            start = end;
         }
         self.scratch.block.recycle_ends(ends);
     }
@@ -570,6 +603,7 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use crate::key::ByKey;
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     #[test]

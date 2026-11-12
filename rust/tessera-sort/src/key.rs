@@ -252,6 +252,31 @@ unsafe impl<T, E: Extract<T>> Extract<T> for &mut E {
     }
 }
 
+/// Ranks records below (0), equal to (1) or above (2) a sampled key, as a
+/// two-bit digit for the ordinary block partition.
+///
+/// The rank keeps the default caching and declines counting: equal ranks do not
+/// identify record payloads. Child work uses the original extractor again.
+#[derive(Clone)]
+pub(crate) struct Rank<E, V> {
+    pub extractor: E,
+    pub equal: V,
+}
+
+// SAFETY: keeps the default caching contract; comparisons cannot panic.
+unsafe impl<T, E: Extract<T>> Extract<T> for Rank<E, E::Value> {
+    type Value = usize;
+
+    /// A full-width rank: byte arithmetic writes partial registers and made the
+    /// scatter loop wait on the previous record's bucket pointer (1.5x slower
+    /// on `u64/two_values/65536`).
+    #[inline]
+    fn key(&mut self, record: &T) -> usize {
+        let key = self.extractor.key(record);
+        usize::from(key >= self.equal) + usize::from(key > self.equal)
+    }
+}
+
 /// Extracts keys with a user key function, which may panic or be inconsistent.
 #[derive(Clone)]
 pub(crate) struct ByKey<F>(pub F);

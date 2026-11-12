@@ -97,9 +97,9 @@ The scan depends on the extractor, not on a backend feature:
 | Key function (`stable_sort_by_key`) | One record at a time, keeping the previous key, so the key function runs once per scanned record |
 | Primitive direct keys, budgeted probe and insertion finish | Vector scan, with the instruction set selected once per pass |
 | Primitive direct keys, ascending confirmation | The vector scan, dispatched once after checking the encoded predecessor |
-| `Reverse<K>` direct keys | The same passes and length rule as primitive keys; the scan is a blocked loop the compiler vectorizes under the selected instruction set |
+| `Reverse<K>` direct keys | The same explicit vector scan as `K`, comparing the underlying keys with the pair sides exchanged |
 
-Slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time. Each direct key type supplies only its adjacent-pair scan; confirmation, probes and finishing are written once for all of them. The insertion loop is inlined into the dispatched function, so its scan runs with the selected target features.
+Slices shorter than 64 records and 128-bit and pointer-sized keys scan one pair at a time. Each direct key type supplies its native lane count and an encoded-order pair mask; one scan owns block traversal, mask aggregation and the scalar tail. Integer comparison and float bit encoding use explicit `fearless_simd` vector operations rather than depending on automatic vectorization. `Reverse<K>` keeps the underlying lane count and reverses comparison by swapping transparent shared views, including for nested `Reverse`. Confirmation, probes and finishing remain shared. The insertion loop is inlined into the dispatched function, so its scan runs with the selected target features.
 
 Dispatch stays inside one insertion pass: per-scan dispatch repeats overhead on short runs, and moving a SIMD token outside its target-feature context loses the intended code generation. Every build requires `std` and uses `fearless_simd`, with no backend feature switch. User-key tiles retain scalar callbacks rather than materializing a second key array. The [SIMD constraints](evidence.md#rejected-or-on-hold) were measured outside the paired protocol and establish no formal speedup claim.
 

@@ -1,0 +1,36 @@
+<svg aria-describedby="d" aria-labelledby="t" role="img" xmlns="http://www.w3.org/2000/svg" style="font-family:Inter, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Helvetica, Arial, sans-serif;font-size:13px;background:none" viewBox="0 0 720 206" height="206" width="720" text-anchor="middle" font-size="10" font-family="system-ui, sans-serif" fill="currentColor" class="benchmark-figure"><style>:where(.benchmark-figure) {
+  --plot-background: white;
+  display: block;
+  height: auto;
+  height: intrinsic;
+  max-width: 100%;
+}
+:where(.benchmark-figure text),
+:where(.benchmark-figure tspan) {
+  white-space: pre;
+}</style><g class="figure-fill-panel figure-stroke-border" stroke="#d8d7d2" fill="#fafaf8" aria-label="rect"><rect rx="12" height="205" width="719" y="0.5" x="0.5" /></g><title id="t">Benchmark changes against refactor/shard-ledger: Tessera 1 faster</title><desc id="d">u32 · random · 65,536: Tessera −9.5% improvement</desc><style>
+    .benchmark-figure { font-feature-settings: "tnum", "cv11"; }
+    .benchmark-figure [font-size="10.5"] { letter-spacing: 1.1px; }
+    .benchmark-figure [font-size="28"] { font-feature-settings: "pnum"; letter-spacing: -.6px; }
+    @media (prefers-color-scheme: dark) { .benchmark-figure .figure-fill-panel { fill: #1e1e1d; }
+.benchmark-figure .figure-fill-muted { fill: #a3a29b; }
+.benchmark-figure .figure-fill-ink { fill: #e8e7e3; }
+.benchmark-figure .figure-stroke-border { stroke: #3a3a37; }
+.benchmark-figure .figure-stroke-rule { stroke: #30302e; }
+.benchmark-figure .figure-stroke-axis { stroke: #6f6e69; }
+.benchmark-figure .figure-stroke-panel { stroke: #1e1e1d; } }
+    html:not(.dark) .benchmark-figure .figure-fill-panel { fill: #fafaf8; }
+html.dark .benchmark-figure .figure-fill-panel { fill: #1e1e1d; }
+html:not(.dark) .benchmark-figure .figure-fill-muted { fill: #6b6a66; }
+html.dark .benchmark-figure .figure-fill-muted { fill: #a3a29b; }
+html:not(.dark) .benchmark-figure .figure-fill-ink { fill: #0b0b0b; }
+html.dark .benchmark-figure .figure-fill-ink { fill: #e8e7e3; }
+html:not(.dark) .benchmark-figure .figure-stroke-border { stroke: #d8d7d2; }
+html.dark .benchmark-figure .figure-stroke-border { stroke: #3a3a37; }
+html:not(.dark) .benchmark-figure .figure-stroke-rule { stroke: #e6e5e0; }
+html.dark .benchmark-figure .figure-stroke-rule { stroke: #30302e; }
+html:not(.dark) .benchmark-figure .figure-stroke-axis { stroke: #8d8c86; }
+html.dark .benchmark-figure .figure-stroke-axis { stroke: #6f6e69; }
+html:not(.dark) .benchmark-figure .figure-stroke-panel { stroke: #fafaf8; }
+html.dark .benchmark-figure .figure-stroke-panel { stroke: #1e1e1d; }
+  </style><g class="figure-stroke-rule" stroke="#e6e5e0" aria-hidden="true" aria-label="x-grid"><line y2="154" y1="90" x2="359.9976208536817" x1="359.9976208536817" /><line y2="154" y1="90" x2="427.4982156402613" x1="427.4982156402613" /><line y2="154" y1="90" x2="494.9988104268409" x1="494.9988104268409" /><line y2="154" y1="90" x2="562.4994052134205" x1="562.4994052134205" /><line y2="154" y1="90" x2="630" x1="630" /></g><g class="figure-stroke-axis" stroke="#8d8c86" aria-label="rule"><line y2="154" y1="90" x2="630" x1="630" /></g><g class="figure-fill-muted" transform="translate(0,9)" font-variant="tabular-nums" font-size="10" fill="#6b6a66" aria-label="x-axis tick label"><text transform="translate(359.9976208536817,154)" y="0.71em">−8%</text><text transform="translate(427.4982156402613,154)" y="0.71em">−6%</text><text transform="translate(494.9988104268409,154)" y="0.71em">−4%</text><text transform="translate(562.4994052134205,154)" y="0.71em">−2%</text><text transform="translate(630,154)" y="0.71em">0</text></g><g stroke-linecap="round" stroke-width="2" aria-label="rule"><line stroke="#4a80e6" y2="131" y1="131" x2="309" x1="630" /></g><g class="figure-stroke-panel" stroke-width="2" stroke="#fafaf8" aria-label="dot"><circle fill="#4a80e6" r="4" cy="131" cx="309" /></g><g class="figure-fill-ink" font-weight="600" font-size="13" text-anchor="start" fill="#0b0b0b" aria-label="text"><text transform="translate(24,36)">Run time against refactor/shard-ledger</text></g><g class="figure-fill-muted" font-weight="400" font-size="11" text-anchor="start" fill="#6b6a66" aria-label="text"><text transform="translate(24,51)">each build, own baseline</text></g><g class="figure-stroke-rule" stroke="#e6e5e0" aria-label="rule"><line y2="76" y1="76" x2="696" x1="24" /></g><g font-weight="600" font-size="28" text-anchor="start" fill="#4a80e6" aria-label="text"><text transform="translate(301,50)">−0.2%</text></g><g class="figure-fill-ink" font-weight="600" font-size="13" text-anchor="start" fill="#0b0b0b" aria-label="text"><text transform="translate(393.64,36)">Tessera</text></g><g class="figure-fill-muted" font-weight="400" font-size="11" text-anchor="start" fill="#6b6a66" aria-label="text"><text transform="translate(393.64,51)">1 faster</text></g><g class="figure-fill-muted" font-weight="600" font-size="10.5" text-anchor="start" fill="#6b6a66" aria-label="text"><text transform="translate(24,102)">SERIAL</text></g><g class="figure-fill-ink" font-weight="400" font-size="13" text-anchor="start" fill="#0b0b0b" aria-label="text"><text transform="translate(24,129)">random</text></g><g class="figure-fill-muted" font-weight="400" font-size="11" text-anchor="start" fill="#6b6a66" aria-label="text"><text transform="translate(24,144)">u32 · 65,536</text></g><g class="figure-fill-ink" font-weight="600" font-size="12" text-anchor="end" fill="#0b0b0b" aria-label="text"><text transform="translate(696,135)">−9.5%</text></g><g fill="#e8622f" aria-label="dot"><circle r="4" cy="188" cx="28" /></g><g fill="#4a80e6" aria-label="dot"><circle r="4" cy="188" cx="38" /></g><g class="figure-fill-muted" font-weight="400" font-size="11" text-anchor="start" fill="#6b6a66" aria-label="text"><text transform="translate(48,192)">alert</text></g><g class="figure-fill-panel figure-stroke-axis" stroke-width="1.5" stroke="#8d8c86" fill="#fafaf8" aria-label="dot"><circle r="3.5" cy="188" cx="90" /></g><g class="figure-fill-muted" font-weight="400" font-size="11" text-anchor="start" fill="#6b6a66" aria-label="text"><text transform="translate(100,192)">no alert</text></g><g class="figure-fill-ink" fill="#0b0b0b" aria-label="dot"><circle r="5.5" cy="188" cx="182" /></g><g class="figure-fill-muted" font-weight="400" font-size="11" text-anchor="start" fill="#6b6a66" aria-label="text"><text transform="translate(193,192)">20% or more</text></g><g font-weight="400" font-size="11" text-anchor="end" fill="#e8622f" aria-label="text"><text transform="translate(696,192)">more time →</text></g><g font-weight="400" font-size="11" text-anchor="end" fill="#4a80e6" aria-label="text"><text transform="translate(611,192)">← less time</text></g></svg>

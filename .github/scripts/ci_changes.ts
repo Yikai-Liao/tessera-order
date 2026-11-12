@@ -41,6 +41,7 @@ const ROUTES: [RegExp, Lane[]][] = [
   ],
   // Tooling that renders or reads results and never builds or times a sorting algorithm.
   [/^bench\/plot\//, ["docs"]],
+  [/^bench\/tracking\/(result|history)\.ts$/, ["benchmark", "docs"]],
   [
     /\.test\.ts$|^bench\/(continuous\/(?!paired\.ts$)|report\/|local\/(report|counters|layout)\.ts$)|^\.github\/scripts\/|^tools\/(status|repository)\.ts$|^(biome|tsconfig)\.json$/,
     [],

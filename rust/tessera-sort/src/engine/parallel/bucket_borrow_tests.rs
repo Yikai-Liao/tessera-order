@@ -19,8 +19,7 @@ fn sort_group<T: Send, E: Extract<T> + Clone + Send>(records: &mut [T], extracto
         }
         .sort_child(bucket, 3);
     };
-    let ends = block::partition_digit(records, 1, 2, extractor, &mut scratch.block, &mut visit);
-    scratch.block.recycle_ends(ends);
+    block::partition_digit(records, 1, 2, extractor, &mut scratch.block, &mut visit);
 }
 
 #[test]

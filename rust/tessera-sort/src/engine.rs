@@ -579,7 +579,6 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             self.extractor,
         ) {
             // The single band exceeds the tile, so no visit finished it.
-            self.scratch.block.recycle_ends(ends);
             self.execute_node(records, parent_varying, plan);
             return;
         }
@@ -596,7 +595,6 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             }
             start = end;
         }
-        self.scratch.block.recycle_ends(ends);
     }
 }
 

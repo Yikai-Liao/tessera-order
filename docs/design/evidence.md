@@ -46,6 +46,7 @@ These changes are in the engine; each measured loss below stays open and no dist
 
 | Change | Gain that justified it | Open loss |
 |---|---|---|
+| Direct source-ledger completion (#120) | Retires parallel permutation/compaction recovery, preserves private staging and direct final placement | Maintainer accepts four-thread `row_u64/skew99/1M` +9.8% (final documentation-head run +8.5%); local skew99/1M `row_u64` +18.6%, `row_u32` +11.2%, `u64` +10.0% are an explicit scoped limit exception. Final-head serial `u64/skew99/1000` +6.6% is retained individually as an under-limit trade-off. Causes remain unresolved, with no source-attributed speedup claim; [study](#shared-ledger-study). |
 | Bounded tile planner (against `3db3860`) | `random/49` 1.6–1.9× faster than main | `row_u32/random/65536` 0.977 / 0.982, `u64/bimodal/65536` 0.977 / 0.990, `u32/sparse_digits/65536` 0.959 / 0.961 (A/A ≤ ±1.5%); `u64/bimodal/49` current B 0.806 |
 | Shared planning and required SIMD (`b8968b6` → `383ddb7`) | `d16` 0.88–0.89 | `random` 1.035 (`u64`) / 1.047 (`row_u64`), cause unidentified |
 | Shared order confirmation (against `28e6a96`) | `sorted/1000` 1.36 (`u64`) / 1.55 (`f64`); descending −24.8% / −19.8% instructions at 1,000 records | `u64/sorted/65536` 0.958 / 0.961, `f64/sorted/65536` 0.983 (+29.5% / +5.3% instructions in the AVX2 inversion scan, whose code changed with inlining) |

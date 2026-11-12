@@ -22,18 +22,6 @@ types = [ "u64" ]
 distributions = [ "sorted", "reverse", "sorted99", "equal", "far_swaps", "d16", "d4096", "sparse_digits", "zipf2", "skew99", "two_values", "sorted_tail", "runs", "bimodal" ]
 lengths = [ 1000000 ]
 
-# Retain the large balanced and concentrated roots that exposed the former
-# staging/capacity trade-off; both now use direct final-band completion.
-[[parallel]]
-types = [ "u64" ]
-distributions = [ "random" ]
-lengths = [ 4194304 ]
-
-[[parallel]]
-types = [ "row_u64" ]
-distributions = [ "skew99" ]
-lengths = [ 4194304 ]
-
 # Keyed rows retain payload stability across fast paths and uneven buckets.
 [[parallel]]
 types = [ "row_u64" ]

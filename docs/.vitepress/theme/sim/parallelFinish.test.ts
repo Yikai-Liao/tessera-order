@@ -76,3 +76,47 @@ test("bounded finishing preserves records under immediate and suspended writes",
   }
   assert.ok(relocations > 0);
 });
+
+test("direct streaming preserves source order without a temporary record pass", () => {
+  let relocatedRecords = 0;
+  for (const [buckets, blockSize, shards, len] of [
+    [2, 1, 2, 33],
+    [4, 3, 2, 73],
+    [8, 7, 4, 127],
+  ]) {
+    for (const concentrated of [false, true]) {
+      const keys = Array.from({ length: len }, (_, id) =>
+        concentrated && id % 17 !== 0 ? 7 : (id * 7919 + 73) % 256,
+      );
+      const classify = (key: number) => key % buckets;
+      const expected = keys
+        .map((key, id) => ({ key, id, bucket: classify(key) }))
+        .sort((a, b) => a.bucket - b.bucket);
+      for (const reverse of [false, true]) {
+        const actions: FinishAction[] = Array.from({ length: buckets }, (_, i) => ({
+          phase: "stream",
+          bucket: reverse ? buckets - 1 - i : i,
+        }));
+        const result = simulateParallelFinish({
+          keys,
+          buckets,
+          blockSize,
+          shards,
+          classify,
+          actions,
+        });
+        assert.deepEqual(result.output, expected);
+        for (const frame of result.frames) {
+          assert.equal(frame.live.length, len, frame.action);
+          assert.equal(new Set(frame.live).size, len, frame.action);
+        }
+        assert.equal(result.recordTransfers.staging, 0);
+        assert.equal(result.recordTransfers.final, len);
+        // Each input block is protected once, copying at most its live prefix.
+        assert.ok(result.recordTransfers.relocation <= Math.floor(len / blockSize) * blockSize);
+        relocatedRecords += result.recordTransfers.relocation;
+      }
+    }
+  }
+  assert.ok(relocatedRecords > 0);
+});

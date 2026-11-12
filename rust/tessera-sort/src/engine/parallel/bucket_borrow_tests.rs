@@ -8,15 +8,16 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-fn sort_group<'records, T: Send, E: Extract<T> + Clone + Send>(
-    records: &'records mut [T],
-    mut extractor: E,
-) {
+fn sort_group<T: Send, E: Extract<T> + Clone + Send>(records: &mut [T], mut extractor: E) {
     let mut scratch = Scratch::new();
-    let pool = Pool::new();
-    let mut pending: Option<Job<'records, T>> = None;
-    let mut visit = |bucket: &'records mut [T], _: &mut E| {
-        pending.get_or_insert_with(Job::new).push(bucket);
+    let mut child_scratch = Scratch::new();
+    let mut visit = |bucket: &mut [T], extractor: &mut E| {
+        Sorter::<T, E> {
+            scratch: &mut child_scratch,
+            extractor,
+            tile_len: tile_capacity::<T>(TILE_BYTES),
+        }
+        .sort_child(bucket, 3);
     };
     let ends = block::partition_digit(
         records,
@@ -26,12 +27,79 @@ fn sort_group<'records, T: Send, E: Extract<T> + Clone + Send>(
         &mut scratch.block,
         &mut visit,
     );
-    drop(visit);
-
-    let mut job = pending.expect("both output buckets are nonempty");
-    assert_eq!(job.buckets.len(), 2);
-    job.run::<E>(extractor, 3, tile_capacity::<T>(TILE_BYTES), &pool);
     scratch.block.recycle_ends(ends);
+}
+
+#[test]
+#[cfg(not(miri))]
+fn streamed_child_can_reenter_and_panic() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    // Cross the production shard-byte quota even though sort_root bypasses
+    // the public entry point cutoff. A one-shard partition would fall back to
+    // serial compaction and never exercise the streamed callback.
+    let record_bytes = core::mem::size_of::<(u64, usize, &mut Cell<usize>)>();
+    let len = (2 * MIN_TASK_BYTES).div_ceil(record_bytes) + 37;
+    assert!(len * record_bytes / MIN_TASK_BYTES >= 2);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .unwrap();
+    for fail in [false, true] {
+        let mut backing: Vec<_> = (0..len).map(Cell::new).collect();
+        let mut records: Vec<_> = backing
+            .iter_mut()
+            .enumerate()
+            .map(|(id, value)| ((id as u64).wrapping_mul(0x9e3779b97f4a7c15), id, value))
+            .collect();
+        let calls = AtomicUsize::new(0);
+        let entered = std::sync::atomic::AtomicBool::new(false);
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            pool.install(|| {
+                let mut extractor = ByKey(|row: &(u64, usize, &mut Cell<usize>)| {
+                    // sort_root skips preparation. For this input the bounded
+                    // sample, early rejected two-run probe and root scatter
+                    // together make fewer than 2 * len calls. Later calls are
+                    // from a completed bucket's finisher, not root movement.
+                    if calls.fetch_add(1, Ordering::Relaxed) > 2 * len
+                        && !entered.swap(true, Ordering::Relaxed)
+                    {
+                        let (left, right) = rayon::join(|| 91, || 91);
+                        assert_eq!(left, right);
+                        assert!(!fail, "panic in streamed child after reentry");
+                    }
+                    row.0
+                });
+                // This is below staging eligibility; an ordinary digit root
+                // must finish through the direct streamed callback.
+                sort_root(
+                    &mut records,
+                    &mut extractor,
+                    &mut Scratch::new(),
+                    u128::from(u64::MAX),
+                    8,
+                );
+            });
+        }));
+        assert!(entered.load(Ordering::Relaxed));
+        assert_eq!(result.is_err(), fail);
+        if !fail {
+            assert!(records.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+        }
+        let mut ids = Vec::new();
+        for (_, id, value) in records {
+            assert_eq!(value.get(), id);
+            value.set(id + 1);
+            ids.push(id);
+        }
+        ids.sort_unstable();
+        assert_eq!(ids, (0..len).collect::<Vec<_>>());
+        assert!(
+            backing
+                .iter()
+                .enumerate()
+                .all(|(id, value)| value.get() == id + 1)
+        );
+    }
 }
 
 #[test]

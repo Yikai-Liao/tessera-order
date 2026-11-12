@@ -5,20 +5,21 @@
 use super::*;
 use rayon::prelude::*;
 
-mod compact;
 mod finish;
 
 /// Finishes one privately staged bucket without retaining its record borrow.
 type BucketSort<'a, T> = &'a (dyn Fn(&mut [T]) + Sync);
+/// Publishes an exclusive final band, independently of other bucket movement.
+type BucketVisit<'callback, 'records, T> = &'callback (dyn Fn(&'records mut [T]) + Sync);
 
-/// Bounded finishing with the existing materialized-bucket fallback.
+/// Root completion: stage eligible buckets or stream exclusive final bands.
 pub(crate) struct BucketFinish<'callback, 'records, T> {
     pub limit: usize,
     pub sort: BucketSort<'callback, T>,
-    pub visit: Visit<'callback, 'records, T>,
+    pub visit: BucketVisit<'callback, 'records, T>,
 }
 
-/// Sorting callback and size cap; absent for fallback-only partitions.
+/// Staged sorting callback and size cap; absent for stream-only partitions.
 struct BoundedFinish<'a, T> {
     limit: usize,
     sort: BucketSort<'a, T>,
@@ -55,7 +56,7 @@ impl<T, E: Extract<T>> Shard<'_, '_, T, E> {
     }
 }
 
-/// Partitions the root with an optional bounded pre-materialization finisher.
+/// Partitions the root and completes it through the shared source ledger.
 pub(crate) fn partition_digit_parallel<'records, T: Send, E: Extract<T> + Clone + Send>(
     records: &'records mut [T],
     width: usize,
@@ -103,7 +104,7 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     key: E,
     buffers: &mut Buffers<T>,
     config: Config<'_, T>,
-    mut visit: Option<Visit<'_, 'records, T>>,
+    visit: Option<BucketVisit<'_, 'records, T>>,
 ) -> Vec<usize> {
     assert!((1..=MAX_RADIX_BITS).contains(&radix));
     assert!(shift < E::Value::BITS);
@@ -136,7 +137,7 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     if shards == 1 && config.block_size.is_none() {
         let mut key = key;
         return partition_digit(arr, radix, shift, &mut key, buffers, &mut |child, _| {
-            if let Some(callback) = visit.as_deref_mut() {
+            if let Some(callback) = visit {
                 callback(child);
             }
         });
@@ -193,22 +194,14 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     // completed the same pass and retain their recovery guards until adoption.
     let (mut global, ends) = unsafe { Partition::adopt_shards(input, tasks, buffers) };
     drop(local_buffers);
-    if let Some(finisher) = config.finish
-        && finish::try_finish(
-            &mut global,
-            &ends,
-            config.parallel,
-            finisher.limit,
-            finisher.sort,
-        )
-    {
-        return ends;
-    }
-    compact::permute_blocks(&mut global, shards, config.parallel);
-    let panic = global.compact_with(&ends, visit);
-    if let Some(payload) = panic {
-        unwind::resume(payload);
-    }
+    finish::complete(
+        &mut global,
+        &ends,
+        config.parallel,
+        config.finish.as_ref().map_or(0, |finish| finish.limit),
+        config.finish.as_ref().map(|finish| finish.sort),
+        visit,
+    );
     ends
 }
 
@@ -371,7 +364,7 @@ mod tests {
             .collect();
         let mut expected = rows.clone();
         expected.sort_by_key(|row| row.0);
-        let mut pending: Option<(*mut (u64, alloc::string::String), usize)> = None;
+        let pending = std::sync::Mutex::new(None::<&mut [(u64, String)]>);
         let mut buffers = Buffers::new();
         partition_impl_with_visit(
             &mut rows,
@@ -380,18 +373,16 @@ mod tests {
             ByKey(|row: &(u64, alloc::string::String)| row.0),
             &mut buffers,
             config(3, 7),
-            Some(&mut |child| {
-                if let Some((pointer, len)) = pending.take() {
-                    // SAFETY: this is an earlier materialized disjoint bucket.
-                    unsafe { core::slice::from_raw_parts_mut(pointer, len) }
-                        .sort_by_key(|row| row.0);
+            Some(&|child| {
+                let mut pending = pending.lock().unwrap();
+                if let Some(previous) = pending.take() {
+                    previous.sort_by_key(|row| row.0);
                 }
-                pending = Some((child.as_mut_ptr(), child.len()));
+                *pending = Some(child);
             }),
         );
-        if let Some((pointer, len)) = pending {
-            // SAFETY: the final bucket remains uniquely owned until consumed.
-            unsafe { core::slice::from_raw_parts_mut(pointer, len) }.sort_by_key(|row| row.0);
+        if let Some(previous) = pending.into_inner().unwrap() {
+            previous.sort_by_key(|row| row.0);
         }
         assert_eq!(rows, expected);
     }
@@ -412,7 +403,7 @@ mod tests {
                 ByKey(|row: &(u64, alloc::string::String)| row.0),
                 &mut buffers,
                 config(3, 7),
-                Some(&mut |_| panic!("callback panic")),
+                Some(&|_| panic!("callback panic")),
             );
         }));
         assert!(result.is_err());
@@ -524,8 +515,8 @@ mod tests {
             .collect();
         let mut expected: Vec<_> = rows.iter().map(|r| (r.0, r.1)).collect();
         expected.sort_by_key(|r| r.0);
-        let mut pending: Option<(*mut (u64, usize, &mut usize), usize)> = None;
-        let mut callbacks = 0;
+        let pending = std::sync::Mutex::new(None::<&mut [(u64, usize, &mut usize)]>);
+        let callbacks = AtomicUsize::new(0);
         partition_impl_with_visit(
             &mut rows,
             2,
@@ -533,22 +524,19 @@ mod tests {
             ByKey(|r: &(u64, usize, &mut usize)| r.0),
             &mut Buffers::new(),
             config(3, 7),
-            Some(&mut |child| {
-                callbacks += 1;
-                if let Some((pointer, len)) = pending.take() {
-                    // SAFETY: this is a previous, retired, disjoint bucket;
-                    // the current callback cannot overwrite or borrow it.
-                    let previous = unsafe { core::slice::from_raw_parts_mut(pointer, len) };
+            Some(&|child| {
+                callbacks.fetch_add(1, Ordering::Relaxed);
+                let mut pending = pending.lock().unwrap();
+                if let Some(previous) = pending.take() {
                     previous.sort_by_key(|r| r.0);
                 }
-                pending = Some((child.as_mut_ptr(), child.len()));
+                *pending = Some(child);
             }),
         );
-        if let Some((pointer, len)) = pending {
-            // SAFETY: this final retired interval remains exclusively owned.
-            unsafe { core::slice::from_raw_parts_mut(pointer, len) }.sort_by_key(|r| r.0);
+        if let Some(previous) = pending.into_inner().unwrap() {
+            previous.sort_by_key(|r| r.0);
         }
-        assert!(callbacks >= 2);
+        assert!(callbacks.load(Ordering::Relaxed) >= 2);
         assert_eq!(
             rows.iter().map(|r| (r.0, r.1)).collect::<Vec<_>>(),
             expected
@@ -569,10 +557,10 @@ mod tests {
             .enumerate()
             .map(|(id, r)| (((id * 73) % 64) as u64, id, r))
             .collect();
-        let mut pending: Option<(*mut (u64, usize, &mut usize), usize)> = None;
-        let mut callbacks = 0;
-        let mut consumed = 0;
+        let callbacks = AtomicUsize::new(0);
+        let consumed = AtomicUsize::new(0);
         let result = catch_unwind(AssertUnwindSafe(|| {
+            let pending = std::sync::Mutex::new(None::<&mut [(u64, usize, &mut usize)]>);
             partition_impl_with_visit(
                 &mut rows,
                 2,
@@ -580,24 +568,29 @@ mod tests {
                 ByKey(|r: &(u64, usize, &mut usize)| r.0),
                 &mut Buffers::new(),
                 config(3, 7),
-                Some(&mut |child| {
-                    callbacks += 1;
-                    if let Some((pointer, len)) = pending.take() {
-                        // SAFETY: the earlier retired bucket is disjoint and
-                        // cannot be accessed by the remaining producer work.
-                        let previous = unsafe { core::slice::from_raw_parts_mut(pointer, len) };
-                        previous.sort_by_key(|r| r.0);
-                        consumed += len;
+                Some(&|child| {
+                    let mut pending = pending
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let position = callbacks.fetch_add(1, Ordering::Relaxed);
+                    if position == 1 {
+                        if let Some(previous) = pending.take() {
+                            previous.sort_by_key(|r| r.0);
+                            consumed.fetch_add(previous.len(), Ordering::Relaxed);
+                        }
+                        assert!(pending.is_none());
+                        drop(pending);
                         panic!("second callback after previous exclusive bucket consumed");
                     }
-                    pending = Some((child.as_mut_ptr(), child.len()));
+                    if position == 0 {
+                        *pending = Some(child);
+                    }
                 }),
             );
         }));
         assert!(result.is_err());
-        assert_eq!(callbacks, 2);
-        assert!(consumed > 0);
-        assert!(pending.is_none());
+        assert!(callbacks.load(Ordering::Relaxed) >= 2);
+        assert!(consumed.load(Ordering::Relaxed) > 0);
         let mut ids = Vec::new();
         for (_, id, r) in rows {
             assert_eq!(*r, id);

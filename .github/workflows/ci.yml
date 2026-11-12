@@ -194,6 +194,7 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.value }}
       baseline: ${{ steps.build.outputs.baseline }}
+      artifact: ${{ steps.artifact.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -221,8 +222,9 @@ jobs:
           bun run tools continuous prepare "$baseline" \
             --out bench/results/prepared
       - uses: actions/upload-artifact@v7
+        id: artifact
         with:
-          name: prepared-revisions
+          name: prepared-revisions-${{ github.run_attempt }}
           path: bench/results/prepared/
           retention-days: 14
           if-no-files-found: error
@@ -245,7 +247,8 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - uses: actions/download-artifact@v8
         with:
-          name: prepared-revisions
+          artifact-ids: ${{ needs.prepare.outputs.artifact }}
+          merge-multiple: true
           path: bench/results/prepared
       - name: Measure retained revisions without compiling
         env:
@@ -263,7 +266,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: ${{ matrix.artifact }}
+          name: ${{ matrix.artifact }}-${{ needs.prepare.outputs.artifact }}
           path: |
             bench/results/continuous/
             !bench/results/continuous/binaries/**
@@ -293,12 +296,13 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - uses: actions/download-artifact@v8
         with:
-          name: prepared-revisions
+          artifact-ids: ${{ needs.prepare.outputs.artifact }}
+          merge-multiple: true
           path: ${{ runner.temp }}/prepared
       - uses: actions/download-artifact@v8
         continue-on-error: true
         with:
-          pattern: paired-*
+          pattern: paired-*-${{ needs.prepare.outputs.artifact }}
           path: ${{ runner.temp }}/paired
       - uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d # v0.6.16
         continue-on-error: true

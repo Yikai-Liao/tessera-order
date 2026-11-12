@@ -42,7 +42,7 @@ The R3 `finish_ordered` refactor keeps the flat-sample route and adds no scan, a
 
 ## Shared explicit direct-key scan
 
-[PR #126](https://github.com/Yikai-Liao/tessera-sort/pull/126) consolidates integer, float and reversed-key traversal into one explicit `fearless_simd` scan. Native lane comparisons stay at the sealed key boundary; traversal, mask aggregation and tail handling have one owner. This bounded first S1 stage retains the peel, short-path policy and once-per-pass dispatch. Scalar-loop prototypes did not preserve the generated-code savings; the selected construction remains explicitly vectorized with LLVM loop and SLP vectorization disabled. Retiring the insertion extractor adapter is separate unfinished work, not a condition already satisfied by the shared loop.
+[PR #126](https://github.com/Yikai-Liao/tessera-sort/pull/126) consolidates integer, float and reversed-key traversal into one explicit `fearless_simd` scan. Native lane comparisons stay at the sealed key boundary; traversal, mask aggregation and tail handling have one owner. This bounded first S1 stage retains the peel, short-path policy and once-per-pass dispatch. Scalar-loop prototypes did not preserve the generated-code savings; the selected construction remains explicitly vectorized with LLVM loop and SLP vectorization disabled. The shared loop did not itself retire the insertion extractor adapter; the [separate adapter stage](#direct-insertion-scan-operation) records that follow-up.
 
 Against the preceding merged head `81b5818`, normal and native linked-revision screens each cover `u32,u64,f64,reverse_u64,reverse_f64`, sorted/`sorted99`/`far_swaps`/random inputs, and 49/63/64/1,000/65,536 records, with two baseline placements, a current-source copy and repeated-current A/A. The normal screen uses nine blocks, the native screen three. Normal long-input integer/float scans remain within their controls; reversed long ordered inputs are favorable. These observations preserve the reason for the retired scans within the measured coverage, not a general source-causal speedup claim.
 
@@ -61,7 +61,39 @@ Initial short-input alerts and their targeted controls remain part of the decisi
 
 The first native follow-up covers `u64,reverse_u64,reverse_f64` on sorted/`sorted99` at 63/1,000 records; a separate float follow-up covers both distributions at 63/64 records. Neither replaces the full initial screen. Some A/A ranges remain broad, including native `Reverse<f64>/sorted/63` at 0.812–1.188. Normal `f64/sorted99/64` also reaches 1.1114 against one baseline, but has copy/current 0.8756 and A/A 0.807–1.193. Conflicting placements and targeted follow-ups do not establish a reproducible over-limit source loss; they also do not establish harmlessness across all placements. This limited stage accepts that remaining uncertainty explicitly. It does not waive the timing gate using identical normalized instructions or the equal fixed-work counts observed in eight short integer/float cases.
 
-A separate paired `u128` fallback screen covers the four distributions at 49/64/1,000/65,536 records without slower alerts; it is process-level evidence, not placement-isolated. Independent reviews found no blocking correctness/safety issues. The implementation and documentation-follow-up heads passed MSRV, serial/Rayon Miri, ASan and Linux/macOS/Windows checks, plus all four continuous measurement shards, Cloud archival and publication. The first 97-case continuous report has no slower alerts; the second reports the individually accepted `u64/random/49` cost above. Workflow completion and benchmark verdicts are separate, and a successful publication does not make its regression alert disappear. These gates support landing the scan stage, not full S1 completion: adapter retirement and broader width/backend code-generation and timing coverage remain open in the [roadmap](../../ROADMAP.md#simplification-candidates).
+A separate paired `u128` fallback screen covers the four distributions at 49/64/1,000/65,536 records without slower alerts; it is process-level evidence, not placement-isolated. Independent reviews found no blocking correctness/safety issues. The implementation and documentation-follow-up heads passed MSRV, serial/Rayon Miri, ASan and Linux/macOS/Windows checks, plus all four continuous measurement shards, Cloud archival and publication. The first 97-case continuous report has no slower alerts; the second reports the individually accepted `u64/random/49` cost above. Workflow completion and benchmark verdicts are separate, and a successful publication does not make its regression alert disappear. These gates support landing the scan stage, not full S1 completion. The adapter follow-up below has separate acceptance; broader width/backend code-generation and timing coverage remain open in the [roadmap](../../ROADMAP.md#simplification-candidates).
+
+## Direct insertion scan operation
+
+[PR #128](https://github.com/Yikai-Liao/tessera-sort/pull/128) retires `VectorKeys`, its unsafe extractor implementation and the identity-key short-path adapters. The shared insertion loop receives the inversion operation alongside its extractor. A direct pass captures the chosen backend inside the target-feature dispatch, while callback scans use the same mutable extractor as shifts. The scalar callback body moves unchanged out of the extractor trait into `scan::by_key`. Changing scan policy no longer requires another extractor implementation; mutation, budgets and suffix progress still have one owner. No routing, scan count, allocation or public contract changes accompany this stage.
+
+Against the preceding merged `2ebf375`, linked normal/native screens each cover 120 inputs: `u32,u64,f64,reverse_u64,reverse_f64,row_u64`, sorted/`sorted99`/`far_swaps`/random, and 49/63/64/1,000/65,536 records. A three-block normal screen precedes a nine-block expansion; native uses three blocks. Both baseline placements, current-copy placement and repeated-current A/A remain visible. Long inputs are near parity within the measured controls. Actual AVX2/SSE4.2 insertion bodies for integer, float and reversed float keys match normalized instructions across revisions and copies; that supports target-feature inlining, not a waiver of timing evidence.
+
+The operator explicitly accepts this stage's measured short-input differences for later investigation, rather than delaying adapter retirement for short-input tuning. This is a bounded decision for these 49–1,000-record controls, not a change to the general acceptance rule or permission to ignore long-input regressions. The following adverse observations remain accepted costs or uncertainty, not proven harmlessness; ratios are current/baseline, with current-copy/current shown separately:
+
+| Target and case | Baseline placements | Copy/current | A/A |
+|---|---|---|---|
+| Normal `f64/sorted/49` | 1.0201 / 1.2672 | 0.8032 | 0.9507–1.0493 |
+| Normal `f64/sorted/63` | 1.1810 / 1.0199 | 0.9035 | 0.9439–1.0561 |
+| Normal `f64/sorted/64` | 1.1358 / 0.9964 | 0.9044 | 0.9744–1.0256 |
+| Normal `Reverse<f64>/sorted99/64` | 1.0687 / 1.0665 | 0.9484 | 0.9517–1.0483 |
+| Normal `Reverse<u64>/sorted/49` | 1.1090 / 1.0405 | 0.9440 | 0.8973–1.1027 |
+| Normal `Reverse<u64>/sorted99/64` | 1.2604 / 1.2903 | 0.7797 | 0.9335–1.0665 |
+| Native `f64/sorted/64` | 1.0764 / 1.0778 | 1.0732 | 0.9845–1.0155 |
+| Native `f64/sorted99/64` | 1.1626 / 1.1491 | 0.8613 | 0.9511–1.0489 |
+| Native `Reverse<f64>/sorted99/49` | 1.1218 / 1.1200 | 0.9053 | 0.9815–1.0185 |
+| Native `Reverse<f64>/sorted99/63` | 1.1061 / 1.1258 | 0.8925 | 0.9908–1.0092 |
+| Native `row_u64/sorted/49` | 1.1090 / 1.0821 | 0.9397 | 0.9644–1.0356 |
+| Native `row_u64/sorted/63` | 1.1101 / 1.0945 | 0.9461 | 0.9737–1.0263 |
+| Native `row_u64/sorted99/49` | 1.1721 / 1.1764 | 0.8500 | 0.9240–1.0760 |
+| Native `row_u64/sorted99/63` | 0.9898 / 1.1721 | 1.0075 | 0.9574–1.0426 |
+| Native `u64/sorted/49` | 1.1198 / 1.0774 | 0.8700 | 0.9082–1.0918 |
+| Native `u64/sorted99/49` | 1.0585 / 1.0549 | 0.9287 | 0.9614–1.0386 |
+| Native `u64/sorted99/64` | 1.0847 / 1.0741 | 0.9583 | 0.9134–1.0866 |
+
+The implementation-head continuous report also observes `u64/skew99/1000` at 1.0739 (99% interval 1.0604–1.0802); it belongs to the accepted short-input scope. Workflow execution, all four measurement shards, archival and publication succeeded, but the benchmark verdict is a regression alert. Overall gains do not cancel it. Same-source calibration across three LLD layouts covers 18 short float/integer/row ordered inputs without alerts; the subsequent revision-layout measurement timed out and is incomplete, so it supplies no passing revision verdict. These results do not isolate a source cause for the short differences.
+
+Independent source re-review found no blocking correctness or design issues. Differential tests cover budget exhaustion and both insertion entry points across the dispatch threshold for NaN payloads, signed zeros, reversed floats and wide keys. Workspace, Rayon and disabled-vectorizer tests pass; implementation-head CI supplies MSRV, serial/Rayon Miri, ASan and Linux/macOS/Windows coverage. Adapter retirement is complete within this stage; [short-input investigation and broader S1 coverage](../../ROADMAP.md#simplification-candidates) remain unfinished.
 
 ## Root insertion ownership
 

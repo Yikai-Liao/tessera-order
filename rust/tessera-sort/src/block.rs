@@ -385,7 +385,6 @@ pub(crate) struct Buffers<T> {
     counts: Vec<usize>,
     #[cfg(debug_assertions)]
     seen: Vec<bool>,
-    ends: Vec<Vec<usize>>,
 }
 
 impl<T> Buffers<T> {
@@ -400,14 +399,7 @@ impl<T> Buffers<T> {
             counts: Vec::new(),
             #[cfg(debug_assertions)]
             seen: Vec::new(),
-            ends: Vec::new(),
         }
-    }
-
-    /// Keeps the allocation of a bucket-end vector for a later pass.
-    pub(crate) fn recycle_ends(&mut self, mut ends: Vec<usize>) {
-        ends.clear();
-        self.ends.push(ends);
     }
 }
 
@@ -602,9 +594,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     /// every bucket's blocks and partial length, so this is one pass over the
     /// bucket table, not over the records.
     fn record_ends(&mut self) -> Vec<usize> {
-        let mut ends = self.buffers.ends.pop().unwrap_or_default();
-        ends.clear();
-        ends.reserve_exact(self.buffers.partial_blocks.len());
+        let mut ends = Vec::with_capacity(self.buffers.partial_blocks.len());
         let mut records = 0;
         for (bucket, partial) in self.buffers.partial_blocks.iter().enumerate() {
             let full_blocks = self.bucket_blocks(bucket).len() - 1;

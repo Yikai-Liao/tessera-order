@@ -118,7 +118,6 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
         match plan_after_equality(records, &ends, varying, tile_len, extractor) {
             Some(progress) => {
                 // The node is unchanged; continue with the bit-consuming plan.
-                scratch.block.recycle_ends(ends);
                 plan = progress;
             }
             None => {
@@ -127,7 +126,6 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
                 // the end.
                 let (less, rest) = records.split_at_mut(ends[0]);
                 let (_, greater) = rest.split_at_mut(ends[1] - ends[0]);
-                scratch.block.recycle_ends(ends);
                 let mut right_extractor = extractor.clone();
                 [
                     (less, scratch, extractor),
@@ -199,7 +197,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
         pool.give(scratch);
     };
     let limit = bucket_limit::<T>(records.len(), digit.width);
-    let ends = block::partition_digit_parallel(
+    block::partition_digit_parallel(
         records,
         digit.width,
         digit.shift,
@@ -212,7 +210,6 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
             visit: &visit,
         },
     );
-    scratch.block.recycle_ends(ends);
 }
 
 /// Bounds staging to square-root space and declines infeasible root layouts.

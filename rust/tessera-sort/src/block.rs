@@ -170,11 +170,13 @@ fn balanced_block_size_integer(len: usize, record_bytes: usize, radix: usize) ->
 }
 
 /// Transfers a retired bucket borrow; later compaction never accesses it again.
-type Visit<'callback, 'records, T> = &'callback mut dyn FnMut(&'records mut [T]);
+/// Receives each bucket's index and records.
+type Visit<'callback, 'records, T> = &'callback mut dyn FnMut(usize, &'records mut [T]);
 
 /// A [`Visit`] that also receives the extractor, which classification has
 /// finished borrowing by the time buckets are visited.
-type KeyVisit<'callback, 'records, T, E> = &'callback mut dyn FnMut(&'records mut [T], &mut E);
+type KeyVisit<'callback, 'records, T, E> =
+    &'callback mut dyn FnMut(usize, &'records mut [T], &mut E);
 
 /// Partitions `records` stably by the `radix`-bit digit of its keys at `shift`
 /// and returns each bucket's cumulative end in records.
@@ -223,7 +225,8 @@ pub(crate) fn partition_digit<'records, T, E: Extract<T>>(
     let ends = sorter.record_ends();
     // Classification has returned the extractor before any tile callback
     // starts; both phases use the same FnMut state in sequence.
-    let mut callback = |child: &'records mut [T]| visit(child, &mut extractor);
+    let mut callback =
+        |bucket: usize, child: &'records mut [T]| visit(bucket, child, &mut extractor);
     if let Some(payload) = sorter.compact_with(&ends, Some(&mut callback)) {
         unwind::resume(payload);
     }
@@ -788,12 +791,13 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                     break;
                 }
                 if end > begin {
+                    let index = ends.len() - remaining.len();
                     // SAFETY: this bucket is fully materialized and no longer a
                     // copy source; its input slice does not overlap scratch.
                     let bucket = unsafe {
                         core::slice::from_raw_parts_mut(input_ptr.add(begin), end - begin)
                     };
-                    if let Err(payload) = unwind::catch(|| callback(bucket)) {
+                    if let Err(payload) = unwind::catch(|| callback(index, bucket)) {
                         callback_panic = Some(payload);
                         return;
                     }
@@ -1064,7 +1068,7 @@ mod tests {
                     let panic = sorter.step((), |_, record: &(u32, u32)| (record.0 & 3) as usize);
                     assert!(panic.is_ok());
                     let ends = sorter.record_ends();
-                    let mut callback = |bucket: &mut [(u32, u32)]| {
+                    let mut callback = |_: usize, bucket: &mut [(u32, u32)]| {
                         // Buckets materialize in order, so the slice must hold
                         // exactly the records of the bucket that just landed.
                         assert!(

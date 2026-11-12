@@ -138,7 +138,7 @@ fn partition_impl_with_visit<'records, T: Send, E: Extract<T> + Clone + Send>(
     let shards = shards.min(full_blocks.max(1));
     if shards == 1 && config.block_size.is_none() {
         let mut key = key;
-        return partition_digit(arr, radix, shift, &mut key, buffers, &mut |child, _| {
+        return partition_digit(arr, radix, shift, &mut key, buffers, &mut |_, child, _| {
             if let Some(callback) = visit {
                 callback(child);
             }

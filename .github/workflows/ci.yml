@@ -141,11 +141,9 @@ jobs:
           if dpkg-query -W -f='${Status}' libtbb-dev 2>/dev/null | grep -q 'install ok installed'; then
             exit 0
           fi
-          # Hosted runners resolve the ubuntu.com DNS zone unreliably, and the other
-          # repositories the image configures must not gate this step. Install from
-          # one private source served by the Linux Kernel Archives mirror; apt still
-          # verifies Ubuntu's signed metadata with the image's keyrings.
-          mirror=https://mirrors.edge.kernel.org/ubuntu/
+          # Isolate Ubuntu packages from unrelated runner repositories. The Azure
+          # mirror has recovered from the outage (actions/runner-images#15296).
+          mirror=https://azure.archive.ubuntu.com/ubuntu/
           dir="$RUNNER_TEMP/apt"
           mkdir -p "$dir/parts" "$dir/lists"
           for suite in noble noble-updates noble-backports noble-security; do
@@ -158,7 +156,7 @@ jobs:
             -o Dir::Etc::SourceList="$dir/ubuntu.list"
             -o Dir::Etc::SourceParts="$dir/parts"
             -o Dir::State::lists="$dir/lists")
-          "${apt[@]}" update
+          "${apt[@]}" -o APT::Update::Error-Mode=any update
           "${apt[@]}" install -y --no-install-recommends libtbb-dev
       - uses: oven-sh/setup-bun@v2
         with:

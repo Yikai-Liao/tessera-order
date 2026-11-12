@@ -119,6 +119,6 @@ Compiler and dependency upgrades stay in the trend; protocol/input changes requi
 
 ### Setup and recovery
 
-Create a separate `benchmark-main` environment restricted to main, with `BENCHER_API_KEY` and `BENCHER_PROJECT`. Do not widen the PR environment's policy. Adding this workflow changes no credentials or account settings. Keep automatic execution disabled until a manually dispatched Bare Metal pilot confirms execution controls, complete ingestion, timeout headroom, Git publication and browser loading.
+Reuse the `benchmark` environment's `BENCHER_API_KEY` and `BENCHER_PROJECT`. Its deployment branch policy must allow `main` as well as `refs/pull/*/merge`. Keep automatic execution disabled until a manually dispatched Bare Metal pilot confirms execution controls, complete ingestion, timeout headroom, Git publication and browser loading.
 
 Rerunning the workflow measures again. If only publication failed, download the retained summary, check out the data branch, run `bun /path/to/source/bench/tracking/publish.ts /path/to/summary.jsonl`, then commit and push normally. Fourteen-day Actions evidence is diagnostic, not the long-term store. There is no site-refresh recovery step.

@@ -6,10 +6,10 @@ import { continuous } from "../catalog.ts";
 import { pairedRun } from "./fixtures/paired.ts";
 import { fixture } from "./fixtures/report.ts";
 import { summarizePairedTrend } from "./history.ts";
-import { pairedBmf, pairedSummary } from "./paired.ts";
+import { CONTINUOUS_SHARDS, pairedBmf, pairedSummary } from "./paired.ts";
 
 function measured(ratio: number, uuid: string, time: string, head = "same-baseline") {
-  const run = pairedRun(1, ratio);
+  const runs = Array.from({ length: CONTINUOUS_SHARDS }, (_, index) => pairedRun(index + 1, ratio));
   const report = fixture();
   report.uuid = uuid;
   report.start_time = time;
@@ -17,7 +17,7 @@ function measured(ratio: number, uuid: string, time: string, head = "same-baseli
   report.branch.head.start_point = null;
   report.testbed.name = continuous.testbed;
   report.results = [
-    Object.entries(pairedBmf([run])).map(([name, values]) => ({
+    Object.entries(pairedBmf(runs)).map(([name, values]) => ({
       benchmark: { uuid: name, name },
       measures: [
         {
@@ -27,7 +27,7 @@ function measured(ratio: number, uuid: string, time: string, head = "same-baseli
       ],
     })),
   ];
-  return { report, summary: pairedSummary([run], report) };
+  return { report, summary: pairedSummary(runs, report) };
 }
 
 test("paired history retains focus after a regression is fixed", () => {

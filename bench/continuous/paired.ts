@@ -14,7 +14,7 @@ import { parsePlan } from "../plan.ts";
 import { type BencherReport, type Row, summarizeRows } from "./report.ts";
 
 /** Hosted matrix width; workflows obtain their matrix from this owner. */
-export const CONTINUOUS_SHARDS = 4;
+export const CONTINUOUS_SHARDS = 6;
 
 /** Exact source identity captured by this CI run. */
 export interface PairedSource {

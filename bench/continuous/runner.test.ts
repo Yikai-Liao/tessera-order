@@ -45,7 +45,8 @@ test("rejects a self-consistent but shortened inventory across every shard", asy
   t.after(() => rm(out, { recursive: true, force: true }));
   const runs = await writePaired(out);
   const trusted = runs[0].shard!.allCases;
-  const shortened = trusted.filter((id) => !id.endsWith("/par-4"));
+  const omitted = trusted.find((id) => id.endsWith("/par-4"));
+  const shortened = trusted.filter((id) => id !== omitted);
   for (const run of runs) {
     run.shard!.allCases = shortened;
     run.cases = shardCases(shortened, run.shard!.index, CONTINUOUS_SHARDS);

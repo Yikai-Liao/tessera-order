@@ -221,7 +221,15 @@ jobs:
           echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
           bun run tools continuous prepare "$baseline" \
             --out bench/results/prepared
+      - name: Retain preparation log
+        if: always()
+        run: |
+          if [ -f bench/results/prepared.log ]; then
+            mkdir -p bench/results/prepared
+            cp bench/results/prepared.log bench/results/prepared/preparation.log
+          fi
       - uses: actions/upload-artifact@v7
+        if: always()
         id: artifact
         with:
           name: prepared-revisions-${{ github.run_attempt }}

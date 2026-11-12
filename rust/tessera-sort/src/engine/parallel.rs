@@ -3,7 +3,6 @@
 //! Parallel root partition and completion of materialized buckets.
 
 use super::*;
-use rayon::prelude::*;
 
 /// The archived experiment did not reliably win at 512 KiB; keep 1 MiB as a
 /// starting cutoff until controlled measurements retune it.
@@ -95,85 +94,77 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
         return;
     }
     let shards = rayon::current_num_threads().min((node_bytes / MIN_TASK_BYTES).max(1));
-    let mut plan = plan_node(records, varying, tile_len, extractor);
-    if let NodePlan::Equal(equal) = plan {
-        // The same rank digit as serial equality partitions.
-        let rank = Rank {
-            extractor: extractor.clone(),
-            equal,
-        };
-        let ends = block::partition_parallel(records, 2, rank, &mut scratch.block, shards, &|_| {});
-        match plan_after_equality(records, &ends, varying, tile_len, extractor) {
-            Some(progress) => {
-                // The node is unchanged; continue with the bit-consuming plan.
-                plan = progress;
-            }
-            None => {
-                // Materialization has retired all copy sources. Skip the equal
-                // band; the unused fourth bucket leaves the greater band through
-                // the end.
-                let (less, rest) = records.split_at_mut(ends[0]);
-                let (_, greater) = rest.split_at_mut(ends[1] - ends[0]);
-                let mut right_extractor = extractor.clone();
-                [
-                    (less, scratch, extractor),
-                    (greater, &mut Scratch::new(), &mut right_extractor),
-                ]
-                .into_par_iter()
-                .for_each(|(records, scratch, extractor)| {
-                    Sorter {
-                        scratch,
-                        extractor,
-                        tile_len,
-                    }
-                    .sort_child(records, varying);
-                });
+    match plan_node(records, varying, tile_len, extractor) {
+        NodePlan::Equal(equal) => {
+            let rank = Rank::new(extractor.clone(), equal, varying);
+            let split = Split::equality(&rank, varying);
+            partition_root(records, rank, split, extractor, scratch, shards, tile_len);
+        }
+        NodePlan::Digit(digit) => {
+            let candidate = varying & !digit.mask::<E::Value>().to_u128();
+            // Finished buckets need no child sorting; direct keys count them in parallel.
+            if candidate == 0
+                && key::try_count_window_parallel::<T, E>(records, digit.shift, digit.width)
+            {
                 return;
             }
-        }
-    }
-    let digit = match plan {
-        NodePlan::Digit(digit) => digit,
-        plan => {
-            Sorter::<T, E> {
-                scratch,
+            let split = Split {
+                radix: digit.width,
+                candidate,
+                finished: None,
+            };
+            partition_root(
+                records,
+                KeyDigit::new(extractor.clone(), digit.shift),
+                split,
                 extractor,
+                scratch,
+                shards,
                 tile_len,
-            }
-            .execute_node(records, varying, plan);
-            return;
+            );
         }
-    };
-
-    let candidate = varying & !digit.mask::<E::Value>().to_u128();
-    // Finished buckets need no child sorting; direct keys count them in parallel.
-    if candidate == 0 && key::try_count_window_parallel::<T, E>(records, digit.shift, digit.width) {
-        return;
+        plan => Sorter::<T, E> {
+            scratch,
+            extractor,
+            tile_len,
+        }
+        .execute_node(records, varying, plan),
     }
+}
 
+/// Partitions the root by `classifier` across `shards` and finishes each
+/// unfinished bucket with `extractor` in the task that completed its movement.
+fn partition_root<T: Send, C: Classify<T> + Clone + Send, E: Extract<T> + Clone + Sync>(
+    records: &mut [T],
+    classifier: C,
+    split: Split,
+    extractor: &E,
+    scratch: &mut Scratch<T>,
+    shards: usize,
+    tile_len: usize,
+) {
     let pool = Pool::new();
-    let child_extractor = extractor.clone();
-    let visit = |child: &mut [T]| {
-        if candidate == 0 {
+    let visit = |bucket: usize, child: &mut [T]| {
+        if split.candidate == 0 || split.finished == Some(bucket) {
             return;
         }
         // Movement retired every source and released its locks before lending
         // this final band. Finish in that task instead of handing it to a second
         // queue. Tile storage owns whether the whole child fits one tile.
-        let mut key = child_extractor.clone();
+        let mut key = extractor.clone();
         let mut scratch = pool.take();
         Sorter::<T, E> {
             scratch: &mut scratch,
             extractor: &mut key,
             tile_len: tile::finishing_capacity::<T>(child.len(), tile_len),
         }
-        .sort_child(child, candidate);
+        .sort_child(child, split.candidate);
         pool.give(scratch);
     };
     block::partition_parallel(
         records,
-        digit.width,
-        KeyDigit::new(extractor.clone(), digit.shift),
+        split.radix,
+        classifier,
         &mut scratch.block,
         shards,
         &visit,

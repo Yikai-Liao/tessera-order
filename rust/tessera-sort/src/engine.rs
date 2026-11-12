@@ -21,7 +21,7 @@ mod tile;
 pub(crate) use tile::Cursor;
 
 use crate::thresholds::{INSERTION_MAX, TILE_BYTES};
-use plan::{Digit, NodePlan, bit_len, plan_after_equality, plan_node};
+use plan::{Digit, NodePlan, bit_len, plan_node};
 use tile::capacity as tile_capacity;
 
 use alloc::vec::Vec;
@@ -117,6 +117,12 @@ fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor
     (union.to_u128() ^ intersection.to_u128()) & candidate
 }
 
+/// The candidate bits left when every child holds the top bit of a nonzero
+/// `varying` constant, as after a run or equality split.
+fn without_top_bit(varying: u128) -> u128 {
+    varying & !(1 << (bit_len(varying) - 1))
+}
+
 /// Buffers shared by the nodes and tiles of one sort.
 struct Scratch<T> {
     /// Tile-owned record scratch and cached classification storage.
@@ -148,6 +154,17 @@ struct Split {
 }
 
 impl Split {
+    /// The split an equality classification leaves: the equal bucket is
+    /// complete and every other bucket holds the top varying bit constant, so
+    /// every unfinished child consumes it, as after a digit or run split.
+    fn equality<E, V: Unsigned>(rank: &Rank<E, V>, varying: u128) -> Self {
+        Self {
+            radix: 2,
+            candidate: without_top_bit(varying),
+            finished: Some(rank.equal_bucket()),
+        }
+    }
+
     /// Partitions `records` by `classifier` and finishes tile-sized children
     /// while they are cache-hot, using the extractor `lend` returns for child
     /// work. Returns each bucket's end; larger children remain.
@@ -458,7 +475,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         } else {
             boundary
         };
-        let candidate = varying & !(1u128 << (bit_len(varying) - 1));
+        let candidate = without_top_bit(varying);
         self.sort_child(&mut records[..boundary], candidate);
         self.sort_child(&mut records[boundary..], candidate);
     }
@@ -531,18 +548,11 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         self.finish_children(records, ends, split);
     }
 
-    /// Partitions below, equal to, and above a sampled key. The equal band is done.
-    fn partition_equal(&mut self, records: &mut [T], equal: KeyValue<T, E>, parent_varying: u128) {
-        // Outer bands keep every candidate bit; the equal band is complete.
-        let split = Split {
-            radix: 2,
-            candidate: parent_varying,
-            finished: Some(1),
-        };
-        let rank = Rank {
-            extractor: &mut *self.extractor,
-            equal,
-        };
+    /// Partitions below, equal to, and above a sampled key, splitting the
+    /// outer band that crosses the top varying bit. The equal band is done.
+    fn partition_equal(&mut self, records: &mut [T], equal: KeyValue<T, E>, varying: u128) {
+        let rank = Rank::new(&mut *self.extractor, equal, varying);
+        let split = Split::equality(&rank, varying);
         let ends = split.partition(
             records,
             rank,
@@ -550,17 +560,6 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             self.scratch,
             self.tile_len,
         );
-        if let Some(plan) = plan_after_equality(
-            records,
-            &ends,
-            parent_varying,
-            self.tile_len,
-            self.extractor,
-        ) {
-            // The single band exceeds the tile, so no visit finished it.
-            self.execute_node(records, parent_varying, plan);
-            return;
-        }
         self.finish_children(records, ends, split);
     }
 
@@ -714,6 +713,53 @@ mod tests {
             let narrow = alloc::vec![17u8; len];
             assert_eq!(scan_varying_bits(&narrow, u8::MAX as u128, &mut Direct), 0);
         }
+    }
+
+    /// Places a new, smaller key on exactly the records each node samples, so
+    /// an equality split peels only its sampled records and leaves every
+    /// other record in one outer band. Equality splits that keep the top
+    /// varying bit nest once per peel: quadratic work and linear depth.
+    #[test]
+    fn peeled_equality_chains_stay_shallow() {
+        const TILE_BYTES: usize = 128;
+        let levels = if cfg!(miri) { 4 } else { 200 };
+        let min_sampled = 4 * tile_capacity::<u64>(TILE_BYTES);
+        let len = min_sampled + levels * plan::KEY_SAMPLE_LEN;
+        let mut remaining: Vec<usize> = (0..len).collect();
+        let mut keys = alloc::vec![0u64; len];
+        let mut pivot = u64::MAX;
+        while remaining.len() >= min_sampled + plan::KEY_SAMPLE_LEN {
+            let sampled: Vec<_> = (0..plan::KEY_SAMPLE_LEN)
+                .map(|stratum| plan::sample_index(remaining.len(), stratum))
+                .collect();
+            for &index in sampled.iter().rev() {
+                keys[remaining.remove(index)] = pivot;
+            }
+            pivot -= 1;
+        }
+        // Unordered keys below every pivot keep their band unordered.
+        for (index, &slot) in remaining.iter().enumerate() {
+            keys[slot] = (index as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 8;
+        }
+        let mut records: Vec<_> = keys.iter().copied().enumerate().collect();
+        let mut calls = 0usize;
+        sort_with_tile_bytes(
+            &mut records,
+            ByKey(|record: &(usize, u64)| {
+                calls += 1;
+                record.1
+            }),
+            TILE_BYTES,
+        );
+        assert!(records.windows(2).all(|pair| pair[0].1 <= pair[1].1));
+        assert!(
+            records
+                .windows(2)
+                .all(|pair| pair[0].1 < pair[1].1 || pair[0].0 < pair[1].0)
+        );
+        // Each node level reads a key a few times per record; the bound
+        // depends on key width, not on the number of peels.
+        assert!(calls < 64 * len, "{calls} key calls for {len} records");
     }
 
     #[test]

@@ -2,9 +2,18 @@
 
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { caseLabel, caseName, caseParts, compareCases, modeName } from "../catalog.ts";
+import {
+  caseLabel,
+  caseName,
+  caseParts,
+  catalog,
+  compareCases,
+  modeName,
+  modeOrder,
+} from "../catalog.ts";
 import { renderMainOverview } from "./history.ts";
 import {
+  type Facet,
   indexSchema,
   parseRuns,
   runSchema,
@@ -14,12 +23,38 @@ import {
 
 /** Present cases from the catalog in reading order; historical IDs keep readable fallbacks. */
 export function trackingCases(ids: string[]): TrackingCase[] {
-  return ids.toSorted(compareCases).map((id) => ({
-    id,
-    label: caseLabel(id),
-    group: modeName(caseParts(id).mode) || "other",
-    ...caseName(id),
-  }));
+  return ids.toSorted(compareCases).map((id) => {
+    const parts = caseParts(id);
+    return {
+      id,
+      label: caseLabel(id),
+      group: modeName(parts.mode) || "other",
+      ...caseName(id),
+      type: parts.type || "other",
+      length: parts.n || "other",
+    };
+  });
+}
+
+/** Each filterable field's values in catalog order; unknown values follow, in reading order. */
+export function trackingFacets(cases: TrackingCase[]) {
+  const part = (id: string, index: number) => id.split("/")[index] ?? "";
+  const rank = (list: { id: string }[], value: string) => {
+    const found = list.findIndex((entry) => entry.id === value);
+    return found < 0 ? list.length : found;
+  };
+  const ordered = (field: Facet, key: (id: string) => number) => {
+    const first = new Map<string, number>();
+    for (const entry of cases) if (!first.has(entry[field])) first.set(entry[field], key(entry.id));
+    // A stable sort keeps reading order among equal keys.
+    return [...first].toSorted((a, b) => a[1] - b[1]).map(([value]) => value);
+  };
+  return {
+    type: ordered("type", (id) => rank(catalog.types, part(id, 1))),
+    input: ordered("input", (id) => rank(catalog.distributions, part(id, 2))),
+    length: ordered("length", (id) => Number(part(id, 3)) || Number.MAX_SAFE_INTEGER),
+    group: ordered("group", (id) => modeOrder(part(id, 5))),
+  };
 }
 
 /** Append a validated report and regenerate the index/preview. Git owns atomic publication and retries.
@@ -47,10 +82,12 @@ export async function appendRun(directory: string, input: TrackingRun) {
       join(directory, month + ".jsonl"),
       entries.map((entry) => JSON.stringify(entry) + "\n").join(""),
     );
+  const cases = trackingCases([...new Set(runs.flatMap((entry) => Object.keys(entry.values)))]);
   // Validate what the browser will parse, so a bad index fails publication instead of the page.
   const index = indexSchema.parse({
     months: [...months.keys()],
-    cases: trackingCases([...new Set(runs.flatMap((entry) => Object.keys(entry.values)))]),
+    cases,
+    facets: trackingFacets(cases),
   });
   await writeFile(join(directory, "index.json"), JSON.stringify(index) + "\n");
   await writeFile(join(directory, "preview.svg"), renderMainOverview(runs, index.cases));

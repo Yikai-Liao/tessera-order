@@ -14,6 +14,10 @@ export const theme = {
       rule: "#e6e5e0",
       axis: "#8d8c86",
       tag: "#c9c8c2",
+      violet: "#6250d6",
+      magenta: "#e87ba4",
+      green: "#008300",
+      yellow: "#eda100",
     },
     dark: {
       panel: "#1e1e1d",
@@ -23,8 +27,17 @@ export const theme = {
       rule: "#30302e",
       axis: "#6f6e69",
       tag: "#4a4a46",
+      violet: "#9085e9",
+      magenta: "#d55181",
+      green: "#008300",
+      yellow: "#c98500",
     },
   },
+  /** Identity colours for overlaid series, in assignment order. Blue and orange
+   * are excluded because they mean faster and slower. Every pair stays
+   * distinguishable with colour-vision deficiency in both modes; yellow and
+   * green are the weakest pair in dark mode, so series always carry a name. */
+  series: ["violet", "magenta", "green", "yellow"],
   font: {
     family: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
     body: 13,

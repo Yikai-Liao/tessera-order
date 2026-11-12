@@ -53,7 +53,7 @@ These rounded values come from the recorded `release-benchmark-raw-2d6fac2` sess
 | How much memory is required? | Named range rows | Ring for random input, dot for worst input, input-size reference |
 | Which build regressed? | PR comparison matrix | Shared cases, one column per build, stems from zero |
 | What changed during a PR or on main? | Trend matrix | One time series per case and build, reference at the baseline or first run |
-| How long does one case take over time? | Case history | Absolute time per run with its interval, one line per hardware specification |
+| How do selected cases compare over time? | Case comparison | Up to four cases on one log-time or relative-change axis with intervals; independent commit-slot or UTC-time spacing; identity colours that are neither blue nor orange |
 
 A new dataset does not require a new template; a genuinely different question may.
 

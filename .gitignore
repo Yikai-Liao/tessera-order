@@ -19,5 +19,10 @@ perf.data*
 /docs/.vitepress/cache/
 docs/.vitepress/.temp/
 
+# Local performance-page previews and downloaded measurement data.
+/docs/benchmarks/_preview-*.md
+/docs/public/_preview-data/
+/docs/public/_real-data/
+
 # Pinned third-party benchmark sources
 /bench/vendor/

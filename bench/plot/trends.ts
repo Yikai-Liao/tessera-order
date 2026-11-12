@@ -22,6 +22,10 @@ export interface TrendRow {
 }
 export interface TrendChart {
   id?: string;
+  /** Expand the plot to this host width without enlarging labels or row heights. */
+  minimumWidth?: number;
+  /** Shared, non-decreasing numeric run positions; omitted means equal spacing. */
+  positions?: number[];
   title: NameCell;
   headline: string;
   description: string;
@@ -56,9 +60,21 @@ export function renderTrends(spec: TrendChart) {
     throw new Error(
       "Trend rows require matching cells, finite histories and a positive minimum span",
     );
+  if (
+    spec.positions &&
+    (!spec.positions.length ||
+      spec.positions.some(
+        (x, index, xs) => !Number.isFinite(x) || (index > 0 && x < xs[index - 1]),
+      ) ||
+      rows.some((row) =>
+        row.cells.some((cell) => cell && cell.changes.length !== spec.positions!.length),
+      ))
+  )
+    throw new Error("Trend positions must be finite, ordered and match every history");
   const { W: width, cols } = matrixLayout(
     spec.columns.length,
     nameWidth([spec.title, ...rows.map((row) => row.name)]),
+    spec.minimumWidth,
   );
   const { pad, headerRule } = theme.layout;
   const rowHeight = 46;
@@ -132,20 +148,20 @@ export function renderTrends(spec: TrendChart) {
           latest = cell.changes.findLastIndex((value) => value !== null),
           left = column.left + 6,
           right = column.plotR - 8;
-        const x: Plot.ScaleOptions = {
-          type: "linear",
-          domain: last ? [0, last] : [-1, 0],
-          range: [left, right],
-          nice: false,
-        };
-        const points = cell.changes.map((value, run) => ({ value, run }));
+        const xs = spec.positions ?? cell.changes.map((_, run) => run);
+        const lowX = xs[0],
+          highX = xs[last];
+        const domain =
+          lowX === highX ? (spec.positions ? [lowX - 1, highX + 1] : [-1, 0]) : [lowX, highX];
+        const x: Plot.ScaleOptions = { type: "linear", domain, range: [left, right], nice: false };
+        const points = cell.changes.map((value, run) => ({ value, run: xs[run] }));
         layers.push({
           x,
           y,
           marks: [
             Plot.ruleY([0], {
-              x1: last ? 0 : -1,
-              x2: last || 0,
+              x1: domain[0],
+              x2: domain[1],
               stroke: ink.axis,
               strokeDasharray: "3 3",
             }),

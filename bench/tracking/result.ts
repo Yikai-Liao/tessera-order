@@ -16,7 +16,7 @@ const reportSchema = z.object({
     head: z.object({ version: z.object({ hash: z.string() }) }),
   }),
   testbed: z.object({
-    name: z.literal("baremetal-intel-v1-absolute-v1"),
+    name: z.literal("main"),
     spec: z.object({ uuid: z.uuid(), slug: z.literal("intel-v1") }),
   }),
   results: z.tuple([
@@ -42,6 +42,8 @@ const reportSchema = z.object({
 export const runSchema = z.object({
   id: z.uuid(),
   time: z.iso.datetime(),
+  // Git committer time, normalized to UTC; older journals have only measurement time.
+  commit_time: z.iso.datetime().optional(),
   hash: z.string().regex(/^[a-f0-9]{40}$/),
   spec: z.uuid(),
   protocol: z.literal("criterion-main-v1"),
@@ -68,13 +70,24 @@ export const caseSchema = z.object({
   input: z.string().min(1),
   sub: z.string(),
   tag: z.string(),
+  type: z.string().min(1),
+  length: z.string().min(1),
 });
 export type TrackingCase = z.infer<typeof caseSchema>;
-/** Months with journals, and cases in display order: grouped by mode, serial first. */
+/** Months with journals, cases in display order (grouped by mode, serial first)
+ * and, for each case field a reader filters by, its values in catalog order.
+ * `input` is the distribution and `group` the API mode. */
 export const indexSchema = z.object({
   months: z.array(z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)),
   cases: z.array(caseSchema),
+  facets: z.object({
+    type: z.array(z.string()),
+    input: z.array(z.string()),
+    length: z.array(z.string()),
+    group: z.array(z.string()),
+  }),
 });
+export type Facet = keyof z.infer<typeof indexSchema>["facets"];
 
 /** Accept a complete absolute-time report for this source and inventory, or fail publication. */
 export function summarizeReport(input: unknown, hash: string, project: string, ids: string[]) {

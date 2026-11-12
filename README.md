@@ -71,7 +71,7 @@ Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.de
 > [!NOTE]
 > The first complete release comparison remains on the [roadmap](ROADMAP.md). The preview below tracks Tessera on main, not an algorithm ranking.
 
-Main trend: the geometric mean of each mode's run-time change since the first run on the current runner specification; lower is faster. The [interactive page](https://yikai-liao.github.io/tessera-sort/benchmarks/) shows every case, absolute times and selectable time windows.
+Main trend: the geometric mean of each mode's run-time change since the first run on the current runner specification and protocol; lower is faster. The [interactive page](https://yikai-liao.github.io/tessera-sort/benchmarks/) filters cases by type, distribution, length and mode, compares cases over any time range and lists absolute times.
 
 [![Main performance trend](https://raw.githubusercontent.com/Yikai-Liao/tessera-sort/benchmark-data/main/preview.svg)](https://yikai-liao.github.io/tessera-sort/benchmarks/)
 

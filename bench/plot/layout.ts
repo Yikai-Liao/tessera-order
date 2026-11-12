@@ -24,9 +24,10 @@ export function nameWidth(names: NameCell[]) {
   );
 }
 
-/** Lay out one label column and equally sized build columns. */
-export function matrixLayout(count: number, namesWidth: number) {
+/** Lay out one label column and equally sized build columns, expanding to the host width if supplied. */
+export function matrixLayout(count: number, namesWidth: number, minimumWidth = 0) {
   const width = Math.max(
+    minimumWidth,
     theme.layout.width + Math.max(0, count - 2) * 180,
     2 * theme.layout.pad + Math.ceil(namesWidth) + 24 + count * 140 + (count - 1) * 20,
   );

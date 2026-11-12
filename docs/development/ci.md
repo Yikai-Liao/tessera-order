@@ -22,7 +22,7 @@ Issue and PR templates, Dependabot configuration, `fuzz/`, manual diagnostics an
 
 ## Lanes
 
-Use a bounded number of lanes: the account has 20 concurrent slots shared with benchmarks and repository checks. Continuous measurement builds once and uses four measurement jobs; Rust validation keeps its independent platform, Miri and sanitizer jobs, and algorithm comparison runs only for its affected inputs. There is no benchmark-to-test dependency or account-wide priority/preemption guarantee; multiple PRs and other repositories can still consume the account. See [capacity](continuous-benchmarks.md#capacity-and-recovery).
+Use a bounded number of lanes: the account has 20 concurrent slots shared with benchmarks and repository checks. Continuous measurement builds once and takes its matrix width from [`CONTINUOUS_SHARDS`](../../bench/continuous/paired.ts); Rust validation keeps its independent platform, Miri and sanitizer jobs, and algorithm comparison runs only for its affected inputs. There is no benchmark-to-test dependency or account-wide priority/preemption guarantee; multiple PRs and other repositories can still consume the account. See [capacity](continuous-benchmarks.md#capacity-and-recovery).
 
 | Check | Pull request | `main` |
 |---|---|---|
@@ -31,7 +31,7 @@ Use a bounded number of lanes: the account has 20 concurrent slots shared with b
 | Miri: serial backend and Rayon ownership fixtures | two parallel jobs | the same |
 | AddressSanitizer | `asan` | the same |
 | `cargo package` | in `rust / lint` | the same |
-| Paired continuous measurement | one preparation job and four complete-case shards, inputs up to 1M | none; independent opt-in absolute-time tracking on relevant pushes |
+| Paired continuous measurement | one preparation job and the configured complete-case shards, inputs up to 1M | none; independent opt-in absolute-time tracking on relevant pushes |
 | Algorithm harness tests, doctests, native smoke checks and report generation | `comparison`, for affected comparison/shared inputs | the same |
 
 The Rust lint job checks all workspace features with Clippy and rustdoc, including the benchmark's native-facing Rust code. These commands do not link executables, so they set `TESSERA_BENCH_CHECK_ONLY=1` to skip the benchmark build script's native compilation and linker inputs. The lint runner needs neither fetched native sources nor native build tools. The comparison job sets the variable only for the Clippy and rustdoc step it owns, then compiles, links and exercises the native competitors, including the sequential-linkage check. Cargo tracks changes to the variable so a check-only build cannot suppress a later executable build's native setup.

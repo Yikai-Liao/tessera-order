@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -28,6 +28,11 @@ test("all shards cover the same input inventory once, including four-thread mode
   const runs = await writePaired(out);
   const selected = runs.flatMap((run) => run.cases).sort();
   assert.deepEqual(selected, runs[0].shard!.allCases);
+  // Actions names bind a shard to its prepared artifact; JSON owns its index.
+  for (const run of runs) {
+    const name = `paired-${run.shard!.index}`;
+    await rename(join(out, name), join(out, `${name}-12345`));
+  }
   const loaded = await readPaired(out, source, join(out, "prepared"));
   const bmf = pairedBmf(loaded);
   assert.equal(Object.keys(bmf).length, selected.length);
@@ -74,6 +79,7 @@ for (const damage of [
   "features",
   "invalid-time",
   "provenance",
+  "different-build",
   "aslr",
   "budget",
   "missing-budget",
@@ -102,6 +108,7 @@ for (const damage of [
       if (damage === "features") run.builds!.current.features = [];
       if (damage === "invalid-time") run.samples![run.cases[0]][0].current = -1;
       if (damage === "provenance") delete (run.source as Partial<typeof run.source>).current;
+      if (damage === "different-build") run.binaries.current = "1".repeat(64);
       await writeFile(path, JSON.stringify(run));
     }
     await assert.rejects(readPaired(out, source, join(out, "prepared")));

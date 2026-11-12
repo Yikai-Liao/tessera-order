@@ -23,6 +23,7 @@ struct Bucket {
     sources: core::ops::Range<usize>,
     start: usize,
     len: usize,
+    /// The bucket index, which also selects the bucket's free-block cache.
     cache: usize,
     completed: bool,
     panic: Option<unwind::Payload>,
@@ -209,7 +210,7 @@ impl Bucket {
             // disjoint bands, even if they share a physical block fragment.
             let band =
                 unsafe { core::slice::from_raw_parts_mut(storage.input.add(self.start), self.len) };
-            self.panic = unwind::catch(|| visit(band)).err();
+            self.panic = unwind::catch(|| visit(self.cache, band)).err();
         }
     }
 }
@@ -417,7 +418,7 @@ mod tests {
                 block_size: Some(block_size),
                 parallel: !cfg!(miri),
             },
-            Some(finish),
+            Some(&|_, band| finish(band)),
         );
     }
 
@@ -714,7 +715,7 @@ mod tests {
                             block_size: Some(block_size),
                             parallel: !cfg!(miri),
                         },
-                        Some(&|band| {
+                        Some(&|_, band| {
                             if !cfg!(miri) {
                                 let (a, b) = rayon::join(|| 13 * 7, || 13 * 7);
                                 assert_eq!(a, b);

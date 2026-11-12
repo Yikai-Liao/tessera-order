@@ -170,22 +170,6 @@ pub(crate) unsafe trait Extract<T> {
         crate::engine::confirm_ascending(records, self, previous)
     }
 
-    /// Returns the offset of the first adjacent pair whose keys descend.
-    ///
-    /// Retaining the previous key avoids evaluating it again for the next
-    /// pair, so the key function is called once per scanned record.
-    #[inline]
-    fn first_inversion(&mut self, records: &[T]) -> Option<usize> {
-        let first = records.first()?;
-        let mut previous = self.key(first);
-        records.windows(2).position(|pair| {
-            let current = self.key(&pair[1]);
-            let inverted = previous > current;
-            previous = current;
-            inverted
-        })
-    }
-
     /// Sorts `records` stably by insertion, without a swap limit.
     ///
     /// Direct extraction selects its scan once for the whole pass.
@@ -193,7 +177,7 @@ pub(crate) unsafe trait Extract<T> {
     where
         Self: Sized,
     {
-        crate::engine::finish_insertion(records, self);
+        crate::engine::finish_insertion(records, self, crate::scan::by_key);
     }
 
     /// Sorts `records` stably by insertion within `budget` swaps.
@@ -205,7 +189,7 @@ pub(crate) unsafe trait Extract<T> {
     where
         Self: Sized,
     {
-        crate::engine::insertion_loop(records, budget, self)
+        crate::engine::insertion_loop(records, budget, self, crate::scan::by_key)
     }
 }
 

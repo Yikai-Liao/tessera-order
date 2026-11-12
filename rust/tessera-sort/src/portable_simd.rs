@@ -11,7 +11,7 @@
 //! The same generic code serves every key width and every backend.
 
 use crate::RadixKey;
-use crate::key::{ByKey, Extract};
+use crate::key::Direct;
 use fearless_simd::prelude::*;
 use fearless_simd::{Level, Simd, dispatch, u8x16, u16x8};
 
@@ -52,10 +52,10 @@ pub(crate) fn finish_insertion<K: RadixKey>(keys: &mut [K]) {
     // Every slice the scan sees is a suffix of `keys`, so a short pass never
     // reaches the vector kernel and skips dispatch.
     if keys.len() < SIMD_MIN {
-        ByKey(|key: &K| *key).finish_insertion(keys);
+        crate::engine::finish_insertion(keys, &mut Direct, crate::scan::by_key);
         return;
     }
-    dispatch!(Level::new(), simd => crate::engine::finish_insertion(keys, &mut VectorKeys(simd)));
+    dispatch!(Level::new(), simd => crate::engine::finish_insertion(keys, &mut Direct, |values, _| first_inversion_with(simd, values)));
 }
 
 /// Sorts `keys` stably by insertion within `budget` swaps, dispatched once.
@@ -64,27 +64,9 @@ pub(crate) fn finish_insertion<K: RadixKey>(keys: &mut [K]) {
 /// that case `keys` is a stable permutation of its input.
 pub(crate) fn insertion_sort<K: RadixKey>(keys: &mut [K], budget: usize) -> Option<usize> {
     if keys.len() < SIMD_MIN {
-        return ByKey(|key: &K| *key).insertion_sort(keys, budget);
+        return crate::engine::insertion_loop(keys, budget, &mut Direct, crate::scan::by_key);
     }
-    dispatch!(Level::new(), simd => crate::engine::insertion_loop(keys, budget, &mut VectorKeys(simd)))
-}
-
-/// Direct extraction with a backend already selected for this insertion pass.
-struct VectorKeys<S>(S);
-
-// SAFETY: this insertion-only adapter retains the default cached classification policy.
-unsafe impl<S: Simd, K: RadixKey> crate::key::Extract<K> for VectorKeys<S> {
-    type Value = K::Encoded;
-
-    #[inline(always)]
-    fn key(&mut self, record: &K) -> Self::Value {
-        record.encode()
-    }
-
-    #[inline(always)]
-    fn first_inversion(&mut self, values: &[K]) -> Option<usize> {
-        first_inversion_with(self.0, values)
-    }
+    dispatch!(Level::new(), simd => crate::engine::insertion_loop(keys, budget, &mut Direct, |values, _| first_inversion_with(simd, values)))
 }
 
 /// Converts per-bucket counts to per-bucket starts, in place.
@@ -130,7 +112,7 @@ fn prefix_sum_with<S: Simd>(simd: S, counts: &mut [u16]) {
 #[inline]
 pub(crate) fn confirm_ascending<K: RadixKey>(values: &[K], previous: K::Encoded) -> bool {
     if values.len() < SIMD_MIN {
-        return crate::engine::confirm_ascending(values, &mut ByKey(|value: &K| *value), previous);
+        return crate::engine::confirm_ascending(values, &mut Direct, previous);
     }
     previous <= values[0].encode() && first_inversion(values).is_none()
 }
@@ -466,6 +448,56 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn insertion_encodings() {
+        use crate::key::{ByKey, Extract};
+
+        fn check<K: RadixKey>(keys: Vec<K>)
+        where
+            K::Encoded: core::fmt::Debug,
+        {
+            let encoded = |keys: &[K]| keys.iter().copied().map(K::encode).collect::<Vec<_>>();
+            for budget in [0, 10, usize::MAX] {
+                let mut direct = keys.clone();
+                let mut scalar = keys.clone();
+                assert_eq!(
+                    insertion_sort(&mut direct, budget),
+                    ByKey(|key: &K| *key).insertion_sort(&mut scalar, budget),
+                );
+                assert_eq!(encoded(&direct), encoded(&scalar));
+            }
+            let mut expected = encoded(&keys);
+            expected.sort_unstable();
+            let mut finished = keys;
+            finish_insertion(&mut finished);
+            assert_eq!(encoded(&finished), expected);
+        }
+
+        // Cross the dispatch threshold with repeated keys and exact float bits,
+        // including both NaN signs and signed zeros. Partial passes must agree
+        // with callback extraction as well as complete insertion finishing.
+        for length in [63, 64, 65, 97] {
+            let bits = [
+                0,
+                1 << 63,
+                u64::MAX,
+                0x7ff8_0000_0000_0001,
+                1,
+                0xfff0_0000_0000_0000,
+            ];
+            let keys: Vec<_> = (0..length)
+                .map(|index| f64::from_bits(bits[(index * 5) % bits.len()]))
+                .collect();
+            check(keys.clone());
+            check(keys.into_iter().map(core::cmp::Reverse).collect());
+            check(
+                (0..length)
+                    .map(|index| ((index % 7) as u128) << 80)
+                    .collect(),
+            );
         }
     }
 

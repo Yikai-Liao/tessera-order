@@ -262,10 +262,8 @@ fn insertion_probe<T, E: Extract<T>>(
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Order {
     Ascending,
-    /// Keys descend; `strict` is false once an adjacent pair ties.
-    Descending {
-        strict: bool,
-    },
+    /// Keys descend, possibly with ties.
+    Descending,
     /// Every sampled pair had equal keys; gaps may still contain differing keys.
     Flat,
     Unsorted,
@@ -277,12 +275,8 @@ enum Order {
 fn finish_ordered<T, E: Extract<T>>(records: &mut [T], order: Order, extractor: &mut E) -> bool {
     match order {
         Order::Ascending => true,
-        Order::Descending { strict } => {
-            if strict {
-                reverse_strictly(records);
-            } else {
-                reverse_stably(records, extractor);
-            }
+        Order::Descending => {
+            reverse_stably(records, extractor);
             true
         }
         Order::Flat | Order::Unsorted => false,
@@ -319,7 +313,7 @@ fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     confirm_order(records, extractor)
 }
 
-/// Rejects a mixed prefix, then confirms one direction while preserving strictness.
+/// Rejects a mixed prefix, then confirms one direction.
 fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     // Three keys are the shortest mixed-direction witness. Reject it
     // before selecting a directional continuation; each key is read once.
@@ -330,11 +324,9 @@ fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     };
     let mut ascending = first <= current;
     let mut descending = first >= current;
-    let mut strict = first != current;
     if let Some(after) = keys.next() {
         ascending &= current <= after;
         descending &= current >= after;
-        strict &= current != after;
         if !ascending && !descending {
             return Order::Unsorted;
         }
@@ -360,10 +352,9 @@ fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
         if current < after {
             return Order::Unsorted;
         }
-        strict &= current != after;
         current = after;
     }
-    Order::Descending { strict }
+    Order::Descending
 }
 
 /// Confirms ascending keys after an already encoded predecessor.
@@ -380,14 +371,6 @@ pub(crate) fn confirm_ascending<T, E: Extract<T>>(
             (before <= after).then_some(after)
         })
         .is_some()
-}
-
-/// Finishes a strictly descending array: every key is distinct, so one
-/// reversal sorts it without moving equal keys past each other.
-// Keep the reversal loop out of the general sort path.
-#[inline(never)]
-fn reverse_strictly<T>(records: &mut [T]) {
-    records.reverse();
 }
 
 /// Sorts a descending array, stably, by reversing it and then reversing each
@@ -580,9 +563,7 @@ mod tests {
                 let expected = if records.windows(2).all(|pair| pair[0] <= pair[1]) {
                     Order::Ascending
                 } else if records.windows(2).all(|pair| pair[0] >= pair[1]) {
-                    Order::Descending {
-                        strict: records.windows(2).all(|pair| pair[0] > pair[1]),
-                    }
+                    Order::Descending
                 } else {
                     Order::Unsorted
                 };

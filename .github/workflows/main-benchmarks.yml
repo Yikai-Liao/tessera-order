@@ -33,7 +33,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.benchmark == 'true'
     runs-on: ubuntu-24.04
-    environment: benchmark-main
+    environment: benchmark
     timeout-minutes: 45
     permissions:
       contents: write

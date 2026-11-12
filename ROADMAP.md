@@ -53,7 +53,6 @@ Existing smaller candidates remain available; none is a prerequisite for P1:
 
 | ID | Retire | Replace with | Risk |
 |---|---|---|---|
-| T2 | Two-pass LSD tile planning and its split-point search | MSD-led tile finishing that keeps LSD's in-place ending | The simplest variant lost +55.5% on `u32/random/1M` ([evidence](docs/design/evidence.md#rejected-or-on-hold)); retry only with a cost-modelled mechanism listed there |
 | P2 | `Config`, `BucketFinish` and `BoundedFinish` describing one root partition | One description consumed by the block layer | Reassess after P1 so deleted staging policy does not acquire another wrapper |
 | P3 | `tile::Scratch`, `block::Buffers`, job `Pool` | A shared scratch lifecycle | Reassess after P1; preserve nested/reentrant lifetimes and allocation reuse rather than assume one buffer per worker |
 

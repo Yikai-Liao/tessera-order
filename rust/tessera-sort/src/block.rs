@@ -32,7 +32,7 @@
 //! <https://arxiv.org/abs/2607.05302>
 //!
 //! The engine uses one pass of this sort as a stable partition by one digit
-//! ([`partition_digit`]) or by a caller's classification ([`partition_by`]).
+//! ([`partition_digit`]).
 //! Buckets are filled block by block, consumed input blocks are recycled as
 //! output blocks, and a block order records the logical sequence, so a pass
 //! needs O(√n) scratch instead of a second buffer of the input's size.
@@ -209,75 +209,20 @@ pub(crate) fn partition_digit<'records, T, E: Extract<T>>(
     let width = radix.min(bits - shift);
     let shift = E::Value::from_usize(shift);
     let mask = E::Value::from_usize((1usize << width) - 1) << shift;
-    partition_pass(
-        records,
-        1 << radix,
-        extractor,
-        buffers,
-        move |extractor, record| ((extractor.key(record) & mask) >> shift).to_usize(),
-        Some(visit),
-    )
-}
-
-/// Partitions `records` stably into `buckets` buckets chosen by `classify` and
-/// returns each bucket's cumulative end in records.
-///
-/// Classes at or above `buckets` go to the last bucket.
-///
-/// # Panics
-///
-/// Panics if `buckets` is not a power of two in `2..=1 << MAX_RADIX_BITS`. A
-/// key-function panic is resumed after every record is back in `records`.
-pub(crate) fn partition_by<T, E: Extract<T>>(
-    records: &mut [T],
-    buckets: usize,
-    extractor: &mut E,
-    buffers: &mut Buffers<T>,
-    mut classify: impl FnMut(&mut E, &T) -> usize,
-) -> Vec<usize> {
-    let record_bytes = core::mem::size_of::<T>();
-    if records.len() < 2 || record_bytes == 0 {
-        return alloc::vec![0; buckets];
-    }
-    assert!(buckets.is_power_of_two() && (2..=1 << MAX_RADIX_BITS).contains(&buckets));
-    partition_pass(
-        records,
-        buckets,
-        extractor,
-        buffers,
-        move |extractor, record| classify(extractor, record).min(buckets - 1),
-        None,
-    )
-}
-
-/// Runs one block pass, compacts the result back into `records` and returns
-/// each bucket's cumulative end in records.
-fn partition_pass<'records, T, E: Extract<T>>(
-    records: &'records mut [T],
-    buckets: usize,
-    extractor: &mut E,
-    buffers: &mut Buffers<T>,
-    mut classify: impl FnMut(&mut E, &T) -> usize,
-    visit: Option<KeyVisit<'_, 'records, T, E>>,
-) -> Vec<usize> {
-    let radix = buckets.trailing_zeros() as usize;
-    let block_size = default_block_size(records.len(), core::mem::size_of::<T>(), radix);
-    let mut sorter = Partition::new(records, buckets, block_size, buffers);
+    let block_size = default_block_size(records.len(), record_bytes, radix);
+    let mut sorter = Partition::new(records, 1 << radix, block_size, buffers);
     let classify_extractor = &mut *extractor;
-    if let Some(payload) = sorter.step(move |record| classify(classify_extractor, record)) {
+    if let Some(payload) =
+        sorter.step(move |record| ((classify_extractor.key(record) & mask) >> shift).to_usize())
+    {
         sorter.compact();
         unwind::resume(payload);
     }
     let ends = sorter.record_ends();
     // Classification has finished borrowing the extractor before any tile
     // callback starts; both phases use the same FnMut state in sequence.
-    let panic = if let Some(visit) = visit {
-        let mut callback = |child: &'records mut [T]| visit(child, extractor);
-        sorter.compact_with(&ends, Some(&mut callback))
-    } else {
-        sorter.compact_with(&ends, None)
-    };
-    if let Some(payload) = panic {
+    let mut callback = |child: &'records mut [T]| visit(child, extractor);
+    if let Some(payload) = sorter.compact_with(&ends, Some(&mut callback)) {
         unwind::resume(payload);
     }
     ends

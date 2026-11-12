@@ -27,7 +27,7 @@ use tile::capacity as tile_capacity;
 use alloc::vec::Vec;
 
 use crate::block;
-use crate::key::{Direct, Extract, KeyHalf, Unsigned};
+use crate::key::{ByKey, Direct, Extract, KeyHalf, Unsigned};
 
 type KeyValue<T, E> = <E as Extract<T>>::Value;
 
@@ -114,6 +114,15 @@ fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor
         batch = batch.saturating_mul(2);
     }
     (union.to_u128() ^ intersection.to_u128()) & candidate
+}
+
+/// Ranks a key below (0), equal to (1) or above (2) a sampled key.
+///
+/// Serial and parallel equality partitions read this two-bit digit; the
+/// fourth bucket is unused, so the greater band runs to the end.
+#[inline]
+fn equality_rank<V: Ord>(key: V, equal: V) -> u8 {
+    u8::from(key >= equal) + u8::from(key > equal)
 }
 
 /// Buffers shared by the nodes and tiles of one sort.
@@ -526,18 +535,17 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
 
     /// Partitions below, equal to, and above a sampled key. The equal band is done.
     fn partition_equal(&mut self, records: &mut [T], equal: KeyValue<T, E>, parent_varying: u128) {
-        let classify = move |extractor: &mut E, record: &T| {
-            let key = extractor.key(record);
-            usize::from(key >= equal) + usize::from(key > equal)
-        };
-        // Three outcomes need four buckets because `partition_by` takes powers
-        // of two; the fourth is unused, so the greater band runs to the end.
-        let ends = block::partition_by(
+        let extractor = &mut *self.extractor;
+        // The same rank digit as the parallel root. ByKey caches classification
+        // and declines filling: equal ranks do not identify record payloads.
+        let mut rank = ByKey(move |record: &T| equality_rank(extractor.key(record), equal));
+        let ends = block::partition_digit(
             records,
-            4,
-            self.extractor,
+            2,
+            0,
+            &mut rank,
             &mut self.scratch.block,
-            classify,
+            &mut |_, _| {},
         );
         if ends[0] == records.len() || ends[1] == 0 {
             // A changing key can leave the whole node below or above the
@@ -563,7 +571,6 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::key::ByKey;
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     #[test]

@@ -11,7 +11,7 @@ A complete materialized parallel child may use a larger tile, up to a 1 MiB reco
 | Leaf | Used when | How it works |
 |---|---|---|
 | <span id="insertion">**Insertion sort**</span> | the tile has at most 48 records | stable insertion on encoded keys |
-| <span id="tile-msd">**Tile MSD**</span> | more than two width-bounded passes would be needed to finish flat | one counting pass on the top digit through scratch, then each bucket is finished on its own: insertion for buckets of at most 48 records, `sort_tile` again for larger ones |
+| <span id="tile-msd">**Tile MSD**</span> | more than two width-bounded passes would be needed to finish flat | one counting pass on the top digit through scratch, then each bucket is finished on its own: insertion for buckets of at most 48 records, another tile leaf for larger ones |
 | <span id="tile-lsd">**Tile LSD**</span> | otherwise | one counting pass per planned digit, from the lowest digit up, alternating between the tile and scratch |
 
 Below 48 records, the work of clearing and scanning bucket tables costs more than insertion's shifts. The threshold is `thresholds::INSERTION_MAX` in `lib.rs`.

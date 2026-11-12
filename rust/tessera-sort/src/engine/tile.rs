@@ -44,50 +44,6 @@ pub(super) fn finishing_capacity<T>(len: usize, ordinary: usize) -> usize {
 /// Reusable record scratch; each sort restores its complete record set before return.
 pub(super) struct Scratch<T>(Vec<MaybeUninit<T>>);
 
-impl<T> Scratch<T> {
-    /// Creates empty storage without allocating.
-    pub(super) fn new() -> Self {
-        Self(Vec::new())
-    }
-
-    /// Stably finishes a cursor-bounded slice, restoring records on key panic.
-    pub(super) fn sort<E: Extract<T>>(
-        &mut self,
-        records: &mut [T],
-        varying: u128,
-        extractor: &mut E,
-    ) {
-        debug_assert!(records.len() <= MAX_TILE_RECORDS);
-        Tile::<T, E> {
-            scratch: &mut self.0,
-            extractor,
-        }
-        .sort_tile(records, varying);
-    }
-
-    /// Finishes a cursor-bounded partition child whose remaining variation
-    /// lies within `candidate`. Node and tile partitions share this rule.
-    pub(super) fn finish_child<E: Extract<T>>(
-        &mut self,
-        records: &mut [T],
-        candidate: u128,
-        extractor: &mut E,
-    ) {
-        debug_assert!(records.len() <= MAX_TILE_RECORDS);
-        Tile::<T, E> {
-            scratch: &mut self.0,
-            extractor,
-        }
-        .finish_child(records, candidate);
-    }
-}
-
-/// One active tile operation, including recursive MSD children.
-struct Tile<'a, T, E> {
-    scratch: &'a mut Vec<MaybeUninit<T>>,
-    extractor: &'a mut E,
-}
-
 /// One stable counting pass: histogram, prefix sum, then scatter from `source`
 /// to `destination`. Returns the size of the largest bucket.
 ///
@@ -169,13 +125,61 @@ unsafe fn counting_pass<T, E: Extract<T>>(
     }
 }
 
-impl<T, E: Extract<T>> Tile<'_, T, E> {
+impl<T> Scratch<T> {
+    /// Creates empty storage without allocating.
+    pub(super) fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    /// Stably finishes a cursor-bounded slice by insertion, MSD or LSD passes,
+    /// restoring its complete record set on key panic.
+    pub(super) fn sort<E: Extract<T>>(
+        &mut self,
+        records: &mut [T],
+        varying: u128,
+        extractor: &mut E,
+    ) {
+        let len = records.len();
+        debug_assert!(len <= MAX_TILE_RECORDS);
+        if len < 2 || varying == 0 {
+            return;
+        }
+        match plan_tile::<T>(len, varying) {
+            TilePlan::Insertion => extractor.finish_insertion(records),
+            TilePlan::Msd(digit) => self.partition_tile(records, digit, varying, extractor),
+            TilePlan::Lsd { digits, passes } => {
+                let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
+                self.counting_passes(records, &digits[..passes], &mut counts, extractor);
+            }
+        }
+    }
+
+    /// Finishes a cursor-bounded child within `candidate`. Insertion-sized
+    /// children skip the variation scan; node and tile partitions share this rule.
+    pub(super) fn finish_child<E: Extract<T>>(
+        &mut self,
+        records: &mut [T],
+        candidate: u128,
+        extractor: &mut E,
+    ) {
+        debug_assert!(records.len() <= MAX_TILE_RECORDS);
+        if candidate == 0 || records.len() < 2 {
+            return;
+        }
+        if records.len() > INSERTION_MAX {
+            let varying = scan_varying_bits(records, candidate, extractor);
+            self.sort(records, varying, extractor);
+        } else {
+            extractor.finish_insertion(records);
+        }
+    }
+
     /// Reserves `len` scratch records and, when bucket IDs are cached, `len`
     /// aligned `Cursor` slots after them.
     ///
     /// Returns the scratch records and the ID slots, or a null ID pointer when
     /// classification is not cached.
-    fn reserve_scratch(&mut self, len: usize) -> (*mut T, *mut Cursor) {
+    fn reserve_scratch<E: Extract<T>>(&mut self, len: usize) -> (*mut T, *mut Cursor) {
         // Cached IDs share the record allocation, without another allocation
         // or zero initialization.
         if E::DIRECT.is_none() {
@@ -186,15 +190,15 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
             let required = len
                 .checked_add(extra)
                 .expect("tile scratch capacity overflow");
-            if self.scratch.capacity() < required {
-                self.scratch.reserve_exact(required - self.scratch.len());
+            if self.0.capacity() < required {
+                self.0.reserve_exact(required - self.0.len());
             }
         }
-        if self.scratch.len() < len {
-            self.scratch.reserve_exact(len - self.scratch.len());
-            self.scratch.resize_with(len, MaybeUninit::<T>::uninit);
+        if self.0.len() < len {
+            self.0.reserve_exact(len - self.0.len());
+            self.0.resize_with(len, MaybeUninit::<T>::uninit);
         }
-        let records = self.scratch.as_mut_ptr().cast::<T>();
+        let records = self.0.as_mut_ptr().cast::<T>();
         let ids = if E::DIRECT.is_none() {
             // SAFETY: capacity includes len records followed by 2*len+1 bytes.
             // The allocation includes worst-case alignment padding after records.
@@ -219,15 +223,16 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
     // so optimization can remove its per-record update without a second loop.
     // Counter and placement evidence: port.md, "Counting-pass result visibility".
     #[inline(always)]
-    fn counting_passes(
+    fn counting_passes<E: Extract<T>>(
         &mut self,
         records: &mut [T],
         digits: &[Digit],
         cursor: &mut MaybeUninit<[Cursor; MAX_DIGIT_BUCKETS]>,
+        extractor: &mut E,
     ) -> Cursor {
         let len = records.len();
         debug_assert!(len <= MAX_TILE_RECORDS);
-        let (scratch, bucket_ids) = self.reserve_scratch(len);
+        let (scratch, bucket_ids) = self.reserve_scratch::<E>(len);
         let cursor = cursor.as_mut_ptr().cast::<Cursor>();
         let tile = records.as_mut_ptr();
         let mut guard = RestoreTile {
@@ -250,7 +255,7 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
                     digit,
                     cursor,
                     bucket_ids,
-                    self.extractor,
+                    extractor,
                 )
             };
             // Only a completed pass makes its output the live record set.
@@ -260,14 +265,20 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
     }
 
     /// Partitions a tile through scratch, then finishes each bucket.
-    fn partition_tile(&mut self, records: &mut [T], digit: Digit, varying: u128) {
+    fn partition_tile<E: Extract<T>>(
+        &mut self,
+        records: &mut [T],
+        digit: Digit,
+        varying: u128,
+        extractor: &mut E,
+    ) {
         let len = records.len();
         let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
-        let largest = self.counting_passes(records, &[digit], &mut counts);
+        let largest = self.counting_passes(records, &[digit], &mut counts, extractor);
         // With insertion-sized buckets, whole-tile insertion has the same inversion
         // count as separate bucket sorts and skips the boundary walk.
         if largest as usize <= INSERTION_MAX {
-            self.extractor.finish_insertion(records);
+            extractor.finish_insertion(records);
             return;
         }
         // Read boundaries from the completed cursors; recomputing them from keys
@@ -281,38 +292,8 @@ impl<T, E: Extract<T>> Tile<'_, T, E> {
         for &end in ends {
             let end = end as usize;
             debug_assert!(start <= end && end <= len);
-            self.finish_child(&mut records[start..end], candidate);
+            self.finish_child(&mut records[start..end], candidate, extractor);
             start = end;
-        }
-    }
-
-    /// Finishes a partition child. Insertion-sized children skip the variation
-    /// scan, which would cost about as much as the insertion pass it could save.
-    fn finish_child(&mut self, records: &mut [T], candidate: u128) {
-        if candidate == 0 || records.len() < 2 {
-            return;
-        }
-        if records.len() > INSERTION_MAX {
-            let varying = scan_varying_bits(records, candidate, self.extractor);
-            self.sort_tile(records, varying);
-        } else {
-            self.extractor.finish_insertion(records);
-        }
-    }
-
-    /// Finishes a tile by insertion, an MSD partition, or LSD counting passes.
-    fn sort_tile(&mut self, records: &mut [T], varying: u128) {
-        let len = records.len();
-        if len < 2 || varying == 0 {
-            return;
-        }
-        match plan_tile::<T>(len, varying) {
-            TilePlan::Insertion => self.extractor.finish_insertion(records),
-            TilePlan::Msd(digit) => self.partition_tile(records, digit, varying),
-            TilePlan::Lsd { digits, passes } => {
-                let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
-                self.counting_passes(records, &digits[..passes], &mut counts);
-            }
         }
     }
 }
@@ -381,11 +362,7 @@ mod tests {
                 u64::MAX
             }
         });
-        Tile::<_, _> {
-            scratch: &mut scratch.0,
-            extractor: &mut extractor,
-        }
-        .sort_tile(&mut records, u64::MAX as u128);
+        scratch.sort(&mut records, u64::MAX as u128, &mut extractor);
         records.sort_unstable();
         assert_eq!(records, (0..1000u64).collect::<Vec<_>>());
     }
@@ -402,11 +379,12 @@ mod tests {
                 calls << SHIFT
             });
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                Tile {
-                    scratch: &mut Vec::new(),
-                    extractor: &mut crate::key::KeyHalf::<_, SHIFT>(key),
-                }
-                .partition_tile(&mut records, Digit { shift: 0, width: 6 }, 63);
+                Scratch::new().partition_tile(
+                    &mut records,
+                    Digit { shift: 0, width: 6 },
+                    63,
+                    &mut crate::key::KeyHalf::<_, SHIFT>(key),
+                );
             }));
             assert_eq!(result.is_err(), panic_at.is_some());
             records.sort_by_key(|record| record.0);
@@ -440,17 +418,14 @@ mod tests {
         expected.sort_by_key(|x| u16::from_le_bytes([x.0[0], x.0[1]]));
         let mut scratch = Scratch::new();
         let mut key = ByKey(|x: &Odd| u16::from_le_bytes([x.0[0], x.0[1]]));
-        Tile::<_, _> {
-            scratch: &mut scratch.0,
-            extractor: &mut key,
-        }
-        .partition_tile(
+        scratch.partition_tile(
             &mut records,
             Digit {
                 shift: 0,
                 width: 14,
             },
             0x3fff,
+            &mut key,
         );
         assert_eq!(records, expected);
     }

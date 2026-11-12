@@ -172,7 +172,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
         }
         // Movement retired every source and released its locks before lending
         // this final band. Finish in that task instead of handing it to a second
-        // queue. Unlike private staging, it keeps the ordinary tile allowance.
+        // queue. P1 experiment: it uses the staged allowance.
         let mut key = child_extractor.clone();
         let mut scratch = pool.take();
         Sorter::<T, E> {
@@ -180,7 +180,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
             extractor: &mut key,
             tile_len,
         }
-        .sort_child(child, candidate);
+        .sort_staged_child(child, candidate);
         pool.give(scratch);
     };
     let finish = |child: &mut [T]| {

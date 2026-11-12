@@ -61,8 +61,7 @@ fn streamed_child_can_reenter_and_panic() {
                     }
                     row.0
                 });
-                // This is below staging eligibility; an ordinary digit root
-                // must finish through the direct streamed callback.
+                // Finish a digit root through the direct final-band callback.
                 sort_root(
                     &mut records,
                     &mut extractor,

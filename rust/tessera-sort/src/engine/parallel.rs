@@ -109,11 +109,7 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
             rank,
             &mut scratch.block,
             shards,
-            block::BucketFinish {
-                limit: 0,
-                sort: &|_| {},
-                visit: &mut |_| {},
-            },
+            &|_| {},
         );
         match plan_after_equality(records, &ends, varying, tile_len, extractor) {
             Some(progress) => {
@@ -182,7 +178,6 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
         .sort_child(child, candidate);
         pool.give(scratch);
     };
-    let limit = bucket_limit::<T>(records.len(), digit.width);
     block::partition_digit_parallel(
         records,
         digit.width,
@@ -190,26 +185,8 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
         extractor.clone(),
         &mut scratch.block,
         shards,
-        block::BucketFinish {
-            limit,
-            sort: &visit,
-            visit: &visit,
-        },
+        &visit,
     );
-}
-
-/// Bounds staging to square-root space and declines infeasible root layouts.
-///
-/// The 1M/10M paired screens keep the existing small-input route. The cap
-/// admits balanced 10M roots with 256 buckets while bounding suspended
-/// staging; it deliberately declines larger or concentrated buckets.
-fn bucket_limit<T>(len: usize, width: usize) -> usize {
-    let limit = len.isqrt().saturating_mul(16);
-    if len < (1 << 21) || core::mem::size_of::<T>() > 16 || limit.saturating_mul(1 << width) < len {
-        0
-    } else {
-        limit
-    }
 }
 
 #[cfg(test)]

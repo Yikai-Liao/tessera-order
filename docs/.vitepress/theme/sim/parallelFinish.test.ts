@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type FinishAction, simulateParallelFinish } from "./parallelFinish.ts";
+import { simulateParallelFinish } from "./parallelFinish.ts";
 
 test("equality ranks preserve the shared sharded directory order", () => {
   // The rank closure uses the serial below/equal/above policy. This model checks
@@ -10,7 +10,8 @@ test("equality ranks preserve the shared sharded directory order", () => {
   // scheduling are covered by the native Rust tests, not this bounded model.
   const equal = 7;
   const keys = Array.from({ length: 129 }, (_, id) => (id % 16 === 0 ? id % 17 : equal));
-  const expected = keys.map((key, id) => ({ key, id })).sort((a, b) => a.key - b.key);
+  const rank = (key: number) => Number(key >= equal) + Number(key > equal);
+  const expected = keys.map((key, id) => ({ key, id })).sort((a, b) => rank(a.key) - rank(b.key));
   for (const blockSize of [1, 3, 7]) {
     for (const shards of [2, 4]) {
       const result = simulateParallelFinish({
@@ -18,7 +19,7 @@ test("equality ranks preserve the shared sharded directory order", () => {
         buckets: 4,
         blockSize,
         shards,
-        classify: (key) => Number(key >= equal) + Number(key > equal),
+        classify: rank,
       });
       assert.deepEqual(
         result.output.map((record) => record.id),
@@ -30,51 +31,6 @@ test("equality ranks preserve the shared sharded directory order", () => {
       }
     }
   }
-});
-
-test("bounded finishing preserves records under immediate and suspended writes", () => {
-  let relocations = 0;
-  // Vary storage geometry independently of scheduling. Repeated keys in the
-  // longest input cross shard boundaries; tiny blocks force relocation.
-  for (const [buckets, blockSize, shards, len, keySpace] of [
-    [2, 1, 2, 33, 256],
-    [4, 3, 4, 73, 256],
-    [8, 7, 2, 127, 4],
-  ]) {
-    const keys = Array.from({ length: len }, (_, id) => (id * 7919 + 73) % (buckets * keySpace));
-    for (const [reverse, suspended] of [
-      [false, false],
-      [true, false],
-      [false, true],
-      [true, true],
-    ]) {
-      const order = Array.from({ length: buckets }, (_, i) => (reverse ? buckets - 1 - i : i));
-      const stages: FinishAction[] = order.map((bucket) => ({ phase: "stage", bucket }));
-      const writes: FinishAction[] = order.map((bucket) => ({ phase: "write", bucket }));
-      const actions = suspended
-        ? [...stages, ...writes]
-        : stages.flatMap((stage, i) => [stage, writes[i]]);
-      const result = simulateParallelFinish({
-        keys,
-        buckets,
-        blockSize,
-        shards,
-        classify: (key) => Math.floor(key / keySpace),
-        actions,
-      });
-      const expected = keys.map((key, id) => ({ key, id })).sort((a, b) => a.key - b.key);
-      assert.deepEqual(
-        result.output.map((record) => record.id),
-        expected.map((record) => record.id),
-      );
-      for (const frame of result.frames) {
-        assert.equal(frame.live.length, len, frame.action);
-        assert.equal(new Set(frame.live).size, len, frame.action);
-      }
-      relocations += result.relocations;
-    }
-  }
-  assert.ok(relocations > 0);
 });
 
 test("direct streaming preserves source order without a temporary record pass", () => {
@@ -93,24 +49,20 @@ test("direct streaming preserves source order without a temporary record pass", 
         .map((key, id) => ({ key, id, bucket: classify(key) }))
         .sort((a, b) => a.bucket - b.bucket);
       for (const reverse of [false, true]) {
-        const actions: FinishAction[] = Array.from({ length: buckets }, (_, i) => ({
-          phase: "stream",
-          bucket: reverse ? buckets - 1 - i : i,
-        }));
+        const order = Array.from({ length: buckets }, (_, i) => (reverse ? buckets - 1 - i : i));
         const result = simulateParallelFinish({
           keys,
           buckets,
           blockSize,
           shards,
           classify,
-          actions,
+          order,
         });
         assert.deepEqual(result.output, expected);
         for (const frame of result.frames) {
           assert.equal(frame.live.length, len, frame.action);
           assert.equal(new Set(frame.live).size, len, frame.action);
         }
-        assert.equal(result.recordTransfers.staging, 0);
         assert.equal(result.recordTransfers.final, len);
         // Each input block is protected once, copying at most its live prefix.
         assert.ok(result.recordTransfers.relocation <= Math.floor(len / blockSize) * blockSize);

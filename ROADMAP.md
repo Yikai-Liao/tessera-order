@@ -31,7 +31,7 @@ The merged direct source ledger is the chosen C design: it retires parallel perm
 Remaining work:
 
 - Validate above-window revision timing and investigate skew with placement controls; current-only output/allocation checks are not revision evidence. List remaining losses individually, without treating #120's exceptions as a general budget.
-- Evaluate P1 below to decide whether one movement strategy can preserve staging's saving. If it cannot, record its blocking cost and retain both strategies as a trade-off.
+- Accept or reject P1 below: the streaming-only candidate removes private staging, but its routing and movement stages still need complete performance and allocation acceptance. If it cannot preserve the saving, record the blocking cost rather than merging the deletion.
 - Revisit A or B only with a construction that addresses the recorded blocker. The [study ceiling](docs/design/evidence.md#structure-analysis) remains available for research, but changing the public space bound requires an accepted design and an explicit contract decision.
 
 Every candidate preserves the public semantics, including `Send`-only records, `Fn + Sync` extraction, panic restoration and termination under inconsistent keys. Model active and suspended allocations, not one live buffer per worker. Large-input measurements need maintainer approval of the budget. A follow-up is complete when its saving is demonstrated within the controls or its blocking cost is recorded; structural and routing changes land separately.
@@ -44,16 +44,16 @@ S1 ([accepted](docs/design/evidence.md#shared-explicit-direct-key-scan)), shared
 
 | ID | Candidate | Done when |
 |---|---|---|
-| P1 | Streaming final bands with the same child capacity as staging | At fixed root plan, shards and block size, compare current staging, ordinary-capacity streaming and extended-capacity streaming, starting at 10M records/eight threads. Extend to narrow/wide direct keys and rows, skew, below/above eligibility and oversized buckets. Retire staging only after timing, relocation/copy counts, peak/suspended allocation and owned/borrowed, panic, inconsistent-key and reentry coverage preserve its saving and invariants. Block sizing and capacity have explicit owners independent of staging. |
-| P5 | Recursive parallel scheduling of the same node decisions | Before implementation, prove the public space bound and progress with live parent directories, an active frontier and reentrant suspension. Then measure skewed and balanced roots, thread counts, wide records and expensive extraction. Keep partition analysis shared; do not infer a bound from worker count or fixed digit depth. |
+| P1 | Streaming-only candidate; acceptance pending | Keep the independent whole-child capacity/block-sizing stage separate from staging deletion. At fixed root plan, shards and block size, compare current staging, ordinary-capacity streaming and extended-capacity streaming, starting at 10M records/eight threads. Extend to narrow/wide direct keys and rows, skew, below/above eligibility and oversized buckets. Retire staging only after timing, relocation/copy counts, peak/suspended allocation and owned/borrowed, panic, inconsistent-key and reentry coverage preserve its saving and invariants. Block sizing and capacity have explicit owners independent of staging. |
+| P5 | Resource model available; implementation deferred | First bound serial equality continuation metadata by retiring boundaries before the largest-child tail transfer, without adding a second execution/analysis pipeline. The [model](docs/design/evidence.md#p5-recursive-parallel-nodes) permits one parallel phase at a time, not an unrestricted active frontier. Require a simplification payoff before implementation and preserve the public space/progress contract under reentrant suspension. Then measure skewed and balanced roots, thread counts, wide records and expensive extraction. Keep partition analysis shared; do not infer a bound from worker count or fixed digit depth. |
 
-Follow-up order: A serial trial of the enlarged capacity follows P1's evidence, under the same capacity owner, with separate routing acceptance. P5 starts with a resource model, not recursive task spawning. Do not reopen flat-state removal, fused order/variation, block-only tiles or the rejected A/B constructions without a new saving-preserving construction ([evidence](docs/design/evidence.md#structure-analysis)).
+Follow-up order: A serial trial of the enlarged capacity follows P1's evidence, under the same capacity owner, with separate routing acceptance. P5 has a restricted resource model and an outstanding serial traversal obligation; it is not an instruction to add recursive task spawning. Do not reopen flat-state removal, fused order/variation, block-only tiles or the rejected A/B constructions without a new saving-preserving construction ([evidence](docs/design/evidence.md#structure-analysis)).
 
 Existing smaller candidates remain available; none is a prerequisite for P1:
 
 | ID | Retire | Replace with | Risk |
 |---|---|---|---|
-| P2 | `Config`, `BucketFinish` and `BoundedFinish` describing one root partition | One description consumed by the block layer | Reassess after P1 so deleted staging policy does not acquire another wrapper |
+| P2 | Residual partition configuration after P1 | One description consumed by the block layer | P1 retires `BucketFinish` and `BoundedFinish`; after its acceptance, reassess `Config` only if it duplicates policy rather than owning test geometry and execution controls |
 | P3 | `tile::Scratch`, `block::Buffers`, job `Pool` | A shared scratch lifecycle | Reassess after P1; preserve nested/reentrant lifetimes and allocation reuse rather than assume one buffer per worker |
 
 ### Rayon

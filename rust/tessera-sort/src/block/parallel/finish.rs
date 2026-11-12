@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! One relocatable-source ledger for staged and streamed final bands.
+//! Direct final-band completion through one relocatable-source ledger.
 
 use super::*;
 use std::sync::{
@@ -18,14 +18,12 @@ struct Source {
     len: usize,
 }
 
-/// A bucket's source prefixes and temporary record ownership.
-struct Bucket<T> {
+/// A bucket's source prefixes and final input range.
+struct Bucket {
     sources: core::ops::Range<usize>,
     start: usize,
     len: usize,
-    records: Vec<MaybeUninit<T>>,
     cache: usize,
-    staged: bool,
     completed: bool,
     panic: Option<unwind::Payload>,
 }
@@ -164,21 +162,6 @@ impl<T> Storage<T> {
             offset += count;
         }
     }
-
-    /// Writes privately owned records after retiring all destination sources.
-    fn write(
-        &self,
-        start: usize,
-        records: *const T,
-        len: usize,
-        local: &mut Vec<usize>,
-        cache: usize,
-    ) {
-        self.protect_band(start, len, local, cache);
-        // SAFETY: protection evacuated unread sources. Private staging cannot
-        // overlap the input, and final bands are disjoint, including fragments.
-        unsafe { ptr::copy_nonoverlapping(records, self.input.add(start), len) };
-    }
 }
 
 /// Acquires an internal metadata lock, never held across a user callback.
@@ -188,50 +171,9 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-impl<T> Bucket<T> {
-    /// Stages, sorts, and writes a bounded bucket, completing writes after a key panic.
-    fn finish(&mut self, storage: &Storage<T>, sort: Option<BucketSort<'_, T>>) {
-        if self.completed || self.len == 0 {
-            self.completed = true;
-            return;
-        }
-        if !self.staged {
-            // Allocate before transferring ownership; completed buckets release
-            // capacity so ordinary scheduling retains only active buffers.
-            self.records.resize_with(self.len, MaybeUninit::uninit);
-            let mut offset = 0;
-            for logical in self.sources.clone() {
-                // SAFETY: staging has capacity for the concatenated prefixes.
-                let output = unsafe { self.records.as_mut_ptr().add(offset).cast() };
-                lock(&storage.free[self.cache]).push(storage.gather(logical, output));
-                offset += storage.sources[logical].len;
-            }
-            self.staged = true;
-        }
-        if let Some(sort) = sort {
-            // SAFETY: staging owns the complete bucket. The serial sorter
-            // restores this slice before a key panic propagates.
-            let records = unsafe {
-                core::slice::from_raw_parts_mut(self.records.as_mut_ptr().cast::<T>(), self.len)
-            };
-            self.panic = unwind::catch(|| sort(records)).err();
-        }
-        {
-            let mut free = lock(&storage.free[self.cache]);
-            storage.write(
-                self.start,
-                self.records.as_ptr().cast(),
-                self.len,
-                &mut free,
-                self.cache,
-            );
-        }
-        self.completed = true;
-        self.records = Vec::new();
-    }
-
+impl Bucket {
     /// Streams a band without a bucket-sized buffer, then publishes its borrow.
-    fn stream<'records>(
+    fn finish<'records, T>(
         &mut self,
         storage: &Storage<T>,
         visit: Option<BucketVisit<'_, 'records, T>>,
@@ -259,7 +201,6 @@ impl<T> Bucket<T> {
             offset += len;
         }
         self.completed = true;
-        self.records = Vec::new();
         if self.len != 0
             && let Some(visit) = visit
         {
@@ -273,35 +214,24 @@ impl<T> Bucket<T> {
     }
 }
 
-/// Completes every bucket using one protected-source ownership/recovery ledger.
-/// Eligible roots stage and sort before writing; other roots stream prefixes
-/// and lend each final band as soon as it no longer has live copy sources.
+/// Completes every bucket through the protected-source ledger, lending each
+/// final band as soon as it no longer has live copy sources.
 pub(super) fn complete<'records, T: Send>(
     sorter: &mut Partition<'records, '_, T>,
     ends: &[usize],
     parallel: bool,
-    limit: usize,
-    finish: Option<BucketSort<'_, T>>,
     visit: Option<BucketVisit<'_, 'records, T>>,
 ) {
-    complete_with_fault(sorter, ends, parallel, limit, finish, visit, None);
+    complete_with_fault(sorter, ends, parallel, visit, None);
 }
 
 fn complete_with_fault<'records, T: Send>(
     sorter: &mut Partition<'records, '_, T>,
     ends: &[usize],
     parallel: bool,
-    limit: usize,
-    finish: Option<BucketSort<'_, T>>,
     visit: Option<BucketVisit<'_, 'records, T>>,
     fail_after: Option<usize>,
 ) {
-    let mut start = 0;
-    let staged = ends.iter().all(|&end| {
-        let fits = end - start <= limit;
-        start = end;
-        fits
-    });
     let block_size = sorter.blocks.block_size;
     let count = sorter.buffers.block_order.len();
     let head = sorter.active_blocks.start;
@@ -335,8 +265,6 @@ fn complete_with_fault<'records, T: Send>(
             sources: source_start..sources.len(),
             start,
             len: end - start,
-            records: Vec::new(),
-            staged: false,
             completed: false,
             panic: None,
         });
@@ -369,12 +297,8 @@ fn complete_with_fault<'records, T: Send>(
         free: caches,
     };
     let completed = AtomicUsize::new(0);
-    let run = |bucket: &mut Bucket<T>| {
-        if staged {
-            bucket.finish(&storage, finish);
-        } else {
-            bucket.stream(&storage, visit);
-        }
+    let run = |bucket: &mut Bucket| {
+        bucket.finish(&storage, visit);
         if let Some(fail_after) = fail_after {
             let position = completed.fetch_add(1, Ordering::Relaxed);
             assert_ne!(
@@ -392,11 +316,7 @@ fn complete_with_fault<'records, T: Send>(
     });
     if result.is_err() {
         for bucket in &mut buckets {
-            if staged {
-                bucket.finish(&storage, None);
-            } else {
-                bucket.stream(&storage, None);
-            }
+            bucket.finish(&storage, None);
         }
     }
     sorter.input_materialized = true;
@@ -417,7 +337,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
 
-    /// Forces bounded finishing independently of production routing cutoffs.
+    /// Exercises final-band finishing with small storage geometries.
     fn finish_records<T: Send, E: Extract<T> + Clone + Send>(
         records: &mut [T],
         key: E,
@@ -435,12 +355,8 @@ mod tests {
                 shards,
                 block_size: Some(block_size),
                 parallel: !cfg!(miri),
-                finish: Some(BoundedFinish {
-                    limit: usize::MAX,
-                    sort: finish,
-                }),
             },
-            Some(&|_| panic!("bounded finishing unexpectedly declined")),
+            Some(finish),
         );
     }
 
@@ -558,26 +474,18 @@ mod tests {
 
     #[test]
     fn concurrent_borrows_keep_records() {
-        // The second bucket is already staged; race relocation of the first
-        // source against gathering it. std threads keep dependency-level
-        // epoch reclamation out of Miri's provenance and leak checks.
+        // Race protection of each destination against gathering its source.
+        // std threads keep dependency-level epoch reclamation out of Miri.
         let mut first = core::cell::Cell::new(10usize);
         let mut second = core::cell::Cell::new(20usize);
         let mut records = vec![(1u32, &mut first), (0u32, &mut second)];
         let input = records.as_mut_ptr();
-        let mut staged_second = MaybeUninit::uninit();
-        // SAFETY: the second record transfers to private staging before its
-        // original physical block is made free in the owner table.
-        unsafe {
-            ptr::copy_nonoverlapping(input.add(1), staged_second.as_mut_ptr(), 1);
-        }
         type BorrowedRecord<'a> = (u32, &'a mut core::cell::Cell<usize>);
         let mut scratch: Vec<MaybeUninit<BorrowedRecord<'_>>> = Vec::with_capacity(2);
         scratch.resize_with(2, MaybeUninit::uninit);
         let scratch_pointer = scratch.as_mut_ptr().cast::<BorrowedRecord<'_>>();
         let storage = Storage {
-            // SAFETY: both scratch cells and both original input records are
-            // allocated, with every address derived from its own ancestor.
+            // SAFETY: all addresses derive from their allocation's ancestor.
             addresses: unsafe {
                 vec![scratch_pointer, scratch_pointer.add(1), input, input.add(1)]
             },
@@ -585,7 +493,7 @@ mod tests {
             full_blocks: 2,
             scratch_blocks: 2,
             block_size: 1,
-            owners: [FREE, FREE, 0, FREE].into_iter().map(Mutex::new).collect(),
+            owners: [FREE, FREE, 0, 1].into_iter().map(Mutex::new).collect(),
             sources: [2, 3]
                 .into_iter()
                 .map(|physical| Source {
@@ -594,24 +502,24 @@ mod tests {
                 })
                 .collect(),
             free: vec![
-                Mutex::new(Vec::with_capacity(1)),
-                Mutex::new(vec![3]),
+                Mutex::new(Vec::with_capacity(2)),
+                Mutex::new(Vec::with_capacity(2)),
                 Mutex::new(vec![0, 1]),
             ],
         };
+        let mut buckets = [0, 1].map(|bucket| Bucket {
+            sources: bucket..bucket + 1,
+            start: 1 - bucket,
+            len: 1,
+            cache: bucket,
+            completed: false,
+            panic: None,
+        });
         std::thread::scope(|scope| {
-            let storage = &storage;
-            scope.spawn(move || {
-                let mut staged_first = MaybeUninit::uninit();
-                let physical = storage.gather(0, staged_first.as_mut_ptr());
-                let mut free = lock(&storage.free[0]);
-                free.push(physical);
-                storage.write(1, staged_first.as_ptr(), 1, &mut free, 0);
-            });
-            scope.spawn(move || {
-                let mut free = lock(&storage.free[1]);
-                storage.write(0, staged_second.as_ptr(), 1, &mut free, 1);
-            });
+            for bucket in &mut buckets {
+                let storage = &storage;
+                scope.spawn(move || bucket.finish(storage, None));
+            }
         });
         drop(storage);
         drop(scratch);
@@ -629,9 +537,9 @@ mod tests {
 
     #[test]
     fn suspended_caches_keep_progress() {
-        // Eight staged even buckets coexist with eight unread odd buckets.
-        // Helpers finalize their victims' free input blocks, then are paused
-        // before publishing unused blocks. No key callback needs to panic.
+        // Completed helpers retain registered free caches while suspended.
+        // Later buckets must use those candidates without waiting for helpers
+        // to return. No key callback needs to panic.
         const SHARDS: usize = 8;
         const BUCKETS: usize = 16;
         const BLOCK: usize = 2;
@@ -722,8 +630,6 @@ mod tests {
                 sources: source_start..sources.len(),
                 start: bucket * BUCKET_LEN,
                 len: BUCKET_LEN,
-                records: Vec::new(),
-                staged: false,
                 completed: false,
                 panic: None,
             });
@@ -756,47 +662,23 @@ mod tests {
         for part in &mut parts {
             part.input_materialized = true;
         }
-        for bucket in buckets.iter_mut().step_by(2) {
-            bucket.records.resize_with(bucket.len, MaybeUninit::uninit);
-            let mut offset = 0;
-            for logical in bucket.sources.clone() {
-                // SAFETY: staging covers the concatenated source prefixes.
-                let target = unsafe { bucket.records.as_mut_ptr().add(offset).cast() };
-                lock(&storage.free[bucket.cache]).push(storage.gather(logical, target));
-                offset += storage.sources[logical].len;
-            }
-            bucket.staged = true;
-        }
         for helper in [0, 2, 4, 6] {
-            let bucket = &mut buckets[helper];
-            storage.write(
-                bucket.start,
-                bucket.records.as_ptr().cast(),
-                bucket.len,
-                &mut lock(&storage.free[bucket.cache]),
-                bucket.cache,
-            );
-            bucket.completed = true;
-            bucket.records = Vec::new();
-            // Deliberately pause before the completed helper returns.
+            buckets[helper].finish(&storage, None);
         }
+        // Concentrate unused candidates in a completed helper's registered
+        // cache, forcing subsequent work to discover a suspended peer's blocks.
+        for cache in 1..storage.free.len() {
+            let mut free = lock(&storage.free[cache]);
+            lock(&storage.free[0]).append(&mut free);
+        }
+        let held = lock(&storage.free[0]).len();
         let result = unwind::catch(|| {
             for victim in [8, 10, 12, 14] {
-                let bucket = &mut buckets[victim];
-                storage.write(
-                    bucket.start,
-                    bucket.records.as_ptr().cast(),
-                    bucket.len,
-                    &mut lock(&storage.free[bucket.cache]),
-                    bucket.cache,
-                );
-                bucket.completed = true;
-                bucket.records = Vec::new();
+                buckets[victim].finish(&storage, None);
             }
         });
-        assert!(lock(storage.free.last().unwrap()).is_empty());
         assert!(
-            lock(&storage.free[0]).len() < 64,
+            lock(&storage.free[0]).len() < held,
             "victims must steal a helper block"
         );
         // Helpers stay paused. Their registered caches must support victims
@@ -836,10 +718,6 @@ mod tests {
                             shards,
                             block_size: Some(block_size),
                             parallel: !cfg!(miri),
-                            finish: Some(BoundedFinish {
-                                limit: 0,
-                                sort: &|_| panic!("must stream"),
-                            }),
                         },
                         Some(&|band| {
                             if !cfg!(miri) {
@@ -878,7 +756,7 @@ mod tests {
     }
 
     #[test]
-    fn scheduler_panic_restores_streamed_and_staged_owners() {
+    fn scheduler_panic_restores_owners() {
         struct Owned {
             id: usize,
             drops: Arc<Vec<AtomicUsize>>,
@@ -891,71 +769,29 @@ mod tests {
             }
         }
         let len = if cfg!(miri) { 23 } else { 113 };
-        for limit in [0, usize::MAX] {
-            for parallel in [false, !cfg!(miri)] {
-                let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
-                let mut records: Vec<_> = (0..len)
-                    .map(|id| Owned {
-                        id,
-                        drops: drops.clone(),
-                        text: id.to_string(),
-                    })
-                    .collect();
-                let result = unwind::catch(|| {
-                    let mut buffers = Buffers::new();
-                    let mut partition = Partition::new(&mut records, 4, 3, &mut buffers);
-                    assert!(partition.step((), |_, record| record.id * 37 % 4).is_ok());
-                    let ends = partition.record_ends();
-                    complete_with_fault(
-                        &mut partition,
-                        &ends,
-                        parallel,
-                        limit,
-                        None,
-                        None,
-                        Some(0),
-                    );
-                });
-                assert!(result.is_err());
-                let mut ids: Vec<_> = records.iter().map(|record| record.id).collect();
-                ids.sort_unstable();
-                assert_eq!(ids, (0..len).collect::<Vec<_>>());
-                assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 0));
-                drop(records);
-                assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 1));
-            }
+        for parallel in [false, !cfg!(miri)] {
+            let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
+            let mut records: Vec<_> = (0..len)
+                .map(|id| Owned {
+                    id,
+                    drops: drops.clone(),
+                    text: id.to_string(),
+                })
+                .collect();
+            let result = unwind::catch(|| {
+                let mut buffers = Buffers::new();
+                let mut partition = Partition::new(&mut records, 4, 3, &mut buffers);
+                assert!(partition.step((), |_, record| record.id * 37 % 4).is_ok());
+                let ends = partition.record_ends();
+                complete_with_fault(&mut partition, &ends, parallel, None, Some(0));
+            });
+            assert!(result.is_err());
+            let mut ids: Vec<_> = records.iter().map(|record| record.id).collect();
+            ids.sort_unstable();
+            assert_eq!(ids, (0..len).collect::<Vec<_>>());
+            assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 0));
+            drop(records);
+            assert!(drops.iter().all(|count| count.load(Ordering::Relaxed) == 1));
         }
-    }
-
-    #[test]
-    fn oversized_buckets_use_fallback() {
-        let mut records: Vec<_> = (0..97)
-            .map(|id| (((id * 7919 + 73) % 256) as u32, id))
-            .collect();
-        let mut expected = records.clone();
-        expected.sort_by_key(|record| record.0);
-        let visits = AtomicUsize::new(0);
-        partition_impl_with_visit(
-            &mut records,
-            3,
-            5,
-            ByKey(|record: &(u32, usize)| record.0),
-            &mut Buffers::new(),
-            Config {
-                shards: 3,
-                block_size: Some(5),
-                parallel: !cfg!(miri),
-                finish: Some(BoundedFinish {
-                    limit: 0,
-                    sort: &|_| panic!("oversized bucket entered bounded finishing"),
-                }),
-            },
-            Some(&|records| {
-                visits.fetch_add(1, Ordering::Relaxed);
-                records.sort_by_key(|record| record.0);
-            }),
-        );
-        assert!(visits.load(Ordering::Relaxed) > 0);
-        assert_eq!(records, expected);
     }
 }

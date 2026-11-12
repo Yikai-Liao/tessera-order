@@ -30,7 +30,7 @@ cargo test -p tessera-sort
 cargo test -p tessera-sort --features rayon
 rustup +nightly component add miri
 cargo +nightly miri test -p tessera-sort
-cargo +nightly miri test -p tessera-sort --lib --features rayon block::parallel::
+cargo +nightly miri test -p tessera-sort --lib --features rayon block::
 ```
 
 Run `bun run docs:test` when simulation models change and the [site checks](docs/development/docs-site.md#commands) when their pages change. CI owns the remaining platform, MSRV and sanitizer lanes; the [Rust workflow](.github/workflows/rust-ci.yml) is the command source for reproducing a lane. It uses cargo-nextest for test processes and runs doctests separately.

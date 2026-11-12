@@ -5,35 +5,15 @@
 use super::*;
 use rayon::prelude::*;
 
-mod finish;
-
 /// Publishes a bucket's index and exclusive final band, independently of other
 /// bucket movement.
-type BucketVisit<'callback, 'records, T> = &'callback (dyn Fn(usize, &'records mut [T]) + Sync);
+pub(super) type BucketVisit<'callback, 'records, T> =
+    &'callback (dyn Fn(usize, &'records mut [T]) + Sync);
 
-struct Shard<'a, 'w, T> {
-    sorter: Partition<'a, 'w, T>,
-    panic: Option<unwind::Payload>,
-    first_block: usize,
-}
-
-struct Config {
-    shards: usize,
-    block_size: Option<usize>,
-    parallel: bool,
-}
-
-// SAFETY: each shard exclusively borrows a disjoint input slice and Buffers.
-// Its pointers address only those allocations. No shared references to its
-// records cross threads, and all records are restored by Partition on unwind.
-unsafe impl<T: Send> Send for Shard<'_, '_, T> {}
-
-impl<T> Shard<'_, '_, T> {
-    /// Scatters this shard with its own classifier, which the pass consumes.
-    fn scatter<C: Classify<T>>(mut self, classifier: C) -> Self {
-        self.panic = self.sorter.step(classifier).err();
-        self
-    }
+pub(super) struct Config {
+    pub(super) shards: usize,
+    pub(super) block_size: Option<usize>,
+    pub(super) parallel: bool,
 }
 
 /// Partitions the root into the `2^radix` buckets `classifier` assigns and
@@ -71,7 +51,7 @@ fn partition_impl<T: Send, C: Classify<T> + Clone + Send>(
     partition_impl_with_visit(arr, radix, classifier, buffers, config, None)
 }
 
-fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clone + Send>(
+pub(super) fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clone + Send>(
     arr: &'records mut [T],
     radix: usize,
     classifier: C,
@@ -86,13 +66,13 @@ fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clone + Send>(
     let shards = config.shards.max(1).min(arr.len());
     let record_bytes = core::mem::size_of::<T>();
     let block_size = config.block_size.unwrap_or_else(|| {
-        // Shard directories coexist with the completion ledger, so the balance
-        // charges two directories against one scratch reserve per shard bucket.
+        // The completion owner charges all live tables, including shard links.
+        // Balance them against one scratch reserve per shard bucket.
         let balanced = balanced_size(
             arr.len(),
             record_bytes,
             shards * bucket_count,
-            2 * DESCRIPTOR_BYTES_PER_POSITION,
+            finish::parallel_descriptor_bytes(),
         );
         // Source-ledger transfers pay per-block ownership work regardless of
         // how the engine finishes a bucket. Use the shared amortization scale.
@@ -131,36 +111,31 @@ fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clone + Send>(
         // uses after these shard guards have been retired.
         let part =
             unsafe { core::slice::from_raw_parts_mut(input.add(first_block * block_size), len) };
-        let shard = Shard {
-            sorter: Partition::new(part, bucket_count, block_size, local),
-            panic: None,
-            first_block,
-        };
-        tasks.push((shard, classifier.clone()));
+        tasks.push((
+            Partition::new(part, bucket_count, block_size, local),
+            classifier.clone(),
+        ));
         first_block += blocks;
     }
-    let mut tasks: Vec<_> = if config.parallel {
-        tasks
-            .into_par_iter()
-            .map(|(shard, classifier)| shard.scatter(classifier))
-            .collect()
-    } else {
-        // The same ownership path can run under Miri without Rayon.
-        tasks
-            .into_iter()
-            .map(|(shard, classifier)| shard.scatter(classifier))
-            .collect()
-    };
-    if let Some(payload) = tasks.iter_mut().find_map(|task| task.panic.take()) {
-        // All jobs have joined. Every guard still owns only its original
-        // shard, so unwinding restores all slices without invoking keys again.
-        unwind::resume(payload);
+    fn scatter<'a, 'w, T, C: Classify<T>>(
+        (mut partition, classifier): (Partition<'a, 'w, T>, C),
+    ) -> Partition<'a, 'w, T> {
+        if let Err(payload) = partition.step(classifier) {
+            // Each independent guard restores its own original shard. Rayon
+            // joins all jobs before propagating an error out of this collect.
+            unwind::resume(payload);
+        }
+        partition
     }
-
-    // SAFETY: shards cover consecutive disjoint block-aligned ranges built
-    // from this common ancestor, with only the last containing a tail. All
-    // completed the same pass and still own their recovery.
-    unsafe { finish::complete(input, input_len, &mut tasks, config.parallel, visit) }
+    let mut partitions: Vec<_> = if config.parallel {
+        tasks.into_par_iter().map(scatter).collect()
+    } else {
+        tasks.into_iter().map(scatter).collect()
+    };
+    let mut borrows: Vec<_> = partitions.iter_mut().collect();
+    // SAFETY: these completed guards cover consecutive disjoint block-aligned
+    // ranges from the same ancestor. Only the final partition has a tail.
+    unsafe { finish::complete(input, input_len, &mut borrows, config.parallel, visit) }
 }
 
 #[cfg(test)]

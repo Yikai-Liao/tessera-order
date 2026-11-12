@@ -2,18 +2,78 @@
 
 //! Direct final-band completion through one relocatable-source ledger.
 
+#[cfg(feature = "rayon")]
+use super::parallel::BucketVisit;
 use super::*;
+use core::ops::DerefMut;
 use std::sync::{
     Mutex,
     atomic::{AtomicUsize, Ordering},
 };
+
+/// Supplies exclusive metadata access to the shared movement operation.
+/// Serial completion uses `RefCell`; parallel completion uses poison-tolerant
+/// mutexes. Neither guard is held while calling a bucket finisher.
+///
+/// # Safety
+///
+/// A guard must exclusively access the same stored value until it drops.
+/// `exclusive` must access that value without bypassing any outstanding guard.
+unsafe trait MetadataCell<Value> {
+    /// Creates an unborrowed cell containing exactly this value.
+    fn new(value: Value) -> Self;
+    /// Acquires exclusive access; callers never reacquire a held cell.
+    fn acquire(&self) -> impl DerefMut<Target = Value>;
+    /// Attempts exclusive access without waiting.
+    fn try_acquire(&self) -> Option<impl DerefMut<Target = Value>>;
+    /// Accesses the value during uniquely owned construction.
+    fn exclusive(&mut self) -> &mut Value;
+}
+
+// SAFETY: standard mutex guards serialize access and get_mut requires exclusivity.
+unsafe impl<Value> MetadataCell<Value> for Mutex<Value> {
+    fn new(value: Value) -> Self {
+        Mutex::new(value)
+    }
+    fn acquire(&self) -> impl DerefMut<Target = Value> {
+        self.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    fn try_acquire(&self) -> Option<impl DerefMut<Target = Value>> {
+        match self.try_lock() {
+            Ok(guard) => Some(guard),
+            Err(std::sync::TryLockError::Poisoned(error)) => Some(error.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => None,
+        }
+    }
+    fn exclusive(&mut self) -> &mut Value {
+        self.get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+// SAFETY: RefCell guards enforce exclusive borrowing, and it is never Sync.
+unsafe impl<Value> MetadataCell<Value> for core::cell::RefCell<Value> {
+    fn new(value: Value) -> Self {
+        core::cell::RefCell::new(value)
+    }
+    fn acquire(&self) -> impl DerefMut<Target = Value> {
+        self.borrow_mut()
+    }
+    fn try_acquire(&self) -> Option<impl DerefMut<Target = Value>> {
+        self.try_borrow_mut().ok()
+    }
+    fn exclusive(&mut self) -> &mut Value {
+        self.get_mut()
+    }
+}
 
 /// A physical block without a live source or finalized band fragment.
 const FREE: usize = usize::MAX;
 /// A physical block with no unread source. Disjoint final-band fragments may
 /// still be unwritten; FINAL does not mean the whole block is filled.
 const FINAL: usize = usize::MAX - 1;
-/// One initialized source prefix in the partition directory.
+/// One initialized source prefix from a bucket chain.
 struct Source {
     location: AtomicUsize,
     len: usize,
@@ -30,23 +90,64 @@ struct Bucket {
     panic: Option<unwind::Payload>,
 }
 
+/// Owns restoration after partition guards hand off their sources. Structured
+/// parallel execution joins before this guard can drop, so recovery can finish
+/// every unpublished band without invoking a callback.
+struct Completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> {
+    storage: Storage<T, Owner, Free>,
+    buckets: Vec<Bucket>,
+    ends: Vec<usize>,
+}
+
+impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Drop
+    for Completion<T, Owner, Free>
+{
+    fn drop(&mut self) {
+        for bucket in &mut self.buckets {
+            bucket.finish(&self.storage, None::<fn(usize, &mut [T])>);
+        }
+    }
+}
+
+/// Per-block metadata capacity that coexists with record scratch. Bucket and
+/// shard descriptors add O(Rq) separately. Free-cache capacities sum to at most
+/// the physical-block count plus one slot per bucket.
+const fn descriptor_bytes<Owner>() -> usize {
+    core::mem::size_of::<u32>()
+        + core::mem::size_of::<*mut ()>()
+        + core::mem::size_of::<Owner>()
+        + core::mem::size_of::<Source>()
+        + core::mem::size_of::<usize>()
+}
+
+/// Live metadata cost per full input block for exclusive completion.
+pub(super) const fn serial_descriptor_bytes() -> usize {
+    descriptor_bytes::<core::cell::RefCell<usize>>()
+}
+
+/// Live metadata cost per full input block for sharded completion.
+#[cfg(feature = "rayon")]
+pub(super) const fn parallel_descriptor_bytes() -> usize {
+    descriptor_bytes::<Mutex<usize>>()
+}
+
 /// Physical owners, relocatable logical sources and free block candidates.
-struct Storage<T> {
+struct Storage<T, Owner = Mutex<usize>, Free = Mutex<Vec<usize>>> {
     addresses: Vec<*mut T>,
     input: *mut T,
     full_blocks: usize,
     scratch_blocks: usize,
     block_size: usize,
-    owners: Vec<Mutex<usize>>,
+    owners: Vec<Owner>,
     sources: Vec<Source>,
-    free: Vec<Mutex<Vec<usize>>>,
+    free: Vec<Free>,
 }
 
 // SAFETY: no T references are shared. A physical owner mutex protects source
 // relocation and gathering; final writes cover disjoint fixed record bands.
-unsafe impl<T: Send> Sync for Storage<T> {}
+unsafe impl<T: Send, Owner: Sync, Free: Sync> Sync for Storage<T, Owner, Free> {}
 
-impl<T> Storage<T> {
+impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Storage<T, Owner, Free> {
     /// Finds a free candidate in the local cache, reserve, or another bucket.
     fn take_free(&self, current: usize, local: &mut Vec<usize>) -> usize {
         if let Some(physical) = local.pop() {
@@ -59,10 +160,8 @@ impl<T> Storage<T> {
             }
             for offset in 1..buckets {
                 let peer = (current + offset) % buckets;
-                let mut free = match self.free[peer].try_lock() {
-                    Ok(free) => free,
-                    Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
-                    Err(std::sync::TryLockError::WouldBlock) => continue,
+                let Some(mut free) = self.free[peer].try_acquire() else {
+                    continue;
                 };
                 if let Some(physical) = free.pop() {
                     return physical;
@@ -205,19 +304,21 @@ impl<T> Storage<T> {
 }
 
 /// Acquires an internal metadata lock, never held across a user callback.
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn lock<Value>(cell: &impl MetadataCell<Value>) -> impl DerefMut<Target = Value> {
+    cell.acquire()
 }
 
 impl Bucket {
     /// Streams a band without a bucket-sized buffer, then publishes its borrow.
-    fn finish<'records, T>(
+    fn finish<'records, T: 'records, Owner, Free, Visit>(
         &mut self,
-        storage: &Storage<T>,
-        visit: Option<BucketVisit<'_, 'records, T>>,
-    ) {
+        storage: &Storage<T, Owner, Free>,
+        visit: Option<Visit>,
+    ) where
+        Owner: MetadataCell<usize>,
+        Free: MetadataCell<Vec<usize>>,
+        Visit: FnOnce(usize, &'records mut [T]),
+    {
         if self.completed {
             return;
         }
@@ -246,65 +347,55 @@ impl Bucket {
     }
 }
 
-/// Builds the ledger over scattered `shards` without moving a record.
-///
-/// Physical IDs number every shard's scratch blocks in shard order, then the
-/// full input blocks. Sources are bucket-major, then in original shard and
-/// block order, so equal keys keep their order across shards. A source owns
-/// a nonempty live prefix; every other physical block starts free.
+/// Builds the source ledger and takes restoration responsibility only after
+/// every metadata table and bucket boundary exists.
 ///
 /// # Safety
 ///
-/// `shards` are in input order and completed one pass with the same block
-/// size and bucket count. They cover consecutive disjoint ranges of the
-/// `input_len` records at `input`, only the last with a tail, and each
-/// `first_block` is the shard's block offset. `input` is their common raw
-/// ancestor, so its block addresses stay valid after the shard borrows retire.
-unsafe fn ledger<T>(
+/// Partitions are in input order, own their recovery and completed one scatter
+/// with the same block size and fan-out. They cover `input_len` consecutive
+/// records from the common raw ancestor `input`; only the last may have a tail.
+/// Their scratch allocations remain alive until this completion is dropped.
+unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>>(
     input: *mut T,
     input_len: usize,
-    shards: &mut [Shard<'_, '_, T>],
-) -> (Storage<T>, Vec<Bucket>) {
-    let block_size = shards[0].sorter.blocks.block_size;
-    let local_scratch = shards[0].sorter.blocks.scratch_blocks;
-    let bucket_count = shards[0].sorter.buffers.partial_blocks.len();
-    let scratch_blocks = shards.len() * local_scratch;
+    partitions: &mut [&mut Partition<'_, '_, T>],
+) -> Completion<T, Owner, Free> {
+    let block_size = partitions[0].blocks.block_size;
+    let local_scratch = partitions[0].blocks.scratch_blocks;
+    let bucket_count = partitions[0].buffers.writers.len();
+    let scratch_blocks = partitions.len() * local_scratch;
     let full_blocks = input_len / block_size;
     let count = scratch_blocks + full_blocks;
     let mut addresses = Vec::with_capacity(count);
-    for shard in shards.iter_mut() {
-        addresses
-            .extend((0..local_scratch).map(|physical| shard.sorter.blocks.block_ptr(physical)));
+    for partition in partitions.iter_mut() {
+        addresses.extend((0..local_scratch).map(|physical| partition.blocks.block_ptr(physical)));
     }
-    // SAFETY: the caller guarantees `full_blocks` blocks at the ancestor.
+    // SAFETY: the caller guarantees these full blocks at the common ancestor.
     addresses.extend((0..full_blocks).map(|block| unsafe { input.add(block * block_size) }));
-    let mut owners = vec![FREE; count];
-    let mut sources = Vec::new();
+    let mut owners: Vec<Owner> = (0..count).map(|_| Owner::new(FREE)).collect();
+    // A shard adds at most one partial prefix per bucket to its full blocks.
+    // Reserve the bound now, avoiding source-table growth and overlap.
+    let mut sources = Vec::with_capacity(full_blocks + partitions.len() * bucket_count);
     let mut buckets = Vec::with_capacity(bucket_count);
     let mut start = 0;
     for bucket in 0..bucket_count {
         let first_source = sources.len();
         let mut len = 0;
-        for (index, shard) in shards.iter().enumerate() {
-            let sorter = &shard.sorter;
-            let blocks = sorter.bucket_blocks(bucket);
-            let last = blocks.end - 1;
-            for logical in blocks {
-                let prefix = if logical == last {
-                    sorter.buffers.partial_blocks[bucket].len
-                } else {
-                    block_size
-                };
+        for (index, partition) in partitions.iter().enumerate() {
+            // SAFETY: partition inputs are block-aligned subranges of input.
+            let first_block =
+                unsafe { partition.blocks.input.offset_from(input) } as usize / block_size;
+            for (local, prefix) in partition.bucket_blocks(bucket) {
                 if prefix == 0 {
                     continue;
                 }
-                let local = sorter.buffers.block_order[logical] as usize;
                 let physical = if local < local_scratch {
                     index * local_scratch + local
                 } else {
-                    scratch_blocks + shard.first_block + local - local_scratch
+                    scratch_blocks + first_block + local - local_scratch
                 };
-                owners[physical] = sources.len();
+                *owners[physical].exclusive() = sources.len();
                 sources.push(Source {
                     location: AtomicUsize::new(physical),
                     len: prefix,
@@ -323,76 +414,122 @@ unsafe fn ledger<T>(
         start += len;
     }
     assert_eq!(start, input_len);
-    let free = owners
-        .iter()
-        .enumerate()
-        .filter_map(|(physical, &owner)| (owner == FREE).then_some(physical))
-        .collect();
-    let mut caches: Vec<_> = buckets
-        .iter()
-        // A direct transfer can return a borrowed free candidate before it
-        // retires its source, so reserve one slot beyond the own-source count.
-        .map(|bucket| Mutex::new(Vec::with_capacity(bucket.sources.len() + 1)))
-        .collect();
-    caches.push(Mutex::new(free));
-    let storage = Storage {
-        addresses,
-        input,
-        full_blocks,
-        scratch_blocks,
-        block_size,
-        owners: owners.into_iter().map(Mutex::new).collect(),
-        sources,
-        free: caches,
-    };
-    (storage, buckets)
-}
-
-/// Completes every bucket of the scattered `shards` through the
-/// protected-source ledger, lending each final band as soon as it no longer
-/// has live copy sources, and returns each bucket's cumulative end.
-///
-/// # Safety
-///
-/// The [`ledger`] requirements hold, and every shard still owns its recovery.
-pub(super) unsafe fn complete<'records, T: Send>(
-    input: *mut T,
-    input_len: usize,
-    shards: &mut [Shard<'records, '_, T>],
-    parallel: bool,
-    visit: Option<BucketVisit<'_, 'records, T>>,
-) -> Vec<usize> {
-    // SAFETY: forwarded from the caller.
-    unsafe { complete_with_fault(input, input_len, shards, parallel, visit, None) }
-}
-
-/// [`complete`] with an injected scheduler panic after `fail_after` buckets.
-///
-/// # Safety
-///
-/// As for [`complete`].
-unsafe fn complete_with_fault<'records, T: Send>(
-    input: *mut T,
-    input_len: usize,
-    shards: &mut [Shard<'records, '_, T>],
-    parallel: bool,
-    visit: Option<BucketVisit<'_, 'records, T>>,
-    fail_after: Option<usize>,
-) -> Vec<usize> {
-    // SAFETY: forwarded from the caller.
-    let (storage, mut buckets) = unsafe { ledger(input, input_len, shards) };
+    let mut free = Vec::with_capacity(count - sources.len());
+    for (physical, owner) in owners.iter_mut().enumerate() {
+        if *owner.exclusive() == FREE {
+            free.push(physical);
+        }
+    }
+    let mut caches = Vec::with_capacity(bucket_count + 1);
+    caches.extend(buckets.iter().map(|bucket| {
+        // Empty buckets perform no transfers and need no free cache.
+        let capacity = if bucket.sources.is_empty() {
+            0
+        } else {
+            bucket.sources.len() + 1
+        };
+        Free::new(Vec::with_capacity(capacity))
+    }));
+    caches.push(Free::new(free));
     let ends = buckets
         .iter()
         .map(|bucket| bucket.start + bucket.len)
         .collect();
-    // Every table is built. From here the ledger owns recovery: finishing all
-    // buckets restores every record, so the shard guards must not compact.
-    for shard in shards.iter_mut() {
-        shard.sorter.owns_recovery = false;
+    let completion = Completion {
+        storage: Storage {
+            addresses,
+            input,
+            full_blocks,
+            scratch_blocks,
+            block_size,
+            owners,
+            sources,
+            free: caches,
+        },
+        buckets,
+        ends,
+    };
+    // No fallible step separates this complete recovery guard from retiring
+    // the old guards. Scratch remains owned by those partitions until return.
+    for partition in partitions {
+        partition.owns_recovery = false;
     }
+    completion
+}
+
+/// Finishes serial bands with exclusive metadata and a mutable callback.
+/// The completion guard restores every unfinished band before a panic escapes.
+pub(super) fn complete_serial<'records, T>(
+    partition: &mut Partition<'records, '_, T>,
+    mut visit: Option<Visit<'_, 'records, T>>,
+) -> Vec<usize> {
+    assert!(partition.owns_recovery, "partition already completed");
+    let input = partition.blocks.input;
+    let len = partition.blocks.input_len;
+    // SAFETY: the single guard owns this complete scatter and its scratch.
+    let mut completion = unsafe {
+        build_completion::<T, core::cell::RefCell<usize>, core::cell::RefCell<Vec<usize>>>(
+            input,
+            len,
+            &mut [partition],
+        )
+    };
+    for bucket in &mut completion.buckets {
+        bucket.finish(&completion.storage, visit.as_deref_mut());
+        if bucket.panic.is_some() {
+            visit = None;
+        }
+    }
+    if let Some(payload) = completion
+        .buckets
+        .iter_mut()
+        .find_map(|bucket| bucket.panic.take())
+    {
+        unwind::resume(payload);
+    }
+    core::mem::take(&mut completion.ends)
+}
+
+/// Completes all scattered partitions in the caller's pool and lends final
+/// bands. The completion guard restores pending bands after all jobs join.
+///
+/// # Safety
+///
+/// The [`build_completion`] requirements hold.
+#[cfg(feature = "rayon")]
+pub(super) unsafe fn complete<'records, T: Send>(
+    input: *mut T,
+    input_len: usize,
+    partitions: &mut [&mut Partition<'records, '_, T>],
+    parallel: bool,
+    visit: Option<BucketVisit<'_, 'records, T>>,
+) -> Vec<usize> {
+    // SAFETY: forwarded from the caller.
+    unsafe { complete_with_fault(input, input_len, partitions, parallel, visit, None) }
+}
+
+/// Completes with an injected scheduler failure between bucket jobs.
+///
+/// # Safety
+///
+/// The [`build_completion`] requirements hold.
+#[cfg(feature = "rayon")]
+unsafe fn complete_with_fault<'records, T: Send>(
+    input: *mut T,
+    input_len: usize,
+    partitions: &mut [&mut Partition<'records, '_, T>],
+    parallel: bool,
+    visit: Option<BucketVisit<'_, 'records, T>>,
+    fail_after: Option<usize>,
+) -> Vec<usize> {
+    use rayon::prelude::*;
+    // SAFETY: forwarded from the caller.
+    let mut completion = unsafe {
+        build_completion::<T, Mutex<usize>, Mutex<Vec<usize>>>(input, input_len, partitions)
+    };
     let completed = AtomicUsize::new(0);
     let run = |bucket: &mut Bucket| {
-        bucket.finish(&storage, visit);
+        bucket.finish(&completion.storage, visit);
         if let Some(fail_after) = fail_after {
             let position = completed.fetch_add(1, Ordering::Relaxed);
             assert_ne!(
@@ -401,29 +538,24 @@ unsafe fn complete_with_fault<'records, T: Send>(
             );
         }
     };
-    let result = unwind::catch(|| {
-        if parallel {
-            buckets.par_iter_mut().for_each(run);
-        } else {
-            buckets.iter_mut().for_each(run);
-        }
-    });
-    if result.is_err() {
-        for bucket in &mut buckets {
-            bucket.finish(&storage, None);
-        }
+    if parallel {
+        completion.buckets.par_iter_mut().for_each(run);
+    } else {
+        completion.buckets.iter_mut().for_each(run);
     }
-    if let Err(payload) = result {
+    if let Some(payload) = completion
+        .buckets
+        .iter_mut()
+        .find_map(|bucket| bucket.panic.take())
+    {
         unwind::resume(payload);
     }
-    if let Some(payload) = buckets.iter_mut().find_map(|bucket| bucket.panic.take()) {
-        unwind::resume(payload);
-    }
-    ends
+    core::mem::take(&mut completion.ends)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "rayon"))]
 mod tests {
+    use super::super::parallel::{Config, partition_impl_with_visit};
     use super::*;
     use crate::key::{ByKey, Extract, KeyDigit};
     use std::sync::{
@@ -643,7 +775,7 @@ mod tests {
         std::thread::scope(|scope| {
             for bucket in &mut buckets {
                 let storage = &storage;
-                scope.spawn(move || bucket.finish(storage, None));
+                scope.spawn(move || bucket.finish(storage, None::<fn(usize, &mut [_])>));
             }
         });
         drop(storage);
@@ -703,14 +835,19 @@ mod tests {
                     .step(|record: &(u32, usize)| record.0 as usize)
                     .is_ok()
             );
-            shards.push(Shard {
-                sorter,
-                panic: None,
-                first_block: shard * SHARD_LEN / BLOCK,
-            });
+            shards.push(sorter);
         }
-        // SAFETY: the shards cover the records in order from their ancestor.
-        let (storage, mut buckets) = unsafe { ledger(input, SHARDS * SHARD_LEN, &mut shards) };
+        let mut partitions: Vec<_> = shards.iter_mut().collect();
+        // SAFETY: these partitions cover the records in order from their ancestor.
+        let mut completion = unsafe {
+            build_completion::<_, Mutex<usize>, Mutex<Vec<usize>>>(
+                input,
+                SHARDS * SHARD_LEN,
+                &mut partitions,
+            )
+        };
+        let storage = &completion.storage;
+        let buckets = &mut completion.buckets;
         assert!(
             buckets
                 .iter()
@@ -719,11 +856,8 @@ mod tests {
         assert_eq!(lock(&storage.free[BUCKETS]).len(), 192);
         // Transfer recovery responsibility to this controlled state-machine
         // fixture; all records are plain Copy values and are restored below.
-        for shard in &mut shards {
-            shard.sorter.owns_recovery = false;
-        }
         for helper in [0, 2, 4, 6] {
-            buckets[helper].finish(&storage, None);
+            buckets[helper].finish(storage, None::<fn(usize, &mut [_])>);
         }
         // Concentrate unused candidates in a completed helper's registered
         // cache, forcing subsequent work to discover a suspended peer's blocks.
@@ -734,7 +868,7 @@ mod tests {
         let held = lock(&storage.free[0]).len();
         let result = unwind::catch(|| {
             for victim in [8, 10, 12, 14] {
-                buckets[victim].finish(&storage, None);
+                buckets[victim].finish(storage, None::<fn(usize, &mut [_])>);
             }
         });
         assert!(
@@ -743,10 +877,10 @@ mod tests {
         );
         // Helpers stay paused. Their registered caches must support victims
         // before any helper returns to publish or release its allocation.
-        for bucket in &mut buckets {
-            bucket.finish(&storage, None);
+        for bucket in buckets {
+            bucket.finish(storage, None::<fn(usize, &mut [_])>);
         }
-        drop(storage);
+        drop(completion);
         drop(shards);
         assert_eq!(records, expected);
         assert!(
@@ -844,13 +978,12 @@ mod tests {
                 let records = unsafe { core::slice::from_raw_parts_mut(input, len) };
                 let mut sorter = Partition::new(records, 4, 3, &mut buffers);
                 assert!(sorter.step(|record: &Owned| record.id * 37 % 4).is_ok());
-                let mut shards = [Shard {
-                    sorter,
-                    panic: None,
-                    first_block: 0,
-                }];
+                let mut shards = [sorter];
+                let mut partitions: Vec<_> = shards.iter_mut().collect();
                 // SAFETY: one shard covers all records from their ancestor.
-                unsafe { complete_with_fault(input, len, &mut shards, parallel, None, Some(0)) };
+                unsafe {
+                    complete_with_fault(input, len, &mut partitions, parallel, None, Some(0))
+                };
             });
             assert!(result.is_err());
             let mut ids: Vec<_> = records.iter().map(|record| record.id).collect();

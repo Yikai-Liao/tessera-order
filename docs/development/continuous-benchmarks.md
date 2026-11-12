@@ -1,6 +1,6 @@
 # Continuous benchmarks
 
-Affected pull requests compare the required SIMD backend against an exact source baseline on GitHub-hosted runners. Each case alternates adjacent A/B and B/A samples; local `compare commit` uses the same protocol. Bencher Cloud archives relative results, not historical regression thresholds. These screens flag changes to investigate, not source-change causality independent of code placement.
+Affected pull requests compare the required SIMD backend against an exact source baseline on GitHub-hosted runners. Each case alternates adjacent A/B and B/A samples; local `compare commit` uses the same protocol. Bencher Cloud archives the PRs’ relative results, not historical regression thresholds. Independent [main tracking](#main-long-term-tracking) records absolute time. These screens flag changes to investigate, not source-change causality independent of code placement.
 
 ## Read feedback from a PR
 
@@ -20,13 +20,13 @@ A read-only feedback request does not authorize new measurements.
 
 ## Read main and history
 
-The [dashboard](https://bencher.dev/perf/yikai-liao-s-project) stores current/baseline ratios, not absolute nanoseconds: 1.10 means 10% more time than that run's exact baseline. A PR's points form one trend even when merging main or a retarget changes the baseline, so a step can come from the baseline moving. Do not compare ratios across PRs.
+The PR series on the [dashboard](https://bencher.dev/perf/yikai-liao-s-project) store current/baseline ratios, not absolute nanoseconds: 1.10 means 10% more time than that run's exact baseline. A PR's points form one trend even when merging main or a retarget changes the baseline, so a step can come from the baseline moving. Do not compare ratios across PRs.
 
-Measurement and Cloud archival run on PRs only; main runs correctness and site checks selected by its diff. With no attached benchmark check, `status main` returns `benchmark.state: "not_applicable"`; an unmeasured PR or another ref still returns `"missing"`. Retained older main ratios describe parent-to-commit effects, not cumulative latency, and no historical threshold decides the performance check.
+Paired measurement and ratio archival run on PRs only; main runs correctness and site checks selected by its diff, plus the opt-in independent main tracking workflow. With no attached benchmark check, `status main` returns `benchmark.state: "not_applicable"`; an unmeasured PR or another ref still returns `"missing"`. Retained older main ratios describe parent-to-commit effects, not cumulative latency, and no historical threshold decides the performance check.
 
 ## Pipeline
 
-- The [CI workflow](../../.github/workflows/ci.yml) runs `prepare → measure → report` with the PR branch's code; the [diff router](ci.md) selects measurement for engine, harness, plan and execution-tooling changes. There is no second publisher or plan authority on main.
+- The [CI workflow](../../.github/workflows/ci.yml) runs `prepare → measure → report` with the PR branch's code; the [diff router](ci.md) selects measurement for engine, harness, plan and execution-tooling changes. Main tracking does not publish PR verdicts or interpret the continuous plan.
 - **Prepare** calls `continuous prepare` once. Both revisions use the PR's harness, lockfile and toolchain; the baseline library comes from the merge base with the target SHA from the triggering event. It retains the plan, resolved inventory, provenance, hashes and executables as `prepared-revisions`.
 - **Measure**: four complete-case shards call `continuous measure --shard INDEX/COUNT` without Rust or compiling, checking hashes, harness/catalog compatibility and both inventories first. Fourteen-day `paired-*` artifacts keep JSON, reports and logs; combine a shard's `local.json` binary paths with `prepared-revisions` to inspect binaries.
 - **Report** reads this run's prepared plan and inventory, verifies complete disjoint shards and matching identity, and recomputes verdicts from raw samples without running artifact binaries. Cloud submission is attempted first so reports carry links; failure leaves the verdict, figures and summary intact.
@@ -102,3 +102,23 @@ bun run tools continuous submit --project PROJECT --hash COMMIT --base-hash BASE
 ```
 
 It validates the prepared plan and inventory, disjoint shard coverage, the revision pair, common settings and complete positive sample pairs, then uploads before rendering so reports carry links. It retains `bmf.json` and the Cloud response `bencher.json` and exits nonzero on validation or upload failure; raw-sample verdicts are unaffected. Omitting `--pr` keeps legacy manual main upload. The evidence limits are in [benchmarking](benchmarking.md#working-tree-comparisons).
+
+## Main long-term tracking
+
+The [performance page](../benchmarks/index.md) tracks absolute nanoseconds per sort, independently of PR ratios. The [main workflow](../../.github/workflows/main-benchmarks.yml) reuses the diff router: relevant main pushes measure their exact head; documentation-only changes and unchanged main do not measure. Manual dispatch is available on main. Push execution is opt-in through `MAIN_BENCHMARKS_ENABLED=true`. Pending pushes are not coalesced; Bencher owns the single remote execution slot. This is not a merge requirement and sets no historical alerts.
+
+[The plan](../../bench/plans/main.toml) owns fixed-length serial and four-thread coverage, reusing the smoke Criterion harness and catalog budgets. Preview with `bun run --silent tools plan main`. CI reuses the shared workspace/builder to create one static glibc executable; the Alpine runtime contains no Rust, Bun, sources or credentials. Remote execution never compiles. Serial and parallel phases require CPU pinning and disabled ASLR, failing if unavailable. There is one remote job, no shards, with `--job-timeout 300`; compilation and queue wait are outside that budget. The nominal sampling budget is not an end-to-end duration guarantee. Canceling Actions need not cancel an already submitted job.
+
+### Data and site publication
+
+Bencher branch `main` / Testbed `baremetal-intel-v1-absolute-v1` / Spec `intel-v1` / Measure `latency` identify the series. The workflow accepts only complete matching reports, then uses ordinary Git to update the orphan `benchmark-data` branch. Each content-addressed monthly JSONL contains numeric summaries, source/build hashes, compiler flags, image digest and Actions links—not raw samples, full API responses or binaries. A small `main/index.json` lists months and catalog-generated case labels. Publication also regenerates `main/preview.svg` for the representative serial random-u64 case; GitHub README embeds this image and links to the interactive page. GitHub image caching may delay updates. Re-publishing the same report is a no-op; a conflicting identity fails. Non-force pushes retry ref races without remeasurement. Full clones include data-branch history; Git growth and registry retention remain operational costs.
+
+The browser reads the data index from GitHub Raw when opened, downloads all monthly JSONL files overlapping the selected time window, merges them, and filters/plots the selected case locally. Month boundaries never split the chart. Content-addressed filenames prevent silently mixing cached generations; unavailable files report an error. **Publishing measurements does not build or deploy the website.** The Docs workflow has no data-fetch step; local builds need no data or network. Before the first publication the page reports that data is unavailable. Agents can inspect the same files with `git fetch origin benchmark-data` and `git ls-tree -r FETCH_HEAD main/`.
+
+Compiler and dependency upgrades stay in the trend; protocol/input changes require a compatibility decision. Hardware specifications/protocols are separate plotted series, not a guarantee of one physical machine. Criterion intervals describe within-run estimates, not cross-run regression confidence or source-change causality.
+
+### Setup and recovery
+
+Create a separate `benchmark-main` environment restricted to main, with `BENCHER_API_KEY` and `BENCHER_PROJECT`. Do not widen the PR environment's policy. Adding this workflow changes no credentials or account settings. Keep automatic execution disabled until a manually dispatched Bare Metal pilot confirms execution controls, complete ingestion, timeout headroom, Git publication and browser loading.
+
+Rerunning the workflow measures again. If only publication failed, download the retained summary, check out the data branch, run `bun /path/to/source/bench/tracking/publish.ts /path/to/summary.jsonl`, then commit and push normally. Fourteen-day Actions evidence is diagnostic, not the long-term store. There is no site-refresh recovery step.

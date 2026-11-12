@@ -18,7 +18,7 @@ The router uses the merge base and the first matching row of the `ROUTES` table 
 
 An engine-only PR does not fetch third-party native sources, install TBB or run the external algorithm harness. Its Rust revision comparison is the `prepare → measure → report` pipeline; `Algorithm harness (Rust and C++)` (job ID `comparison`) tests the separate algorithm-comparison tool. In particular, adapter integration is no longer dynamically retested for every engine revision; library correctness and revision measurement remain the engine's automatic checks. Comparator-only changes do not rerun library platform, Miri or sanitizer jobs. Shared build inputs still select both consumers.
 
-Issue and PR templates, Dependabot configuration, `fuzz/`, manual diagnostics and separate title/DCO/release workflows select no additional lane. A path that no row names, an unavailable base and manual CI dispatch select all lanes: an unclassified file is not known to be harmless, so a new kind of file needs a row. `ci.yml` is the only automatic task selector. PR updates cancel obsolete runs on the same PR. Every main push has an independent CI concurrency group, preserving a pending site deployment when a later non-docs push arrives.
+Issue and PR templates, Dependabot configuration, `fuzz/`, manual diagnostics and separate title/DCO/release workflows select no additional lane. A path that no row names, an unavailable base and manual CI dispatch select all lanes: an unclassified file is not known to be harmless, so a new kind of file needs a row. `ci.yml` is the only automatic change-based task selector. The opt-in [main performance workflow](continuous-benchmarks.md#main-long-term-tracking) is independent of these lanes and `ci-ok`. PR updates cancel obsolete runs on the same PR. Every main push has an independent CI concurrency group, preserving a pending site deployment when a later non-docs push arrives.
 
 ## Lanes
 
@@ -31,7 +31,7 @@ Use a bounded number of lanes: the account has 20 concurrent slots shared with b
 | Miri: serial backend and Rayon ownership fixtures | two parallel jobs | the same |
 | AddressSanitizer | `asan` | the same |
 | `cargo package` | in `rust / lint` | the same |
-| Paired continuous measurement | one preparation job and four complete-case shards, inputs up to 1M | none |
+| Paired continuous measurement | one preparation job and four complete-case shards, inputs up to 1M | none; independent opt-in absolute-time tracking on relevant pushes |
 | Algorithm harness tests, doctests, native smoke checks and report generation | `comparison`, for affected comparison/shared inputs | the same |
 
 The Rust lint job checks all workspace features with Clippy and rustdoc, including the benchmark's native-facing Rust code. These commands do not link executables, so they set `TESSERA_BENCH_CHECK_ONLY=1` to skip the benchmark build script's native compilation and linker inputs. The lint runner needs neither fetched native sources nor native build tools. The comparison job sets the variable only for the Clippy and rustdoc step it owns, then compiles, links and exercises the native competitors, including the sequential-linkage check. Cargo tracks changes to the variable so a check-only build cannot suppress a later executable build's native setup.

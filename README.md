@@ -69,7 +69,11 @@ The optional `rayon` feature adds `par_stable_sort` and `par_stable_sort_by_key`
 Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). These continuous measurements flag changes to investigate; use the [benchmark protocol](docs/development/benchmarking.md#command-capabilities) for paired algorithm comparisons and source-change attribution.
 
 > [!NOTE]
-> The comparison runner is implemented. The first complete release comparison and its published figures remain on the [roadmap](ROADMAP.md); this README provides no performance data until then.
+> The first complete release comparison remains on the [roadmap](ROADMAP.md). The preview below tracks one main case, not an algorithm ranking.
+
+Main trend: serial random u64 keys, 65,536 records; lower is faster. Select other cases and time windows on the [interactive page](https://yikai-liao.github.io/tessera-sort/benchmarks/).
+
+[![Main performance trend](https://raw.githubusercontent.com/Yikai-Liao/tessera-sort/benchmark-data/main/preview.svg)](https://yikai-liao.github.io/tessera-sort/benchmarks/)
 
 ## When to use something else
 

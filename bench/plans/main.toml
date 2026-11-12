@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+schema = 1
+harness = "smoke"
+algorithms = ["tessera"]
+exclude = []
+
+# Fixed lengths keep historical points comparable when engine boundaries move.
+[[include]]
+types = ["u64", "row_u64"]
+distributions = ["random"]
+lengths = [32, 1000]
+
+[[include]]
+types = ["u64"]
+distributions = ["random", "sorted", "reverse", "equal", "d16", "skew99", "sparse_digits"]
+lengths = [65536]
+
+[[include]]
+types = ["row_u64"]
+distributions = ["d16", "sorted_tail"]
+lengths = [65536]
+
+[[include]]
+types = ["u32", "u64", "u128", "f64", "row_u64", "rec128_u64"]
+distributions = ["random"]
+lengths = [1000000]
+
+[[parallel]]
+types = ["u32", "u64", "row_u64", "rec128_u64"]
+distributions = ["random"]
+lengths = [1000000]
+
+[[parallel]]
+types = ["u64"]
+distributions = ["d16", "skew99", "sorted_tail"]
+lengths = [1000000]

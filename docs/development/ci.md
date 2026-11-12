@@ -44,11 +44,21 @@ The job uses a cached Cargo target and matching development profiles and alignme
 
 A Rust test cell's commands live in one composite action, [`rust-test`](../../.github/actions/rust-test/action.yml), which both the pull request cells and the extra `main` cells call. A job's `if` cannot branch on `matrix` — the matrix is expanded after the condition is evaluated — so the two sets of cells are two jobs over one action rather than one matrix with a skip per cell.
 
-Each cell tests only `tessera-sort`, with the shared SIMD backend and optional `rayon` entry points, including on Rust 1.89. There are no separate scalar or no-std configurations. Rayon tests cover sharded root scatter, caller-pool bucket scheduling, the one-thread fallback, task panics and record preservation. The two Miri jobs interpret serial and Rayon ownership fixtures concurrently without dropping either configuration. The Rayon job additionally interprets sequential ownership fixtures for parallel storage and bucket handoff; native tests cover threaded scheduling. The AddressSanitizer job exercises the library's serial and Rayon builds; benchmark executables and competitor dependencies stay with the comparison job, which runs them unsanitized. No test lane is added for the continuous benchmark's two API groups.
+Each cell tests only `tessera-sort`, with the shared SIMD backend and optional `rayon` entry points, including on Rust 1.89. The test cells disable test-profile debug information to reduce compilation work; this can make failure backtraces less informative and does not change Miri, sanitizers, benchmarks or release builds. There are no separate scalar or no-std configurations. Rayon tests cover sharded root scatter, caller-pool bucket scheduling, the one-thread fallback, task panics and record preservation. The two Miri jobs interpret serial and Rayon ownership fixtures concurrently without dropping either configuration. The Rayon job additionally interprets sequential ownership fixtures for parallel storage and bucket handoff; native tests cover threaded scheduling. The AddressSanitizer job exercises the library's serial and Rayon builds; benchmark executables and competitor dependencies stay with the comparison job, which runs them unsanitized. No test lane is added for the continuous benchmark's two API groups.
 
 The benchmark crate's own unit tests and doctests run with the algorithm harness. A library change does not rerun them: it still builds the smoke benchmark against both revisions, which rejects changed case identities, and the tested modules are benchmark-owned code.
 
 The [benchmark diagnostics workflow](../../.github/workflows/bench-diagnostics.yml) runs only by manual dispatch. Select fixed-work counters or a five-layout sample and an optional baseline, using the four serial inputs in the diagnostics plan. Results and logs remain 14-day artifacts. It has read-only permissions, no Cloud submissions and a 45-minute timeout. Ordinary PRs and main pushes do not start these exploratory experiments.
+
+## Optional faster local tests
+
+For a local correctness iteration that does not need debugger information, disable test-profile debug information for that command only:
+
+```sh
+CARGO_PROFILE_TEST_DEBUG=0 cargo test -p tessera-sort --lib --tests --features rayon
+```
+
+This uses stable Cargo without changing the repository profile, but backtraces and debugging may be less informative. Run the normal validation commands as well; do not use this setting to change benchmark or release builds.
 
 ## Adding a language
 

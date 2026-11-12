@@ -13,11 +13,13 @@ runs:
   using: composite
   steps:
     # Stable enforces current lints; the MSRV checks build and test compatibility.
-    - name: Set RUSTFLAGS
+    - name: Set test build environment
       shell: bash
       env:
         FLAGS: ${{ inputs.toolchain == 'stable' && '-D warnings' || '' }}
-      run: echo "RUSTFLAGS=$FLAGS" >> "$GITHUB_ENV"
+      run: |
+        echo "RUSTFLAGS=$FLAGS" >> "$GITHUB_ENV"
+        echo "CARGO_PROFILE_TEST_DEBUG=0" >> "$GITHUB_ENV"
     - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ inputs.toolchain }}

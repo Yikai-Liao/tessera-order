@@ -10,7 +10,8 @@ use std::sync::{
 
 /// A physical block without a live source or finalized band fragment.
 const FREE: usize = usize::MAX;
-/// A physical block reserved for disjoint final-band writes.
+/// A physical block with no unread source. Disjoint final-band fragments may
+/// still be unwritten; FINAL does not mean the whole block is filled.
 const FINAL: usize = usize::MAX - 1;
 /// One initialized source prefix in the partition directory.
 struct Source {
@@ -74,22 +75,45 @@ impl<T> Storage<T> {
         }
     }
 
-    /// Transfers a live prefix to exclusively owned, non-overlapping output.
-    fn gather(&self, logical: usize, output: *mut T) -> usize {
+    /// Transfers one complete live prefix to its final input range, allowing
+    /// overlap with that same source. Retires or recycles its physical block
+    /// and returns the number of records written.
+    fn transfer(
+        &self,
+        logical: usize,
+        start: usize,
+        local: &mut Vec<usize>,
+        cache: usize,
+    ) -> usize {
         let source = &self.sources[logical];
+        let initial = source.location.load(Ordering::Acquire);
+        let skipped = self.protect_band(start, source.len, initial, local, cache);
         loop {
             let physical = source.location.load(Ordering::Acquire);
             let mut owner = lock(&self.owners[physical]);
             if *owner != logical {
                 continue;
             }
-            // SAFETY: the verified owner mutex protects this initialized
-            // source prefix until ownership transfers to exclusive output.
-            unsafe {
-                ptr::copy_nonoverlapping(self.addresses[physical], output, source.len);
+            // SAFETY: the final interval fits the input. Every overlapping
+            // destination block is FINAL except an explicitly skipped source.
+            let output = unsafe { self.input.add(start) };
+            if skipped && physical == initial {
+                // SAFETY: this owner still protects the skipped live prefix.
+                // Its only overlap is with its own final range; memmove
+                // transfers ownership before that block becomes FINAL.
+                unsafe { ptr::copy(self.addresses[physical], output, source.len) };
+                *owner = FINAL;
+            } else {
+                // If the skipped source moved, acquiring its verified new
+                // owner also observes the relocation making its old block
+                // FINAL. The actual source is outside the protected output.
+                // SAFETY: the verified owner protects a live prefix disjoint
+                // from the whole final interval, even after relocation.
+                unsafe { ptr::copy_nonoverlapping(self.addresses[physical], output, source.len) };
+                *owner = FREE;
+                local.push(physical);
             }
-            *owner = FREE;
-            return physical;
+            return source.len;
         }
     }
 
@@ -149,8 +173,17 @@ impl<T> Storage<T> {
         }
     }
 
-    /// Retires unread sources from every physical block touching a final band.
-    fn protect_band(&self, start: usize, len: usize, local: &mut Vec<usize>, cache: usize) {
+    /// Protects the final range except `source`, returning whether that
+    /// physical block actually overlapped and was skipped.
+    fn protect_band(
+        &self,
+        start: usize,
+        len: usize,
+        source: usize,
+        local: &mut Vec<usize>,
+        cache: usize,
+    ) -> bool {
+        let mut skipped = false;
         let mut offset = 0;
         while offset < len {
             let position = start + offset;
@@ -158,10 +191,16 @@ impl<T> Storage<T> {
             let begin = position % self.block_size;
             let count = (self.block_size - begin).min(len - offset);
             if block < self.full_blocks {
-                self.protect(self.scratch_blocks + block, local, cache);
+                let physical = self.scratch_blocks + block;
+                if physical == source {
+                    skipped = true;
+                } else {
+                    self.protect(physical, local, cache);
+                }
             }
             offset += count;
         }
+        skipped
     }
 }
 
@@ -183,23 +222,15 @@ impl Bucket {
             return;
         }
         // No allocation, user code or scheduler call interrupts movement, so
-        // unwind recovery sees whole buckets. Protect before loading the source
-        // location: protection may relocate that very source. After g retired
+        // unwind recovery sees whole buckets. Transfer protects output and then
+        // validates the source, which peers may have relocated. After g retired
         // prefixes a bucket touches at most g + 2 destination blocks. While it
         // waits for one of those blocks, at most g + 1 are final: with at least
         // two shards, the shared reserve still covers outstanding candidates.
         let mut offset = 0;
         for logical in self.sources.clone() {
-            let len = storage.sources[logical].len;
             let mut free = lock(&storage.free[self.cache]);
-            storage.protect_band(self.start + offset, len, &mut free, self.cache);
-            // SAFETY: the whole destination is final and therefore contains no
-            // unread source. gather validates and locks the current source,
-            // which is disjoint even if protection just relocated it.
-            let output = unsafe { storage.input.add(self.start + offset) };
-            let physical = storage.gather(logical, output);
-            free.push(physical);
-            offset += len;
+            offset += storage.transfer(logical, self.start + offset, &mut free, self.cache);
         }
         self.completed = true;
         if self.len != 0
@@ -399,6 +430,38 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+
+    #[test]
+    fn transfers_recycle_only_sources_outside_the_final_range() {
+        for (physical, start, len, expected_owner) in [(2, 0, 4, FREE), (1, 1, 3, FINAL)] {
+            let mut input = [10u32, 11, 12, 13, 20, 21, 22, 23];
+            let mut scratch = [0u32; 4];
+            let input_ptr = input.as_mut_ptr();
+            let expected = input[(physical - 1) * 4..(physical - 1) * 4 + len].to_vec();
+            let mut owners = vec![Mutex::new(FREE), Mutex::new(FREE), Mutex::new(FREE)];
+            *owners[physical].get_mut().unwrap() = 0;
+            let storage = Storage {
+                // SAFETY: both input blocks and the disjoint scratch hold four
+                // records and stay alive until this complete transfer returns.
+                addresses: vec![scratch.as_mut_ptr(), input_ptr, unsafe { input_ptr.add(4) }],
+                input: input_ptr,
+                full_blocks: 2,
+                scratch_blocks: 1,
+                block_size: 4,
+                owners,
+                sources: vec![Source {
+                    location: AtomicUsize::new(physical),
+                    len,
+                }],
+                free: vec![Mutex::new(Vec::new()), Mutex::new(vec![0])],
+            };
+            let mut free = Vec::new();
+            assert_eq!(storage.transfer(0, start, &mut free, 0), len);
+            assert_eq!(&input[start..start + len], expected);
+            assert_eq!(*lock(&storage.owners[physical]), expected_owner);
+            assert_eq!(free.contains(&physical), expected_owner == FREE);
+        }
+    }
 
     /// Exercises final-band finishing with small storage geometries.
     fn finish_records<T: Send, E: Extract<T> + Clone + Send>(

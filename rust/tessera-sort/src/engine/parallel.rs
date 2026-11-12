@@ -95,48 +95,59 @@ fn sort_root<T: Send, E: Extract<T> + Clone + Send + Sync>(
         return;
     }
     let shards = rayon::current_num_threads().min((node_bytes / MIN_TASK_BYTES).max(1));
-    let digit = match plan_node(records, varying, tile_len, extractor) {
-        NodePlan::Digit(digit) => digit,
-        NodePlan::Equal(equal) => {
-            // The same rank digit as serial equality partitions.
-            let rank = Rank {
-                extractor: extractor.clone(),
-                equal,
-            };
-            let ends = block::partition_digit_parallel(
-                records,
-                2,
-                0,
-                rank,
-                &mut scratch.block,
-                shards,
-                block::BucketFinish {
-                    limit: 0,
-                    sort: &|_| {},
-                    visit: &mut |_| {},
-                },
-            );
-            // Materialization has retired all copy sources. Skip the equal band;
-            // the unused fourth bucket leaves the greater band through the end.
-            let (less, rest) = records.split_at_mut(ends[0]);
-            let (_, greater) = rest.split_at_mut(ends[1] - ends[0]);
-            scratch.block.recycle_ends(ends);
-            let mut right_extractor = extractor.clone();
-            [
-                (less, scratch, extractor),
-                (greater, &mut Scratch::new(), &mut right_extractor),
-            ]
-            .into_par_iter()
-            .for_each(|(records, scratch, extractor)| {
-                Sorter {
-                    scratch,
-                    extractor,
-                    tile_len,
-                }
-                .sort_child(records, varying);
-            });
-            return;
+    let mut plan = plan_node(records, varying, tile_len, extractor);
+    if let NodePlan::Equal(equal) = plan {
+        // The same rank digit as serial equality partitions.
+        let rank = Rank {
+            extractor: extractor.clone(),
+            equal,
+        };
+        let ends = block::partition_digit_parallel(
+            records,
+            2,
+            0,
+            rank,
+            &mut scratch.block,
+            shards,
+            block::BucketFinish {
+                limit: 0,
+                sort: &|_| {},
+                visit: &mut |_| {},
+            },
+        );
+        match plan_after_equality(records, &ends, varying, tile_len, extractor) {
+            Some(progress) => {
+                // The node is unchanged; continue with the bit-consuming plan.
+                scratch.block.recycle_ends(ends);
+                plan = progress;
+            }
+            None => {
+                // Materialization has retired all copy sources. Skip the equal
+                // band; the unused fourth bucket leaves the greater band through
+                // the end.
+                let (less, rest) = records.split_at_mut(ends[0]);
+                let (_, greater) = rest.split_at_mut(ends[1] - ends[0]);
+                scratch.block.recycle_ends(ends);
+                let mut right_extractor = extractor.clone();
+                [
+                    (less, scratch, extractor),
+                    (greater, &mut Scratch::new(), &mut right_extractor),
+                ]
+                .into_par_iter()
+                .for_each(|(records, scratch, extractor)| {
+                    Sorter {
+                        scratch,
+                        extractor,
+                        tile_len,
+                    }
+                    .sort_child(records, varying);
+                });
+                return;
+            }
         }
+    }
+    let digit = match plan {
+        NodePlan::Digit(digit) => digit,
         plan => {
             Sorter::<T, E> {
                 scratch,

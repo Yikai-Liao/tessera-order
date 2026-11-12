@@ -254,15 +254,21 @@ pub(super) fn plan_node<T, E: Extract<T>>(
     plan_digit(records, varying, tile_len, extractor, sample)
 }
 
-/// Selects a bit-consuming partition after an equality split failed to progress.
-/// Sample reuse stays private; the executor needs only the progress guarantee.
-pub(super) fn plan_progress<T, E: Extract<T>>(
+/// Returns the bit-consuming plan that replaces an equality partition which
+/// left the node unchanged, or `None` when its bands progressed.
+///
+/// A changing key can leave every record below or above the sampled key, so
+/// equality would repeat indefinitely; a sample cannot certify progress, only
+/// the partition's `ends` can. Both executors consult this one rule.
+pub(super) fn plan_after_equality<T, E: Extract<T>>(
     records: &[T],
+    ends: &[usize],
     varying: u128,
     tile_len: usize,
     extractor: &mut E,
-) -> NodePlan<E::Value> {
-    plan_digit(records, varying, tile_len, extractor, None)
+) -> Option<NodePlan<E::Value>> {
+    let unchanged = ends[0] == records.len() || ends[1] == 0;
+    unchanged.then(|| plan_digit(records, varying, tile_len, extractor, None))
 }
 
 /// Reuses any equality sample when planning a bit-consuming partition.
@@ -326,6 +332,28 @@ mod tests {
                 buckets.dedup();
                 assert_eq!(sample.top_digit_occupancy(digit), buckets.len());
             }
+        }
+    }
+
+    #[test]
+    fn unchanged_equality_partitions_consume_key_bits() {
+        let len = 4096;
+        let records: Vec<u64> = (0..len as u64)
+            .map(|key| key.wrapping_mul(0x9e37_79b9))
+            .collect();
+        let varying = records.iter().fold(0, |bits, &key| bits | key) as u128;
+        let replan = |ends: &[usize]| plan_after_equality(&records, ends, varying, 64, &mut Direct);
+        // Every record below or every record above the sampled key: the
+        // replacement must split on a bit rather than sample equality again.
+        for ends in [[len, len, len, len], [0, 0, len, len]] {
+            assert!(matches!(
+                replan(&ends),
+                Some(NodePlan::Digit(_) | NodePlan::Runs { .. })
+            ));
+        }
+        // Any separated band, including an empty equal band, is progress.
+        for ends in [[1, 1, len, len], [0, 1, len, len], [len - 1, len, len, len]] {
+            assert!(replan(&ends).is_none());
         }
     }
 

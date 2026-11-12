@@ -21,7 +21,7 @@ mod tile;
 pub(crate) use tile::Cursor;
 
 use crate::thresholds::{INSERTION_MAX, TILE_BYTES};
-use plan::{Digit, NodePlan, bit_len, plan_node, plan_progress};
+use plan::{Digit, NodePlan, bit_len, plan_after_equality, plan_node};
 use tile::capacity as tile_capacity;
 
 use alloc::vec::Vec;
@@ -571,13 +571,15 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             self.scratch,
             self.tile_len,
         );
-        if ends[0] == records.len() || ends[1] == 0 {
-            // A changing key can leave the whole node below or above the
-            // sampled pivot. Force a digit partition to remove candidate bits
-            // rather than repeat the same equality partition indefinitely.
-            // That single band exceeds the tile, so no visit finished it.
+        if let Some(plan) = plan_after_equality(
+            records,
+            &ends,
+            parent_varying,
+            self.tile_len,
+            self.extractor,
+        ) {
+            // The single band exceeds the tile, so no visit finished it.
             self.scratch.block.recycle_ends(ends);
-            let plan = plan_progress(records, parent_varying, self.tile_len, self.extractor);
             self.execute_node(records, parent_varying, plan);
             return;
         }

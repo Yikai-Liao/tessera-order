@@ -17,6 +17,13 @@ export const ink = {
   panel: "var(--panel)",
 } as const;
 
+/** Format a relative change as a signed percentage; missing values print as a dash. */
+export function formatChange(change: number | null) {
+  if (change == null || !Number.isFinite(change)) return "—";
+  const pct = change * 100;
+  return `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%`;
+}
+
 /** Measure Inter labels with the library's font metrics, without a canvas. */
 export const textWidth = (text: string, size: number) => measure(text, { font: "inter", size });
 

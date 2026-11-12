@@ -8,9 +8,17 @@ import { type Headline, matrixHeader } from "./matrix.ts";
 import { theme } from "./theme.ts";
 
 export interface TrendCell {
-  changes: number[];
+  /** One entry per shared run; null leaves a gap, so every row keeps the same run positions. */
+  changes: (number | null)[];
   value: string;
   major: boolean;
+}
+export interface TrendRow {
+  name: NameCell;
+  cells: (TrendCell | null)[];
+  aggregate: boolean;
+  /** Turns the whole row into a link, for example to a detail view in the host page. */
+  href?: string;
 }
 export interface TrendChart {
   id?: string;
@@ -18,15 +26,13 @@ export interface TrendChart {
   headline: string;
   description: string;
   columns: Headline[];
-  groups: {
-    title: string;
-    rows: { name: NameCell; cells: (TrendCell | null)[]; aggregate: boolean }[];
-  }[];
+  groups: { title: string; rows: TrendRow[] }[];
   minimumSpan: number;
   reference: string;
   guide: string;
 }
 const color = (value: number) => (value < 0 ? ink.primary : value > 0 ? ink.radix : ink.axis);
+const present = (values: (number | null)[]) => values.filter((value) => value !== null);
 
 /** Render grouped small-multiple histories with a shared vertical scale per row. */
 export function renderTrends(spec: TrendChart) {
@@ -41,7 +47,9 @@ export function renderTrends(spec: TrendChart) {
         row.cells.length !== spec.columns.length ||
         row.cells.some(
           (cell) =>
-            cell && (!cell.changes.length || cell.changes.some((value) => !Number.isFinite(value))),
+            cell &&
+            (!present(cell.changes).length ||
+              present(cell.changes).some((value) => !Number.isFinite(value))),
         ),
     )
   )
@@ -75,6 +83,8 @@ export function renderTrends(spec: TrendChart) {
     ...spec.columns.flatMap((column, index) => matrixHeader(column, cols[index].left)),
   ];
   const layers: Plot.PlotOptions[] = [];
+  const links: { x1: number; x2: number; y1: number; y2: number; href: string; title: string }[] =
+    [];
   for (const [index, group] of groups.entries()) {
     if (index)
       annotations.push(
@@ -85,7 +95,16 @@ export function renderTrends(spec: TrendChart) {
     );
     for (const { row, cy } of group.placed) {
       annotations.push(...rowName(row.name, cy));
-      const values = row.cells.flatMap((cell) => cell?.changes ?? []);
+      if (row.href)
+        links.push({
+          x1: pad / 2,
+          x2: width - pad / 2,
+          y1: cy - rowHeight / 2,
+          y2: cy + rowHeight / 2,
+          href: row.href,
+          title: [row.name.input, row.name.sub, row.name.tag].filter(Boolean).join(" · "),
+        });
+      const values = row.cells.flatMap((cell) => present(cell?.changes ?? []));
       const low = Math.min(0, ...values),
         high = Math.max(0, ...values);
       const span = Math.max(high - low, spec.minimumSpan),
@@ -108,12 +127,14 @@ export function renderTrends(spec: TrendChart) {
           }),
         );
         if (!cell) return;
-        const latest = cell.changes.length - 1,
+        const last = cell.changes.length - 1,
+          first = cell.changes.findIndex((value) => value !== null),
+          latest = cell.changes.findLastIndex((value) => value !== null),
           left = column.left + 6,
           right = column.plotR - 8;
         const x: Plot.ScaleOptions = {
           type: "linear",
-          domain: latest ? [0, latest] : [-1, 0],
+          domain: last ? [0, last] : [-1, 0],
           range: [left, right],
           nice: false,
         };
@@ -123,13 +144,14 @@ export function renderTrends(spec: TrendChart) {
           y,
           marks: [
             Plot.ruleY([0], {
-              x1: latest ? 0 : -1,
-              x2: latest || 0,
+              x1: last ? 0 : -1,
+              x2: last || 0,
               stroke: ink.axis,
               strokeDasharray: "3 3",
             }),
           ],
         });
+        // A null value breaks Plot's line, so a missing run stays a visible gap.
         const line = (stroke: string) =>
           Plot.line(points, {
             x: "run",
@@ -140,7 +162,7 @@ export function renderTrends(spec: TrendChart) {
             clip: "frame",
           });
         // Plot clips one line at the baseline; no custom segment interpolation.
-        if (cell.changes.every((value) => value === 0)) {
+        if (present(cell.changes).every((value) => value === 0)) {
           layers.push({
             x,
             y,
@@ -172,17 +194,19 @@ export function renderTrends(spec: TrendChart) {
             },
           );
         }
+        const start = cell.changes[first]!,
+          end = cell.changes[latest]!;
         layers.push({
           x,
           y,
           marks: [
-            ...(latest
+            ...(latest > first
               ? [
-                  Plot.dot([points[0]], {
+                  Plot.dot([points[first]], {
                     x: "run",
                     y: "value",
                     r: 2.5,
-                    fill: color(points[0].value),
+                    fill: color(start),
                     stroke: ink.panel,
                     strokeWidth: 1.5,
                   }),
@@ -192,7 +216,7 @@ export function renderTrends(spec: TrendChart) {
               x: "run",
               y: "value",
               r: cell.major ? 5.5 : 4,
-              fill: color(points[latest].value),
+              fill: color(end),
               stroke: ink.panel,
               strokeWidth: 2,
             }),
@@ -208,6 +232,24 @@ export function renderTrends(spec: TrendChart) {
     label(spec.guide, width - pad, legendY, { size: 11, tone: ink.muted, anchor: "end" }),
   );
   layers.push({ marks: annotations });
+  // Row links cover every mark of their row; the host page styles hover and focus.
+  if (links.length)
+    layers.push({
+      marks: [
+        Plot.rect(links, {
+          x1: "x1",
+          x2: "x2",
+          y1: "y1",
+          y2: "y2",
+          href: "href",
+          title: "title",
+          rx: 6,
+          inset: 0,
+          fill: "transparent",
+          className: "trend-row-link",
+        }),
+      ],
+    });
   return renderFigure(
     { width, height, id: spec.id, title: spec.headline, description: spec.description },
     layers,

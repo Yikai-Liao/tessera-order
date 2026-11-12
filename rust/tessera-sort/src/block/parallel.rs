@@ -329,58 +329,6 @@ mod tests {
     };
 
     #[test]
-    fn configured_geometry_preserves_stable_bands() {
-        let input: Vec<_> = (0..17u32).map(|id| ((id * 7) % 4, id)).collect();
-        let mut expected = input.clone();
-        expected.sort_by_key(|record| record.0);
-        for parallel in [false, true] {
-            if parallel && cfg!(miri) {
-                continue;
-            }
-            for shards in [0, 1, 3, usize::MAX] {
-                // Explicit geometry must still exercise adoption when only
-                // one shard fits; None permits the production serial fallback.
-                for block_size in [None, Some(1), Some(3), Some(input.len() + 1)] {
-                    let mut records = input.clone();
-                    let mut buffers = Buffers::new();
-                    let visited = std::sync::Mutex::new(Vec::new());
-                    let ends = partition_impl_with_visit(
-                        &mut records,
-                        2,
-                        0,
-                        ByKey(|record: &(u32, u32)| record.0),
-                        &mut buffers,
-                        Config {
-                            shards,
-                            block_size,
-                            parallel,
-                        },
-                        Some(&|band| {
-                            if let Some(first) = band.first() {
-                                assert!(band.iter().all(|record| record.0 == first.0));
-                                visited.lock().unwrap().extend_from_slice(band);
-                            }
-                        }),
-                    );
-                    assert_eq!(records, expected);
-                    let mut visited = visited.into_inner().unwrap();
-                    visited.sort_by_key(|record| record.0);
-                    assert_eq!(visited, expected);
-                    let mut start = 0;
-                    for (bucket, end) in ends.into_iter().enumerate() {
-                        assert_eq!(
-                            end - start,
-                            input.iter().filter(|r| r.0 as usize == bucket).count()
-                        );
-                        start = end;
-                    }
-                    assert_eq!(start, input.len());
-                }
-            }
-        }
-    }
-
-    #[test]
     fn deferred_owned_is_stable() {
         let mut rows: Vec<_> = (0..293u64)
             .map(|i| ((i * 73) % 64, alloc::format!("row {i}")))

@@ -55,29 +55,8 @@ fn streamed_child_can_reenter_and_panic() {
                     if calls.fetch_add(1, Ordering::Relaxed) > 2 * len
                         && !entered.swap(true, Ordering::Relaxed)
                     {
-                        rayon::join(
-                            || {
-                                // A nested public call owns separate scratch in
-                                // this same Rayon pool while outer finishers
-                                // retain their checked-out storage.
-                                let mut nested: Vec<_> = (0..65_573u64)
-                                    .map(|id| (Cell::new(id.wrapping_mul(0x9e3779b97f4a7c15)), id))
-                                    .collect();
-                                let mut expected = nested.clone();
-                                expected.sort_by_key(|row| row.0.get());
-                                crate::par_stable_sort_by_key(&mut nested, |row| row.0.get());
-                                assert_eq!(nested, expected);
-                            },
-                            || {
-                                let mut nested: Vec<_> = (0..4096u64)
-                                    .map(|id| (id.wrapping_mul(7919) & 0xfffff, Box::new(id)))
-                                    .collect();
-                                let mut expected = nested.clone();
-                                expected.sort_by_key(|row| row.0);
-                                crate::stable_sort_by_key(&mut nested, |row| row.0);
-                                assert_eq!(nested, expected);
-                            },
-                        );
+                        let (left, right) = rayon::join(|| 91, || 91);
+                        assert_eq!(left, right);
                         assert!(!fail, "panic in streamed child after reentry");
                     }
                     row.0

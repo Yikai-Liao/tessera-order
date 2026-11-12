@@ -66,7 +66,7 @@ struct ScatterPosition {
 
 /// Smallest block, counted in bytes of records.
 ///
-/// The compaction pass moves a block with one copy, so a block has to hold
+/// Completion transfers a block with one copy, so a block has to hold
 /// enough bytes for a copy to be worth its own overhead.
 const BLOCK_BYTES_FLOOR: usize = 1024;
 
@@ -79,7 +79,7 @@ const BLOCK_SCALE: usize = 4;
 
 /// Smallest block, counted in records.
 ///
-/// The bookkeeping of a block — its order entry, its bucket id and one copy
+/// The bookkeeping of a block — its source location, ownership and one copy
 /// call — costs the same whatever the record width, so a floor in records keeps
 /// it amortised for wide records, where the byte floor alone would allow only a
 /// handful of records per block.

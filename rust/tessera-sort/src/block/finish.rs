@@ -73,7 +73,7 @@ const FREE: usize = usize::MAX;
 /// A physical block with no unread source. Disjoint final-band fragments may
 /// still be unwritten; FINAL does not mean the whole block is filled.
 const FINAL: usize = usize::MAX - 1;
-/// One initialized source prefix in the partition directory.
+/// One initialized source prefix from a bucket chain.
 struct Source {
     location: AtomicUsize,
     len: usize,
@@ -421,11 +421,15 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
         }
     }
     let mut caches = Vec::with_capacity(bucket_count + 1);
-    caches.extend(
-        buckets
-            .iter()
-            .map(|bucket| Free::new(Vec::with_capacity(bucket.sources.len() + 1))),
-    );
+    caches.extend(buckets.iter().map(|bucket| {
+        // Empty buckets perform no transfers and need no free cache.
+        let capacity = if bucket.sources.is_empty() {
+            0
+        } else {
+            bucket.sources.len() + 1
+        };
+        Free::new(Vec::with_capacity(capacity))
+    }));
     caches.push(Free::new(free));
     let ends = buckets
         .iter()

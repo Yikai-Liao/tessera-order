@@ -118,7 +118,7 @@ The research prototype skipped the stored bucket numbers for `Copy` records by f
 
 Key functions are user code and may panic. On a panic:
 
-- the block partition rebuilds each block's offsets from the bucket fill counts and the number of complete input blocks, then moves every live record back into the input slice;
+- the block partition derives the unread suffix from its bucket cursors and consumed input blocks, appends that suffix without calling the failed classifier, and completes the live bucket chains through the source ledger;
 - a tile keeps a pointer to the complete record set from the last finished pass and copies it back if needed;
 - the panic is then resumed.
 

@@ -204,22 +204,13 @@ fn two_runs<T, E: Extract<T>>(
     bit: u128,
     extractor: &mut E,
 ) -> Option<(usize, bool)> {
-    let first = extractor.key(&records[0]).to_u128() & bit != 0;
-    let mut boundary = 0;
-    while boundary < records.len()
-        && (extractor.key(&records[boundary]).to_u128() & bit != 0) == first
-    {
-        boundary += 1;
-    }
-    if boundary == 0 || boundary == records.len() {
-        return None;
-    }
-    for record in &records[boundary..] {
-        if (extractor.key(record).to_u128() & bit != 0) == first {
-            return None;
-        }
-    }
-    Some((boundary, first))
+    let mut holds = records
+        .iter()
+        .map(|record| extractor.key(record).to_u128() & bit != 0);
+    let first = holds.next()?;
+    // The record that breaks the first run starts the second one.
+    let boundary = 1 + holds.position(|held| held != first)?;
+    holds.all(|held| held != first).then_some((boundary, first))
 }
 
 /// A node's partition decision, consumed by either execution path.

@@ -26,7 +26,7 @@ use core::ops::{BitAnd, BitOrAssign, Not, Shl, Shr};
 /// | Signed integers | Sign bit flipped |
 /// | `f32`, `f64` | All bits inverted if the sign bit is set, otherwise the sign bit flipped; this matches `total_cmp` |
 /// | `Reverse<K>` | All bits of the encoding of `K` inverted |
-pub trait RadixKey: crate::portable_simd::SimdKey + Copy {
+pub trait RadixKey: crate::portable_simd::SimdKey + Copy + Send + Sync {
     #[doc(hidden)]
     type Encoded: Unsigned;
     #[doc(hidden)]
@@ -127,7 +127,7 @@ impl<K: RadixKey> RadixKey for Reverse<K> {
     }
 }
 
-/// Widest key window that [`Extract::try_count_window`] counts and fills, in bits.
+/// Widest key window that [`try_count_window`] counts and fills, in bits.
 const SMALL_WINDOW_BITS: usize = 8;
 
 /// Buckets such a window can hold.
@@ -140,45 +140,22 @@ const SMALL_WINDOW_BUCKETS: usize = 1 << SMALL_WINDOW_BITS;
 ///
 /// # Safety
 ///
-/// If `CACHE_BUCKETS` is false, `key` must be deterministic and panic-free:
-/// tile scatter may evaluate it again after ownership transfer has started.
+/// If `DIRECT` is present, `key` must be deterministic and panic-free (tile
+/// scatter may evaluate it again after ownership transfer has started), and
+/// each record must be the decoding of its encoded key shifted by
+/// `DirectKeys::shift`, so that equal keys are interchangeable.
 pub(crate) unsafe trait Extract<T> {
-    /// Whether tile passes must retain each classification before moving records.
-    /// User callbacks keep the default; only repeatable library encoders opt out.
-    const CACHE_BUCKETS: bool = true;
+    /// Present only when every record is its own sealed key. This one fact
+    /// lets tile passes recompute classification instead of caching it, and
+    /// lets a window that covers all variation finish by counting and refilling.
+    /// User callbacks keep the default: their keys do not identify payloads.
+    const DIRECT: Option<DirectKeys<T>> = None;
 
     /// The encoded key type.
     type Value: Unsigned;
 
     /// Returns the encoded key of `record`.
     fn key(&mut self, record: &T) -> Self::Value;
-
-    /// Finishes a slice whose keys all fall in one small window of the encoded
-    /// key, by counting the window and filling each run from one of its records.
-    ///
-    /// The window starts at bit `low` and is `width` bits wide, at most
-    /// [`SMALL_WINDOW_BITS`]; the caller guarantees that every key agrees
-    /// outside it. Filling a run with one of its records preserves order and
-    /// stability only where equal keys imply interchangeable records, which a
-    /// user key function does not guarantee. The default therefore declines and
-    /// leaves the slice unchanged for the block partition.
-    ///
-    /// Returns whether the slice is finished.
-    fn try_count_window(&mut self, _records: &mut [T], _low: usize, _width: usize) -> bool {
-        false
-    }
-
-    /// Finishes a small key window using parallel counting where supported.
-    ///
-    /// Has the same window and interchangeability contract as
-    /// [`Self::try_count_window`]. Record extractors retain the serial fallback.
-    #[cfg(feature = "rayon")]
-    fn try_count_window_parallel(&mut self, records: &mut [T], low: usize, width: usize) -> bool
-    where
-        T: Send,
-    {
-        self.try_count_window(records, low, width)
-    }
 
     /// Returns whether `previous` and the keys of `records` are in ascending
     /// order. `previous` is the already encoded key of the preceding record.
@@ -216,24 +193,12 @@ pub(crate) unsafe trait Extract<T> {
 /// value, such as a block pass, without changing its scans or caching policy.
 // SAFETY: forwards every method, including the caching contract, unchanged.
 unsafe impl<T, E: Extract<T>> Extract<T> for &mut E {
-    const CACHE_BUCKETS: bool = E::CACHE_BUCKETS;
+    const DIRECT: Option<DirectKeys<T>> = E::DIRECT;
     type Value = E::Value;
 
     #[inline]
     fn key(&mut self, record: &T) -> Self::Value {
         (**self).key(record)
-    }
-
-    fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
-        (**self).try_count_window(records, low, width)
-    }
-
-    #[cfg(feature = "rayon")]
-    fn try_count_window_parallel(&mut self, records: &mut [T], low: usize, width: usize) -> bool
-    where
-        T: Send,
-    {
-        (**self).try_count_window_parallel(records, low, width)
     }
 
     #[inline]
@@ -295,48 +260,13 @@ pub(crate) struct Direct;
 
 // SAFETY: sealed key encodings are deterministic and panic-free.
 unsafe impl<K: RadixKey> Extract<K> for Direct {
-    const CACHE_BUCKETS: bool = false;
+    const DIRECT: Option<DirectKeys<K>> = Some(DirectKeys {
+        shift: 0,
+        count: count_keys::<K>,
+        #[cfg(feature = "rayon")]
+        count_parallel: count_keys_parallel::<K>,
+    });
     type Value = K::Encoded;
-
-    #[cfg(feature = "rayon")]
-    fn try_count_window_parallel(&mut self, records: &mut [K], low: usize, width: usize) -> bool
-    where
-        K: Send,
-    {
-        use rayon::prelude::*;
-
-        if width == 0 || width > SMALL_WINDOW_BITS {
-            return false;
-        }
-        if records.is_empty() {
-            return true;
-        }
-        let shard_len = records.len().div_ceil(rayon::current_num_threads());
-        // Mutable shards need only Send; no shared record borrow crosses tasks.
-        let counts = records
-            .par_chunks_mut(shard_len)
-            .map(|records| KeyCounts::count(records, low, width))
-            .reduce_with(KeyCounts::merge)
-            .unwrap();
-        counts
-            .runs(records)
-            .collect::<Vec<_>>()
-            .into_par_iter()
-            .for_each(|(run, key)| run.fill(key));
-        true
-    }
-
-    fn try_count_window(&mut self, records: &mut [K], low: usize, width: usize) -> bool {
-        if width == 0 || width > SMALL_WINDOW_BITS {
-            return false;
-        }
-        if !records.is_empty() {
-            for (run, key) in KeyCounts::count(records, low, width).runs(records) {
-                run.fill(key);
-            }
-        }
-        true
-    }
 
     #[inline]
     fn confirm_ascending(&mut self, records: &[K], previous: Self::Value) -> bool {
@@ -357,6 +287,86 @@ unsafe impl<K: RadixKey> Extract<K> for Direct {
     fn insertion_sort(&mut self, records: &mut [K], budget: usize) -> Option<usize> {
         crate::portable_simd::insertion_sort(records, budget)
     }
+}
+
+/// Counting access to records that are their own sealed keys.
+///
+/// Only [`Extract::DIRECT`] supplies it, so classification caching and
+/// count/fill eligibility cannot disagree.
+pub(crate) struct DirectKeys<T> {
+    /// Position of the extractor's key bit 0 in the record's encoded key.
+    shift: usize,
+    count: fn(&mut [T], usize, usize),
+    #[cfg(feature = "rayon")]
+    count_parallel: fn(&mut [T], usize, usize),
+}
+
+/// Finishes a slice whose keys all fall in one small window of the encoded
+/// key, by counting the window and refilling each run with its decoded key.
+///
+/// The window starts at bit `low` and is `width` bits wide, at most
+/// [`SMALL_WINDOW_BITS`]; the caller guarantees that every key agrees outside
+/// it. Refilling preserves order and stability only where equal keys imply
+/// interchangeable records, so extractors without [`Extract::DIRECT`] decline
+/// and leave the slice unchanged for the block partition.
+///
+/// Returns whether the slice is finished.
+pub(crate) fn try_count_window<T, E: Extract<T>>(
+    records: &mut [T],
+    low: usize,
+    width: usize,
+) -> bool {
+    match E::DIRECT {
+        Some(direct) if (1..=SMALL_WINDOW_BITS).contains(&width) => {
+            if !records.is_empty() {
+                (direct.count)(records, low + direct.shift, width);
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+/// [`try_count_window`] with parallel counting and filling.
+#[cfg(feature = "rayon")]
+pub(crate) fn try_count_window_parallel<T, E: Extract<T>>(
+    records: &mut [T],
+    low: usize,
+    width: usize,
+) -> bool {
+    match E::DIRECT {
+        Some(direct) if (1..=SMALL_WINDOW_BITS).contains(&width) => {
+            if !records.is_empty() {
+                (direct.count_parallel)(records, low + direct.shift, width);
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+fn count_keys<K: RadixKey>(records: &mut [K], low: usize, width: usize) {
+    for (run, key) in KeyCounts::count(records, low, width).runs(records) {
+        run.fill(key);
+    }
+}
+
+#[cfg(feature = "rayon")]
+fn count_keys_parallel<K: RadixKey>(records: &mut [K], low: usize, width: usize) {
+    use rayon::prelude::*;
+
+    let shard_len = records.len().div_ceil(rayon::current_num_threads());
+    // Mutable shards need only Send; no shared record borrow crosses tasks.
+    let counts = records
+        .par_chunks_mut(shard_len)
+        .map(|records| KeyCounts::count(records, low, width))
+        .reduce_with(KeyCounts::merge)
+        .unwrap();
+    counts
+        .runs(records)
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .for_each(|(run, key)| run.fill(key));
 }
 
 /// A histogram of one encoded-key window, with the bits outside it.
@@ -432,27 +442,20 @@ pub(crate) struct KeyHalf<E, const SHIFT: usize>(pub E);
 
 // SAFETY: the inner extractor owns repeatability; wrapping shifts cannot panic.
 unsafe impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for KeyHalf<E, SHIFT> {
-    const CACHE_BUCKETS: bool = E::CACHE_BUCKETS;
+    // The other half is constant, so the translated window still covers
+    // every difference in the underlying key.
+    const DIRECT: Option<DirectKeys<T>> = match E::DIRECT {
+        Some(direct) => Some(DirectKeys {
+            shift: direct.shift + SHIFT,
+            ..direct
+        }),
+        None => None,
+    };
     type Value = u64;
 
     #[inline]
     fn key(&mut self, record: &T) -> u64 {
         self.0.key(record).to_u128().wrapping_shr(SHIFT as u32) as u64
-    }
-
-    fn try_count_window(&mut self, records: &mut [T], low: usize, width: usize) -> bool {
-        // The other half is constant, so this translated window still
-        // covers every difference in the underlying key.
-        self.0.try_count_window(records, low + SHIFT, width)
-    }
-
-    #[cfg(feature = "rayon")]
-    fn try_count_window_parallel(&mut self, records: &mut [T], low: usize, width: usize) -> bool
-    where
-        T: Send,
-    {
-        self.0
-            .try_count_window_parallel(records, low + SHIFT, width)
     }
 }
 
@@ -466,6 +469,20 @@ mod tests {
         let key = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210u128;
         assert_eq!(KeyHalf::<_, 0>(Direct).key(&key), 0xfedc_ba98_7654_3210);
         assert_eq!(KeyHalf::<_, 64>(Direct).key(&key), 0x0123_4567_89ab_cdef);
+    }
+
+    fn count<T, E: Extract<T>>(_: &E, records: &mut [T], low: usize, width: usize) -> bool {
+        try_count_window::<T, E>(records, low, width)
+    }
+
+    #[cfg(all(feature = "rayon", not(miri)))]
+    fn count_parallel<T, E: Extract<T>>(
+        _: &E,
+        records: &mut [T],
+        low: usize,
+        width: usize,
+    ) -> bool {
+        try_count_window_parallel::<T, E>(records, low, width)
     }
 
     /// Checks shared window and decline rules against independently sorted keys.
@@ -485,8 +502,8 @@ mod tests {
             let mut keys = input.clone();
             let mut records: Vec<_> = input.iter().copied().zip(0..input.len()).collect();
             let original = records.clone();
-            assert!(direct_half.try_count_window(&mut keys, low, width));
-            assert!(!keyed_half.try_count_window(&mut records, low, width));
+            assert!(count(direct_half, &mut keys, low, width));
+            assert!(!count(keyed_half, &mut records, low, width));
             assert_eq!(keys, expected);
             assert_eq!(records, original);
 
@@ -494,8 +511,8 @@ mod tests {
             #[cfg(all(feature = "rayon", not(miri)))]
             {
                 let mut keys = input;
-                assert!(direct_half.try_count_window_parallel(&mut keys, low, width));
-                assert!(!keyed_half.try_count_window_parallel(&mut records, low, width));
+                assert!(count_parallel(direct_half, &mut keys, low, width));
+                assert!(!count_parallel(keyed_half, &mut records, low, width));
                 assert_eq!(keys, expected);
                 assert_eq!(records, original);
             }
@@ -552,7 +569,7 @@ mod tests {
             .collect();
         let mut expected: Vec<_> = negative.iter().map(|key| key.to_bits()).collect();
         expected.sort_by_key(|&bits| f32::from_bits(bits).encode());
-        assert!(Direct.try_count_window(&mut negative, 0, 8));
+        assert!(try_count_window::<_, Direct>(&mut negative, 0, 8));
         assert_eq!(
             negative.iter().map(|key| key.to_bits()).collect::<Vec<_>>(),
             expected

@@ -10,6 +10,5 @@
     "types": ["node", "vite/client"],
     "lib": ["ES2023", "DOM"]
   },
-  "contentMappers": [{ "package": "@vue/content-mapper", "extensions": [".vue"] }],
   "include": ["*.ts", "theme/**/*.ts", "theme/**/*.vue"]
 }

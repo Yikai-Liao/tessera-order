@@ -50,7 +50,7 @@ test("revision workers alternate adjacent samples, retain evidence and reap fail
   for (const [role, file] of Object.entries(binaries))
     await writeFile(
       file,
-      String.raw`#!/usr/bin/env node
+      String.raw`#!/usr/bin/env bun
 const fs = require("node:fs"), readline = require("node:readline");
 const role = ${JSON.stringify(role)}, dir = ${JSON.stringify(directory)};
 fs.writeFileSync(dir + "/" + role + ".pid", String(process.pid));

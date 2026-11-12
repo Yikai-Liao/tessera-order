@@ -20,7 +20,7 @@ async function fixture(t: { after: (cleanup: () => Promise<void>) => void }, res
   await writeFile(join(root, "responses.json"), JSON.stringify(responses));
   await writeFile(
     join(bin, "gh"),
-    `#!/usr/bin/env node
+    `#!/usr/bin/env bun
 // SPDX-License-Identifier: BSD-2-Clause
 const fs = require("node:fs");
 const path = require("node:path");

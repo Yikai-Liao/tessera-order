@@ -153,7 +153,7 @@ async function prepareComparison(options: ReleaseOptions) {
     build,
   };
   await writeFile(join(out, "session.json"), `${JSON.stringify(session, null, 2)}\n`);
-  diagnostic(`Prepared; resume with: pnpm tools compare resume ${out}`);
+  diagnostic(`Prepared; resume with: bun run tools compare resume ${out}`);
 }
 
 /** Resume with the retained selection, sampling settings and exact executable pair. */

@@ -209,27 +209,34 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync>(
     let root_extractor = extractor.clone();
     let child_extractor = extractor.clone();
     rayon::scope(move |scope| {
-        let mut pending: Option<Job<'records, T>> = None;
-        let mut visit = |bucket: &'records mut [T]| {
+        let pending = std::sync::Mutex::new(None::<Job<'records, T>>);
+        let visit = |bucket: &'records mut [T]| {
             // A covering digit already finished these records; do not retain
             // borrows or allocate jobs whose child finisher would return.
             if candidate == 0 {
                 return;
             }
-            let mut job = pending.take().unwrap_or_else(Job::new);
-            job.push(bucket);
-            if job.bytes() >= MIN_TASK_BYTES {
-                spawn_job::<T, E>(
-                    scope,
-                    job,
-                    candidate,
-                    child_extractor.clone(),
-                    tile_len,
-                    pool_ref,
-                );
-            } else {
-                pending = Some(job);
-            }
+            let job = {
+                let mut pending = pending
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut job = pending.take().unwrap_or_else(Job::new);
+                job.push(bucket);
+                if job.bytes() < MIN_TASK_BYTES {
+                    *pending = Some(job);
+                    return;
+                }
+                job
+            };
+            // No batch lock crosses scheduling or a user key callback.
+            spawn_job::<T, E>(
+                scope,
+                job,
+                candidate,
+                child_extractor.clone(),
+                tile_len,
+                pool_ref,
+            );
         };
         let finish = |child: &mut [T]| {
             if candidate == 0 {
@@ -256,11 +263,13 @@ fn sort_root<'records, T: Send, E: Extract<T> + Clone + Send + Sync>(
             block::BucketFinish {
                 limit,
                 sort: &finish,
-                visit: &mut visit,
+                visit: &visit,
             },
         );
-        drop(visit);
-        if let Some(job) = pending {
+        if let Some(job) = pending
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
             spawn_job::<T, E>(
                 scope,
                 job,

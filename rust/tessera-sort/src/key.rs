@@ -246,22 +246,52 @@ impl<T, E: Extract<T>> Classify<T> for KeyDigit<E, E::Value> {
     }
 }
 
-/// Ranks records below (0), equal to (1) or above (2) a sampled key, as
-/// buckets of a two-bit partition.
+/// Classifies records against a sampled key and the node's highest varying
+/// bit, as buckets of a two-bit partition.
+///
+/// The bucket is the rank below (0), equal to (1) or above (2) the sampled
+/// key, plus one at or above the smallest key that shares the sampled key's
+/// bits above the top varying bit and sets that bit. For consistent keys every
+/// bit above it is shared, so the four buckets stay in key order, the equal
+/// key fills [`Self::equal_bucket`] alone, and every other bucket holds the
+/// top bit constant: an equality split consumes that bit like any digit split.
 #[derive(Clone)]
 pub(crate) struct Rank<E, V> {
     pub extractor: E,
-    pub equal: V,
+    equal: V,
+    /// The first key above `equal`'s prefix that sets the top varying bit.
+    split: V,
+}
+
+impl<E, V: Unsigned> Rank<E, V> {
+    /// Ranks against `equal` and the highest bit of a nonzero `varying`.
+    pub(crate) fn new(extractor: E, equal: V, varying: u128) -> Self {
+        let bit = V::from_usize(varying.ilog2() as usize);
+        let mut split = equal & (!V::from_usize(0) << bit << V::from_usize(1));
+        split |= V::from_usize(1) << bit;
+        Self {
+            extractor,
+            equal,
+            split,
+        }
+    }
+
+    /// The bucket that receives exactly the sampled key; it is complete.
+    pub(crate) fn equal_bucket(&self) -> usize {
+        1 + usize::from(self.equal >= self.split)
+    }
 }
 
 impl<T, E: Extract<T>> Classify<T> for Rank<E, E::Value> {
-    /// A full-width rank: byte arithmetic writes partial registers and made the
-    /// scatter loop wait on the previous record's bucket pointer (1.5x slower
-    /// on `u64/two_values/65536`).
+    /// Full-width comparisons: byte arithmetic writes partial registers and
+    /// made the scatter loop wait on the previous record's bucket pointer
+    /// (1.5x slower on `u64/two_values/65536`).
     #[inline]
     fn bucket(&mut self, record: &T) -> usize {
         let key = self.extractor.key(record);
-        usize::from(key >= self.equal) + usize::from(key > self.equal)
+        usize::from(key >= self.equal)
+            + usize::from(key > self.equal)
+            + usize::from(key >= self.split)
     }
 }
 
@@ -486,6 +516,33 @@ unsafe impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for KeyHalf<E, SHIF
 mod tests {
     use super::*;
     use alloc::vec::Vec;
+
+    #[test]
+    fn equality_digits_order_keys_and_hold_the_top_bit() {
+        // Every pivot and every highest varying bit of a node whose keys share
+        // the bits above it: digits ascend with keys, the equal bucket holds
+        // exactly the pivot and every bucket holds the top bit constant.
+        for top in 0..8 {
+            let high = !0u8 << top << 1;
+            for prefix in (0..=255u8).filter(|key| key & !high == 0) {
+                let keys: Vec<u8> = (0..=255u8).filter(|key| key & high == prefix).collect();
+                for &pivot in &keys {
+                    let mut rank = Rank::new(Direct, pivot, 1u128 << top);
+                    let equal = rank.equal_bucket();
+                    let mut top_bits = [None; 4];
+                    let mut previous = 0;
+                    for &key in &keys {
+                        let digit = rank.bucket(&key);
+                        assert!(previous <= digit && digit < 4);
+                        assert_eq!(digit == equal, key == pivot);
+                        let bit = key >> top & 1;
+                        assert_eq!(*top_bits[digit].get_or_insert(bit), bit);
+                        previous = digit;
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn half_keys_keep_encoded_bits() {

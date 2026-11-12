@@ -23,6 +23,19 @@ pub(super) const KEY_SAMPLE_LEN: usize = 128;
 /// A value occupying this fraction of the sample merits an equality partition.
 const MODE_SHARE_DENOMINATOR: usize = 4;
 
+/// The record that a nonempty node of `len` records samples for `stratum`.
+///
+/// Each of the first `min(len, KEY_SAMPLE_LEN)` equal strata contributes one
+/// record. A golden-ratio offset within each stratum avoids aliasing with
+/// periodic input, and locally ordered keys still yield independent
+/// observations.
+pub(super) fn sample_index(len: usize, stratum: usize) -> usize {
+    let stride = len / len.min(KEY_SAMPLE_LEN);
+    // A fixed-point fraction times `stride` stays below `stride`.
+    let fraction = (stratum as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    stratum * stride + ((u128::from(fraction) * stride as u128) >> 64) as usize
+}
+
 /// Sorted sampled keys, independent of the digit currently being considered.
 /// This is advisory evidence only: execution still scans actual child variation.
 struct KeySample<V> {
@@ -31,22 +44,15 @@ struct KeySample<V> {
 }
 
 impl<V: Unsigned> KeySample<V> {
-    /// Reads one key from each equal stratum of a nonempty input, then sorts them.
-    ///
-    /// A golden-ratio offset within each stratum avoids aliasing with periodic
-    /// input, and locally ordered keys still yield independent observations.
+    /// Reads one key per stratum of a nonempty input, then sorts them.
     fn collect<T, E: Extract<T, Value = V>>(records: &[T], extractor: &mut E) -> Self {
         let len = records.len().min(KEY_SAMPLE_LEN);
         let mut sample = Self {
             keys: [V::from_usize(0); KEY_SAMPLE_LEN],
             len,
         };
-        let stride = records.len() / len;
         for (stratum, key) in sample.keys[..len].iter_mut().enumerate() {
-            // A fixed-point fraction times `stride` stays below `stride`.
-            let fraction = (stratum as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-            let offset = ((u128::from(fraction) * stride as u128) >> 64) as usize;
-            *key = extractor.key(&records[stratum * stride + offset]);
+            *key = extractor.key(&records[sample_index(records.len(), stratum)]);
         }
         sample.keys[..len].sort_unstable();
         sample
@@ -245,23 +251,6 @@ pub(super) fn plan_node<T, E: Extract<T>>(
     plan_digit(records, varying, tile_len, extractor, sample)
 }
 
-/// Returns the bit-consuming plan that replaces an equality partition which
-/// left the node unchanged, or `None` when its bands progressed.
-///
-/// A changing key can leave every record below or above the sampled key, so
-/// equality would repeat indefinitely; a sample cannot certify progress, only
-/// the partition's `ends` can. Both executors consult this one rule.
-pub(super) fn plan_after_equality<T, E: Extract<T>>(
-    records: &[T],
-    ends: &[usize],
-    varying: u128,
-    tile_len: usize,
-    extractor: &mut E,
-) -> Option<NodePlan<E::Value>> {
-    let unchanged = ends[0] == records.len() || ends[1] == 0;
-    unchanged.then(|| plan_digit(records, varying, tile_len, extractor, None))
-}
-
 /// Reuses any equality sample when planning a bit-consuming partition.
 fn plan_digit<T, E: Extract<T>>(
     records: &[T],
@@ -323,28 +312,6 @@ mod tests {
                 buckets.dedup();
                 assert_eq!(sample.top_digit_occupancy(digit), buckets.len());
             }
-        }
-    }
-
-    #[test]
-    fn unchanged_equality_partitions_consume_key_bits() {
-        let len = 4096;
-        let records: Vec<u64> = (0..len as u64)
-            .map(|key| key.wrapping_mul(0x9e37_79b9))
-            .collect();
-        let varying = records.iter().fold(0, |bits, &key| bits | key) as u128;
-        let replan = |ends: &[usize]| plan_after_equality(&records, ends, varying, 64, &mut Direct);
-        // Every record below or every record above the sampled key: the
-        // replacement must split on a bit rather than sample equality again.
-        for ends in [[len, len, len, len], [0, 0, len, len]] {
-            assert!(matches!(
-                replan(&ends),
-                Some(NodePlan::Digit(_) | NodePlan::Runs { .. })
-            ));
-        }
-        // Any separated band, including an empty equal band, is progress.
-        for ends in [[1, 1, len, len], [0, 1, len, len], [len - 1, len, len, len]] {
-            assert!(replan(&ends).is_none());
         }
     }
 

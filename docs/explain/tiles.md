@@ -30,7 +30,7 @@ When two windows cannot finish the tile, one MSD pass consumes the highest digit
 
 ## Actual children instead of predicted work
 
-An MSD partition preserves the savings that the planner previously tried to predict. An insertion-sized child needs no further variation scan. A larger constant child finishes after confirmation. A child that still has many varying bits can partition again; each partition removes its digit from the candidate mask. Concentrated distributions therefore keep recursive finishing without a recursive cost estimate.
+An MSD partition preserves the savings that the planner previously tried to predict. An insertion-sized child needs no further variation scan. A larger constant child finishes after confirmation. Node partitions finish their tile-sized children by the same rule. A child that still has many varying bits can partition again; each partition removes its digit from the candidate mask. Concentrated distributions therefore keep recursive finishing without a recursive cost estimate.
 
 This simpler routing may choose MSD where a longer LSD plan would be faster. [Engine evidence](../design/evidence.md#landed-with-open-losses) lists the measured trade-offs; removing an estimate is not proof that its choices never helped.
 

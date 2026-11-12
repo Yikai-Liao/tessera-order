@@ -29,8 +29,6 @@ use alloc::vec::Vec;
 use crate::block;
 use crate::key::{self, Direct, Extract, KeyHalf, Rank, Unsigned};
 
-type KeyValue<T, E> = <E as Extract<T>>::Value;
-
 /// Stably inserts inverted records until sorted or the swap budget runs out.
 /// A failed pass still leaves a stable permutation of the input.
 ///
@@ -448,37 +446,30 @@ fn reverse_stably<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
 }
 
 impl<T, E: Extract<T>> Sorter<'_, T, E> {
-    /// Consumes an ordered-run decision without probing or partitioning again.
-    fn split_ordered(&mut self, records: &mut [T], boundary: usize, set: bool, varying: u128) {
-        // Rotation preserves each run's internal order.
-        let boundary = if set {
-            let len = records.len();
-            records.rotate_left(boundary);
-            len - boundary
-        } else {
-            boundary
-        };
-        let candidate = varying & !(1u128 << (bit_len(varying) - 1));
-        self.sort_child(&mut records[..boundary], candidate);
-        self.sort_child(&mut records[boundary..], candidate);
-    }
-
     /// Finishes a child using remaining variation, order and the shared node policy.
     fn sort_child(&mut self, records: &mut [T], candidate: u128) {
-        if records.len() < 2 || candidate == 0 {
+        let Some(varying) = self.child_varying(records, candidate) else {
             return;
+        };
+        self.sort_node(records, varying);
+    }
+
+    /// Analyzes each unfinished child once, including the tail continuation.
+    fn child_varying(&mut self, records: &mut [T], candidate: u128) -> Option<u128> {
+        if records.len() < 2 || candidate == 0 {
+            return None;
         }
         // Constant children finish after the varying scan; confirming order
         // lets ordered children skip partitioning.
         let varying = scan_varying_bits(records, candidate, self.extractor);
         if varying == 0 {
-            return;
+            return None;
         }
         let order = confirm_order(records, self.extractor);
         if finish_ordered(records, order, self.extractor) {
-            return;
+            return None;
         }
-        self.sort_node(records, varying);
+        Some(varying)
     }
 
     /// Routes a slice whose order has already been probed.
@@ -497,83 +488,137 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         self.execute_node(records, varying, plan);
     }
 
-    /// Executes an already selected partition; parallel fallbacks do not resample.
-    fn execute_node(&mut self, records: &mut [T], varying: u128, plan: NodePlan<E::Value>) {
-        match plan {
-            NodePlan::Equal(equal) => self.partition_equal(records, equal, varying),
-            NodePlan::Runs { boundary, set } => self.split_ordered(records, boundary, set, varying),
-            NodePlan::Digit(digit) => self.partition_digit(records, digit, varying),
+    /// Executes a selected plan, recursing only on non-largest children.
+    /// Boundaries and the partition retire before the largest child continues.
+    fn execute_node(
+        &mut self,
+        mut records: &mut [T],
+        mut varying: u128,
+        mut plan: NodePlan<E::Value>,
+    ) {
+        loop {
+            let (tail, candidate) = match plan {
+                NodePlan::Runs { boundary, set } => {
+                    // Rotation preserves each run's internal order; no partition
+                    // or heap boundaries are needed for these existing runs.
+                    let boundary = if set {
+                        records.rotate_left(boundary);
+                        records.len() - boundary
+                    } else {
+                        boundary
+                    };
+                    let candidate = varying & !(1u128 << (bit_len(varying) - 1));
+                    let (left, right) = records.split_at_mut(boundary);
+                    let (small, large) = if left.len() <= right.len() {
+                        (left, right)
+                    } else {
+                        (right, left)
+                    };
+                    self.sort_child(small, candidate);
+                    (large, candidate)
+                }
+                NodePlan::Digit(digit) => {
+                    // A completed digit cannot return to the candidate even if
+                    // the extractor changes its answers.
+                    let candidate = varying & !digit.mask::<E::Value>().to_u128();
+                    if candidate == 0
+                        && key::try_count_window::<T, E>(records, digit.shift, digit.width)
+                    {
+                        return;
+                    }
+                    let split = Split {
+                        digit,
+                        candidate,
+                        finished: None,
+                    };
+                    let ends = split.partition(
+                        records,
+                        &mut *self.extractor,
+                        |extractor| &mut **extractor,
+                        self.scratch,
+                        self.tile_len,
+                    );
+                    let tail = self.finish_children(records, ends, split);
+                    (tail, candidate)
+                }
+                NodePlan::Equal(equal) => {
+                    // Outer bands keep every candidate bit; the equal band is done.
+                    let split = Split {
+                        digit: Digit { shift: 0, width: 2 },
+                        candidate: varying,
+                        finished: Some(1),
+                    };
+                    let rank = Rank {
+                        extractor: &mut *self.extractor,
+                        equal,
+                    };
+                    let ends = split.partition(
+                        records,
+                        rank,
+                        |rank| &mut *rank.extractor,
+                        self.scratch,
+                        self.tile_len,
+                    );
+                    if let Some(progress) =
+                        plan_after_equality(records, &ends, varying, self.tile_len, self.extractor)
+                    {
+                        // The unchanged band has not been tile-finished. Retire
+                        // its boundaries and execute this bit-consuming plan,
+                        // without analyzing or sampling equality again.
+                        drop(ends);
+                        plan = progress;
+                        continue;
+                    }
+                    let tail = self.finish_children(records, ends, split);
+                    (tail, varying)
+                }
+            };
+            records = tail;
+            let Some(next_varying) = self.child_varying(records, candidate) else {
+                return;
+            };
+            varying = next_varying;
+            if records.len() <= self.tile_len {
+                self.scratch.tile.sort(records, varying, self.extractor);
+                return;
+            }
+            plan = plan_node(records, varying, self.tile_len, self.extractor);
         }
     }
 
-    /// Partitions by digit, then sorts each unfinished child.
-    fn partition_digit(&mut self, records: &mut [T], digit: Digit, varying: u128) {
-        // The split digit is constant inside each child, so its bits are
-        // excluded from the next scan.
-        let candidate = varying & !digit.mask::<E::Value>().to_u128();
-        // A digit covering all remaining variation leaves constant buckets;
-        // interchangeable records can be counted instead of moved.
-        if candidate == 0 && key::try_count_window::<T, E>(records, digit.shift, digit.width) {
-            return;
-        }
-        let split = Split {
-            digit,
-            candidate,
-            finished: None,
-        };
-        let ends = split.partition(
-            records,
-            &mut *self.extractor,
-            |extractor| &mut **extractor,
-            self.scratch,
-            self.tile_len,
-        );
-        self.finish_children(records, ends, split);
-    }
-
-    /// Partitions below, equal to, and above a sampled key. The equal band is done.
-    fn partition_equal(&mut self, records: &mut [T], equal: KeyValue<T, E>, parent_varying: u128) {
-        // Outer bands keep every candidate bit; the equal band is complete.
-        let split = Split {
-            digit: Digit { shift: 0, width: 2 },
-            candidate: parent_varying,
-            finished: Some(1),
-        };
-        let rank = Rank {
-            extractor: &mut *self.extractor,
-            equal,
-        };
-        let ends = split.partition(
-            records,
-            rank,
-            |rank| &mut *rank.extractor,
-            self.scratch,
-            self.tile_len,
-        );
-        if let Some(plan) = plan_after_equality(
-            records,
-            &ends,
-            parent_varying,
-            self.tile_len,
-            self.extractor,
-        ) {
-            // The single band exceeds the tile, so no visit finished it.
-            self.execute_node(records, parent_varying, plan);
-            return;
-        }
-        self.finish_children(records, ends, split);
-    }
-
-    /// Sorts the partition children that exceed the tile; the partition
-    /// finished smaller ones while they were cache-hot.
-    fn finish_children(&mut self, records: &mut [T], ends: Vec<usize>, split: Split) {
+    /// Finishes non-largest unfinished children, releases the boundary capacity,
+    /// and returns the largest for tail continuation. Each recursive child is
+    /// at most half the parent; tile children were already finished cache-hot.
+    fn finish_children<'r>(
+        &mut self,
+        records: &'r mut [T],
+        ends: Vec<usize>,
+        split: Split,
+    ) -> &'r mut [T] {
+        let mut largest = 0..0;
         let mut start = 0;
         for (bucket, &end) in ends.iter().enumerate() {
-            if end - start > self.tile_len && split.finished != Some(bucket) {
+            if end - start > self.tile_len
+                && split.finished != Some(bucket)
+                && end - start > largest.len()
+            {
+                largest = start..end;
+            }
+            start = end;
+        }
+        let mut start = 0;
+        for (bucket, &end) in ends.iter().enumerate() {
+            if end - start > self.tile_len
+                && split.finished != Some(bucket)
+                && start != largest.start
+            {
                 self.sort_child(&mut records[start..end], split.candidate);
             }
             start = end;
         }
+        // Ends owns its capacity, even after all its entries have been visited.
+        drop(ends);
+        &mut records[largest]
     }
 }
 
@@ -583,6 +628,7 @@ mod tests {
 
     use super::*;
     use crate::key::ByKey;
+    use alloc::boxed::Box;
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     #[test]
@@ -717,6 +763,91 @@ mod tests {
     }
 
     #[test]
+    fn equality_peeling_retires_boundary_capacity() {
+        // Successful equality decisions need not consume bits: an advisory
+        // sample can choose a pivot that matches only one actual record.
+        // Keep peeling on either side, then make the remaining child constant.
+        let len: usize = if cfg!(miri) { 96 } else { 2048 };
+        let limit = if cfg!(miri) { 8 } else { 1024 };
+        for (greater, panic_midway) in [(false, false), (true, false), (false, true), (true, true)]
+        {
+            let mut records: Vec<_> = (0..len as u16).map(|id| (id, Box::new(id))).collect();
+            let mut node_len = len;
+            let mut phase = 0;
+            let mut peels = 0;
+            let pivot = if greater { 0 } else { 0x1ff };
+            let mut extractor = ByKey(|_: &(u16, Box<u16>)| -> u16 {
+                assert!(!panic_midway || peels != limit / 2, "peeling key failed");
+                if peels == limit {
+                    return 0;
+                }
+                let key = if phase < node_len {
+                    if phase == 0 { pivot } else { pivot ^ 0x1ff }
+                } else if phase < node_len + 65 {
+                    // A complete first batch witnesses all nine candidate bits.
+                    if phase.is_multiple_of(2) { 0 } else { 0x1ff }
+                } else if phase < node_len + 68 {
+                    // Reject order with a three-key mixed-direction witness.
+                    [0x1ff, 0, 0x1ff][phase - node_len - 65]
+                } else {
+                    pivot
+                };
+                phase += 1;
+                if phase == node_len {
+                    peels += 1;
+                }
+                if phase == node_len + 68 + plan::KEY_SAMPLE_LEN {
+                    phase = 0;
+                    node_len -= 1;
+                }
+                key
+            });
+            let run = || {
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    let mut scratch = Scratch::new();
+                    Sorter {
+                        scratch: &mut scratch,
+                        extractor: &mut extractor,
+                        tile_len: tile_capacity::<(u16, Box<u16>)>(256),
+                    }
+                    .execute_node(&mut records, 0x1ff, NodePlan::Equal(pivot));
+                }));
+                assert_eq!(result.is_err(), panic_midway);
+            };
+            #[cfg(not(miri))]
+            {
+                if panic_midway {
+                    let mut run = run;
+                    run();
+                } else {
+                    let ((_, net), peak) = crate::allocations::measure_peak(run);
+                    assert_eq!(net, 0);
+                    // Includes block floors, directories and all live ends vectors,
+                    // not just their lengths. Linear retained boundaries exceed it.
+                    assert!(peak < 32 * 1024, "peeling peak scratch {peak}");
+                }
+            }
+            #[cfg(miri)]
+            {
+                let mut run = run;
+                run();
+            }
+            assert_eq!(
+                peels,
+                if panic_midway { limit / 2 } else { limit },
+                "did not exercise the peeling chain"
+            );
+            records.sort_unstable();
+            assert!(
+                records
+                    .iter()
+                    .enumerate()
+                    .all(|(id, (identity, record))| *identity == id as u16 && **record == id as u16)
+            );
+        }
+    }
+
+    #[test]
     fn changing_keys_finish_node() {
         for greater in [false, true] {
             let len = if cfg!(miri) { 65 } else { 129 };
@@ -749,7 +880,11 @@ mod tests {
                 extractor: &mut extractor,
                 tile_len: tile_capacity::<u16>(32),
             }
-            .partition_equal(&mut records, if greater { 0 } else { 0x1ff }, 0x1ff);
+            .execute_node(
+                &mut records,
+                0x1ff,
+                NodePlan::Equal(if greater { 0 } else { 0x1ff }),
+            );
             records.sort_unstable();
             assert_eq!(records, (0..len as u16).collect::<Vec<_>>());
         }

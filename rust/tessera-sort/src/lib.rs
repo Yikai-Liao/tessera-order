@@ -64,6 +64,9 @@
 
 extern crate alloc;
 
+#[cfg(all(test, not(miri)))]
+#[path = "../tests/support/allocations.rs"]
+mod allocations;
 mod block;
 mod engine;
 mod key;

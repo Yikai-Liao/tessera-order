@@ -79,7 +79,9 @@ Otherwise the node is split on the digit under its highest varying bit, with the
 
 Serial and parallel roots share this partition decision. If equality or existing runs make a serial operation preferable, the parallel entry executes that decision without repeating its sample. Existing runs are checked before digit-width sampling, so a successful split never plans an unused table. A narrow window uses its actual bit width in both engines.
 
-While the block partition writes its result back into the input, each child that fits a tile is finished **at once**, while its records are still in cache. Larger children are routed again after the partition.
+While the block partition writes its result back into the input, each child that fits a tile is finished **at once**, while its records are still in cache. Larger children are routed again only after the partition operation returns and its record ownership and recovery have retired; the same serial scratch can then be reused.
+
+For equality, digit and existing-run splits, execution recurses only on non-largest unfinished children, then releases the old bucket boundaries and continues on the largest in a loop. Every recursive edge therefore enters at most half the parent's records, bounding live boundary capacity by O(R log(n + 1)) for maximum fan-out R. This matters even for fixed-width keys: changing keys can repeatedly make an equality sample's pivot match just one actual record, leaving a proper child of length n − 1 without consuming any candidate bits. Such peeling is now a tail continuation rather than a chain of retained boundary vectors. An unchanged equality split still executes its already-selected bit-consuming digit or run fallback, never a new equality sample. Child variation scans and order confirmation are shared by recursive and tail children; already-finished tiles and equal bands are not analyzed again. Existing runs keep their no-partition route.
 
 ## Summary
 

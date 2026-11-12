@@ -1,0 +1,26 @@
+<svg aria-labelledby="main-history-title main-history-description" role="img" xmlns="http://www.w3.org/2000/svg" style="font-family:Inter, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Helvetica, Arial, sans-serif;font-size:13px;background:none" viewBox="0 0 720 330" height="330" width="720" text-anchor="middle" font-size="10" font-family="system-ui, sans-serif" fill="currentColor" class="benchmark-figure"><style>:where(.benchmark-figure) {
+  --plot-background: white;
+  display: block;
+  height: auto;
+  height: intrinsic;
+  max-width: 100%;
+}
+:where(.benchmark-figure text),
+:where(.benchmark-figure tspan) {
+  white-space: pre;
+}</style><g class="figure-fill-panel figure-stroke-border" stroke="#d8d7d2" fill="#fafaf8" aria-label="rect"><rect rx="12" height="329" width="719" y="0.5" x="0.5" /></g><title id="main-history-title">Main performance history</title><desc id="main-history-description">One point per completed run, with Criterion confidence intervals. Lower is faster. Select a point to open its source commit.</desc><style>
+    .benchmark-figure { font-feature-settings: "tnum", "cv11"; }
+    .benchmark-figure [font-size="10.5"] { letter-spacing: 1.1px; }
+    .benchmark-figure [font-size="28"] { font-feature-settings: "pnum"; letter-spacing: -.6px; }
+    @media (prefers-color-scheme: dark) { .benchmark-figure .figure-fill-panel { fill: #1e1e1d; }
+.benchmark-figure .figure-fill-muted { fill: #a3a29b; }
+.benchmark-figure .figure-stroke-border { stroke: #3a3a37; }
+.benchmark-figure .figure-stroke-rule { stroke: #30302e; }
+.benchmark-figure .figure-stroke-muted { stroke: #a3a29b; } }
+  </style><g class="figure-stroke-rule" stroke="#e6e5e0" aria-hidden="true" aria-label="y-grid"><line y2="282" y1="282" x2="696" x1="72" /><line y2="243.2304085834072" y1="243.2304085834072" x2="696" x1="72" /><line y2="204.46081716681442" y1="204.46081716681442" x2="696" x1="72" /><line y2="165.69122575022163" y1="165.69122575022163" x2="696" x1="72" /><line y2="126.92163433362884" y1="126.92163433362884" x2="696" x1="72" /><line y2="88.15204291703608" y1="88.15204291703608" x2="696" x1="72" /><line y2="49.382451500443295" y1="49.382451500443295" x2="696" x1="72" /></g><g class="figure-stroke-muted" stroke="#6b6a66" fill="none" aria-hidden="true" aria-label="x-axis tick"><path d="M0,0L0,6" transform="translate(384,282)" /></g><g class="figure-fill-muted" transform="translate(0,9)" font-variant="tabular-nums" fill="#6b6a66" aria-label="x-axis tick label"><text transform="translate(384,282)" y="0.71em">2026-11-12T06:09:13Z</text></g><g class="figure-fill-muted" transform="translate(21,45)" text-anchor="end" fill="#6b6a66" aria-label="x-axis label"><text transform="translate(696,282)">Measurement date (UTC)</text></g><g class="figure-stroke-muted" stroke="#6b6a66" fill="none" aria-hidden="true" aria-label="y-axis tick"><path d="M0,0L-6,0" transform="translate(72,282)" /><path d="M0,0L-6,0" transform="translate(72,243.2304085834072)" /><path d="M0,0L-6,0" transform="translate(72,204.46081716681442)" /><path d="M0,0L-6,0" transform="translate(72,165.69122575022163)" /><path d="M0,0L-6,0" transform="translate(72,126.92163433362884)" /><path d="M0,0L-6,0" transform="translate(72,88.15204291703608)" /><path d="M0,0L-6,0" transform="translate(72,49.382451500443295)" /></g><g class="figure-fill-muted" transform="translate(-9,0)" font-variant="tabular-nums" text-anchor="end" fill="#6b6a66" aria-label="y-axis tick label"><text transform="translate(72,282)" y="0.32em">0</text><text transform="translate(72,243.2304085834072)" y="0.32em">100,000</text><text transform="translate(72,204.46081716681442)" y="0.32em">200,000</text><text transform="translate(72,165.69122575022163)" y="0.32em">300,000</text><text transform="translate(72,126.92163433362884)" y="0.32em">400,000</text><text transform="translate(72,88.15204291703608)" y="0.32em">500,000</text><text transform="translate(72,49.382451500443295)" y="0.32em">600,000</text></g><g class="figure-fill-muted" transform="translate(-69,-21)" text-anchor="start" fill="#6b6a66" aria-label="y-axis label"><text transform="translate(72,24)" y="0.71em">↑ Nanoseconds per sort</text></g><g stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" stroke="#4a80e6" fill="none" aria-label="line"><path d="M384,24.023Z" /></g><g stroke="#4a80e6" aria-label="rule"><line y2="24" y1="24.0387695914166" x2="384" x1="384" /></g><g fill="#4a80e6" aria-label="dot"><a href="https://github.com/Yikai-Liao/tessera-sort/commit/1fd12fedf39aa384a92266398045068e1ec486a6" fill="inherit"><circle r="4" cy="24.023261754849955" cx="384"><title>2026-11-12T06:09:13Z · 1fd12fe · rustc 1.99.1 (58cf8f9c3 2026-10-13)
+binary: rustc
+commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+commit-date: 2026-10-13
+host: x86_64-unknown-linux-gnu
+release: 1.99.1
+LLVM version: 23.1.1 · 665410 / 665370 / 665470 ns (estimate / lower / upper)</title></circle></a></g></svg>

@@ -43,7 +43,7 @@ The tail block is recorded as a *partial block*: a block whose prefix of `len < 
 
 ### 2. Scatter
 
-Each bucket starts with one of the R free blocks. The input is read in table order, from logical position R. Each record is classified by its digit and copied to its bucket's next free slot. When a bucket's block fills up, the bucket takes the block at the next **output position** in the table, which starts at R and only grows.
+Each bucket starts with one of the R free blocks. The input is read in table order, from logical position R. Each record is classified, usually by its digit, and copied to its bucket's next free slot. When a bucket's block fills up, the bucket takes the block at the next **output position** in the table, which starts at R and only grows.
 
 Why that block is always free: a bucket takes its k-th new block only when k blocks have been filled, so at least k·b records have been read. Every input block holds at most b records, so the first k input blocks (logical positions R … R+k−1) have been read completely. The output position never overtakes the read position, so a block is reused only after every record in it has been read.
 

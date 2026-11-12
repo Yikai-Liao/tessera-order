@@ -27,7 +27,8 @@ use tile::capacity as tile_capacity;
 use alloc::vec::Vec;
 
 use crate::block;
-use crate::key::{self, Direct, Extract, KeyHalf, Rank, Unsigned};
+use crate::block::Classify;
+use crate::key::{self, Direct, Extract, KeyDigit, KeyHalf, Rank, Unsigned};
 
 type KeyValue<T, E> = <E as Extract<T>>::Value;
 
@@ -137,8 +138,8 @@ impl<T> Scratch<T> {
 /// How a stable block partition leaves its children.
 #[derive(Clone, Copy)]
 struct Split {
-    /// The classification digit.
-    digit: Digit,
+    /// Bits of the classifier's bucket index.
+    radix: usize,
     /// Key bits that may still vary inside each unfinished child.
     candidate: u128,
     /// A bucket that is already complete, such as an equality partition's
@@ -150,7 +151,7 @@ impl Split {
     /// Partitions `records` by `classifier` and finishes tile-sized children
     /// while they are cache-hot, using the extractor `lend` returns for child
     /// work. Returns each bucket's end; larger children remain.
-    fn partition<T, E: Extract<T>, C: Extract<T>>(
+    fn partition<T, E: Extract<T>, C: Classify<T>>(
         self,
         records: &mut [T],
         classifier: C,
@@ -164,10 +165,9 @@ impl Split {
                 tile.finish_child(child, self.candidate, lend(classifier));
             }
         };
-        block::partition_digit(
+        block::partition(
             records,
-            self.digit.width,
-            self.digit.shift,
+            self.radix,
             classifier,
             &mut scratch.block,
             &mut visit,
@@ -517,14 +517,14 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             return;
         }
         let split = Split {
-            digit,
+            radix: digit.width,
             candidate,
             finished: None,
         };
         let ends = split.partition(
             records,
-            &mut *self.extractor,
-            |extractor| &mut **extractor,
+            KeyDigit::new(&mut *self.extractor, digit.shift),
+            |digit| &mut *digit.extractor,
             self.scratch,
             self.tile_len,
         );
@@ -535,7 +535,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
     fn partition_equal(&mut self, records: &mut [T], equal: KeyValue<T, E>, parent_varying: u128) {
         // Outer bands keep every candidate bit; the equal band is complete.
         let split = Split {
-            digit: Digit { shift: 0, width: 2 },
+            radix: 2,
             candidate: parent_varying,
             finished: Some(1),
         };

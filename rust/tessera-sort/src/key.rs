@@ -7,6 +7,7 @@
 //! user key function ([`ByKey`]) or from the record itself ([`Direct`]), and
 //! selects the scan an insertion pass uses.
 
+use crate::block::Classify;
 use core::cmp::Reverse;
 use core::ops::{BitAnd, BitOrAssign, Not, Shl, Shr};
 
@@ -217,26 +218,48 @@ unsafe impl<T, E: Extract<T>> Extract<T> for &mut E {
     }
 }
 
-/// Ranks records below (0), equal to (1) or above (2) a sampled key, as a
-/// two-bit digit for the ordinary block partition.
+/// Classifies records by the key digit that starts at bit `shift`.
 ///
-/// The rank keeps the default caching and declines counting: equal ranks do not
-/// identify record payloads. Child work uses the original extractor again.
+/// The partition keeps the digit's low bits; bits above the key width count
+/// as zero.
+#[derive(Clone)]
+pub(crate) struct KeyDigit<E, V> {
+    pub extractor: E,
+    shift: V,
+}
+
+impl<E, V: Unsigned> KeyDigit<E, V> {
+    /// Classifies by the digit at `shift`, which must be below the key width.
+    pub(crate) fn new(extractor: E, shift: usize) -> Self {
+        assert!(shift < V::BITS);
+        Self {
+            extractor,
+            shift: V::from_usize(shift),
+        }
+    }
+}
+
+impl<T, E: Extract<T>> Classify<T> for KeyDigit<E, E::Value> {
+    #[inline]
+    fn bucket(&mut self, record: &T) -> usize {
+        (self.extractor.key(record) >> self.shift).to_usize()
+    }
+}
+
+/// Ranks records below (0), equal to (1) or above (2) a sampled key, as
+/// buckets of a two-bit partition.
 #[derive(Clone)]
 pub(crate) struct Rank<E, V> {
     pub extractor: E,
     pub equal: V,
 }
 
-// SAFETY: keeps the default caching contract; comparisons cannot panic.
-unsafe impl<T, E: Extract<T>> Extract<T> for Rank<E, E::Value> {
-    type Value = usize;
-
+impl<T, E: Extract<T>> Classify<T> for Rank<E, E::Value> {
     /// A full-width rank: byte arithmetic writes partial registers and made the
     /// scatter loop wait on the previous record's bucket pointer (1.5x slower
     /// on `u64/two_values/65536`).
     #[inline]
-    fn key(&mut self, record: &T) -> usize {
+    fn bucket(&mut self, record: &T) -> usize {
         let key = self.extractor.key(record);
         usize::from(key >= self.equal) + usize::from(key > self.equal)
     }

@@ -331,7 +331,7 @@ fn complete_with_fault<'records, T: Send>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::key::ByKey;
+    use crate::key::{ByKey, Extract, KeyDigit};
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -348,8 +348,7 @@ mod tests {
         partition_impl_with_visit(
             records,
             3,
-            5,
-            key,
+            KeyDigit::new(key, 5),
             &mut Buffers::new(),
             Config {
                 shards,
@@ -573,7 +572,7 @@ mod tests {
             let records =
                 unsafe { core::slice::from_raw_parts_mut(input.add(shard * SHARD_LEN), SHARD_LEN) };
             let mut part = Partition::new(records, BUCKETS, BLOCK, buffers);
-            assert!(part.step((), |_, record| record.0 as usize).is_ok());
+            assert!(part.step(|record: &(u32, usize)| record.0 as usize).is_ok());
             parts.push(part);
         }
         let scratch_blocks = SHARDS * 2 * BUCKETS;
@@ -711,8 +710,7 @@ mod tests {
                     partition_impl_with_visit(
                         &mut records,
                         3,
-                        5,
-                        ByKey(|record: &(u32, usize, &mut Cell<usize>)| record.0),
+                        KeyDigit::new(ByKey(|record: &(u32, usize, &mut Cell<usize>)| record.0), 5),
                         &mut Buffers::new(),
                         Config {
                             shards,
@@ -781,7 +779,7 @@ mod tests {
             let result = unwind::catch(|| {
                 let mut buffers = Buffers::new();
                 let mut partition = Partition::new(&mut records, 4, 3, &mut buffers);
-                assert!(partition.step((), |_, record| record.id * 37 % 4).is_ok());
+                assert!(partition.step(|record: &Owned| record.id * 37 % 4).is_ok());
                 let ends = partition.record_ends();
                 complete_with_fault(&mut partition, &ends, parallel, None, Some(0));
             });

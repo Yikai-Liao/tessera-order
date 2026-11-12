@@ -22,6 +22,18 @@ types = [ "u64" ]
 distributions = [ "sorted", "reverse", "sorted99", "equal", "far_swaps", "d16", "d4096", "sparse_digits", "zipf2", "skew99", "two_values", "sorted_tail", "runs", "bimodal" ]
 lengths = [ 1000000 ]
 
+# Roots of at least 2^21 records reach bounded staging and its block scale;
+# a balanced key and skewed keyed rows cover both final-band routes.
+[[parallel]]
+types = [ "u64" ]
+distributions = [ "random" ]
+lengths = [ 4194304 ]
+
+[[parallel]]
+types = [ "row_u64" ]
+distributions = [ "skew99" ]
+lengths = [ 4194304 ]
+
 # Keyed rows retain payload stability across fast paths and uneven buckets.
 [[parallel]]
 types = [ "row_u64" ]

@@ -3,6 +3,9 @@
 import { z } from "zod";
 import type { RowChart } from "../plot/rows.ts";
 
+/** The Bencher hardware every tracking job runs on; the site reads this module, so it stays browser-safe. */
+export const TRACKING_SPEC = { slug: "intel-v1", cpus: 4 } as const;
+
 const positive = z.number().finite().positive();
 const metric = z
   .object({ value: positive, lower_value: positive, upper_value: positive })
@@ -18,7 +21,7 @@ const reportSchema = z.object({
   }),
   testbed: z.object({
     name: z.literal("main"),
-    spec: z.object({ uuid: z.uuid(), slug: z.literal("intel-v1") }),
+    spec: z.object({ uuid: z.uuid(), slug: z.literal(TRACKING_SPEC.slug) }),
   }),
   results: z.tuple([
     z

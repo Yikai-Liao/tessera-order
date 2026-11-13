@@ -192,7 +192,7 @@ impl Split {
     }
 }
 
-/// Routes nodes and finishes tiles with one extractor and shared scratch.
+/// Runs nodes, tiles and parallel roots with one extractor and shared scratch.
 struct Sorter<'a, T, E> {
     scratch: &'a mut Scratch<T>,
     extractor: &'a mut E,

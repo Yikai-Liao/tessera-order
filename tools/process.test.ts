@@ -77,7 +77,8 @@ for (const nested of [false, true]) {
         try {
           running = (await readFile(`/proc/${pid}/stat`, "utf8")).split(" ")[2] !== "Z";
         } catch (error) {
-          assert.equal((error as NodeJS.ErrnoException).code, "ENOENT");
+          // A process reaped while its stat file is read reports ESRCH instead of ENOENT.
+          assert.ok(["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? ""));
           running = false;
         }
         if (running) await new Promise((resolve) => setTimeout(resolve, 10));

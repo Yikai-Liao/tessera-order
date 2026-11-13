@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { parseHTML } from "linkedom/worker";
 import { label } from "./annotations.ts";
 import { renderFigure } from "./figure.ts";
+import { type RowChart, renderRows } from "./rows.ts";
 import { theme } from "./theme.ts";
 
 test("standalone figures keep readable colours without CSS variable support", () => {
@@ -22,4 +23,29 @@ test("standalone figures keep readable colours without CSS variable support", ()
   assert.match(svg, /prefers-color-scheme: dark/);
   assert.ok(svg.includes(theme.palette.dark.ink));
   assert.ok(svg.includes(theme.palette.dark.panel));
+});
+
+test("a row chart that draws an off-scale triangle explains it in its legend", () => {
+  const chart = (value: number): RowChart => ({
+    title: "t",
+    guide: "g",
+    columns: ["Speed"],
+    groups: [
+      {
+        title: "",
+        rows: [
+          {
+            name: { input: "a", sub: "", tag: "" },
+            marks: [{ value, tone: "primary" }],
+            cells: ["x"],
+          },
+        ],
+      },
+    ],
+    scale: { low: 1 / 4, high: 4, ticks: [{ value: 1, label: "1" }], origin: 1, clamp: true },
+    legend: [[["primary"], "Tessera"]],
+    axis: ["slower", "faster"],
+  });
+  assert.match(renderRows(chart(64)), /off-scale, value at right/);
+  assert.doesNotMatch(renderRows(chart(2)), /off-scale/);
 });

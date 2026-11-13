@@ -153,6 +153,8 @@ const figureSchema = z.object({
   title: z.string().min(1),
   // Built and validated by the shared row template at publication; the page only renders it.
   chart: z.custom<RowChart>((value) => typeof value === "object" && value !== null),
+  /** Markdown table of every plotted value, naming each sort, including values beyond the axis. */
+  table: z.string(),
 });
 /** Cross-algorithm figures from each algorithm's latest run, published as `comparison.json`. */
 export const comparisonSchema = z.object({

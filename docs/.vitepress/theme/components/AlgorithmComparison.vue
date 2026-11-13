@@ -48,8 +48,24 @@ const figures = computed(() => {
   return list.map((figure) => ({
     name: figure.name,
     svg: renderRows({ ...figure.chart, id: `${id}-${figure.name}` }),
+    table: cells(figure.table),
   }));
 });
+// The figure's Markdown table as rows of plain-text cells, rendered by Vue as text.
+function cells(markdown: string) {
+  const rows = markdown
+    .trim()
+    .split("\n")
+    .filter((line) => !/^\|\s*-/.test(line))
+    .map((line) =>
+      line
+        .replace(/^\|/, "")
+        .replace(/\|$/, "")
+        .split("|")
+        .map((cell) => cell.trim()),
+    );
+  return { head: rows[0] ?? [], body: rows.slice(1) };
+}
 const tessera = computed(() => {
   const run = data.value?.runs.find((entry) => entry.algorithm === "tessera");
   return run && {
@@ -76,6 +92,21 @@ const unmeasured = computed(() =>
       <figure v-for="figure in figures" :key="figure.name" class="figure">
         <!-- The shared renderer escapes labels through DOM text nodes. -->
         <div v-html="figure.svg" />
+        <details v-if="figure.table.body.length" class="data">
+          <summary>Data</summary>
+          <table>
+            <thead>
+              <tr>
+                <th v-for="cell in figure.table.head" :key="cell">{{ cell }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, index) in figure.table.body" :key="index">
+                <td v-for="(cell, column) in row" :key="column">{{ cell }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </details>
       </figure>
       <p class="provenance">
         {{ summary }}
@@ -103,6 +134,14 @@ const unmeasured = computed(() =>
   display: block;
   width: 100%;
   height: auto;
+}
+.data {
+  margin-top: 8px;
+  font-size: 13px;
+}
+.data summary {
+  cursor: pointer;
+  color: var(--vp-c-text-2);
 }
 .provenance {
   margin: 0;

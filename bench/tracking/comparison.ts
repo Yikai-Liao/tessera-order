@@ -108,12 +108,13 @@ export function comparisonData(runs: Map<string, TrackingRun[]>): ComparisonData
   const latest = latestRuns(runs);
   const field = trackingField(latest?.runs ?? new Map());
   const cohort = trackingCohort(field);
-  // The site renders each chart itself and needs neither the SVG nor the release table.
+  // The site renders each chart itself; the table names every plotted value.
   const figures = cohort
-    ? comparisonFigures(field, cohort, undefined, true).map(({ name, title, chart }) => ({
+    ? comparisonFigures(field, cohort, undefined, true).map(({ name, title, chart, table }) => ({
         name,
         title,
         chart,
+        table,
       }))
     : [];
   return comparisonSchema.parse({

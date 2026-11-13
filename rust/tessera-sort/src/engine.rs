@@ -252,23 +252,28 @@ pub(crate) fn sort<T, E: Extract<T>>(records: &mut [T], extractor: E) {
 
 /// [`sort`] with a tile budget of `tile_bytes`, so tests can reach node routes
 /// with small inputs.
-fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], extractor: E, tile_bytes: usize) {
-    dispatch!(Level::new(), simd => sort_with_tile_bytes_with(simd, records, extractor, tile_bytes));
-}
-
-#[inline(always)]
-fn sort_with_tile_bytes_with<S: Simd, T, E: Extract<T>>(
-    simd: S,
-    records: &mut [T],
-    mut extractor: E,
-    tile_bytes: usize,
-) {
+fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], mut extractor: E, tile_bytes: usize) {
     let record_bytes = core::mem::size_of::<T>();
     if records.len() < 2 || record_bytes == 0 {
         return;
     }
     let tile_len = tile_capacity::<T>(tile_bytes);
-    let Some(varying) = prepare(simd, records, &mut extractor, tile_len) else {
+    let Some(sampled) = prepare(records, &mut extractor, tile_len) else {
+        return;
+    };
+    // Existing order/insertion exits must not pay for an unused variation backend.
+    dispatch!(Level::new(), simd => sort_prepared(simd, records, extractor, tile_len, sampled));
+}
+
+#[inline(always)]
+fn sort_prepared<S: Simd, T, E: Extract<T>>(
+    simd: S,
+    records: &mut [T],
+    mut extractor: E,
+    tile_len: usize,
+    sampled: Order,
+) {
+    let Some(varying) = root_varying(simd, records, &mut extractor, sampled) else {
         return;
     };
     let mut scratch = Scratch::new();
@@ -304,14 +309,13 @@ fn sort_with_tile_bytes_with<S: Simd, T, E: Extract<T>>(
     .sort_node(records, varying);
 }
 
-/// Finishes ordered or insertion-friendly roots, otherwise returns their varying bits.
-/// Shared by serial and parallel entries before either allocates partition scratch.
-fn prepare<S: Simd, T, E: Extract<T>>(
-    simd: S,
+/// Finishes order/insertion probes before either entry selects a variation backend.
+/// Otherwise returns the sampled order needed after the variation scan.
+fn prepare<T, E: Extract<T>>(
     records: &mut [T],
     extractor: &mut E,
     tile_len: usize,
-) -> Option<u128> {
+) -> Option<Order> {
     let sampled = probe_order(records, extractor);
     if finish_ordered(records, sampled, extractor) {
         return None;
@@ -319,6 +323,17 @@ fn prepare<S: Simd, T, E: Extract<T>>(
     if sampled == Order::Unsorted && insertion_probe(records, extractor, tile_len) {
         return None;
     }
+    Some(sampled)
+}
+
+/// Completes root analysis in the selected backend, before allocating scratch.
+#[inline(always)]
+fn root_varying<S: Simd, T, E: Extract<T>>(
+    simd: S,
+    records: &mut [T],
+    extractor: &mut E,
+    sampled: Order,
+) -> Option<u128> {
     let candidate = u128::MAX >> (128 - E::Value::BITS);
     let varying = scan_varying_bits(simd, records, candidate, extractor);
     if varying == 0 {

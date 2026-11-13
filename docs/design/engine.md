@@ -56,7 +56,7 @@ Node samples choose partitions; they never certify ownership, equality of actual
 
 A stage's rule changes on its page, in the code and in the page's model together. Structural facts across stages:
 
-- `prepare` is shared by the serial and parallel entries. `insertion_probe` owns insertion eligibility, its window and budget, including unlimited finishing for insertion-sized inputs.
+- Serial and parallel roots share `prepare` for order/insertion exits and `root_varying` for variation and deferred flat confirmation. Variation backend selection belongs between these phases, so roots that finish without a variation scan do not pay for it. `insertion_probe` owns insertion eligibility, its window and budget, including unlimited finishing for insertion-sized inputs.
 - `finish_ordered` owns ascending completion and strict or stable descending reversal, for the root probe, deferred flat confirmation and partition children.
 - Root and child variation share one candidate-masked scan.
 - Serial and parallel execution consume one `NodePlan` decision once. Parallel roots shard equality and digit partitions; an existing-run split runs serially without resampling.

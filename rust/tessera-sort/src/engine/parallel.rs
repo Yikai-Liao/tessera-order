@@ -11,13 +11,7 @@ const MIN_PARALLEL_BYTES: usize = 1 << 20;
 const MIN_TASK_BYTES: usize = 256 * 1024;
 
 /// Sorts large inputs by handing complete root buckets to Rayon's current pool.
-pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(records: &mut [T], extractor: E) {
-    dispatch!(Level::new(), simd => sort_with(simd, records, extractor));
-}
-
-#[inline(always)]
-fn sort_with<S: Simd, T: Send, E: Extract<T> + Clone + Send + Sync>(
-    simd: S,
+pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
     records: &mut [T],
     mut extractor: E,
 ) {
@@ -27,16 +21,29 @@ fn sort_with<S: Simd, T: Send, E: Extract<T> + Clone + Send + Sync>(
         return;
     }
     if bytes < MIN_PARALLEL_BYTES || rayon::current_num_threads() == 1 {
-        super::sort_with_tile_bytes_with(simd, records, extractor, TILE_BYTES);
+        super::sort(records, extractor);
         return;
     }
 
     let tile_len = tile_capacity::<T>(TILE_BYTES);
-    let mut scratch = Scratch::new();
-    let Some(varying) = prepare(simd, records, &mut extractor, tile_len) else {
+    let Some(sampled) = prepare(records, &mut extractor, tile_len) else {
         return;
     };
+    dispatch!(Level::new(), simd => sort_prepared(simd, records, extractor, tile_len, sampled));
+}
 
+#[inline(always)]
+fn sort_prepared<S: Simd, T: Send, E: Extract<T> + Clone + Send + Sync>(
+    simd: S,
+    records: &mut [T],
+    mut extractor: E,
+    tile_len: usize,
+    sampled: Order,
+) {
+    let Some(varying) = root_varying(simd, records, &mut extractor, sampled) else {
+        return;
+    };
+    let mut scratch = Scratch::new();
     let scratch = &mut scratch;
     // Keep the existing narrow kernels when only one half of a 128-bit key varies.
     if E::Value::BITS > 64 {

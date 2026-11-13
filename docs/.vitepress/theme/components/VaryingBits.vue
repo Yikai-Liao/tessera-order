@@ -3,8 +3,8 @@
 import { computed, ref } from "vue";
 import { planDigits } from "../sim/digits";
 
-// The union XOR intersection equals the scan’s OR of differences from the
-// first key; this figure visualizes the equivalent union/intersection form.
+// `varying_key_bits` in block.rs: a bit varies if it is set in the union of
+// all keys but not in their intersection.
 const text = ref("0x1A40, 0x1A48, 0x1B40, 0x1A4C, 0x1B44");
 const BITS = 16;
 

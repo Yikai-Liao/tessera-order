@@ -92,46 +92,59 @@ pub(crate) fn finish_insertion<T, E: Extract<T>>(
 /// Only candidate bits are returned, so even changing keys cannot restore a
 /// parent partition digit and prevent the recursion from making progress.
 fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor: &mut E) -> u128 {
-    extractor.varying_bits(records, candidate)
+    fearless_simd::dispatch!(fearless_simd::Level::new(), simd => scan_varying_bits_with(simd, records, candidate, extractor))
 }
 
-/// Scalar variation scan for user extractors and unsupported direct key widths.
-pub(crate) fn scan_varying_bits_scalar<T, E: Extract<T>>(
+#[inline(always)]
+fn scan_varying_bits_with<S: fearless_simd::Simd, T, E: Extract<T>>(
+    simd: S,
     records: &[T],
     candidate: u128,
     extractor: &mut E,
 ) -> u128 {
+    use fearless_simd::{prelude::*, u64x4};
     if candidate == 0 {
         return 0;
     }
     let first = extractor.key(&records[0]).to_u128();
-    varying_batches(&records[1..], candidate, |batch| {
-        batch.iter().fold(0, |seen, record| {
-            seen | (extractor.key(record).to_u128() ^ first)
-        })
-    })
-}
-
-/// Shares early-exit and candidate masking between scalar and vector scans.
-#[inline(always)]
-pub(crate) fn varying_batches<T>(
-    records: &[T],
-    candidate: u128,
-    mut scan: impl FnMut(&[T]) -> u128,
-) -> u128 {
-    let mut seen = 0;
-    let mut index = 0;
-    let mut batch: usize = 64;
+    let (mut union, mut intersection) = (first, first);
+    let mut index = 1;
+    let mut batch = 64;
     while index < records.len() {
         let end = index + batch.min(records.len() - index);
-        seen |= scan(&records[index..end]);
+        let (chunks, tail) = records[index..end].as_chunks::<4>();
+        // Two halves preserve the complete encoding, including 128-bit keys.
+        let (mut lo_or, mut lo_and) = (u64x4::splat(simd, 0), u64x4::splat(simd, u64::MAX));
+        let (mut hi_or, mut hi_and) = (lo_or, lo_and);
+        for chunk in chunks {
+            let keys = chunk
+                .each_ref()
+                .map(|record| extractor.key(record).to_u128());
+            let lo = u64x4::from_slice(simd, &keys.map(|key| key as u64));
+            let hi = u64x4::from_slice(simd, &keys.map(|key| (key >> 64) as u64));
+            lo_or |= lo;
+            lo_and &= lo;
+            hi_or |= hi;
+            hi_and &= hi;
+        }
+        for lane in 0..4 {
+            union |= lo_or[lane] as u128 | ((hi_or[lane] as u128) << 64);
+            intersection &= lo_and[lane] as u128 | ((hi_and[lane] as u128) << 64);
+        }
+        for record in tail {
+            let key = extractor.key(record).to_u128();
+            union |= key;
+            intersection &= key;
+        }
+        let seen = union ^ intersection;
         if seen & candidate == candidate {
             break;
         }
         index = end;
+        // Keep early witnesses cheap and amortize batch checks on long scans.
         batch = batch.saturating_mul(2);
     }
-    seen & candidate
+    (union ^ intersection) & candidate
 }
 
 /// The candidate bits left when every child holds the top bit of a nonzero
@@ -715,7 +728,7 @@ mod tests {
 
     #[test]
     fn variation_covers_late_bits_and_key_widths() {
-        for len in [1, 64, 65, 192, 193, 1025] {
+        for len in [1, 2, 3, 4, 5, 64, 65, 66, 67, 68, 192, 193, 1025] {
             let mut records = alloc::vec![7u128; len];
             records[len - 1] |= 1 << 127;
             for candidate in [0, 0xff, u128::MAX] {
@@ -724,6 +737,11 @@ mod tests {
                     .fold(0, |bits, key| bits | (key ^ records[0]));
                 assert_eq!(
                     scan_varying_bits(&records, candidate, &mut Direct),
+                    expected & candidate
+                );
+                assert_eq!(
+                    fearless_simd::dispatch!(fearless_simd::Level::baseline(), simd =>
+                        scan_varying_bits_with(simd, &records, candidate, &mut Direct)),
                     expected & candidate
                 );
             }

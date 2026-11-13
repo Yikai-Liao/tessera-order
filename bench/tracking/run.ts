@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { command } from "../../tools/process.ts";
 import { repositoryRoot, runTask } from "../../tools/tasks.ts";
-import { trackingAlgorithm, trackingBranch } from "./algorithms.ts";
+import { TRACKING_SPEC, trackingAlgorithm, trackingBranch } from "./algorithms.ts";
 import { localImage, type TrackingBuild } from "./build.ts";
 import { reportFailure } from "./failure.ts";
 import { JOB_TIMEOUT_S } from "./jobs.ts";
@@ -60,7 +60,7 @@ await reportFailure(`Track (${algorithm.id})`, `${out}.log`, () =>
           `--branch=${branch}`,
           `--hash=${build.hash}`,
           "--testbed=main",
-          "--spec=intel-v1",
+          `--spec=${TRACKING_SPEC.slug}`,
           `--image=${image}`,
           `--job-timeout=${JOB_TIMEOUT_S}`,
           "--adapter=rust_criterion",

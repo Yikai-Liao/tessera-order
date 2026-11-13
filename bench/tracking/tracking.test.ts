@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parseHTML } from "linkedom/worker";
 import { z } from "zod";
+import { catalog } from "../catalog.ts";
+import { TRACKING_SPEC, trackingAlgorithms } from "./algorithms.ts";
 import { trackingMemory } from "./build.ts";
 import { comparisonData, latestRuns } from "./comparison.ts";
 import { explainFailure } from "./failure.ts";
@@ -626,4 +628,11 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
     ]),
   ).figures.find((figure) => figure.name === "types");
   assert.match(types!.chart.guide, /on the random input$/);
+});
+
+test("tracking schedules only variants that fit the tracking hardware", () => {
+  assert.ok(trackingAlgorithms.every((entry) => (entry.threads ?? 1) <= TRACKING_SPEC.cpus));
+  // Wider catalog variants stay available to local comparisons.
+  assert.ok(catalog.algorithms.some((entry) => (entry.threads ?? 1) > TRACKING_SPEC.cpus));
+  assert.ok(!trackingAlgorithms.some((entry) => entry.id === "tessera-par-8"));
 });

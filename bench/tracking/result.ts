@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import type { RowChart } from "../plot/rows.ts";
+import { TRACKING_SPEC } from "./algorithms.ts";
 
 const positive = z.number().finite().positive();
 const metric = z
@@ -18,7 +19,7 @@ const reportSchema = z.object({
   }),
   testbed: z.object({
     name: z.literal("main"),
-    spec: z.object({ uuid: z.uuid(), slug: z.literal("intel-v1") }),
+    spec: z.object({ uuid: z.uuid(), slug: z.literal(TRACKING_SPEC.slug) }),
   }),
   results: z.tuple([
     z

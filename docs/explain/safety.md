@@ -27,7 +27,7 @@ An inconsistent key function can therefore produce an unsorted result, but never
 
 A key-function panic propagates only after every live record is back in the input slice:
 
-- **During a block scatter**, the engine works out how far the pass got from the bucket cursors and the number of input blocks consumed. It then finishes the pass **without calling the key function again**, sending every unread record to bucket 0. The result is a valid, unsorted pass, and the [completion ledger](block-partition.md#completion) copies every record back into the input.
+- **During a block scatter**, the partition guard retains the writers and input-block progress. On unwind its destructor works out how far the pass got from the bucket cursors and the number of input blocks consumed. It then finishes the pass **without calling the key function again**, sending every unread record to bucket 0. The result is a valid, unsorted pass, and the [completion ledger](block-partition.md#completion) copies every record back into the input.
 - **During a tile pass**, `RestoreTile` copies the last complete record set back into the tile if it was in scratch. The interrupted pass only wrote stale copies into the other buffer.
 - **During a completion callback** (a band finished while cache-hot), ordinary unwinding reaches the completion guard after parallel jobs join. The guard completes unpublished bands without callbacks and never accesses a band already lent to a callback.
 

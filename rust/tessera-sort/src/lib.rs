@@ -72,6 +72,7 @@ mod parallel;
 mod portable_simd;
 mod scan;
 mod trace;
+#[cfg(test)]
 mod unwind;
 
 pub use key::RadixKey;

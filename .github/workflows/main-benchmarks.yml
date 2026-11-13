@@ -112,8 +112,8 @@ jobs:
       matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     runs-on: ubuntu-24.04
     environment: benchmark
-    # Several remote jobs of at most five minutes each, plus Bencher queueing.
-    timeout-minutes: 45
+    # run.ts waits up to 50 minutes for its remote jobs, queueing included.
+    timeout-minutes: 60
     permissions:
       contents: write
     env:

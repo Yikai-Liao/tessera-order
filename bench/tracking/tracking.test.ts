@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parseHTML } from "linkedom/worker";
 import { z } from "zod";
+import { explainFailure } from "./failure.ts";
 import {
   comparableRuns,
   formatTimestamp,
@@ -475,4 +476,18 @@ test("a run combines its remote jobs only for one source and hardware", () => {
   assert.deepEqual(Object.keys(run.values).sort(), [other, PREVIEW_CASE].sort());
   assert.throws(() => combineReports([jobs[0], { ...jobs[1], spec: second.uuid }]));
   assert.throws(() => combineReports([]));
+});
+
+test("known remote failures are explained once, unknown ones are not guessed", () => {
+  assert.match(
+    explainFailure(
+      "x\nRemote job failed: Firecracker error: Timeout: VM execution timed out after 300s\n",
+    )!,
+    /longer than Bencher's 300 s limit/,
+  );
+  assert.match(
+    explainFailure("Timed out waiting for remote job after 600 seconds")!,
+    /within 600 s of waiting, queueing included/,
+  );
+  assert.equal(explainFailure("error: linker failed"), null);
 });

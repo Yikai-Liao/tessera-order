@@ -14,16 +14,18 @@ The extra memory is 2R scratch blocks plus per-block metadata, O(√n) when b is
 
 ## Step by step
 
-The figure runs the engine's own serial block partition, compiled to WebAssembly, on a small input: R = 4 buckets on the tens digit, blocks of 2–4 records instead of the [derived size](#choosing-the-block-size). The engine reports each step it takes; [`blockPartition.ts`](../.vitepress/theme/sim/blockPartition.ts) only draws them. Its tests check that the replay ends in the engine's stable order and that every frame holds each record exactly once.
+A bucket is not an array of its own. Each record's bucket is one digit of its key, and a pass with a d-bit digit has R = 2^d buckets, numbered by the digit's value; the [planner](routing.md#nodes-and-tiles) chooses d for each node. A bucket is a chain of fixed-size blocks: its records sit in the blocks it has filled, in input order, and the ledger records which blocks those are.
+
+The figure runs the engine's own serial block partition, compiled to WebAssembly, on two-digit keys 0–39. The digit is the tens place, so R = 4 and a key's tens digit is its bucket. Blocks hold 2–4 records instead of the [derived size](#choosing-the-block-size). The engine reports each step it takes; [`blockPartition.ts`](../.vitepress/theme/sim/blockPartition.ts) only draws them. Its tests check that the replay ends in the engine's stable order and that every frame holds each record exactly once.
 
 <BlockPartitionDemo />
 
 How to read the figure:
 
-- **Physical blocks.** `S0`–`S7` are the 2R scratch blocks and `I0`, `I1`, … the full blocks of the input slice. The input's last, partial block is the *tail*; it is read but never becomes an output block.
-- **Cells.** A coloured cell is a live record: its key, and a letter for its input position. A grey cell is a stale copy left behind after the record moved. Stale bytes are never read as a record again.
-- **Labels.** During scatter, `→ bucket k` marks each bucket's current output block. During completion, a block is a `source` (coloured by its bucket), `free`, or `final` (no unread source remains in it).
-- **Chains.** The bottom rows list each bucket's source prefixes in stable order, as block·records. During completion, a prefix leaves its row once it has been copied.
+- **Rows.** The top row is the input slice with each position's index. `I0`, `I1`, … are its full blocks; the last, partial block is the *tail*, which is read but never becomes an output block. `S0`–`S3` are the first block of each bucket and `S4`–`S7` the reserve that completion needs: 2R scratch blocks in all. The bottom rows show each bucket's chain, the same records as above in chain order. Hovering a block marks it in both views.
+- **Cells.** A coloured cell is a live record: its key, with the tens digit in bold, and its input position below. A grey cell is a stale copy left behind after the record moved. Stale bytes are never read as a record again.
+- **Labels.** During scatter, `k writes` marks bucket k's current block. From the ledger on, a block is a `source` (coloured by its bucket), `free`, or `final` (no unread source remains in it), and coloured bars under the input mark each bucket's final band, whose positions the bucket's row lists.
+- **Steps.** The phase buttons jump to scatter, the ledger or completion. Clicking an input position jumps to the step that reads it, and clicking a block in a bucket row during completion jumps to the step that copies it.
 
 ## Scatter
 
@@ -46,7 +48,7 @@ Each copy writes at most a block of records, so after g copies a bucket has touc
 
 The optional Rayon path uses the serial engine below 1 MiB of records or in a one-thread pool. A larger root scatters disjoint input shards independently, one per 256 KiB of records up to the pool width, clamped to the number of full blocks. Each shard has its own 2R scratch blocks. One ledger joins the chains bucket by bucket in original shard order, so the result is stable whichever worker finishes first.
 
-Each bucket completes as an independent task: it protects and copies its own sources, then finishes its band while peers keep moving disjoint records. A root with a frequent sampled key uses the same sharded scatter and completion with the [equality classification](routing.md#repeated-key); the complete equal band skips its callback. The figure's model replays the same ledger with several shards and every bucket order. Locking, recovery and the progress argument belong to the [engine reference](../design/engine.md#parallel-root-completion).
+Each bucket completes as an independent task: it protects and copies its own sources, then finishes its band while peers keep moving disjoint records. A root with a frequent sampled key uses the same sharded scatter and completion with the [equality classification](routing.md#repeated-key); the complete equal band skips its callback. The figure shows the serial path; the Rust parallel tests cover sharded ledgers and every bucket order. Locking, recovery and the progress argument belong to the [engine reference](../design/engine.md#parallel-root-completion).
 
 ## Choosing the block size
 

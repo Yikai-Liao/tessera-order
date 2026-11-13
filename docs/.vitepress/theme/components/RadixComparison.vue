@@ -92,8 +92,8 @@ function groupStarts(s: Stage): Set<number> {
       </section>
     </div>
     <p class="tsr-note">
-      Colour is the tens digit; the letter is the input position. In a stable result, equal keys keep their letters in
-      alphabetical order. A red outline marks equal keys that the in-place MSD sort swapped past each other.
+      Colour is the tens digit; the small number is the input position. In a stable result, equal keys keep their positions in
+      ascending order. A red outline marks equal keys that the in-place MSD sort swapped past each other.
     </p>
   </figure>
 </template>

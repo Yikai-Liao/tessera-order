@@ -18,7 +18,7 @@ export function bucketColor(bucket: number, buckets: number): string {
   return ramp[Math.round((bucket * (ramp.length - 1)) / (buckets - 1))];
 }
 
-/** Original positions as letters, so stability is visible: equal keys keep a, b, c order. */
+/** A record's original input position, so stability is visible: equal keys keep ascending positions. */
 export function recordLabel(id: number): string {
-  return id < 26 ? String.fromCharCode(97 + id) : `#${id}`;
+  return String(id);
 }

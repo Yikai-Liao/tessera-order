@@ -667,14 +667,11 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   assert.equal(data.overview!.subject, "Overall ranking");
   const latest = new Map([...runs].map(([id, list]) => [id, list[0]]));
   const scaling = trackingScaling(latest)!;
-  assert.deepEqual([scaling.n, scaling.inputs], [1000000, 1]);
-  assert.deepEqual(
-    scaling.rows.map((row) => [row.threads, +row.tessera.toFixed(9), +row.rayon.toFixed(9)]),
-    [
-      [1, 4, 1],
-      [2, 8, 2],
-    ],
-  );
+  assert.deepEqual([scaling.n, scaling.threads], [1000000, [1, 2]]);
+  assert.deepEqual(scaling.inputs, [{ label: "u64 · random", tessera: [4, 8], rayon: [1, 2] }]);
+  const figure = data.figures.find((entry) => entry.name === "parallel")!;
+  // The table names every input in the aggregate.
+  assert.match(figure.table, /\| u64 · random \| 4× \| 8× \| 1.00× \| 2× \|/);
   const names = data.figures.map((figure) => figure.name);
   assert.ok(names.includes("parallel"));
   // Without Rayon on one thread there is no baseline.

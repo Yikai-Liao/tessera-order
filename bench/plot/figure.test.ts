@@ -46,6 +46,6 @@ test("a row chart that draws an off-scale triangle explains it in its legend", (
     legend: [[["primary"], "Tessera"]],
     axis: ["slower", "faster"],
   });
-  assert.match(renderRows(chart(64)), /off-scale, value at right/);
+  assert.match(renderRows(chart(64)), /off-scale, value in table/);
   assert.doesNotMatch(renderRows(chart(2)), /off-scale/);
 });

@@ -511,23 +511,33 @@ function renderMemory(field: Field, cohort: Cohort): Figure | null {
 
 /**
  * Tessera's parallel entry point and Rayon's stable sort at each thread count, as speed
- * relative to Rayon's stable sort on one thread, each a geometric mean over the same inputs.
+ * relative to Rayon's stable sort on one thread, on each input every thread count measured.
  */
 export interface Scaling {
   n: number;
-  inputs: number;
-  rows: { threads: number; tessera: number; rayon: number }[];
+  threads: number[];
+  /** Short commits of the Tessera runs, which may predate its latest serial run. */
+  tessera: string[];
+  inputs: { label: string; tessera: number[]; rayon: number[] }[];
 }
 
-export function renderParallel({ n, inputs, rows }: Scaling): Figure | null {
-  if (!rows.length) return null;
-  const threads = (t: number) => `${t} thread${t === 1 ? "" : "s"}`;
+export function renderParallel({ n, threads, tessera, inputs }: Scaling): Figure | null {
+  if (!inputs.length || !threads.length) return null;
+  const named = (t: number) => `${t} thread${t === 1 ? "" : "s"}`;
+  const mean = (pick: (input: Scaling["inputs"][number]) => number[], at: number) =>
+    geomean(inputs.map((input) => pick(input)[at]));
+  const rows = threads.map((t, at) => ({
+    threads: t,
+    tessera: mean((input) => input.tessera, at),
+    rayon: mean((input) => input.rayon, at),
+  }));
   const widest = rows.at(-1)!;
-  const title = `${times(widest.tessera / widest.rayon)} Rayon's speed on ${threads(widest.threads)}`;
+  const title = `${times(widest.tessera / widest.rayon)} Rayon's speed on ${named(widest.threads)}`;
   const scale = speedScale(rows.flatMap((row) => [row.tessera, row.rayon]));
   scale.ticks = scale.ticks.map((tick) =>
     tick.value === 1 ? { ...tick, label: "Rayon · 1" } : tick,
   );
+  const cells = (values: number[]) => values.map(times);
   return {
     name: "parallel",
     subject: "Parallel sorting",
@@ -536,14 +546,14 @@ export function renderParallel({ n, inputs, rows }: Scaling): Figure | null {
     title,
     ...rendered({
       title,
-      guide: `${formatLength(n)} elements · geometric mean over the ${inputs} inputs both measured at every thread count`,
+      guide: `${formatLength(n)} elements · geometric mean over the ${inputs.length} inputs every thread count measured · Tessera at ${tessera.join(", ")}`,
       columns: ["Tessera", "Rayon"],
       groups: [
         {
           title: "Threads",
           rows: rows.map(
             (row): Row => ({
-              name: { input: threads(row.threads), sub: "", tag: "" },
+              name: { input: named(row.threads), sub: "", tag: "" },
               marks: [
                 { value: row.rayon, tone: "comparison" },
                 { value: row.tessera, tone: "primary" },
@@ -561,8 +571,19 @@ export function renderParallel({ n, inputs, rows }: Scaling): Figure | null {
       ],
     }),
     table: markdownTable(
-      ["Threads", "Tessera speed vs Rayon on 1 thread", "Rayon speed vs Rayon on 1 thread"],
-      rows.map((row) => [String(row.threads), times(row.tessera), times(row.rayon)]),
+      [
+        "Input",
+        ...threads.map((t) => `Tessera, ${named(t)}`),
+        ...threads.map((t) => `Rayon, ${named(t)}`),
+      ],
+      [
+        ...inputs.map((input) => [input.label, ...cells(input.tessera), ...cells(input.rayon)]),
+        [
+          "Geometric mean",
+          ...cells(rows.map((row) => row.tessera)),
+          ...cells(rows.map((row) => row.rayon)),
+        ],
+      ],
     ),
   };
 }

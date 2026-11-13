@@ -10,7 +10,6 @@ import {
   renderParallel,
   type Scaling,
 } from "../report/charts.ts";
-import { geomean } from "../statistics.ts";
 import { trackingAlgorithms } from "./algorithms.ts";
 import { type ComparisonData, comparisonSchema, parseRuns, type TrackingRun } from "./result.ts";
 
@@ -126,8 +125,8 @@ export function trackingCohort(field: Field): Cohort | null {
 }
 
 /**
- * Tessera's and Rayon's stable parallel variants at every thread count both ran, over the
- * inputs every one of them measured at their most common length. Rayon on one thread is the
+ * Tessera's and Rayon's stable parallel variants at every thread count both ran, on each
+ * input every one of them measured at their most common length. Rayon on one thread is the
  * baseline: slice::sort has no runs at most parallel lengths.
  */
 export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null {
@@ -151,16 +150,25 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
   );
   if (!found) return null;
   const [n, inputs] = found;
-  const speed = (adapter: string, t: number) =>
-    geomean(inputs.map((id) => time("rayon-stable", 1, id)! / time(adapter, t, id)!));
+  const speed = (adapter: string, t: number, id: string) =>
+    time("rayon-stable", 1, id)! / time(adapter, t, id)!;
+  const of = (adapter: string, id: string) => counts.map((t) => speed(adapter, t, id));
+  // Tessera's parallel journals update only when dispatched, so they name their own commits.
+  const hashes = [
+    ...new Set(counts.map((t) => runs.get(variant("tessera-par", t)!.id)!.hash.slice(0, 7))),
+  ];
   return {
     n,
-    inputs: inputs.length,
-    rows: counts.map((t) => ({
-      threads: t,
-      tessera: speed("tessera-par", t),
-      rayon: speed("rayon-stable", t),
-    })),
+    threads: counts,
+    tessera: hashes,
+    inputs: inputs.map((id) => {
+      const { ty, distribution: shape } = parseComparisonId(id);
+      return {
+        label: `${ty} · ${distribution(shape).label}`,
+        tessera: of("tessera-par", id),
+        rayon: of("rayon-stable", id),
+      };
+    }),
   };
 }
 

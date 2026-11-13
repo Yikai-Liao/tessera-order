@@ -304,7 +304,7 @@ export function renderRows(spec: RowChart) {
   );
   if (Array.isArray(spec.legend)) {
     const legend: [Swatch[], string][] = clipped
-      ? [...spec.legend, [["edge"], "off-scale, value at right"]]
+      ? [...spec.legend, [["edge"], "off-scale, value in table"]]
       : spec.legend;
     let left = pad;
     for (const [swatches, text] of legend) {

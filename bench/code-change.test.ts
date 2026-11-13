@@ -79,3 +79,15 @@ test("shared code statistics exclude comments and tests and support commits and 
   await rm(join(root, "rust/tessera-sort"), { recursive: true });
   assert.equal((await codeChange("HEAD", undefined, root)).current, 0);
 });
+
+test("figure trace instrumentation is not production code", async () => {
+  const { production } = await import("./code-source.ts");
+  const source =
+    "use crate::trace::{self, Event};\nuse crate::key;\nfn run() {\n trace::emit(|| Event::Begin {\n len: 1,\n });\n work();\n trace::emit(|| Event::Final { physical })\n}\n";
+  assert.deepEqual(production(source).lines, [
+    "use crate :: key ;",
+    "fn run ( ) {",
+    "work ( ) ;",
+    "}",
+  ]);
+});

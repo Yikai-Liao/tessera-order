@@ -153,6 +153,9 @@ export function parseRuns(text: string): TrackingRun[] {
 
 const figureSchema = z.object({
   name: z.string().min(1),
+  // Optional while comparisons published before section headings remain the latest.
+  subject: z.string().min(1).optional(),
+  summary: z.string().min(1).optional(),
   title: z.string().min(1),
   // Built and validated by the shared row template at publication; the page only renders it.
   chart: z.custom<RowChart>((value) => typeof value === "object" && value !== null),

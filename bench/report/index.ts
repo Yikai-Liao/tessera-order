@@ -177,7 +177,7 @@ export async function writeReport(directories: string[], partial = false) {
     "## Figure scope\n\nStandard panels show fixed slices and aggregates, not every measured case. The 1M input panels include all selected distributions for each type, including the new skew, key-structure, disorder and finite-float cases. Record panels rank stable sorts only. Ranking and cross-type aggregate panels retain the ten baseline distributions for a common comparison; they do not summarize the whole expanded suite. The memory panel takes the worst across all selected 10M u64 distributions. The selected-input panel is a fallback used only when no standard panel can be drawn. All completed cases, including custom lengths absent from the figures, remain in [Full results](#full-results) and [summaries.json](summaries.json).\n\n";
   for (const chart of charts) {
     await writeFile(join(out, `${chart.name}.svg`), chart.svg);
-    markdown += `## ${chart.title}\n\n![${chart.title}](${chart.name}.svg)\n\n<details>\n<summary>Plotted values</summary>\n\n${chart.table}\n</details>\n\n`;
+    markdown += `## ${chart.subject}\n\n${chart.summary}\n\n![${chart.title}](${chart.name}.svg)\n\n<details>\n<summary>Plotted values</summary>\n\n${chart.table}\n</details>\n\n`;
   }
   markdown += renderResults(dataset, summaries);
   markdown +=

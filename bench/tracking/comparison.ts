@@ -3,7 +3,14 @@
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { algorithm, catalog, comparisonId, distribution, parseComparisonId } from "../catalog.ts";
-import { type Cohort, comparisonFigures, type Field } from "../report/charts.ts";
+import {
+  type Cohort,
+  comparisonFigures,
+  type Field,
+  renderParallel,
+  type Scaling,
+} from "../report/charts.ts";
+import { geomean } from "../statistics.ts";
 import { trackingAlgorithms } from "./algorithms.ts";
 import { type ComparisonData, comparisonSchema, parseRuns, type TrackingRun } from "./result.ts";
 
@@ -57,23 +64,40 @@ export function trackingField(runs: Map<string, TrackingRun>): Field {
   };
 }
 
+// The ranking compares 32-bit-key records: the one format every radix opponent supports,
+// including the original Block LSD implementation of the paper Tessera's partition adapts.
+const RANKING_TYPE = "row_u32";
+
 /**
- * The cohort follows the continuous plan instead of fixed lengths: rankings use the u64
- * length with the most input patterns that both Tessera and slice::sort measured, and
- * memory the largest u64 length with a random input.
+ * The cohort follows the continuous plan instead of fixed lengths. The ranking and the
+ * u64 input-pattern figures each use their type's length with the most input patterns that
+ * both Tessera and slice::sort measured, the longest on a tie; memory uses the longest u64
+ * length with a random input.
  */
 export function trackingCohort(field: Field): Cohort | null {
   const measured = (id: string) =>
     field.speed(id, "tessera") !== null && field.nsPerKey(id, "std-stable") !== null;
-  const u64 = field.cases.filter((entry) => entry.ty === "u64" && measured(comparisonId(entry)));
-  const lengths = Map.groupBy(u64, (entry) => entry.len);
-  const [n] = [...lengths].toSorted((a, b) => b[1].length - a[1].length || b[0] - a[0])[0] ?? [];
-  if (n === undefined) return null;
   const order = catalog.distributions.map((entry) => entry.id);
-  const shapes = lengths
-    .get(n)!
-    .map((entry) => entry.distribution)
-    .toSorted((a, b) => order.indexOf(a) - order.indexOf(b));
+  const widest = (ty: string) => {
+    const cases = field.cases.filter((entry) => entry.ty === ty && measured(comparisonId(entry)));
+    const [found] = [...Map.groupBy(cases, (entry) => entry.len)].toSorted(
+      (a, b) => b[1].length - a[1].length || b[0] - a[0],
+    );
+    if (!found) return null;
+    const shapes = found[1]
+      .map((entry) => entry.distribution)
+      .toSorted((a, b) => order.indexOf(a) - order.indexOf(b));
+    return { n: found[0], shapes, cases };
+  };
+  const over = (shapes: string[], patterns: string) =>
+    shapes.length === 1
+      ? `on the ${distribution(shapes[0]).label} input`
+      : `geometric mean over the ${shapes.length} ${patterns}`;
+  const u64 = widest("u64");
+  if (!u64) return null;
+  const records = widest(RANKING_TYPE);
+  const ranking = records ? { ty: RANKING_TYPE, ...records } : { ty: "u64", ...u64 };
+  const { n, shapes } = u64;
   // Element types compare over the patterns every measured type shares at that length.
   const types = Map.groupBy(
     field.cases.filter((entry) => entry.len === n && measured(comparisonId(entry))),
@@ -83,19 +107,60 @@ export function trackingCohort(field: Field): Cohort | null {
     [...types.values()].every((cases) => cases.some((entry) => entry.distribution === shape)),
   );
   const memoryN = Math.max(
-    ...u64.filter((entry) => entry.distribution === "random").map((entry) => entry.len),
+    ...u64.cases.filter((entry) => entry.distribution === "random").map((entry) => entry.len),
   );
   return {
+    ranking: {
+      ty: ranking.ty,
+      n: ranking.n,
+      lengths: [ranking.n],
+      shapes: ranking.shapes,
+      label: over(ranking.shapes, "measured input patterns"),
+    },
     n,
-    lengths: [n],
     shapes,
-    shapesLabel: `the ${shapes.length} measured input patterns`,
     typeShapes,
-    typeShapesLabel:
-      typeShapes.length === 1
-        ? `on the ${distribution(typeShapes[0]).label} input`
-        : `geometric mean over the ${typeShapes.length} input patterns every type has`,
+    typeShapesLabel: over(typeShapes, "input patterns every type has"),
     memoryN: Number.isFinite(memoryN) ? memoryN : n,
+  };
+}
+
+/**
+ * Tessera's and Rayon's stable parallel variants at every thread count both ran, over the
+ * inputs every one of them measured at their most common length. Rayon on one thread is the
+ * baseline: slice::sort has no runs at most parallel lengths.
+ */
+export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null {
+  const variant = (adapter: string, threads: number) =>
+    trackingAlgorithms.find((entry) => entry.adapter === adapter && entry.threads === threads);
+  const counts = trackingAlgorithms
+    .filter((entry) => entry.adapter === "tessera-par" && entry.threads !== undefined)
+    .map((entry) => entry.threads!)
+    .filter((t) =>
+      [variant("tessera-par", t), variant("rayon-stable", t)].every((e) => e && runs.has(e.id)),
+    )
+    .toSorted((a, b) => a - b);
+  if (counts[0] !== 1) return null;
+  const time = (adapter: string, t: number, id: string) =>
+    runs.get(variant(adapter, t)!.id)!.values[`rust/${id}/par-${t}`]?.[0];
+  const ids = Object.keys(runs.get(variant("rayon-stable", 1)!.id)!.values)
+    .map((key) => key.slice("rust/".length, key.lastIndexOf("/")))
+    .filter((id) => counts.every((t) => time("tessera-par", t, id) && time("rayon-stable", t, id)));
+  const [found] = [...Map.groupBy(ids, (id) => parseComparisonId(id).len)].toSorted(
+    (a, b) => b[1].length - a[1].length || b[0] - a[0],
+  );
+  if (!found) return null;
+  const [n, inputs] = found;
+  const speed = (adapter: string, t: number) =>
+    geomean(inputs.map((id) => time("rayon-stable", 1, id)! / time(adapter, t, id)!));
+  return {
+    n,
+    inputs: inputs.length,
+    rows: counts.map((t) => ({
+      threads: t,
+      tessera: speed("tessera-par", t),
+      rayon: speed("rayon-stable", t),
+    })),
   };
 }
 
@@ -109,14 +174,20 @@ export function comparisonData(runs: Map<string, TrackingRun[]>): ComparisonData
   const field = trackingField(latest?.runs ?? new Map());
   const cohort = trackingCohort(field);
   // The site renders each chart itself; the table names every plotted value.
-  const figures = cohort
-    ? comparisonFigures(field, cohort, undefined, true).map(({ name, title, chart, table }) => ({
-        name,
-        title,
-        chart,
-        table,
-      }))
-    : [];
+  const scaling = latest && cohort ? trackingScaling(latest.runs) : null;
+  const parallel = scaling ? renderParallel(scaling) : null;
+  // Parallel sorting follows the serial figures and precedes memory.
+  const all = cohort ? comparisonFigures(field, cohort, undefined, true) : [];
+  const memory = all.findIndex((figure) => figure.name === "memory");
+  if (parallel) all.splice(memory < 0 ? all.length : memory, 0, parallel);
+  const figures = all.map(({ name, subject, summary, title, chart, table }) => ({
+    name,
+    subject,
+    summary,
+    title,
+    chart,
+    table,
+  }));
   return comparisonSchema.parse({
     spec: latest?.spec ?? null,
     runs: [...(latest?.runs ?? [])]

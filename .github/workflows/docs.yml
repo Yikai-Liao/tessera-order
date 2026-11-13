@@ -32,7 +32,7 @@ jobs:
         with:
           workspaces: "rust/tessera-trace -> ../../target/trace"
       - run: bun install --frozen-lockfile
-      - run: cargo test -p tessera-sort --lib --features trace trace::
+      - run: "cargo test -p tessera-sort --lib --features trace trace::"
       - run: >-
           cargo clippy --manifest-path rust/tessera-trace/Cargo.toml
           --target wasm32-unknown-unknown --target-dir target/trace -- -D warnings

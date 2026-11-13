@@ -47,6 +47,15 @@ pub struct RevisionSampling {
     pub samples: usize,
 }
 
+/// Fixed prepared-record budget for Criterion batches, shared by both timing harnesses.
+/// Batch size does not adapt to measured speed; restoring inputs remains outside the clock.
+///
+/// # Panics
+/// Panics for an empty input.
+pub fn criterion_batch_iterations(records_len: usize) -> u64 {
+    ((1 << 18) / records_len).max(1) as u64
+}
+
 /// Selects the first matching descending length floor from the catalog.
 ///
 /// # Panics

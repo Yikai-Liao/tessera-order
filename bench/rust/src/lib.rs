@@ -10,7 +10,9 @@ pub mod plan;
 pub mod pool;
 pub mod sampling;
 #[cfg(feature = "compare")]
-pub use comparison::main;
+pub use comparison::{
+    BenchmarkRecord, CaseInput, KernelVisitor, PreparedRecords, Variant, check, list_variants, main,
+};
 
 #[cfg(feature = "compare")]
 pub mod allocation;

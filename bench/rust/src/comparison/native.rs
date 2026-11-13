@@ -4,7 +4,7 @@
 
 use super::{
     record::{BenchmarkRecord, PreparedRecords, WideRecord},
-    variant::{Kernel, Variant, prepare_kernel},
+    variant::{KernelVisitor, Variant},
 };
 use crate::case::Row;
 use serde_json::{Value, json};
@@ -109,14 +109,15 @@ unsafe extern "C" {
     fn bench_x86simdsort_target() -> *const c_char;
 }
 /// Creates a kernel when the native registry supports this record representation.
-pub(super) fn prepare<T: NativeRecord>(
+pub(super) fn prepare<T: NativeRecord, V: KernelVisitor>(
     v: Variant,
     input: std::rc::Rc<PreparedRecords<T>>,
-) -> Option<Box<dyn Kernel>> {
+    visitor: V,
+) -> Option<V::Output> {
     let algorithm = NativeAlgorithm::from_name(v.name)?;
     // SAFETY: The registry returns a static function pointer or NULL for these indices.
     let sort = unsafe { bench_kernel(algorithm as u32, T::TYPE as u32) }?;
-    Some(prepare_kernel(input, v.stable, move |values| {
+    Some(visitor.visit(input, v.stable, 0, move |values| {
         // SAFETY: NativeRecord binds T to the registry's C layout for TYPE.
         unsafe { sort(values.as_mut_ptr().cast(), values.len()) };
     }))

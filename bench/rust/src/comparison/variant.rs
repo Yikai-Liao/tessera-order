@@ -80,7 +80,7 @@ macro_rules! tessera_keys {
         }
     )+};
 }
-tessera_keys!(u32, u64, f64, Reverse<u64>, Reverse<f64>);
+tessera_keys!(u32, u64, u128, f64, Reverse<u64>, Reverse<f64>);
 
 /// Keeps keyed-record adapters on Tessera's by-key entry points.
 macro_rules! tessera_records {
@@ -135,7 +135,7 @@ fn glidesort_sqrt<T: BenchmarkRecord>(records: &mut [T], scratch_bytes: usize) {
 }
 
 /// Restorable batches with one adapter call and output verification per batch.
-pub(super) trait Kernel {
+pub(crate) trait Kernel {
     /// Restores every independent buffer to the original input.
     fn restore(&mut self, batch: usize);
     /// Sorts the prepared buffers without restoring or checking them.
@@ -186,30 +186,54 @@ impl<T: BenchmarkRecord, F: FnMut(&mut [T])> Kernel for BatchKernel<T, F> {
         self.worker_threads
     }
 }
-/// Creates a typed batch kernel without cloning its shared reference.
-pub(super) fn prepare_kernel<T: BenchmarkRecord>(
-    input: Rc<PreparedRecords<T>>,
-    stable: bool,
-    sort: impl FnMut(&mut [T]) + 'static,
-) -> Box<dyn Kernel> {
-    Box::new(BatchKernel {
-        input,
-        buffers: Vec::new(),
-        sort,
-        stable,
-        worker_threads: 0,
-    })
+/// Supplies a monomorphized sorting operation with prepared inputs and owned workers.
+/// Implementations choose timing/storage, but do not reconstruct adapter capabilities.
+pub trait KernelVisitor {
+    /// The caller's prepared operation or measurement result.
+    type Output;
+    /// Takes ownership of the sort (including any warmed pool) outside its timed calls.
+    fn visit<T: BenchmarkRecord, F: FnMut(&mut [T]) + 'static>(
+        self,
+        input: Rc<PreparedRecords<T>>,
+        stable: bool,
+        threads: usize,
+        sort: F,
+    ) -> Self::Output;
+}
+
+struct BatchVisitor;
+impl KernelVisitor for BatchVisitor {
+    type Output = Box<dyn Kernel>;
+    fn visit<T: BenchmarkRecord, F: FnMut(&mut [T]) + 'static>(
+        self,
+        input: Rc<PreparedRecords<T>>,
+        stable: bool,
+        worker_threads: usize,
+        sort: F,
+    ) -> Self::Output {
+        Box::new(BatchKernel {
+            input,
+            buffers: Vec::new(),
+            sort,
+            stable,
+            worker_threads,
+        })
+    }
 }
 /// An adapter's public name and stability contract.
 #[derive(Clone, Copy)]
-pub(super) struct Variant {
+pub struct Variant {
+    /// Catalog algorithm identity.
     pub name: &'static str,
+    /// Whether equal keys retain their input order.
     pub stable: bool,
+    /// Catalog adapter family.
     pub adapter: &'static str,
+    /// Owned pool size, absent for serial adapters.
     pub threads: Option<usize>,
 }
 /// Lists the adapters measured in the selected executable configuration.
-pub(super) fn list_variants() -> Vec<Variant> {
+pub fn list_variants() -> Vec<Variant> {
     crate::plan::catalog()
         .algorithms
         .iter()
@@ -229,81 +253,122 @@ pub(super) fn list_variants() -> Vec<Variant> {
         .collect()
 }
 /// Prepares the standard or Tessera adapter for any benchmark record type.
-fn try_prepare_common<T: TesseraAdapter>(
+fn try_prepare_common<T: TesseraAdapter, V: KernelVisitor>(
     v: Variant,
     input: Rc<PreparedRecords<T>>,
     scratch_bytes: usize,
-) -> Option<Box<dyn Kernel>> {
+    visitor: V,
+) -> Option<V::Output> {
     #[cfg(feature = "rayon")]
     if let Some(threads) = v.threads {
-        return Some(parallel::prepare(input, v.adapter, threads));
+        return Some(parallel::prepare(input, v.adapter, threads, visitor));
     }
     Some(match v.name {
-        "tessera" => prepare_kernel(input, true, T::tessera),
+        "tessera" => visitor.visit(input, true, 0, T::tessera),
         #[cfg(tessera_bench_revisions)]
-        "tessera-baseline" => prepare_kernel(input, true, T::baseline),
+        "tessera-baseline" => visitor.visit(input, true, 0, T::baseline),
         #[cfg(tessera_bench_revisions)]
-        "tessera-baseline-copy" => prepare_kernel(input, true, T::baseline_copy),
+        "tessera-baseline-copy" => visitor.visit(input, true, 0, T::baseline_copy),
         #[cfg(tessera_bench_revisions)]
-        "tessera-copy" => prepare_kernel(input, true, T::current_copy),
-        "std-stable" => prepare_kernel(input, true, |v| v.sort_by(T::order)),
-        "std-unstable" => prepare_kernel(input, false, |v| v.sort_unstable_by(T::order)),
-        "glidesort" => prepare_kernel(input, true, glidesort::<T>),
-        "glidesort-sqrt" => prepare_kernel(input, true, move |v| glidesort_sqrt(v, scratch_bytes)),
+        "tessera-copy" => visitor.visit(input, true, 0, T::current_copy),
+        "std-stable" => visitor.visit(input, true, 0, |v| v.sort_by(T::order)),
+        "std-unstable" => visitor.visit(input, false, 0, |v| v.sort_unstable_by(T::order)),
+        "glidesort" => visitor.visit(input, true, 0, glidesort::<T>),
+        "glidesort-sqrt" => {
+            visitor.visit(input, true, 0, move |v| glidesort_sqrt(v, scratch_bytes))
+        }
         _ => return None,
     })
 }
 /// Selects a typed copyable-record adapter without callbacks inside a sort.
 macro_rules! copy_adapter {
-    ($v:expr,$input:expr,$scratch_bytes:expr,$key:expr) => {{
+    ($v:expr,$input:expr,$scratch_bytes:expr,$key:expr,$visitor:expr) => {{
         let v = $v;
         let input = $input;
+        let visitor = $visitor;
         match v.name {
-            "radsort" => Some(prepare_kernel(input, true, |v| {
-                radsort::sort_by_key(v, $key)
-            })),
-            "voracious" => Some(prepare_kernel(input, true, |v| v.voracious_stable_sort())),
-            "rdst" => Some(prepare_kernel(input, false, |v| v.radix_sort_unstable())),
+            "radsort" => Some(visitor.visit(input, true, 0, |v| radsort::sort_by_key(v, $key))),
+            "voracious" => Some(visitor.visit(input, true, 0, |v| v.voracious_stable_sort())),
+            "rdst" => Some(visitor.visit(input, false, 0, |v| v.radix_sort_unstable())),
             #[cfg(feature = "compare-native")]
-            _ if v.adapter == "native" => $crate::comparison::native::prepare(v, input),
-            _ => try_prepare_common(v, input, $scratch_bytes),
+            _ if v.adapter == "native" => $crate::comparison::native::prepare(v, input, visitor),
+            _ => try_prepare_common(v, input, $scratch_bytes, visitor),
         }
     }};
 }
 impl Variant {
     /// Checks capabilities without starting workers for a parallel adapter.
-    pub(super) fn supports(self, input: &CaseInput) -> bool {
+    pub fn supports(self, input: &CaseInput) -> bool {
         // Every CaseInput representation implements TesseraAdapter's parallel
         // operations. Preparing one here would warm and discard a real pool.
         (cfg!(feature = "rayon") && self.threads.is_some()) || self.prepare(input, 0).is_some()
     }
 
     /// Prepares an adapter for this input, or declines an unsupported combination.
-    pub(super) fn prepare(
+    pub(crate) fn prepare(
         self,
         input: &CaseInput,
         scratch_bytes: usize,
     ) -> Option<Box<dyn Kernel>> {
+        self.with_kernel(input, scratch_bytes, BatchVisitor)
+    }
+
+    /// Resolves capabilities and gives the caller one typed, fully prepared sort.
+    /// Unsupported algorithm/record pairs return None without invoking the visitor.
+    pub fn with_kernel<V: KernelVisitor>(
+        self,
+        input: &CaseInput,
+        scratch_bytes: usize,
+        visitor: V,
+    ) -> Option<V::Output> {
+        #[cfg(feature = "compare-native")]
+        {
+            static LAYOUTS: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+            LAYOUTS.get_or_init(super::native::check_layouts);
+        }
         match (self.name, input) {
             ("voracious", input) if !matches!(input, CaseInput::U32(_) | CaseInput::U64(_)) => None,
             ("radsort", CaseInput::OwnedRecord(v)) => {
-                Some(prepare_kernel(Rc::clone(v), true, |v| {
+                Some(visitor.visit(Rc::clone(v), true, 0, |v| {
                     radsort::sort_by_key(v, |r| r.key)
                 }))
             }
             // External radix and native adapters do not accept Reverse keys.
             // Common comparison sorts use BenchmarkRecord's reversed order;
             // Tessera keeps the direct-key API in every revision copy.
-            (_, CaseInput::ReverseU64(v)) => try_prepare_common(self, Rc::clone(v), scratch_bytes),
-            (_, CaseInput::ReverseF64(v)) => try_prepare_common(self, Rc::clone(v), scratch_bytes),
-            (_, CaseInput::OwnedRecord(v)) => try_prepare_common(self, Rc::clone(v), scratch_bytes),
-            (_, CaseInput::U32(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
-            (_, CaseInput::U64(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
-            (_, CaseInput::F64(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
-            (_, CaseInput::Row32(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key),
-            (_, CaseInput::Row64(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key),
+            (_, CaseInput::ReverseU64(v)) => {
+                try_prepare_common(self, Rc::clone(v), scratch_bytes, visitor)
+            }
+            (_, CaseInput::ReverseF64(v)) => {
+                try_prepare_common(self, Rc::clone(v), scratch_bytes, visitor)
+            }
+            (_, CaseInput::OwnedRecord(v)) => {
+                try_prepare_common(self, Rc::clone(v), scratch_bytes, visitor)
+            }
+            (_, CaseInput::U32(v)) => {
+                copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k, visitor)
+            }
+            (_, CaseInput::U128(input)) => match self.name {
+                "radsort" => Some(visitor.visit(Rc::clone(input), true, 0, radsort::sort)),
+                "rdst" => {
+                    Some(visitor.visit(Rc::clone(input), false, 0, |v| v.radix_sort_unstable()))
+                }
+                _ => try_prepare_common(self, Rc::clone(input), scratch_bytes, visitor),
+            },
+            (_, CaseInput::U64(v)) => {
+                copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k, visitor)
+            }
+            (_, CaseInput::F64(v)) => {
+                copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k, visitor)
+            }
+            (_, CaseInput::Row32(v)) => {
+                copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key, visitor)
+            }
+            (_, CaseInput::Row64(v)) => {
+                copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key, visitor)
+            }
             (_, CaseInput::WideRecord(v)) => {
-                copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key)
+                copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key, visitor)
             }
         }
     }
@@ -317,6 +382,7 @@ impl CaseInput {
         match self {
             Self::U32(_) => u32::revision_entries(),
             Self::U64(_) => u64::revision_entries(),
+            Self::U128(_) => u128::revision_entries(),
             Self::F64(_) => f64::revision_entries(),
             Self::ReverseU64(_) => Reverse::<u64>::revision_entries(),
             Self::ReverseF64(_) => Reverse::<f64>::revision_entries(),
@@ -424,7 +490,7 @@ mod tests {
     #[test]
     fn batches_restore_shared_input() {
         let input = PreparedRecords::new(vec![3u64, 1, 2]);
-        let mut k = prepare_kernel(Rc::clone(&input), true, |v| {
+        let mut k = BatchVisitor.visit(Rc::clone(&input), true, 0, |v| {
             v.fill(0);
         });
         k.restore(3);

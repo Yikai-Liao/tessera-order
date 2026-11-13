@@ -7,12 +7,9 @@
 use criterion::{BatchSize, Criterion};
 use std::{hint::black_box, sync::OnceLock, time::Duration};
 use tessera_bench::{
-    case::{Key, Row, generate},
-    plan::{InputCase, Plan, criterion_group, criterion_id},
+    case::{Key, Row, Wide, generate},
+    plan::{InputCase, Plan, criterion_batch_iterations, criterion_group, criterion_id},
 };
-
-/// Fixed prepared element count, independent of measured execution time.
-const BATCH_ELEMENTS: usize = 1 << 18;
 
 /// Expands both API selections without multiplying their coverage.
 fn suite(c: &mut Criterion) {
@@ -97,22 +94,6 @@ fn rows<K: Key + Send + Sync>(c: &mut Criterion, distribution: &str, len: usize,
         measure_parallel(c, &id, &input, &expected, same, |values| {
             tessera_sort::par_stable_sort_by_key(values, |record| record.key);
         });
-    }
-}
-
-/// A wide record whose payload carries its original index.
-#[derive(Clone, Copy)]
-struct Wide {
-    key: u64,
-    payload: [u8; 120],
-}
-
-impl Wide {
-    /// Creates a wide record with a stable identity.
-    fn new(key: u64, index: usize) -> Self {
-        let mut payload = [0u8; 120];
-        payload[..8].copy_from_slice(&(index as u64).to_le_bytes());
-        Self { key, payload }
     }
 }
 
@@ -211,7 +192,7 @@ fn measure<T: Copy>(
         );
         return;
     }
-    let batch = (BATCH_ELEMENTS / input.len()).max(1) as u64;
+    let batch = criterion_batch_iterations(input.len());
     let mut group = c.benchmark_group(id);
     let settings = tessera_bench::plan::revision_sampling(input.len());
     if std::env::var_os("TESSERA_BENCH_PAIRED").is_some() {

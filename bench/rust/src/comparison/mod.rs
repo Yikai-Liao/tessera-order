@@ -10,6 +10,10 @@ mod record;
 mod run;
 mod variant;
 
+pub use check::check;
+pub use record::{BenchmarkRecord, CaseInput, PreparedRecords};
+pub use variant::{KernelVisitor, Variant, list_variants};
+
 use crate::plan::{InputCase, catalog};
 use serde_json::{Value, json};
 use std::{

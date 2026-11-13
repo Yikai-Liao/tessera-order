@@ -17,7 +17,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import lockfile from "proper-lockfile";
-import { parse } from "smol-toml";
+import { parse, stringify } from "smol-toml";
 import { command } from "../tools/process.ts";
 
 /** Select the same vector backend on historical opt-in and current required builds.
@@ -110,6 +110,19 @@ export async function copySnapshot(source: string, destination: string, root: st
   });
 }
 
+/** The library's directory in a checkout; commits before the rename keep `rust/tessera-sort`. */
+export async function libraryDirectory(tree: string) {
+  for (const name of ["rust/tessera-order", "rust/tessera-sort"]) {
+    try {
+      await lstat(join(tree, name));
+      return join(tree, name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  throw new Error("Revision has no Tessera library directory");
+}
+
 /** Materialize a library revision against its own repository, keeping the current harness. */
 export async function copyLibraryRevision(root: string, revision: string, destination: string) {
   const directory = await mkdtemp(join(dirname(destination), "baseline-"));
@@ -121,9 +134,24 @@ export async function copyLibraryRevision(root: string, revision: string, destin
       cwd: root,
     });
     await command("tar", ["-xf", archive, "-C", tree]);
-    await copySnapshot(join(tree, "rust/tessera-sort"), destination, tree);
+    await copySnapshot(await libraryDirectory(tree), destination, tree);
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Give a built library copy the package name the harness depends on. A commit before the crate
+ * rename names its package `tessera-sort`; only an old manifest is rewritten, so a current copy
+ * keeps its source hash.
+ */
+export async function nameLibraryPackage(library: string) {
+  const path = join(library, "Cargo.toml");
+  const manifest = parse(await readFile(path, "utf8"));
+  const named = manifest.package as { name: string };
+  if (named.name !== "tessera-order") {
+    named.name = "tessera-order";
+    await writeFile(path, stringify(manifest));
   }
 }
 
@@ -164,7 +192,7 @@ export async function withWorkspace<T>(
   try {
     await command("git", ["worktree", "add", "--detach", tree, "HEAD"], { cwd: root });
     added = true;
-    for (const path of ["rust/tessera-sort", "bench/rust", "bench/plans"]) {
+    for (const path of ["rust/tessera-order", "bench/rust", "bench/plans"]) {
       await rm(join(tree, path), { recursive: true, force: true });
       await copySnapshot(join(root, path), join(tree, path), root);
     }
@@ -214,7 +242,7 @@ export async function buildArtifact(output: string, name: string) {
   const libraries = messages.filter(
     (value) =>
       value.reason === "compiler-artifact" &&
-      value.target.name === "tessera_sort" &&
+      value.target.name === "tessera_order" &&
       value.target.kind?.includes("lib"),
   );
   if (

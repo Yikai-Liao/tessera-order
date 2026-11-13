@@ -25,15 +25,15 @@ test("revision preparation preserves external lock entries", () => {
 /** Minimal offline Cargo workspace with no registry dependencies. */
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "tessera-revisions-test-"));
-  for (const path of ["rust/tessera-sort/src", "bench/rust/src", "bench/plans"])
+  for (const path of ["rust/tessera-order/src", "bench/rust/src", "bench/plans"])
     await mkdir(join(root, path), { recursive: true });
   const files = {
-    "Cargo.toml": '[workspace]\nmembers=["rust/tessera-sort","bench/rust"]\nresolver="3"\n',
-    "rust/tessera-sort/Cargo.toml":
-      '[package]\nname="tessera-sort"\nversion="0.0.0"\n[features]\nportable-simd=[]\n',
+    "Cargo.toml": '[workspace]\nmembers=["rust/tessera-order","bench/rust"]\nresolver="3"\n',
+    "rust/tessera-order/Cargo.toml":
+      '[package]\nname="tessera-order"\nversion="0.0.0"\n[features]\nportable-simd=[]\n',
     "bench/rust/Cargo.toml":
-      '[package]\nname="tessera-bench"\nversion="0.0.0"\n[dependencies]\ntessera-sort={path="../../rust/tessera-sort"}\n[features]\ncompare=[]\n',
-    "rust/tessera-sort/src/lib.rs": "// original library\n",
+      '[package]\nname="tessera-bench"\nversion="0.0.0"\n[dependencies]\ntessera-order={path="../../rust/tessera-order"}\n[features]\ncompare=[]\n',
+    "rust/tessera-order/src/lib.rs": "// original library\n",
     "bench/rust/src/lib.rs": "// current harness\n",
     "bench/catalog.toml": "schema=1\n",
   };
@@ -65,7 +65,7 @@ for (const explicit of [false, true]) {
   test(`revision copies retain source identity: ${explicit ? "commit" : "working tree"}`, async (t) => {
     const root = await fixture();
     t.after(() => rm(root, { recursive: true, force: true }));
-    await writeFile(join(root, "rust/tessera-sort/src/lib.rs"), "// dirty library\n");
+    await writeFile(join(root, "rust/tessera-order/src/lib.rs"), "// dirty library\n");
     await writeFile(join(root, "bench/rust/src/lib.rs"), "// dirty harness\n");
     const originalLock = parse(await readFile(join(root, "Cargo.lock"), "utf8"));
     await withWorkspace(root, async ({ tree }) => {
@@ -80,7 +80,7 @@ for (const explicit of [false, true]) {
       assert.equal(revision.currentSource, revision.copies["revision-current-copy"]);
       assert.equal(revision.copies["revision-baseline"], revision.copies["revision-baseline-copy"]);
       assert.equal(revision.currentSource === revision.copies["revision-baseline"], explicit);
-      assert.equal(revision.currentSource, await sourceHash(join(tree, "rust/tessera-sort")));
+      assert.equal(revision.currentSource, await sourceHash(join(tree, "rust/tessera-order")));
       for (const name of Object.keys(revision.copies)) {
         const path = join(tree, "bench/revision-libraries", name);
         const manifest = parse(await readFile(join(path, "Cargo.toml"), "utf8"));
@@ -108,7 +108,7 @@ for (const explicit of [false, true]) {
                   "revision-baseline",
                   "revision-baseline-copy",
                   "revision-current-copy",
-                  "tessera-sort",
+                  "tessera-order",
                 ],
               }
             : { ...p },
@@ -116,8 +116,41 @@ for (const explicit of [false, true]) {
       );
     });
     assert.equal(
-      await readFile(join(root, "rust/tessera-sort/src/lib.rs"), "utf8"),
+      await readFile(join(root, "rust/tessera-order/src/lib.rs"), "utf8"),
       "// dirty library\n",
     );
   });
 }
+
+test("a pre-rename commit compared with itself keeps one source identity", async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const git = (...args: string[]) =>
+    command(
+      "git",
+      [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.org",
+        "-c",
+        "commit.gpgsign=false",
+        ...args,
+      ],
+      { cwd: root, capture: true },
+    );
+  // Rewrite history's view of the library as it was before the crate rename.
+  await git("mv", "rust/tessera-order", "rust/tessera-sort");
+  await writeFile(
+    join(root, "rust/tessera-sort/Cargo.toml"),
+    '[package]\nname="tessera-sort"\nversion="0.0.0"\n[features]\nportable-simd=[]\n',
+  );
+  await git("commit", "-qam", "old");
+  const old = (await git("rev-parse", "HEAD")).trim();
+  await git("revert", "--no-edit", "HEAD");
+  await withWorkspace(root, async ({ tree }) => {
+    await prepareRevisions(root, tree, { baseline: old, current: old });
+    const revision = JSON.parse(await readFile(join(tree, "bench/rust/revisions.json"), "utf8"));
+    assert.equal(revision.currentSource, revision.copies["revision-baseline"]);
+  });
+});

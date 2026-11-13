@@ -7,7 +7,7 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
-use tessera_sort::{stable_sort, stable_sort_by_key};
+use tessera_order::{stable_sort, stable_sort_by_key};
 
 thread_local! {
     static ENABLED: Cell<bool> = const { Cell::new(false) };

@@ -27,6 +27,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
+name = "fearless_simd"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "629c9d6b6f30b5604089e0980f4d924a013aacb1654a6cdf5d3d852224f68651"
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -82,13 +88,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
-name = "tessera-sort"
+name = "tessera-order"
 version = "0.0.0"
+dependencies = [
+ "fearless_simd",
+]
 
 [[package]]
-name = "tessera-sort-fuzz"
+name = "tessera-order-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
- "tessera-sort",
+ "tessera-order",
 ]

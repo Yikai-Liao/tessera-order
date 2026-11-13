@@ -17,7 +17,7 @@ const MAJOR = 0.2;
 const seriesOf = (run: TrackingRun) => run.spec;
 const short = (hash: string) => hash.slice(0, 7);
 const day = (time: string) => time.slice(0, 10);
-const commit = (hash: string) => "https://github.com/Yikai-Liao/tessera-sort/commit/" + hash;
+const commit = (hash: string) => "https://github.com/Yikai-Liao/tessera-order/commit/" + hash;
 const estimate = (run: TrackingRun, id: string) => run.values[id]?.[0];
 
 /** UTC readout shared by inline figures and their host, including time of day. */

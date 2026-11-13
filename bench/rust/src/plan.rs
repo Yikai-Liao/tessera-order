@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use std::{collections::BTreeSet, sync::OnceLock};
-use tessera_sort::thresholds::{INSERTION_MAX, TILE_BYTES};
+use tessera_order::thresholds::{INSERTION_MAX, TILE_BYTES};
 
 /// The catalog fields needed to expand and validate experiments.
 #[derive(Deserialize)]

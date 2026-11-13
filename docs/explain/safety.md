@@ -37,4 +37,4 @@ Every build requires `std`, so this recovery always applies; there is no abort-o
 
 ## Where this is tested
 
-The tests in [`rust/tessera-sort/tests`](../../rust/tessera-sort/tests) and the engine's unit tests cover owned records with drop tracking, `&mut` records under panicking and changing key functions, over-aligned and zero-sized records, and key-function panics at many points of a sort. Miri and AddressSanitizer run them in CI.
+The tests in [`rust/tessera-order/tests`](../../rust/tessera-order/tests) and the engine's unit tests cover owned records with drop tracking, `&mut` records under panicking and changing key functions, over-aligned and zero-sized records, and key-function panics at many points of a sort. Miri and AddressSanitizer run them in CI.

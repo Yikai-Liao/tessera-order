@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { lstatSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { diffLines } from "diff";
 import { command } from "../tools/process.ts";
-import { copyLibraryRevision, copySnapshot, resolveCommit } from "./workspace.ts";
+import { copyLibraryRevision, copySnapshot, libraryDirectory, resolveCommit } from "./workspace.ts";
 
 export interface CodeChange {
   baseHash: string;
@@ -18,9 +17,11 @@ export interface CodeChange {
   files: { path: string; baseline: number; current: number; added: number; removed: number }[];
 }
 
-const SOURCE = "rust/tessera-sort/src/";
+// Commits before the crate rename keep the library in `rust/tessera-sort`; files are keyed
+// by their path under `src/`, so a comparison across the rename matches them.
+const SOURCES = ["rust/tessera-order/src/", "rust/tessera-sort/src/"];
 const ENGINE =
-  /^rust\/tessera-sort\/src\/(engine|block|key|portable_simd|scan|unwind)(\.rs$|\/.*\.rs$)/;
+  /^rust\/tessera-(?:order|sort)\/src\/((?:engine|block|key|portable_simd|scan|unwind)(?:\.rs$|\/.*\.rs$))/;
 
 /** Compare core production lines from commits or the working tree; owns temporary snapshots. */
 export async function codeChange(
@@ -38,8 +39,8 @@ export async function codeChange(
     const paths = (
       await git(
         revision
-          ? ["ls-tree", "-r", "--name-only", "-z", revision, "--", SOURCE]
-          : ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", SOURCE],
+          ? ["ls-tree", "-r", "--name-only", "-z", revision, "--", ...SOURCES]
+          : ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", ...SOURCES],
       )
     )
       .split("\0")
@@ -48,22 +49,26 @@ export async function codeChange(
     if (!paths.length) return files;
     const tree = join(temporary, revision ?? "working");
     if (revision) await copyLibraryRevision(root, revision, tree);
-    else if (lstatSync(join(root, "rust/tessera-sort"), { throwIfNoEntry: false }))
-      await copySnapshot(join(root, "rust/tessera-sort"), tree, root);
-    else return files;
+    else {
+      // Listed files whose library directory was deleted count as removed.
+      const library = await libraryDirectory(root).catch(() => null);
+      if (!library) return files;
+      await copySnapshot(library, tree, root);
+    }
     const excluded: string[] = [];
     for (const path of new Set(paths)) {
-      const source = await readFile(
-        join(tree, path.slice("rust/tessera-sort/".length)),
-        "utf8",
-      ).catch((error: NodeJS.ErrnoException) => {
-        if (!revision && error.code === "ENOENT") return "";
-        throw error;
-      });
+      const relative = ENGINE.exec(path)![1];
+      const source = await readFile(join(tree, "src", relative), "utf8").catch(
+        (error: NodeJS.ErrnoException) => {
+          if (!revision && error.code === "ENOENT") return "";
+          throw error;
+        },
+      );
       const { lines, testModules } = production(source);
-      files.set(path.slice(SOURCE.length), lines.length ? `${lines.join("\n")}\n` : "");
-      const directory = path.endsWith("/mod.rs") ? dirname(path) : path.slice(0, -3);
-      for (const name of testModules) excluded.push(`${directory}/${name}`.slice(SOURCE.length));
+      files.set(relative, lines.length ? `${lines.join("\n")}\n` : "");
+      const directory = relative.endsWith("/mod.rs") ? dirname(relative) : relative.slice(0, -3);
+      for (const name of testModules)
+        excluded.push(directory === "." ? name : `${directory}/${name}`);
     }
     for (const path of files.keys())
       if (excluded.some((prefix) => path === `${prefix}.rs` || path.startsWith(`${prefix}/`)))

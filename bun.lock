@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "tessera-sort-tools",
+      "name": "tessera-order-tools",
       "devDependencies": {
         "@actions/github": "^9.1.1",
         "@ast-grep/lang-rust": "0.0.7",

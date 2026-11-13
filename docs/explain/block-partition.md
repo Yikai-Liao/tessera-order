@@ -1,6 +1,6 @@
 # 4. The block partition
 
-The block partition splits a large node stably without an n-record buffer. It is adapted from Robert Clausecker's `radixsort_permuted.c`, described in [*Parallel O(√n) Overhead LSD Radix Sort*](https://arxiv.org/abs/2607.05302) by Clausecker and Schintke. Tessera runs one pass per node, on the digit or equality classification the [planner](routing.md#nodes-and-tiles) chose. Scatter lives in [`block.rs`](../../rust/tessera-sort/src/block.rs), completion in [`block/finish.rs`](../../rust/tessera-sort/src/block/finish.rs).
+The block partition splits a large node stably without an n-record buffer. It is adapted from Robert Clausecker's `radixsort_permuted.c`, described in [*Parallel O(√n) Overhead LSD Radix Sort*](https://arxiv.org/abs/2607.05302) by Clausecker and Schintke. Tessera runs one pass per node, on the digit or equality classification the [planner](routing.md#nodes-and-tiles) chose. Scatter lives in [`block.rs`](../../rust/tessera-order/src/block.rs), completion in [`block/finish.rs`](../../rust/tessera-order/src/block/finish.rs).
 
 ## The idea
 

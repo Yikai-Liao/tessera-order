@@ -7,6 +7,7 @@ import { command } from "../tools/process.ts";
 import {
   copyLibraryRevision,
   copySnapshot,
+  nameLibraryPackage,
   resolveCommit,
   simdFeatures,
   sourceHash,
@@ -29,11 +30,12 @@ export async function prepareRevisions(
   const current = revisions.current ? await resolveCommit(root, revisions.current) : undefined;
   // Fresh CI hosts need the locked registry metadata before offline path resolution.
   await command("cargo", ["fetch", "--locked"], { cwd: tree });
-  const library = join(tree, "rust/tessera-sort");
+  const library = join(tree, "rust/tessera-order");
   if (current) {
     // The current harness stays in place; only the requested library is replaced.
     await rm(library, { recursive: true });
     await copyLibraryRevision(root, current, library);
+    await nameLibraryPackage(library);
   }
   const copies = join(tree, "bench/revision-libraries");
   await mkdir(copies);
@@ -41,7 +43,7 @@ export async function prepareRevisions(
   const manifest = parse(await readFile(manifestPath, "utf8"));
   const dependencies = manifest.dependencies as Record<string, object>;
   const sources: Record<string, string> = {};
-  const primary = dependencies["tessera-sort"] as { features?: string[] };
+  const primary = dependencies["tessera-order"] as { features?: string[] };
   primary.features = [
     ...new Set([
       ...(primary.features ?? []),
@@ -52,7 +54,11 @@ export async function prepareRevisions(
   for (const name of ["revision-baseline", "revision-baseline-copy", "revision-current-copy"]) {
     const destination = join(copies, name);
     if (name === "revision-current-copy") await copySnapshot(library, destination, tree);
-    else await copyLibraryRevision(root, baseline, destination);
+    else {
+      await copyLibraryRevision(root, baseline, destination);
+      // Hash every copy under the harness's package name, so one commit has one identity.
+      await nameLibraryPackage(destination);
+    }
     sources[name] = await sourceHash(destination);
     const path = join(destination, "Cargo.toml");
     const copy = parse(await readFile(path, "utf8"));
@@ -97,7 +103,7 @@ export async function prepareRevisions(
   };
   verifyRevisionLock(originalLock, await readFile(join(tree, "Cargo.lock"), "utf8"));
   const libraries = Object.fromEntries(
-    ["tessera-sort", ...Object.keys(sources)].map((name) => {
+    ["tessera-order", ...Object.keys(sources)].map((name) => {
       const id = metadata.packages.find((entry) => entry.name === name)!.id;
       return [name, metadata.resolve.nodes.find((entry) => entry.id === id)!.features.sort()];
     }),

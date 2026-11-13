@@ -26,8 +26,8 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: bun run tools release verify --tag "$RELEASE_TAG"
-      - run: cargo publish --locked -p tessera-sort --dry-run
-      - run: cargo publish --locked -p tessera-sort
+      - run: cargo publish --locked -p tessera-order --dry-run
+      - run: cargo publish --locked -p tessera-order
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: Create Rust release
@@ -36,4 +36,4 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           # A draft: an agent or maintainer writes the notes per RELEASING.md, then publishes it.
-          gh release create "$RELEASE_TAG" target/package/tessera-sort-*.crate --verify-tag --title "$RELEASE_TAG" --draft --notes 'Draft: write the notes per RELEASING.md.'
+          gh release create "$RELEASE_TAG" target/package/tessera-order-*.crate --verify-tag --title "$RELEASE_TAG" --draft --notes 'Draft: write the notes per RELEASING.md.'

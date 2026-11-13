@@ -1,6 +1,6 @@
 # 5. Finishing tiles
 
-A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so that one `u16` can hold any position in it. Its scratch buffer is the same size and stays in the L2 cache. Inside a tile a second buffer is cheap, so Tessera uses ordinary counting passes; the questions are which digits to use and whether to finish with MSD or LSD. [`engine/plan.rs`](../../rust/tessera-sort/src/engine/plan.rs) selects the leaf; [`engine/tile.rs`](../../rust/tessera-sort/src/engine/tile.rs) executes it and owns its scratch and panic recovery.
+A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so that one `u16` can hold any position in it. Its scratch buffer is the same size and stays in the L2 cache. Inside a tile a second buffer is cheap, so Tessera uses ordinary counting passes; the questions are which digits to use and whether to finish with MSD or LSD. [`engine/plan.rs`](../../rust/tessera-order/src/engine/plan.rs) selects the leaf; [`engine/tile.rs`](../../rust/tessera-order/src/engine/tile.rs) executes it and owns its scratch and panic recovery.
 
 ## Parallel child allowance
 

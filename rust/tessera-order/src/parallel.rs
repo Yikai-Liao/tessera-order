@@ -31,7 +31,7 @@ use crate::{RadixKey, engine};
 ///
 /// ```
 /// let mut keys = [42u64, 7, 19, 7, 3];
-/// tessera_sort::par_stable_sort(&mut keys);
+/// tessera_order::par_stable_sort(&mut keys);
 /// assert_eq!(keys, [3, 7, 7, 19, 42]);
 /// ```
 pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
@@ -73,7 +73,7 @@ pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
 /// use core::cmp::Reverse;
 ///
 /// let mut rows = [(2u32, "first"), (1, "middle"), (2, "last")];
-/// tessera_sort::par_stable_sort_by_key(&mut rows, |row| Reverse(row.0));
+/// tessera_order::par_stable_sort_by_key(&mut rows, |row| Reverse(row.0));
 /// assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 /// ```
 pub fn par_stable_sort_by_key<T, K, F>(values: &mut [T], key: F)

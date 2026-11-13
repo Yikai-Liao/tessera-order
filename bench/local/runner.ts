@@ -14,6 +14,7 @@ import {
   buildBenchmark,
   copyLibraryRevision,
   copySnapshot,
+  nameLibraryPackage,
   resolveCommit,
   simdFeatures,
   sourceHash,
@@ -96,7 +97,7 @@ export async function buildRevisions(
   control?: LayoutControl,
 ) {
   const { tree, directory, target } = workspace;
-  const crate = join(tree, "rust/tessera-sort");
+  const crate = join(tree, "rust/tessera-order");
   const saved = join(directory, "current-source");
   await copySnapshot(crate, saved, tree);
   const source = {
@@ -109,6 +110,7 @@ export async function buildRevisions(
   };
   await rm(crate, { recursive: true });
   await copyLibraryRevision(root, baseline, crate);
+  await nameLibraryPackage(crate);
   // Cargo validates inactive forwarding and locks optional dependency edges.
   // Only serial baselines may receive the inactive optional dependency shim.
   const manifest = join(crate, "Cargo.toml");
@@ -146,7 +148,9 @@ export async function buildRevisions(
   const build = async (role: "baseline" | "current", seed: number | undefined) => {
     const selectedFeatures = [
       ...features,
-      ...simdFeatures(await readFile(manifest, "utf8")).map((feature) => `tessera-sort/${feature}`),
+      ...simdFeatures(await readFile(manifest, "utf8")).map(
+        (feature) => `tessera-order/${feature}`,
+      ),
     ];
     const args = rustcArgs(seed);
     if (extraFlags.length && !env) {

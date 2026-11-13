@@ -42,7 +42,7 @@ const example: RowChart = {
 
 <BenchmarkFigure :chart="example" />
 
-These rounded values come from the recorded `release-benchmark-raw-2d6fac2` session, measured at commit [`2d6fac2`](https://github.com/Yikai-Liao/tessera-sort/commit/2d6fac27d2584694eb4d3c989f2f09f538dd78aa) with the default build, nine blocks and ten input patterns. This is a three-sort excerpt, not the complete ranking or a measurement of the current commit. The site renders it with the same [row template](../../bench/plot/rows.ts) used by offline reports.
+These rounded values come from the recorded `release-benchmark-raw-2d6fac2` session, measured at commit [`2d6fac2`](https://github.com/Yikai-Liao/tessera-order/commit/2d6fac27d2584694eb4d3c989f2f09f538dd78aa) with the default build, nine blocks and ten input patterns. This is a three-sort excerpt, not the complete ranking or a measurement of the current commit. The site renders it with the same [row template](../../bench/plot/rows.ts) used by offline reports.
 
 ## Choose an expression
 

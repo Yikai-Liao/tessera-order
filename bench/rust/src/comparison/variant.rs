@@ -69,13 +69,13 @@ macro_rules! tessera_keys {
         impl TesseraAdapter for $t {
             #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
-                tessera_sort::stable_sort(records);
+                tessera_order::stable_sort(records);
             }
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort);
             #[cfg(feature = "rayon")]
             fn tessera_parallel(records: &mut [Self]) {
-                tessera_sort::par_stable_sort(records);
+                tessera_order::par_stable_sort(records);
             }
         }
     )+};
@@ -88,13 +88,13 @@ macro_rules! tessera_records {
         impl TesseraAdapter for $t {
             #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
-                tessera_sort::stable_sort_by_key(records, |r| r.key);
+                tessera_order::stable_sort_by_key(records, |r| r.key);
             }
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort_by_key, |r| r.key);
             #[cfg(feature = "rayon")]
             fn tessera_parallel(records: &mut [Self]) {
-                tessera_sort::par_stable_sort_by_key(records, |r| r.key);
+                tessera_order::par_stable_sort_by_key(records, |r| r.key);
             }
         }
     )+};

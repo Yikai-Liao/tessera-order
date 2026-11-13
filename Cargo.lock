@@ -714,13 +714,13 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "tessera-sort",
+ "tessera-order",
  "toml",
  "voracious_radix_sort",
 ]
 
 [[package]]
-name = "tessera-sort"
+name = "tessera-order"
 version = "0.0.0"
 dependencies = [
  "fearless_simd",

@@ -33,7 +33,7 @@ import {
 } from "../../../../bench/tracking/result.ts";
 
 const props = withDefaults(defineProps<{ source?: string; caseId?: string }>(), {
-  source: "https://raw.githubusercontent.com/Yikai-Liao/tessera-sort/benchmark-data/tessera/",
+  source: "https://raw.githubusercontent.com/Yikai-Liao/tessera-order/benchmark-data/tessera/",
   caseId: "rust/u64/random/65536/s1/api",
 });
 type Color = ComparedCase["color"];
@@ -574,7 +574,7 @@ const emptyMessage = computed(() => {
           <template v-for="({ entry }, i) in compared" :key="entry.id">
             <li v-if="comparison.baselines[i]">
               {{ entry.label }}: 0% = {{ formatTime(comparison.baselines[i]!.value) }} at
-              <a :href="`https://github.com/Yikai-Liao/tessera-sort/commit/${comparison.baselines[i]!.hash}`" target="_blank" rel="noreferrer">{{ comparison.baselines[i]!.hash.slice(0, 7) }}</a>
+              <a :href="`https://github.com/Yikai-Liao/tessera-order/commit/${comparison.baselines[i]!.hash}`" target="_blank" rel="noreferrer">{{ comparison.baselines[i]!.hash.slice(0, 7) }}</a>
               · measured {{ formatTimestamp(comparison.baselines[i]!.time) }}
             </li>
           </template>

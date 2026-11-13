@@ -1,5 +1,5 @@
 {
-  "name": "tessera-sort-tools",
+  "name": "tessera-order-tools",
   "private": true,
   "description": "Documentation site and CI tooling for Tessera",
   "type": "module",

@@ -130,7 +130,15 @@ function renderProvenance(dataset: Dataset) {
       version = block.match(/^version = "(.+)"$/m)?.[1];
     return name &&
       version &&
-      ["radsort", "rdst", "glidesort", "voracious_radix_sort", "tessera-sort"].includes(name)
+      // `tessera-sort` names the crate in reports measured before the rename.
+      [
+        "radsort",
+        "rdst",
+        "glidesort",
+        "voracious_radix_sort",
+        "tessera-order",
+        "tessera-sort",
+      ].includes(name)
       ? [[name, version]]
       : [];
   });

@@ -9,7 +9,7 @@
 //! `docs/.vitepress/theme/sim/engine.ts`.
 
 use std::cell::RefCell;
-use tessera_sort::figures::{self, Event};
+use tessera_order::figures::{self, Event};
 
 /// Words per event in the log.
 pub const EVENT_WORDS: usize = 5;

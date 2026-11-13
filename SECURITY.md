@@ -4,7 +4,7 @@ Tessera uses unsafe code to move records through uninitialized memory. Memory-sa
 
 ## Reporting
 
-Please report vulnerabilities privately through [GitHub security advisories](https://github.com/Yikai-Liao/tessera-sort/security/advisories/new). Do not open a public issue.
+Please report vulnerabilities privately through [GitHub security advisories](https://github.com/Yikai-Liao/tessera-order/security/advisories/new). Do not open a public issue.
 
 Include a reproduction if you can: the key and record types, the input or a program that generates it, and the toolchain.
 

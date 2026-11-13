@@ -3,6 +3,7 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Command, InvalidArgumentError } from "commander";
+import { codeCommands } from "./code.ts";
 import { continuousCommands } from "./continuous.ts";
 import { experimentCommands } from "./experiments.ts";
 import { repositoryCommands } from "./repository.ts";
@@ -20,6 +21,7 @@ export function createProgram() {
   experimentCommands(program);
   continuousCommands(program);
   repositoryCommands(program);
+  codeCommands(program);
   program
     .command("status [ref]")
     .description("Read compact CI and benchmark status for a remote ref (default: main) or PR")

@@ -76,7 +76,9 @@ Use the existing, user-named Testbeds: `ci` for PR comparisons and `main` for ma
 
 ## Reports
 
-The `Benchmarks (rust)` report states the baseline, compared-case count and overall run-time change (with an explicit result when nothing alerts), then changed-case summaries and tables, a focused comparison figure, a compact overview when nothing alerts, a PR trend figure and the complete case table. Ratios display as ×, never nanoseconds. A missing measurement fails its check on its own; image or Cloud failures do not erase valid numbers. The report job maintains the `benchmark-images` branch for figures.
+The `Benchmarks (rust)` report starts with one compact table of core-engine production lines at the exact measured baseline and head: before/after totals, additions, removals and net change, followed by changed files in the same table. Unchanged files are omitted. It shares its source scope, filtering and table with the local [`code` command](benchmarking.md#core-engine-code-size). Missing source history or unsupported syntax leaves the statistic explicitly unavailable without changing the performance verdict.
+
+CAUTION and TIP callouts retain slower/faster cases, followed by changed-case tables, a focused comparison figure, a compact overview when nothing alerts, a PR trend figure and the complete case table. Ratios display as ×, never nanoseconds. A missing measurement fails its check on its own; image or Cloud failures do not erase valid numbers. The report job maintains the `benchmark-images` branch for figures.
 
 Each PR submits to its own `pr-N` branch with no Start Point or Head reset, so merging main or rebasing does not restart its trend. The trend reads every run on that branch with the current Testbed and hardware, plots each ratio against one over a fixed case cohort and names the latest baseline.
 

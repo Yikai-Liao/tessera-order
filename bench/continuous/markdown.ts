@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { modeName } from "../catalog.ts";
-import { formatChange, geomean, modes, type ReportSummary, type Row, short } from "./report.ts";
+import { type CodeChange, codeTable } from "../code-change.ts";
+import { formatChange, type ReportSummary, type Row, short } from "./report.ts";
 
 interface RenderOptions {
   language: string;
@@ -11,6 +12,7 @@ interface RenderOptions {
   chartRef?: string | null;
   trendRef?: string | null;
   imagesUnavailable?: boolean;
+  codeChange?: CodeChange;
 }
 
 /** A measured verdict, independent of Cloud and image publication. */
@@ -57,39 +59,12 @@ export function render(summary: ReportSummary, options: RenderOptions) {
   const { baseRef = "main", chartRef, trendRef, runUrl } = options;
   const changed = summary.rows.filter((row) => row.verdict !== "within");
   const out = [`### Benchmarks · ${options.language} · ${headline(summary)}`];
-  if (summary.geomean !== null) {
-    out.push(
-      "",
-      "**Overall run time " +
-        formatChange(summary.geomean - 1) +
-        "** against `" +
-        baseRef +
-        "`, the geometric mean over " +
-        summary.compared +
-        " cases." +
-        (!changed.length ? " No regression or improvement alerts." : ""),
-    );
+  const code = options.codeChange;
+  if (code) {
+    out.push("", codeTable(code, { baseline: baseRef, current: "PR" }));
+  } else {
+    out.push("", "Core sorting engine production-line analysis unavailable; see the workflow log.");
   }
-  const overview = (label: string, mode?: string) => {
-    const value = geomean(summary, mode);
-    const rows = summary.rows.filter((row) => mode === undefined || row.parts.mode === mode);
-    const slower = rows.filter((row) => row.verdict === "regression").length;
-    const faster = rows.filter((row) => row.verdict === "improvement").length;
-    return (
-      "| " +
-      label +
-      " | " +
-      [
-        value ? formatChange(value.change) : "—",
-        ...(slower ? [`${slower} slower`] : []),
-        ...(faster ? [`${faster} faster`] : []),
-      ].join(" · ") +
-      " |"
-    );
-  };
-  out.push("", "| | Change |", "|---|---:|", overview("**All cases**"));
-  const groups = modes(summary);
-  if (groups.length > 1) for (const mode of groups) out.push(overview(modeName(mode), mode));
   if (summary.regressions) {
     out.push("", "> [!CAUTION]", `> **${summary.regressions} cases slower**.`);
     const slower = summary.rows.filter((row) => row.verdict === "regression");

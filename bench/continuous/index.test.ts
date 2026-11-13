@@ -52,6 +52,13 @@ async function publication(t: TestContext, cloud = true, moved = false, ratio?: 
     fetchHistory: async () =>
       new Response("[]", { headers: { "content-type": "application/json" } }),
     summaries,
+    readCodeChange: async () => ({
+      baseline: 100,
+      current: 94,
+      added: 4,
+      removed: 10,
+      files: [{ path: "engine.rs", added: 4, removed: 10 }],
+    }),
     core: {
       notice: () => {},
       setOutput: () => {},
@@ -86,17 +93,19 @@ test("a precise sub-threshold change is no alert, not statistical equivalence", 
   await publishReport(action);
   assert.doesNotMatch(action.summaries[0], /no significant change/);
   assert.match(action.summaries[0], /no regression alert/);
-  assert.match(action.summaries[0], /Overall run time \+4\.0%.*`main`.*10 cases/);
-  assert.match(action.summaries[0], /No regression or improvement alerts/);
+  assert.match(
+    action.summaries[0],
+    /Core sorting engine: −6 production lines.*`main`.*100 → 94; \+4 \/ −10/,
+  );
+  assert.doesNotMatch(action.summaries[0], /Overall run time|geometric mean|\*\*All cases\*\*/);
   const check = action.requests.find((request) => request.method === "PATCH")!;
   assert.match(
     (check.body.output as { summary: string }).summary,
-    /Overall run time \+4\.0%.*10 cases/,
+    /Core sorting engine: −6 production lines/,
   );
   assert.match(action.summaries[0], /!\[Changes against main\]/);
   assert.match(action.summaries[0], /!\[PR benchmark history\]/);
-  assert.match(action.summaries[0], /\| serial \|/);
-  assert.match(action.summaries[0], /\| parallel · 4 threads \|/);
+  assert.match(action.summaries[0], /All 10 cases/);
   assert.match(action.summaries[0], /`ci`/);
 });
 
@@ -110,7 +119,7 @@ test("improvements publish successful configured checks", async (t) => {
     ["success"],
   );
   assert.match(action.summaries[0], /0.8000×/);
-  assert.match(action.summaries[0], /Overall run time −20\.0%/);
+  assert.match(action.summaries[0], /Core sorting engine: −6 production lines/);
   assert.match(action.summaries[0], /\[!TIP\]/);
   assert.doesNotMatch(action.summaries[0], /No regression or improvement alerts/);
   assert.match(action.summaries[0], /\[Report\]\(/);
@@ -129,7 +138,7 @@ test("raw paired samples drive configured checks and the existing shared chart",
     ["failure"],
   );
   const body = action.summaries[0];
-  assert.match(body, /Overall run time \+20\.0%/);
+  assert.match(body, /Core sorting engine: −6 production lines/);
   assert.match(body, /\[!CAUTION\]/);
   assert.doesNotMatch(body, /No regression or improvement alerts/);
   assert.match(body, /1.2000×/);
@@ -149,6 +158,35 @@ test("raw paired samples drive configured checks and the existing shared chart",
     ).length,
     1,
   );
+});
+
+test("source analysis failure preserves measured alerts, figures and checks", async (t) => {
+  const action = await publication(t, false, false, 0.8);
+  await publishReport({
+    ...action,
+    readCodeChange: async () => {
+      throw new Error("Missing source");
+    },
+  });
+  assert.match(action.summaries[0], /production-line analysis unavailable/);
+  assert.match(action.summaries[0], /\[!TIP\]/);
+  assert.match(action.summaries[0], /0.8000×/);
+  assert.match(action.summaries[0], /!\[Changes against main\]/);
+  assert.equal(
+    action.requests.find((request) => request.method === "PATCH")!.body.conclusion,
+    "success",
+  );
+});
+
+test("unchanged engine source reports zero without reviving the runtime overview", async (t) => {
+  const action = await publication(t, false, false, 1.04);
+  await publishReport({
+    ...action,
+    readCodeChange: async () => ({ baseline: 100, current: 100, added: 0, removed: 0, files: [] }),
+  });
+  assert.match(action.summaries[0], /Core sorting engine: 0 production lines/);
+  assert.match(action.summaries[0], /No production-line changes/);
+  assert.doesNotMatch(action.summaries[0], /Overall run time|geometric mean/);
 });
 
 test("missing shards fail the configured build", async (t) => {

@@ -141,14 +141,17 @@ const SMALL_WINDOW_BUCKETS: usize = 1 << SMALL_WINDOW_BITS;
 ///
 /// # Safety
 ///
-/// If `DIRECT` is present, `key` must be deterministic and panic-free (tile
-/// scatter may evaluate it again after ownership transfer has started), and
-/// each record must be the decoding of its encoded key shifted by
-/// `DirectKeys::shift`, so that equal keys are interchangeable.
+/// If `DIRECT` is present, `T` must be a sealed [`RadixKey`] type and `key`
+/// must be its deterministic, panic-free encoded-key projection starting at
+/// [`DirectKeys::shift`]. Tile scatter may recompute that projection after
+/// ownership transfer has started. The counting functions must operate on the
+/// complete record encoding and preserve its bits outside the requested window.
+/// A projection need not identify the complete record: counting callers must
+/// establish that all complete encodings agree outside the translated window.
 pub(crate) unsafe trait Extract<T> {
-    /// Present only when every record is its own sealed key. This one fact
-    /// lets tile passes recompute classification instead of caching it, and
-    /// lets a window that covers all variation finish by counting and refilling.
+    /// Present only for sealed native-key records, including narrowed keys.
+    /// This one capability lets tiles recompute classification and lets a
+    /// window covering all full-record variation finish by counting/refilling.
     /// User callbacks keep the default: their keys do not identify payloads.
     const DIRECT: Option<DirectKeys<T>> = None;
 
@@ -192,7 +195,7 @@ pub(crate) unsafe trait Extract<T> {
 
 /// Lends an extractor to an operation that takes its classification state by
 /// value, such as a block pass, without changing its scans or caching policy.
-// SAFETY: forwards every method, including the caching contract, unchanged.
+// SAFETY: forwards the extraction and full-record counting capability unchanged.
 unsafe impl<T, E: Extract<T>> Extract<T> for &mut E {
     const DIRECT: Option<DirectKeys<T>> = E::DIRECT;
     type Value = E::Value;
@@ -311,7 +314,8 @@ unsafe impl<T, K: RadixKey, F: FnMut(&T) -> K> Extract<T> for ByKey<F> {
 #[derive(Clone, Copy)]
 pub(crate) struct Direct;
 
-// SAFETY: sealed key encodings are deterministic and panic-free.
+// SAFETY: sealed key encodings are deterministic, panic-free and bitwise
+// bijective. Counting uses that same complete encoding, with no projection.
 unsafe impl<K: RadixKey> Extract<K> for Direct {
     const DIRECT: Option<DirectKeys<K>> = Some(DirectKeys {
         shift: 0,
@@ -342,26 +346,31 @@ unsafe impl<K: RadixKey> Extract<K> for Direct {
     }
 }
 
-/// Counting access to records that are their own sealed keys.
+/// Counting access to the complete encoding of sealed native-key records.
 ///
 /// Only [`Extract::DIRECT`] supplies it, so classification caching and
-/// count/fill eligibility cannot disagree.
+/// count/fill eligibility cannot disagree. Counting retains the shared bits
+/// outside its full-record window; an extractor's projection alone need not
+/// identify a record.
 pub(crate) struct DirectKeys<T> {
     /// Position of the extractor's key bit 0 in the record's encoded key.
     shift: usize,
+    /// Counts/fills a window in the full encoding, whose outside bits agree.
     count: fn(&mut [T], usize, usize),
+    /// The same full-encoding operation with parallel counting and filling.
     #[cfg(feature = "rayon")]
     count_parallel: fn(&mut [T], usize, usize),
 }
 
-/// Finishes a slice whose keys all fall in one small window of the encoded
-/// key, by counting the window and refilling each run with its decoded key.
+/// Finishes a slice by counting a small encoded-key window and decoding its runs.
 ///
-/// The window starts at bit `low` and is `width` bits wide, at most
-/// [`SMALL_WINDOW_BITS`]; the caller guarantees that every key agrees outside
-/// it. Refilling preserves order and stability only where equal keys imply
-/// interchangeable records, so extractors without [`Extract::DIRECT`] decline
-/// and leave the slice unchanged for the block partition.
+/// The window starts at bit `low` of `E::Value` and is `width` bits wide, at most
+/// [`SMALL_WINDOW_BITS`]. For a direct extractor, the caller guarantees that it
+/// fits the projection and that all complete record encodings agree outside
+/// the window starting at `low + DirectKeys::shift`. This includes any bits
+/// omitted by `KeyHalf`: a constant omitted half may be nonzero. Counting
+/// retains those outside bits when decoding the runs. Extractors without
+/// [`Extract::DIRECT`] decline and leave the payload records unchanged.
 ///
 /// Returns whether the slice is finished.
 pub(crate) fn try_count_window<T, E: Extract<T>>(
@@ -380,7 +389,8 @@ pub(crate) fn try_count_window<T, E: Extract<T>>(
     }
 }
 
-/// [`try_count_window`] with parallel counting and filling.
+/// [`try_count_window`] with the same full-encoding precondition and parallel
+/// counting and filling.
 #[cfg(feature = "rayon")]
 pub(crate) fn try_count_window_parallel<T, E: Extract<T>>(
     records: &mut [T],
@@ -439,6 +449,7 @@ struct KeyCounts<K: RadixKey> {
 
 impl<K: RadixKey> KeyCounts<K> {
     /// Counts a nonempty slice in a window of at most `SMALL_WINDOW_BITS` bits.
+    /// Full encodings must agree outside that window, including omitted halves.
     fn count(records: &[K], low: usize, width: usize) -> Self {
         let buckets = 1 << width;
         let mask = K::Encoded::from_usize(buckets - 1);
@@ -455,7 +466,7 @@ impl<K: RadixKey> KeyCounts<K> {
         }
     }
 
-    /// Combines disjoint shards counted with the same window.
+    /// Combines disjoint shards with the same window and shared outside bits.
     #[cfg(feature = "rayon")]
     fn merge(mut self, other: Self) -> Self {
         debug_assert_eq!(self.buckets, other.buckets);
@@ -490,13 +501,19 @@ impl<K: RadixKey> KeyCounts<K> {
 /// Extracts the 64 key bits starting at `SHIFT` when the other half is constant.
 ///
 /// Scans retain the defaults for the narrowed keys, not the inner key width.
+/// Counting still uses the complete record encoding, including that constant
+/// half; narrowing does not make the projection identify the complete record.
 #[derive(Clone)]
 pub(crate) struct KeyHalf<E, const SHIFT: usize>(pub E);
 
-// SAFETY: the inner extractor owns repeatability; wrapping shifts cannot panic.
+// SAFETY: the inner extractor owns deterministic, panic-free direct extraction;
+// the wrapping projection cannot panic and translates only the window offset.
+// Counting retains the inner functions over complete record encodings. Its
+// callers must establish agreement outside the translated window.
 unsafe impl<T, E: Extract<T>, const SHIFT: usize> Extract<T> for KeyHalf<E, SHIFT> {
-    // The other half is constant, so the translated window still covers
-    // every difference in the underlying key.
+    // Root narrowing establishes that the omitted half is constant; count/fill
+    // preserves it through the inner functions rather than reconstructing it
+    // from this projection.
     const DIRECT: Option<DirectKeys<T>> = match E::DIRECT {
         Some(direct) => Some(DirectKeys {
             shift: direct.shift + SHIFT,

@@ -763,41 +763,75 @@ mod tests {
     }
 
     #[test]
-    fn changing_keys_finish_node() {
+    fn changing_pivot_keeps_owned_records() {
+        use std::cell::{Cell, RefCell};
+        use std::rc::Rc;
+
+        struct Owned {
+            id: usize,
+            text: String,
+            key: Cell<u16>,
+            drops: Rc<RefCell<Vec<usize>>>,
+        }
+        impl Drop for Owned {
+            fn drop(&mut self) {
+                self.drops.borrow_mut().push(self.id);
+            }
+        }
+
         for greater in [false, true] {
             let len = if cfg!(miri) { 65 } else { 129 };
-            let mut records: Vec<_> = (0..len as u16).collect();
+            let pivot = if greater { 0 } else { 0x1ff };
+            let drops = Rc::new(RefCell::new(Vec::new()));
+            let mut records: Vec<_> = (0..len)
+                .map(|id| Owned {
+                    id,
+                    text: format!("record {id}"),
+                    key: Cell::new(1),
+                    drops: drops.clone(),
+                })
+                .collect();
             let mut scratch = Scratch::new();
-            let mut calls = 0;
-            // Each equality pass puts every record in one non-equal band.
-            // The child scan restores all bits; the next sample picks the
-            // same absent pivot. Stop safely before a broken sort exhausts
-            // the stack.
-            let mut extractor = ByKey(|_: &u16| -> u16 {
-                assert!(calls < 12_000, "node recursion did not make progress");
-                let phase = calls % (len + 4 + 65 + plan::KEY_SAMPLE_LEN);
-                calls += 1;
-                if phase < len {
-                    1
-                } else if phase < len + 4 {
-                    // Reject order before the candidate scan and mode sample.
-                    [1, 0, 0, 1][phase - len]
-                } else if phase < len + 4 + 65 {
-                    if phase.is_multiple_of(2) { 0 } else { 0x1ff }
-                } else if greater {
-                    0
-                } else {
-                    0x1ff
+            let planning = Cell::new(true);
+            let mut extractor = ByKey(|record: &Owned| {
+                if planning.get() {
+                    return pivot;
                 }
+                // Every record first enters the same outer band. Later keys
+                // differ only in the bit the equality split consumed, so
+                // continued sorting must leave their original order intact.
+                record.key.replace((record.id as u16 % 2) << 8)
             });
+            let tile_len = tile_capacity::<Owned>(128);
+            // Select the real equality plan, then change keys at its execution
+            // boundary. No fixture needs to count probes, samples or scans.
+            let plan = plan_node(&records, 0x1ff, tile_len, &mut extractor);
+            assert!(matches!(plan, NodePlan::Equal(equal) if equal == pivot));
+            planning.set(false);
             Sorter::<_, _> {
                 scratch: &mut scratch,
                 extractor: &mut extractor,
-                tile_len: tile_capacity::<u16>(32),
+                tile_len,
             }
-            .partition_equal(&mut records, if greater { 0 } else { 0x1ff }, 0x1ff);
-            records.sort_unstable();
-            assert_eq!(records, (0..len as u16).collect::<Vec<_>>());
+            .execute_node(&mut records, 0x1ff, plan);
+
+            assert!(drops.borrow().is_empty());
+            for (id, record) in records.iter().enumerate() {
+                assert_eq!(record.id, id);
+                assert_eq!(record.text, format!("record {id}"));
+                assert_eq!(record.key.get(), (id as u16 % 2) << 8);
+            }
+            // The owned records remain usable through another public key width.
+            crate::stable_sort_by_key(&mut records, |record| (record.id as u128) << 64);
+            assert!(
+                records
+                    .iter()
+                    .enumerate()
+                    .all(|(id, record)| record.id == id)
+            );
+            drop(records);
+            drops.borrow_mut().sort_unstable();
+            assert_eq!(*drops.borrow(), (0..len).collect::<Vec<_>>());
         }
     }
 }

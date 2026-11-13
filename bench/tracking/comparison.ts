@@ -2,7 +2,7 @@
 
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { algorithm, catalog, comparisonId, parseComparisonId } from "../catalog.ts";
+import { algorithm, catalog, comparisonId, distribution, parseComparisonId } from "../catalog.ts";
 import { type Cohort, comparisonFigures, type Field } from "../report/charts.ts";
 import { trackingAlgorithms } from "./algorithms.ts";
 import { type ComparisonData, comparisonSchema, parseRuns, type TrackingRun } from "./result.ts";
@@ -74,6 +74,14 @@ export function trackingCohort(field: Field): Cohort | null {
     .get(n)!
     .map((entry) => entry.distribution)
     .toSorted((a, b) => order.indexOf(a) - order.indexOf(b));
+  // Element types compare over the patterns every measured type shares at that length.
+  const types = Map.groupBy(
+    field.cases.filter((entry) => entry.len === n && measured(comparisonId(entry))),
+    (entry) => entry.ty,
+  );
+  const typeShapes = shapes.filter((shape) =>
+    [...types.values()].every((cases) => cases.some((entry) => entry.distribution === shape)),
+  );
   const memoryN = Math.max(
     ...u64.filter((entry) => entry.distribution === "random").map((entry) => entry.len),
   );
@@ -82,25 +90,36 @@ export function trackingCohort(field: Field): Cohort | null {
     lengths: [n],
     shapes,
     shapesLabel: `the ${shapes.length} measured input patterns`,
+    typeShapes,
+    typeShapesLabel:
+      typeShapes.length === 1
+        ? `on the ${distribution(typeShapes[0]).label} input`
+        : `geometric mean over the ${typeShapes.length} input patterns every type has`,
     memoryN: Number.isFinite(memoryN) ? memoryN : n,
   };
 }
 
-/** Build the published comparison from every algorithm's journals, or null before Tessera has one. */
-export function comparisonData(runs: Map<string, TrackingRun[]>): ComparisonData | null {
+/**
+ * Build the published comparison from every algorithm's journals. Without a cohort, such as
+ * before `slice::sort` has a run on Tessera's latest hardware, it has no figures, so the site
+ * never shows an earlier comparison as the latest one.
+ */
+export function comparisonData(runs: Map<string, TrackingRun[]>): ComparisonData {
   const latest = latestRuns(runs);
-  if (!latest) return null;
-  const field = trackingField(latest.runs);
+  const field = trackingField(latest?.runs ?? new Map());
   const cohort = trackingCohort(field);
-  if (!cohort) return null;
   // The site renders each chart itself and needs neither the SVG nor the release table.
-  const figures = comparisonFigures(field, cohort, undefined, true).map(
-    ({ name, title, chart }) => ({ name, title, chart }),
-  );
+  const figures = cohort
+    ? comparisonFigures(field, cohort, undefined, true).map(({ name, title, chart }) => ({
+        name,
+        title,
+        chart,
+      }))
+    : [];
   return comparisonSchema.parse({
-    spec: latest.spec,
-    runs: [...latest.runs]
-      .filter(([id]) => field.algorithms.some((entry) => entry.name === id))
+    spec: latest?.spec ?? null,
+    runs: [...(latest?.runs ?? [])]
+      .filter(([id]) => cohort && field.algorithms.some((entry) => entry.name === id))
       .map(([id, run]) => ({
         algorithm: id,
         label: algorithm(id).label,
@@ -129,6 +148,6 @@ export async function writeComparison(root: string) {
     if (list.length) runs.set(id, list);
   }
   const data = comparisonData(runs);
-  if (data) await writeFile(join(root, "comparison.json"), JSON.stringify(data) + "\n");
+  await writeFile(join(root, "comparison.json"), `${JSON.stringify(data)}\n`);
   return data;
 }

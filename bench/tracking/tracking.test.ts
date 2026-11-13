@@ -597,5 +597,33 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
   // Geometric mean of 40/10 and 20/20; the worst peak over the cohort's cases.
   assert.deepEqual(tessera.cells, ["2×", "100 B"]);
   assert.ok(!JSON.stringify(rows).includes("radsort"));
-  assert.equal(comparisonData(new Map([["std-stable", runs.get("std-stable")!]])), null);
+  // Without a cohort, the comparison is published empty, replacing any earlier one.
+  const alone = comparisonData(new Map([["tessera", runs.get("tessera")!]]));
+  assert.deepEqual([alone.spec, alone.runs, alone.overview, alone.figures], [uuid, [], null, []]);
+  assert.equal(comparisonData(new Map()).spec, null);
+  // Element types compare over the patterns every type has: here only random.
+  const types = comparisonData(
+    new Map([
+      ...runs,
+      [
+        "tessera",
+        [
+          tracked(uuid, "2026-11-06T00:00:00Z", {
+            ...at([10, 20, 100]),
+            "f64/random/65536/s1": 10,
+          }),
+        ],
+      ],
+      [
+        "std-stable",
+        [
+          tracked(uuid, "2026-11-06T00:00:00Z", {
+            ...at([40, 20, 800]),
+            "f64/random/65536/s1": 30,
+          }),
+        ],
+      ],
+    ]),
+  ).figures.find((figure) => figure.name === "types");
+  assert.match(types!.chart.guide, /on the random input$/);
 });

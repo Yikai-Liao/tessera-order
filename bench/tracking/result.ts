@@ -156,7 +156,8 @@ const figureSchema = z.object({
 });
 /** Cross-algorithm figures from each algorithm's latest run, published as `comparison.json`. */
 export const comparisonSchema = z.object({
-  spec: z.uuid(),
+  // Null before Tessera has a run.
+  spec: z.uuid().nullable(),
   runs: z.array(
     z.object({
       algorithm: z.string().min(1),

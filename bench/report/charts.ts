@@ -51,6 +51,10 @@ export interface Cohort {
   shapes: string[];
   /** Guide wording for those patterns. */
   shapesLabel: string;
+  /** Input patterns the element-type figure compares; every type must have each of them. */
+  typeShapes: string[];
+  /** How the element-type figure combines them, after "speed relative to slice::sort, ". */
+  typeShapesLabel: string;
   /** Length of the memory figure. */
   memoryN: number;
 }
@@ -377,14 +381,16 @@ function renderInputs(
   };
 }
 
-// Each element type as a geometric mean over the ten inputs. Records admit
+// Each element type over the cohort's type patterns. Records admit
 // only stable sorts, because stability is observable there.
 function renderTypes(field: Field, cohort: Cohort): Figure | null {
   const plotted: [string, Standing][] = [];
   const groups = TYPE_GROUPS.map((g) => ({
     title: g.title,
     rows: g.types.flatMap(([ty, label, sub]) => {
-      const ids = cohort.shapes.map((shape) => caseId({ ty, distribution: shape, len: cohort.n }));
+      const ids = cohort.typeShapes.map((shape) =>
+        caseId({ ty, distribution: shape, len: cohort.n }),
+      );
       const s = standing(field, ids, !g.keys);
       if (!s) return [];
       plotted.push([label, s]);
@@ -400,7 +406,7 @@ function renderTypes(field: Field, cohort: Cohort): Figure | null {
     title,
     ...rendered({
       title,
-      guide: `${formatLength(cohort.n)} elements · speed relative to slice::sort, geometric mean over ${cohort.shapesLabel}`,
+      guide: `${formatLength(cohort.n)} elements · speed relative to slice::sort, ${cohort.typeShapesLabel}`,
       columns: ["Speed", "Rank"],
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
@@ -544,6 +550,8 @@ const RELEASE: Cohort = {
   lengths,
   shapes,
   shapesLabel: `the ${shapes.length} baseline input patterns`,
+  typeShapes: shapes,
+  typeShapesLabel: `geometric mean over the ${shapes.length} baseline input patterns`,
   memoryN: LARGEST,
 };
 

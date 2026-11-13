@@ -144,6 +144,10 @@ export interface ReleaseOptions {
 /** Retain the executable pair, then measure verified batches and report one experiment. */
 export async function compareAlgorithms(options: ReleaseOptions) {
   pairedBudget(options.blocks);
+  if (options.revisions && options.plan.operation)
+    throw new Error(
+      "Linked revisions support full sorting only; use compare algorithms for other operations",
+    );
   await mkdir(options.out, { recursive: false });
   return withSessionLock(options.out, async () => {
     await prepareComparison(options);
@@ -167,6 +171,7 @@ async function prepareComparison(options: ReleaseOptions) {
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
   const build = await withComparisonWorkspace(root, native, async ({ tree, target }) => {
     const features = [
+      ...(plan.operation ? ["operations"] : []),
       ...(native ? ["compare-native"] : []),
       ...(plan.algorithms.some((id) =>
         catalog.algorithms.some((entry) => entry.id === id && entry.threads),

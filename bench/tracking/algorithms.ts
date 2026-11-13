@@ -3,9 +3,9 @@
 import { appendFile } from "node:fs/promises";
 import { catalog } from "../catalog.ts";
 
-/** Production adapters are the tracking inventory; revision placements are controls, not algorithms. */
+/** Track production sort adapters, not revision controls or operation-only references. */
 export const trackingAlgorithms = catalog.algorithms.filter(
-  (entry) => entry.adapter !== "revision",
+  (entry) => entry.adapter !== "revision" && entry.adapter !== "reference",
 );
 
 /** Resolve a catalog ID before it enters a command, data directory or Cloud branch. */

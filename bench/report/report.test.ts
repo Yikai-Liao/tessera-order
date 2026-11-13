@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { strict as assert } from "node:assert";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { comparisonGroup, comparisonId, type Operation } from "../catalog.ts";
 import { createFixture } from "./fixture.ts";
 import { collectWarnings, writeReport } from "./index.ts";
 import { loadRun, validateRun } from "./load.ts";
@@ -245,5 +246,114 @@ test("optimization and debug settings must agree across timing and memory", asyn
     }
   } finally {
     await rm(dir, { recursive: true });
+  }
+});
+
+/** Small boundary fixture, derived from the existing paired-run fixture. */
+function operationFixture(operation: Operation) {
+  const dataset = createFixture(3);
+  const source = dataset.manifest.cases.find(
+    (c) => c.ty === "u64" && c.distribution === "random" && c.len === 1000,
+  )!;
+  const oldId = comparisonId(source),
+    oldGroup = comparisonGroup(source);
+  const variants = ["tessera", "std-stable"];
+  const c = {
+    ...source,
+    operation,
+    variants,
+    implementations: Object.fromEntries(
+      variants.map((name) => [name, "synthetic complete operation"]),
+    ),
+    omitted: [{ variant: "rdst", reason: "unsupported operation/input combination" }],
+  };
+  const id = comparisonId(c),
+    group = comparisonGroup(c);
+  Object.assign(dataset.manifest, {
+    suite_version: 2,
+    index_bytes: 8,
+    cases: [c],
+    variants: [
+      ...dataset.manifest.variants.filter((v) => variants.includes(v.name)),
+      { name: "rdst", stable: false },
+    ],
+    plan: {
+      schema: 2,
+      operation,
+      algorithms: [...variants, "rdst"],
+      include: [{ types: [c.ty], distributions: [c.distribution], lengths: [c.len] }],
+    },
+  });
+  dataset.samples = dataset.samples
+    .filter((s) => s.case_id === oldId && [...variants, "tessera-aa"].includes(s.variant))
+    .map((s) => ({
+      ...s,
+      case_id: id,
+      group,
+      slot: [...variants, "tessera-aa"].indexOf(s.variant),
+    }));
+  dataset.observations = dataset.observations
+    .filter((o) => o.group === oldGroup)
+    .map((o) => ({ ...o, group }));
+  const output = operation.kind === "argsort" ? c.len * 8 : 0;
+  dataset.memory = dataset.memory
+    .filter((m) => m.case_id === oldId && variants.includes(m.variant))
+    .map((m) => ({
+      ...m,
+      case_id: id,
+      peak_extra_bytes: m.peak_extra_bytes + output,
+      output_bytes: output,
+    }));
+  return dataset;
+}
+
+test("operation reports retain exact parameters and output-aware memory without sorting figures", async (t) => {
+  for (const operation of [
+    { kind: "argsort" },
+    { kind: "segments", segment_len: 73 },
+    { kind: "top-k", k: 99 },
+    { kind: "prefix", prefix_len: 99 },
+    { kind: "select", index: 499 },
+    { kind: "rank-range", start: 99, end: 199 },
+    { kind: "select-many", indices: [999, 0, 999] },
+  ] satisfies Operation[]) {
+    const directory = await mkdtemp(join(tmpdir(), "tessera-operation-report-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const dataset = operationFixture(operation);
+    validateRun(dataset);
+    await writeFixture(directory, dataset);
+    await writeReport([directory]);
+    const report = await readFile(join(directory, "report/index.md"), "utf8");
+    assert.match(report, /synthetic complete operation/);
+    assert.ok(report.includes(JSON.stringify(operation)));
+    assert.ok((await readdir(join(directory, "report"))).every((name) => !name.endsWith(".svg")));
+    assert.equal(
+      (await loadRun([directory])).memory[0].output_bytes,
+      operation.kind === "argsort" ? 8000 : 0,
+    );
+    const invalid = structuredClone(dataset);
+    invalid.memory[0].output_bytes = operation.kind === "argsort" ? 0 : 1;
+    assert.throws(() => validateRun(invalid), /output allocation/);
+    const memoryPath = join(directory, "memory-manifest-default.json");
+    await writeFile(memoryPath, JSON.stringify({ ...dataset.manifest, index_bytes: 4 }));
+    await assert.rejects(loadRun([directory]), /index_bytes/);
+  }
+  for (const mutation of [
+    (d: ReturnType<typeof operationFixture>) => {
+      delete d.manifest.cases[0].operation;
+    },
+    (d: ReturnType<typeof operationFixture>) => {
+      d.manifest.cases[0].operation = { kind: "argsort" };
+    },
+    (d: ReturnType<typeof operationFixture>) => {
+      d.manifest.cases[0].implementations = {};
+    },
+    (d: ReturnType<typeof operationFixture>) => {
+      d.manifest.cases[0].omitted = [];
+    },
+  ]) {
+    const dataset = operationFixture({ kind: "top-k", k: 99 });
+    mutation(dataset);
+    assert.throws(() => validateRun(dataset));
   }
 });

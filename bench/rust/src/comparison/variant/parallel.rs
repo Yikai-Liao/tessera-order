@@ -25,6 +25,8 @@ pub(super) fn prepare<T: TesseraAdapter>(
             })
         },
         stable: true,
+        required: None,
+        description: "caller-owned pool and public sorting call",
         worker_threads: threads,
     })
 }

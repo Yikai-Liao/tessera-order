@@ -4,7 +4,7 @@ import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { type Command, InvalidArgumentError, Option } from "commander";
 import { stringify as stringifyToml } from "smol-toml";
-import { catalog } from "../bench/catalog.ts";
+import { catalog, operationKinds, parseRankRange } from "../bench/catalog.ts";
 import { compareCounters, probeCounters, reportCounters } from "../bench/local/counters.ts";
 import { LAYOUT_CONTROLS, type LayoutControl, parseLayoutSeeds } from "../bench/local/layout.ts";
 import { renderLocalReport } from "../bench/local/report.ts";
@@ -21,6 +21,13 @@ interface MeasurementOptions extends SelectionOptions {
   plan?: string;
   out?: string;
   cpu?: string;
+}
+
+function parseCount(value: string) {
+  const number = Number(value);
+  if (!/^(0|[1-9]\d*)$/.test(value) || !Number.isSafeInteger(number))
+    throw new InvalidArgumentError("expected a nonnegative integer");
+  return number;
 }
 
 function parsePositiveInteger(value: string) {
@@ -70,12 +77,45 @@ function addSelectionOptions(command: Command, presets: string) {
     .option("--plan <name-or-file>", `JSON/TOML plan or ${presets} preset`)
     .option("--types <ids>", "comma-separated record types", parseList)
     .option("--distributions <ids>", "comma-separated input distributions", parseList)
-    .option("--lengths <numbers>", "comma-separated positive record counts", parseLengths);
+    .option("--lengths <numbers>", "comma-separated positive record counts", parseLengths)
+    .addOption(
+      new Option("--operation <kind>", "result contract (default: sort)").choices(operationKinds),
+    )
+    .option("--k <count>", "number of smallest records for unordered top-k", parseCount)
+    .option("--prefix-len <count>", "required sorted prefix length", parseCount)
+    .option("--index <rank>", "zero-based selection rank", parseCount)
+    .option("--indices <ranks>", "comma-separated selection ranks, or none", (value) =>
+      value === "none" ? [] : parseList(value).map(parseCount),
+    )
+    .option(
+      "--segment-len <count>",
+      "records per segment; last may be shorter",
+      parsePositiveInteger,
+    )
+    .option("--rank-range <start:end>", "exact half-open ordered rank interval", (value) => {
+      try {
+        return parseRankRange(value);
+      } catch (error) {
+        throw new InvalidArgumentError((error as Error).message);
+      }
+    });
 }
 
 function selectAxes(options: MeasurementOptions): SelectionOptions {
   return Object.fromEntries(
-    ["algorithms", "types", "distributions", "lengths"]
+    [
+      "algorithms",
+      "types",
+      "distributions",
+      "lengths",
+      "operation",
+      "prefixLen",
+      "k",
+      "index",
+      "indices",
+      "rankRange",
+      "segmentLen",
+    ]
       .filter((key) => options[key as keyof MeasurementOptions] !== undefined)
       .map((key) => [key, options[key as keyof MeasurementOptions]]),
   );

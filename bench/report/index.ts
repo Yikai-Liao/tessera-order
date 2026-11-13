@@ -2,7 +2,7 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { catalog } from "../catalog.ts";
+import { catalog, operationLabel } from "../catalog.ts";
 import { median, pairedBudget } from "../statistics.ts";
 import { resultSummary } from "../summary.ts";
 import { renderFigures } from "./charts.ts";
@@ -66,11 +66,11 @@ export function collectWarnings(dataset: Dataset): string[] {
 }
 function renderResults(dataset: Dataset, summaries: Map<string, Summary>): string {
   let output =
-    "## Full results\n\nTimes include each sort's scratch allocation. Ratios divide the variant's time by the mean of Tessera's paired samples in the same block. Bounds are per-block minima and maxima. The A/A noise range spans both Tessera samples divided by their block mean, across all blocks. Faster/slower describes the variant relative to Tessera; it requires the declared budget's direction agreement and a median outside that range (see Measurement budget). A short screen is inconclusive when either condition fails. The tessera-aa row separately reports A2 / A1.\n\n";
+    "## Full results\n\nTimes include each complete call's scratch and mandatory output allocation. Ratios divide the variant's time by the mean of Tessera's paired samples in the same block. Bounds are per-block minima and maxima. The A/A noise range spans both Tessera samples divided by their block mean, across all blocks. Faster/slower describes the variant relative to Tessera; it requires the declared budget's direction agreement and a median outside that range (see Measurement budget). A short screen is inconclusive when either condition fails. The tessera-aa row separately reports A2 / A1.\n\n";
   const variants = [...new Set(dataset.manifest.variants.map((v) => v.name)), "tessera-aa"];
   output +=
-    "Each cell gives ratio, ns / element, per-block ratio bounds, verdict and peak extra heap bytes. A dash means the variant is outside that build or task. Full-precision values are in [summaries.json](summaries.json).\n\n";
-  for (const ty of types) {
+    "Each cell gives ratio, ns / input record, per-block ratio bounds, verdict and peak extra heap bytes. A dash means the variant is outside that build or task. Full-precision values are in [summaries.json](summaries.json).\n\n";
+  for (const ty of new Set([...types, ...dataset.manifest.cases.map((c) => c.ty)])) {
     const rows: string[][] = [];
     const manifest = dataset.manifest;
     const build = "default";
@@ -90,7 +90,10 @@ function renderResults(dataset: Dataset, summaries: Map<string, Summary>): strin
               measurementId(m.build, m.case_id, m.variant) ===
               measurementId(build, caseId(c), variant),
           );
-          return `${s.ratio.toFixed(4)}×<br>${s.ns.toFixed(3)} ns<br>[${s.low.toFixed(4)}, ${s.high.toFixed(4)}]<br>${s.verdict}<br>${memory ? `${memory.peak_extra_bytes} B` : "heap unmeasured"}`;
+          const heap = memory
+            ? `${memory.peak_extra_bytes} B peak${memory.output_bytes !== undefined ? `<br>${memory.output_bytes} B output + ${memory.peak_extra_bytes - memory.output_bytes} B workspace peak` : ""}`
+            : "heap unmeasured";
+          return `${s.ratio.toFixed(4)}×<br>${s.ns.toFixed(3)} ns<br>[${s.low.toFixed(4)}, ${s.high.toFixed(4)}]<br>${s.verdict}<br>${heap}`;
         }),
       ]);
     }
@@ -109,7 +112,30 @@ function renderCapabilities(dataset: Dataset) {
       manifest.cases.some((c) => c.ty === ty && c.variants.includes(v.name)) ? "yes" : "—",
     ),
   ]);
-  return `## Capabilities\n\n${renderTable(["Variant", "Stability", "Pool workers", ...types], rows)}\nUnstable sorts on records are listed as a separate task: their permutation check allows equal keys to change order. A dash means the adapter does not support the task.\n\n`;
+  let out = `## Capabilities\n\n${renderTable(["Variant", "Sort contract", "Pool workers", ...types], rows)}\n`;
+  if (manifest.suite_version === 1)
+    return (
+      out +
+      "Unstable sorts on records are listed as a separate task: their permutation check allows equal keys to change order. A dash means the adapter does not support the task.\n\n"
+    );
+  out +=
+    "Every admitted implementation satisfies this workload’s stable result contract. The catalog’s sort contract does not override it: unstable scalar selection is admitted only when equal keys are bitwise indistinguishable, and unstable argsort explicitly breaks ties by original index.\n\n";
+  const routes = new Map<string, string[]>();
+  for (const c of manifest.cases) {
+    for (const [name, route] of Object.entries(c.implementations ?? {}))
+      routes.set(`${c.ty}/${name}`, [c.ty, name, route]);
+    for (const omitted of c.omitted ?? [])
+      routes.set(`${c.ty}/${omitted.variant}`, [
+        c.ty,
+        omitted.variant,
+        `omitted: ${omitted.reason}`,
+      ]);
+  }
+  return (
+    out +
+    renderTable(["Input type", "Variant", "Complete call / omission"], [...routes.values()]) +
+    "\n"
+  );
 }
 function renderProvenance(dataset: Dataset) {
   let out = `## Measurement environment\n\n${renderTable(["Condition", "Recorded value"], Object.entries(dataset.host))}\n`;
@@ -140,10 +166,13 @@ function renderProvenance(dataset: Dataset) {
 export async function writeReport(directories: string[], partial = false) {
   const dataset = await loadRun(directories, partial),
     summaries = summarize(dataset),
-    charts = renderFigures(dataset, summaries);
+    charts = dataset.manifest.suite_version === 1 ? renderFigures(dataset, summaries) : [];
   const out = join(directories[0], "report");
   await mkdir(out, { recursive: true });
-  let markdown = `# Sorting comparison\n\n${partial ? "Partial suite; only completed groups are shown." : `${dataset.manifest.suite} suite, version 1.`} Every value is regenerated from the accompanying manifests, host fingerprint, blocks and memory samples.\n\n`;
+  const operation = dataset.manifest.cases[0].operation;
+  let markdown = `# ${operation ? operationLabel(operation) : "Sorting comparison"}\n\n${partial ? "Partial suite; only completed groups are shown." : `${dataset.manifest.suite} suite, version ${dataset.manifest.suite_version}.`} Every value is regenerated from the accompanying manifests, host fingerprint, blocks and memory samples.\n\n`;
+  if (operation)
+    markdown += `Operation: \`${JSON.stringify(operation)}\`. Times are complete-call latency divided by input length, not by requested ranks or output count. Full-sort reference rows perform more work but satisfy the identical result contract; they are not native partial selectors.\n\n`;
   markdown +=
     "All blocks reuse each case's seed-one input. Their range measures execution variability on that input; it does not measure variability across random inputs. Calibration can choose different batch sizes for different variants, changing the prepared-buffer working set and cache behavior.\n\n";
   markdown += "## Measurement budget\n\n";
@@ -165,15 +194,19 @@ export async function writeReport(directories: string[], partial = false) {
   if (dataset.manifest.variants.some((v) => v.threads))
     markdown +=
       "## Parallel measurement scope\n\nPools are started and warmed before timing and allocation counting; each timed call includes pool dispatch and sort scratch allocation. Peak heap bytes exclude pre-existing pool/runtime storage and thread stacks. All workers exit before the next adapter. Ratios use the serial Tessera A/A pair, not a separate parallel A/A pair. The inverse ratio is whole-call speedup over serial Tessera, not source-change attribution or parallel-only noise control.\n\n";
-  markdown +=
-    "## Figure scope\n\nStandard panels show fixed slices and aggregates, not every measured case. The 1M input panels include all selected distributions for each type, including the new skew, key-structure, disorder and finite-float cases. Record panels rank stable sorts only. Ranking and cross-type aggregate panels retain the ten baseline distributions for a common comparison; they do not summarize the whole expanded suite. The memory panel takes the worst across all selected 10M u64 distributions. The selected-input panel is a fallback used only when no standard panel can be drawn. All completed cases, including custom lengths absent from the figures, remain in [Full results](#full-results) and [summaries.json](summaries.json).\n\n";
+  if (!operation)
+    markdown +=
+      "## Figure scope\n\nStandard panels show fixed slices and aggregates, not every measured case. The 1M input panels include all selected distributions for each type, including the new skew, key-structure, disorder and finite-float cases. Record panels rank stable sorts only. Ranking and cross-type aggregate panels retain the ten baseline distributions for a common comparison; they do not summarize the whole expanded suite. The memory panel takes the worst across all selected 10M u64 distributions. The selected-input panel is a fallback used only when no standard panel can be drawn. All completed cases, including custom lengths absent from the figures, remain in [Full results](#full-results) and [summaries.json](summaries.json).\n\n";
   for (const chart of charts) {
     await writeFile(join(out, `${chart.name}.svg`), chart.svg);
     markdown += `## ${chart.title}\n\n![${chart.title}](${chart.name}.svg)\n\n<details>\n<summary>Plotted values</summary>\n\n${chart.table}\n</details>\n\n`;
   }
   markdown += renderResults(dataset, summaries);
   markdown +=
-    "## Memory accounting\n\nThe memory executable measures one sort after allocating its input and verification reference. Rust-only builds count requested allocation sizes. Native builds count allocator usable sizes at the wrapped C allocation functions and C++ new/delete; allocator rounding is included. Fixed stack storage is unmeasured. Input buffers and owned payloads are excluded.\n";
+    "## Memory accounting\n\nThe memory executable measures one complete call after preparing its input and verification reference. Rust-only builds count requested allocation sizes. Native builds count allocator usable sizes at the wrapped C allocation functions and C++ new/delete; allocator rounding is included. Fixed stack storage is unmeasured. Input buffers and owned payloads are excluded.\n";
+  if (operation)
+    markdown +=
+      "Mandatory output is allocated inside the measured call and included in peak extra heap bytes. Workspace peak is the recorded peak minus retained output bytes; argsort constructs its index result before sorting, so both coexist. In-place operations have zero output bytes. Multiple-selection normalization is inside the measured call. No sorting figures are generated for these result shapes.\n";
   await writeFile(join(out, "index.md"), markdown);
   await writeFile(
     join(out, "summaries.json"),

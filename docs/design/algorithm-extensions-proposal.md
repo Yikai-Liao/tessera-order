@@ -1,6 +1,6 @@
 # Algorithm extensions proposal
 
-Status: experiment in progress; new public interfaces are not implemented. This page specifies candidate Rust interfaces, internal dependency changes and implementation order. Implemented boundaries belong in the [engine reference](engine.md); the [roadmap](../../ROADMAP.md#algorithm-extension-experiment) tracks acceptance. It does not add public exports or change the current [semantics](../../conformance/semantics.md). Unimplemented interfaces stay in this document, not as exported stubs or `todo!()` functions.
+Status: the shared foundations and first serial one-shot operations are implemented on the experimental branch. This page owns remaining candidate interfaces and migration choices, not current API contracts. Implemented boundaries belong in the [engine reference](engine.md); the [roadmap](../../ROADMAP.md#algorithm-extension-experiment) tracks acceptance. Current guarantees belong in [semantics](../../conformance/semantics.md#serial-slice-operations). Unimplemented interfaces stay in this document, not as exported stubs or `todo!()` functions.
 
 ## Scope and direction
 
@@ -8,104 +8,30 @@ Extend Tessera through complete operations for stable distribution and ordered r
 
 Design the target architecture as if the known sorting, selection, partitioning, batch and incremental consumers were required from day zero. Their result contracts, ownership and resource lifetimes determine the boundaries; the current `Sorter` and the first feature do not. Settle that target before migrating the implementation, then deliver independently verifiable slices from simple compositions to stateful algorithms. External sorting and Wavelet matrix construction receive neither an interface nor an implementation in this experiment. Their known roles remain compatible with the boundary: run generation consumes complete sorting, while Wavelet construction needs controlled stable passes, not rank refinement. A priority queue is outside this proposal.
 
-The first implementation sequence covers argsort, standard-library compositions for multiple fields and groups, segmented sorting, stable binary and bounded multiway partitioning, sorted prefixes, rank selection and sorted rank ranges. Incremental prefix completion follows only after the one-shot operations work. This is an experiment, not a commitment to include every interface in Rust 0.1.
+The implemented first slice covers argsort, standard-library compositions for multiple fields and groups, segmented sorting, unordered Top-k, sorted prefixes, rank selection and sorted rank ranges. Stable binary and bounded multiway partitioning remain later stages. Incremental prefix completion follows only after the one-shot operations work. This is an experiment, not a commitment to include every interface in Rust 0.1.
 
-## Proposed Rust interfaces
+## Public surface and remaining proposals
 
-Keep the existing `stable_sort` and `stable_sort_by_key` unchanged. New functions use slices, `usize` lengths and indices, `Range<usize>` where appropriate, and ordinary closures. In-place operations return `()` unless they naturally return a boundary or the standard library's selection tuple. Do not introduce public planners, workspaces, policies, bucket descriptors or result handles for one-shot calls.
+Argsort, segmented sorting, stable-membership Top-k, sorted prefixes, single and multiple selection, and sorted rank ranges are implemented. Their one contract owner is [serial slice semantics](../../conformance/semantics.md#serial-slice-operations); [public Rust docs](../../rust/tessera-sort/src/algorithms.rs) provide signatures and examples. These are normal serial functions, not research features or stubs. The existing full-sort and Rayon interfaces are unchanged.
 
-Names retain the crate's explicit `stable_` convention. Selection follows the argument and return shape of slice `select_nth_unstable`, but has the stable ranked-member contract below. These are proposed signatures, not implemented API:
+The remaining one-shot proposals are stable category partitions:
 
 ```rust
-pub fn stable_argsort<K: RadixKey>(values: &[K]) -> Vec<usize>;
-pub fn stable_argsort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
-    values: &[T],
-    key: F,
-) -> Vec<usize>;
-
-pub fn stable_sort_segments<K: RadixKey>(values: &mut [K], offsets: &[usize]);
-pub fn stable_sort_segments_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
-    values: &mut [T],
-    offsets: &[usize],
-    key: F,
-);
-
-pub fn stable_partition<T, F: FnMut(&T) -> bool>(
-    values: &mut [T],
-    predicate: F,
-) -> usize;
+pub fn stable_partition<T, F: FnMut(&T) -> bool>(values: &mut [T], predicate: F) -> usize;
 pub fn stable_partition_by_bucket<T, F: FnMut(&T) -> usize>(
-    values: &mut [T],
-    bucket_count: usize,
-    classify: F,
+    values: &mut [T], bucket_count: usize, classify: F,
 ) -> Vec<usize>;
-
-pub fn stable_sort_prefix<K: RadixKey>(values: &mut [K], prefix_len: usize);
-pub fn stable_sort_prefix_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
-    values: &mut [T],
-    prefix_len: usize,
-    key: F,
-);
-
-pub fn stable_select_nth<K: RadixKey>(
-    values: &mut [K],
-    index: usize,
-) -> (&mut [K], &mut K, &mut [K]);
-pub fn stable_select_nth_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
-    values: &mut [T],
-    index: usize,
-    key: F,
-) -> (&mut [T], &mut T, &mut [T]);
-
-pub fn stable_sort_rank_range<K: RadixKey>(values: &mut [K], ranks: Range<usize>);
-pub fn stable_sort_rank_range_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
-    values: &mut [T],
-    ranks: Range<usize>,
-    key: F,
-);
-
-pub fn stable_select_nth_many<K: RadixKey>(values: &mut [K], indices: &[usize]);
-pub fn stable_select_nth_many_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
-    values: &mut [T],
-    indices: &[usize],
-    key: F,
-);
 ```
 
-`Range` above is `core::ops::Range`; `RadixKey` is the existing sealed key trait. Do not change its supported types, the MSRV or dependencies as part of these interfaces. No parallel extension API is proposed yet; existing Rayon full-sort calls remain supported throughout the refactor.
+Binary partition returns the matching count, placing matching before nonmatching records, stable within each group. Multiway partition groups categories `0..bucket_count` in ascending category order, stable within each category, returning `bucket_count + 1` offsets including empty categories. Its O(R) output and category-dependent scratch are separate from sorting's fixed-radix bound.
 
-### Shared behavior
+The category functions would evaluate the classifier once per record on success, in input order, including zero-sized records. Invalid bucket counts panic before mutation; an out-of-range classification is detected under movement recovery, without a preliminary classification pass. A single category still evaluates the classifier. Positive category counts need not be powers of two; internal padding must not mask invalid IDs or expose extra categories. Document a representation-derived supported maximum before exporting either function. The existing callback-panic and record-restoration rules apply, without rolling back user side effects.
 
-Ordering and key extraction follow the existing [key contract](../../conformance/semantics.md#key-extraction), including encoded float order and `Reverse`. New by-key calls retain `FnMut` and the current freedom to evaluate keys repeatedly. Success conditions below assume consistent keys. Changing keys may invalidate ordering, but must not invalidate record ownership or bounded progress. A key or classifier panic restores every input record before unwinding, in unspecified order; it does not promise a valid partial result.
+### Composition and persistent use
 
-Validate lengths, indices, ranges, segment offsets and bucket-count limits before mutation or callback evaluation. Invalid arguments panic, as with slice indexing and selection. A classifier returning an invalid bucket is detected when that record is classified, under recovery protection; do not add a preliminary classification pass just to validate all results. The library does not roll back user callback side effects.
+[Multi-field and grouping examples](../guide/getting-started.md#multi-field-sorting-and-groups) use ordinary stable sorting and slice composition, not new frameworks. Tuple keys and variable-width encodings are not implied by `RadixKey`. Consuming callbacks, reductions and deduplication retain their own destructor and panic contracts, separate from sorting's permutation guarantee. Exact statistical ranks remain caller choices rather than quantile policies in the engine.
 
-The proposed partition functions evaluate the predicate or classifier once per record on success. Serial classification follows input order. They do not reuse sorting probes or key fast paths. Tile execution caches those category decisions; block execution already classifies each input record once per pass. Empty and zero-sized inputs still produce the defined counts and boundaries.
-
-### Result contracts
-
-Let `S` be a conceptual complete stable sort of the original records. Record identity matters, not merely equality of keys. No implementation is required to materialize `S` or attach original indices to moved records.
-
-| Operation | Successful result and boundaries | Additional output or metadata |
-|---|---|---|
-| Argsort | Return a permutation of `0..values.len()` in stable encoded-key order; do not reorder the source. | The index output is O(n), separate from sorting scratch. |
-| Segmented sort | Sort each segment independently and stably. Offsets must be nondecreasing, start at zero and end at the slice length; repeated offsets permit empty segments. An empty slice accepts `[0]`. | Offsets are borrowed. Reuse private scratch across segments. |
-| Binary partition | Return the number of matching records. Matching records precede nonmatching records; both groups retain their original order. | One boundary. |
-| Multiway partition | Categories are `0..bucket_count` in ascending category order, stable within each category. Return `bucket_count + 1` offsets, starting at zero and ending at the input length, including empty categories. | O(R) output for R categories; R also affects scratch. |
-| Sorted prefix | `values[..prefix_len]` equals `S[..prefix_len]`. The suffix contains exactly the other records, in unspecified order. Accept `0..=len`; zero is a no-op without key calls or allocation. | No result allocation. |
-| Single selection | The middle record equals `S[index]`; the preceding slice contains exactly the members of `S[..index]`, and the following slice the remaining members. Neither side needs internal order. Require `index < len`. | The three mutable borrows are disjoint, as in standard-library selection. |
-| Sorted rank range | For a nonempty range, `values[ranks.clone()]` equals `S[ranks.clone()]`, and the prefix and suffix contain their corresponding ranked members without internal ordering guarantees. Require `start <= end <= len`. An empty range is a no-op and does not establish an outer rank boundary. | No result allocation. These are sorted ranks, not original positions; sorting a physical subslice remains ordinary slice composition. |
-| Multiple selection | Each requested position holds `S[index]`; regions before, between and after requested ranks contain their corresponding ranked members without internal ordering guarantees. Accept unordered and duplicate indices; validate all, normalize once, and borrow views during recursion. An empty request is a no-op. | At most O(m) request metadata for m indices, not a vector of record references. |
-
-Stable selection means stable membership and ranked identity. It does not mean that all selected records of different keys retain their original input order. For an unsorted minimum-k set, use the prefix before index k from single selection when `0 < k < len`; handle the empty and full set directly. Do not add a second top-k wrapper with the same semantics. Statistical quantile definitions and interpolation stay outside the engine; multiple selection accepts exact integer ranks.
-
-Multiway partitioning requires `bucket_count > 0` and is initially bounded by the block representation's existing fan-out limit. The implementation must document the supported maximum before exporting the API. Positive counts need not be powers of two: internal padding must not expose extra categories or silently mask invalid IDs. A single category needs no record movement but still evaluates the classifier. Do not advertise arbitrary category counts under the sort's fixed-radix space bound.
-
-### Capabilities that need no new public framework
-
-Lexicographic multiple-field sorting initially uses repeated stable sorts from the least significant field to the most significant field. Tuple keys and variable-width encodings are not implied by the current `RadixKey` contract. Group traversal initially uses a completed sort and slice `chunk_by`; equality must match the chosen normalized or encoded grouping key, not merely a digit. Standard iterators and `Vec` operations supply counting, reduction and deduplication where appropriate. Their consuming, destructor and callback-panic contracts are separate from sorting's permutation guarantee.
-
-Incremental completion eventually needs a borrowing object, not an iterator that immediately moves records out. The candidate shape is `PrefixSorter::by_key(&mut values, key)` followed by `ensure_prefix(prefix_len) -> &[T]`. Smaller requests may reuse completed work; extending a prefix requires an exclusive borrow of the object. Names and exact generics remain provisional until its lifecycle stage. The key must remain consistent for the whole session; a panic invalidates further use of that session while restoring its records. No half-finished movement or live records may remain in scratch between public calls.
+Incremental completion remains a proposed borrowing object, not a record-removing iterator: `PrefixSorter::by_key(&mut values, key)` followed by `ensure_prefix(prefix_len) -> &[T]`. Smaller requests may reuse completed work; extension needs an exclusive borrow. Names and generics remain provisional. Keys must stay consistent throughout the session; a panic invalidates further session use while restoring all records. No live record or half-finished movement may remain in scratch between calls.
 
 ## Derive the architecture from all known consumers
 
@@ -191,7 +117,7 @@ Moving shared primitives and tile ownership removes dependency on the full-sort 
 
 ## Ordered refinement without a general policy framework
 
-Use required ordered rank positions as the common logical representation: a normalized collection of disjoint intervals. Full sorting requests `[0,n)`, a sorted prefix `[0,k)`, a rank range `[a,b)`, and selection index i the singleton interval `[i,i+1)`. Multiple selected positions become singleton intervals, merging adjacent ones where appropriate. Each nonempty interval implies isolation of its endpoint ranks. Do not maintain a second explicit cut list that must agree with those endpoints; unsorted top-k uses the single-selection composition already specified.
+Use required ordered rank positions as the common logical representation: a normalized collection of disjoint intervals. Full sorting requests `[0,n)`, a sorted prefix `[0,k)`, a rank range `[a,b)`, and selection index i the singleton interval `[i,i+1)`. Multiple selected positions become singleton intervals, merging adjacent ones where appropriate. Each nonempty interval implies isolation of its endpoint ranks. Do not maintain a second explicit cut list that must agree with those endpoints; Top-k uses the same single-rank refinement behind its count-and-split interface, as specified by the [engine reference](engine.md#ordered-rank-requirements).
 
 The rank module owns this meaning from the beginning, rather than starting with a prefix-specific executor and replacing it when another algorithm arrives. Its projection answers whether a child is irrelevant, entirely required or still needs partial refinement, using exact parent-relative ranges and a rank base. It does not reinterpret keys or planner decisions. Single intervals must need no heap allocation; multiple requests normalize at most once and recursion borrows views instead of building vectors per child. An inline interval versus a borrowed normalized list is an internal representation choice, not a different algorithm policy.
 
@@ -228,7 +154,7 @@ The [roadmap](../../ROADMAP.md#algorithm-extension-experiment) owns progress and
 | 1 | Stable argsort; documented multi-field and grouping compositions. | Use existing sorting. Verify index identity and ties; no new movement kernel or custom grouping engine. |
 | 2 | Serial segmented sorting with private scratch reuse. | Validate all offsets before writes. Finish and restore one segment before reusing storage for the next; account for retained capacity. |
 | 3 | Stable binary partition, then bounded multiway partition. | Separate complete slices. Cover arbitrary payloads, classifier failure, small and zero-sized inputs, invalid categories and full boundary output. |
-| 4 | Stable sorted prefixes. | Use the shared node executor and fully sorted requested tiles. Zero and full-length requests follow their proposed contracts; no persistent state. |
+| 4 | Stable sorted prefixes and unordered Top-k. | Use the shared node executor and fully sorted requested tiles. Zero and full-length requests follow their [implemented contracts](../../conformance/semantics.md#serial-slice-operations); no persistent state. |
 | 5 | Stable single selection, then sorted rank ranges. | Extend the same request authority; verify ranked record identity and both outer memberships, not just selected key values. |
 | 6 | Multiple-rank selection. | Normalize once and share early partitions; no independent selection loop per target and no per-child request-vector allocation. |
 | 7 | Incremental prefix completion. | First establish borrowing, panic invalidation and frontier-space invariants; then reuse one-shot analysis. Do not add insertion, record-removing iteration or PQ operations. |
@@ -237,27 +163,9 @@ The sequence is an implementation order, not permission to postpone the target d
 
 ## Benchmark workloads and the existing tools CLI
 
-Extend the existing `bun run tools` pipeline, not a second benchmark executable or an algorithm-specific command family. Its current input generation, `Variant::prepare` capability boundary, restorable `Kernel`, process-isolated allocation measurement, retained builds, journals and offline statistics remain useful. The assumptions to remove are that every case means a full sort, every output is a reordered input buffer, and exact full-reference equality is always the right checker.
+The first one-shot operations use the maintained [operation comparison contract](../development/benchmarking.md#serial-operation-comparisons) and [shared kernel boundary](benchmark-tooling.md#operation-workloads). Public algorithms, not private study entries, are timed end to end. Current contracts belong there; no second command family or experimental library feature is needed.
 
-A workload is an operation with validated parameters plus an input case. An implementation identity remains an implementation identity: do not encode argsort or Top-k by inventing sorting-algorithm names or abusing the serial/parallel mode. Resolve parameters once into the prepared inventory; include them in grouping, sample identity, memory evidence, resume validation and report labels. Requested rank fractions become exact ranks before any adapter runs, with their rounding rule recorded. Do not compare or aggregate ratios across different result contracts.
-
-| Operation | Parameter axes | Verification and equivalent baseline |
-|---|---|---|
-| Full sort | Existing input and mode axes. | Current exact stable-reference or unstable permutation checker. Preserve existing measurements and figures. |
-| Argsort | Input representation and distribution; the returned index vector is part of the operation. | Verify an exact stable index permutation against source keys. Compare with index construction plus standard stable index sorting, not direct record sorting. |
-| Segments | Validated segment offsets or a reproducible segment-length specification. | Reference-sort each segment independently. Include public-call allocation and initialization; do not time only one isolated segment as a batch API. |
-| Binary / multiway partition | A deterministic classifier and category count, with a reproducible category distribution. | Verify complete category boundaries and stable member identity. Use a stable reference distribution; distinguish sort-based and output-buffer baselines by their full costs. |
-| Prefix / rank range | Prefix length or nonempty rank interval, including boundary-heavy ties. | Compare required positions and all outer memberships with complete stable sorting. Charge the full public operation, not only the final prefix sort. |
-| Single / multiple selection | Exact target indices or a normalized index specification. | Verify selected record identities and memberships of all intervening regions. Unstable selection is a separately labelled weaker-contract comparison, not the stable anchor. |
-| Incremental prefix | A recorded sequence of increasing requests. | Verify every published prefix. Report whole-session cost and individual extension latency; do not substitute repeated fresh Top-k calls or mix persistent setup with steady-state samples. |
-
-`Kernel::measure_batch` remains the common clock boundary, but its documented meaning becomes operation execution, not sorting. Each prepared kernel owns the required output shape, restoration and checker. An argsort kernel may share immutable source records across repetitions but must create the public result inside the timed call, retain it through verification and account for its memory; resetting and destroying a previous output happen outside the timed region. A separate allocation process reports peak call allocation, with mandatory output bytes explicitly distinguished from extra workspace. Partition and partial-order checks must inspect identities, not just key values or locally sorted windows.
-
-`Variant::prepare` remains the authority for supported operation/input/implementation combinations. Reuse typed record semantics and generation; do not duplicate support matrices in TypeScript, the catalog and worker code. Preparation returns the concrete inventory and reasons unsupported selections were omitted or rejected. Required controls must implement the same operation; an unavailable old-revision API is an explicit capability limitation, never silent fallback to complete sorting. Hosted full-sort tracking stays unchanged until an operation has local verification and evidence support.
-
-Keep task-oriented commands: `plan` previews selection, `compare algorithms` compares implementations of one operation, `compare revisions` compares sources implementing the same operation, and `report` regenerates retained data. Add an operation selector and only the relevant validated parameters when the first new kernel exists. Default existing invocations to full sorting. Show the selected operation, resolved parameters, valid implementations and experiment size in preview output; fail incompatible parameter combinations before building. No interactive wizard is required for iteration. Rework command spelling only if this complete workflow cannot be expressed clearly; the old sorting-only parser is not the design authority.
-
-Persisted formats need an explicit version and workload identity before non-sort samples are admitted. Continue reading historical sorting results as sorting without changing their IDs or figures; never infer a new operation from an algorithm label or report text. Admit the first new operation end to end (plan, preparation, timing, verification, memory, resume and offline report) before adding more axes. The first benchmark slice directly exercises the private ordered-refinement foundation before any new public operation. It measures complete calls, including root preparation, request validation and fresh invocation workspace, not only prepared partitions. New figures are deferred; existing full-sort figures are preserved.
+Future category partitions need deterministic classifiers and category counts, complete boundary and stable-member verification, and explicit distinction between output-buffer and sorting-based references. A future incremental session needs a recorded request sequence and verification of each published prefix, reporting both whole-session cost and extension latency without replacing the persistent workload with independent Top-k calls. Admit those shapes through the same capabilities, provenance, allocation and recovery boundaries before measuring them. Keep new figures deferred unless separately requested; preserve the existing full-sort figures.
 
 ## Validation and evidence
 

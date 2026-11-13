@@ -3,7 +3,8 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { algorithm } from "../catalog.ts";
+import { algorithm, comparisonGroup, operationSchema, validateOperation } from "../catalog.ts";
+import { parsePlan } from "../plan.ts";
 import { pairedBudget } from "../statistics.ts";
 import {
   caseId,
@@ -49,7 +50,7 @@ function parseManifest(value: unknown): Manifest {
   assertObject(value);
   if (
     value.schema !== 1 ||
-    value.suite_version !== 1 ||
+    (value.suite_version !== 1 && value.suite_version !== 2) ||
     !["smoke", "release", "custom"].includes(String(value.suite))
   )
     throw new Error("unsupported measurement schema or suite");
@@ -84,6 +85,12 @@ function parseManifest(value: unknown): Manifest {
     if (v.adapter !== undefined) assertString(v.adapter);
     names.add(v.name);
   }
+  const operation = value.suite_version === 2 ? parsePlan(value.plan).operation : undefined;
+  if (value.suite_version === 2) {
+    if (!operation || operation.kind === "sort")
+      throw new Error("schema 2 measurements require an explicit non-sort plan");
+    assertInteger(value.index_bytes, 1);
+  }
   const ids = new Set<string>();
   for (const c of value.cases) {
     assertObject(c);
@@ -99,6 +106,41 @@ function parseManifest(value: unknown): Manifest {
       c.variants.some((v) => !names.has(v))
     )
       throw new Error("invalid case capabilities");
+    if (value.suite_version === 1) {
+      if (c.operation !== undefined) throw new Error("schema 1 measurements are sorting only");
+    } else {
+      const actual = operationSchema.parse(c.operation);
+      validateOperation(actual, c.len);
+      if (!isDeepStrictEqual(actual, operation))
+        throw new Error("case operation differs from its plan");
+      assertObject(c.implementations);
+      if (!Array.isArray(c.omitted)) throw new Error("missing unsupported-operation evidence");
+      for (const [name, route] of Object.entries(c.implementations)) {
+        assertString(route);
+        if (!(c.variants as unknown[]).includes(name))
+          throw new Error("implementation outside case capabilities");
+      }
+      if (
+        !isDeepStrictEqual(
+          Object.keys(c.implementations).sort(),
+          [...(c.variants as string[])].sort(),
+        )
+      )
+        throw new Error("missing implementation route");
+      const omitted = c.omitted.map((entry) => {
+        assertObject(entry);
+        assertString(entry.variant);
+        assertString(entry.reason);
+        return entry.variant;
+      });
+      if (
+        !isDeepStrictEqual(
+          omitted.sort(),
+          [...names].filter((name) => !(c.variants as string[]).includes(name)).sort(),
+        )
+      )
+        throw new Error("incomplete unsupported-operation evidence");
+    }
     const id = caseId(c as unknown as Manifest["cases"][number]);
     if (ids.has(id)) throw new Error(`duplicate case ${id}`);
     ids.add(id);
@@ -106,7 +148,7 @@ function parseManifest(value: unknown): Manifest {
   return value as unknown as Manifest;
 }
 export function validateRun(dataset: Dataset): void {
-  const m = dataset.manifest;
+  const m = parseManifest(dataset.manifest);
   pairedBudget(m.blocks);
   const build = "default";
   const samples = new Map<string, Sample[]>(),
@@ -130,7 +172,7 @@ export function validateRun(dataset: Dataset): void {
       s.slot >= c.variants.length + 1 ||
       s.verified !== true ||
       ![...c.variants, "tessera-aa"].includes(s.variant) ||
-      s.group !== `${c.ty}/${c.distribution}`
+      s.group !== comparisonGroup(c)
     )
       throw new Error(`invalid or unverified sample ${s.case_id}/${s.variant}`);
     const id = `${measurementId(s.build, s.case_id, s.variant)}:${s.block}`,
@@ -158,7 +200,7 @@ export function validateRun(dataset: Dataset): void {
     const has = [...c.variants, "tessera-aa"].map((v) =>
       samples.get(measurementId(build, caseId(c), v)),
     );
-    const group = `${build}:${c.ty}/${c.distribution}`;
+    const group = `${build}:${comparisonGroup(c)}`;
     if (
       dataset.partial &&
       has.every((s) => !s) &&
@@ -178,6 +220,7 @@ export function validateRun(dataset: Dataset): void {
   for (const r of dataset.memory) {
     assertObject(r);
     assertInteger(r.peak_extra_bytes);
+
     assertString(r.case_id);
     assertString(r.variant);
     assertString(r.build);
@@ -190,6 +233,14 @@ export function validateRun(dataset: Dataset): void {
       memories.has(id)
     )
       throw new Error(`invalid or duplicate memory sample ${id}`);
+    if (m.suite_version === 2) {
+      assertInteger(r.output_bytes);
+      const expected = c.operation?.kind === "argsort" ? c.len * m.index_bytes! : 0;
+      if (r.output_bytes !== expected || r.peak_extra_bytes < r.output_bytes)
+        throw new Error(
+          "mandatory output allocation differs from the operation or exceeds its peak",
+        );
+    }
     memories.add(id);
   }
   for (const c of m.cases) {
@@ -197,7 +248,11 @@ export function validateRun(dataset: Dataset): void {
     for (const v of c.variants) {
       const adapter = m.variants.find((entry) => entry.name === v)?.adapter ?? algorithm(v).adapter;
       if (
-        (c.len <= 1000000 || c.ty === "u64" || v === "tessera" || adapter === "tessera-par") &&
+        (m.suite_version === 2 ||
+          c.len <= 1000000 ||
+          c.ty === "u64" ||
+          v === "tessera" ||
+          adapter === "tessera-par") &&
         !memories.has(measurementId(build, caseId(c), v))
       )
         throw new Error(`missing memory sample ${build}/${caseId(c)}/${v}`);
@@ -226,6 +281,7 @@ export async function loadRun(directories: string[], partial = false): Promise<D
     const memory = await readJson(join(directory, "memory-manifest-default.json"));
     assertObject(memory);
     for (const field of [
+      ...(manifest.suite_version === 2 ? ["suite_version", "plan", "cases", "index_bytes"] : []),
       "schema",
       "blocks",
       "source_sha256",

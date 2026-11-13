@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Sorting adapters and restorable, verified batch kernels.
+//! Operation adapters and restorable, verified batch kernels.
 
+#[cfg(feature = "operations")]
+mod operations;
 #[cfg(feature = "rayon")]
 mod parallel;
 
@@ -10,6 +12,8 @@ use super::{
     record::{BenchmarkRecord, CaseInput, OwnedRecord, PreparedRecords, WideRecord},
 };
 use crate::case::Row;
+#[cfg(any(test, feature = "operations"))]
+use crate::plan::Operation;
 use rdst::RadixSort;
 use std::{cmp::Reverse, hint::black_box, mem::MaybeUninit, rc::Rc};
 use voracious_radix_sort::{RadixSort as VoraciousSort, Radixable};
@@ -18,6 +22,21 @@ use voracious_radix_sort::{RadixSort as VoraciousSort, Radixable};
 pub(super) trait TesseraAdapter: BenchmarkRecord {
     /// Sorts scalar keys directly and keyed records through the by-key API.
     fn tessera(records: &mut [Self]);
+    /// Current serial slice operations; historical sorting adapters omit these APIs.
+    #[cfg(feature = "operations")]
+    fn argsort(records: &[Self]) -> Vec<usize>;
+    #[cfg(feature = "operations")]
+    fn segments(records: &mut [Self], offsets: &[usize]);
+    #[cfg(feature = "operations")]
+    fn prefix(records: &mut [Self], len: usize);
+    #[cfg(feature = "operations")]
+    fn top_k(records: &mut [Self], k: usize);
+    #[cfg(feature = "operations")]
+    fn select(records: &mut [Self], index: usize);
+    #[cfg(feature = "operations")]
+    fn rank_range(records: &mut [Self], ranks: std::ops::Range<usize>);
+    #[cfg(feature = "operations")]
+    fn select_many(records: &mut [Self], indices: &[usize]);
     /// Sorts through the independently named baseline crate.
     #[cfg(tessera_bench_revisions)]
     fn baseline(records: &mut [Self]);
@@ -63,6 +82,27 @@ macro_rules! revision_sorts {
     };
 }
 
+/// Supplies only the direct/by-key API distinction; operation behavior stays
+/// in the library and kernel preparation owns the workload/output shape.
+macro_rules! slice_operations {
+    ($argsort:ident, $segments:ident, $prefix:ident, $top_k:ident, $select:ident, $range:ident, $many:ident $(, $key:expr)?) => {
+        #[cfg(feature = "operations")]
+        fn argsort(records: &[Self]) -> Vec<usize> { tessera_sort::$argsort(records $(, $key)?) }
+        #[cfg(feature = "operations")]
+        fn segments(records: &mut [Self], offsets: &[usize]) { tessera_sort::$segments(records, offsets $(, $key)?); }
+        #[cfg(feature = "operations")]
+        fn prefix(records: &mut [Self], len: usize) { tessera_sort::$prefix(records, len $(, $key)?); }
+        #[cfg(feature = "operations")]
+        fn top_k(records: &mut [Self], k: usize) { tessera_sort::$top_k(records, k $(, $key)?); }
+        #[cfg(feature = "operations")]
+        fn select(records: &mut [Self], index: usize) { tessera_sort::$select(records, index $(, $key)?); }
+        #[cfg(feature = "operations")]
+        fn rank_range(records: &mut [Self], ranks: std::ops::Range<usize>) { tessera_sort::$range(records, ranks $(, $key)?); }
+        #[cfg(feature = "operations")]
+        fn select_many(records: &mut [Self], indices: &[usize]) { tessera_sort::$many(records, indices $(, $key)?); }
+    };
+}
+
 /// Keeps scalar adapters on Tessera's direct-key entry points.
 macro_rules! tessera_keys {
     ($($t:ty),+ $(,)?) => {$(
@@ -71,6 +111,7 @@ macro_rules! tessera_keys {
             fn tessera(records: &mut [Self]) {
                 tessera_sort::stable_sort(records);
             }
+            slice_operations!(stable_argsort, stable_sort_segments, stable_sort_prefix, stable_top_k, stable_select_nth, stable_sort_rank_range, stable_select_nth_many);
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort);
             #[cfg(feature = "rayon")]
@@ -90,6 +131,7 @@ macro_rules! tessera_records {
             fn tessera(records: &mut [Self]) {
                 tessera_sort::stable_sort_by_key(records, |r| r.key);
             }
+            slice_operations!(stable_argsort_by_key, stable_sort_segments_by_key, stable_sort_prefix_by_key, stable_top_k_by_key, stable_select_nth_by_key, stable_sort_rank_range_by_key, stable_select_nth_many_by_key, |r| r.key);
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort_by_key, |r| r.key);
             #[cfg(feature = "rayon")]
@@ -134,15 +176,15 @@ fn glidesort_sqrt<T: BenchmarkRecord>(records: &mut [T], scratch_bytes: usize) {
     glidesort::sort_with_buffer_by(records, &mut buffer, T::order);
 }
 
-/// Restorable batches with one adapter call and output verification per batch.
+/// Restorable batches of complete calls with operation-specific verification.
 pub trait Kernel {
     /// Restores every independent buffer to the original input.
     fn restore(&mut self, batch: usize);
-    /// Sorts the prepared buffers without restoring or checking them.
+    /// Executes complete calls without restoring or checking the prepared buffers.
     fn run_batch(&mut self);
     /// Verifies all buffers against the shared original and reference.
     fn check(&self) -> Result<(), String>;
-    /// Restores independent inputs, times only sorting, then checks every result and worker.
+    /// Restores independent inputs, times only operation calls, then checks results and workers.
     /// Returns an error for invalid output or threads outside the owned pool.
     fn measure_batch(&mut self, batch: usize) -> Result<std::time::Duration, String> {
         self.restore(batch);
@@ -157,13 +199,21 @@ pub trait Kernel {
     fn buffer_bytes(&self) -> usize;
     /// Returns the number of persistent workers owned by this adapter.
     fn worker_threads(&self) -> usize;
+    /// Mandatory output allocation retained through verification, per call.
+    fn output_bytes(&self) -> usize {
+        0
+    }
+    /// Exact implementation route, retained with non-sort capability evidence.
+    fn description(&self) -> &'static str;
 }
-/// Batch buffers and a monomorphized sort over one shared prepared input.
+/// Batch buffers and a monomorphized in-place call over one shared input.
 struct BatchKernel<T, F> {
     input: Rc<PreparedRecords<T>>,
     buffers: Vec<Vec<T>>,
     sort: F,
     stable: bool,
+    required: Option<Vec<std::ops::Range<usize>>>,
+    description: &'static str,
     worker_threads: usize,
 }
 impl<T: BenchmarkRecord, F: FnMut(&mut [T])> Kernel for BatchKernel<T, F> {
@@ -181,14 +231,24 @@ impl<T: BenchmarkRecord, F: FnMut(&mut [T])> Kernel for BatchKernel<T, F> {
     }
     fn check(&self) -> Result<(), String> {
         for v in &self.buffers {
-            check::check(
-                v,
-                self.input.original(),
-                self.input.reference(),
-                self.stable,
-            )?;
+            if self.input.operation().is_noop(self.input.original().len()) {
+                // No-op contracts require original order, not just membership.
+                check::check(v, self.input.original(), self.input.original(), true)?;
+            } else if let Some(ranges) = &self.required {
+                check::refinement(v, self.input.reference(), ranges)?;
+            } else {
+                check::check(
+                    v,
+                    self.input.original(),
+                    self.input.reference(),
+                    self.stable,
+                )?;
+            }
         }
         Ok(())
+    }
+    fn description(&self) -> &'static str {
+        self.description
     }
     fn buffer_bytes(&self) -> usize {
         self.input.buffer_bytes()
@@ -203,7 +263,19 @@ pub(super) fn prepare_kernel<T: BenchmarkRecord>(
     stable: bool,
     sort: impl FnMut(&mut [T]) + 'static,
 ) -> Box<dyn Kernel> {
+    prepare_call(input, stable, sort, "complete sorting call")
+}
+
+/// Prepares one complete in-place call with its result checker and route evidence.
+fn prepare_call<T: BenchmarkRecord>(
+    input: Rc<PreparedRecords<T>>,
+    stable: bool,
+    sort: impl FnMut(&mut [T]) + 'static,
+    description: &'static str,
+) -> Box<dyn Kernel> {
     Box::new(BatchKernel {
+        description,
+        required: input.operation().required_ranges(),
         input,
         buffers: Vec::new(),
         sort,
@@ -211,6 +283,25 @@ pub(super) fn prepare_kernel<T: BenchmarkRecord>(
         worker_threads: 0,
     })
 }
+/// Adapts radix extraction to index output or an in-place operation.
+fn prepare_radsort<T: BenchmarkRecord, K: radsort::Key>(
+    input: Rc<PreparedRecords<T>>,
+    key: impl Fn(&T) -> K + Copy + 'static,
+) -> Box<dyn Kernel> {
+    #[cfg(feature = "operations")]
+    if !input.operation().is_sort() {
+        if matches!(input.operation(), Operation::Argsort {}) {
+            return operations::indices(input, move |source| {
+                let mut indices: Vec<_> = (0..source.len()).collect();
+                radsort::sort_by_key(&mut indices, |&index| key(&source[index]));
+                indices
+            });
+        }
+        return operations::reference(input, move |values| radsort::sort_by_key(values, key));
+    }
+    prepare_kernel(input, true, move |values| radsort::sort_by_key(values, key))
+}
+
 /// An adapter's public name and stability contract.
 #[derive(Clone, Copy)]
 pub struct Variant {
@@ -230,6 +321,7 @@ pub fn list_variants() -> Vec<Variant> {
         .iter()
         .filter(|algorithm| {
             algorithm.adapter == "common"
+                || (algorithm.adapter == "reference" && cfg!(feature = "operations"))
                 || (cfg!(feature = "rayon") && algorithm.threads.is_some())
                 || (algorithm.adapter == "revision" && cfg!(tessera_bench_revisions))
                 || algorithm.adapter == "rust"
@@ -249,6 +341,12 @@ fn try_prepare_common<T: TesseraAdapter>(
     input: Rc<PreparedRecords<T>>,
     scratch_bytes: usize,
 ) -> Option<Box<dyn Kernel>> {
+    if !input.operation().is_sort() {
+        #[cfg(feature = "operations")]
+        return operations::prepare(v, input);
+        #[cfg(not(feature = "operations"))]
+        return None;
+    }
     #[cfg(feature = "rayon")]
     if let Some(threads) = v.threads {
         return Some(parallel::prepare(input, v.adapter, threads));
@@ -274,9 +372,7 @@ macro_rules! copy_adapter {
         let v = $v;
         let input = $input;
         match v.name {
-            "radsort" => Some(prepare_kernel(input, true, |v| {
-                radsort::sort_by_key(v, $key)
-            })),
+            "radsort" => Some(prepare_radsort(input, $key)),
             "voracious" => Some(prepare_kernel(input, true, |v| v.voracious_stable_sort())),
             "rdst" => Some(prepare_kernel(input, false, |v| v.radix_sort_unstable())),
             #[cfg(feature = "compare-native")]
@@ -290,11 +386,29 @@ impl Variant {
     pub fn supports(self, input: &CaseInput) -> bool {
         // Every CaseInput representation implements TesseraAdapter's parallel
         // operations. Preparing one here would warm and discard a real pool.
-        (cfg!(feature = "rayon") && self.threads.is_some()) || self.prepare(input, 0).is_some()
+        (input.operation().is_sort() && cfg!(feature = "rayon") && self.threads.is_some())
+            || self.prepare(input, 0).is_some()
     }
 
     /// Prepares an adapter for this input, or declines an unsupported combination.
     pub fn prepare(self, input: &CaseInput, scratch_bytes: usize) -> Option<Box<dyn Kernel>> {
+        if input.operation().is_sort() {
+            if self.adapter == "reference" {
+                return None;
+            }
+        } else if !cfg!(feature = "operations")
+            || !matches!(
+                self.name,
+                "tessera"
+                    | "tessera-full"
+                    | "std-stable"
+                    | "std-unstable"
+                    | "glidesort"
+                    | "radsort"
+            )
+        {
+            return None;
+        }
         #[cfg(feature = "compare-native")]
         {
             static LAYOUTS: std::sync::OnceLock<()> = std::sync::OnceLock::new();
@@ -303,9 +417,7 @@ impl Variant {
         match (self.name, input) {
             ("voracious", input) if !matches!(input, CaseInput::U32(_) | CaseInput::U64(_)) => None,
             ("radsort", CaseInput::OwnedRecord(v)) => {
-                Some(prepare_kernel(Rc::clone(v), true, |v| {
-                    radsort::sort_by_key(v, |r| r.key)
-                }))
+                Some(prepare_radsort(Rc::clone(v), |r| r.key))
             }
             // External radix and native adapters do not accept Reverse keys.
             // Common comparison sorts use BenchmarkRecord's reversed order;
@@ -315,7 +427,10 @@ impl Variant {
             (_, CaseInput::OwnedRecord(v)) => try_prepare_common(self, Rc::clone(v), scratch_bytes),
             (_, CaseInput::U32(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
             (_, CaseInput::U128(input)) => match self.name {
-                "radsort" => Some(prepare_kernel(Rc::clone(input), true, radsort::sort)),
+                "radsort" if input.operation().is_sort() => {
+                    Some(prepare_kernel(Rc::clone(input), true, radsort::sort))
+                }
+                "radsort" => Some(prepare_radsort(Rc::clone(input), |key| *key)),
                 "rdst" => Some(prepare_kernel(Rc::clone(input), false, |v| {
                     v.radix_sort_unstable()
                 })),
@@ -365,6 +480,7 @@ mod tests {
                     ty: ty.clone(),
                     distribution: distribution.into(),
                     len: 1000,
+                    operation: Operation::Sort {},
                 });
                 assert_eq!(input.revision_entries().len(), 4);
                 for variant in list_variants()
@@ -404,6 +520,7 @@ mod tests {
                 ty: ty.clone(),
                 distribution: "random".into(),
                 len: 32,
+                operation: Operation::Sort {},
             });
             for variant in list_variants() {
                 assert_eq!(
@@ -425,6 +542,7 @@ mod tests {
                         ty: ty.into(),
                         distribution: distribution.into(),
                         len,
+                        operation: Operation::Sort {},
                     });
                     for variant in list_variants().into_iter().filter(|v| v.threads.is_none()) {
                         let kernel = variant.prepare(&input, 32768);
@@ -462,6 +580,8 @@ mod tests {
                 v.sort();
             },
             stable: true,
+            required: None,
+            description: "test fixture",
             worker_threads: 0,
         };
         for _ in 0..9 {

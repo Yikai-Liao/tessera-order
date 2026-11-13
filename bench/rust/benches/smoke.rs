@@ -90,6 +90,10 @@ fn main() {
         |path| std::fs::read_to_string(path).expect("read benchmark plan"),
     );
     let plan = Plan::parse(&text).expect("valid benchmark plan");
+    assert!(
+        plan.operation().is_sort(),
+        "Criterion/tracking currently supports full sorting only; use tools compare algorithms for internal refinement"
+    );
     let available = list_variants();
     assert!(
         plan.algorithms().iter().all(|id| available

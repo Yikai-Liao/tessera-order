@@ -65,6 +65,41 @@ test("malformed and unsupported plans fail before execution", () => {
   assert.throws(() => selectCaseIds(ids, "^never$"), /no supported cases/);
 });
 
+test("operation overrides retain exact raw requests and reject unrelated flags", async () => {
+  const selected = await loadPlan("local", {
+    operation: "select-many",
+    indices: [99, 0, 99],
+    lengths: [100],
+  });
+  assert.equal(selected.schema, 2);
+  assert.deepEqual(selected.operation, { kind: "select-many", indices: [99, 0, 99] });
+  for (const invalid of [
+    { operation: "argsort" as const, prefixLen: 1 },
+    { operation: "top-k" as const },
+    { operation: "top-k" as const, k: 101, lengths: [100] },
+    { operation: "prefix" as const, prefixLen: 5, lengths: ["tile-next" as const] },
+    { prefixLen: 5 },
+  ])
+    await assert.rejects(loadPlan("local", invalid));
+  const result = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL("../tools/index.ts", import.meta.url)),
+      "plan",
+      "local",
+      "--operation",
+      "top-k",
+      "--k",
+      "10",
+      "--lengths",
+      "100",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(parsePlan(JSON.parse(result.stdout)).operation, { kind: "top-k", k: 10 });
+});
+
 test("plan CLI defaults to JSON and retains explicit TOML export", async () => {
   const expected = await loadPlan("local");
   for (const format of ["json", "toml"]) {

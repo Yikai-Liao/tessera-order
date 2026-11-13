@@ -5,14 +5,17 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
   caseParts,
+  comparisonGroup,
   comparisonId,
   criterionGroup,
   criterionId,
+  operationSchema,
   parseComparisonId,
   parseCriterionId,
   rawCaseParts,
 } from "./catalog.ts";
 import { decodeConfig } from "./config.ts";
+import { parsePlan } from "./plan.ts";
 
 test("both benchmark grammars match the shared language fixture", () => {
   const fixture = decodeConfig(
@@ -63,4 +66,41 @@ test("strict identities reject unknown fields without tightening historical labe
   });
   assert.deepEqual(rawCaseParts("old/id"), { input: "id", sub: "" });
   assert.equal(caseParts("not-an-id").input, "not-an-id");
+});
+
+test("operation identities and parameter admission match the shared language fixture", () => {
+  const fixture = decodeConfig(
+    readFileSync(new URL("./plans/selection.fixture.toml", import.meta.url), "utf8"),
+    "selection.fixture.toml",
+  ) as {
+    operation_case: { ty: string; distribution: string; len: number };
+    operations: { operation: unknown; comparison?: string; group?: string }[];
+  };
+  const input = fixture.operation_case;
+  for (const entry of fixture.operations) {
+    const plan = {
+      schema: 2,
+      algorithms: ["tessera"],
+      operation: entry.operation,
+      include: [{ types: [input.ty], distributions: [input.distribution], lengths: [input.len] }],
+    };
+    if (!entry.comparison) {
+      assert.throws(() => parsePlan(plan));
+      continue;
+    }
+    const operation = operationSchema.parse(entry.operation);
+    parsePlan(plan);
+    assert.equal(comparisonId({ ...input, operation }), entry.comparison);
+    assert.equal(comparisonGroup({ ...input, operation }), entry.group);
+    assert.deepEqual(parseComparisonId(entry.comparison), { ...input, seed: "s1", operation });
+    assert.throws(() => criterionId({ ...input, operation }, "api"), /full sorting only/);
+  }
+  for (const invalid of [
+    "u64/random/1000/s1/top-k/1001",
+    "u64/random/1000/s1/argsort/extra",
+    "u64/random/1000/s1/select/01",
+    "u64/random/1000/s1/rank-range/8-7",
+    "u64/random/1000/s1/select-many/0,1000",
+  ])
+    assert.throws(() => parseComparisonId(invalid));
 });

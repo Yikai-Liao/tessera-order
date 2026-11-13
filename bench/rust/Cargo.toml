@@ -11,6 +11,8 @@ layout-study = []
 # Tessera's optional parallel API; opponent pools use rayon unconditionally.
 rayon = ["tessera-sort/rayon"]
 compare-native = []
+# Current serial operation adapters; historical full-sort builds leave this off.
+operations = []
 
 [dependencies]
 rayon = "1.12"

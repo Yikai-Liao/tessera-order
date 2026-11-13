@@ -10,11 +10,14 @@ export const { summaryShapes: shapes, types } = catalog.comparison;
 export const { lengths } = catalog.inputs;
 export interface Case extends CaseIdentity {
   variants: string[];
+  omitted?: { variant: string; reason: string }[];
+  implementations?: Record<string, string>;
 }
 export interface Manifest {
   schema: number;
   suite: string;
   suite_version: number;
+  index_bytes?: number;
   build: string;
   blocks: number;
   cases: Case[];
@@ -63,6 +66,8 @@ export interface Memory {
   variant: string;
   build: string;
   peak_extra_bytes: number;
+  /** Mandatory output allocation included in the peak; zero for in-place operations. */
+  output_bytes?: number;
   verified: boolean;
 }
 export interface Dataset {

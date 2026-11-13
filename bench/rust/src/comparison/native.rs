@@ -216,6 +216,7 @@ mod tests {
                     ty: ty.id.clone(),
                     distribution: "random".into(),
                     len: 0,
+                    operation: crate::plan::Operation::Sort {},
                 }),
         );
         for algorithm in crate::plan::catalog()

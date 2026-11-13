@@ -122,7 +122,14 @@ export default defineConfig({
     nav: [
       { text: "Guide", link: "/guide/getting-started", activeMatch: "^/(guide|conformance)/" },
       { text: "How it works", link: "/explain/", activeMatch: "^/explain/" },
-      { text: "Performance", link: "/benchmarks/", activeMatch: "^/benchmarks/" },
+      {
+        text: "Performance",
+        activeMatch: "^/benchmarks/",
+        items: [
+          { text: "Algorithm comparison", link: "/benchmarks/algorithms" },
+          { text: "Main history", link: "/benchmarks/" },
+        ],
+      },
       {
         text: "Development",
         link: "/design/engine",

@@ -12,6 +12,7 @@ import {
   modeOrder,
 } from "../catalog.ts";
 import { trackingAlgorithm } from "./algorithms.ts";
+import { writeComparison } from "./comparison.ts";
 import { renderMainOverview } from "./history.ts";
 import {
   type Facet,
@@ -94,10 +95,12 @@ export async function appendRun(directory: string, input: TrackingRun) {
   await writeFile(join(directory, "preview.svg"), renderMainOverview(runs, index.cases));
 }
 
-// Usage: publish.ts ALGORITHM JOURNAL, run from the data checkout's root.
+// Usage: publish.ts ALGORITHM JOURNAL, run from the data checkout's root; also regenerates
+// `comparison.json` from every algorithm present.
 if (import.meta.main) {
   const [algorithm, journal] = process.argv.slice(2);
   const runs = parseRuns(await readFile(journal, "utf8"));
   if (runs.length !== 1) throw new Error("Expected exactly one complete run");
   await appendRun(trackingAlgorithm(algorithm).id, runs[0]);
+  await writeComparison(".");
 }

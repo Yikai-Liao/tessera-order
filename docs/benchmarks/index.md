@@ -10,37 +10,37 @@ pageClass: performance-page
 import PerformanceHistory from "../.vitepress/theme/components/PerformanceHistory.vue";
 </script>
 
-This page tracks how long Tessera takes to sort fixed inputs on main, measured on Bencher's Intel v1 Bare Metal runners. It answers three questions: whether main is getting faster overall, which cases moved and at which commit, and how long each case takes now.
+How long Tessera takes to sort fixed inputs on main, measured on Bencher's Intel v1 Bare Metal runners: whether main is getting faster, which cases moved at which commit, and how long each case takes now.
 
 <PerformanceHistory />
 
-**Filters.** Type, distribution, length and mode filter the cases independently; within a filter, any selected value matches, and "All" clears it. The trend, its group means and the table cover the matching cases.
+**Filters.** Type, distribution, length and mode filter independently; any selected value matches, and "All" clears a filter. The trend, its group means and the table cover the matching cases.
 
-**All cases.** The trend has one row per case, grouped into serial and four-thread entry points, with each group led by its geometric mean. A row's line shows its run time relative to its first measurement in the selected range; the dashed line is that reference. Blue segments are faster than it and orange segments slower. Every row has its own vertical scale with a minimum span that keeps run-to-run noise flat, so read the size of a change from the value on the right, the change at the case's latest measurement. Rows share the run positions, so a step that lines up across rows came from the same commit. A gap means the run did not measure that case, for example before it joined the plan. The headline number is the geometric mean over the matching cases.
+**All cases.** One row per case, grouped by serial and parallel entry point, each group led by its geometric mean. A row shows run time relative to its first measurement in the range (the dashed line): blue is faster, orange slower. Each row has its own vertical scale with a minimum span that keeps noise flat, so read the size of a change from the value on the right. Rows share run positions, so a step aligned across rows came from one commit; a gap means the run did not measure that case. The headline is the geometric mean over the matching cases.
 
-**Compared cases.** Clicking a row adds the case to the comparison above the trend, or removes it. The comparison scrolls with the page, so it does not obscure the trend rows. Up to four cases share one axis; each case keeps its colour while selected. **Run time** plots absolute run time on a logarithmic axis, so equal heights are equal ratios and cases of different lengths fit together. **Change %**, the default, plots `(run time / baseline − 1) × 100%`: negative is faster, positive is slower. Each case's baseline is its first comparable report in the selected range, in commit timestamp order, not the previous commit. The baseline value, SHA and UTC measurement time appear above the chart. Changing the range can change the baseline; switching either axis does not. A pale bar is Criterion's within-run confidence interval. Hovering shows the SHA, commit and measurement times in UTC, and each case's absolute time, change and baseline. Each point opens its source commit.
+**Compared cases.** Click a row to add or remove it from the comparison above the trend; up to four cases share one axis and keep their colours. **Change %** (default) plots `(run time / baseline − 1) × 100%`; **Run time** plots absolute time on a log axis. Each case's baseline is its first comparable report in the range, by commit timestamp, and is shown above the chart; changing the range can change it, switching axes does not. Pale bars are Criterion's within-run confidence intervals. Hover for SHAs, times (UTC) and baselines; click a point to open its commit.
 
-**Horizontal axis.** Both charts sort by Git committer timestamp, not author time or benchmark completion time. **Commit**, the default, gives each report an equal-width slot labelled by SHA; reruns of the same SHA stay separate, ordered by measurement time, with report identity breaking exact ties. **Time (UTC)** uses the same records and order but spaces them by elapsed commit time; reports with identical commit timestamps can overlap. Short ranges show time-of-day ticks. Older reports without a commit timestamp fall back to measurement time, with a visible notice. Git timestamps describe the commit, not a guaranteed merge order. The all-case trend always shows relative change, independent of the comparison's vertical-axis setting.
+**Horizontal axis.** Both charts order reports by Git committer timestamp. **Commit** (default) gives each report an equal slot; reruns of one SHA stay separate, ordered by measurement time. **Time (UTC)** spaces the same reports by commit time, so reports with equal timestamps can overlap. Reports without a commit timestamp fall back to measurement time, with a notice. Commit time is not a guaranteed merge order. The all-case trend always shows relative change.
 
-**Measured range and zoom.** Presets and date fields filter benchmark start time, not commit time; dates include their whole UTC day. Monthly downloads follow this measured range even when an older commit was measured later. Dragging across the comparison zooms to an inclusive range of reports on either horizontal axis; **Reset zoom** restores the measured range. Changing a preset or date clears zoom. The compared cases, both axes, filters, measured dates and zoom report identities are part of the URL, so a view can be shared.
+**Range and zoom.** Presets and dates filter benchmark start time, not commit time, and include whole UTC days; downloads follow this range. Drag across the comparison to zoom to a range of reports; **Reset zoom**, or changing the range, restores it. The URL records cases, axes, filters, dates and zoom, so a view can be shared.
 
-**Latest values.** The table lists every matching case's latest estimate, interval and change over the range; a value from an earlier run than the latest shows its date. Its checkboxes compare cases by keyboard, and the figure's description reads each row's latest change.
+**Latest values.** The table lists each matching case's latest estimate, interval and change; a value older than the latest run shows its date. Its checkboxes select compared cases by keyboard.
 
 ## Reading the trend
 
-Changes include compiler and dependency upgrades alongside library changes. Criterion intervals are within-run estimates, not cross-run regression tests, and they do not remove code-layout effects or variation between machines with the same specification. Missing measurements are absent, not passes or zeroes.
+Changes include compiler and dependency upgrades as well as library changes. Criterion intervals are within-run estimates, not cross-run regression tests, and do not remove code-layout effects or differences between machines of the same specification. Missing measurements are absent, not passes or zeroes.
 
-Both comparison modes, the trend and the latest-value table use only runs on the latest measured run's hardware specification and protocol in the measured range. This keeps the selected reports and baselines unchanged when switching axes; the page does not show different environments together, even in absolute run time. Earlier environments remain in the journals and can be inspected by selecting a measured range before the transition. Within the selected series, the latest values and baselines follow commit timestamp order. Group means chain each case's ratio to its own previous measurement, so a case that joins the plan later does not shift the mean by its own level. With an unchanged set of cases, this equals the geometric mean of the cases' own changes.
+Every view uses only runs on the latest run's hardware specification and protocol within the range, so environments are never mixed; select an earlier range to inspect older environments. Group means chain each case's ratio to its own previous measurement, so a case that joins later does not shift the mean; with an unchanged case set this equals the geometric mean of the cases' changes.
 
-The page downloads monthly JSONL from the public data branch according to the selected range and never queries the live Bencher API. See the [main tracking contract](../development/continuous-benchmarks.md#main-long-term-tracking) for coverage, publication, data access and operational limits. PR checks use their own paired comparisons.
+The page reads monthly JSONL from the public data branch and never queries the live Bencher API. Coverage, publication and limits belong to the [main tracking contract](../development/continuous-benchmarks.md#main-long-term-tracking); PR checks use their own paired comparisons.
 
 ## Embed the tracker
 
-In another Vue-enabled Markdown page, import this component and use it directly:
+In another Vue-enabled Markdown page:
 
 	<script setup>
 	import PerformanceHistory from "./path/to/PerformanceHistory.vue";
 	</script>
 	<PerformanceHistory />
 
-Optional `source` (a data-directory URL ending in `/`) and `case-id` props select another compatible dataset or the initially compared case; a URL hash with the page's view takes precedence. Ordinary webpages can embed this page with an iframe. GitHub Markdown uses the [README’s fixed SVG preview](../../README.md), which shows only the group means. Publishing measurements does not rebuild this website.
+Optional `source` (a data-directory URL ending in `/`) and `case-id` props select another compatible dataset or the initially compared case; a URL hash takes precedence. Other webpages can use an iframe. GitHub Markdown uses the [README's fixed SVG preview](../../README.md) of the group means. Publishing measurements does not rebuild this website.

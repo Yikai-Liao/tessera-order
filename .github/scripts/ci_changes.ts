@@ -46,7 +46,7 @@ const ROUTES: [RegExp, Lane[]][] = [
   [/^bench\/plot\//, ["docs"]],
   [/^bench\/tracking\/(result|history)\.ts$/, ["benchmark", "docs"]],
   [
-    /\.test\.ts$|^bench\/(code-change\.ts$|continuous\/(?!paired\.ts$)|report\/|local\/(report|counters|layout)\.ts$)|^\.github\/scripts\/|^tools\/(code|status|repository)\.ts$|^(biome|tsconfig)\.json$/,
+    /\.test\.ts$|^bench\/(code-(change|source)\.ts$|continuous\/(?!paired\.ts$)|report\/|local\/(report|counters|layout)\.ts$)|^\.github\/scripts\/|^tools\/(code|status|repository)\.ts$|^(biome|tsconfig)\.json$/,
     [],
   ],
   [

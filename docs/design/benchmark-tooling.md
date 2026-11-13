@@ -11,7 +11,7 @@
 | `bench/catalog.toml`, `catalog.ts` | Identities, labels, families, record widths, build names, suite order, paired-block and revision-sampling budgets |
 | `bench/plans/`, `plan.ts`, `config.ts` | Presets, strict schema, CLI overrides and syntax decoding |
 | `bench/workspace.ts` | Source snapshots, builds, temporary worktrees and cleanup |
-| `bench/code-change.ts` | Core-engine source scope, production-line filtering, revision/working-tree comparison and the table shared by CLI and PR reports |
+| `bench/code-change.ts`, `code-source.ts` | Core-engine source scope, Rust AST filtering, revision/working-tree comparison and the table shared by CLI and PR reports |
 | `bench/local/` | Commit comparison, adjacent sample scheduling, prepared/measured results (`model.ts`), layout and counter studies, report |
 | `bench/release.ts`, `bench/session.ts` | Preparation, retained builds and session recovery |
 | `bench/rust/` | Timing, allocation measurement and resumable journals: `case.rs` (seed-one generator shared with the continuous suite), `plan.rs`, `record.rs` (record semantics and immutable originals), `variant.rs` (capabilities and adapters), `check.rs`, `run.rs` (clock boundaries, calibration, block order), `host.rs`, `comparison/mod.rs` (CLI, provenance, persistence) |

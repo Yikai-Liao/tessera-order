@@ -383,15 +383,15 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
     input_len: usize,
     partitions: &mut [Partition<'_, '_, T>],
 ) -> Completion<T, Owner, Free> {
-    let block_size = partitions[0].blocks.block_size;
-    let local_scratch = partitions[0].blocks.scratch_blocks;
+    let block_size = partitions[0].block_size;
+    let local_scratch = partitions[0].scratch_blocks;
     let bucket_count = partitions[0].buffers.writers.len();
     let scratch_blocks = partitions.len() * local_scratch;
     let full_blocks = input_len / block_size;
     let count = scratch_blocks + full_blocks;
     let mut addresses = Vec::with_capacity(count);
     for partition in partitions.iter_mut() {
-        addresses.extend((0..local_scratch).map(|physical| partition.blocks.block_ptr(physical)));
+        addresses.extend((0..local_scratch).map(|physical| partition.block_ptr(physical)));
     }
     // SAFETY: the caller guarantees these full blocks at the common ancestor.
     addresses.extend((0..full_blocks).map(|block| unsafe { input.add(block * block_size) }));
@@ -406,8 +406,7 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
         let mut len = 0;
         for (index, partition) in partitions.iter().enumerate() {
             // SAFETY: partition inputs are block-aligned subranges of input.
-            let first_block =
-                unsafe { partition.blocks.input.offset_from(input) } as usize / block_size;
+            let first_block = unsafe { partition.input.offset_from(input) } as usize / block_size;
             for (local, prefix) in partition.bucket_blocks(bucket) {
                 if prefix == 0 {
                     continue;
@@ -490,8 +489,8 @@ pub(super) fn complete_serial<'records, T>(
     mut visit: Option<Visit<'_, 'records, T>>,
 ) -> Vec<usize> {
     assert!(partition.owns_recovery, "partition already completed");
-    let input = partition.blocks.input;
-    let len = partition.blocks.input_len;
+    let input = partition.input;
+    let len = partition.input_len;
     // SAFETY: the single guard owns this complete scatter and its scratch.
     let mut completion = unsafe {
         build_completion::<T, core::cell::RefCell<usize>, core::cell::RefCell<Vec<usize>>>(

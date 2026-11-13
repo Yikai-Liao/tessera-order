@@ -67,7 +67,7 @@ A stage's rule changes on its page, in the code and in the page's model together
 
 With the optional `rayon` feature, inputs below the parallel byte threshold and one-thread pools use the serial engine. Larger roots share `prepare` with serial sorting. The [parallel layout](../explain/block-partition.md#parallel-roots) owns the byte gates, shard clamps and block sizing.
 
-Each shard scatters its own input range with its own scratch. The source ledger is built directly from the shard chains: bucket prefixes in original shard order, over each shard's own scratch. Shard guards own recovery until every ledger table exists, then hand it over without a fallible step; no packed output is allocated.
+Each shard scatters its own input range with its own scratch. `Partition` borrows the reusable `Buffers` directly: record scratch stays in that allocation, and its capacity cannot change until completion and recovery finish. The source ledger is built directly from the shard chains: bucket prefixes in original shard order, over each shard's own scratch. Shard guards own recovery until every ledger table exists, then hand it over without a fallible step; no packed output is allocated.
 
 An equality decision partitions with the `Rank` classifier (the below/equal/above rank plus one at or above the sampled key's top-varying-bit boundary), a digit decision with `KeyDigit`. Both use the same sharded partition and band callbacks. The callback receives the bucket index, skips the complete equal bucket, and continues every other bucket without the top bit.
 

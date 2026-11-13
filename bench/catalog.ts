@@ -36,6 +36,10 @@ export const catalog = z
         family: z.string(),
         adapter: z.string(),
         threads: z.number().int().positive().optional(),
+        tracking_path: z
+          .string()
+          .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+          .optional(),
         detail: z.string().optional(),
         description: z.string().optional(),
       }),

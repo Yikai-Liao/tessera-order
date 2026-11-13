@@ -58,6 +58,14 @@ unsafe impl GlobalAlloc for Counting {
 static ALLOCATOR: Counting = Counting;
 /// Runs the memory command-line executable.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--tracking") {
+        assert_eq!(args.len(), 3, "memory --tracking PLAN OUTPUT");
+        return tessera_bench::tracking_scratch(
+            std::path::Path::new(&args[1]),
+            std::path::Path::new(&args[2]),
+        );
+    }
     tessera_bench::main(true)
 }
 

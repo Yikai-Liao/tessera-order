@@ -88,7 +88,7 @@ An independent track binding the Rust crate; see the [design](docs/design/python
 - Retain raw paired evidence beyond Actions' 14-day artifacts if longer-term offline regeneration is needed.
 - Investigate near-order, sparse-digit and skewed-key deficits with general mechanisms, not per-distribution tuning, against current-head continuous feedback.
 - Add cold-cache experiments, more seeds and threshold cases, and native-CPU placement controls for source A/B studies (existing CGU, alignment and engine-order screens are process-level). Validate alignment's dispersion across hosted CPU models; revisit multi-layout sampling only with held-out false-alert, detection and whole-job cost evidence.
-- Add hosted algorithm comparison groups after the local release report, keeping complete per-type length groups apart from revision-ratio Cloud history.
+- Accept the unified manual algorithm tracking lane: run Bare Metal pilots for every production adapter, especially the slowest wide/random and adverse cases, and confirm each remote shard completes within 300 seconds with headroom. Verify native runtime images, glidesort-sqrt scratch measurement, complete multi-shard ingestion, per-algorithm Git publication and browser loading. Workflow plumbing, local functional checks and nominal budgets alone do not satisfy remote timeout acceptance. The cross-algorithm page remains to be designed on the shared absolute JSONL/index format; keep its independent-run ratios apart from PR paired verdicts.
 
 ## Documentation figures
 

@@ -14,7 +14,7 @@ import type { TrackingCase, TrackingRun } from "./result.ts";
 const MIN_SPAN = 0.05;
 const MAJOR = 0.2;
 
-const seriesOf = (run: TrackingRun) => run.protocol + "/" + run.spec;
+const seriesOf = (run: TrackingRun) => run.algorithm + "/" + run.protocol + "/" + run.spec;
 const short = (hash: string) => hash.slice(0, 7);
 const day = (time: string) => time.slice(0, 10);
 const commit = (hash: string) => "https://github.com/Yikai-Liao/tessera-sort/commit/" + hash;

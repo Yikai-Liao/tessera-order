@@ -4,106 +4,178 @@ import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { command } from "../../tools/process.ts";
 import { repositoryRoot, runTask } from "../../tools/tasks.ts";
-import { parseCriterionId } from "../catalog.ts";
 import { loadPlan } from "../plan.ts";
+import { withComparisonWorkspace } from "../release.ts";
 import {
   benchmarkEnvironment,
   buildBenchmark,
   resolveCommit,
-  withWorkspace,
   workingTreeDirty,
 } from "../workspace.ts";
-import { runSchema, summarizeReport } from "./result.ts";
+import { trackingAlgorithm, trackingBranch } from "./algorithms.ts";
+import { mergeReports, runSchema, summarizeReport } from "./result.ts";
+import { trackingShards, validateInventory } from "./selection.ts";
 
-// CI-only: one static image and one remote job. The workflow owns credentials and publication.
+// CI-only: freeze one algorithm/image, measure complete-case shards, then publish one complete summary.
+// The workflow owns event policy, credentials and Git publication.
 const root = await repositoryRoot();
-const out = join(root, "bench/results/main");
+const algorithm = trackingAlgorithm(process.env.TRACKING_ALGORITHM ?? "tessera");
+const out = join(root, "bench/results/tracking");
 await runTask(out, false, async () => {
   if (await workingTreeDirty(root)) throw new Error("Tracking requires a clean committed checkout");
   const source = await resolveCommit(root, "HEAD");
   const commitTime = new Date(
-    await command("git", ["show", "-s", "--format=%cI", source], {
-      cwd: root,
-      capture: true,
-    }),
+    await command("git", ["show", "-s", "--format=%cI", source], { cwd: root, capture: true }),
   ).toISOString();
   const project = process.env.BENCHER_PROJECT ?? "";
-  if (!/^[a-z0-9-]+$/.test(project) || process.env.GITHUB_SHA !== source)
-    throw new Error("Expected Bencher project and exact Actions source");
+  if (
+    !/^[a-z0-9-]+$/.test(project) ||
+    process.env.GITHUB_SHA !== source ||
+    process.env.GITHUB_REF !== "refs/heads/main"
+  )
+    throw new Error("Expected Bencher project and exact main Actions source");
   await mkdir(out);
-  return withWorkspace(root, async ({ tree, target }) => {
+  const native = algorithm.adapter === "native";
+  return withComparisonWorkspace(root, native, async ({ tree, target }) => {
     const env = await benchmarkEnvironment(tree, { targetTriple: "x86_64-unknown-linux-gnu" });
-    env.CARGO_ENCODED_RUSTFLAGS += "\x1f-C\x1ftarget-feature=+crt-static";
-    const built = await buildBenchmark(tree, target, "smoke", ["rayon"], {
-      targetTriple: "x86_64-unknown-linux-gnu",
-      env,
-    });
+    if (!native) env.CARGO_ENCODED_RUSTFLAGS += "\x1f-C\x1ftarget-feature=+crt-static";
+    const features = [
+      "rayon",
+      ...(algorithm.id === "tessera" ? [] : [native ? "compare-native" : "compare"]),
+    ];
+    const built = await buildBenchmark(
+      tree,
+      target,
+      algorithm.id === "tessera" ? "smoke" : "tracking",
+      features,
+      { targetTriple: "x86_64-unknown-linux-gnu", env },
+    );
     const headers = await command("readelf", ["-l", "-d", built.executable], { capture: true });
-    if (/INTERP|\(NEEDED\)/.test(headers)) throw new Error("Benchmark is not statically linked");
+    if (!native && /INTERP|\(NEEDED\)/.test(headers))
+      throw new Error("Benchmark is not statically linked");
+    if (native) {
+      const libraries = await command("ldd", [built.executable], { capture: true });
+      if (/libtbb|libgomp|libomp/.test(libraries))
+        throw new Error("Unexpected parallel native runtime");
+    }
     const context = join(out, "image");
     await mkdir(context);
-    const executable = join(context, "benchmark");
-    await copyFile(built.executable, executable);
-    await command("strip", ["--strip-debug", executable]);
-    const plan = JSON.stringify(await loadPlan("main"));
-    await writeFile(join(context, "plan.json"), plan);
-    const ids = (
-      await command(executable, [], {
-        capture: true,
-        env: {
-          TESSERA_BENCH_PLAN: join(context, "plan.json"),
-          TESSERA_BENCH_LIST: "1",
-        },
-      })
+    await copyFile(built.executable, join(context, "benchmark"));
+    await command("strip", ["--strip-debug", join(context, "benchmark")]);
+    if (algorithm.id === "glidesort-sqrt")
+      await copyFile(join(built.executable, "..", "memory"), join(context, "memory"));
+    else await writeFile(join(context, "memory"), "unused");
+    await writeFile(join(context, "algorithm"), algorithm.id);
+    await writeFile(join(context, "plan.json"), JSON.stringify(await loadPlan("main")));
+    const listingEnv = {
+      TESSERA_BENCH_PLAN: join(context, "plan.json"),
+      TESSERA_BENCH_LIST: "1",
+      TESSERA_BENCH_ALGORITHM: algorithm.id,
+    };
+    // The smoke executable remains the plan/inventory authority, also for opponents.
+    const referenceBuild =
+      algorithm.id === "tessera"
+        ? built
+        : await buildBenchmark(tree, target, "smoke", ["rayon"], {
+            targetTriple: "x86_64-unknown-linux-gnu",
+            env,
+          });
+    const reference = (
+      await command(referenceBuild.executable, [], { capture: true, env: listingEnv })
     ).split("\n");
-    for (const mode of ["api", "par-4"])
-      await writeFile(
-        join(context, mode + ".ids"),
-        ids.filter((id) => parseCriterionId(id).mode === mode).join("\n") + "\n",
-      );
+    const inventory =
+      algorithm.id === "tessera"
+        ? { supported: reference, unsupported: [] }
+        : validateInventory(
+            JSON.parse(await command(built.executable, [], { capture: true, env: listingEnv })),
+            reference,
+            algorithm,
+          );
+    const shards = trackingShards(inventory.supported);
+    await writeFile(join(out, "inventory.json"), JSON.stringify(inventory));
+    for (const [index, ids] of shards.entries())
+      await writeFile(join(context, index + ".ids"), ids.join("\n") + "\n");
     for (const name of ["Dockerfile", "run.sh"])
       await copyFile(join(root, "bench/tracking", name), join(context, name));
-    const imageTag = `registry.bencher.dev/${project}:main-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`;
-    await command("docker", ["build", "-t", imageTag, context]);
-    await command("docker", ["run", "--rm", "--network=none", imageTag, "./benchmark", "--test"]);
-    const size = await command("docker", ["image", "inspect", imageTag, "--format", "{{.Size}}"], {
-      capture: true,
-    });
+    const imageTag = `registry.bencher.dev/${project}:${algorithm.path}-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`;
+    await command("docker", [
+      "build",
+      "--target",
+      native ? "native-runtime" : "static-runtime",
+      "-t",
+      imageTag,
+      context,
+    ]);
+    // Exercise every selected case and the real entrypoint without collecting timing evidence.
+    for (const index of shards.keys())
+      await command("docker", [
+        "run",
+        "--rm",
+        "--network=none",
+        imageTag,
+        "/app/run.sh",
+        String(index),
+        "--test",
+      ]);
     await command("docker", ["push", imageTag]);
     const image = await command(
       "docker",
       ["image", "inspect", imageTag, "--format", "{{index .RepoDigests 0}}"],
       { capture: true },
     );
-    const response = await command(
-      "bencher",
-      [
-        "run",
-        `--project=${project}`,
-        "--branch=main",
-        `--hash=${source}`,
-        "--testbed=main",
-        "--spec=intel-v1",
-        `--image=${image}`,
-        "--job-timeout=300",
-        "--adapter=rust_criterion",
-        "--format=json",
-        "--quiet",
-        "/app/run.sh",
-      ],
-      { capture: true },
-    );
-    await writeFile(join(out, "bencher.json"), response);
+    const reports = [];
+    for (const [index, ids] of shards.entries()) {
+      const response = await command(
+        "bencher",
+        [
+          "run",
+          `--project=${project}`,
+          `--branch=${trackingBranch(algorithm.path)}`,
+          `--hash=${source}`,
+          "--testbed=main",
+          "--spec=intel-v1",
+          `--image=${image}`,
+          "--job-timeout=300",
+          "--adapter=rust_criterion",
+          "--format=json",
+          "--quiet",
+          `/app/run.sh ${index}`,
+        ],
+        { capture: true },
+      );
+      await writeFile(join(out, "bencher-" + index + ".json"), response);
+      reports.push(
+        summarizeReport(JSON.parse(response), source, project, ids, trackingBranch(algorithm.path)),
+      );
+    }
     const run = runSchema.parse({
-      ...summarizeReport(JSON.parse(response), source, project, ids),
+      ...mergeReports(reports, inventory.supported),
+      algorithm: algorithm.path,
+      unsupported: inventory.unsupported,
       commit_time: commitTime,
       protocol: "criterion-main-v1",
       image,
       workflow: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`,
       rustc: built.provenance.rustc,
       rustflags: built.provenance.cargo_encoded_rustflags,
+      ...(native
+        ? {
+            native: {
+              cc: built.provenance.cc,
+              cxx: built.provenance.cxx,
+              build: built.provenance.native_build,
+            },
+          }
+        : {}),
     });
     await writeFile(join(out, run.time.slice(0, 7) + ".jsonl"), JSON.stringify(run) + "\n");
-    return { hash: source, cases: ids.length, image, image_bytes: Number(size) };
+    return {
+      algorithm: algorithm.path,
+      hash: source,
+      cases: inventory.supported.length,
+      unsupported: inventory.unsupported.length,
+      shards: shards.length,
+      image,
+    };
   });
 });

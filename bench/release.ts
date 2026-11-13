@@ -27,7 +27,7 @@ import {
 } from "./workspace.ts";
 
 /** Acquire native sources and own their link inside an isolated build workspace. */
-async function withComparisonWorkspace<T>(
+export async function withComparisonWorkspace<T>(
   root: string,
   native: boolean,
   operation: (workspace: Workspace) => Promise<T>,

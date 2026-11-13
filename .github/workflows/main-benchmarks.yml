@@ -1,10 +1,42 @@
 # SPDX-License-Identifier: BSD-2-Clause
-name: Main performance tracking
+name: Performance tracking
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      algorithm:
+        description: Algorithm to measure; all runs algorithms sequentially
+        required: true
+        type: choice
+        default: tessera
+        options:
+          - tessera
+          - all
+          - rust-std-stable
+          - rust-std-unstable
+          - glidesort
+          - glidesort-sqrt
+          - radsort
+          - voracious
+          - rdst
+          - clausecker
+          - fluxsort
+          - ips2ra
+          - ips4o
+          - vqsort
+          - x86simdsort
+          - crumsort
+          - duckdb
+          - tessera-par-1
+          - tessera-par-2
+          - tessera-par-4
+          - tessera-par-8
+          - rayon-stable-1
+          - rayon-stable-2
+          - rayon-stable-4
+          - rayon-stable-8
 
 permissions:
   contents: read
@@ -16,6 +48,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       benchmark: ${{ steps.changes.outputs.benchmark }}
+      matrix: ${{ steps.selection.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -29,20 +62,43 @@ jobs:
           BASE: ${{ github.event.before }}
         run: bun .github/scripts/ci_changes.ts --base "$BASE" --head "$GITHUB_SHA" --out "$GITHUB_OUTPUT"
 
+      - run: bun install --frozen-lockfile --ignore-scripts
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.benchmark == 'true'
+      - id: selection
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.benchmark == 'true'
+        env:
+          TRACKING_ALGORITHM: ${{ github.event_name == 'workflow_dispatch' && inputs.algorithm || 'tessera' }}
+        run: bun bench/tracking/algorithms.ts
+
   track:
     needs: changes
-    if: needs.changes.outputs.benchmark == 'true'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.benchmark == 'true')
+    name: Track (${{ matrix.algorithm }})
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     runs-on: ubuntu-24.04
     environment: benchmark
-    timeout-minutes: 45
+    timeout-minutes: 90
     permissions:
       contents: write
     env:
+      TRACKING_ALGORITHM: ${{ matrix.algorithm }}
       TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/main-tracking
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - uses: actions/cache@v6
+        if: matrix.native
+        with:
+          path: bench/vendor
+          key: native-sources-${{ runner.os }}-${{ hashFiles('bench/rust/native/sources.toml') }}
+      - name: Install native benchmark tools
+        if: matrix.native
+        timeout-minutes: 5
+        run: bash .github/scripts/install_native_tools.sh
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -55,7 +111,7 @@ jobs:
       - uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d # v0.6.16
         with:
           version: 0.6.16
-      - name: Build minimal image and measure one complete run
+      - name: Build frozen image and measure complete algorithm coverage
         env:
           BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
           BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
@@ -83,20 +139,21 @@ jobs:
             else
               git checkout --orphan "initial-$attempt"
             fi
-            bun "$GITHUB_WORKSPACE/bench/tracking/publish.ts" ../main/*.jsonl
-            git add main
+            bun "$GITHUB_WORKSPACE/bench/tracking/publish.ts" ../tracking/*.jsonl
+            git add .
             git diff --cached --quiet && break
-            git commit -s -m "chore(bench): record main performance ${GITHUB_SHA:0:7}" -m 'Assisted-by: OpenAI'
+            git commit -s -m "chore(bench): record $TRACKING_ALGORITHM performance ${GITHUB_SHA:0:7}" -m 'Assisted-by: OpenAI'
             git push origin HEAD:refs/heads/benchmark-data && break
             [ "$attempt" != 3 ] || exit 1
           done
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: main-performance-evidence
+          name: performance-evidence-${{ matrix.algorithm }}
           path: |
-            bench/results/main/*.jsonl
-            bench/results/main/bencher.json
-            bench/results/main.log
+            bench/results/tracking/*.jsonl
+            bench/results/tracking/bencher-*.json
+            bench/results/tracking/inventory.json
+            bench/results/tracking.log
           retention-days: 14
           if-no-files-found: ignore

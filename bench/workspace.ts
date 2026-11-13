@@ -76,6 +76,12 @@ export interface BuildProvenance {
   library_features?: string[];
   rustc_args?: string[];
   revisions?: { libraries: Record<string, string[]> };
+  cc?: string;
+  cxx?: string;
+  native_build?: {
+    flags: string[];
+    translation_units: { source: string; compiler: string; flags: string[] }[];
+  };
 }
 
 /** Materialize repository-local links; reject escaping targets and directory cycles.
@@ -331,7 +337,7 @@ export async function withBuildCache<T>(target: string, operation: () => Promise
 export async function buildBenchmark(
   tree: string,
   target: string,
-  name: "smoke" | "compare",
+  name: "smoke" | "tracking" | "compare",
   features: string[],
   options: {
     targetTriple?: string;
@@ -350,7 +356,7 @@ export async function buildBenchmark(
       await command(
         "cargo",
         [
-          ...(name === "smoke"
+          ...(name !== "compare"
             ? options.rustcArgs
               ? ["rustc", "--profile", "bench", "--bench", name]
               : ["bench", "--bench", name, "--no-run"]
@@ -383,6 +389,28 @@ export async function buildBenchmark(
     const frozen = await mkdtemp(join(dirname(tree), "build-"));
     const executable = join(frozen, basename(result.executable));
     await copyFile(result.executable, executable);
+    if (name === "tracking") {
+      await command(
+        "cargo",
+        [
+          "build",
+          "--release",
+          "--locked",
+          "-p",
+          "tessera-bench",
+          "--bin",
+          "memory",
+          "--target-dir",
+          target,
+          ...(options.targetTriple ? ["--target", options.targetTriple] : []),
+          "--features",
+          features.join(","),
+        ],
+        { cwd: tree, env },
+      );
+      const directory = dirname(dirname(result.executable));
+      await copyFile(join(directory, "memory"), join(frozen, "memory"));
+    }
     if (name === "compare") {
       const memory = `memory${extname(executable)}`;
       await copyFile(join(dirname(result.executable), memory), join(frozen, memory));

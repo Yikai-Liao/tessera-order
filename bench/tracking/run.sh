@@ -2,21 +2,32 @@
 # SPDX-License-Identifier: BSD-2-Clause
 set -eu
 cd /app
+case "${1:-}" in ''|*[!0-9]*) echo 'Expected shard index' >&2; exit 1;; esac
+shard=$1
 export TESSERA_BENCH_PLAN=/app/plan.json
-# Inherited harness control variables must not turn a measured run into a listing/test.
-unset TESSERA_BENCH_LIST TESSERA_BENCH_PAIRED TESSERA_BENCH_FIXED_SORTS
-# Expand the actual allowed set; never assume the runner owns CPU zero.
+export TESSERA_BENCH_ALGORITHM="$(cat algorithm)"
+unset TESSERA_BENCH_LIST TESSERA_BENCH_PAIRED TESSERA_BENCH_FIXED_SORTS TESSERA_BENCH_SCRATCH
+export TESSERA_BENCH_IDS="$(cat "$shard.ids")"
+[ -n "$TESSERA_BENCH_IDS" ]
+test_mode=false
+[ "${2:-}" != --test ] || test_mode=true
 cpus=$(awk '/^Cpus_allowed_list:/ {n=split($2,parts,","); for(i=1;i<=n;i++) {split(parts[i],r,"-"); end=r[2]==""?r[1]:r[2]; for(j=r[1];j<=end;j++) print j}}' /proc/self/status)
-set -- $cpus
-[ "$#" -ge 4 ] || { echo 'Four allowed CPUs required' >&2; exit 1; }
-serial=$1
-parallel=$1,$2,$3,$4
-# No silent fallback: changing these controls changes the measurement protocol.
-setarch x86_64 -R true
-for mode in api par-4; do
-  export TESSERA_BENCH_IDS="$(cat "$mode.ids")"
-  [ -n "$TESSERA_BENCH_IDS" ]
-  cpu=$serial
-  [ "$mode" = api ] || cpu=$parallel
-  taskset -c "$cpu" setarch x86_64 -R ./benchmark --bench --noplot
- done
+if ! "$test_mode"; then setarch x86_64 -R true; fi
+if [ "$TESSERA_BENCH_ALGORITHM" = glidesort-sqrt ]; then
+  if "$test_mode"; then ./memory --tracking plan.json scratch.json
+  else taskset -c "$(printf '%s\n' "$cpus" | head -n 1)" setarch x86_64 -R ./memory --tracking plan.json scratch.json; fi
+  export TESSERA_BENCH_SCRATCH=/app/scratch.json
+fi
+# Each phase owns exactly its advertised number of allowed CPUs; never assume CPU zero.
+for mode in $(awk -F/ '{print $NF}' "$shard.ids" | sort -u); do
+  threads=1
+  case "$mode" in api) ;; par-[1248]) threads=${mode#par-};; *) echo 'Invalid mode' >&2; exit 1;; esac
+  export TESSERA_BENCH_IDS="$(awk -F/ -v mode="$mode" '$NF == mode' "$shard.ids")"
+  if "$test_mode"; then ./benchmark --test
+  else
+    available=$(printf '%s\n' "$cpus" | wc -l)
+    [ "$available" -ge "$threads" ] || { echo 'Insufficient allowed CPUs' >&2; exit 1; }
+    cpu=$(printf '%s\n' "$cpus" | head -n "$threads" | paste -sd, -)
+    taskset -c "$cpu" setarch x86_64 -R ./benchmark --bench --noplot
+  fi
+done

@@ -42,6 +42,7 @@ const ROUTES: [RegExp, Lane[]][] = [
     /^(cpp\/|bench\/cpp\/)|^(CMakeLists\.txt|CMakePresets\.json|\.github\/workflows\/cpp-ci\.yml)$/,
     ["cpp"],
   ],
+  [/^\.github\/scripts\/install_native_tools\.sh$/, ["comparison"]],
   // Tooling that renders or reads results and never builds or times a sorting algorithm.
   [/^bench\/plot\//, ["docs"]],
   [/^bench\/tracking\/(result|history)\.ts$/, ["benchmark", "docs"]],

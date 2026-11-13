@@ -11,7 +11,8 @@ pub mod pool;
 pub mod sampling;
 #[cfg(feature = "compare")]
 pub use comparison::{
-    BenchmarkRecord, CaseInput, KernelVisitor, PreparedRecords, Variant, check, list_variants, main,
+    BenchmarkRecord, CaseInput, KernelVisitor, PreparedRecords, Variant, check, list_variants,
+    main, tracking_scratch,
 };
 
 #[cfg(feature = "compare")]

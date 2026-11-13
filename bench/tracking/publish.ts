@@ -11,6 +11,7 @@ import {
   modeName,
   modeOrder,
 } from "../catalog.ts";
+import { trackingAlgorithm, trackingAlgorithms } from "./algorithms.ts";
 import { renderMainOverview } from "./history.ts";
 import {
   type Facet,
@@ -61,8 +62,8 @@ export function trackingFacets(cases: TrackingCase[]) {
  *
  * Re-publishing an identical report regenerates the derived files without remeasuring.
  */
-export async function appendRun(directory: string, input: TrackingRun) {
-  const run = runSchema.parse(input);
+export async function appendRun(directory: string, input: TrackingRun | TrackingRun[]) {
+  const incoming = (Array.isArray(input) ? input : [input]).map((run) => runSchema.parse(run));
   await mkdir(directory, { recursive: true });
   const files = (await readdir(directory)).filter((file) => file.endsWith(".jsonl"));
   const runs = (
@@ -70,11 +71,15 @@ export async function appendRun(directory: string, input: TrackingRun) {
       files.map(async (file) => parseRuns(await readFile(join(directory, file), "utf8"))),
     )
   ).flat();
-  const previous = runs.find((entry) => entry.id === run.id);
-  if (previous) {
-    if (JSON.stringify(previous) !== JSON.stringify(run))
-      throw new Error("Report identity has different data");
-  } else runs.push(run);
+  for (const run of incoming) {
+    const previous = runs.find((entry) => entry.id === run.id);
+    if (previous) {
+      if (JSON.stringify(previous) !== JSON.stringify(run))
+        throw new Error("Report identity has different data");
+    } else runs.push(run);
+  }
+  if (new Set(runs.map((run) => run.algorithm)).size > 1)
+    throw new Error("Cannot mix algorithms in one journal");
   runs.sort((a, b) => a.time.localeCompare(b.time));
   const months = Map.groupBy(runs, (entry) => entry.time.slice(0, 7));
   for (const [month, entries] of months)
@@ -90,10 +95,40 @@ export async function appendRun(directory: string, input: TrackingRun) {
     facets: trackingFacets(cases),
   });
   await writeFile(join(directory, "index.json"), JSON.stringify(index) + "\n");
-  await writeFile(join(directory, "preview.svg"), renderMainOverview(runs, index.cases));
+  if (runs.every((run) => run.algorithm === "tessera"))
+    await writeFile(join(directory, "preview.svg"), renderMainOverview(runs, index.cases));
+}
+
+/** Publish one algorithm namespace and regenerate the catalog-derived root index.
+ * The caller owns the Git transaction and retries competing ref updates. */
+export async function publishRun(root: string, input: TrackingRun) {
+  const run = runSchema.parse(input);
+  const algorithm = trackingAlgorithm(run.algorithm);
+  await appendRun(join(root, algorithm.path), run);
+  const available = [];
+  for (const entry of trackingAlgorithms) {
+    const index = await readFile(join(root, entry.path, "index.json"), "utf8").catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+        return null;
+      },
+    );
+    if (index === null) continue;
+    indexSchema.parse(JSON.parse(index));
+    available.push({
+      id: entry.path,
+      label: entry.label,
+      path: entry.path + "/",
+      stable: entry.stable,
+      family: entry.family,
+      ...(entry.threads ? { threads: entry.threads } : {}),
+    });
+  }
+  await writeFile(join(root, "index.json"), JSON.stringify({ algorithms: available }) + "\n");
 }
 
 if (import.meta.main) {
-  const [run] = parseRuns(await readFile(process.argv[2], "utf8"));
-  await appendRun("main", run);
+  const runs = parseRuns(await readFile(process.argv[2], "utf8"));
+  if (runs.length !== 1) throw new Error("Expected exactly one complete algorithm summary");
+  await publishRun(".", runs[0]);
 }

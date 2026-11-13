@@ -16,8 +16,15 @@ import {
   renderMainOverview,
   renderMainTrend,
 } from "./history.ts";
-import { appendRun, trackingCases, trackingFacets } from "./publish.ts";
-import { indexSchema, parseRuns, runSchema, summarizeReport, type TrackingRun } from "./result.ts";
+import { appendRun, publishRun, trackingCases, trackingFacets } from "./publish.ts";
+import {
+  indexSchema,
+  mergeReports,
+  parseRuns,
+  runSchema,
+  summarizeReport,
+  type TrackingRun,
+} from "./result.ts";
 
 const PREVIEW_CASE = "rust/u64/random/65536/s1/api";
 
@@ -45,6 +52,7 @@ const report = () => ({
   ],
 });
 const run: TrackingRun = {
+  algorithm: "tessera",
   ...summarizeReport(report(), source, "example", [PREVIEW_CASE]),
   protocol: "criterion-main-v1",
   rustc: "rustc test",
@@ -52,6 +60,65 @@ const run: TrackingRun = {
   image: "registry.bencher.dev/example@sha256:" + "b".repeat(64),
   workflow: "https://github.com/test/repo/actions/runs/1",
 };
+
+test("algorithm reports require their own Cloud branch and complete disjoint shards", () => {
+  const raw = report();
+  raw.branch.name = "algorithm-rust-std-stable";
+  assert.throws(() => summarizeReport(raw, source, "example", [PREVIEW_CASE]));
+  const a = summarizeReport(raw, source, "example", [PREVIEW_CASE], raw.branch.name);
+  const other = PREVIEW_CASE.replace("random", "sorted");
+  const b = {
+    ...a,
+    id: "01a1cdb1-9445-76dd-89c4-e4220d49e6f8",
+    values: { [other]: a.values[PREVIEW_CASE] },
+  };
+  assert.deepEqual(Object.keys(mergeReports([a, b], [PREVIEW_CASE, other]).values), [
+    PREVIEW_CASE,
+    other,
+  ]);
+  for (const reports of [
+    [],
+    [a],
+    [a, a],
+    [a, { ...b, values: a.values }],
+    [a, { ...b, spec: b.id }],
+  ])
+    assert.throws(() => mergeReports(reports, [PREVIEW_CASE, other]));
+});
+
+test("root publication isolates algorithm namespaces and is idempotent", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "algorithm-history-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await publishRun(dir, run);
+  const before = await readFile(join(dir, "tessera/2026-10.jsonl"), "utf8");
+  const opponent: TrackingRun = {
+    ...run,
+    algorithm: "rust-std-stable",
+    id: "01a1cdb1-9445-76dd-89c4-e4220d49e6f8",
+  };
+  await publishRun(dir, opponent);
+  assert.equal(await readFile(join(dir, "tessera/2026-10.jsonl"), "utf8"), before);
+  assert.equal(
+    parseRuns(await readFile(join(dir, "rust-std-stable/2026-10.jsonl"), "utf8"))[0].algorithm,
+    "rust-std-stable",
+  );
+  const index = JSON.parse(await readFile(join(dir, "index.json"), "utf8"));
+  assert.deepEqual(
+    index.algorithms.map((entry: { path: string }) => entry.path),
+    ["tessera/", "rust-std-stable/"],
+  );
+  await publishRun(dir, opponent);
+  const next = { ...run, id: "01a1cdb1-9445-76dd-89c4-e4220d49e6f9" };
+  await publishRun(dir, next);
+  assert.equal(parseRuns(await readFile(join(dir, "tessera/2026-10.jsonl"), "utf8")).length, 2);
+  assert.deepEqual((await readdir(dir)).toSorted(), ["index.json", "rust-std-stable", "tessera"]);
+  await assert.rejects(publishRun(dir, { ...opponent, rustc: "conflicting" }), /different data/);
+  await assert.rejects(publishRun(dir, { ...opponent, algorithm: "../main" }));
+  assert.deepEqual(
+    comparableRuns([run, opponent]).map((entry) => entry.algorithm),
+    ["rust-std-stable"],
+  );
+});
 
 test("only complete matching absolute reports enter history", () => {
   assert.deepEqual(run.values[PREVIEW_CASE], [10, 9, 11]);

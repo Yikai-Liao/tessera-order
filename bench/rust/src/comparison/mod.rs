@@ -8,7 +8,9 @@ mod host;
 mod native;
 mod record;
 mod run;
+mod tracking;
 mod variant;
+pub use tracking::tracking_scratch;
 
 pub use check::check;
 pub use record::{BenchmarkRecord, CaseInput, PreparedRecords};

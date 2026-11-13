@@ -33,7 +33,7 @@ import {
 } from "../../../../bench/tracking/result.ts";
 
 const props = withDefaults(defineProps<{ source?: string; caseId?: string }>(), {
-  source: "https://raw.githubusercontent.com/Yikai-Liao/tessera-sort/benchmark-data/main/",
+  source: "https://raw.githubusercontent.com/Yikai-Liao/tessera-sort/benchmark-data/tessera/",
   caseId: "rust/u64/random/65536/s1/api",
 });
 type Color = ComparedCase["color"];

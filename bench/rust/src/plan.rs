@@ -622,6 +622,68 @@ mod tests {
     }
 
     #[test]
+    fn main_uses_fixed_pr_inputs_and_one_native_pair_control() {
+        let main = Plan::parse(include_str!("../../plans/main.toml"), "smoke").unwrap();
+        let mut pr = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
+        // Compare fixed PR inputs; tracking must not follow moving engine thresholds.
+        pr.include.retain(|rule| {
+            rule.lengths.as_ref().is_none_or(|lengths| {
+                lengths
+                    .iter()
+                    .all(|length| matches!(length, Length::Count(_)))
+            })
+        });
+        let serial = main.inputs().unwrap();
+        let mut expected = pr.inputs().unwrap();
+        expected.extend(
+            serial
+                .iter()
+                .filter(|case| {
+                    case.ty == "row_u32" && case.distribution == "random" && case.len == 1_000_000
+                })
+                .cloned(),
+        );
+        // Boundary cases have fixed numeric lengths, not moving aliases.
+        for (ty, len) in [("u64", 48), ("row_u64", 48)] {
+            for distribution in ["random", "sorted", "reverse", "equal"] {
+                expected.push(InputCase {
+                    ty: ty.into(),
+                    distribution: distribution.into(),
+                    len,
+                });
+            }
+        }
+        for (ty, len) in [
+            ("u64", 49),
+            ("u64", 8193),
+            ("row_u32", 49),
+            ("row_u32", 8193),
+            ("row_u64", 4097),
+        ] {
+            expected.push(InputCase {
+                ty: ty.into(),
+                distribution: "random".into(),
+                len,
+            });
+        }
+        assert_eq!(
+            serial.iter().collect::<BTreeSet<_>>(),
+            expected.iter().collect::<BTreeSet<_>>()
+        );
+        assert!(serial.iter().any(|case| case.ty == "row_u32"
+            && case.distribution == "random"
+            && case.len == 1_000_000));
+        assert_eq!(
+            main.parallel_inputs().unwrap(),
+            pr.parallel_inputs().unwrap()
+        );
+        let text = serde_json::to_string(&main).unwrap();
+        for boundary in ["insertion-max", "insertion-next", "tile-next"] {
+            assert!(!text.contains(boundary));
+        }
+    }
+
+    #[test]
     fn relative_lengths_follow_records() {
         let plan = Plan::parse(r#"{"schema":1,"harness":"smoke","algorithms":["tessera"],
             "include":[{"types":["u64","row_u64"],"distributions":["random"],"lengths":["tile-next"]}]}"#, "smoke").unwrap();

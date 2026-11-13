@@ -44,19 +44,16 @@ jobs:
           TRACKING_ALGORITHM: ${{ github.event_name == 'workflow_dispatch' && inputs.algorithm || 'tessera' }}
         run: bun bench/tracking/algorithms.ts
 
-  track:
+  # Builds need no credentials and run in parallel; each freezes one tested image as an artifact.
+  build:
     needs: changes
     if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.benchmark == 'true')
-    name: Track (${{ matrix.algorithm }})
+    name: Build (${{ matrix.algorithm }})
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     runs-on: ubuntu-24.04
-    environment: benchmark
     timeout-minutes: 45
-    permissions:
-      contents: write
     env:
       TRACKING_ALGORITHM: ${{ matrix.algorithm }}
       CC: clang
@@ -84,10 +81,59 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Build and test the frozen image
+        run: bun bench/tracking/build.ts
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tracking-build-${{ matrix.algorithm }}
+          path: |
+            bench/results/tracking-build/build.json
+            bench/results/tracking-build/image.tar
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: tracking-build-log-${{ matrix.algorithm }}
+          path: bench/results/tracking-build.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # Measurement waits for every build, then runs one algorithm at a time: Bencher has a single
+  # remote slot, and Actions concurrency groups would cancel queued jobs rather than hold them.
+  # An algorithm whose build failed fails here when its artifact is missing; the others continue.
+  track:
+    needs: [changes, build]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.benchmark == 'true') }}
+    name: Track (${{ matrix.algorithm }})
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    environment: benchmark
+    # Several remote jobs of at most five minutes each, plus Bencher queueing.
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      TRACKING_ALGORITHM: ${{ matrix.algorithm }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --ignore-scripts
       - uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d # v0.6.16
         with:
           version: 0.6.16
-      - name: Build frozen image and measure one complete run
+      - uses: actions/download-artifact@v8
+        with:
+          name: tracking-build-${{ matrix.algorithm }}
+          path: bench/results/tracking-build
+      - name: Push the frozen image and measure its remote jobs
         env:
           BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
           BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
@@ -128,7 +174,7 @@ jobs:
           name: performance-evidence-${{ matrix.algorithm }}
           path: |
             bench/results/tracking/*.jsonl
-            bench/results/tracking/bencher.json
+            bench/results/tracking/bencher-*.json
             bench/results/tracking.log
           retention-days: 14
           if-no-files-found: ignore

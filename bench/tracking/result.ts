@@ -116,6 +116,15 @@ export function summarizeReport(
   return { id: report.uuid, time: report.start_time, hash, spec: report.testbed.spec.uuid, values };
 }
 
+/** Merge one run's remote jobs; the first job supplies the run's identity and start time. */
+export function combineReports(jobs: ReturnType<typeof summarizeReport>[]) {
+  const [first, ...rest] = jobs;
+  if (!first || rest.some((job) => job.hash !== first.hash || job.spec !== first.spec))
+    throw new Error("Tracking jobs disagree on source or hardware");
+  // Each job was checked against its own disjoint inventory, so the values cannot collide.
+  return { ...first, values: Object.assign({}, ...jobs.map((job) => job.values)) };
+}
+
 /** JSONL is the only stored measurement representation, shared by writers and the browser. */
 export function parseRuns(text: string): TrackingRun[] {
   if (text && !text.endsWith("\n")) throw new Error("Truncated performance journal");

@@ -88,7 +88,6 @@ struct Bucket {
     /// The bucket index, which also selects the bucket's free-block cache.
     cache: usize,
     completed: bool,
-    panic: Option<unwind::Payload>,
 }
 
 /// Owns restoration after partition guards hand off their sources. Structured
@@ -338,7 +337,7 @@ impl Bucket {
         if self.completed {
             return;
         }
-        // No allocation, user code or scheduler call interrupts movement, so
+        // No allocation, user code or Rayon reentry interrupts movement, so
         // unwind recovery sees whole buckets. Transfer protects output and then
         // validates the source, which peers may have relocated. After g retired
         // prefixes a bucket touches at most g + 2 destination blocks. While it
@@ -349,6 +348,8 @@ impl Bucket {
             let mut free = lock(&storage.free[self.cache]);
             offset += storage.transfer(logical, self.start + offset, &mut free, self.cache);
         }
+        // Recovery must not revisit this band if its callback retains a borrow
+        // or unwinds. Completion restores the other bands after all jobs join.
         self.completed = true;
         trace::emit(|| Event::Band {
             bucket: self.cache,
@@ -363,7 +364,7 @@ impl Bucket {
             // disjoint bands, even if they share a physical block fragment.
             let band =
                 unsafe { core::slice::from_raw_parts_mut(storage.input.add(self.start), self.len) };
-            self.panic = unwind::catch(|| visit(self.cache, band)).err();
+            visit(self.cache, band);
         }
     }
 }
@@ -380,7 +381,7 @@ impl Bucket {
 unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>>(
     input: *mut T,
     input_len: usize,
-    partitions: &mut [&mut Partition<'_, '_, T>],
+    partitions: &mut [Partition<'_, '_, T>],
 ) -> Completion<T, Owner, Free> {
     let block_size = partitions[0].blocks.block_size;
     let local_scratch = partitions[0].blocks.scratch_blocks;
@@ -435,7 +436,6 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
             start,
             len,
             completed: false,
-            panic: None,
         });
         start += len;
     }
@@ -497,21 +497,11 @@ pub(super) fn complete_serial<'records, T>(
         build_completion::<T, core::cell::RefCell<usize>, core::cell::RefCell<Vec<usize>>>(
             input,
             len,
-            &mut [partition],
+            core::slice::from_mut(partition),
         )
     };
     for bucket in &mut completion.buckets {
         bucket.finish(&completion.storage, visit.as_deref_mut());
-        if bucket.panic.is_some() {
-            visit = None;
-        }
-    }
-    if let Some(payload) = completion
-        .buckets
-        .iter_mut()
-        .find_map(|bucket| bucket.panic.take())
-    {
-        unwind::resume(payload);
     }
     core::mem::take(&mut completion.ends)
 }
@@ -526,7 +516,7 @@ pub(super) fn complete_serial<'records, T>(
 pub(super) unsafe fn complete<'records, T: Send>(
     input: *mut T,
     input_len: usize,
-    partitions: &mut [&mut Partition<'records, '_, T>],
+    partitions: &mut [Partition<'records, '_, T>],
     parallel: bool,
     visit: Option<BucketVisit<'_, 'records, T>>,
 ) -> Vec<usize> {
@@ -543,7 +533,7 @@ pub(super) unsafe fn complete<'records, T: Send>(
 unsafe fn complete_with_fault<'records, T: Send>(
     input: *mut T,
     input_len: usize,
-    partitions: &mut [&mut Partition<'records, '_, T>],
+    partitions: &mut [Partition<'records, '_, T>],
     parallel: bool,
     visit: Option<BucketVisit<'_, 'records, T>>,
     fail_after: Option<usize>,
@@ -568,13 +558,6 @@ unsafe fn complete_with_fault<'records, T: Send>(
         completion.buckets.par_iter_mut().for_each(run);
     } else {
         completion.buckets.iter_mut().for_each(run);
-    }
-    if let Some(payload) = completion
-        .buckets
-        .iter_mut()
-        .find_map(|bucket| bucket.panic.take())
-    {
-        unwind::resume(payload);
     }
     core::mem::take(&mut completion.ends)
 }
@@ -796,7 +779,6 @@ mod tests {
             len: 1,
             cache: bucket,
             completed: false,
-            panic: None,
         });
         std::thread::scope(|scope| {
             for bucket in &mut buckets {
@@ -863,13 +845,12 @@ mod tests {
             );
             shards.push(sorter);
         }
-        let mut partitions: Vec<_> = shards.iter_mut().collect();
         // SAFETY: these partitions cover the records in order from their ancestor.
         let mut completion = unsafe {
             build_completion::<_, Mutex<usize>, Mutex<Vec<usize>>>(
                 input,
                 SHARDS * SHARD_LEN,
-                &mut partitions,
+                &mut shards,
             )
         };
         let storage = &completion.storage;
@@ -1005,11 +986,8 @@ mod tests {
                 let mut sorter = Partition::new(records, 4, 3, &mut buffers);
                 assert!(sorter.step(|record: &Owned| record.id * 37 % 4).is_ok());
                 let mut shards = [sorter];
-                let mut partitions: Vec<_> = shards.iter_mut().collect();
                 // SAFETY: one shard covers all records from their ancestor.
-                unsafe {
-                    complete_with_fault(input, len, &mut partitions, parallel, None, Some(0))
-                };
+                unsafe { complete_with_fault(input, len, &mut shards, parallel, None, Some(0)) };
             });
             assert!(result.is_err());
             let mut ids: Vec<_> = records.iter().map(|record| record.id).collect();

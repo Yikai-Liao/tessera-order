@@ -6,7 +6,7 @@ import { arch, cpus, platform, release } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
-import { parseCriterionId } from "../catalog.ts";
+import { inventorySchema, parseCriterionId } from "../catalog.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
@@ -32,6 +32,7 @@ import {
   type PreparedPair,
   type RevisionPair,
   readPrepared,
+  revisionThreads,
   shardCases,
   summarizeLocal,
 } from "./model.ts";
@@ -144,6 +145,7 @@ export async function buildRevisions(
   let env: NodeJS.ProcessEnv | undefined;
   const build = async (role: "baseline" | "current", seed: number | undefined) => {
     const selectedFeatures = [
+      "compare",
       ...features,
       ...simdFeatures(await readFile(manifest, "utf8")).map((feature) => `tessera-sort/${feature}`),
     ];
@@ -245,19 +247,20 @@ export async function selectedCases(
   parallel = false,
 ) {
   const list = async (binary: string) =>
-    (
-      await command(binary, ["--bench"], {
-        cwd,
-        capture: true,
-        env: {
-          TESSERA_BENCH_LIST: "1",
-          TESSERA_BENCH_PLAN: planPath,
-        },
-      })
-    )
-      .split("\n")
-      .filter(Boolean)
-      .sort();
+    inventorySchema
+      .parse(
+        JSON.parse(
+          await command(binary, ["--bench"], {
+            cwd,
+            capture: true,
+            env: {
+              TESSERA_BENCH_LIST: "1",
+              TESSERA_BENCH_PLAN: planPath,
+            },
+          }),
+        ),
+      )
+      .supported.sort();
   const current = await list(binaries.current);
   if (parallel && !current.some((id) => parseCriterionId(id).mode === "par-4"))
     throw new Error("Parallel plan did not list any four-thread cases");
@@ -346,7 +349,8 @@ export async function comparePrepared(options: {
     pair.source.catalog !== catalogHash
   )
     throw new Error("Prepared pair requires its original harness and catalog");
-  const cpu = await comparisonCpus(Boolean(plan.parallel?.length), options.cpu);
+  const parallel = revisionThreads(plan) === 4;
+  const cpu = await comparisonCpus(parallel, options.cpu);
   const binaries = { baseline: "", current: "" };
   const preparedRoot = await realpath(prepared);
   await mkdir(out, { recursive: false });
@@ -368,13 +372,7 @@ export async function comparePrepared(options: {
   }
   if (basename(binaries.baseline) !== basename(binaries.current))
     throw new Error("Prepared executables must have identical basenames");
-  const allCases = await selectedCases(
-    binaries,
-    join(out, "plan.json"),
-    undefined,
-    root,
-    Boolean(plan.parallel?.length),
-  );
+  const allCases = await selectedCases(binaries, join(out, "plan.json"), undefined, root, parallel);
   if (JSON.stringify(allCases) !== JSON.stringify(pair.cases))
     throw new Error("Prepared executable inventory differs from its recorded cases");
   const run = measurementRun(pair, cpu, options.shard);
@@ -395,7 +393,8 @@ export async function compareLocal(options: LocalOptions) {
     throw new Error("Preparation requires a complete non-layout revision pair");
   // Probe before compiling; do not silently publish an uncontrolled ASLR run.
   if (platform() === "linux") await command("setarch", ["-R", "true"]);
-  const cpu = await comparisonCpus(Boolean(options.plan.parallel?.length), options.cpu);
+  const parallel = revisionThreads(options.plan) === 4;
+  const cpu = await comparisonCpus(parallel, options.cpu);
   options = { ...options, cpu };
   if (options.layoutControl && !options.layoutSeeds)
     throw new Error("Layout controls require --layout-seeds");
@@ -431,7 +430,7 @@ export async function compareLocal(options: LocalOptions) {
         root,
         workspace,
         baseline,
-        options.plan.parallel?.length ? ["rayon"] : [],
+        parallel ? ["rayon"] : [],
         seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
         options.layoutControl,
       );
@@ -449,7 +448,7 @@ export async function compareLocal(options: LocalOptions) {
         planPath,
         options.filter,
         workspace.tree,
-        Boolean(options.plan.parallel?.length),
+        parallel,
       );
       const pair: RevisionPair = {
         schema: 1,

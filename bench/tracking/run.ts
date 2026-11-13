@@ -4,6 +4,7 @@ import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { command } from "../../tools/process.ts";
 import { repositoryRoot, runTask } from "../../tools/tasks.ts";
+import { inventorySchema, parseCriterionId } from "../catalog.ts";
 import { loadPlan } from "../plan.ts";
 import { withComparisonWorkspace } from "../release.ts";
 import {
@@ -14,7 +15,7 @@ import {
 } from "../workspace.ts";
 import { trackingAlgorithm, trackingBranch } from "./algorithms.ts";
 import { mergeReports, runSchema, summarizeReport } from "./result.ts";
-import { trackingShards, validateInventory } from "./selection.ts";
+import { trackingShards } from "./selection.ts";
 
 // CI-only: freeze one algorithm/image, measure complete-case shards, then publish one complete summary.
 // The workflow owns event policy, credentials and Git publication.
@@ -37,19 +38,16 @@ await runTask(out, false, async () => {
   await mkdir(out);
   const native = algorithm.adapter === "native";
   return withComparisonWorkspace(root, native, async ({ tree, target }) => {
-    const env = await benchmarkEnvironment(tree, { targetTriple: "x86_64-unknown-linux-gnu" });
+    const env = await benchmarkEnvironment(tree, {
+      targetTriple: "x86_64-unknown-linux-gnu",
+      env: { CC: "clang", CXX: "clang++" },
+    });
     if (!native) env.CARGO_ENCODED_RUSTFLAGS += "\x1f-C\x1ftarget-feature=+crt-static";
-    const features = [
-      "rayon",
-      ...(algorithm.id === "tessera" ? [] : [native ? "compare-native" : "compare"]),
-    ];
-    const built = await buildBenchmark(
-      tree,
-      target,
-      algorithm.id === "tessera" ? "smoke" : "tracking",
-      features,
-      { targetTriple: "x86_64-unknown-linux-gnu", env },
-    );
+    const features = ["compare", "rayon", ...(native ? ["compare-native"] : [])];
+    const built = await buildBenchmark(tree, target, "smoke", features, {
+      targetTriple: "x86_64-unknown-linux-gnu",
+      env,
+    });
     const headers = await command("readelf", ["-l", "-d", built.executable], { capture: true });
     if (!native && /INTERP|\(NEEDED\)/.test(headers))
       throw new Error("Benchmark is not statically linked");
@@ -62,39 +60,52 @@ await runTask(out, false, async () => {
     await mkdir(context);
     await copyFile(built.executable, join(context, "benchmark"));
     await command("strip", ["--strip-debug", join(context, "benchmark")]);
-    if (algorithm.id === "glidesort-sqrt")
-      await copyFile(join(built.executable, "..", "memory"), join(context, "memory"));
-    else await writeFile(join(context, "memory"), "unused");
+    if (algorithm.id === "glidesort-sqrt") {
+      const memory = await buildBenchmark(tree, target, "memory", features, {
+        profile: "bench",
+        targetTriple: "x86_64-unknown-linux-gnu",
+        env,
+      });
+      await copyFile(memory.executable, join(context, "memory"));
+    }
     await writeFile(join(context, "algorithm"), algorithm.id);
-    await writeFile(join(context, "plan.json"), JSON.stringify(await loadPlan("main")));
-    const listingEnv = {
-      TESSERA_BENCH_PLAN: join(context, "plan.json"),
-      TESSERA_BENCH_LIST: "1",
-      TESSERA_BENCH_ALGORITHM: algorithm.id,
-    };
-    // The smoke executable remains the plan/inventory authority, also for opponents.
-    const referenceBuild =
-      algorithm.id === "tessera"
-        ? built
-        : await buildBenchmark(tree, target, "smoke", ["rayon"], {
-            targetTriple: "x86_64-unknown-linux-gnu",
-            env,
-          });
-    const reference = (
-      await command(referenceBuild.executable, [], { capture: true, env: listingEnv })
-    ).split("\n");
-    const inventory =
-      algorithm.id === "tessera"
-        ? { supported: reference, unsupported: [] }
-        : validateInventory(
-            JSON.parse(await command(built.executable, [], { capture: true, env: listingEnv })),
-            reference,
-            algorithm,
-          );
+    await writeFile(
+      join(context, "plan.json"),
+      JSON.stringify(
+        await loadPlan(
+          "continuous",
+          algorithm.id === "tessera" ? {} : { algorithms: [algorithm.id] },
+        ),
+      ),
+    );
+    const inventory = inventorySchema.parse(
+      JSON.parse(
+        await command(built.executable, [], {
+          capture: true,
+          env: {
+            TESSERA_BENCH_PLAN: join(context, "plan.json"),
+            TESSERA_BENCH_LIST: "json",
+          },
+        }),
+      ),
+    );
     const shards = trackingShards(inventory.supported);
     await writeFile(join(out, "inventory.json"), JSON.stringify(inventory));
-    for (const [index, ids] of shards.entries())
+    for (const [index, ids] of shards.entries()) {
       await writeFile(join(context, index + ".ids"), ids.join("\n") + "\n");
+      if (algorithm.id === "glidesort-sqrt")
+        await writeFile(
+          join(context, `${index}.memory.json`),
+          JSON.stringify({
+            schema: 1,
+            algorithms: ["tessera"],
+            include: ids.map((id) => {
+              const { ty, distribution, len } = parseCriterionId(id);
+              return { types: [ty], distributions: [distribution], lengths: [len] };
+            }),
+          }),
+        );
+    }
     for (const name of ["Dockerfile", "run.sh"])
       await copyFile(join(root, "bench/tracking", name), join(context, name));
     const imageTag = `registry.bencher.dev/${project}:${algorithm.path}-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`;
@@ -153,7 +164,7 @@ await runTask(out, false, async () => {
       algorithm: algorithm.path,
       unsupported: inventory.unsupported,
       commit_time: commitTime,
-      protocol: "criterion-main-v1",
+      protocol: "criterion-kernel-v2",
       image,
       workflow: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`,
       rustc: built.provenance.rustc,

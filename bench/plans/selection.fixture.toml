@@ -2,7 +2,6 @@
 
 [plan]
 schema = 1
-harness = "smoke"
 algorithms = [ "tessera" ]
 
 [[plan.include]]

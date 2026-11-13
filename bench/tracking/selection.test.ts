@@ -4,11 +4,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { command } from "../../tools/process.ts";
+import { inventorySchema } from "../catalog.ts";
 import { trackingAlgorithm, trackingAlgorithms, trackingBranch } from "./algorithms.ts";
-import { trackingShards, validateInventory } from "./selection.ts";
+import { trackingShards } from "./selection.ts";
 
 const serial = "rust/u64/random/1000000/s1/api";
-const parallel = "rust/u64/random/1000000/s1/par-4";
 
 test("dispatch exposes every production algorithm and keeps auto tracking Tessera-only", async () => {
   const workflow = await readFile(
@@ -43,36 +43,17 @@ test("dispatch exposes every production algorithm and keeps auto tracking Tesser
     assert.throws(() => trackingAlgorithm(id));
 });
 
-test("capability inventory covers the shared plan without disguising thread counts", () => {
-  const reference = [serial, parallel];
-  const algorithm = trackingAlgorithm("rust-std-stable");
-  assert.deepEqual(
-    validateInventory({ supported: [serial], unsupported: [] }, reference, algorithm).supported,
-    [serial],
-  );
+test("executable inventories reject empty, overlapping or malformed pairs", () => {
+  assert.deepEqual(inventorySchema.parse({ supported: [serial], unsupported: [] }).supported, [
+    serial,
+  ]);
   for (const input of [
-    { supported: [serial], unsupported: [serial] },
     { supported: [], unsupported: [serial] },
-    { supported: [parallel], unsupported: [] },
-    { supported: [serial, serial.replace("u64", "u32")], unsupported: [] },
+    { supported: [serial], unsupported: [serial] },
+    { supported: [serial, serial], unsupported: [] },
+    { supported: ["not-a-case"], unsupported: [] },
   ])
-    assert.throws(() => validateInventory(input, reference, algorithm));
-  const eight = parallel.replace("par-4", "par-8");
-  assert.deepEqual(
-    validateInventory(
-      { supported: [eight], unsupported: [] },
-      reference,
-      trackingAlgorithm("rayon-stable-8"),
-    ).supported,
-    [eight],
-  );
-  assert.throws(() =>
-    validateInventory(
-      { supported: [parallel], unsupported: [] },
-      reference,
-      trackingAlgorithm("rayon-stable-8"),
-    ),
-  );
+    assert.throws(() => inventorySchema.parse(input));
 });
 
 test("complete-case shards preserve every budget and balance long and short cases deterministically", () => {

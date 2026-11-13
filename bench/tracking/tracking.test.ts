@@ -54,7 +54,7 @@ const report = () => ({
 const run: TrackingRun = {
   algorithm: "tessera",
   ...summarizeReport(report(), source, "example", [PREVIEW_CASE]),
-  protocol: "criterion-main-v1",
+  protocol: "criterion-kernel-v2",
   rustc: "rustc test",
   rustflags: "",
   image: "registry.bencher.dev/example@sha256:" + "b".repeat(64),

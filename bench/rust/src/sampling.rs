@@ -3,7 +3,6 @@
 //! One sample per process; stdin owns when preparation and timing may run.
 
 use std::{
-    hint::black_box,
     io::{self, BufRead, Write},
     time::{Duration, Instant},
 };
@@ -15,31 +14,17 @@ use std::{
 ///
 /// # Panics
 /// Panics on empty input, invalid requests, failed I/O or incorrect sort output.
-pub fn serve<T: Copy>(
+pub fn serve(
     id: &str,
-    input: &[T],
-    expected: &[T],
-    same: impl Fn(&T, &T) -> bool,
-    mut sort: impl FnMut(&mut [T]),
+    kernel: &mut dyn crate::Kernel,
+    records_len: usize,
     settings: &crate::plan::RevisionSampling,
 ) {
-    let batch = ((1 << 18) / input.len()).max(1);
-    let mut buffers = vec![input.to_vec(); batch];
+    let batch = crate::plan::criterion_batch_iterations(records_len) as usize;
     let mut measure = || {
-        for values in &mut buffers {
-            values.copy_from_slice(input);
-        }
-        let start = Instant::now();
-        for values in &mut buffers {
-            sort(black_box(values.as_mut_slice()));
-        }
-        let elapsed = start.elapsed();
-        assert!(
-            buffers
-                .iter()
-                .all(|values| values.iter().zip(expected).all(|(a, b)| same(a, b))),
-            "{id}: output differs from reference"
-        );
+        let elapsed = kernel
+            .measure_batch(batch)
+            .unwrap_or_else(|error| panic!("{id}: {error}"));
         (elapsed.as_nanos().max(1) as u64, batch as u64)
     };
     println!("{{\"id\":{}}}", serde_json::to_string(id).unwrap());

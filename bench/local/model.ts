@@ -2,10 +2,25 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parseCriterionId, revisionSampling } from "../catalog.ts";
+import { catalog, parseCriterionId, revisionSampling } from "../catalog.ts";
 import { type Plan, parsePlan } from "../plan.ts";
 import { summarizeRatios } from "../statistics.ts";
 import type { BuildProvenance } from "../workspace.ts";
+
+/** Validate the revision scheduler's serial/four-thread lanes from explicit algorithms. */
+export function revisionThreads(plan: Plan): 1 | 4 {
+  const selected = plan.algorithms.map(
+    (id) => catalog.algorithms.find((entry) => entry.id === id)!,
+  );
+  if (
+    selected.some((entry) => entry.threads !== undefined && entry.threads !== 4) ||
+    new Set(selected.map((entry) => entry.threads)).size !== selected.length
+  )
+    throw new Error(
+      "Revision comparisons require one algorithm per mode and support serial or four-thread modes",
+    );
+  return selected.some((entry) => entry.threads === 4) ? 4 : 1;
+}
 
 /** One deterministic partition of a complete timed-ID listing. */
 export interface Shard {
@@ -97,8 +112,7 @@ export async function readPrepared(directory: string): Promise<PreparedPair> {
   )
     throw new Error("Expected an unmeasured prepared revision pair");
   pair.plan = parsePlan(pair.plan);
-  if (pair.plan.harness !== "smoke")
-    throw new Error("Prepared comparisons require a smoke harness plan");
+  revisionThreads(pair.plan);
   return pair;
 }
 

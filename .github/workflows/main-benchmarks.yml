@@ -85,6 +85,8 @@ jobs:
       contents: write
     env:
       TRACKING_ALGORITHM: ${{ matrix.algorithm }}
+      CC: clang
+      CXX: clang++
       TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/main-tracking
     steps:
       - uses: actions/checkout@v7

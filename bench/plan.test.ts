@@ -22,8 +22,18 @@ test("presets load through the same validator and overrides replace selection", 
     lengths: [1234],
   });
   assert.deepEqual(plan.include, [{ types: ["u64"], distributions: ["random"], lengths: [1234] }]);
-  assert.equal(parsePlan(fixture.plan).harness, "smoke");
+  assert.deepEqual(parsePlan(fixture.plan).algorithms, ["tessera"]);
+  assert.deepEqual((await loadPlan("main", { algorithms: ["glidesort"] })).algorithms, [
+    "glidesort",
+  ]);
   assert.deepEqual(parsePlan(decodeConfig(JSON.stringify(plan), "plan.json")), plan);
+});
+
+test("main and PR load one shared selection without hidden cases or algorithms", async () => {
+  const pr = await loadPlan("continuous");
+  const main = await loadPlan("main");
+  assert.deepEqual(main, pr);
+  assert.deepEqual(parsePlan({ ...main, algorithms: ["glidesort"] }).algorithms, ["glidesort"]);
 });
 
 test("Reverse direct keys are opt-in comparison inputs", async () => {
@@ -40,12 +50,13 @@ test("Reverse direct keys are opt-in comparison inputs", async () => {
       defaults.include.every((rule) => rule.types && !rule.types.some((id) => types.includes(id))),
     );
   }
-  assert.throws(() => parsePlan({ ...plan, harness: "smoke", algorithms: ["tessera"] }));
+  assert.deepEqual(parsePlan({ ...plan, algorithms: ["tessera"] }).include, plan.include);
 });
 
 test("malformed and unsupported plans fail before execution", () => {
   for (const invalid of [
     { ...fixture.plan, schema: 2 },
+    { ...fixture.plan, harness: "smoke" },
     { ...fixture.plan, unexpected: true },
     { ...fixture.plan, include: [] },
     { ...fixture.plan, include: [{ types: ["u33"] }] },

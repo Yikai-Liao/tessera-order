@@ -9,11 +9,7 @@ const blockBudget = z.object({
   count: z.number().int().positive(),
   agreement: z.number().int().positive(),
 });
-const inventory = z.object({
-  types: z.array(z.string()),
-  shapes: z.array(z.string()),
-  lengths: z.array(z.number().int().positive()),
-});
+const inputDefaults = z.object({ lengths: z.array(z.number().int().positive()) });
 
 /** Language-neutral benchmark identities, presentation metadata and suite order. */
 export const catalog = z
@@ -60,8 +56,9 @@ export const catalog = z
     ),
     modes: z.array(identity),
     continuous: z.object({ testbed: z.string(), features: z.array(z.string()) }),
-    smoke: inventory,
-    comparison: inventory.extend({
+    inputs: inputDefaults,
+    comparison: z.object({
+      types: z.array(z.string()),
       summaryShapes: z.array(z.string()),
       typeGroups: z.array(
         z.object({
@@ -177,6 +174,22 @@ export function parseCriterionId(id: string) {
     throw new Error(`Invalid Criterion benchmark ID: ${id}`);
   return { ty, distribution, len: Number(length), seed, mode };
 }
+
+export const inventorySchema = z
+  .object({ supported: z.array(z.string()), unsupported: z.array(z.string()) })
+  .superRefine(({ supported, unsupported }, ctx) => {
+    const all = [...supported, ...unsupported];
+    if (!supported.length || new Set(all).size !== all.length)
+      ctx.addIssue({ code: "custom", message: "Empty or overlapping tracking inventory" });
+    for (const id of all) {
+      try {
+        parseCriterionId(id);
+      } catch {
+        ctx.addIssue({ code: "custom", message: "Invalid tracking case: " + id });
+      }
+    }
+  });
+export type BenchmarkInventory = z.infer<typeof inventorySchema>;
 
 /** Preserve raw Criterion components for local reports, including old unknown IDs. */
 export function rawCaseParts(id: string) {

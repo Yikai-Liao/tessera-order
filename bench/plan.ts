@@ -25,7 +25,6 @@ const rule = z.strictObject({
 const schema = z.strictObject({
   $comment: z.string().optional(),
   schema: z.literal(1),
-  harness: z.enum(["smoke", "comparison"]),
   algorithms: choices(ids(catalog.algorithms)),
   include: z.array(rule).min(1),
   exclude: z.array(rule).default([]),
@@ -38,32 +37,16 @@ export type CaseRule = z.infer<typeof rule>;
 export type Plan = z.infer<typeof schema>;
 export type SelectionOptions = CaseRule & { algorithms?: string[] };
 
-/** Validate selectors and retain the controls required by the chosen harness. */
+/** Validate selections without choosing a measurement protocol or adding algorithms. */
 export function parsePlan(value: unknown): Plan {
-  const plan = schema.parse(value);
-  const controls = plan.harness === "comparison" ? ["tessera", "std-stable"] : ["tessera"];
-  if (plan.harness === "smoke" && plan.algorithms.some((id) => id !== "tessera"))
-    throw new Error(
-      "The smoke harness measures Tessera only; use a comparison plan for algorithms",
-    );
-  const inventory = plan.harness === "smoke" ? catalog.smoke : catalog.comparison;
-  if (plan.parallel?.length && plan.harness !== "smoke")
-    throw new Error("Parallel API rules belong to the smoke harness");
-  for (const entry of [...plan.include, ...plan.exclude, ...(plan.parallel ?? [])]) {
-    if (
-      entry.types?.some((id) => !inventory.types.includes(id)) ||
-      entry.distributions?.some((id) => !inventory.shapes.includes(id))
-    )
-      throw new Error(`Selector is unsupported by the ${plan.harness} harness`);
-  }
-  plan.algorithms = [...new Set([...controls, ...plan.algorithms])];
-  return plan;
+  return schema.parse(value);
 }
 
 /** Load a TOML preset or a JSON/TOML file, then apply explicit axis overrides. */
 export async function loadPlan(name: string, options: SelectionOptions = {}): Promise<Plan> {
-  const path = ["local", "continuous", "main", "smoke", "release", "parallel"].includes(name)
-    ? fileURLToPath(new URL(`./plans/${name}.toml`, import.meta.url))
+  const preset = name === "main" ? "continuous" : name;
+  const path = ["local", "continuous", "smoke", "release", "parallel"].includes(preset)
+    ? fileURLToPath(new URL(`./plans/${preset}.toml`, import.meta.url))
     : name;
   const plan = schema.parse(decodeConfig(await readFile(path, "utf8"), path));
   const { algorithms, ...axes } = options;

@@ -4,7 +4,7 @@
 
 use super::{
     record::{BenchmarkRecord, PreparedRecords, WideRecord},
-    variant::{KernelVisitor, Variant},
+    variant::{Kernel, Variant, prepare_kernel},
 };
 use crate::case::Row;
 use serde_json::{Value, json};
@@ -109,15 +109,14 @@ unsafe extern "C" {
     fn bench_x86simdsort_target() -> *const c_char;
 }
 /// Creates a kernel when the native registry supports this record representation.
-pub(super) fn prepare<T: NativeRecord, V: KernelVisitor>(
+pub(super) fn prepare<T: NativeRecord>(
     v: Variant,
     input: std::rc::Rc<PreparedRecords<T>>,
-    visitor: V,
-) -> Option<V::Output> {
+) -> Option<Box<dyn Kernel>> {
     let algorithm = NativeAlgorithm::from_name(v.name)?;
     // SAFETY: The registry returns a static function pointer or NULL for these indices.
     let sort = unsafe { bench_kernel(algorithm as u32, T::TYPE as u32) }?;
-    Some(visitor.visit(input, v.stable, 0, move |values| {
+    Some(prepare_kernel(input, v.stable, move |values| {
         // SAFETY: NativeRecord binds T to the registry's C layout for TYPE.
         unsafe { sort(values.as_mut_ptr().cast(), values.len()) };
     }))
@@ -201,23 +200,24 @@ mod tests {
         let plan = crate::plan::Plan::parse(
             r#"
             schema = 1
-            harness = "comparison"
             algorithms = ["duckdb"]
             [[include]]
             lengths = [1, 2, 23, 24, 127, 128, 129, 1023, 1024, 1025, 8192]
         "#,
-            "comparison",
         )
         .unwrap();
         let mut cases = plan.inputs().unwrap();
         // The public plan requires positive lengths; the FFI also accepts empty input.
-        cases.extend(crate::plan::catalog().comparison.types.iter().map(|ty| {
-            crate::plan::InputCase {
-                ty: ty.clone(),
-                distribution: "random".into(),
-                len: 0,
-            }
-        }));
+        cases.extend(
+            crate::plan::catalog()
+                .types
+                .iter()
+                .map(|ty| crate::plan::InputCase {
+                    ty: ty.id.clone(),
+                    distribution: "random".into(),
+                    len: 0,
+                }),
+        );
         for algorithm in crate::plan::catalog()
             .algorithms
             .iter()
@@ -233,16 +233,15 @@ mod tests {
                 // This independent oracle preserves native capabilities and
                 // verifies that opt-in Reverse keys decline every native kernel.
                 let expected = match case.ty.as_str() {
-                    "reverse_u64" | "reverse_f64" => false,
-                    "u32" | "u64" | "f64" | "row_u32" | "row_u64" | "record128" | "owned" => {
-                        match variant.name {
-                            "clausecker" => case.ty == "row_u32",
-                            "vqsort" | "x86simdsort" => matches!(case.ty.as_str(), "u32" | "u64"),
-                            "duckdb" => !matches!(case.ty.as_str(), "f64" | "owned"),
-                            "fluxsort" | "ips2ra" | "ips4o" | "crumsort" => case.ty != "owned",
-                            _ => panic!("missing support expectation for {}", variant.name),
-                        }
-                    }
+                    "reverse_u64" | "reverse_f64" | "u128" => false,
+                    "u32" | "u64" | "f64" | "row_u32" | "row_u64" | "record128" | "rec128_u64"
+                    | "owned" => match variant.name {
+                        "clausecker" => case.ty == "row_u32",
+                        "vqsort" | "x86simdsort" => matches!(case.ty.as_str(), "u32" | "u64"),
+                        "duckdb" => !matches!(case.ty.as_str(), "f64" | "owned"),
+                        "fluxsort" | "ips2ra" | "ips4o" | "crumsort" => case.ty != "owned",
+                        _ => panic!("missing support expectation for {}", variant.name),
+                    },
                     _ => panic!("missing support expectation for record type {}", case.ty),
                 };
                 let input = CaseInput::new(case);

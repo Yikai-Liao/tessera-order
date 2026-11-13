@@ -337,17 +337,15 @@ export async function withBuildCache<T>(target: string, operation: () => Promise
 export async function buildBenchmark(
   tree: string,
   target: string,
-  name: "smoke" | "tracking" | "compare",
+  name: "smoke" | "compare" | "memory",
   features: string[],
   options: {
     targetTriple?: string;
     env?: NodeJS.ProcessEnv;
     rustcArgs?: string[];
-    profile?: "dev" | "release";
+    profile?: "dev" | "release" | "bench";
   } = {},
 ) {
-  if (options.profile && name !== "compare")
-    throw new Error("Explicit profiles are only supported for comparison builds");
   if (options.rustcArgs && name !== "smoke")
     throw new Error("Final rustc arguments require a smoke benchmark build");
   return withBuildCache(target, async () => {
@@ -356,19 +354,12 @@ export async function buildBenchmark(
       await command(
         "cargo",
         [
-          ...(name !== "compare"
-            ? options.rustcArgs
-              ? ["rustc", "--profile", "bench", "--bench", name]
-              : ["bench", "--bench", name, "--no-run"]
-            : [
-                "build",
-                "--profile",
-                options.profile ?? "release",
-                "--bin",
-                name,
-                "--bin",
-                "memory",
-              ]),
+          options.rustcArgs ? "rustc" : "build",
+          "--profile",
+          options.profile ?? (name === "smoke" ? "bench" : "release"),
+          name === "smoke" ? "--bench" : "--bin",
+          name,
+          ...(name === "compare" ? ["--bin", "memory"] : []),
           "--locked",
           "-p",
           "tessera-bench",
@@ -389,28 +380,6 @@ export async function buildBenchmark(
     const frozen = await mkdtemp(join(dirname(tree), "build-"));
     const executable = join(frozen, basename(result.executable));
     await copyFile(result.executable, executable);
-    if (name === "tracking") {
-      await command(
-        "cargo",
-        [
-          "build",
-          "--release",
-          "--locked",
-          "-p",
-          "tessera-bench",
-          "--bin",
-          "memory",
-          "--target-dir",
-          target,
-          ...(options.targetTriple ? ["--target", options.targetTriple] : []),
-          "--features",
-          features.join(","),
-        ],
-        { cwd: tree, env },
-      );
-      const directory = dirname(dirname(result.executable));
-      await copyFile(join(directory, "memory"), join(frozen, "memory"));
-    }
     if (name === "compare") {
       const memory = `memory${extname(executable)}`;
       await copyFile(join(dirname(result.executable), memory), join(frozen, memory));

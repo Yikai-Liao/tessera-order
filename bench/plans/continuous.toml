@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 schema = 1
-harness = "smoke"
-algorithms = [ "tessera" ]
+algorithms = [ "tessera", "tessera-par-4" ]
 exclude = []
 
 # Small random inputs exercise parallel-entry overhead and serial fallback;
@@ -135,7 +134,7 @@ distributions = [ "random", "bimodal", "sorted_tail" ]
 lengths = [ 1000000 ]
 
 [[include]]
-types = [ "u32", "row_u64" ]
+types = [ "u32", "row_u32", "row_u64" ]
 distributions = [ "random" ]
 lengths = [ 1000000 ]
 

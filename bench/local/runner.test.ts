@@ -7,8 +7,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { catalog, criterionId } from "../catalog.ts";
 import { pairedRun } from "../continuous/fixtures/paired.ts";
+import { loadPlan } from "../plan.ts";
 import { simdFeatures } from "../workspace.ts";
-import { summarizeLocal } from "./model.ts";
+import { revisionThreads, summarizeLocal } from "./model.ts";
 import { renderLocalReport } from "./report.ts";
 import { comparisonCpus, selectedCases, serialBaselineManifest } from "./runner.ts";
 import { measureSamples } from "./samples.ts";
@@ -140,8 +141,9 @@ test("revision selection checks parallel IDs from both binaries", {
     const plan = join(directory, "plan.json");
     const source = (withParallel: boolean) => `#!${process.execPath}
 if (process.env.TESSERA_BENCH_LIST !== "1" || process.env.TESSERA_BENCH_PLAN !== ${JSON.stringify(plan)}) process.exit(1);
-console.log(${JSON.stringify(serial)});
-if (${withParallel} && JSON.parse(require("node:fs").readFileSync(process.env.TESSERA_BENCH_PLAN)).parallel?.length) console.log(${JSON.stringify(parallel)});
+const supported = [${JSON.stringify(serial)}];
+if (${withParallel} && JSON.parse(require("node:fs").readFileSync(process.env.TESSERA_BENCH_PLAN)).parallel?.length) supported.push(${JSON.stringify(parallel)});
+console.log(JSON.stringify({supported, unsupported: []}));
 `;
     for (const path of Object.values(binaries))
       await writeFile(path, source(true), { mode: 0o755 });
@@ -163,6 +165,15 @@ if (${withParallel} && JSON.parse(require("node:fs").readFileSync(process.env.TE
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("revision scheduling follows selected algorithms, not the presence of parallel case rules", async () => {
+  const local = await loadPlan("local");
+  assert.equal(revisionThreads(local), 1);
+  assert.equal(revisionThreads(await loadPlan("continuous")), 4);
+  assert.equal(revisionThreads(await loadPlan("local", { algorithms: ["tessera-par-4"] })), 4);
+  assert.throws(() => revisionThreads({ ...local, algorithms: ["tessera-par-8"] }));
+  assert.throws(() => revisionThreads({ ...local, algorithms: ["tessera", "std-stable"] }));
 });
 
 test("revision comparison enables historical SIMD without changing current builds", () => {

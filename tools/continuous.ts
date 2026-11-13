@@ -30,16 +30,10 @@ export function continuousCommands(program: Command) {
   continuous
     .command("prepare [revision]")
     .description("Freeze a revision pair without timing (baseline: HEAD; plan: continuous)")
-    .option(
-      "--plan <name-or-file>",
-      "JSON/TOML smoke-harness plan or local/continuous preset",
-      "continuous",
-    )
+    .option("--plan <name-or-file>", "JSON/TOML selection or local/continuous preset", "continuous")
     .option("--out <directory>", "new prepared directory (default: bench/results/<timestamp>)")
     .action(async (baseline: string | undefined, options: { plan: string; out?: string }) => {
       const plan = await loadPlan(options.plan);
-      if (plan.harness !== "smoke")
-        throw new Error("Continuous preparation requires a smoke harness plan");
       const root = await repositoryRoot();
       const out = resultDirectory(root, options.out);
       await runTask(out, Boolean(program.opts().verbose), () =>

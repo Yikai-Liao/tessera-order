@@ -8,13 +8,10 @@ mod host;
 mod native;
 mod record;
 mod run;
-mod tracking;
 mod variant;
-pub use tracking::tracking_scratch;
 
-pub use check::check;
-pub use record::{BenchmarkRecord, CaseInput, PreparedRecords};
-pub use variant::{KernelVisitor, Variant, list_variants};
+pub use record::CaseInput;
+pub use variant::{Kernel, Variant, list_variants};
 
 use crate::plan::{InputCase, catalog};
 use serde_json::{Value, json};
@@ -54,10 +51,7 @@ impl Options {
             command,
             suite: "smoke".into(),
             group: None,
-            plan: crate::plan::Plan::parse(
-                include_str!("../../../plans/smoke.toml"),
-                "comparison",
-            )?,
+            plan: crate::plan::Plan::parse(include_str!("../../../plans/smoke.toml"))?,
             plan_path: None,
             output_dir: "bench/results/local".into(),
             sampling: run::Sampling {
@@ -114,7 +108,18 @@ impl Options {
                 _ => return Err("expected smoke or release suite".into()),
             }
         };
-        options.plan = crate::plan::Plan::parse(&text, "comparison")?;
+        options.plan = crate::plan::Plan::parse(&text)?;
+        if options.command == "run"
+            && ["tessera", "std-stable"].iter().any(|id| {
+                !options
+                    .plan
+                    .algorithms
+                    .iter()
+                    .any(|selected| selected == id)
+            })
+        {
+            return Err("paired algorithm runs require tessera and std-stable controls".into());
+        }
         let available = variant::list_variants();
         for id in &options.plan.algorithms {
             if BUILD == "default"
@@ -129,9 +134,13 @@ impl Options {
 
     /// Selects all supported cases before applying a resumable group restriction.
     fn cases(&self, group: Option<&str>) -> Result<Vec<InputCase>> {
+        // Ratios require a common cohort, including separately selected parallel inputs.
         let cases: Vec<_> = self
             .plan
             .inputs()?
+            .into_iter()
+            .chain(self.plan.parallel_inputs()?)
+            .collect::<BTreeSet<_>>()
             .into_iter()
             .filter(|case| group.is_none_or(|group| case.group() == group))
             .collect();
@@ -312,10 +321,8 @@ fn rewrite_journal(path: &Path, records: &[Value]) -> Result<()> {
 }
 
 /// Checks that scratch sizes were measured by the same source and configuration.
-fn verify_memory_build(options: &Options) -> Result<()> {
-    let path = options
-        .output_dir
-        .join(format!("memory-manifest-{BUILD}.json"));
+fn verify_memory_build(directory: &Path) -> Result<()> {
+    let path = directory.join(format!("memory-manifest-{BUILD}.json"));
     let memory: Value = serde_json::from_slice(&fs::read(path)?)?;
     let timing: Value =
         serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/provenance.json")))?;
@@ -344,6 +351,32 @@ fn verify_memory_build(options: &Options) -> Result<()> {
     Ok(())
 }
 
+/// Loads exact-case Tessera scratch budgets from the normal memory worker.
+/// Rejects incompatible builds, unverified rows and duplicate case measurements.
+///
+/// # Errors
+/// Returns an error for invalid evidence, incompatible provenance or failed I/O.
+pub fn read_scratch(directory: &Path) -> Result<std::collections::BTreeMap<String, usize>> {
+    verify_memory_build(directory)?;
+    let mut scratch = std::collections::BTreeMap::new();
+    for row in read_block_records(&directory.join("memory.jsonl"))? {
+        if row["variant"] != "tessera" || row["build"] != BUILD {
+            continue;
+        }
+        let id = row["case_id"]
+            .as_str()
+            .ok_or("missing memory case identity")?;
+        let bytes: usize = row["peak_extra_bytes"]
+            .as_u64()
+            .ok_or("invalid scratch bytes")?
+            .try_into()?;
+        if row["verified"] != true || scratch.insert(id.to_owned(), bytes).is_some() {
+            return Err("unverified or duplicate Tessera memory measurement".into());
+        }
+    }
+    Ok(scratch)
+}
+
 /// Finds Tessera's measured peak allocation size for a case.
 fn find_scratch_bytes(case: &InputCase, rows: &[Value]) -> Option<usize> {
     rows.iter()
@@ -363,7 +396,7 @@ fn validate_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
         let input = record::CaseInput::new(case);
         for v in options.variants() {
             if let Some(mut k) = v.prepare(&input, 32_768) {
-                run::measure_batch(&mut *k, 1)
+                k.measure_batch(1)
                     .map_err(|e| format!("{} {}: {e}", case.id(), v.name))?;
             }
         }
@@ -374,7 +407,6 @@ fn validate_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
 /// Resumes completed groups and records the missing paired measurements.
 fn measure_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
     prepare_output(options)?;
-    let mem_path = options.output_dir.join("memory.jsonl");
     // The memory worker owns completeness for every adapter, not just Tessera.
     // It repairs an interrupted write and skips every row already committed.
     let exe = std::env::current_exe()?.with_file_name("memory");
@@ -394,8 +426,7 @@ fn measure_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
     }
     // Keep direct memory invocations out while timing and journals are active.
     let _memory_lock = lock_worker(&options.output_dir, "memory")?;
-    verify_memory_build(options)?;
-    let mem = read_block_records(&mem_path)?;
+    let scratch = read_scratch(&options.output_dir)?;
     let path = options.output_dir.join("blocks.jsonl");
     let existing = read_block_records(&path)?;
     let completed: BTreeSet<_> = existing
@@ -422,7 +453,8 @@ fn measure_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
         start["build"] = json!(BUILD);
         append_record(&mut f, &start)?;
         for case in cases.iter().filter(|case| case.group() == group) {
-            let bytes = find_scratch_bytes(case, &mem)
+            let bytes = *scratch
+                .get(&case.id())
                 .ok_or_else(|| format!("missing Tessera memory measurement: {}", case.id()))?;
             run::measure_case(
                 case,
@@ -465,10 +497,9 @@ pub fn main(memory: bool) -> Result<()> {
         "list" => {
             for v in variant::list_variants() {
                 let supported: Vec<_> = catalog()
-                    .comparison
                     .types
                     .iter()
-                    .map(String::as_str)
+                    .map(|ty| ty.id.as_str())
                     .filter(|ty| {
                         v.supports(&record::CaseInput::new(&InputCase {
                             ty: (*ty).into(),
@@ -627,47 +658,45 @@ mod tests {
     }
 
     #[test]
-    fn memory_build_checks_configuration() {
+    fn memory_evidence_checks_configuration_and_rows() {
         let output_dir = std::env::temp_dir().join(format!(
             "tessera-memory-build-{}-{}",
             std::process::id(),
             super::BUILD
         ));
         std::fs::create_dir_all(&output_dir).unwrap();
-        let options = super::Options {
-            command: "run".into(),
-            suite: "smoke".into(),
-            group: None,
-            plan: crate::plan::Plan::parse(include_str!("../../../plans/smoke.toml"), "comparison")
-                .unwrap(),
-            plan_path: None,
-            output_dir,
-            sampling: super::run::Sampling {
-                min_sample_ns: 1_000_000,
-                prepared_cap_bytes: 1 << 20,
-                blocks: super::catalog().paired_blocks.extended.count,
-            },
-        };
-        let path = options
-            .output_dir
-            .join(format!("memory-manifest-{}.json", super::BUILD));
+        let path = output_dir.join(format!("memory-manifest-{}.json", super::BUILD));
         let timing: serde_json::Value =
             serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/provenance.json")))
                 .unwrap();
         std::fs::write(&path, serde_json::to_vec(&timing).unwrap()).unwrap();
-        super::verify_memory_build(&options).unwrap();
+        super::verify_memory_build(&output_dir).unwrap();
         for field in ["opt_level", "debug", "cc", "cxx"] {
             let mut memory = timing.clone();
             memory[field] = serde_json::json!("different");
             std::fs::write(&path, serde_json::to_vec(&memory).unwrap()).unwrap();
             assert_eq!(
-                super::verify_memory_build(&options)
+                super::verify_memory_build(&output_dir)
                     .unwrap_err()
                     .to_string(),
                 format!("memory executable differs from timing executable: {field}")
             );
         }
-        std::fs::remove_dir_all(&options.output_dir).unwrap();
+        std::fs::write(&path, serde_json::to_vec(&timing).unwrap()).unwrap();
+        let journal = output_dir.join("memory.jsonl");
+        let row = serde_json::json!({"case_id":"u64/random/49/s1", "variant":"tessera", "build":super::BUILD, "verified":true, "peak_extra_bytes":123});
+        std::fs::write(&journal, format!("{row}\n")).unwrap();
+        assert_eq!(
+            super::read_scratch(&output_dir).unwrap()["u64/random/49/s1"],
+            123
+        );
+        std::fs::write(&journal, format!("{row}\n{row}\n")).unwrap();
+        assert!(super::read_scratch(&output_dir).is_err());
+        let mut invalid = row;
+        invalid["verified"] = serde_json::json!(false);
+        std::fs::write(&journal, format!("{invalid}\n")).unwrap();
+        assert!(super::read_scratch(&output_dir).is_err());
+        std::fs::remove_dir_all(&output_dir).unwrap();
     }
 
     #[test]

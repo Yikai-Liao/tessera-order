@@ -155,7 +155,7 @@ export async function writeReport(directories: string[], partial = false) {
   const revisions = dataset.manifest.revisions;
   if (revisions) {
     markdown +=
-      "## Linked revision controls\n\nTwo named crates represent each revision, alongside the repeated primary-current A/A call. Ratios divide each placement by the current A/A mean: a slower baseline row indicates a current improvement. Compare both baseline copies and the second current copy, not only one favorable placement. Adapter entry offsets prove distinct call boundaries, not distinct internal sort bodies; inspect the retained executable before source attribution. This is a serial comparison; parallel revision process screens use smoke plans with parallel rules.\n\n";
+      "## Linked revision controls\n\nTwo named crates represent each revision, alongside the repeated primary-current A/A call. Ratios divide each placement by the current A/A mean: a slower baseline row indicates a current improvement. Compare both baseline copies and the second current copy, not only one favorable placement. Adapter entry offsets prove distinct call boundaries, not distinct internal sort bodies; inspect the retained executable before source attribution. This is a serial comparison; parallel revision process screens use the shared worker with explicit four-thread algorithms.\n\n";
     markdown += "```json\n" + JSON.stringify(revisions, null, 2) + "\n```\n\n";
   }
   const conditions = collectWarnings(dataset);

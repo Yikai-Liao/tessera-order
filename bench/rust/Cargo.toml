@@ -44,10 +44,6 @@ criterion = { version = "0.7", default-features = false, features = ["cargo_benc
 [[bench]]
 name = "smoke"
 harness = false
-
-[[bench]]
-name = "tracking"
-harness = false
 required-features = ["compare"]
 
 [lints]

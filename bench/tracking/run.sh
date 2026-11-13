@@ -5,7 +5,7 @@ cd /app
 case "${1:-}" in ''|*[!0-9]*) echo 'Expected shard index' >&2; exit 1;; esac
 shard=$1
 export TESSERA_BENCH_PLAN=/app/plan.json
-export TESSERA_BENCH_ALGORITHM="$(cat algorithm)"
+algorithm=$(cat algorithm)
 unset TESSERA_BENCH_LIST TESSERA_BENCH_PAIRED TESSERA_BENCH_FIXED_SORTS TESSERA_BENCH_SCRATCH
 export TESSERA_BENCH_IDS="$(cat "$shard.ids")"
 [ -n "$TESSERA_BENCH_IDS" ]
@@ -13,10 +13,10 @@ test_mode=false
 [ "${2:-}" != --test ] || test_mode=true
 cpus=$(awk '/^Cpus_allowed_list:/ {n=split($2,parts,","); for(i=1;i<=n;i++) {split(parts[i],r,"-"); end=r[2]==""?r[1]:r[2]; for(j=r[1];j<=end;j++) print j}}' /proc/self/status)
 if ! "$test_mode"; then setarch x86_64 -R true; fi
-if [ "$TESSERA_BENCH_ALGORITHM" = glidesort-sqrt ]; then
-  if "$test_mode"; then ./memory --tracking plan.json scratch.json
-  else taskset -c "$(printf '%s\n' "$cpus" | head -n 1)" setarch x86_64 -R ./memory --tracking plan.json scratch.json; fi
-  export TESSERA_BENCH_SCRATCH=/app/scratch.json
+if [ "$algorithm" = glidesort-sqrt ]; then
+  if "$test_mode"; then ./memory --plan "$shard.memory.json" --out "memory-$shard"
+  else taskset -c "$(printf '%s\n' "$cpus" | head -n 1)" setarch x86_64 -R ./memory --plan "$shard.memory.json" --out "memory-$shard"; fi
+  export TESSERA_BENCH_SCRATCH="/app/memory-$shard"
 fi
 # Each phase owns exactly its advertised number of allowed CPUs; never assume CPU zero.
 for mode in $(awk -F/ '{print $NF}' "$shard.ids" | sort -u); do

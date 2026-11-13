@@ -49,7 +49,8 @@ export const runSchema = z.object({
   commit_time: z.iso.datetime().optional(),
   hash: z.string().regex(/^[a-f0-9]{40}$/),
   spec: z.uuid(),
-  protocol: z.literal("criterion-main-v1"),
+  // Numeric journals share a shape across protocols; trend selection keeps them apart.
+  protocol: z.string().min(1),
   image: z.string().regex(/^registry\.bencher\.dev\/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$/),
   workflow: z
     .url()

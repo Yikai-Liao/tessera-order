@@ -5,7 +5,7 @@
 use super::record::BenchmarkRecord;
 
 /// Checks ordering, record preservation and stable tie order against the reference.
-pub fn check<T: BenchmarkRecord>(
+pub(super) fn check<T: BenchmarkRecord>(
     values: &[T],
     input: &[T],
     reference: &[T],

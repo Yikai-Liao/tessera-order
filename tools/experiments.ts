@@ -149,8 +149,6 @@ export function experimentCommands(program: Command) {
         if (options.layoutControl && !options.layoutSeeds)
           throw new InvalidArgumentError("layout controls require --layout-seeds");
         const plan = await loadPlan(options.plan ?? "local", selectAxes(options));
-        if (plan.harness !== "smoke")
-          throw new Error("Commit comparisons require a smoke harness plan");
         const root = await repositoryRoot();
         const out = resultDirectory(root, options.out);
         await runTask(out, Boolean(program.opts().verbose), () =>
@@ -198,7 +196,6 @@ export function experimentCommands(program: Command) {
         options: MeasurementOptions & { sorts: number; valgrindImage?: string },
       ) => {
         const plan = await loadPlan(options.plan ?? "local", selectAxes(options));
-        if (plan.harness !== "smoke") throw new Error("Counters require a smoke harness plan");
         const root = await repositoryRoot();
         const dirty = await workingTreeDirty(root);
         const out = resultDirectory(root, options.out);
@@ -251,8 +248,6 @@ export function experimentCommands(program: Command) {
         },
       ) => {
         const plan = await loadPlan(options.plan ?? "smoke", selectAxes(options));
-        if (plan.harness !== "comparison")
-          throw new Error("Algorithm comparisons require a comparison harness plan");
         const root = await repositoryRoot();
         const out = resultDirectory(root, options.out);
         await runTask(out, Boolean(program.opts().verbose), () =>
@@ -302,8 +297,6 @@ export function experimentCommands(program: Command) {
             ...catalog.algorithms.filter((a) => a.adapter === "revision").map((a) => a.id),
           ],
         });
-        if (plan.harness !== "comparison")
-          throw new Error("Revision comparisons require a comparison harness plan");
         const root = await repositoryRoot();
         const out = resultDirectory(root, options.out);
         await runTask(out, Boolean(program.opts().verbose), () =>
@@ -332,13 +325,9 @@ export function experimentCommands(program: Command) {
 
   addSelectionOptions(
     program.command("plan [name-or-file]"),
-    "local/continuous/smoke/release/parallel",
+    "local/continuous/main/smoke/release/parallel",
   )
-    .option(
-      "--algorithms <ids>",
-      "comma-separated algorithms (required controls are retained)",
-      parseList,
-    )
+    .option("--algorithms <ids>", "comma-separated algorithms", parseList)
     .description("Print a resolved plan without compiling or measuring")
     .addOption(
       new Option("--format <format>", "output encoding").choices(["json", "toml"]).default("json"),

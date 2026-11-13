@@ -1,171 +1,33 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Continuous Criterion measurements: serial API and exclusive four-thread API.
-//!
-//! IDs are `rust/<case_id>/<mode>`; input selection precedes generation.
+//! Criterion and paired scheduling over the shared plan, inputs and batch kernels.
 
-use criterion::{BatchSize, Criterion};
-use std::{hint::black_box, sync::OnceLock, time::Duration};
+use criterion::Criterion;
+#[cfg(feature = "layout-study")]
+use std::hint::black_box;
+use std::{collections::BTreeMap, time::Duration};
 use tessera_bench::{
-    case::{Key, Row, Wide, generate},
-    plan::{InputCase, Plan, criterion_batch_iterations, criterion_group, criterion_id},
+    CaseInput, Kernel, list_variants,
+    plan::{
+        InputCase, Plan, criterion_batch_iterations, criterion_group, criterion_id,
+        revision_sampling,
+    },
 };
 
-/// Expands both API selections without multiplying their coverage.
-fn suite(c: &mut Criterion) {
-    for case in plan().inputs().expect("nonempty benchmark plan") {
-        measure_case(c, &case, "api");
-    }
-    if cfg!(feature = "rayon") {
-        for case in plan().parallel_inputs().expect("valid parallel selection") {
-            measure_case(c, &case, "par-4");
-        }
-    }
-}
-
-/// Dispatches an input/API pair before allocating records or pool workers.
-fn measure_case(c: &mut Criterion, case: &InputCase, mode: &str) {
-    let distribution = &case.distribution;
-    let len = case.len;
-    match case.ty.as_str() {
-        "u32" => keys::<u32>(c, distribution, len, mode),
-        "u64" => keys::<u64>(c, distribution, len, mode),
-        "u128" => keys::<u128>(c, distribution, len, mode),
-        "f64" => keys::<f64>(c, distribution, len, mode),
-        "row_u32" => rows::<u32>(c, distribution, len, mode),
-        "row_u64" => rows::<u64>(c, distribution, len, mode),
-        "rec128_u64" => records(c, distribution, len, mode),
-        _ => unreachable!("validated record type"),
-    }
-}
-
-/// Measures keys against the same stable total-order reference for both APIs.
-fn keys<K: Key + Send + Sync>(c: &mut Criterion, distribution: &str, len: usize, mode: &str) {
-    let id = criterion_group!("{}", K::NAME; distribution, len);
-    if !selected(&id, mode) {
-        return;
-    }
-    let input = generate::<K>(distribution, len);
-    let mut expected = input.clone();
-    expected.sort_by(K::order);
-    if mode == "api" {
-        measure(
-            c,
-            &id,
-            mode,
-            &input,
-            &expected,
-            K::same,
-            tessera_sort::stable_sort,
-        );
-    } else {
-        #[cfg(feature = "rayon")]
-        measure_parallel(
-            c,
-            &id,
-            &input,
-            &expected,
-            K::same,
-            tessera_sort::par_stable_sort,
-        );
-    }
-}
-
-/// Measures keyed rows, including stable payload order.
-fn rows<K: Key + Send + Sync>(c: &mut Criterion, distribution: &str, len: usize, mode: &str) {
-    let id = criterion_group!("row_{}", K::NAME; distribution, len);
-    if !selected(&id, mode) {
-        return;
-    }
-    let input: Vec<Row<K>> = generate::<K>(distribution, len)
-        .into_iter()
-        .zip(0..)
-        .map(|(key, row)| Row { key, row })
-        .collect();
-    let mut expected = input.clone();
-    expected.sort_by(|a, b| a.key.order(&b.key));
-    let same = |a: &Row<K>, b: &Row<K>| a.key.same(&b.key) && a.row == b.row;
-    if mode == "api" {
-        measure(c, &id, mode, &input, &expected, same, |values| {
-            tessera_sort::stable_sort_by_key(values, |record| record.key);
-        });
-    } else {
-        #[cfg(feature = "rayon")]
-        measure_parallel(c, &id, &input, &expected, same, |values| {
-            tessera_sort::par_stable_sort_by_key(values, |record| record.key);
-        });
-    }
-}
-
-/// Measures records much wider than their keys.
-fn records(c: &mut Criterion, distribution: &str, len: usize, mode: &str) {
-    let id = criterion_group!("rec128_u64"; distribution, len);
-    if !selected(&id, mode) {
-        return;
-    }
-    let input: Vec<Wide> = generate::<u64>(distribution, len)
-        .into_iter()
-        .enumerate()
-        .map(|(index, key)| Wide::new(key, index))
-        .collect();
-    let mut expected = input.clone();
-    expected.sort_by_key(|record| record.key);
-    let same = |a: &Wide, b: &Wide| a.key == b.key && a.payload == b.payload;
-    if mode == "api" {
-        measure(c, &id, mode, &input, &expected, same, |values| {
-            tessera_sort::stable_sort_by_key(values, |record| record.key);
-        });
-    } else {
-        #[cfg(feature = "rayon")]
-        measure_parallel(c, &id, &input, &expected, same, |values| {
-            tessera_sort::par_stable_sort_by_key(values, |record| record.key);
-        });
-    }
-}
-
-/// Warms one pool before verification and joins it before the next case prepares.
-#[cfg(feature = "rayon")]
-fn measure_parallel<T: Copy + Send>(
-    c: &mut Criterion,
-    id: &str,
-    input: &[T],
-    expected: &[T],
-    same: impl Fn(&T, &T) -> bool,
-    sort: impl Fn(&mut [T]) + Sync,
-) {
-    // Criterion uses test mode unless --bench is present without --test.
-    // Build verification may oversubscribe CPUs, but measured runs may not.
-    let args = std::env::args_os().collect::<Vec<_>>();
-    let test_mode =
-        !args.iter().any(|arg| arg == "--bench") || args.iter().any(|arg| arg == "--test");
-    if !test_mode {
-        assert!(
-            std::thread::available_parallelism().unwrap().get() >= 4,
-            "four allowed CPUs are required for par-4"
-        );
-    }
-    let pool = tessera_bench::pool::BenchmarkPool::new(4);
-    measure(c, id, "par-4", input, expected, same, |values| {
-        pool.install(|| sort(values))
-    });
-}
-
-/// Verifies a complete sort, then times calls without input restoration or teardown.
-fn measure<T: Copy>(
-    c: &mut Criterion,
-    id: &str,
-    mode: &str,
-    input: &[T],
-    expected: &[T],
-    same: impl Fn(&T, &T) -> bool,
-    mut sort: impl FnMut(&mut [T]),
-) {
-    let mut values = input.to_vec();
-    sort(&mut values);
+/// All protocols consume the same restorable kernel; only their scheduling differs.
+fn measure(criterion: &mut Criterion, case: &InputCase, mode: &str, kernel: &mut dyn Kernel) {
+    let args = std::env::args().collect::<Vec<_>>();
     assert!(
-        values.iter().zip(expected).all(|(a, b)| same(a, b)),
-        "{id}/{mode}: output differs from the reference"
+        !args.iter().any(|arg| arg == "--bench")
+            || args.iter().any(|arg| arg == "--test")
+            || std::thread::available_parallelism().unwrap().get() >= kernel.worker_threads(),
+        "insufficient allowed CPUs"
     );
+    kernel.restore(1);
+    kernel.run_batch();
+    kernel.check().expect("verified output");
+    let group_id = criterion_group!("{}", case.ty; &case.distribution, case.len);
+    let id = criterion_id!(&group_id, mode);
     #[cfg(feature = "layout-study")]
     if let Ok(count) = std::env::var("TESSERA_BENCH_FIXED_SORTS") {
         let count: usize = count.parse().expect("integer fixed sort count");
@@ -173,54 +35,40 @@ fn measure<T: Copy>(
             (1..=1024).contains(&count),
             "fixed sort count must be 1..1024"
         );
-        let mut buffers = vec![input.to_vec(); count];
-        // Callgrind toggles collection at this stable symbol. Preparation,
-        // restoration and verification stay outside its dynamic call tree.
-        tessera_counted_sorts(&mut || {
-            for values in &mut buffers {
-                sort(black_box(values.as_mut_slice()));
-            }
-        });
-        assert!(
-            buffers
-                .iter()
-                .all(|values| { values.iter().zip(expected).all(|(a, b)| same(a, b)) })
-        );
-        println!(
-            "{}",
-            serde_json::json!({ "id": criterion_id!(id, mode), "sorts": count })
-        );
+        kernel.restore(count);
+        tessera_counted_sorts(&mut || kernel.run_batch());
+        kernel.check().expect("verified output");
+        println!("{}", serde_json::json!({ "id": id, "sorts": count }));
         return;
     }
-    let batch = criterion_batch_iterations(input.len());
-    let mut group = c.benchmark_group(id);
-    let settings = tessera_bench::plan::revision_sampling(input.len());
+    let settings = revision_sampling(case.len);
     if std::env::var_os("TESSERA_BENCH_PAIRED").is_some() {
-        tessera_bench::sampling::serve(
-            &criterion_id!(id, mode),
-            input,
-            expected,
-            same,
-            sort,
-            settings,
-        );
+        tessera_bench::sampling::serve(&id, kernel, case.len, settings);
         return;
     }
+    let mut group = criterion.benchmark_group(group_id);
     group
         .warm_up_time(Duration::from_millis(settings.warm_ms))
         .measurement_time(Duration::from_millis(settings.window_ms))
         .sample_size(settings.samples);
     group.bench_function(mode, |b| {
-        b.iter_batched_ref(
-            || input.to_vec(),
-            |values| sort(black_box(values.as_mut_slice())),
-            BatchSize::NumIterations(batch),
-        );
+        b.iter_custom(|iterations| {
+            let mut remaining = iterations;
+            let mut elapsed = Duration::ZERO;
+            while remaining > 0 {
+                let batch = remaining.min(criterion_batch_iterations(case.len));
+                elapsed += kernel
+                    .measure_batch(batch as usize)
+                    .expect("verified batch");
+                remaining -= batch;
+            }
+            elapsed
+        })
     });
     group.finish();
+    kernel.check().expect("verified output");
 }
 
-/// Marks one prepared batch for Callgrind's function-scoped collection.
 #[cfg(feature = "layout-study")]
 #[inline(never)]
 #[unsafe(no_mangle)]
@@ -229,32 +77,6 @@ fn tessera_counted_sorts(run: &mut dyn FnMut()) {
     black_box(());
 }
 
-/// Reads the compiled suite unless a local reproduction supplies a saved plan.
-fn plan() -> &'static Plan {
-    static PLAN: OnceLock<Plan> = OnceLock::new();
-    PLAN.get_or_init(|| {
-        let text = std::env::var("TESSERA_BENCH_PLAN").map_or_else(
-            |_| include_str!("../../plans/continuous.toml").to_owned(),
-            |path| std::fs::read_to_string(path).expect("read benchmark plan"),
-        );
-        Plan::parse(&text, "smoke").expect("valid smoke benchmark plan")
-    })
-}
-
-/// Lists the plan inventory or selects exact timed IDs before generating inputs.
-fn selected(id: &str, mode: &str) -> bool {
-    let full = criterion_id!(id, mode);
-    if std::env::var_os("TESSERA_BENCH_LIST").is_some() {
-        println!("{full}");
-        return false;
-    }
-    if let Ok(ids) = std::env::var("TESSERA_BENCH_IDS") {
-        return ids.lines().any(|selected| selected == full);
-    }
-    true
-}
-
-/// Runs Criterion with its standard command-line controls.
 fn main() {
     if std::env::var_os("TESSERA_BENCH_PAIRED").is_some() {
         let mut request = String::new();
@@ -263,7 +85,103 @@ fn main() {
             .expect("read start request");
         assert_eq!(request.trim(), "start");
     }
+    let text = std::env::var("TESSERA_BENCH_PLAN").map_or_else(
+        |_| include_str!("../../plans/continuous.toml").to_owned(),
+        |path| std::fs::read_to_string(path).expect("read benchmark plan"),
+    );
+    let plan = Plan::parse(&text).expect("valid benchmark plan");
+    let available = list_variants();
+    assert!(
+        plan.algorithms().iter().all(|id| available
+            .iter()
+            .any(|v| v.name == id && v.adapter != "revision")),
+        "unavailable algorithm"
+    );
+    let variants: Vec<_> = available
+        .into_iter()
+        .filter(|v| plan.algorithms().iter().any(|id| id == v.name))
+        .collect();
+    assert_eq!(
+        variants
+            .iter()
+            .map(|v| v.threads)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        variants.len(),
+        "Criterion requires one algorithm per API mode"
+    );
+    let mut supported = Vec::new();
+    let mut unsupported = Vec::new();
+    for variant in variants {
+        let mode = variant
+            .threads
+            .map_or_else(|| "api".into(), |n| format!("par-{n}"));
+        let mut cases = if variant.threads.is_some() {
+            plan.parallel_inputs().unwrap()
+        } else {
+            Vec::new()
+        };
+        if cases.is_empty() {
+            cases = plan.inputs().unwrap();
+        }
+        for case in cases {
+            let id = criterion_id!(
+                criterion_group!("{}", case.ty; &case.distribution, case.len),
+                &mode
+            );
+            if variant.supports(&CaseInput::new(&InputCase {
+                len: 32,
+                ..case.clone()
+            })) {
+                supported.push((variant, case, mode.clone(), id));
+            } else {
+                unsupported.push(id);
+            }
+        }
+    }
+    if std::env::var_os("TESSERA_BENCH_LIST").is_some() {
+        println!(
+            "{}",
+            serde_json::json!({"supported": supported.iter().map(|(_,_,_,id)| id).collect::<Vec<_>>(), "unsupported": unsupported})
+        );
+        return;
+    }
+    let selected = std::env::var("TESSERA_BENCH_IDS").ok();
+    if let Some(ids) = &selected {
+        assert!(
+            !ids.is_empty()
+                && ids
+                    .lines()
+                    .all(|id| supported.iter().any(|(_, _, _, expected)| expected == id)),
+            "unknown or unsupported case selection"
+        );
+    }
+    let scratch: BTreeMap<String, usize> =
+        if plan.algorithms().iter().any(|id| id == "glidesort-sqrt") {
+            tessera_bench::read_scratch(std::path::Path::new(
+                &std::env::var("TESSERA_BENCH_SCRATCH").expect("scratch measurement required"),
+            ))
+            .expect("compatible memory evidence")
+        } else {
+            BTreeMap::new()
+        };
     let mut criterion = Criterion::default().without_plots().configure_from_args();
-    suite(&mut criterion);
+    for (variant, case, mode, id) in supported {
+        if selected
+            .as_ref()
+            .is_some_and(|ids| !ids.lines().any(|selected| selected == id))
+        {
+            continue;
+        }
+        let bytes = if variant.name == "glidesort-sqrt" {
+            *scratch.get(&case.id()).expect("missing exact-case scratch")
+        } else {
+            0
+        };
+        let mut kernel = variant
+            .prepare(&CaseInput::new(&case), bytes)
+            .expect("listed capability changed");
+        measure(&mut criterion, &case, &mode, kernel.as_mut());
+    }
     criterion.final_summary();
 }

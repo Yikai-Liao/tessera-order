@@ -169,19 +169,6 @@ pub enum CaseInput {
     OwnedRecord(Rc<PreparedRecords<OwnedRecord>>),
 }
 impl CaseInput {
-    /// Preserves the smoke suite's zero-filled wide payload, including its indexed identity.
-    pub fn smoke(c: &InputCase) -> Self {
-        if c.ty != "rec128_u64" {
-            return Self::new(c);
-        }
-        Self::WideRecord(PreparedRecords::new(
-            generate::<u64>(&c.distribution, c.len)
-                .into_iter()
-                .enumerate()
-                .map(|(index, key)| WideRecord::new(key, index))
-                .collect(),
-        ))
-    }
     /// Generates and prepares the concrete record representation of a suite case.
     pub fn new(c: &InputCase) -> Self {
         match c.ty.as_str() {
@@ -228,6 +215,14 @@ impl CaseInput {
                     .into_iter()
                     .enumerate()
                     .map(|(i, key)| Row { key, row: i as u32 })
+                    .collect(),
+            )),
+            // These are distinct inputs, not harness-specific representations.
+            "rec128_u64" => Self::WideRecord(PreparedRecords::new(
+                generate::<u64>(&c.distribution, c.len)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, key)| WideRecord::new(key, index))
                     .collect(),
             )),
             "record128" => Self::WideRecord(PreparedRecords::new(

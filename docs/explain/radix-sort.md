@@ -26,7 +26,7 @@ A key has several digits. A 32-bit key read 8 bits at a time has four.
 
 **MSD (most significant digit first)** splits on the highest digit first, then sorts each bucket on its own by the next digit, recursively. It can stop early: a bucket with one record, or a bucket that fits a cheap insertion sort, needs no more digits. The textbook in-place version, **American flag sort**, permutes records inside the array with swap cycles. It needs only a counter per bucket. A swap moves a record past others that have not been examined yet, so equal keys can change order: **in-place MSD is not stable**. A stable MSD sort scatters into a buffer instead, which costs an n-record buffer again.
 
-**Block LSD**, by Clausecker and Schintke, is an LSD sort without the n-record buffer. Each pass fills buckets block by block and reuses input blocks it has finished reading as output blocks. A small table records the logical order of the blocks. The extra memory is O(√n), and the records are written back into the input once, at the end. Tessera's [block partition](block-partition.md) is this scheme, applied to one digit at a time.
+**Block LSD**, by Clausecker and Schintke, is an LSD sort without the n-record buffer. Each pass fills buckets block by block and reuses input blocks it has finished reading as output blocks. A small table records the logical order of the blocks. The extra memory is O(√n), and the records are written back into the input once, at the end. Tessera's [block partition](block-partition.md) adapts this scheme to one digit at a time, linking each bucket's blocks into a chain instead of a table.
 
 ## Side by side
 
@@ -55,13 +55,13 @@ Tessera takes **stability and O(√n) memory** from Block LSD, the **top-digit-f
 
 ## How much memory O(√n) is
 
-For a top-digit split into R = 256 buckets, the block partition needs this much memory beyond the input. An LSD pass needs a second buffer of n records. The [block partition page](block-partition.md#choosing-the-block-size) derives the formula.
+For a top-digit split into R = 256 buckets on a 64-bit target, the block partition needs this much memory beyond the input. An LSD pass needs a second buffer of n records. The [block partition page](block-partition.md#choosing-the-block-size) derives the formula.
 
 | n | 8-byte records: block partition | 8-byte records: LSD buffer | 16-byte records: block partition | 16-byte records: LSD buffer |
 |---:|---:|---:|---:|---:|
-| 10⁶ | 0.57 MiB | 7.6 MiB | 0.65 MiB | 15 MiB |
-| 10⁷ | 1.2 MiB | 76 MiB | 1.7 MiB | 153 MiB |
-| 10⁸ | 3.9 MiB | 763 MiB | 5.5 MiB | 1.5 GiB |
-| 10⁹ | 12 MiB | 7.5 GiB | 17 MiB | 15 GiB |
+| 10⁶ | 1.9 MiB | 7.6 MiB | 2.7 MiB | 15 MiB |
+| 10⁷ | 5.9 MiB | 76 MiB | 8.4 MiB | 153 MiB |
+| 10⁸ | 19 MiB | 763 MiB | 26 MiB | 1.5 GiB |
+| 10⁹ | 59 MiB | 7.5 GiB | 84 MiB | 15 GiB |
 
 The tile buffer and its cached bucket IDs come on top of these numbers; see [memory](index.md#memory).

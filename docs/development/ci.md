@@ -1,8 +1,6 @@
 # Continuous integration
 
-[`ci.yml`](../../.github/workflows/ci.yml) decides which engine, comparison, benchmark and site checks a change needs, runs the repository-wide checks, and folds every result into the one required check, `ci-ok`. A language's checks are a reusable workflow that `ci.yml` calls only when its paths changed; [`ci_changes.ts`](../../.github/scripts/ci_changes.ts) holds the rules and its tests.
-
-The router uses the merge base and the first matching row of the `ROUTES` table in `ci_changes.ts`, one row per path owner. Repository formatting, tooling type checks and tooling tests run on every change; additional jobs follow the changed boundary:
+[`ci.yml`](../../.github/workflows/ci.yml) decides which engine, comparison, benchmark and site checks a change needs, runs the repository-wide checks and folds every result into the one required check, `ci-ok`. Each language's checks are a reusable workflow called only when its paths changed. [`ci_changes.ts`](../../.github/scripts/ci_changes.ts) holds the rules and their tests: the router diffs against the merge base and takes the first matching row of its `ROUTES` table, one row per path owner. Formatting, tooling type checks and tooling tests run on every change; other jobs follow the changed boundary:
 
 | Changed boundary | Additional automatic checks |
 |---|---|
@@ -16,13 +14,13 @@ The router uses the merge base and the first matching row of the `ROUTES` table 
 | Markdown, site inputs or shared figure templates | Docs |
 | C++ library inputs | C++ validation, when its manifest exists |
 
-An engine-only PR does not fetch third-party native sources, install TBB or run the external algorithm harness. Its Rust revision comparison is the `prepare → measure → report` pipeline; `Algorithm harness (Rust and C++)` (job ID `comparison`) tests the separate algorithm-comparison tool. In particular, adapter integration is no longer dynamically retested for every engine revision; library correctness and revision measurement remain the engine's automatic checks. Comparator-only changes do not rerun library platform, Miri or sanitizer jobs. Shared build inputs still select both consumers.
+An engine-only PR fetches no native sources, installs no TBB and skips the algorithm harness (`Algorithm harness (Rust and C++)`, job ID `comparison`): its automatic checks are library correctness and the `prepare → measure → report` revision measurement. Comparator-only changes skip the library platform, Miri and sanitizer jobs. Shared build inputs select both.
 
-Issue and PR templates, Dependabot configuration, `fuzz/`, manual diagnostics and separate title/DCO/release workflows select no additional lane. A path that no row names, an unavailable base and manual CI dispatch select all lanes: an unclassified file is not known to be harmless, so a new kind of file needs a row. `ci.yml` is the only automatic change-based task selector. The opt-in [main performance workflow](continuous-benchmarks.md#main-long-term-tracking) is independent of these lanes and `ci-ok`. PR updates cancel obsolete runs on the same PR. Every main push has an independent CI concurrency group, preserving a pending site deployment when a later non-docs push arrives.
+Issue and PR templates, Dependabot configuration, `fuzz/`, manual diagnostics and the separate title, DCO and release workflows select no extra lane. A path no row names, an unavailable base and manual dispatch select all lanes, so a new kind of file needs a row. The opt-in [main performance workflow](continuous-benchmarks.md#main-long-term-tracking) is independent of these lanes and `ci-ok`. PR updates cancel obsolete runs; each main push has its own concurrency group, so a later non-docs push cannot cancel a pending site deployment.
 
 ## Lanes
 
-Use a bounded number of lanes: the account has 20 concurrent slots shared with benchmarks and repository checks. Continuous measurement builds once and takes its matrix width from [`CONTINUOUS_SHARDS`](../../bench/continuous/paired.ts); Rust validation keeps its independent platform, Miri and sanitizer jobs, and algorithm comparison runs only for its affected inputs. There is no benchmark-to-test dependency or account-wide priority/preemption guarantee; multiple PRs and other repositories can still consume the account. See [capacity](continuous-benchmarks.md#capacity-and-recovery).
+Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, checks, other PRs and other repositories, with no priority or preemption. Continuous measurement builds once and takes its matrix width from [`CONTINUOUS_SHARDS`](../../bench/continuous/paired.ts); no test waits for it ([capacity](continuous-benchmarks.md#capacity-and-recovery)).
 
 | Check | Pull request | `main` |
 |---|---|---|
@@ -34,31 +32,37 @@ Use a bounded number of lanes: the account has 20 concurrent slots shared with b
 | Paired continuous measurement | one preparation job and the configured complete-case shards, inputs up to 1M | none; independent opt-in absolute-time tracking on relevant pushes |
 | Algorithm harness tests, doctests, native smoke checks and report generation | `comparison`, for affected comparison/shared inputs | the same |
 
-The Rust lint job checks all workspace features with Clippy and rustdoc, including the benchmark's native-facing Rust code. These commands do not link executables, so they set `TESSERA_BENCH_CHECK_ONLY=1` to skip the benchmark build script's native compilation and linker inputs. The lint runner needs neither fetched native sources nor native build tools. The comparison job sets the variable only for the Clippy and rustdoc step it owns, then compiles, links and exercises the native competitors, including the sequential-linkage check. Cargo tracks changes to the variable so a check-only build cannot suppress a later executable build's native setup.
+### Rust tests
 
-The comparison job owns benchmark Rust formatting, Clippy, rustdoc and functional checks. It formats the workspace, checks the benchmark crate with every feature, and runs that crate's harness tests and doctests inside the isolated workspace that builds the native competitors. It checks the standalone native registry with GCC and Clang on Linux; a comparison-owned Windows job compiles it with both MSVC preprocessors without fetching competitors. Native benchmarking supports Linux x86-64; the library's Windows jobs no longer compile this C++ registry or initialize MSVC.
+Each test cell tests only `tessera-sort`, with the SIMD backend and the `rayon` entry points, also on Rust 1.89. There are no scalar or no-std configurations. The cells disable test-profile debug information to save compilation, at the cost of less informative backtraces; Miri, sanitizers, benchmarks and release builds are unaffected. Rayon tests cover sharded root scatter, caller-pool bucket scheduling, the one-thread fallback, task panics and record preservation. The two Miri jobs interpret the serial and Rayon ownership fixtures, the latter including sequential fixtures for parallel storage and bucket handoff; native tests cover threaded scheduling. AddressSanitizer runs the library's serial and Rayon builds; benchmark executables stay with the comparison job, unsanitized.
 
-It pins Ubuntu 24.04 LTS and uses the image's Clang. It installs TBB development headers only when the package is absent, from a private source list naming the four Ubuntu suites on the Azure archive mirror. This mirror [recovered from the Canonical outage](https://github.com/actions/runner-images/issues/15296), while the previously used Kernel.org mirror timed out on hosted runners. Unrelated runner repositories cannot gate the installation. Apt reads only that list and the image's keyrings, so it still verifies Ubuntu's signed metadata; an index download failure stops the step before installation. Retries, fetch timeouts, a step timeout and the job timeout bound the installation.
+A cell's commands live in one composite action, [`rust-test`](../../.github/actions/rust-test/action.yml), called by both the pull request cells and the extra `main` cells. They are two jobs over one action because a job's `if` is evaluated before its matrix expands.
 
-The job uses a cached Cargo target and matching development profiles and alignment flags for its functional harness tests and executables. The cache retains workspace build outputs, including native objects, keyed by the [native build inputs](../design/benchmark-tooling.md#ownership) and the runner image version; pinned native sources are cached separately and revalidated by the existing fetcher. Algorithm comparisons and revision measurement still use optimized builds. The smoke check uses Rayon and the shared SIMD backend, validates the smoke suite and generates a partial report. The docs workflow checks algorithm ownership models and site types, then builds the shared Markdown sources and checks site links.
+The Rust lint job runs Clippy and rustdoc over all workspace features, including the benchmark's native-facing code. These commands link nothing, so they set `TESSERA_BENCH_CHECK_ONLY=1` to skip native compilation and linker inputs, and the lint runner needs no native sources or tools. Cargo tracks the variable, so a check-only build cannot suppress a later executable build's native setup.
 
-A Rust test cell's commands live in one composite action, [`rust-test`](../../.github/actions/rust-test/action.yml), which both the pull request cells and the extra `main` cells call. A job's `if` cannot branch on `matrix` — the matrix is expanded after the condition is evaluated — so the two sets of cells are two jobs over one action rather than one matrix with a skip per cell.
+### Algorithm harness
 
-Each cell tests only `tessera-sort`, with the shared SIMD backend and optional `rayon` entry points, including on Rust 1.89. The test cells disable test-profile debug information to reduce compilation work; this can make failure backtraces less informative and does not change Miri, sanitizers, benchmarks or release builds. There are no separate scalar or no-std configurations. Rayon tests cover sharded root scatter, caller-pool bucket scheduling, the one-thread fallback, task panics and record preservation. The two Miri jobs interpret serial and Rayon ownership fixtures concurrently without dropping either configuration. The Rayon job additionally interprets sequential ownership fixtures for parallel storage and bucket handoff; native tests cover threaded scheduling. The AddressSanitizer job exercises the library's serial and Rayon builds; benchmark executables and competitor dependencies stay with the comparison job, which runs them unsanitized. No test lane is added for the continuous benchmark's two API groups.
+The comparison job owns benchmark formatting, Clippy, rustdoc and functional checks. It checks the benchmark crate with every feature (setting `TESSERA_BENCH_CHECK_ONLY` only for Clippy and rustdoc), runs its harness tests and doctests in the isolated workspace that builds the native competitors, and checks that native programs link no parallel runtime. It compiles the standalone native registry with GCC and Clang on Linux and, in a comparison-owned Windows job, with both MSVC preprocessors; native benchmarking itself supports Linux x86-64 only. The smoke check uses Rayon, validates the smoke suite and generates a partial report. A library change does not rerun the benchmark crate's own tests: building the smoke benchmark against both revisions already rejects changed case identities.
 
-The benchmark crate's own unit tests and doctests run with the algorithm harness. A library change does not rerun them: it still builds the smoke benchmark against both revisions, which rejects changed case identities, and the tested modules are benchmark-owned code.
+The job pins Ubuntu 24.04 LTS and the image's Clang. It installs TBB headers only when absent, from a private source list naming the four Ubuntu suites on the Azure archive mirror, which [recovered from the Canonical outage](https://github.com/actions/runner-images/issues/15296) where the Kernel.org mirror timed out. Apt reads only that list and the image's keyrings, so it still verifies Ubuntu's signed metadata, and unrelated runner repositories cannot block it; retries and step and job timeouts bound the installation.
 
-The [benchmark diagnostics workflow](../../.github/workflows/bench-diagnostics.yml) runs only by manual dispatch. Select fixed-work counters or a five-layout sample and an optional baseline, using the four serial inputs in the diagnostics plan. Results and logs remain 14-day artifacts. It has read-only permissions, no Cloud submissions and a 45-minute timeout. Ordinary PRs and main pushes do not start these exploratory experiments.
+A cached Cargo target keeps workspace outputs, including native objects, keyed by the [native build inputs](../design/benchmark-tooling.md#ownership) and the runner image version; pinned native sources are cached separately and revalidated by the fetcher. Functional checks use development profiles with the benchmark alignment flags; comparisons and revision measurement use optimized builds.
+
+### Docs and diagnostics
+
+The docs workflow runs the ownership model tests and site type checks, then builds the site and checks its links.
+
+The [benchmark diagnostics workflow](../../.github/workflows/bench-diagnostics.yml) runs only by manual dispatch: fixed-work counters or a five-layout sample on the four serial inputs of the diagnostics plan, with an optional baseline. It has read-only permissions, no Cloud submission and a 45-minute timeout, and keeps results and logs as 14-day artifacts.
 
 ## Optional faster local tests
 
-For a local correctness iteration that does not need debugger information, disable test-profile debug information for that command only:
+For a local correctness iteration, disable test-profile debug information for one command:
 
 ```sh
 CARGO_PROFILE_TEST_DEBUG=0 cargo test -p tessera-sort --lib --tests --features rayon
 ```
 
-This uses stable Cargo without changing the repository profile, but backtraces and debugging may be less informative. Run the normal validation commands as well; do not use this setting to change benchmark or release builds.
+Backtraces may be less informative. Still run the normal validation commands, and never apply this to benchmark or release builds.
 
 ## Adding a language
 
@@ -69,7 +73,7 @@ This uses stable Cargo without changing the repository profile, but backtraces a
 
 ## Reproducing locally
 
-Run the [commands in `AGENTS.md`](../../AGENTS.md#commands) before pushing: a pull request also runs Miri, the MSRV, the benchmarks and one test cell per operating system, and `main` the remaining platform cells. The shared operations behind CI are CLI commands; workflows add only event attribution, runners, artifacts, credentials and publication:
+Run the [commands in `AGENTS.md`](../../AGENTS.md#commands) before pushing; a pull request adds Miri, the MSRV, the benchmarks and one test cell per operating system, and `main` the remaining platform cells. CI's operations are CLI commands; workflows add only event attribution, runners, artifacts, credentials and publication:
 
 | Task | Command |
 |---|---|
@@ -81,4 +85,4 @@ Run the [commands in `AGENTS.md`](../../AGENTS.md#commands) before pushing: a pu
 | Fetch and verify pinned native sources | `bun run --silent tools native fetch` |
 | Validate a release tag | `bun run --silent tools release verify --tag rust/v0.1.0` |
 
-Benchmark commands are in the [protocol](benchmarking.md#command-capabilities). `ci check` is a functional smoke check (one-millisecond samples, not an experiment): it materializes HEAD and working-tree copies, runs harness tests and doctests, validates the smoke suite, measures one `u64/random` group, verifies that native programs link no parallel runtime under `--native`, and generates a partial report. The comparison job additionally formats the workspace and checks the benchmark crate with every feature. Routing, title and DCO have dependency-free bootstrap entry points in `.github/scripts/` that call the same functions; DCO runs the base commit's trusted code without installing PR code. Rust feature tests, Miri and sanitizers stay in their workflows and composite action.
+Benchmark commands are in the [protocol](benchmarking.md#command-capabilities). `ci check` is a functional smoke check with one-millisecond samples, not an experiment: it materializes HEAD and working-tree copies, runs harness tests and doctests, validates the smoke suite, measures one `u64/random` group, checks native linkage under `--native` and generates a partial report. Routing, title and DCO also have dependency-free entry points in `.github/scripts/`; DCO runs the base commit's trusted code without installing PR code.

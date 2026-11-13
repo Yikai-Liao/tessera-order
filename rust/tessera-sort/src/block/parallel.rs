@@ -120,11 +120,9 @@ pub(super) fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clon
     fn scatter<'a, 'w, T, C: Classify<T>>(
         (mut partition, classifier): (Partition<'a, 'w, T>, C),
     ) -> Partition<'a, 'w, T> {
-        if let Err(payload) = partition.step(classifier) {
-            // Each independent guard restores its own original shard. Rayon
-            // joins all jobs before propagating an error out of this collect.
-            unwind::resume(payload);
-        }
+        // Each guard restores its original shard during unwinding. Rayon
+        // joins all jobs before the parent buffers can be released.
+        let _ = partition.step(classifier);
         partition
     }
     let mut partitions: Vec<_> = if config.parallel {

@@ -40,11 +40,12 @@
 //! Ownership: the active block sequence holds exactly one live copy of every
 //! record. Other physical copies are stale bytes that are never dropped or
 //! borrowed, and key extraction borrows only live records. Scratch is
-//! `MaybeUninit<T>`. Before returning, or before resuming a key-function panic,
+//! `MaybeUninit<T>`. Before returning or propagating a key-function panic,
 //! the completion ledger moves every live record back into the input, so records
 //! need neither `Copy` nor `Clone`.
 
 use crate::trace::{self, Event};
+#[cfg(test)]
 use crate::unwind;
 use alloc::vec::Vec;
 use core::{marker::PhantomData, mem::MaybeUninit, ptr};
@@ -203,7 +204,7 @@ impl<T, F: FnMut(&T) -> usize> Classify<T> for F {
 /// # Panics
 ///
 /// Panics if `radix` is not in `1..=MAX_RADIX_BITS`. A classification or
-/// `visit` panic is resumed after every record is back in `records`.
+/// `visit` panic propagates after every record is back in `records`.
 pub(crate) fn partition<'records, T, C: Classify<T>>(
     records: &'records mut [T],
     radix: usize,
@@ -233,13 +234,7 @@ pub(crate) fn partition_in_blocks<'records, T, C: Classify<T>>(
 ) -> Vec<usize> {
     assert!((1..=MAX_RADIX_BITS).contains(&radix));
     let mut sorter = Partition::new(records, 1 << radix, block_size, buffers);
-    let mut classifier = match sorter.step(classifier) {
-        Ok(classifier) => classifier,
-        Err(payload) => {
-            drop(sorter);
-            unwind::resume(payload);
-        }
-    };
+    let mut classifier = sorter.step(classifier);
     // The ledger lends only retired final bands; both classification and
     // child finishing borrow this same mutable classifier in sequence.
     let mut callback =
@@ -322,6 +317,7 @@ struct Partition<'a, 'w, T> {
     block_count: usize,
     input_borrow: PhantomData<&'a mut [T]>,
     bucket_count: usize,
+    position: ScatterPosition,
     owns_recovery: bool,
 }
 
@@ -365,6 +361,10 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             block_count,
             input_borrow: PhantomData,
             bucket_count,
+            position: ScatterPosition {
+                input: 0,
+                output: 0,
+            },
             owns_recovery: false,
         }
     }
@@ -407,40 +407,22 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         self.buffers.seen = seen;
     }
 
-    /// Classifies contiguous input once and returns the
-    /// classifier, or a panic after appending the unread suffix to bucket zero.
-    fn step<C: Classify<T>>(&mut self, classifier: C) -> Result<C, unwind::Payload> {
+    /// Classifies contiguous input once, retaining cursors for unwind recovery.
+    fn step<C: Classify<T>>(&mut self, classifier: C) -> C {
         assert!(!self.owns_recovery, "partition already scattered");
-        let mut buckets = self.begin_pass();
-        self.owns_recovery = true;
-        let mut position = ScatterPosition {
+        self.begin_pass();
+        self.position = ScatterPosition {
             input: 0,
             output: 0,
         };
+        // Every table and initial writer exists before any record can move.
+        self.owns_recovery = true;
         // Owning the classifier keeps its constants in the scatter's register
         // allocation instead of accessing them through a borrowed extractor.
-        let result =
-            unwind::catch(|| self.scatter(&mut buckets, &mut position, 0, classifier, C::bucket));
-        if result.is_err() {
-            let written = position.output * self.block_size
-                + buckets
-                    .iter()
-                    .map(|bucket| {
-                        // SAFETY: both cursors delimit the same reserved block.
-                        let free = unsafe { bucket.end.offset_from(bucket.next) as usize };
-                        self.block_size - free
-                    })
-                    .sum::<usize>();
-            let offset = written - position.input * self.block_size;
-            // Input consumption is contiguous. Complete its unread suffix
-            // without calling the failed classifier or moving any live record
-            // twice; the same read-before-reserve rule funds the new blocks.
-            self.scatter(&mut buckets, &mut position, offset, (), |_, _| 0);
-        }
-        self.buffers.writers = buckets;
+        let classifier = self.scatter(0, classifier, C::bucket);
         #[cfg(debug_assertions)]
         self.validate();
-        result
+        classifier
     }
 
     /// Physical prefixes of one stable bucket chain. The writer records the
@@ -465,29 +447,13 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         })
     }
 
-    /// Independent test view of the chain's cumulative record boundaries.
-    #[cfg(test)]
-    fn record_ends(&self) -> Vec<usize> {
-        let mut records = 0;
-        (0..self.bucket_count)
-            .map(|bucket| {
-                records += self
-                    .bucket_blocks(bucket)
-                    .map(|(_, len)| len)
-                    .sum::<usize>();
-                records
-            })
-            .collect()
-    }
-
     /// Starts each bucket's chain in its own scratch block.
-    fn begin_pass(&mut self) -> Vec<BucketWriter<T>> {
-        let mut buckets = core::mem::take(&mut self.buffers.writers);
-        buckets.clear();
-        buckets.reserve(self.bucket_count);
+    fn begin_pass(&mut self) {
+        self.buffers.writers.clear();
+        self.buffers.writers.reserve(self.bucket_count);
         for physical in 0..self.bucket_count {
             let out = self.block_ptr(physical);
-            buckets.push(BucketWriter {
+            self.buffers.writers.push(BucketWriter {
                 next: out,
                 // SAFETY: block_ptr returns a complete block.
                 end: unsafe { out.add(self.block_size) },
@@ -498,7 +464,6 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 physical,
             });
         }
-        buckets
     }
 
     // Pass setup and completion need state that scatter does not.
@@ -507,22 +472,28 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     #[inline(never)]
     fn scatter<C, F: FnMut(&mut C, &T) -> usize>(
         &mut self,
-        buckets: &mut [BucketWriter<T>],
-        position: &mut ScatterPosition,
         first_offset: usize,
         mut state: C,
         mut classify: F,
     ) -> C {
+        let input_ptr = self.input;
+        let input_len = self.input_len;
+        let block_size = self.block_size;
+        let scratch_blocks = self.scratch_blocks;
+        let full_blocks = self.block_count - scratch_blocks;
+        let position = &mut self.position;
+        let buckets = self.buffers.writers.as_mut_slice();
+        let block_links = self.buffers.block_links.as_mut_slice();
         debug_assert!(buckets.len().is_power_of_two());
         let last_bucket = buckets.len() - 1;
         let mut begin = first_offset;
-        while position.input * self.block_size < self.input_len {
+        while position.input * block_size < input_len {
             let input = position.input;
-            let begin_record = input * self.block_size;
+            let begin_record = input * block_size;
             // SAFETY: this block's unread records still occupy their original
             // input range. Only fully read input blocks can become outputs.
-            let source = unsafe { self.input.add(begin_record) };
-            let length = self.block_size.min(self.input_len - begin_record);
+            let source = unsafe { input_ptr.add(begin_record) };
+            let length = block_size.min(input_len - begin_record);
             let mut write = |offset: usize| {
                 // SAFETY: only the initialized, unread suffix is read. Blocks
                 // become output only after all of their input records are read.
@@ -548,17 +519,21 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                     bucket: b,
                     physical: bucket.physical as usize,
                     // SAFETY: both cursors delimit the same reserved block.
-                    slot: self.block_size - unsafe { end.offset_from(next) } as usize - 1,
+                    slot: block_size - unsafe { end.offset_from(next) } as usize - 1,
                 });
                 if unlikely(next == end) {
                     debug_assert!(position.output <= input);
-                    let physical = self.scratch_blocks + position.output;
-                    let out = self.block_ptr(physical);
-                    self.buffers.block_links[bucket.physical as usize] = physical as u32;
+                    let physical = scratch_blocks + position.output;
+                    assert!(position.output < full_blocks);
+                    // SAFETY: output <= input; equality can occur only on
+                    // this full input block's last record. The recycled block
+                    // is fully read and uses the same raw input ancestor.
+                    let out = unsafe { input_ptr.add(position.output * block_size) };
+                    block_links[bucket.physical as usize] = physical as u32;
                     *bucket = BucketWriter {
                         next: out,
-                        // SAFETY: block_ptr reserves a complete block.
-                        end: unsafe { out.add(self.block_size) },
+                        // SAFETY: the checked recycled input block is complete.
+                        end: unsafe { out.add(block_size) },
                         physical: physical as u32,
                     };
                     position.output += 1;
@@ -592,6 +567,26 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
 impl<T> Drop for Partition<'_, '_, T> {
     fn drop(&mut self) {
         if self.owns_recovery {
+            if self.position.input * self.block_size < self.input_len {
+                let written = self.position.output * self.block_size
+                    + self
+                        .buffers
+                        .writers
+                        .iter()
+                        .map(|bucket| {
+                            // SAFETY: both cursors delimit the same reserved block.
+                            let free = unsafe { bucket.end.offset_from(bucket.next) as usize };
+                            self.block_size - free
+                        })
+                        .sum::<usize>();
+                let offset = written - self.position.input * self.block_size;
+                // Input consumption is contiguous. Append only the unread
+                // suffix, without the failed classifier. Writers and block
+                // progress survive unwinding; no per-record counter is needed.
+                self.scatter(offset, (), |_, _| 0);
+                #[cfg(debug_assertions)]
+                self.validate();
+            }
             // The ledger takes over recovery before it starts moving records;
             // its guard finishes all bands even if completion itself unwinds.
             finish::complete_serial(self, None);
@@ -689,52 +684,32 @@ mod tests {
     /// bucket 0, and compaction restores the input slice.
     fn scatter_until_panic(len: usize, block_size: usize, at: usize) {
         let mut records = numbered(len);
-        // A pass reads records in input order. Records before the panicking
-        // call were classified; every later record goes to bucket 0, so the
-        // exact expected ends follow from the input alone.
-        let mut counts = [0usize; 4];
-        for (index, record) in records.iter().enumerate() {
-            let bucket = if index + 1 < at {
-                (record.0 & 3) as usize
+        // Scatter reads in input order; the panicking record and its unread
+        // suffix join bucket zero without another key evaluation.
+        let mut expected = records.clone();
+        expected.sort_by_key(|record| {
+            if (record.1 as usize) + 1 < at {
+                record.0 & 3
             } else {
                 0
-            };
-            counts[bucket] += 1;
-        }
-        let mut total = 0;
-        let expected: Vec<usize> = counts
-            .iter()
-            .map(|count| {
-                total += count;
-                total
-            })
-            .collect();
+            }
+        });
         let mut buffers = Buffers::new();
         let mut calls = 0;
-        let panic = {
+        let panic = unwind::catch(|| {
             let mut sorter = Partition::new(&mut records, 4, block_size, &mut buffers);
-            let panic = sorter
-                .step(|record: &(u32, u32)| {
-                    calls += 1;
-                    if calls == at {
-                        std::panic::panic_any(0x71u32);
-                    }
-                    (record.0 & 3) as usize
-                })
-                .err();
-            let ends = sorter.record_ends();
-            assert!(panic.is_some(), "panic at {at} of {len} was not caught");
-            // The recovery re-scatters unread records without the failed
-            // extractor, which must not run a second time.
-            assert_eq!(calls, at, "key called after it panicked");
-            assert_eq!(ends, expected, "recovered ends at panic {at}");
-            assert_eq!(finish::complete_serial(&mut sorter, None), ends);
-            // Drop also compacts, so the check must run before the sorter does.
-            assert!(!sorter.owns_recovery, "compaction did not finish");
-            panic
-        };
-        assert_eq!(*panic.unwrap().downcast::<u32>().unwrap(), 0x71);
-        assert_eq!(ids(&records), (0..len as u32).collect::<Vec<_>>());
+            let _ = sorter.step(|record: &(u32, u32)| {
+                calls += 1;
+                if calls == at {
+                    std::panic::panic_any(0x71u32);
+                }
+                (record.0 & 3) as usize
+            });
+        })
+        .expect_err("classifier did not panic");
+        assert_eq!(*panic.downcast::<u32>().unwrap(), 0x71);
+        assert_eq!(calls, at, "key called after it panicked");
+        assert_eq!(records, expected, "unwind recovery at call {at}");
     }
 
     /// `(len, block_size)` pairs. The short pair has a one-record tail over
@@ -812,8 +787,7 @@ mod tests {
                 let mut visited = 0;
                 let payload = {
                     let mut sorter = Partition::new(&mut records, 4, block_size, &mut buffers);
-                    let panic = sorter.step(|record: &(u32, u32)| (record.0 & 3) as usize);
-                    assert!(panic.is_ok());
+                    let _ = sorter.step(|record: &(u32, u32)| (record.0 & 3) as usize);
                     let mut callback = |_: usize, bucket: &mut [(u32, u32)]| {
                         // Buckets materialize in order, so the slice must hold
                         // exactly the records of the bucket that just landed.

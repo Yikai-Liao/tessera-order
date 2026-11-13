@@ -136,9 +136,9 @@ The research prototype skipped stored buckets for `Copy` records by filling scra
 
 Key functions are user code and may panic. On a panic:
 
-- the block partition derives the unread suffix from its bucket cursors and consumed input blocks, appends it to bucket 0 without calling the failed classifier, and completes the chains through the source ledger;
+- the block partition guard retains bucket cursors and input-block progress; on unwind its destructor derives the unread suffix, appends it to bucket 0 without calling the failed classifier, and completes the chains through the source ledger;
 - a tile keeps a pointer to the complete record set of the last finished pass and copies it back if needed;
-- the panic is then resumed.
+- ordinary unwinding propagates the panic after the guards restore ownership.
 
 The slice then holds every record once, in an unspecified order. Every build uses this recovery; there is no abort-only variant.
 

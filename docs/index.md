@@ -36,4 +36,12 @@ features:
 
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 
+<script setup lang="ts">
+import AlgorithmComparison from "./.vitepress/theme/components/AlgorithmComparison.vue";
+</script>
+
+## Measured against other sorts
+
+<AlgorithmComparison view="overview" />
+
 [Use the library](guide/getting-started.md), [learn the algorithm](explain/index.md), or [choose a development task](README.md).

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { algorithm, catalog, recordType } from "../catalog.ts";
+import { algorithm, type CaseIdentity, catalog, recordType } from "../catalog.ts";
 import type { NameCell } from "../plot/layout.ts";
 import {
   type RowChart as Chart,
@@ -16,8 +16,47 @@ import { caseId, type Dataset, lengths, measurementId, type Summary, shapes } fr
 export interface Figure {
   name: string;
   title: string;
+  /** The chart description, for callers that render it themselves, such as the site. */
+  chart: Chart;
   svg: string;
   table: string;
+}
+
+const rendered = (chart: Chart) => ({ chart, svg: renderRows(chart) });
+
+/**
+ * What the comparison figures read, independent of how it was measured.
+ *
+ * Local reports derive speeds from paired blocks; main tracking derives them
+ * from independent runs. Case IDs are comparison IDs (`u64/random/1000/s1`).
+ */
+export interface Field {
+  algorithms: { name: string; stable: boolean }[];
+  cases: CaseIdentity[];
+  /** slice::sort time over the algorithm's time on one case, or null if either is missing. */
+  speed(id: string, algorithm: string): number | null;
+  /** Nanoseconds per element, or null if unmeasured. */
+  nsPerKey(id: string, algorithm: string): number | null;
+  /** Peak extra heap bytes of one sort, or null if unmeasured. */
+  peak(id: string, algorithm: string): number | null;
+}
+
+/** The inputs a figure set summarizes and how its guides name them. */
+export interface Cohort {
+  /** Length of the ranking, input-pattern and element-type figures. */
+  n: number;
+  /** Lengths tabulated next to the ranking; the ranking admits sorts measured at all of them. */
+  lengths: number[];
+  /** Input patterns averaged by the ranking and element-type figures. */
+  shapes: string[];
+  /** Guide wording for those patterns. */
+  shapesLabel: string;
+  /** Input patterns the element-type figure compares; every type must have each of them. */
+  typeShapes: string[];
+  /** How the element-type figure combines them, after "speed relative to slice::sort, ". */
+  typeShapesLabel: string;
+  /** Length of the memory figure. */
+  memoryN: number;
 }
 
 // Every figure answers one question on one horizontal axis, so it reads
@@ -110,20 +149,33 @@ function speedScale(ratios: number[]): Chart["scale"] {
 
 // Speed of one variant relative to slice::sort in the same blocks: the
 // slice::sort time over the variant's, per block, then the median.
-function speedOnCase(summaries: Map<string, Summary>, id: string, variant: string) {
+function pairedSpeed(summaries: Map<string, Summary>, id: string, variant: string) {
   const std = summaries.get(measurementId("default", id, "std-stable")),
     s = summaries.get(measurementId("default", id, variant));
   if (!std || !s) return null;
   return variant === "tessera" ? std.ratio : median(std.ratios.map((r, i) => r / s.ratios[i]));
 }
 
+/** A local report's field: paired speeds and the memory worker's peaks. */
+export function reportField(dataset: Dataset, summaries: Map<string, Summary>): Field {
+  return {
+    algorithms: dataset.manifest.variants,
+    cases: dataset.manifest.cases,
+    speed: (id, variant) => pairedSpeed(summaries, id, variant),
+    nsPerKey: (id, variant) => summaries.get(measurementId("default", id, variant))?.ns ?? null,
+    peak: (id, variant) =>
+      dataset.memory.find((m) => m.build === "default" && m.variant === variant && m.case_id === id)
+        ?.peak_extra_bytes ?? null,
+  };
+}
+
 // The geometric mean of those speeds over cases, or null if one is missing.
-function speedOver(summaries: Map<string, Summary>, ids: string[], variant: string) {
-  const values = ids.map((id) => speedOnCase(summaries, id, variant));
+function speedOver(field: Field, ids: string[], variant: string) {
+  const values = ids.map((id) => field.speed(id, variant));
   return values.every((v): v is number => v !== null) ? geomean(values) : null;
 }
-const u64Cases = (n: number) =>
-  shapes.map((shape) => caseId({ ty: "u64", distribution: shape, len: n }));
+const u64Cases = (cohort: Cohort, n: number) =>
+  cohort.shapes.map((shape) => caseId({ ty: "u64", distribution: shape, len: n }));
 
 const kindLegend: [Swatch[], string][] = [
   [["primary"], "Tessera"],
@@ -132,15 +184,22 @@ const kindLegend: [Swatch[], string][] = [
 ];
 const SPEED_AXIS: [string, string] = ["← slower", "faster →"];
 
-function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figure | null {
-  const entries = dataset.manifest.variants.map((v) => ({
+// With `memory`, each sort also shows its largest peak over the ranked inputs,
+// so one figure states both speed and memory.
+function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | null {
+  const worstPeak = (variant: string) => {
+    const peaks = u64Cases(cohort, cohort.n).map((id) => field.peak(id, variant));
+    return peaks.every((v): v is number => v !== null) ? Math.max(...peaks) : null;
+  };
+  const entries = field.algorithms.map((v) => ({
     cell: sortName(v.name),
     kind: family(v.name),
     tone: toneOf(v.name),
     stable: v.stable,
-    speeds: lengths.map((n) => speedOver(summaries, u64Cases(n), v.name)),
+    speeds: cohort.lengths.map((n) => speedOver(field, u64Cases(cohort, n), v.name)),
+    peak: memory ? worstPeak(v.name) : null,
   }));
-  const at = lengths.indexOf(LARGE);
+  const at = cohort.lengths.indexOf(cohort.n);
   const complete = entries
     .filter((e) => e.speeds.every((v) => v !== null))
     .map((e) => ({ ...e, speeds: e.speeds as number[] }))
@@ -152,21 +211,18 @@ function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figur
   const row = (e: (typeof complete)[number]): Row => ({
     name: e.cell,
     marks: [{ value: e.speeds[at], tone: e.tone }],
-    cells: [times(e.speeds[at])],
+    cells: [times(e.speeds[at]), ...(memory ? [e.peak === null ? "–" : formatBytes(e.peak)] : [])],
     strong: e.cell.strong,
   });
-  const field = `${others.length + 1} sorts on ${formatLength(LARGE)} u64 keys`;
-  const title =
-    rank === 1
-      ? `Tessera is the fastest of ${field}`
-      : `Tessera ranks ${ordinal(rank)} of ${field}`;
+  const sorts = `${others.length + 1} sorts`;
+  const title = rank === 1 ? `Fastest of ${sorts}` : `Ranked ${ordinal(rank)} of ${sorts}`;
   return {
-    name: "ranking",
+    name: memory ? "overview" : "ranking",
     title,
-    svg: renderRows({
+    ...rendered({
       title,
-      guide: "Speed relative to slice::sort, geometric mean over the 10 baseline input patterns",
-      columns: ["Speed"],
+      guide: `${formatLength(cohort.n)} u64 keys · speed vs slice::sort, geometric mean over ${cohort.shapesLabel}`,
+      columns: ["Speed", ...(memory ? ["Extra memory"] : [])],
       groups: [
         { title: "Stable sorts", rows: complete.filter((e) => e.stable).map(row) },
         { title: "Unstable sorts", rows: complete.filter((e) => !e.stable).map(row) },
@@ -180,13 +236,15 @@ function renderRanking(dataset: Dataset, summaries: Map<string, Summary>): Figur
         "Sort",
         "Kind",
         "Stability",
-        ...lengths.map((n) => `${formatLength(n)} keys, speed vs slice::sort`),
+        ...cohort.lengths.map((n) => `${formatLength(n)} keys, speed vs slice::sort`),
+        ...(memory ? ["Largest extra memory"] : []),
       ],
       complete.map((e) => [
         e.cell.input,
         e.kind,
         e.stable ? "stable" : "unstable",
         ...e.speeds.map(times),
+        ...(memory ? [e.peak === null ? "unmeasured" : formatBytes(e.peak)] : []),
       ]),
     ),
   };
@@ -199,13 +257,9 @@ interface Standing {
 }
 // Where Tessera stands among every eligible sort on one row, all measured
 // against slice::sort, which therefore sits at the origin and is not drawn.
-function standing(
-  summaries: Map<string, Summary>,
-  variants: { name: string; stable: boolean }[],
-  ids: string[],
-  stableOnly: boolean,
-): Standing | null {
-  const speedOf = (variant: string) => speedOver(summaries, ids, variant);
+function standing(field: Field, ids: string[], stableOnly: boolean): Standing | null {
+  const variants = field.algorithms;
+  const speedOf = (variant: string) => speedOver(field, ids, variant);
   const tessera = speedOf("tessera");
   if (tessera === null) return null;
   const speeds = variants
@@ -231,6 +285,7 @@ function fieldRow(name: NameCell, s: Standing): Row {
     ],
     cells: [times(s.tessera), ordinal(s.rank)],
     strong: true,
+    lead: s.rank === 1,
   };
 }
 
@@ -239,9 +294,16 @@ function fieldTitle(standings: Standing[], unit: string) {
   const total = standings.length,
     first = standings.filter((s) => s.rank === 1).length,
     top3 = standings.filter((s) => s.rank <= 3).length;
-  if (first === total) return `Tessera is fastest on all ${total} ${unit}`;
-  const top = top3 > first ? `, top 3 on ${top3}` : "";
-  return `Tessera is fastest on ${first} of ${total} ${unit}${top}`;
+  if (first === total) return `Fastest on all ${total} ${unit}`;
+  // A podium needs more than three sorts in the field.
+  const field = Math.max(...standings.map((s) => s.speeds.length + 1));
+  const podium = top3 > first && field > 3;
+  // Without a first place, the podium is the finding.
+  if (!first && podium)
+    return top3 === total
+      ? `Top 3 on all ${total} ${unit}`
+      : `Top 3 on ${top3} of ${total} ${unit}`;
+  return `Fastest on ${first} of ${total} ${unit}${podium ? `, top 3 on ${top3}` : ""}`;
 }
 
 function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
@@ -269,21 +331,19 @@ function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
 // Each selected input pattern of one type. Records admit only stable sorts;
 // for keys, stability is unobservable and every sort competes.
 function renderInputs(
-  dataset: Dataset,
-  summaries: Map<string, Summary>,
+  field: Field,
+  cohort: Cohort,
   name: string,
   n: number,
   ty = "u64",
 ): Figure | null {
-  const manifest = dataset.manifest;
-  const variants = manifest.variants;
-  const patterns = manifest.cases
+  const patterns = field.cases
     .filter((input) => input.ty === ty && input.len === n)
     .map((input) => input.distribution);
   // Retain the small-selection fallback rather than presenting a single input
   // as a full pattern panel. Non-u64 panels add the type-specific coverage.
-  if (ty === "u64" && !shapes.every((shape) => patterns.includes(shape))) return null;
-  if (ty !== "u64" && !patterns.some((shape) => !shapes.includes(shape))) return null;
+  if (ty === "u64" && !cohort.shapes.every((shape) => patterns.includes(shape))) return null;
+  if (ty !== "u64" && !patterns.some((shape) => !cohort.shapes.includes(shape))) return null;
   const record = recordType(ty);
   const stableOnly = record.task === "records";
   const plotted: [string, Standing][] = [];
@@ -294,9 +354,9 @@ function renderInputs(
       .filter(([shape]) => patterns.includes(shape))
       .flatMap(([shape, label]) => {
         const id = caseId({ ty, distribution: shape, len: n });
-        const s = standing(summaries, variants, [id], stableOnly);
-        const ns = summaries.get(measurementId("default", id, "tessera"))?.ns;
-        if (!s || ns === undefined) return [];
+        const s = standing(field, [id], stableOnly);
+        const ns = field.nsPerKey(id, "tessera");
+        if (!s || ns === null) return [];
         plotted.push([label, s]);
         nsPerKey.push(ns);
         return [fieldRow({ input: label, sub: "", tag: "" }, s)];
@@ -304,16 +364,13 @@ function renderInputs(
   })).filter((g) => g.rows.length);
   if (!plotted.length) return null;
   const standings = plotted.map(([, s]) => s);
-  const title = fieldTitle(
-    standings,
-    ty === "u64" ? "input patterns" : `${record.label} input patterns`,
-  );
+  const title = fieldTitle(standings, "inputs");
   return {
     name,
     title,
-    svg: renderRows({
+    ...rendered({
       title,
-      guide: `${formatLength(n)} ${ty === "u64" ? "u64 keys" : record.label}; each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to slice::sort`,
+      guide: `${formatLength(n)} ${ty === "u64" ? "u64 keys" : record.label} · each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to slice::sort`,
       columns: ["Speed", "Rank"],
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
@@ -324,30 +381,32 @@ function renderInputs(
   };
 }
 
-// Each element type as a geometric mean over the ten inputs. Records admit
+// Each element type over the cohort's type patterns. Records admit
 // only stable sorts, because stability is observable there.
-function renderTypes(dataset: Dataset, summaries: Map<string, Summary>): Figure | null {
-  const variants = dataset.manifest.variants;
+function renderTypes(field: Field, cohort: Cohort): Figure | null {
   const plotted: [string, Standing][] = [];
   const groups = TYPE_GROUPS.map((g) => ({
     title: g.title,
     rows: g.types.flatMap(([ty, label, sub]) => {
-      const ids = shapes.map((shape) => caseId({ ty, distribution: shape, len: LARGE }));
-      const s = standing(summaries, variants, ids, !g.keys);
+      const ids = cohort.typeShapes.map((shape) =>
+        caseId({ ty, distribution: shape, len: cohort.n }),
+      );
+      const s = standing(field, ids, !g.keys);
       if (!s) return [];
       plotted.push([label, s]);
       return [fieldRow({ input: label, sub, tag: "" }, s)];
     }),
   })).filter((g) => g.rows.length);
-  if (!plotted.length) return null;
+  // A comparison of element types needs at least two of them.
+  if (plotted.length < 2) return null;
   const standings = plotted.map(([, s]) => s);
-  const title = fieldTitle(standings, "element types");
+  const title = fieldTitle(standings, "types");
   return {
     name: "types",
     title,
-    svg: renderRows({
+    ...rendered({
       title,
-      guide: `${formatLength(LARGE)} elements; speed relative to slice::sort, geometric mean over the 10 baseline input patterns`,
+      guide: `${formatLength(cohort.n)} elements · speed relative to slice::sort, ${cohort.typeShapesLabel}`,
       columns: ["Speed", "Rank"],
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
@@ -358,27 +417,21 @@ function renderTypes(dataset: Dataset, summaries: Map<string, Summary>): Figure 
   };
 }
 
-function renderMemory(dataset: Dataset): Figure | null {
-  const n = LARGEST;
-  const patterns = dataset.manifest.cases
+function renderMemory(field: Field, cohort: Cohort): Figure | null {
+  const n = cohort.memoryN;
+  const patterns = field.cases
     .filter((input) => input.ty === "u64" && input.len === n)
     .map((input) => input.distribution);
   if (!patterns.includes("random")) return null;
   const peaks = (variant: string) => {
-    const found = patterns.map(
-      (shape) =>
-        dataset.memory.find(
-          (m) =>
-            m.build === "default" &&
-            m.variant === variant &&
-            m.case_id === caseId({ ty: "u64", distribution: shape, len: n }),
-        )?.peak_extra_bytes,
+    const found = patterns.map((shape) =>
+      field.peak(caseId({ ty: "u64", distribution: shape, len: n }), variant),
     );
-    return found.every((v): v is number => v !== undefined)
+    return found.every((v): v is number => v !== null)
       ? { random: found[patterns.indexOf("random")], worst: Math.max(...found) }
       : null;
   };
-  const entries = dataset.manifest.variants
+  const entries = field.algorithms
     .map((v) => ({ ...v, peak: peaks(v.name)! }))
     .filter((e) => e.peak)
     .sort((a, b) => a.peak.worst - b.peak.worst);
@@ -407,13 +460,13 @@ function renderMemory(dataset: Dataset): Figure | null {
     };
   };
   const input = n * 8;
-  const title = `Tessera sorts ${formatLength(n)} u64 keys in at most ${formatBytes(anchor.peak.worst)} of extra memory`;
+  const title = `At most ${formatBytes(anchor.peak.worst)} of extra memory`;
   return {
     name: "memory",
     title,
-    svg: renderRows({
+    ...rendered({
       title,
-      guide: `Peak heap allocation during one sort, beyond the ${formatBytes(input)} input`,
+      guide: `${formatLength(n)} u64 keys · peak heap allocation during one sort, beyond the ${formatBytes(input)} input`,
       columns: ["Worst"],
       groups: [
         { title: "Stable sorts", rows: entries.filter((e) => e.stable).map(row) },
@@ -469,7 +522,7 @@ function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figu
       {
         name: `selected-${id.replaceAll("/", "-").replaceAll(".", "_")}`,
         title,
-        svg: renderRows({
+        ...rendered({
           title,
           guide: `Sort time / paired Tessera time · ${dataset.manifest.blocks} paired blocks`,
           columns: ["Time ratio", "Block range", "A/A range"],
@@ -491,16 +544,41 @@ function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figu
   });
 }
 
-export function renderFigures(dataset: Dataset, summaries: Map<string, Summary>): Figure[] {
-  const figures = [
-    renderRanking(dataset, summaries),
-    renderInputs(dataset, summaries, "inputs", LARGE),
+/** The release comparison's cohort: the catalog's baseline patterns and lengths. */
+const RELEASE: Cohort = {
+  n: LARGE,
+  lengths,
+  shapes,
+  shapesLabel: `the ${shapes.length} baseline input patterns`,
+  typeShapes: shapes,
+  typeShapesLabel: `geometric mean over the ${shapes.length} baseline input patterns`,
+  memoryN: LARGEST,
+};
+
+/** One figure for a first impression: the ranking with each sort's extra memory. */
+/**
+ * Every comparison figure the field supports for one cohort, in reading order. With
+ * `memory`, the ranking adds an extra-memory column and becomes the `overview` figure.
+ */
+export function comparisonFigures(
+  field: Field,
+  cohort: Cohort,
+  short?: number,
+  memory = false,
+): Figure[] {
+  return [
+    renderRanking(field, cohort, memory),
+    renderInputs(field, cohort, "inputs", cohort.n),
     ...catalog.comparison.types
       .filter((ty) => ty !== "u64")
-      .map((ty) => renderInputs(dataset, summaries, `inputs-${ty}`, LARGE, ty)),
-    renderInputs(dataset, summaries, "short", SHORT),
-    renderTypes(dataset, summaries),
-    renderMemory(dataset),
+      .map((ty) => renderInputs(field, cohort, `inputs-${ty}`, cohort.n, ty)),
+    ...(short === undefined ? [] : [renderInputs(field, cohort, "short", short)]),
+    renderTypes(field, cohort),
+    renderMemory(field, cohort),
   ].filter((f): f is Figure => f !== null);
+}
+
+export function renderFigures(dataset: Dataset, summaries: Map<string, Summary>): Figure[] {
+  const figures = comparisonFigures(reportField(dataset, summaries), RELEASE, SHORT);
   return figures.length ? figures : renderSelected(dataset, summaries);
 }

@@ -162,7 +162,7 @@ jobs:
               git checkout --orphan "initial-$attempt"
             fi
             bun "$GITHUB_WORKSPACE/bench/tracking/publish.ts" "$TRACKING_ALGORITHM" ../tracking/*.jsonl
-            git add -- "$TRACKING_ALGORITHM"
+            git add -- "$TRACKING_ALGORITHM" comparison.json
             git diff --cached --quiet && break
             git commit -s -m "chore(bench): record $TRACKING_ALGORITHM performance ${GITHUB_SHA:0:7}" -m 'Assisted-by: OpenAI'
             git push origin HEAD:refs/heads/benchmark-data && break

@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { parseHTML } from "linkedom/worker";
 import { z } from "zod";
 import { trackingMemory } from "./build.ts";
+import { comparisonData, latestRuns } from "./comparison.ts";
 import { explainFailure } from "./failure.ts";
 import {
   comparableRuns,
@@ -523,4 +524,106 @@ test("a run's memory covers exactly its timed cases", () => {
   assert.ok(!runSchema.safeParse({ ...run, memory: {} }).success);
   assert.ok(!runSchema.safeParse({ ...run, memory: { [PREVIEW_CASE]: 1, other: 1 } }).success);
   assert.ok(runSchema.safeParse(run).success);
+});
+
+test("the comparison ranks latest runs on Tessera's hardware over a common cohort", () => {
+  const other = "01a1cdb1-9445-76dd-89c4-e4220d49e6f8";
+  const tracked = (
+    spec: string,
+    time: string,
+    ns: Record<string, number>,
+    memory?: Record<string, number>,
+  ): TrackingRun => {
+    const values = Object.fromEntries(
+      Object.entries(ns).map(([id, value]) => [`rust/${id}/api`, [value, value, value]]),
+    );
+    return runSchema.parse({
+      ...run,
+      id: crypto.randomUUID(),
+      spec,
+      time,
+      values,
+      ...(memory
+        ? {
+            memory: Object.fromEntries(
+              Object.entries(memory).map(([id, bytes]) => [`rust/${id}/api`, bytes]),
+            ),
+          }
+        : {}),
+    });
+  };
+  const cases = ["u64/random/65536/s1", "u64/reverse/65536/s1", "u64/random/1048576/s1"];
+  const at = (values: number[]) => Object.fromEntries(cases.map((id, i) => [id, values[i]]));
+  const runs = new Map([
+    [
+      "tessera",
+      [
+        tracked(other, "2026-10-01T00:00:00Z", at([1, 1, 1])),
+        tracked(uuid, "2026-11-01T00:00:00Z", at([10, 20, 100]), at([100, 100, 1000])),
+      ],
+    ],
+    ["std-stable", [tracked(uuid, "2026-11-02T00:00:00Z", at([40, 20, 800]), at([1, 2, 3]))]],
+    // Latest on another spec: the comparison uses the earlier run on Tessera's spec.
+    [
+      "glidesort",
+      [
+        tracked(uuid, "2026-11-03T00:00:00Z", at([20, 20, 400])),
+        tracked(other, "2026-11-04T00:00:00Z", at([1, 1, 1])),
+      ],
+    ],
+    // Lacks the reverse input, so it is listed but not ranked as a loss or a win.
+    ["radsort", [tracked(uuid, "2026-11-05T00:00:00Z", { [cases[0]]: 5 })]],
+  ]);
+  assert.equal(latestRuns(new Map())?.spec, undefined);
+  const latest = latestRuns(runs)!;
+  assert.equal(latest.spec, uuid);
+  assert.equal(latest.runs.get("glidesort")?.time, "2026-11-03T00:00:00Z");
+  const data = comparisonData(runs)!;
+  assert.deepEqual(
+    data.runs.map((entry) => [entry.algorithm, entry.memory]),
+    [
+      ["tessera", true],
+      ["std-stable", true],
+      ["glidesort", false],
+      ["radsort", false],
+    ],
+  );
+  assert.deepEqual(data.overview, data.figures[0]);
+  const overview = data.overview!.chart;
+  assert.match(overview.guide, /the 2 measured input patterns/);
+  assert.deepEqual(overview.columns, ["Speed", "Extra memory"]);
+  const rows = overview.groups.flatMap((group) => group.rows);
+  const tessera = rows.find((row) => row.strong)!;
+  // Geometric mean of 40/10 and 20/20; the worst peak over the cohort's cases.
+  assert.deepEqual(tessera.cells, ["2×", "100 B"]);
+  assert.ok(!JSON.stringify(rows).includes("radsort"));
+  // Without a cohort, the comparison is published empty, replacing any earlier one.
+  const alone = comparisonData(new Map([["tessera", runs.get("tessera")!]]));
+  assert.deepEqual([alone.spec, alone.runs, alone.overview, alone.figures], [uuid, [], null, []]);
+  assert.equal(comparisonData(new Map()).spec, null);
+  // Element types compare over the patterns every type has: here only random.
+  const types = comparisonData(
+    new Map([
+      ...runs,
+      [
+        "tessera",
+        [
+          tracked(uuid, "2026-11-06T00:00:00Z", {
+            ...at([10, 20, 100]),
+            "f64/random/65536/s1": 10,
+          }),
+        ],
+      ],
+      [
+        "std-stable",
+        [
+          tracked(uuid, "2026-11-06T00:00:00Z", {
+            ...at([40, 20, 800]),
+            "f64/random/65536/s1": 30,
+          }),
+        ],
+      ],
+    ]),
+  ).figures.find((figure) => figure.name === "types");
+  assert.match(types!.chart.guide, /on the random input$/);
 });

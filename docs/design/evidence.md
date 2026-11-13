@@ -124,6 +124,34 @@ Foundation B moves complete tile leaf planning, scratch and restoration outside 
 
 Foundation C publishes final ranges directly from the existing ledger start and length; it adds no range table or movement phase. A bounded linked screen on direct/keyed u64 at short, tile-edge and node sizes leaves performance acceptance open: both prior placements are faster on 49-record direct random inputs, and the primary prior placement is faster on keyed random inputs of that length. For direct sorted inputs at 49 records, the current same-source copy is as fast as both prior placements while the primary current placement is slower. Larger controls do not resolve these individual short cases or the earlier foundations' coverage gaps.
 
+## Serial slice-operation baseline
+
+The first serial extensions keep one rank-requirement authority and one refinement executor. Argsort changes the payload to indices; segmented sorting reuses invocation workspace across complete refinements. Top-k, prefixes and selected ranks do not introduce a second mover, recovery protocol or tile engine. This is a small shared implementation, not evidence that every workload is fastest.
+
+A bounded Rust comparison covered direct u64, 16-byte keyed records and 128-byte records on random, d16 and zipf2 inputs at 65,536 and 262,144 records. Nine paired blocks included full-call allocation, exact result checking and separate argsort output/workspace accounting. Random partial workloads saved substantial descendant work relative to full-sort references. This is a workload comparison, not source attribution or a new complexity bound. The host retained powersave, turbo and SMT; the observed block ranges are not confidence intervals.
+
+Native standard-library scalar selection was faster for every measured Top-k and prefix case, and most single-rank cases. Stable payload membership is a different contract: weaker unstable record selection was omitted, not counted as a win. Complete stable sorting, Glidesort and Radsort are explicit full-sort references for partial workloads. The d16 cohort often leaves little additional work for partial execution to avoid; a marginal full-sort advantage for the u64 rank interval remains a local loss rather than a reason for a distribution-specific exception.
+
+Stable-opponent losses in this bounded comparison are listed individually below. Ratios are opponent time divided by the paired Tessera mean; below one favors the opponent. A near-boundary directional verdict is not a portable guarantee.
+
+| Operation | Input | Records | Opponent | Ratio |
+|---|---|---:|---|---:|
+| Multiple selection | u64 / zipf2 | 65,536 | slice stable sort | 0.7948 |
+| Argsort | u64 / zipf2 | 65,536 | slice stable sort | 0.8725 |
+| Argsort | u64 / zipf2 | 262,144 | slice stable sort | 0.8262 |
+| Argsort | keyed u64 / zipf2 | 65,536 | slice stable sort | 0.9936 |
+| Argsort | keyed u64 / zipf2 | 262,144 | slice stable sort | 0.9082 |
+| Argsort | 128-byte records / zipf2 | 262,144 | slice stable sort | 0.9195 |
+| Segments | u64 / zipf2 | 65,536 | slice stable sort | 0.8639 |
+| Segments | u64 / zipf2 | 262,144 | slice stable sort | 0.8580 |
+| Segments | 128-byte records / d16 | 65,536 | Radsort | 0.9848 |
+| Segments | 128-byte records / d16 | 262,144 | Radsort | 0.8965 |
+| Segments | 128-byte records / zipf2 | 262,144 | Radsort | 0.9383 |
+
+The partial parameters were Top-k/prefix length 1,024, single rank 32,768, interval [16,384, 32,768), and three distinct multiple-selection ranks 16,384/32,768/49,152 with a duplicate request. Segments contained 256 records. These integer ranks are not the same quantile fractions at both input lengths. Zipf2 losses and scalar selection limits remain reasons to measure a real workload before adding a partial-tile specialization, not permission to duplicate the engine preemptively.
+
+A separate historical full-sort build and linked-placement screen against Foundation D succeeded with the new-operation benchmark adapters disabled. Small timing differences also appeared between identical-source copies, including u64 random at 65,536 records and several 1,000-record cases. It establishes build compatibility, not regression freedom, and does not close the [foundation acceptance gaps](#algorithm-extension-foundations). Full-sort figure cohorts are unchanged; non-sort results remain tables and JSON.
+
 ## Structure analysis
 
 Compare constructions by their rules, states and invariants, not source length. A replacement must meet [semantics](../../conformance/semantics.md) and the [per-case acceptance rule](../../ROADMAP.md#simplification-candidates); showing each mechanism useful alone does not prove minimality. The maintainer-approved study ceiling is O(P^{3/2}√n), with fixed root fan-out R; an n-record buffer is excluded. The public [O(P√n) bound](../../conformance/semantics.md#rust-rayon-entry-points) changes only if an accepted design needs it.

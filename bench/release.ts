@@ -4,7 +4,7 @@ import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { command, diagnostic } from "../tools/process.ts";
 import { catalog } from "./catalog.ts";
-import type { Plan } from "./plan.ts";
+import { loadPlan, type Plan, parsePlan } from "./plan.ts";
 import { writeReport } from "./report/index.ts";
 import { prepareRevisions, type Revisions } from "./revisions.ts";
 import { fetchNative } from "./rust/native/fetch.ts";
@@ -27,7 +27,7 @@ import {
 } from "./workspace.ts";
 
 /** Acquire native sources and own their link inside an isolated build workspace. */
-async function withComparisonWorkspace<T>(
+export async function withComparisonWorkspace<T>(
   root: string,
   native: boolean,
   operation: (workspace: Workspace) => Promise<T>,
@@ -53,7 +53,7 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
     throw new Error("Native linkage checks require Linux and ldd");
   await mkdir(out, { recursive: false });
   await withComparisonWorkspace(root, native, async ({ tree, target }) => {
-    const features = ["compare", "rayon", ...(native ? ["compare-native"] : [])];
+    const features = ["rayon", ...(native ? ["compare-native"] : [])];
     await prepareRevisions(root, tree, { baseline: "HEAD" }, features);
     await withBuildCache(target, async () => {
       const env = await benchmarkEnvironment(tree);
@@ -84,6 +84,40 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
         if (/libtbb|libgomp|libomp/.test(libraries))
           throw new Error(`${name} unexpectedly links a parallel native runtime:\n${libraries}`);
       }
+    }
+    // Exercise the actual Criterion/paired target, not just its library adapters.
+    const worker = await buildBenchmark(tree, target, "smoke", features, { profile: "dev" });
+    const check = join(out, "worker-check");
+    await mkdir(check);
+    const planPath = join(check, "plan.json");
+    const plan = await loadPlan("continuous", {
+      types: catalog.types.map((entry) => entry.id),
+      distributions: ["random", "equal"],
+      lengths: [32],
+    });
+    const available = await command(executable, ["list"], { cwd: tree, capture: true });
+    for (const line of available.split("\n").filter(Boolean)) {
+      const id = line.split("\t")[0];
+      if (catalog.algorithms.find((entry) => entry.id === id)?.adapter === "revision") continue;
+      await writeFile(planPath, JSON.stringify({ ...plan, algorithms: [id] }));
+      const env: NodeJS.ProcessEnv = { TESSERA_BENCH_PLAN: planPath };
+      const listed = await command(worker.executable, [], {
+        capture: true,
+        env: { ...env, TESSERA_BENCH_LIST: "1" },
+      });
+      if (!listed.trim()) throw new Error(`Shared worker lists no cases for ${id}`);
+      if (id === "glidesort-sqrt") {
+        const memoryPlan = join(check, "memory-plan.json");
+        await writeFile(memoryPlan, JSON.stringify({ ...plan, algorithms: ["tessera"] }));
+        env.TESSERA_BENCH_SCRATCH = join(check, "memory");
+        await command(join(dirname(executable), "memory"), [
+          "--plan",
+          memoryPlan,
+          "--out",
+          env.TESSERA_BENCH_SCRATCH,
+        ]);
+      }
+      await command(worker.executable, ["--test"], { env });
     }
     await command(executable, ["validate", "--suite", "smoke"], { cwd: tree });
     await command(
@@ -119,7 +153,12 @@ export async function compareAlgorithms(options: ReleaseOptions) {
 
 /** Build the timing/memory executable pair before starting any measurement. */
 async function prepareComparison(options: ReleaseOptions) {
-  const { root, out, plan, cpu, group, sampleMs, memoryMib, blocks } = options;
+  const { root, out, cpu, group, sampleMs, memoryMib, blocks } = options;
+  // Controls belong to this measurement operation, not the shared selection parser.
+  const plan = parsePlan({
+    ...options.plan,
+    algorithms: [...new Set(["tessera", "std-stable", ...options.plan.algorithms])],
+  });
   if (cpu) await command("taskset", ["-c", cpu, "true"]);
   const native = plan.algorithms.some((id) =>
     catalog.algorithms.some((entry) => entry.id === id && entry.adapter === "native"),
@@ -128,7 +167,6 @@ async function prepareComparison(options: ReleaseOptions) {
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
   const build = await withComparisonWorkspace(root, native, async ({ tree, target }) => {
     const features = [
-      "compare",
       ...(native ? ["compare-native"] : []),
       ...(plan.algorithms.some((id) =>
         catalog.algorithms.some((entry) => entry.id === id && entry.threads),

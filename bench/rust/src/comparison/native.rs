@@ -200,23 +200,24 @@ mod tests {
         let plan = crate::plan::Plan::parse(
             r#"
             schema = 1
-            harness = "comparison"
             algorithms = ["duckdb"]
             [[include]]
             lengths = [1, 2, 23, 24, 127, 128, 129, 1023, 1024, 1025, 8192]
         "#,
-            "comparison",
         )
         .unwrap();
         let mut cases = plan.inputs().unwrap();
         // The public plan requires positive lengths; the FFI also accepts empty input.
-        cases.extend(crate::plan::catalog().comparison.types.iter().map(|ty| {
-            crate::plan::InputCase {
-                ty: ty.clone(),
-                distribution: "random".into(),
-                len: 0,
-            }
-        }));
+        cases.extend(
+            crate::plan::catalog()
+                .types
+                .iter()
+                .map(|ty| crate::plan::InputCase {
+                    ty: ty.id.clone(),
+                    distribution: "random".into(),
+                    len: 0,
+                }),
+        );
         for algorithm in crate::plan::catalog()
             .algorithms
             .iter()
@@ -232,16 +233,15 @@ mod tests {
                 // This independent oracle preserves native capabilities and
                 // verifies that opt-in Reverse keys decline every native kernel.
                 let expected = match case.ty.as_str() {
-                    "reverse_u64" | "reverse_f64" => false,
-                    "u32" | "u64" | "f64" | "row_u32" | "row_u64" | "record128" | "owned" => {
-                        match variant.name {
-                            "clausecker" => case.ty == "row_u32",
-                            "vqsort" | "x86simdsort" => matches!(case.ty.as_str(), "u32" | "u64"),
-                            "duckdb" => !matches!(case.ty.as_str(), "f64" | "owned"),
-                            "fluxsort" | "ips2ra" | "ips4o" | "crumsort" => case.ty != "owned",
-                            _ => panic!("missing support expectation for {}", variant.name),
-                        }
-                    }
+                    "reverse_u64" | "reverse_f64" | "u128" => false,
+                    "u32" | "u64" | "f64" | "row_u32" | "row_u64" | "record128" | "rec128_u64"
+                    | "owned" => match variant.name {
+                        "clausecker" => case.ty == "row_u32",
+                        "vqsort" | "x86simdsort" => matches!(case.ty.as_str(), "u32" | "u64"),
+                        "duckdb" => !matches!(case.ty.as_str(), "f64" | "owned"),
+                        "fluxsort" | "ips2ra" | "ips4o" | "crumsort" => case.ty != "owned",
+                        _ => panic!("missing support expectation for {}", variant.name),
+                    },
                     _ => panic!("missing support expectation for record type {}", case.ty),
                 };
                 let input = CaseInput::new(case);

@@ -2,8 +2,6 @@
 
 //! Recovery contracts exercised through the retained executable pair.
 
-#![cfg(feature = "compare")]
-
 use std::{fs, process::Command};
 
 #[test]
@@ -22,7 +20,7 @@ fn memory_resumes_missing_adapters() {
     fs::write(
         &plan,
         serde_json::to_vec(&serde_json::json!({
-            "schema": 1, "harness": "comparison", "algorithms": algorithms,
+            "schema": 1,  "algorithms": algorithms,
             "include": [{"types": ["u64"], "distributions": ["random"], "lengths": [49]}]
         }))
         .unwrap(),
@@ -89,7 +87,7 @@ fn short_budget_is_retained_and_fixed() {
     fs::write(
         &plan,
         serde_json::to_vec(&serde_json::json!({
-            "schema": 1, "harness": "comparison", "algorithms": ["tessera", "std-stable"],
+            "schema": 1,  "algorithms": ["tessera", "std-stable"],
             "include": [{"types": ["u64"], "distributions": ["random"], "lengths": [49]}]
         }))
         .unwrap(),
@@ -164,7 +162,7 @@ fn large_parallel_memory_is_measured() {
     fs::write(
         &plan,
         serde_json::to_vec(&serde_json::json!({
-            "schema": 1, "harness": "comparison",
+            "schema": 1,
             "algorithms": ["tessera-par-8"],
             "include": [{
                 "types": ["u32", "row_u32"],
@@ -211,7 +209,7 @@ fn parallel_adapters_validate_records() {
     fs::write(
         &plan,
         serde_json::to_vec(&serde_json::json!({
-            "schema": 1, "harness": "comparison",
+            "schema": 1,
             "algorithms": ["tessera-par-8", "rayon-stable-8"],
             "include": [{
                 "types": ["f64", "reverse_u64", "reverse_f64", "row_u64", "record128", "owned"],

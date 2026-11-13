@@ -105,6 +105,24 @@ pub struct Row<K> {
     pub row: u32,
 }
 
+/// A wide C-layout record with the smoke suite's indexed, otherwise zero-filled payload.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+pub struct Wide {
+    /// Sorting key.
+    pub key: u64,
+    /// Observable payload, including the original index in its first eight bytes.
+    pub payload: [u8; 120],
+}
+impl Wide {
+    /// Creates exactly the wide input representation used by main tracking.
+    pub fn new(key: u64, index: usize) -> Self {
+        let mut payload = [0u8; 120];
+        payload[..8].copy_from_slice(&(index as u64).to_le_bytes());
+        Self { key, payload }
+    }
+}
+
 /// `SplitMix64` state used to draw reproducible input keys.
 pub struct SplitMix64(u64);
 

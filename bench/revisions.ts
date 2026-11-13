@@ -23,7 +23,7 @@ export async function prepareRevisions(
   root: string,
   tree: string,
   revisions: Revisions,
-  features = ["compare"],
+  features: string[] = [],
 ) {
   const baseline = await resolveCommit(root, revisions.baseline);
   const current = revisions.current ? await resolveCommit(root, revisions.current) : undefined;

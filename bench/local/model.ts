@@ -7,6 +7,15 @@ import { type Plan, parsePlan } from "../plan.ts";
 import { summarizeRatios } from "../statistics.ts";
 import type { BuildProvenance } from "../workspace.ts";
 
+/** Revision builds replace only the Tessera library, so a revision comparison measures exactly
+ * Tessera's serial API, its four-thread API, or both; any other algorithm would be identical
+ * code in both builds. Returns the worker threads the scheduler must reserve. */
+export function revisionThreads(plan: Plan): 1 | 4 {
+  if (!plan.algorithms.every((id) => id === "tessera" || id === "tessera-par-4"))
+    throw new Error("Revision comparisons measure only tessera and tessera-par-4");
+  return plan.algorithms.includes("tessera-par-4") ? 4 : 1;
+}
+
 /** One deterministic partition of a complete timed-ID listing. */
 export interface Shard {
   index: number;
@@ -97,8 +106,7 @@ export async function readPrepared(directory: string): Promise<PreparedPair> {
   )
     throw new Error("Expected an unmeasured prepared revision pair");
   pair.plan = parsePlan(pair.plan);
-  if (pair.plan.harness !== "smoke")
-    throw new Error("Prepared comparisons require a smoke harness plan");
+  revisionThreads(pair.plan);
   return pair;
 }
 

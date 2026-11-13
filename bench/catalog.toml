@@ -67,8 +67,6 @@ distributions = [
   { id = "runs", label = "sorted runs", compact = "runs", group = "Presorted" },
   { id = "equal", label = "all equal", group = "Few distinct keys" },
   { id = "d4096", label = "4,096 values", group = "Few distinct keys" },
-  { id = "sorted95", label = "95% sorted" },
-  { id = "skew50", label = "50% one key" },
   { id = "two_values", label = "two values", group = "Few distinct keys" },
   { id = "hot50", label = "50% one key, rest random", group = "Skewed" },
   { id = "sparse8", label = "8 wide keys", group = "Few distinct keys" },
@@ -83,7 +81,10 @@ modes = [
   { id = "api", label = "serial" },
   { id = "unstable", label = "unstable" },
   { id = "par", label = "parallel" },
+  { id = "par-1", label = "parallel · 1 thread" },
+  { id = "par-2", label = "parallel · 2 threads" },
   { id = "par-4", label = "parallel · 4 threads" },
+  { id = "par-8", label = "parallel · 8 threads" },
   { id = "par_unstable", label = "parallel unstable" },
 ]
 
@@ -92,18 +93,15 @@ modes = [
 testbed = "ci"
 features = ["rayon"]
 
+[inputs]
+lengths = [1000,65536,1000000,10000000]
+
+# Figure cohorts and order; independent of input generation and adapter support.
 [comparison]
 types = ["u32","u64","f64","row_u64","record128","owned","row_u32","reverse_u64","reverse_f64"]
-shapes = ["random","d256","d16","zipf1.1","zipf2","skew99","sorted","reverse","sorted99","runs","equal","d4096","two_values","hot50","sparse8","sparse_digits","bimodal","far_swaps","finite_signed","sorted_tail"]
 # Fixed cross-type aggregates; targeted inputs are plotted separately.
 summaryShapes = ["random","d256","d16","zipf1.1","zipf2","skew99","sorted","reverse","sorted99","runs"]
-lengths = [1000,65536,1000000,10000000]
 typeGroups = [
   { title = "Keys · against any sort", keys = true, types = ["u32","u64","f64"] },
   { title = "Records · against stable sorts", keys = false, types = ["row_u32","row_u64","record128","owned"] },
 ]
-
-[smoke]
-types = ["u32","u64","u128","f64","row_u32","row_u64","rec128_u64"]
-shapes = ["random","d256","d16","zipf1.1","zipf2","skew99","sorted","reverse","sorted99","runs","equal","d4096","two_values","hot50","sparse8","sparse_digits","bimodal","far_swaps","finite_signed","sorted_tail"]
-lengths = [1000,65536,1000000,10000000]

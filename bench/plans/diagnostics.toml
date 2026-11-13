@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 schema = 1
-harness = "smoke"
 algorithms = ["tessera"]
 
 [[include]]

@@ -8,6 +8,7 @@ import { CommandCancelledError, command, diagnostic } from "../../tools/process.
 import { parseCriterionId } from "../catalog.ts";
 import type { Plan } from "../plan.ts";
 import { resolveCommit, withWorkspace, workingTreeDirty } from "../workspace.ts";
+import { revisionThreads } from "./model.ts";
 import { assertWorkerEnvironment, buildRevisions, selectedCases } from "./runner.ts";
 
 /** Own a Docker process through failure/cancellation, including daemon-side cleanup. */
@@ -127,7 +128,7 @@ export async function compareCounters(options: {
   dirty?: boolean;
 }) {
   assertWorkerEnvironment();
-  if (options.plan.parallel?.length)
+  if (revisionThreads(options.plan) !== 1)
     throw new Error("Counter comparisons support serial API plans only");
   if (process.platform !== "linux" || process.arch !== "x64")
     throw new Error("Counter comparisons require Linux x86-64 and Valgrind");

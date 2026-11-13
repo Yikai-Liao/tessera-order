@@ -12,7 +12,7 @@ const reportSchema = z.object({
   adapter: z.literal("rust_criterion"),
   project: z.object({ slug: z.string() }),
   branch: z.object({
-    name: z.literal("main"),
+    name: z.string(),
     head: z.object({ version: z.object({ hash: z.string() }) }),
   }),
   testbed: z.object({
@@ -42,27 +42,25 @@ const reportSchema = z.object({
 export const runSchema = z.object({
   id: z.uuid(),
   time: z.iso.datetime(),
-  // Git committer time, normalized to UTC; older journals have only measurement time.
-  commit_time: z.iso.datetime().optional(),
+  // Git committer time, normalized to UTC.
+  commit_time: z.iso.datetime(),
   hash: z.string().regex(/^[a-f0-9]{40}$/),
   spec: z.uuid(),
-  protocol: z.literal("criterion-main-v1"),
   image: z.string().regex(/^registry\.bencher\.dev\/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$/),
   workflow: z
     .url()
     .regex(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+(?:\/attempts\/\d+)?$/),
   rustc: z.string(),
   rustflags: z.string(),
+  // C++ adapters only: the compilers and flags that built the measured code.
+  native: z.object({ cc: z.string(), cxx: z.string(), build: z.json() }).optional(),
   values: z.record(
     z.string().min(1),
     z.tuple([positive, positive, positive]).refine(([v, lo, hi]) => lo <= v && v <= hi),
   ),
 });
 export type TrackingRun = z.infer<typeof runSchema>;
-/** A case's catalog presentation; the browser cannot read the catalog, so publication supplies it.
- *
- * `label` keeps the first index format readable, so readers of either version share one file.
- */
+/** A case's catalog presentation; the browser cannot read the catalog, so publication supplies it. */
 export const caseSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
@@ -90,11 +88,23 @@ export const indexSchema = z.object({
 export type Facet = keyof z.infer<typeof indexSchema>["facets"];
 
 /** Accept a complete absolute-time report for this source and inventory, or fail publication. */
-export function summarizeReport(input: unknown, hash: string, project: string, ids: string[]) {
+export function summarizeReport(
+  input: unknown,
+  hash: string,
+  project: string,
+  ids: string[],
+  branch: string,
+) {
   const report = reportSchema.parse(input);
-  if (report.branch.head.version.hash !== hash || report.project.slug !== project)
+  if (
+    report.branch.name !== branch ||
+    report.branch.head.version.hash !== hash ||
+    report.project.slug !== project
+  )
     throw new Error("Tracking report source/project mismatch");
   const expected = new Set(ids);
+  if (!ids.length || expected.size !== ids.length)
+    throw new Error("Invalid expected tracking inventory");
   const values: TrackingRun["values"] = {};
   for (const entry of report.results[0]) {
     const id = entry.benchmark.name;

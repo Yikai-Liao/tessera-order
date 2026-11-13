@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Experiment selection and expansion for both benchmark harnesses.
+//! Shared experiment selection and expansion, independent of measurement scheduling.
 
 use serde::{Deserialize, Serialize};
 
@@ -11,25 +11,22 @@ use tessera_sort::thresholds::{INSERTION_MAX, TILE_BYTES};
 #[derive(Deserialize)]
 pub(crate) struct Catalog {
     schema: u32,
-    #[cfg(feature = "compare")]
     #[serde(rename = "pairedBlocks")]
     pub(crate) paired_blocks: PairedBlocks,
     pub(crate) algorithms: Vec<Algorithm>,
-    types: Vec<RecordType>,
-    smoke: Inventory,
-    pub(crate) comparison: Inventory,
+    pub(crate) types: Vec<RecordType>,
+    distributions: Vec<Distribution>,
+    inputs: InputDefaults,
     #[serde(rename = "revisionSampling")]
     revision_sampling: Vec<RevisionSampling>,
 }
 /// Supported short and extended paired measurement budgets.
-#[cfg(feature = "compare")]
 #[derive(Deserialize)]
 pub(crate) struct PairedBlocks {
     pub(crate) short: BlockBudget,
     pub(crate) extended: BlockBudget,
 }
 /// Number of blocks to retain; report statistics own agreement checks.
-#[cfg(feature = "compare")]
 #[derive(Deserialize)]
 pub(crate) struct BlockBudget {
     pub(crate) count: usize,
@@ -45,6 +42,15 @@ pub struct RevisionSampling {
     pub window_ms: u64,
     /// Number of adjacent A/B pairs.
     pub samples: usize,
+}
+
+/// Fixed prepared-record budget for Criterion batches, shared by both timing harnesses.
+/// Batch size does not adapt to measured speed; restoring inputs remains outside the clock.
+///
+/// # Panics
+/// Panics for an empty input.
+pub fn criterion_batch_iterations(records_len: usize) -> u64 {
+    ((1 << 18) / records_len).max(1) as u64
 }
 
 /// Selects the first matching descending length floor from the catalog.
@@ -63,25 +69,25 @@ pub fn revision_sampling(len: usize) -> &'static RevisionSampling {
 #[derive(Deserialize)]
 pub(crate) struct Algorithm {
     pub(crate) id: String,
-    #[cfg(feature = "compare")]
     pub(crate) stable: bool,
-    #[cfg(feature = "compare")]
     pub(crate) adapter: String,
-    #[cfg(feature = "compare")]
     #[serde(default)]
     pub(crate) threads: Option<usize>,
 }
 /// A record's identity and storage width.
 #[derive(Deserialize)]
-struct RecordType {
-    id: String,
+pub(crate) struct RecordType {
+    pub(crate) id: String,
     bytes: usize,
 }
-/// Defaults and supported identities for one harness.
+/// A supported input distribution.
 #[derive(Deserialize)]
-pub(crate) struct Inventory {
-    pub(crate) types: Vec<String>,
-    shapes: Vec<String>,
+struct Distribution {
+    id: String,
+}
+/// Default lengths when an inclusion rule omits its record counts.
+#[derive(Deserialize)]
+struct InputDefaults {
     lengths: Vec<usize>,
 }
 /// Reads the language-neutral catalog once per executable.
@@ -131,7 +137,7 @@ impl Length {
     }
 }
 
-/// A product of input axes; absent axes use the harness's catalog.
+/// A product of input axes; absent axes use the shared catalog.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Rule {
@@ -170,10 +176,9 @@ pub struct InputCase {
     pub len: usize,
 }
 
-#[cfg(feature = "compare")]
 impl InputCase {
     /// Formats the stable identifier used in raw samples and reports.
-    pub(crate) fn id(&self) -> String {
+    pub fn id(&self) -> String {
         format!("{}/{}/{}/s1", self.ty, self.distribution, self.len)
     }
     /// Names the resumable group containing this case's lengths.
@@ -189,37 +194,35 @@ pub struct Plan {
     #[serde(rename = "$comment", skip_serializing_if = "Option::is_none")]
     _comment: Option<String>,
     schema: u32,
-    /// Harness used to expand omitted axes.
-    harness: String,
-    /// Algorithm IDs, including the measurement protocol's controls.
+    /// Explicit algorithm selection; measurement drivers own their controls.
     pub(crate) algorithms: Vec<String>,
     include: Vec<Rule>,
     #[serde(default)]
     exclude: Vec<Rule>,
-    /// Additional four-thread API inputs; serial coverage remains independent.
+    /// Separate parallel input rules; empty rules reuse the primary selection.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     parallel: Vec<Rule>,
 }
 impl Plan {
-    /// Reads a JSON or TOML experiment, retaining its protocol's controls.
+    /// Reads a JSON or TOML selection without choosing a measurement protocol.
     ///
-    /// Invalid identities, empty axes, duplicate choices and unsupported harness
-    /// features return an error before input generation or measurement.
-    pub fn parse(text: &str, harness: &str) -> Result<Self, String> {
-        let mut plan: Self = serde_json::from_str(text).or_else(|json_error| {
+    /// Invalid identities, empty axes and duplicate choices return an error
+    /// before input generation or measurement.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let plan: Self = serde_json::from_str(text).or_else(|json_error| {
             toml::from_str(text).map_err(|toml_error| {
                 format!("invalid plan document\nJSON: {json_error}\nTOML: {toml_error}")
             })
         })?;
-        if plan.schema != 1
-            || plan.harness != harness
-            || !["smoke", "comparison"].contains(&harness)
-            || plan.include.is_empty()
-            || plan.algorithms.is_empty()
-        {
-            return Err(format!("expected a nonempty schema 1 {harness} plan"));
+        if plan.schema != 1 || plan.include.is_empty() || plan.algorithms.is_empty() {
+            return Err("expected a nonempty schema 1 plan".into());
         }
-        let inventory = plan.inventory();
+        let types: Vec<_> = catalog().types.iter().map(|ty| ty.id.clone()).collect();
+        let distributions: Vec<_> = catalog()
+            .distributions
+            .iter()
+            .map(|d| d.id.clone())
+            .collect();
         let unique = |values: &[String]| {
             !values.is_empty()
                 && values
@@ -235,9 +238,6 @@ impl Plan {
         {
             return Err("unknown or duplicate algorithm IDs".into());
         }
-        if harness != "smoke" && !plan.parallel.is_empty() {
-            return Err("parallel API rules belong to the smoke harness".into());
-        }
         for rule in plan
             .include
             .iter()
@@ -245,8 +245,8 @@ impl Plan {
             .chain(&plan.parallel)
         {
             for (values, supported, field) in [
-                (&rule.types, &inventory.types, "types"),
-                (&rule.distributions, &inventory.shapes, "distributions"),
+                (&rule.types, &types, "types"),
+                (&rule.distributions, &distributions, "distributions"),
             ] {
                 if let Some(values) = values
                     && (!unique(values) || values.iter().any(|id| !supported.contains(id)))
@@ -263,28 +263,12 @@ impl Plan {
                 return Err("length selectors must be unique, nonempty and positive".into());
             }
         }
-        if harness == "smoke" && plan.algorithms.iter().any(|id| id != "tessera") {
-            return Err("the smoke harness measures Tessera only".into());
-        }
-        let controls = if harness == "comparison" {
-            &["tessera", "std-stable"][..]
-        } else {
-            &["tessera"][..]
-        };
-        plan.algorithms
-            .retain(|id| !controls.contains(&id.as_str()));
-        plan.algorithms
-            .splice(0..0, controls.iter().map(|id| (*id).into()));
         Ok(plan)
     }
 
-    /// Names the defaults validated when this plan was parsed.
-    fn inventory(&self) -> &'static Inventory {
-        if self.harness == "smoke" {
-            &catalog().smoke
-        } else {
-            &catalog().comparison
-        }
+    /// Returns exactly the algorithms selected in this plan.
+    pub fn algorithms(&self) -> &[String] {
+        &self.algorithms
     }
 
     /// Includes matching products, then removes matching exclusions.
@@ -301,12 +285,12 @@ impl Plan {
 
     /// Expands products into unique inputs before allocating any records.
     ///
-    /// Omitted axes use the harness catalog. An empty experiment returns an error.
+    /// Omitted axes use catalog identities and default lengths. An empty experiment returns an error.
     pub fn inputs(&self) -> Result<Vec<InputCase>, String> {
         self.expand(&self.include)
     }
 
-    /// Expands only explicitly selected four-thread API inputs.
+    /// Expands the separate parallel selection, or returns empty when none is specified.
     pub fn parallel_inputs(&self) -> Result<Vec<InputCase>, String> {
         if self.parallel.is_empty() {
             return Ok(Vec::new());
@@ -316,19 +300,22 @@ impl Plan {
 
     /// Applies one API selection and the shared exclusions before generation.
     fn expand(&self, rules: &[Rule]) -> Result<Vec<InputCase>, String> {
-        let inventory = self.inventory();
         let mut cases = BTreeSet::new();
         for rule in rules {
             let types = rule
                 .types
                 .clone()
-                .unwrap_or_else(|| inventory.types.clone());
-            let shapes = rule
-                .distributions
-                .clone()
-                .unwrap_or_else(|| inventory.shapes.clone());
+                .unwrap_or_else(|| catalog().types.iter().map(|ty| ty.id.clone()).collect());
+            let shapes = rule.distributions.clone().unwrap_or_else(|| {
+                catalog()
+                    .distributions
+                    .iter()
+                    .map(|d| d.id.clone())
+                    .collect()
+            });
             let lengths = rule.lengths.clone().unwrap_or_else(|| {
-                inventory
+                catalog()
+                    .inputs
                     .lengths
                     .iter()
                     .map(|&len| Length::Count(len))
@@ -413,7 +400,7 @@ mod tests {
     fn selection_rules_match_contract() {
         let fixture: Value =
             toml::from_str(include_str!("../../plans/selection.fixture.toml")).unwrap();
-        let plan = Plan::parse(&fixture["plan"].to_string(), "smoke").unwrap();
+        let plan = Plan::parse(&fixture["plan"].to_string()).unwrap();
         for input in fixture["cases"].as_array().unwrap() {
             assert_eq!(
                 plan.selects(
@@ -443,26 +430,22 @@ mod tests {
                 criterion_id!(&group, entry["mode"].as_str().unwrap()),
                 entry["criterion"].as_str().unwrap()
             );
-            #[cfg(feature = "compare")]
             assert_eq!(case.id(), entry["comparison"].as_str().unwrap());
         }
     }
 
     #[test]
     fn presets_preserve_coverage() {
-        for (text, harness, expected) in [
-            (include_str!("../../plans/continuous.toml"), "smoke", 61),
-            (include_str!("../../plans/smoke.toml"), "comparison", 125),
-            (include_str!("../../plans/release.toml"), "comparison", 381),
-            (include_str!("../../plans/parallel.toml"), "comparison", 16),
+        for (text, expected) in [
+            (include_str!("../../plans/continuous.toml"), 62),
+            (include_str!("../../plans/smoke.toml"), 125),
+            (include_str!("../../plans/release.toml"), 381),
+            (include_str!("../../plans/parallel.toml"), 16),
         ] {
-            assert_eq!(
-                Plan::parse(text, harness).unwrap().inputs().unwrap().len(),
-                expected
-            );
+            assert_eq!(Plan::parse(text).unwrap().inputs().unwrap().len(), expected);
         }
         let pairs = |text| {
-            Plan::parse(text, "comparison")
+            Plan::parse(text)
                 .unwrap()
                 .inputs()
                 .unwrap()
@@ -478,7 +461,7 @@ mod tests {
 
     #[test]
     fn continuous_preserves_required_screens() {
-        let continuous = Plan::parse(include_str!("../../plans/continuous.toml"), "smoke").unwrap();
+        let continuous = Plan::parse(include_str!("../../plans/continuous.toml")).unwrap();
         let cases = continuous.inputs().unwrap();
         let require = |inputs: &[InputCase], ty: &str, distribution: &str, len: usize| {
             assert!(
@@ -538,13 +521,13 @@ mod tests {
         for ty in ["u32", "u64", "u128", "f64", "row_u64", "rec128_u64"] {
             require(&cases, ty, "random", 65_536);
         }
-        for ty in ["u32", "u64", "u128", "row_u64"] {
+        for ty in ["u32", "u64", "u128", "row_u32", "row_u64"] {
             require(&cases, ty, "random", 1_000_000);
         }
         require(&cases, "u128", "sparse8", 1_000_000);
         require(&cases, "u64", "bimodal", 1_000_000);
         // Bound the expensive serial phase without locking input iteration order.
-        assert_eq!(cases.iter().filter(|case| case.len >= 1_000_000).count(), 7);
+        assert_eq!(cases.iter().filter(|case| case.len >= 1_000_000).count(), 8);
         assert!(!cases.iter().any(|case| {
             case.ty == "u64"
                 && ["skew99", "two_values"].contains(&case.distribution.as_str())
@@ -614,8 +597,8 @@ mod tests {
 
     #[test]
     fn relative_lengths_follow_records() {
-        let plan = Plan::parse(r#"{"schema":1,"harness":"smoke","algorithms":["tessera"],
-            "include":[{"types":["u64","row_u64"],"distributions":["random"],"lengths":["tile-next"]}]}"#, "smoke").unwrap();
+        let plan = Plan::parse(r#"{"schema":1,"algorithms":["tessera"],
+            "include":[{"types":["u64","row_u64"],"distributions":["random"],"lengths":["tile-next"]}]}"#).unwrap();
         for case in plan.inputs().unwrap() {
             let bytes = if case.ty == "u64" { 8 } else { 16 };
             assert_eq!(case.len, TILE_BYTES / bytes + 1);

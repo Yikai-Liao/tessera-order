@@ -76,6 +76,12 @@ export interface BuildProvenance {
   library_features?: string[];
   rustc_args?: string[];
   revisions?: { libraries: Record<string, string[]> };
+  cc?: string;
+  cxx?: string;
+  native_build?: {
+    flags: string[];
+    translation_units: { source: string; compiler: string; flags: string[] }[];
+  };
 }
 
 /** Materialize repository-local links; reject escaping targets and directory cycles.
@@ -331,17 +337,15 @@ export async function withBuildCache<T>(target: string, operation: () => Promise
 export async function buildBenchmark(
   tree: string,
   target: string,
-  name: "smoke" | "compare",
+  name: "smoke" | "compare" | "memory",
   features: string[],
   options: {
     targetTriple?: string;
     env?: NodeJS.ProcessEnv;
     rustcArgs?: string[];
-    profile?: "dev" | "release";
+    profile?: "dev" | "release" | "bench";
   } = {},
 ) {
-  if (options.profile && name !== "compare")
-    throw new Error("Explicit profiles are only supported for comparison builds");
   if (options.rustcArgs && name !== "smoke")
     throw new Error("Final rustc arguments require a smoke benchmark build");
   return withBuildCache(target, async () => {
@@ -350,19 +354,12 @@ export async function buildBenchmark(
       await command(
         "cargo",
         [
-          ...(name === "smoke"
-            ? options.rustcArgs
-              ? ["rustc", "--profile", "bench", "--bench", name]
-              : ["bench", "--bench", name, "--no-run"]
-            : [
-                "build",
-                "--profile",
-                options.profile ?? "release",
-                "--bin",
-                name,
-                "--bin",
-                "memory",
-              ]),
+          options.rustcArgs ? "rustc" : "build",
+          "--profile",
+          options.profile ?? (name === "smoke" ? "bench" : "release"),
+          name === "smoke" ? "--bench" : "--bin",
+          name,
+          ...(name === "compare" ? ["--bin", "memory"] : []),
           "--locked",
           "-p",
           "tessera-bench",

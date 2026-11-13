@@ -45,13 +45,20 @@ const report = () => ({
   ],
 });
 const run: TrackingRun = {
-  ...summarizeReport(report(), source, "example", [PREVIEW_CASE]),
-  protocol: "criterion-main-v1",
+  ...summarizeReport(report(), source, "example", [PREVIEW_CASE], "main"),
+  commit_time: "2026-10-31T00:30:00.000Z",
   rustc: "rustc test",
   rustflags: "",
   image: "registry.bencher.dev/example@sha256:" + "b".repeat(64),
   workflow: "https://github.com/test/repo/actions/runs/1",
 };
+
+test("each algorithm's reports must come from its own Cloud branch", () => {
+  const raw = report();
+  raw.branch.name = "algorithm-glidesort";
+  assert.throws(() => summarizeReport(raw, source, "example", [PREVIEW_CASE], "main"));
+  assert.ok(summarizeReport(raw, source, "example", [PREVIEW_CASE], "algorithm-glidesort"));
+});
 
 test("only complete matching absolute reports enter history", () => {
   assert.deepEqual(run.values[PREVIEW_CASE], [10, 9, 11]);
@@ -81,7 +88,7 @@ test("only complete matching absolute reports enter history", () => {
   for (const mutate of mutations) {
     const r = report();
     mutate(r);
-    assert.throws(() => summarizeReport(r, source, "example", [PREVIEW_CASE]));
+    assert.throws(() => summarizeReport(r, source, "example", [PREVIEW_CASE], "main"));
   }
   assert.throws(() => parseRuns(JSON.stringify(run)), /Truncated/);
 });
@@ -155,6 +162,7 @@ const at = (i: number, values: Record<string, number>, spec = uuid): TrackingRun
   ...run,
   id: `01a1cdb1-9445-76dd-89c4-e4220d49e${i.toString(16).padStart(3, "0")}`,
   time: `2026-11-${String(i + 1).padStart(2, "0")}T00:00:00Z`,
+  commit_time: `2026-11-${String(i + 1).padStart(2, "0")}T00:00:00Z`,
   hash: i.toString(16).padStart(40, "0"),
   spec,
   values: Object.fromEntries(Object.entries(values).map(([id, v]) => [id, [v, v, v]])),
@@ -342,12 +350,11 @@ test("commit timestamps order every view independently of measurement order and 
   assert.deepEqual(comparableRuns(input, { first: later.id, last: early.id }), []);
 });
 
-test("legacy UTC times remain readable and optional commit times survive publication", async (t) => {
-  assert.equal(historyTimestamp(run), Date.parse(run.time));
+test("commit times are normalized and survive publication", async (t) => {
   const normalized = new Date("2026-11-01T00:15:30+08:00").toISOString();
   const withCommit = runSchema.parse({ ...run, commit_time: normalized });
   assert.equal(withCommit.commit_time, "2026-10-31T16:15:30.000Z");
-  assert.equal(formatTimestamp(withCommit.commit_time!), "2026-10-31 16:15:30.000 UTC");
+  assert.equal(formatTimestamp(withCommit.commit_time), "2026-10-31 16:15:30.000 UTC");
   assert.equal(historyTimestamp(withCommit), Date.parse(normalized));
   assert.throws(() => runSchema.parse({ ...run, commit_time: "not-a-time" }));
   const dir = await mkdtemp(join(tmpdir(), "commit-times-"));
@@ -355,9 +362,8 @@ test("legacy UTC times remain readable and optional commit times survive publica
   await appendRun(dir, withCommit);
   const stored = parseRuns(await readFile(join(dir, "2026-10.jsonl"), "utf8"));
   assert.equal(stored[0].commit_time, normalized);
-  // The format remains readable to old readers which ignore new fields.
-  const { commit_time: _, ...legacy } = withCommit;
-  assert.deepEqual(runSchema.parse(legacy), run);
+  const { commit_time: _, ...missing } = withCommit;
+  assert.throws(() => runSchema.parse(missing));
 });
 
 test("missing compared cases retain shared slots, independent baselines and gaps", () => {
@@ -401,7 +407,7 @@ test("the latest measured environment is selected before commit-time ordering", 
   assert.deepEqual(comparableRuns([old, newerEnvironment]), [newerEnvironment]);
 });
 
-test("only runs on the latest protocol and specification form the trend", () => {
+test("only runs on the latest hardware specification form the trend", () => {
   const cases = trackingCases([PREVIEW_CASE]);
   const other = "01a1cdb1-9445-76dd-89c4-e4220d49e000";
   const runs = [

@@ -54,7 +54,7 @@ test("CLI exposes experiments separately from continuous stages and CI checks", 
   );
 });
 
-test("CLI rejects misplaced options and incompatible plans before creating outputs", async (t) => {
+test("CLI rejects misplaced options before creating outputs", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   for (const args of [
@@ -63,9 +63,6 @@ test("CLI rejects misplaced options and incompatible plans before creating outpu
     ["compare", "revisions", "--algorithms", "tessera"],
     ["compare", "commit", "--prepare-only"],
     ["compare", "commit", "--shard", "1/4"],
-    ["compare", "commit", "--plan", "smoke"],
-    ["compare", "algorithms", "--plan", "continuous"],
-    ["continuous", "prepare", "--plan", "release"],
     ["continuous", "measure", "missing", "--shard", "5/4"],
     ["continuous", "measure", "missing", "--shard", "1/65"],
   ]) {

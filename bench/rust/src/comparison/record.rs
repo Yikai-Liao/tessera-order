@@ -10,7 +10,7 @@ use std::{
 };
 
 /// Ordering and payload identity for one benchmark record representation.
-pub(super) trait BenchmarkRecord: Clone + Send + Sync + 'static {
+pub trait BenchmarkRecord: Clone + Send + Sync + 'static {
     /// Whether tie order and payload identity are observable.
     const HAS_PAYLOAD: bool = false;
     /// Compares sorting keys in the shared total order.
@@ -41,6 +41,7 @@ macro_rules! key_element {
 }
 key_element!(u32);
 key_element!(u64);
+key_element!(u128);
 key_element!(f64);
 
 impl<K: Key + Send + Sync + 'static> BenchmarkRecord for Reverse<K> {
@@ -52,16 +53,10 @@ impl<K: Key + Send + Sync + 'static> BenchmarkRecord for Reverse<K> {
     }
 }
 
-/// A 128-byte C-layout record with a key and indexed payload.
-#[repr(C)]
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
-pub(super) struct WideRecord {
-    pub key: u64,
-    pub payload: [u8; 120],
-}
+pub(super) use crate::case::Wide as WideRecord;
 /// A keyed record whose allocated string payload carries its original index.
 #[derive(Clone)]
-pub(super) struct OwnedRecord {
+pub struct OwnedRecord {
     pub(super) key: u64,
     payload: String,
 }
@@ -125,14 +120,14 @@ impl<K: Key> PartialOrd for Row<K> {
     }
 }
 /// Immutable original records and their stable reference shared by all adapters.
-pub(super) struct PreparedRecords<T> {
+pub struct PreparedRecords<T> {
     original: Vec<T>,
     reference: Vec<T>,
     buffer_bytes: usize,
 }
 impl<T: BenchmarkRecord> PreparedRecords<T> {
     /// Prepares one immutable input, its reference order and buffer footprint.
-    pub(super) fn new(original: Vec<T>) -> Rc<Self> {
+    pub fn new(original: Vec<T>) -> Rc<Self> {
         let mut reference = original.clone();
         reference.sort_by(T::order);
         let buffer_bytes =
@@ -145,24 +140,26 @@ impl<T: BenchmarkRecord> PreparedRecords<T> {
     }
 
     /// Returns the original vector for `Vec::clone`/`clone_from` batch restoration.
-    pub(super) fn original(&self) -> &Vec<T> {
+    pub fn original(&self) -> &Vec<T> {
         &self.original
     }
 
     /// Returns the immutable stable reference used by output verification.
-    pub(super) fn reference(&self) -> &[T] {
+    pub fn reference(&self) -> &[T] {
         &self.reference
     }
 
     /// Returns record storage and separately allocated payload bytes.
-    pub(super) fn buffer_bytes(&self) -> usize {
+    pub fn buffer_bytes(&self) -> usize {
         self.buffer_bytes
     }
 }
 /// A prepared case with its concrete record representation preserved.
-pub(super) enum CaseInput {
+#[allow(missing_docs)]
+pub enum CaseInput {
     U32(Rc<PreparedRecords<u32>>),
     U64(Rc<PreparedRecords<u64>>),
+    U128(Rc<PreparedRecords<u128>>),
     F64(Rc<PreparedRecords<f64>>),
     ReverseU64(Rc<PreparedRecords<Reverse<u64>>>),
     ReverseF64(Rc<PreparedRecords<Reverse<f64>>>),
@@ -173,13 +170,17 @@ pub(super) enum CaseInput {
 }
 impl CaseInput {
     /// Generates and prepares the concrete record representation of a suite case.
-    pub(super) fn new(c: &InputCase) -> Self {
+    pub fn new(c: &InputCase) -> Self {
         match c.ty.as_str() {
             "u32" => Self::U32(PreparedRecords::new(generate::<u32>(
                 &c.distribution,
                 c.len,
             ))),
             "u64" => Self::U64(PreparedRecords::new(generate::<u64>(
+                &c.distribution,
+                c.len,
+            ))),
+            "u128" => Self::U128(PreparedRecords::new(generate::<u128>(
                 &c.distribution,
                 c.len,
             ))),
@@ -214,6 +215,14 @@ impl CaseInput {
                     .into_iter()
                     .enumerate()
                     .map(|(i, key)| Row { key, row: i as u32 })
+                    .collect(),
+            )),
+            // These are distinct inputs, not harness-specific representations.
+            "rec128_u64" => Self::WideRecord(PreparedRecords::new(
+                generate::<u64>(&c.distribution, c.len)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, key)| WideRecord::new(key, index))
                     .collect(),
             )),
             "record128" => Self::WideRecord(PreparedRecords::new(

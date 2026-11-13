@@ -80,7 +80,7 @@ macro_rules! tessera_keys {
         }
     )+};
 }
-tessera_keys!(u32, u64, f64, Reverse<u64>, Reverse<f64>);
+tessera_keys!(u32, u64, u128, f64, Reverse<u64>, Reverse<f64>);
 
 /// Keeps keyed-record adapters on Tessera's by-key entry points.
 macro_rules! tessera_records {
@@ -135,13 +135,24 @@ fn glidesort_sqrt<T: BenchmarkRecord>(records: &mut [T], scratch_bytes: usize) {
 }
 
 /// Restorable batches with one adapter call and output verification per batch.
-pub(super) trait Kernel {
+pub trait Kernel {
     /// Restores every independent buffer to the original input.
     fn restore(&mut self, batch: usize);
     /// Sorts the prepared buffers without restoring or checking them.
     fn run_batch(&mut self);
     /// Verifies all buffers against the shared original and reference.
     fn check(&self) -> Result<(), String>;
+    /// Restores independent inputs, times only sorting, then checks every result and worker.
+    /// Returns an error for invalid output or threads outside the owned pool.
+    fn measure_batch(&mut self, batch: usize) -> Result<std::time::Duration, String> {
+        self.restore(batch);
+        let start = std::time::Instant::now();
+        self.run_batch();
+        let elapsed = start.elapsed();
+        self.check()?;
+        super::host::check_threads(self.worker_threads())?;
+        Ok(elapsed)
+    }
     /// Returns the record and owned-payload bytes in one batch buffer.
     fn buffer_bytes(&self) -> usize;
     /// Returns the number of persistent workers owned by this adapter.
@@ -202,14 +213,18 @@ pub(super) fn prepare_kernel<T: BenchmarkRecord>(
 }
 /// An adapter's public name and stability contract.
 #[derive(Clone, Copy)]
-pub(super) struct Variant {
+pub struct Variant {
+    /// Catalog algorithm identity.
     pub name: &'static str,
+    /// Whether equal keys retain input order.
     pub stable: bool,
+    /// Catalog adapter family.
     pub adapter: &'static str,
+    /// Owned worker count, absent for serial adapters.
     pub threads: Option<usize>,
 }
 /// Lists the adapters measured in the selected executable configuration.
-pub(super) fn list_variants() -> Vec<Variant> {
+pub fn list_variants() -> Vec<Variant> {
     crate::plan::catalog()
         .algorithms
         .iter()
@@ -272,18 +287,19 @@ macro_rules! copy_adapter {
 }
 impl Variant {
     /// Checks capabilities without starting workers for a parallel adapter.
-    pub(super) fn supports(self, input: &CaseInput) -> bool {
+    pub fn supports(self, input: &CaseInput) -> bool {
         // Every CaseInput representation implements TesseraAdapter's parallel
         // operations. Preparing one here would warm and discard a real pool.
         (cfg!(feature = "rayon") && self.threads.is_some()) || self.prepare(input, 0).is_some()
     }
 
     /// Prepares an adapter for this input, or declines an unsupported combination.
-    pub(super) fn prepare(
-        self,
-        input: &CaseInput,
-        scratch_bytes: usize,
-    ) -> Option<Box<dyn Kernel>> {
+    pub fn prepare(self, input: &CaseInput, scratch_bytes: usize) -> Option<Box<dyn Kernel>> {
+        #[cfg(feature = "compare-native")]
+        {
+            static LAYOUTS: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+            LAYOUTS.get_or_init(super::native::check_layouts);
+        }
         match (self.name, input) {
             ("voracious", input) if !matches!(input, CaseInput::U32(_) | CaseInput::U64(_)) => None,
             ("radsort", CaseInput::OwnedRecord(v)) => {
@@ -298,6 +314,13 @@ impl Variant {
             (_, CaseInput::ReverseF64(v)) => try_prepare_common(self, Rc::clone(v), scratch_bytes),
             (_, CaseInput::OwnedRecord(v)) => try_prepare_common(self, Rc::clone(v), scratch_bytes),
             (_, CaseInput::U32(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
+            (_, CaseInput::U128(input)) => match self.name {
+                "radsort" => Some(prepare_kernel(Rc::clone(input), true, radsort::sort)),
+                "rdst" => Some(prepare_kernel(Rc::clone(input), false, |v| {
+                    v.radix_sort_unstable()
+                })),
+                _ => try_prepare_common(self, Rc::clone(input), scratch_bytes),
+            },
             (_, CaseInput::U64(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
             (_, CaseInput::F64(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
             (_, CaseInput::Row32(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |r| r.key),
@@ -317,6 +340,7 @@ impl CaseInput {
         match self {
             Self::U32(_) => u32::revision_entries(),
             Self::U64(_) => u64::revision_entries(),
+            Self::U128(_) => u128::revision_entries(),
             Self::F64(_) => f64::revision_entries(),
             Self::ReverseU64(_) => Reverse::<u64>::revision_entries(),
             Self::ReverseF64(_) => Reverse::<f64>::revision_entries(),
@@ -335,7 +359,7 @@ mod tests {
     #[cfg(tessera_bench_revisions)]
     #[test]
     fn revisions_preserve_records() {
-        for ty in &crate::plan::catalog().comparison.types {
+        for ty in crate::plan::catalog().types.iter().map(|ty| &ty.id) {
             for distribution in ["random", "equal", "reverse", "d16"] {
                 let input = CaseInput::new(&InputCase {
                     ty: ty.clone(),
@@ -375,7 +399,7 @@ mod tests {
 
     #[test]
     fn capabilities_match_preparation() {
-        for ty in &crate::plan::catalog().comparison.types {
+        for ty in crate::plan::catalog().types.iter().map(|ty| &ty.id) {
             let input = CaseInput::new(&InputCase {
                 ty: ty.clone(),
                 distribution: "random".into(),

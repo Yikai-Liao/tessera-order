@@ -11,6 +11,7 @@ import {
   modeName,
   modeOrder,
 } from "../catalog.ts";
+import { trackingAlgorithm } from "./algorithms.ts";
 import { renderMainOverview } from "./history.ts";
 import {
   type Facet,
@@ -93,7 +94,10 @@ export async function appendRun(directory: string, input: TrackingRun) {
   await writeFile(join(directory, "preview.svg"), renderMainOverview(runs, index.cases));
 }
 
+// Usage: publish.ts ALGORITHM JOURNAL, run from the data checkout's root.
 if (import.meta.main) {
-  const [run] = parseRuns(await readFile(process.argv[2], "utf8"));
-  await appendRun("main", run);
+  const [algorithm, journal] = process.argv.slice(2);
+  const runs = parseRuns(await readFile(journal, "utf8"));
+  if (runs.length !== 1) throw new Error("Expected exactly one complete run");
+  await appendRun(trackingAlgorithm(algorithm).id, runs[0]);
 }

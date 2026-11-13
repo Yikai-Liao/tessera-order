@@ -4,7 +4,6 @@
 
 use super::{InputCase, variant::Kernel};
 use serde::Serialize;
-use std::time::Instant;
 
 /// Fixed block budget and limits for calibrating each verified sample.
 pub(super) struct Sampling {
@@ -26,23 +25,13 @@ pub(super) struct Sample {
     pub elapsed_ns: u64,
     pub verified: bool,
 }
-/// Restores a batch, times only the sort calls, and verifies every output.
-pub(super) fn measure_batch(k: &mut dyn Kernel, batch: usize) -> Result<u64, String> {
-    k.restore(batch);
-    let start = Instant::now();
-    k.run_batch();
-    let elapsed = start.elapsed().as_nanos() as u64;
-    k.check()?;
-    super::host::check_threads(k.worker_threads())?;
-    Ok(elapsed.max(1))
-}
 /// Chooses a batch from a warm-up timing and the prepared-memory limit.
 pub(super) fn calibrate(
     k: &mut dyn Kernel,
     min_sample_ns: u64,
     prepared_cap_bytes: usize,
 ) -> Result<usize, String> {
-    let elapsed = measure_batch(k, 1)?;
+    let elapsed = k.measure_batch(1)?.as_nanos().max(1) as u64;
     Ok(((min_sample_ns.div_ceil(elapsed)) as usize)
         .clamp(1, (prepared_cap_bytes / k.buffer_bytes()).max(1)))
 }
@@ -91,8 +80,11 @@ pub(super) fn measure_case(
                 sampling.min_sample_ns,
                 sampling.prepared_cap_bytes,
             )?;
-            let elapsed_ns = measure_batch(&mut *kernel, batch)
-                .map_err(|e| format!("{} {}: {e}", case.id(), variant.name))?;
+            let elapsed_ns = kernel
+                .measure_batch(batch)
+                .map_err(|e| format!("{} {}: {e}", case.id(), variant.name))?
+                .as_nanos()
+                .max(1) as u64;
             publish(Sample {
                 kind: "sample",
                 case_id: case.id(),

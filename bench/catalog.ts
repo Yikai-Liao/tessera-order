@@ -9,11 +9,7 @@ const blockBudget = z.object({
   count: z.number().int().positive(),
   agreement: z.number().int().positive(),
 });
-const inventory = z.object({
-  types: z.array(z.string()),
-  shapes: z.array(z.string()),
-  lengths: z.array(z.number().int().positive()),
-});
+const inputDefaults = z.object({ lengths: z.array(z.number().int().positive()) });
 
 /** Language-neutral benchmark identities, presentation metadata and suite order. */
 export const catalog = z
@@ -56,8 +52,9 @@ export const catalog = z
     ),
     modes: z.array(identity),
     continuous: z.object({ testbed: z.string(), features: z.array(z.string()) }),
-    smoke: inventory,
-    comparison: inventory.extend({
+    inputs: inputDefaults,
+    comparison: z.object({
+      types: z.array(z.string()),
       summaryShapes: z.array(z.string()),
       typeGroups: z.array(
         z.object({

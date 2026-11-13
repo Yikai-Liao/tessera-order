@@ -7,9 +7,9 @@
 | Library source or library manifest | Rust validation, PR revision measurement and Docs (the figures replay the engine) |
 | Library tests or Rust validation workflow | Rust validation |
 | Root Cargo manifest/lockfile, toolchain or `.cargo/` | Rust validation, algorithm comparison checks and PR revision measurement |
-| Comparator-only Rust, native adapters or algorithm-session tooling | Algorithm comparison checks |
-| Shared benchmark Rust inputs, plan expansion, sampling or build configuration | Algorithm comparison checks and PR revision measurement |
-| Revision execution, shard validation or local/continuous selection plans | PR revision measurement |
+| Native adapters or algorithm-session tooling | Algorithm comparison checks |
+| Shared benchmark Rust inputs, adapter kernels, plan selection/expansion, sampling or build configuration | Algorithm comparison checks and PR revision measurement |
+| Revision execution or shard validation | PR revision measurement |
 | Reports, status or publication tooling | Repository tooling checks only |
 | Markdown, site inputs, shared figure templates or the figure engine (`rust/tessera-trace/`) | Docs |
 | C++ library inputs | C++ validation, when its manifest exists |
@@ -42,7 +42,7 @@ The Rust lint job runs Clippy and rustdoc over all workspace features, including
 
 ### Algorithm harness
 
-The comparison job owns benchmark formatting, Clippy, rustdoc and functional checks. It checks the benchmark crate with every feature (setting `TESSERA_BENCH_CHECK_ONLY` only for Clippy and rustdoc), runs its harness tests and doctests in the isolated workspace that builds the native competitors, and checks that native programs link no parallel runtime. It compiles the standalone native registry with GCC and Clang on Linux and, in a comparison-owned Windows job, with both MSVC preprocessors; native benchmarking itself supports Linux x86-64 only. The smoke check uses Rayon, validates the smoke suite and generates a partial report. A library change does not rerun the benchmark crate's own tests: building the smoke benchmark against both revisions already rejects changed case identities.
+The comparison job owns benchmark formatting, Clippy, rustdoc and functional checks. It checks the benchmark crate with every feature (setting `TESSERA_BENCH_CHECK_ONLY` only for Clippy and rustdoc), runs its harness tests and doctests in the isolated workspace that builds the native competitors, and checks that native programs link no parallel runtime. It compiles the standalone native registry with GCC and Clang on Linux and, in a comparison-owned Windows job, with both MSVC preprocessors; native benchmarking itself supports Linux x86-64 only. The smoke check uses Rayon, exercises the shared Criterion/paired executable with tiny random/equal inputs for every available production algorithm and record type (including normal memory evidence for `glidesort-sqrt`), validates the smoke suite and generates a partial report. A library change does not rerun the benchmark crate's own tests: building the smoke benchmark against both revisions already rejects changed case identities.
 
 The job pins Ubuntu 24.04 LTS and the image's Clang. It installs TBB headers only when absent, from a private source list naming the four Ubuntu suites on the Azure archive mirror, which [recovered from the Canonical outage](https://github.com/actions/runner-images/issues/15296) where the Kernel.org mirror timed out. Apt reads only that list and the image's keyrings, so it still verifies Ubuntu's signed metadata, and unrelated runner repositories cannot block it; retries and step and job timeouts bound the installation.
 

@@ -33,7 +33,7 @@ import {
 } from "../../../../bench/tracking/result.ts";
 
 const props = withDefaults(defineProps<{ source?: string; caseId?: string }>(), {
-  source: "https://raw.githubusercontent.com/Yikai-Liao/tessera-sort/benchmark-data/main/",
+  source: "https://raw.githubusercontent.com/Yikai-Liao/tessera-sort/benchmark-data/tessera/",
   caseId: "rust/u64/random/65536/s1/api",
 });
 type Color = ComparedCase["color"];
@@ -465,7 +465,6 @@ watch(
   { flush: "post" },
 );
 watch(comparison, () => { hover.value = null; drag.value = null; });
-const missingCommitTimes = computed(() => runs.value.some((run) => !run.commit_time));
 const emptyMessage = computed(() => {
   if (!index.value || loading.value) return "";
   if (!index.value.months.length) return "No main measurements have been published yet.";
@@ -544,9 +543,6 @@ const emptyMessage = computed(() => {
       <p v-if="firstRun || lastRun" class="chart-note" role="status">
         Zoomed to a report range. <button type="button" class="reset-zoom" @click="clearZoom">Reset zoom</button>
       </p>
-      <p v-if="missingCommitTimes" class="chart-note" role="status">
-        Some older reports have no Git commit timestamp; those use measurement time for ordering and spacing.
-      </p>
       <p class="chart-note">
         {{ horizontal === "commit" ? "Commits in timestamp order; reruns keep separate slots." : "Git committer time (UTC); reruns may overlap." }}
         Drag across the chart to zoom.
@@ -604,7 +600,7 @@ const emptyMessage = computed(() => {
           <div class="readout" :style="readout.card">
             <div class="when">
               {{ readout.run.hash.slice(0, 7) }}
-              <div>Commit: {{ readout.run.commitTime ? formatTimestamp(readout.run.commitTime) : "unavailable" }}</div>
+              <div>Commit: {{ formatTimestamp(readout.run.commitTime) }}</div>
               <div>Measured: {{ formatTimestamp(readout.run.time) }}</div>
             </div>
             <div v-for="({ entry, color }, i) in compared" :key="entry.id" class="line">

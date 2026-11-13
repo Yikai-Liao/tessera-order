@@ -11,7 +11,13 @@ const MIN_PARALLEL_BYTES: usize = 1 << 20;
 const MIN_TASK_BYTES: usize = 256 * 1024;
 
 /// Sorts large inputs by handing complete root buckets to Rayon's current pool.
-pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
+pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(records: &mut [T], extractor: E) {
+    dispatch!(Level::new(), simd => sort_with(simd, records, extractor));
+}
+
+#[inline(always)]
+fn sort_with<S: Simd, T: Send, E: Extract<T> + Clone + Send + Sync>(
+    simd: S,
     records: &mut [T],
     mut extractor: E,
 ) {
@@ -21,13 +27,13 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
         return;
     }
     if bytes < MIN_PARALLEL_BYTES || rayon::current_num_threads() == 1 {
-        super::sort::<T, E>(records, extractor);
+        super::sort_with_tile_bytes_with(simd, records, extractor, TILE_BYTES);
         return;
     }
 
     let tile_len = tile_capacity::<T>(TILE_BYTES);
     let mut scratch = Scratch::new();
-    let Some(varying) = prepare(records, &mut extractor, tile_len) else {
+    let Some(varying) = prepare(simd, records, &mut extractor, tile_len) else {
         return;
     };
 
@@ -35,7 +41,8 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
     // Keep the existing narrow kernels when only one half of a 128-bit key varies.
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
-            Sorter::<T, _> {
+            Sorter::<T, _, S> {
+                simd,
                 scratch,
                 extractor: &mut KeyHalf::<_, 0>(extractor),
                 tile_len,
@@ -44,7 +51,8 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
             return;
         }
         if varying & ((1u128 << 64) - 1) == 0 {
-            Sorter::<T, _> {
+            Sorter::<T, _, S> {
+                simd,
                 scratch,
                 extractor: &mut KeyHalf::<_, 64>(extractor),
                 tile_len,
@@ -53,7 +61,8 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
             return;
         }
     }
-    Sorter::<T, E> {
+    Sorter::<T, E, S> {
+        simd,
         scratch,
         extractor: &mut extractor,
         tile_len,
@@ -89,7 +98,7 @@ impl<T> Pool<T> {
     }
 }
 
-impl<T: Send, E: Extract<T> + Clone + Sync> Sorter<'_, T, E> {
+impl<T: Send, E: Extract<T> + Clone + Sync, S: Simd> Sorter<'_, T, E, S> {
     /// Partitions the root and finishes each bucket in its movement task.
     fn sort_root(&mut self, records: &mut [T], varying: u128)
     where
@@ -143,6 +152,7 @@ impl<T: Send, E: Extract<T> + Clone + Sync> Sorter<'_, T, E> {
         let pool = Pool::new();
         let extractor = &*self.extractor;
         let tile_len = self.tile_len;
+        let simd = self.simd;
         let visit = |bucket: usize, child: &mut [T]| {
             if split.candidate == 0 || split.finished == Some(bucket) {
                 return;
@@ -152,7 +162,8 @@ impl<T: Send, E: Extract<T> + Clone + Sync> Sorter<'_, T, E> {
             // queue. Tile storage owns whether the whole child fits one tile.
             let mut key = extractor.clone();
             let mut scratch = pool.take();
-            Sorter::<T, E> {
+            Sorter::<T, E, S> {
+                simd,
                 scratch: &mut scratch,
                 extractor: &mut key,
                 tile_len: tile::finishing_capacity::<T>(child.len(), tile_len),

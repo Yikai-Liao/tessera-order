@@ -10,6 +10,7 @@ use crate::key::{Extract, Unsigned};
 use crate::thresholds::{INSERTION_MAX, MAX_CURSOR_BYTES, MAX_TILE_RECORDS};
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
+use fearless_simd::Simd;
 
 /// Positions and cached bucket IDs used by tile passes.
 pub(crate) type Cursor = u16;
@@ -133,8 +134,9 @@ impl<T> Scratch<T> {
 
     /// Stably finishes a cursor-bounded slice by insertion, MSD or LSD passes,
     /// restoring its complete record set on key panic.
-    pub(super) fn sort<E: Extract<T>>(
+    pub(super) fn sort<S: Simd, E: Extract<T>>(
         &mut self,
+        simd: S,
         records: &mut [T],
         varying: u128,
         extractor: &mut E,
@@ -146,7 +148,7 @@ impl<T> Scratch<T> {
         }
         match plan_tile::<T>(len, varying) {
             TilePlan::Insertion => extractor.finish_insertion(records),
-            TilePlan::Msd(digit) => self.partition_tile(records, digit, varying, extractor),
+            TilePlan::Msd(digit) => self.partition_tile(simd, records, digit, varying, extractor),
             TilePlan::Lsd { digits, passes } => {
                 let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
                 self.counting_passes(records, &digits[..passes], &mut counts, extractor);
@@ -156,8 +158,9 @@ impl<T> Scratch<T> {
 
     /// Finishes a cursor-bounded child within `candidate`. Insertion-sized
     /// children skip the variation scan; node and tile partitions share this rule.
-    pub(super) fn finish_child<E: Extract<T>>(
+    pub(super) fn finish_child<S: Simd, E: Extract<T>>(
         &mut self,
+        simd: S,
         records: &mut [T],
         candidate: u128,
         extractor: &mut E,
@@ -167,8 +170,8 @@ impl<T> Scratch<T> {
             return;
         }
         if records.len() > INSERTION_MAX {
-            let varying = scan_varying_bits(records, candidate, extractor);
-            self.sort(records, varying, extractor);
+            let varying = scan_varying_bits(simd, records, candidate, extractor);
+            self.sort(simd, records, varying, extractor);
         } else {
             extractor.finish_insertion(records);
         }
@@ -265,8 +268,9 @@ impl<T> Scratch<T> {
     }
 
     /// Partitions a tile through scratch, then finishes each bucket.
-    fn partition_tile<E: Extract<T>>(
+    fn partition_tile<S: Simd, E: Extract<T>>(
         &mut self,
+        simd: S,
         records: &mut [T],
         digit: Digit,
         varying: u128,
@@ -292,7 +296,7 @@ impl<T> Scratch<T> {
         for &end in ends {
             let end = end as usize;
             debug_assert!(start <= end && end <= len);
-            self.finish_child(&mut records[start..end], candidate, extractor);
+            self.finish_child(simd, &mut records[start..end], candidate, extractor);
             start = end;
         }
     }
@@ -362,7 +366,7 @@ mod tests {
                 u64::MAX
             }
         });
-        scratch.sort(&mut records, u64::MAX as u128, &mut extractor);
+        fearless_simd::dispatch!(fearless_simd::Level::new(), simd => scratch.sort(simd, &mut records, u64::MAX as u128, &mut extractor));
         records.sort_unstable();
         assert_eq!(records, (0..1000u64).collect::<Vec<_>>());
     }
@@ -379,12 +383,12 @@ mod tests {
                 calls << SHIFT
             });
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                Scratch::new().partition_tile(
-                    &mut records,
+                fearless_simd::dispatch!(fearless_simd::Level::new(), simd => Scratch::new().partition_tile(
+                    simd, &mut records,
                     Digit { shift: 0, width: 6 },
                     63,
                     &mut crate::key::KeyHalf::<_, SHIFT>(key),
-                );
+                ));
             }));
             assert_eq!(result.is_err(), panic_at.is_some());
             records.sort_by_key(|record| record.0);
@@ -418,15 +422,15 @@ mod tests {
         expected.sort_by_key(|x| u16::from_le_bytes([x.0[0], x.0[1]]));
         let mut scratch = Scratch::new();
         let mut key = ByKey(|x: &Odd| u16::from_le_bytes([x.0[0], x.0[1]]));
-        scratch.partition_tile(
-            &mut records,
+        fearless_simd::dispatch!(fearless_simd::Level::new(), simd => scratch.partition_tile(
+            simd, &mut records,
             Digit {
                 shift: 0,
                 width: 14,
             },
             0x3fff,
             &mut key,
-        );
+        ));
         assert_eq!(records, expected);
     }
 }

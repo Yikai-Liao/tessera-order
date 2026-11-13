@@ -12,12 +12,13 @@ fn sort_group<T: Send, E: Extract<T> + Clone + Send>(records: &mut [T], extracto
     let mut scratch = Scratch::new();
     let mut child_scratch = Scratch::new();
     let mut visit = |_: usize, bucket: &mut [T], digit: &mut KeyDigit<E, E::Value>| {
-        Sorter::<T, E> {
+        dispatch!(Level::new(), simd => Sorter::<T, E, _> {
+ simd,
             scratch: &mut child_scratch,
             extractor: &mut digit.extractor,
             tile_len: tile_capacity::<T>(TILE_BYTES),
         }
-        .sort_child(bucket, 3);
+        .sort_child(bucket, 3));
     };
     let digit = KeyDigit::new(extractor, 2);
     block::partition(records, 1, digit, &mut scratch.block, &mut visit);
@@ -63,12 +64,13 @@ fn streamed_child_can_reenter_and_panic() {
                     row.0
                 });
                 // Finish a digit root through the direct final-band callback.
-                Sorter {
+                dispatch!(Level::new(), simd => Sorter {
+ simd,
                     scratch: &mut Scratch::new(),
                     extractor: &mut extractor,
                     tile_len: 8,
                 }
-                .sort_root(&mut records, u128::from(u64::MAX));
+                .sort_root(&mut records, u128::from(u64::MAX)));
             });
         }));
         assert!(entered.load(Ordering::Relaxed));
@@ -118,19 +120,21 @@ fn equality_roots_match_serial_policy() {
         assert!(
             matches!(plan_node(&records, u128::MAX, 1, &mut extractor), NodePlan::Equal(pivot) if pivot == equal)
         );
-        Sorter {
+        dispatch!(Level::new(), simd => Sorter {
+ simd,
             scratch: &mut Scratch::new(),
             extractor: &mut extractor,
             tile_len: 1,
         }
-        .partition_equal(&mut serial, equal, u128::MAX);
+        .partition_equal(&mut serial, equal, u128::MAX));
         pool.install(|| {
-            Sorter {
+            dispatch!(Level::new(), simd => Sorter {
+ simd,
                 scratch: &mut Scratch::new(),
                 extractor: &mut extractor,
                 tile_len: 1,
             }
-            .sort_root(&mut records, u128::MAX)
+            .sort_root(&mut records, u128::MAX))
         });
         assert_eq!(records, serial);
         assert_eq!(records, expected);
@@ -168,12 +172,13 @@ fn descending_children_keep_equal_key_order() {
         let mut records = band.to_vec();
         let mut expected = records.clone();
         expected.sort_by_key(|row| row.0);
-        Sorter::<_, _> {
+        dispatch!(Level::new(), simd => Sorter::<_, _, _> {
+ simd,
             scratch: &mut Scratch::new(),
             extractor: &mut ByKey(|row: &(u64, usize)| row.0),
             tile_len: tile::finishing_capacity::<(u64, usize)>(records.len(), 1),
         }
-        .sort_child(&mut records, 3);
+        .sort_child(&mut records, 3));
         assert_eq!(records, expected);
     }
 }

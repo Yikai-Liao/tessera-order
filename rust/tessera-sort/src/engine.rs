@@ -25,6 +25,7 @@ use plan::{Digit, NodePlan, bit_len, plan_node};
 use tile::capacity as tile_capacity;
 
 use alloc::vec::Vec;
+use fearless_simd::{Level, Simd, dispatch};
 
 use crate::block;
 use crate::block::Classify;
@@ -91,8 +92,18 @@ pub(crate) fn finish_insertion<T, E: Extract<T>>(
 /// Scans until all candidate bits have appeared in both states, or the input ends.
 /// Only candidate bits are returned, so even changing keys cannot restore a
 /// parent partition digit and prevent the recursion from making progress.
-fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor: &mut E) -> u128 {
-    fearless_simd::dispatch!(fearless_simd::Level::new(), simd => scan_varying_bits_with(simd, records, candidate, extractor))
+fn scan_varying_bits<S: Simd, T, E: Extract<T>>(
+    simd: S,
+    records: &[T],
+    candidate: u128,
+    extractor: &mut E,
+) -> u128 {
+    // The token comes from the sort entry, not a new runtime dispatch per child.
+    // Recursive calls and Rayon jobs still need the kernel's target features.
+    simd.vectorize(
+        #[inline(always)]
+        || scan_varying_bits_with(simd, records, candidate, extractor),
+    )
 }
 
 #[inline(always)]
@@ -198,8 +209,9 @@ impl Split {
     /// Partitions `records` by `classifier` and finishes tile-sized children
     /// while they are cache-hot, using the extractor `lend` returns for child
     /// work. Returns each bucket's end; larger children remain.
-    fn partition<T, E: Extract<T>, C: Classify<T>>(
+    fn partition<S: Simd, T, E: Extract<T>, C: Classify<T>>(
         self,
+        simd: S,
         records: &mut [T],
         classifier: C,
         lend: fn(&mut C) -> &mut E,
@@ -209,7 +221,7 @@ impl Split {
         let tile = &mut scratch.tile;
         let mut visit = |bucket: usize, child: &mut [T], classifier: &mut C| {
             if child.len() <= tile_len && self.finished != Some(bucket) {
-                tile.finish_child(child, self.candidate, lend(classifier));
+                tile.finish_child(simd, child, self.candidate, lend(classifier));
             }
         };
         block::partition(
@@ -223,7 +235,8 @@ impl Split {
 }
 
 /// Runs nodes, tiles and parallel roots with one extractor and shared scratch.
-struct Sorter<'a, T, E> {
+struct Sorter<'a, T, E, S> {
+    simd: S,
     scratch: &'a mut Scratch<T>,
     extractor: &'a mut E,
     tile_len: usize,
@@ -239,20 +252,31 @@ pub(crate) fn sort<T, E: Extract<T>>(records: &mut [T], extractor: E) {
 
 /// [`sort`] with a tile budget of `tile_bytes`, so tests can reach node routes
 /// with small inputs.
-fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], mut extractor: E, tile_bytes: usize) {
+fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], extractor: E, tile_bytes: usize) {
+    dispatch!(Level::new(), simd => sort_with_tile_bytes_with(simd, records, extractor, tile_bytes));
+}
+
+#[inline(always)]
+fn sort_with_tile_bytes_with<S: Simd, T, E: Extract<T>>(
+    simd: S,
+    records: &mut [T],
+    mut extractor: E,
+    tile_bytes: usize,
+) {
     let record_bytes = core::mem::size_of::<T>();
     if records.len() < 2 || record_bytes == 0 {
         return;
     }
     let tile_len = tile_capacity::<T>(tile_bytes);
-    let Some(varying) = prepare(records, &mut extractor, tile_len) else {
+    let Some(varying) = prepare(simd, records, &mut extractor, tile_len) else {
         return;
     };
     let mut scratch = Scratch::new();
     let scratch = &mut scratch;
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
-            Sorter::<T, _> {
+            Sorter::<T, _, S> {
+                simd,
                 scratch,
                 extractor: &mut KeyHalf::<_, 0>(extractor),
                 tile_len,
@@ -261,7 +285,8 @@ fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], mut extractor: E, t
             return;
         }
         if varying & ((1u128 << 64) - 1) == 0 {
-            Sorter::<T, _> {
+            Sorter::<T, _, S> {
+                simd,
                 scratch,
                 extractor: &mut KeyHalf::<_, 64>(extractor),
                 tile_len,
@@ -270,7 +295,8 @@ fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], mut extractor: E, t
             return;
         }
     }
-    Sorter::<T, E> {
+    Sorter::<T, E, S> {
+        simd,
         scratch,
         extractor: &mut extractor,
         tile_len,
@@ -280,7 +306,8 @@ fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], mut extractor: E, t
 
 /// Finishes ordered or insertion-friendly roots, otherwise returns their varying bits.
 /// Shared by serial and parallel entries before either allocates partition scratch.
-fn prepare<T, E: Extract<T>>(
+fn prepare<S: Simd, T, E: Extract<T>>(
+    simd: S,
     records: &mut [T],
     extractor: &mut E,
     tile_len: usize,
@@ -293,7 +320,7 @@ fn prepare<T, E: Extract<T>>(
         return None;
     }
     let candidate = u128::MAX >> (128 - E::Value::BITS);
-    let varying = scan_varying_bits(records, candidate, extractor);
+    let varying = scan_varying_bits(simd, records, candidate, extractor);
     if varying == 0 {
         return None;
     }
@@ -494,7 +521,7 @@ fn reverse_stably<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
     }
 }
 
-impl<T, E: Extract<T>> Sorter<'_, T, E> {
+impl<T, E: Extract<T>, S: Simd> Sorter<'_, T, E, S> {
     /// Consumes an ordered-run decision without probing or partitioning again.
     fn split_ordered(&mut self, records: &mut [T], boundary: usize, set: bool, varying: u128) {
         // Rotation preserves each run's internal order.
@@ -517,7 +544,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         }
         // Constant children finish after the varying scan; confirming order
         // lets ordered children skip partitioning.
-        let varying = scan_varying_bits(records, candidate, self.extractor);
+        let varying = scan_varying_bits(self.simd, records, candidate, self.extractor);
         if varying == 0 {
             return;
         }
@@ -537,7 +564,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         if len <= self.tile_len {
             self.scratch
                 .tile
-                .sort::<E>(records, varying, self.extractor);
+                .sort(self.simd, records, varying, self.extractor);
             return;
         }
         let plan = plan_node(records, varying, self.tile_len, self.extractor);
@@ -569,6 +596,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             finished: None,
         };
         let ends = split.partition(
+            self.simd,
             records,
             KeyDigit::new(&mut *self.extractor, digit.shift),
             |digit| &mut *digit.extractor,
@@ -584,6 +612,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         let rank = Rank::new(&mut *self.extractor, equal, varying);
         let split = Split::equality(&rank, varying);
         let ends = split.partition(
+            self.simd,
             records,
             rank,
             |rank| &mut *rank.extractor,
@@ -721,7 +750,7 @@ mod tests {
     #[test]
     fn variation_stays_within_candidate() {
         assert_eq!(
-            scan_varying_bits(&[0u64, u64::MAX], 0xff, &mut Direct),
+            dispatch!(Level::new(), simd => scan_varying_bits(simd, &[0u64, u64::MAX], 0xff, &mut Direct)),
             0xff
         );
     }
@@ -737,7 +766,7 @@ mod tests {
                         .iter()
                         .fold(0, |bits, key| bits | (key ^ records[0]));
                     assert_eq!(
-                        scan_varying_bits(&records, candidate, &mut Direct),
+                        dispatch!(Level::new(), simd => scan_varying_bits(simd, &records, candidate, &mut Direct)),
                         expected & candidate
                     );
                     assert_eq!(
@@ -748,7 +777,10 @@ mod tests {
                 }
             }
             let narrow = alloc::vec![17u8; len];
-            assert_eq!(scan_varying_bits(&narrow, u8::MAX as u128, &mut Direct), 0);
+            assert_eq!(
+                dispatch!(Level::new(), simd => scan_varying_bits(simd, &narrow, u8::MAX as u128, &mut Direct)),
+                0
+            );
         }
     }
 
@@ -845,12 +877,13 @@ mod tests {
             let plan = plan_node(&records, 0x1ff, tile_len, &mut extractor);
             assert!(matches!(plan, NodePlan::Equal(equal) if equal == pivot));
             planning.set(false);
-            Sorter::<_, _> {
+            dispatch!(Level::new(), simd => Sorter::<_, _, _> {
+ simd,
                 scratch: &mut scratch,
                 extractor: &mut extractor,
                 tile_len,
             }
-            .execute_node(&mut records, 0x1ff, plan);
+            .execute_node(&mut records, 0x1ff, plan));
 
             assert!(drops.borrow().is_empty());
             for (id, record) in records.iter().enumerate() {

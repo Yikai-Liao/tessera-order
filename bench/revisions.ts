@@ -54,7 +54,11 @@ export async function prepareRevisions(
   for (const name of ["revision-baseline", "revision-baseline-copy", "revision-current-copy"]) {
     const destination = join(copies, name);
     if (name === "revision-current-copy") await copySnapshot(library, destination, tree);
-    else await copyLibraryRevision(root, baseline, destination);
+    else {
+      await copyLibraryRevision(root, baseline, destination);
+      // Hash every copy under the harness's package name, so one commit has one identity.
+      await nameLibraryPackage(destination);
+    }
     sources[name] = await sourceHash(destination);
     const path = join(destination, "Cargo.toml");
     const copy = parse(await readFile(path, "utf8"));

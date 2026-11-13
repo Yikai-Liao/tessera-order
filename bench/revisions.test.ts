@@ -121,3 +121,36 @@ for (const explicit of [false, true]) {
     );
   });
 }
+
+test("a pre-rename commit compared with itself keeps one source identity", async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const git = (...args: string[]) =>
+    command(
+      "git",
+      [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.org",
+        "-c",
+        "commit.gpgsign=false",
+        ...args,
+      ],
+      { cwd: root, capture: true },
+    );
+  // Rewrite history's view of the library as it was before the crate rename.
+  await git("mv", "rust/tessera-order", "rust/tessera-sort");
+  await writeFile(
+    join(root, "rust/tessera-sort/Cargo.toml"),
+    '[package]\nname="tessera-sort"\nversion="0.0.0"\n[features]\nportable-simd=[]\n',
+  );
+  await git("commit", "-qam", "old");
+  const old = (await git("rev-parse", "HEAD")).trim();
+  await git("revert", "--no-edit", "HEAD");
+  await withWorkspace(root, async ({ tree }) => {
+    await prepareRevisions(root, tree, { baseline: old, current: old });
+    const revision = JSON.parse(await readFile(join(tree, "bench/rust/revisions.json"), "utf8"));
+    assert.equal(revision.currentSource, revision.copies["revision-baseline"]);
+  });
+});

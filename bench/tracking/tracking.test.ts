@@ -10,7 +10,7 @@ import { z } from "zod";
 import { catalog } from "../catalog.ts";
 import { trackingAlgorithms } from "./algorithms.ts";
 import { trackingMemory } from "./build.ts";
-import { comparisonData, latestRuns } from "./comparison.ts";
+import { comparisonData, latestRuns, trackingScaling } from "./comparison.ts";
 import { explainFailure } from "./failure.ts";
 import {
   comparableRuns,
@@ -636,4 +636,48 @@ test("tracking schedules only variants that fit the tracking hardware", () => {
   // Wider catalog variants stay available to local comparisons.
   assert.ok(catalog.algorithms.some((entry) => (entry.threads ?? 1) > TRACKING_SPEC.cpus));
   assert.ok(!trackingAlgorithms.some((entry) => entry.id === "tessera-par-8"));
+});
+
+test("the comparison ranks 32-bit-key records and adds parallel scaling", () => {
+  const tracked = (values: Record<string, number>) =>
+    runSchema.parse({
+      ...run,
+      id: crypto.randomUUID(),
+      values: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, [v, v, v]])),
+    });
+  const serial = (ns: number[]) =>
+    tracked({
+      "rust/u64/random/65536/s1/api": ns[0],
+      "rust/row_u32/random/49/s1/api": ns[1],
+      "rust/row_u32/random/1000000/s1/api": ns[2],
+    });
+  const parallel = (threads: number, ns: number) =>
+    tracked({ [`rust/u64/random/1000000/s1/par-${threads}`]: ns });
+  const runs = new Map([
+    ["tessera", [serial([10, 1, 100])]],
+    ["std-stable", [serial([20, 1, 400])]],
+    ["tessera-par-1", [parallel(1, 50)]],
+    ["tessera-par-2", [parallel(2, 25)]],
+    ["rayon-stable-1", [parallel(1, 200)]],
+    ["rayon-stable-2", [parallel(2, 100)]],
+  ]);
+  const data = comparisonData(runs);
+  // Equal pattern counts take the longest length.
+  assert.match(data.overview!.chart.guide, /^1,000,000 \{u32, u32\} records/);
+  assert.equal(data.overview!.subject, "Overall ranking");
+  // A faster unstable sort does not displace Tessera among stable record sorts.
+  const unstable = comparisonData(new Map([...runs, ["std-unstable", [serial([1, 1, 1])]]]));
+  assert.equal(unstable.overview!.title, "Fastest of 2 stable sorts");
+  const latest = new Map([...runs].map(([id, list]) => [id, list[0]]));
+  const scaling = trackingScaling(latest)!;
+  assert.deepEqual([scaling.n, scaling.threads], [1000000, [1, 2]]);
+  assert.deepEqual(scaling.inputs, [{ label: "u64 · random", tessera: [4, 8], rayon: [1, 2] }]);
+  const figure = data.figures.find((entry) => entry.name === "parallel")!;
+  // The table names every input in the aggregate.
+  assert.match(figure.table, /\| u64 · random \| 4× \| 8× \| 1.00× \| 2× \|/);
+  const names = data.figures.map((figure) => figure.name);
+  assert.ok(names.includes("parallel"));
+  // Without Rayon on one thread there is no baseline.
+  latest.delete("rayon-stable-1");
+  assert.equal(trackingScaling(latest), null);
 });

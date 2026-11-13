@@ -22,7 +22,7 @@ algorithms = [
   { id = "glidesort-sqrt", label = "glidesort-sqrt", stable = true, family = "comparison", adapter = "rust", detail = "given Tessera's memory", description = "comparison sort with Tessera's memory" },
   { id = "std-unstable", label = "slice::sort_unstable", stable = false, family = "comparison", adapter = "rust" },
   { id = "rdst", label = "rdst", stable = false, family = "radix", adapter = "rust" },
-  { id = "clausecker", label = "clausecker", stable = true, family = "radix", adapter = "native" },
+  { id = "clausecker", label = "Block LSD*", stable = true, family = "radix", adapter = "native", detail = "*Clausecker & Schintke's original C code", description = "Clausecker and Schintke's original C implementation; 32-bit-key rows only, no generic adapters" },
   { id = "fluxsort", label = "fluxsort", stable = true, family = "comparison", adapter = "native" },
   { id = "ips2ra", label = "ips2ra", stable = false, family = "radix", adapter = "native" },
   { id = "ips4o", label = "ips4o", stable = false, family = "comparison", adapter = "native" },

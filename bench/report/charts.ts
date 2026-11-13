@@ -15,6 +15,11 @@ import { caseId, type Dataset, lengths, measurementId, type Summary, shapes } fr
 
 export interface Figure {
   name: string;
+  /** What the figure compares, as a section heading: "u64 keys by input pattern". */
+  subject: string;
+  /** One sentence on what is compared and how to read it, shown before the figure. */
+  summary: string;
+  /** The finding, as the chart's own title. */
   title: string;
   /** The chart description, for callers that render it themselves, such as the site. */
   chart: Chart;
@@ -43,14 +48,16 @@ export interface Field {
 
 /** The inputs a figure set summarizes and how its guides name them. */
 export interface Cohort {
-  /** Length of the ranking, input-pattern and element-type figures. */
+  /**
+   * The ranking's element type, length and input patterns. Lengths are tabulated next to
+   * the ranking, which admits sorts measured at all of them; `label` follows
+   * "speed vs slice::sort, " in its guide.
+   */
+  ranking: { ty: string; n: number; lengths: number[]; shapes: string[]; label: string };
+  /** Length of the input-pattern and element-type figures. */
   n: number;
-  /** Lengths tabulated next to the ranking; the ranking admits sorts measured at all of them. */
-  lengths: number[];
-  /** Input patterns averaged by the ranking and element-type figures. */
+  /** Input patterns every u64 input-pattern figure must have. */
   shapes: string[];
-  /** Guide wording for those patterns. */
-  shapesLabel: string;
   /** Input patterns the element-type figure compares; every type must have each of them. */
   typeShapes: string[];
   /** How the element-type figure combines them, after "speed relative to slice::sort, ". */
@@ -73,6 +80,9 @@ export interface Cohort {
 const RATIO_LIMIT = 32;
 
 const displayName = (id: string) => algorithm(id).label;
+// Tables name a sort with its chart subtitle, so a footnote mark such as Block LSD*'s keeps its note.
+const tableName = (id: string) =>
+  algorithm(id).detail ? `${displayName(id)} (${algorithm(id).detail})` : displayName(id);
 const family = (id: string) => algorithm(id).description ?? `${algorithm(id).family} sort`;
 const sortName = (id: string): NameCell => ({
   input: displayName(id),
@@ -174,8 +184,10 @@ function speedOver(field: Field, ids: string[], variant: string) {
   const values = ids.map((id) => field.speed(id, variant));
   return values.every((v): v is number => v !== null) ? geomean(values) : null;
 }
-const u64Cases = (cohort: Cohort, n: number) =>
-  cohort.shapes.map((shape) => caseId({ ty: "u64", distribution: shape, len: n }));
+const rankingCases = ({ ranking }: Cohort, n: number) =>
+  ranking.shapes.map((shape) => caseId({ ty: ranking.ty, distribution: shape, len: n }));
+/** Elements of one type in a guide: "u64 keys" or "{u32, u32} records". */
+const elements = (ty: string) => `${recordType(ty).label} ${recordType(ty).task}`;
 
 const kindLegend: [Swatch[], string][] = [
   [["primary"], "Tessera"],
@@ -188,25 +200,29 @@ const SPEED_AXIS: [string, string] = ["← slower", "faster →"];
 // so one figure states both speed and memory.
 function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | null {
   const worstPeak = (variant: string) => {
-    const peaks = u64Cases(cohort, cohort.n).map((id) => field.peak(id, variant));
+    const peaks = rankingCases(cohort, cohort.ranking.n).map((id) => field.peak(id, variant));
     return peaks.every((v): v is number => v !== null) ? Math.max(...peaks) : null;
   };
   const entries = field.algorithms.map((v) => ({
+    name: v.name,
     cell: sortName(v.name),
     kind: family(v.name),
     tone: toneOf(v.name),
     stable: v.stable,
-    speeds: cohort.lengths.map((n) => speedOver(field, u64Cases(cohort, n), v.name)),
+    speeds: cohort.ranking.lengths.map((n) => speedOver(field, rankingCases(cohort, n), v.name)),
     peak: memory ? worstPeak(v.name) : null,
   }));
-  const at = cohort.lengths.indexOf(cohort.n);
+  const at = cohort.ranking.lengths.indexOf(cohort.ranking.n);
   const complete = entries
     .filter((e) => e.speeds.every((v) => v !== null))
     .map((e) => ({ ...e, speeds: e.speeds as number[] }))
     .sort((a, b) => b.speeds[at] - a.speeds[at]);
   const anchor = complete.find((e) => e.cell.input === "Tessera");
   if (!anchor) return null;
-  const others = complete.filter((e) => !e.cell.strong);
+  // Records rank Tessera among stable sorts only, because stability is observable there;
+  // unstable sorts stay in their own group for context.
+  const records = recordType(cohort.ranking.ty).task === "records";
+  const others = complete.filter((e) => !e.cell.strong && (!records || e.stable));
   const rank = 1 + others.filter((e) => e.speeds[at] > anchor.speeds[at]).length;
   const row = (e: (typeof complete)[number]): Row => ({
     name: e.cell,
@@ -214,14 +230,16 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
     cells: [times(e.speeds[at]), ...(memory ? [e.peak === null ? "–" : formatBytes(e.peak)] : [])],
     strong: e.cell.strong,
   });
-  const sorts = `${others.length + 1} sorts`;
+  const sorts = `${others.length + 1} ${records ? "stable " : ""}sorts`;
   const title = rank === 1 ? `Fastest of ${sorts}` : `Ranked ${ordinal(rank)} of ${sorts}`;
   return {
     name: memory ? "overview" : "ranking",
+    subject: "Overall ranking",
+    summary: `Every sort on the same ${elements(cohort.ranking.ty)}, ranked by speed relative to slice::sort${memory ? ", with the largest extra memory it allocated" : ""}. ${recordType(cohort.ranking.ty).task === "records" ? "Records rank Tessera among stable sorts; unstable sorts, which may reorder equal keys, are shown separately." : "Stable and unstable sorts are grouped separately."}`,
     title,
     ...rendered({
       title,
-      guide: `${formatLength(cohort.n)} u64 keys · speed vs slice::sort, geometric mean over ${cohort.shapesLabel}`,
+      guide: `${formatLength(cohort.ranking.n)} ${elements(cohort.ranking.ty)} · speed vs slice::sort, ${cohort.ranking.label}`,
       columns: ["Speed", ...(memory ? ["Extra memory"] : [])],
       groups: [
         { title: "Stable sorts", rows: complete.filter((e) => e.stable).map(row) },
@@ -236,11 +254,11 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
         "Sort",
         "Kind",
         "Stability",
-        ...cohort.lengths.map((n) => `${formatLength(n)} keys, speed vs slice::sort`),
+        ...cohort.ranking.lengths.map((n) => `${formatLength(n)} elements, speed vs slice::sort`),
         ...(memory ? ["Largest extra memory"] : []),
       ],
       complete.map((e) => [
-        e.cell.input,
+        tableName(e.name),
         e.kind,
         e.stable ? "stable" : "unstable",
         ...e.speeds.map(times),
@@ -322,7 +340,7 @@ function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
       times(s.tessera),
       [...s.speeds]
         .sort((a, b) => b.speed - a.speed)
-        .map((v) => `${displayName(v.variant)} ${times(v.speed)}`)
+        .map((v) => `${tableName(v.variant)} ${times(v.speed)}`)
         .join(", "),
     ]),
   );
@@ -367,10 +385,12 @@ function renderInputs(
   const title = fieldTitle(standings, "inputs");
   return {
     name,
+    subject: `${elements(ty)} by input pattern${n <= SHORT ? `, ${formatLength(n)} elements` : ""}`,
+    summary: `Each row is one input pattern. Each dot is one ${stableOnly ? "stable sort (records keep equal keys in order)" : "sort"}, placed by its speed relative to slice::sort; the columns give Tessera's speed and rank.`,
     title,
     ...rendered({
       title,
-      guide: `${formatLength(n)} ${ty === "u64" ? "u64 keys" : record.label} · each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to slice::sort`,
+      guide: `${formatLength(n)} ${elements(ty)} · each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to slice::sort`,
       columns: ["Speed", "Rank"],
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
@@ -403,6 +423,9 @@ function renderTypes(field: Field, cohort: Cohort): Figure | null {
   const title = fieldTitle(standings, "types");
   return {
     name: "types",
+    subject: "Element types",
+    summary:
+      "Each row is one key or record type. Each dot is one sort, placed by its speed relative to slice::sort; records compare only stable sorts.",
     title,
     ...rendered({
       title,
@@ -442,7 +465,7 @@ function renderMemory(field: Field, cohort: Cohort): Figure | null {
   const plotted: string[][] = [];
   const row = (e: (typeof entries)[number]): Row => {
     const { random, worst } = e.peak;
-    plotted.push([displayName(e.name), formatBytes(random), formatBytes(worst)]);
+    plotted.push([tableName(e.name), formatBytes(random), formatBytes(worst)]);
     const tone = toneOf(e.name);
     // The random-input value is the ring; only the worst case is a number.
     const cells = [worst ? formatBytes(worst) : "0"];
@@ -463,10 +486,13 @@ function renderMemory(field: Field, cohort: Cohort): Figure | null {
   const title = `At most ${formatBytes(anchor.peak.worst)} of extra memory`;
   return {
     name: "memory",
+    subject: "Extra memory",
+    summary:
+      "The largest heap allocation each sort makes beyond its input. The ring is the random input, the dot the worst input; the dashed line is the size of the input itself.",
     title,
     ...rendered({
       title,
-      guide: `${formatLength(n)} u64 keys · peak heap allocation during one sort, beyond the ${formatBytes(input)} input`,
+      guide: `${formatLength(n)} ${elements("u64")} · peak heap allocation during one sort, beyond the ${formatBytes(input)} input`,
       columns: ["Worst"],
       groups: [
         { title: "Stable sorts", rows: entries.filter((e) => e.stable).map(row) },
@@ -483,6 +509,85 @@ function renderMemory(field: Field, cohort: Cohort): Figure | null {
       legend: [...kindLegend, [["hollow"], "random input"], [["reference"], "input size"]],
     }),
     table: markdownTable(["Sort", "Random input", `Worst of ${patterns.length} inputs`], plotted),
+  };
+}
+
+/**
+ * Tessera's parallel entry point and Rayon's stable sort at each thread count, as speed
+ * relative to Rayon's stable sort on one thread, on each input every thread count measured.
+ */
+export interface Scaling {
+  n: number;
+  threads: number[];
+  /** Short commits of the Tessera runs, which may predate its latest serial run. */
+  tessera: string[];
+  inputs: { label: string; tessera: number[]; rayon: number[] }[];
+}
+
+export function renderParallel({ n, threads, tessera, inputs }: Scaling): Figure | null {
+  if (!inputs.length || !threads.length) return null;
+  const named = (t: number) => `${t} thread${t === 1 ? "" : "s"}`;
+  const mean = (pick: (input: Scaling["inputs"][number]) => number[], at: number) =>
+    geomean(inputs.map((input) => pick(input)[at]));
+  const rows = threads.map((t, at) => ({
+    threads: t,
+    tessera: mean((input) => input.tessera, at),
+    rayon: mean((input) => input.rayon, at),
+  }));
+  const widest = rows.at(-1)!;
+  const title = `${times(widest.tessera / widest.rayon)} Rayon's speed on ${named(widest.threads)}`;
+  const scale = speedScale(rows.flatMap((row) => [row.tessera, row.rayon]));
+  scale.ticks = scale.ticks.map((tick) =>
+    tick.value === 1 ? { ...tick, label: "Rayon · 1" } : tick,
+  );
+  const cells = (values: number[]) => values.map(times);
+  return {
+    name: "parallel",
+    subject: "Parallel sorting",
+    summary:
+      "Tessera's Rayon entry point against Rayon's own stable par_sort at each thread count, both as speed relative to Rayon on one thread.",
+    title,
+    ...rendered({
+      title,
+      guide: `${formatLength(n)} elements · geometric mean over the ${inputs.length} inputs every thread count measured · Tessera at ${tessera.join(", ")}`,
+      columns: ["Tessera", "Rayon"],
+      groups: [
+        {
+          title: "Threads",
+          rows: rows.map(
+            (row): Row => ({
+              name: { input: named(row.threads), sub: "", tag: "" },
+              marks: [
+                { value: row.rayon, tone: "comparison" },
+                { value: row.tessera, tone: "primary" },
+              ],
+              cells: [times(row.tessera), times(row.rayon)],
+            }),
+          ),
+        },
+      ],
+      scale,
+      axis: SPEED_AXIS,
+      legend: [
+        [["primary"], "Tessera"],
+        [["comparison"], "Rayon stable sort"],
+      ],
+    }),
+    table: markdownTable(
+      [
+        "Input",
+        ...threads.map((t) => `Tessera, ${named(t)}`),
+        ...threads.map((t) => `Rayon, ${named(t)}`),
+      ],
+      [
+        ...inputs.map((input) => [input.label, ...cells(input.tessera), ...cells(input.rayon)]),
+        [
+          "Geometric mean",
+          ...cells(rows.map((row) => row.tessera)),
+          ...cells(rows.map((row) => row.rayon)),
+        ],
+      ],
+    ),
   };
 }
 
@@ -521,6 +626,8 @@ function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figu
     return [
       {
         name: `selected-${id.replaceAll("/", "-").replaceAll(".", "_")}`,
+        subject: title,
+        summary: "Each sort's time relative to the paired Tessera control, with its block range.",
         title,
         ...rendered({
           title,
@@ -546,10 +653,15 @@ function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figu
 
 /** The release comparison's cohort: the catalog's baseline patterns and lengths. */
 const RELEASE: Cohort = {
+  ranking: {
+    ty: "u64",
+    n: LARGE,
+    lengths,
+    shapes,
+    label: `geometric mean over the ${shapes.length} baseline input patterns`,
+  },
   n: LARGE,
-  lengths,
   shapes,
-  shapesLabel: `the ${shapes.length} baseline input patterns`,
   typeShapes: shapes,
   typeShapesLabel: `geometric mean over the ${shapes.length} baseline input patterns`,
   memoryN: LARGEST,

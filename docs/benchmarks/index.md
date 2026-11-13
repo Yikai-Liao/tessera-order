@@ -13,8 +13,6 @@ import PerformanceHistory from "../.vitepress/theme/components/PerformanceHistor
 
 <AlgorithmComparison view="overview" />
 
-Each sort's latest run, ranked by speed relative to `slice::sort`, with its largest extra heap allocation; [algorithm comparison](algorithms.md) explains the figures.
-
 ## Main history
 
 How long Tessera takes to sort fixed inputs on main, measured on Bencher's Intel v1 Bare Metal runners: whether main is getting faster, which cases moved at which commit, and how long each case takes now.

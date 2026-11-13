@@ -39,26 +39,37 @@ const reportSchema = z.object({
   ]),
 });
 
-export const runSchema = z.object({
-  id: z.uuid(),
-  time: z.iso.datetime(),
-  // Git committer time, normalized to UTC.
-  commit_time: z.iso.datetime(),
-  hash: z.string().regex(/^[a-f0-9]{40}$/),
-  spec: z.uuid(),
-  image: z.string().regex(/^registry\.bencher\.dev\/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$/),
-  workflow: z
-    .url()
-    .regex(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+(?:\/attempts\/\d+)?$/),
-  rustc: z.string(),
-  rustflags: z.string(),
-  // C++ adapters only: the compilers and flags that built the measured code.
-  native: z.object({ cc: z.string(), cxx: z.string(), build: z.json() }).optional(),
-  values: z.record(
-    z.string().min(1),
-    z.tuple([positive, positive, positive]).refine(([v, lo, hi]) => lo <= v && v <= hi),
-  ),
-});
+export const runSchema = z
+  .object({
+    id: z.uuid(),
+    time: z.iso.datetime(),
+    // Git committer time, normalized to UTC.
+    commit_time: z.iso.datetime(),
+    hash: z.string().regex(/^[a-f0-9]{40}$/),
+    spec: z.uuid(),
+    image: z.string().regex(/^registry\.bencher\.dev\/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$/),
+    workflow: z
+      .url()
+      .regex(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+(?:\/attempts\/\d+)?$/),
+    rustc: z.string(),
+    rustflags: z.string(),
+    // C++ adapters only: the compilers and flags that built the measured code.
+    native: z.object({ cc: z.string(), cxx: z.string(), build: z.json() }).optional(),
+    values: z.record(
+      z.string().min(1),
+      z.tuple([positive, positive, positive]).refine(([v, lo, hi]) => lo <= v && v <= hi),
+    ),
+    // Peak extra heap bytes of one sort per case, beyond the input; runs before memory
+    // tracking have none. When present it covers exactly the timed cases.
+    memory: z.record(z.string().min(1), z.number().int().nonnegative()).optional(),
+  })
+  .refine(
+    (run) =>
+      !run.memory ||
+      (Object.keys(run.memory).length === Object.keys(run.values).length &&
+        Object.keys(run.memory).every((id) => id in run.values)),
+    "Memory must cover exactly the timed cases",
+  );
 export type TrackingRun = z.infer<typeof runSchema>;
 /** A case's catalog presentation; the browser cannot read the catalog, so publication supplies it. */
 export const caseSchema = z.object({

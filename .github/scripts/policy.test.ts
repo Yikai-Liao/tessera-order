@@ -49,8 +49,9 @@ test("routing keeps library, comparison and revision checks with their owners", 
   const owners: [string[], Partial<typeof none>][] = [
     [
       ["rust/tessera-sort/src/lib.rs", "rust/tessera-sort/Cargo.toml"],
-      { rust: true, benchmark: true },
+      { rust: true, benchmark: true, docs: true },
     ],
+    [["rust/tessera-trace/src/lib.rs", "rust/tessera-trace/Cargo.lock"], { docs: true }],
     [["rust/tessera-sort/tests/memory.rs", ".github/actions/rust-test/action.yml"], { rust: true }],
     [
       ["Cargo.lock", "Cargo.toml", ".cargo/config.toml", "rust-toolchain.toml"],
@@ -126,6 +127,7 @@ test("routing keeps library, comparison and revision checks with their owners", 
     rust: true,
     comparison: true,
     benchmark: true,
+    docs: true,
   });
   assert.equal(changedPaths(undefined, "HEAD"), null);
   assert.equal(changedPaths("missing-base-ref", "HEAD"), null);

@@ -1,20 +1,28 @@
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref, shallowRef } from "vue";
 import { bucketColor, recordLabel } from "../palette";
-import {
-  blockName,
-  type Cell,
-  type Frame,
-  type Loc,
-  type Phase,
-  simulate,
-} from "../sim/blockPartition";
+import { blockName, type Cell, type Loc, type Phase, simulate } from "../sim/blockPartition";
+import { type Engine, instantiate } from "../sim/engine";
+import wasmUrl from "../sim/tessera_trace.wasm?url";
 import { useStepper } from "../useStepper";
 import StepControls from "./StepControls.vue";
 
-const BUCKETS = 4;
-const classify = (key: number) => Math.floor(key / 10);
+const RADIX = 2;
+const BUCKETS = 1 << RADIX;
+const DIVISOR = 10;
+
+// The figure replays the engine's own partition, compiled to WebAssembly.
+const engine = shallowRef<Engine | null>(null);
+const failed = ref(false);
+onMounted(async () => {
+  try {
+    engine.value = await instantiate(await (await fetch(wasmUrl)).arrayBuffer());
+  } catch (error) {
+    failed.value = true;
+    console.error(error);
+  }
+});
 
 const blockSize = ref(3);
 const length = ref(19);
@@ -36,13 +44,19 @@ function makeKeys(n: number, s: number): number[] {
 
 const keys = computed(() => makeKeys(length.value, seed.value));
 const result = computed(() =>
-  simulate({ keys: keys.value, buckets: BUCKETS, blockSize: blockSize.value, classify }),
+  engine.value
+    ? simulate(engine.value, {
+        keys: keys.value,
+        radix: RADIX,
+        blockSize: blockSize.value,
+        divisor: DIVISOR,
+      })
+    : null,
 );
-const frames = computed(() => result.value.frames);
+const frames = computed(() => result.value?.frames ?? []);
 const stepper = useStepper(computed(() => frames.value.length));
-const frame = computed<Frame>(
-  () => frames.value[Math.min(stepper.index.value, frames.value.length - 1)],
-);
+// Read only while the template shows the engine's result.
+const frame = computed(() => frames.value[Math.min(stepper.index.value, frames.value.length - 1)]);
 
 const phaseLabels: Record<Phase, string> = {
   setup: "1 · Set up blocks",
@@ -75,8 +89,8 @@ const ROW_INPUT = 200;
 const ROW_CHAINS = 300;
 const CHAIN_ROW = 30;
 
-const scratchBlocks = computed(() => result.value.scratchBlocks);
-const fullBlocks = computed(() => result.value.fullBlocks);
+const scratchBlocks = computed(() => result.value?.scratchBlocks ?? 0);
+const fullBlocks = computed(() => result.value?.fullBlocks ?? 0);
 const tailLen = computed(() => length.value % blockSize.value);
 
 interface BlockBox {
@@ -204,6 +218,10 @@ function reshuffle() {
       <span class="tsr-note">Digit = tens place, R = 4 buckets. Letters give each record's input position.</span>
     </div>
 
+    <p v-if="!result" class="tsr-caption">
+      {{ failed ? "The figure engine failed to load." : "Loading the figure engine…" }}
+    </p>
+    <template v-else>
     <svg
       :viewBox="`0 0 ${width} ${height}`"
       :width="width"
@@ -346,6 +364,7 @@ function reshuffle() {
       @seek="stepper.seek"
       @speed="(v) => (stepper.speed.value = v)"
     />
+    </template>
   </figure>
 </template>
 

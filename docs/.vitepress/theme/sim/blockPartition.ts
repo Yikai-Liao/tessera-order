@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
-// A step-by-step model of one stable block partition: the scatter in
-// `rust/tessera-sort/src/block.rs` (`BlockStorage::new`, `begin_pass`,
-// `scatter`) and the source-ledger completion in `block/finish.rs`
-// (`build_completion`, `Bucket::finish`, `transfer`, `protect`,
-// `protect_band`, `take_free`). Several shards follow `block/parallel.rs`:
-// each scatters its own block range with its own scratch, and one ledger
-// completes them. It moves record identities instead of bytes and records a
-// frame after every observable step. Buckets complete one at a time in
-// `order`, a serial linearization of parallel completion; mutex scheduling,
-// key panics and pointer provenance remain Rust tests.
+// Replays one stable block partition that the engine itself ran (see
+// `engine.ts`) as frames for the block-partition figure. The engine decides
+// every step; this file only applies each event to a picture of the scratch
+// and input cells and describes it. It moves record identities instead of
+// bytes and checks that its picture ends where the engine's slice does.
+
+import type { Engine, Event } from "./engine.ts";
 
 export interface Rec {
   /** Position in the original input; equal buckets must keep this order. */
@@ -32,7 +29,6 @@ export interface Loc {
 
 export interface Writer {
   physical: number;
-  next: number;
 }
 
 /** One initialized prefix of a physical block in a bucket's chain. */
@@ -65,13 +61,11 @@ export interface Frame {
 
 export interface Config {
   keys: number[];
-  buckets: number;
+  /** Digit width: the partition has 2^radix buckets. */
+  radix: number;
   blockSize: number;
-  classify: (key: number) => number;
-  /** Requested scatter shards; clamped like `partition_impl_with_visit`. */
-  shards?: number;
-  /** Bucket completion order; ascending by default. */
-  order?: number[];
+  /** A key's bucket is ⌊key / divisor⌋. */
+  divisor: number;
 }
 
 export interface Result {
@@ -89,24 +83,26 @@ export function blockName(physical: number, scratchBlocks: number): string {
   return physical < scratchBlocks ? `S${physical}` : `I${physical - scratchBlocks}`;
 }
 
-export function simulate(config: Config): Result {
-  const { keys, blockSize: b, classify } = config;
-  const R = config.buckets;
-  const n = keys.length;
+export function simulate(engine: Engine, config: Config): Result {
+  const { keys, blockSize: b } = config;
+  const { events, output: engineOutput } = engine.partition(keys, config.radix, b, config.divisor);
+  const begin = events[0];
+  if (begin?.kind !== "begin") throw new Error("the log does not start a partition");
+  const { len: n, buckets: R, scratchBlocks } = begin;
   const fullBlocks = Math.floor(n / b);
-  const shards = Math.min(config.shards ?? 1, n, Math.max(1, fullBlocks));
-  const localScratch = 2 * R;
-  const scratchBlocks = shards * localScratch;
   const blockCount = scratchBlocks + fullBlocks;
   const name = (p: number) => blockName(p, scratchBlocks);
   const blocks = (list: Prefix[]) => list.map((prefix) => name(prefix.physical)).join(", ");
 
+  // The engine reports each record's bucket as it scatters it.
+  const bucketOf: number[] = [];
+  for (const event of events) if (event.kind === "scatter") bucketOf[event.input] = event.bucket;
   const scratch: Cell[] = Array.from({ length: scratchBlocks * b }, () => ({
     rec: null,
     live: false,
   }));
   const input: Cell[] = keys.map((key, id) => ({
-    rec: { id, key, bucket: classify(key) },
+    rec: { id, key, bucket: bucketOf[id] },
     live: true,
   }));
   const blockLoc = (physical: number, offset: number): Loc =>
@@ -115,7 +111,6 @@ export function simulate(config: Config): Result {
       : { region: "input", index: (physical - scratchBlocks) * b + offset };
   const inputLoc = (index: number): Loc => ({ region: "input", index });
   const cells = (region: Region) => (region === "scratch" ? scratch : input);
-  const at = (loc: Loc) => cells(loc.region)[loc.index];
 
   // memmove semantics: read every source cell before writing any destination.
   const move = (from: Loc, to: Loc, len: number) => {
@@ -157,220 +152,152 @@ export function simulate(config: Config): Result {
   snap(
     "setup",
     `${n} records, ${R} buckets, blocks of ${b}. The input holds ${fullBlocks} full blocks ` +
-      `and a tail of ${n % b}; scratch holds 2R = ${localScratch} blocks` +
-      (shards > 1 ? ` per shard, for ${shards} shards.` : "."),
+      `and a tail of ${n % b}; scratch holds 2R = ${scratchBlocks} blocks.`,
   );
 
-  // Each shard scatters its own consecutive full blocks; the last one also
-  // reads the input tail. Shard chains are kept apart until the ledger joins
-  // them in bucket-major, shard order.
-  const shardChains: Prefix[][][] = [];
-  let firstBlock = 0;
-  for (let shard = 0; shard < shards; shard++) {
-    const ownBlocks = Math.floor(fullBlocks / shards) + Number(shard < fullBlocks % shards);
-    const begin = firstBlock * b;
-    const len = shard + 1 === shards ? n - begin : ownBlocks * b;
-    const scratchBase = shard * localScratch;
-    // begin_pass: bucket k starts its chain in this shard's scratch block k.
-    writers = Array.from({ length: R }, (_, k) => ({ physical: scratchBase + k, next: 0 }));
-    const local: Prefix[][] = Array.from({ length: R }, (_, k) => [
-      { physical: scratchBase + k, len: 0 },
-    ]);
-    for (let k = 0; k < R; k++) chains[k] = local[k];
-    snap(
-      "scatter",
-      `Each bucket starts its chain in a scratch block: ` +
-        writers.map((w, k) => `bucket ${k} → ${name(w.physical)}`).join(", ") +
-        `. Blocks ${name(scratchBase + R)}–${name(scratchBase + 2 * R - 1)} stay free.`,
-      { focus: writers.map((w) => w.physical) },
-    );
-    let output = 0;
-    for (let offset = 0; offset < len; offset++) {
-      const from = inputLoc(begin + offset);
-      const rec = at(from).rec!;
-      const bucket = classify(rec.key);
-      const writer = writers[bucket];
-      const to = blockLoc(writer.physical, writer.next);
-      move(from, to, 1);
-      writer.next++;
-      const chain = local[bucket];
-      chain[chain.length - 1].len = writer.next;
+  const sources: { bucket: number; len: number; physical: number }[] = [];
+  let transferred = 0;
+  const transfers = { final: 0, relocation: 0 };
+  // Frames that summarise several events are taken once the run ends.
+  const pending = { writers: false, ledger: false };
+  const flush = () => {
+    if (pending.writers && writers) {
       snap(
         "scatter",
-        `Read key ${rec.key}; digit ${bucket} appends it to ${name(writer.physical)}.`,
-        { read: from, wrote: [to], focus: [writer.physical] },
+        `Each bucket starts its chain in a scratch block: ` +
+          writers.map((w, k) => `bucket ${k} → ${name(w.physical)}`).join(", ") +
+          `. Blocks ${name(R)}–${name(scratchBlocks - 1)} stay free.`,
+        { focus: writers.map((w) => w.physical) },
       );
-      if (writer.next === b) {
-        // A bucket claims its k-th input block only after k·b records were
-        // read, so every record in that block has already moved.
-        const read = offset + 1;
-        if ((output + 1) * b > read) throw new Error("claimed an unread block");
-        const claimed = scratchBlocks + firstBlock + output;
-        const full = writer.physical;
-        writers[bucket] = { physical: claimed, next: 0 };
-        chain.push({ physical: claimed, len: 0 });
-        output++;
-        snap(
-          "scatter",
-          `${name(full)} is full. Bucket ${bucket} links the next input block, ` +
-            `${name(claimed)}, which has been read completely.`,
-          { focus: [full, claimed] },
-        );
-      }
     }
-    shardChains.push(local);
-    firstBlock += ownBlocks;
-  }
-  writers = null;
-
-  // build_completion: one source per nonempty prefix, bucket-major and in
-  // original shard order. Every other physical block is free.
-  owners = Array<Owner>(blockCount).fill("free");
-  const sources: { bucket: number; len: number }[] = [];
-  const location: number[] = [];
-  const bucketSources: number[][] = Array.from({ length: R }, () => []);
-  const starts: number[] = [];
-  let end = 0;
-  for (let bucket = 0; bucket < R; bucket++) {
-    starts.push(end);
-    const joined: Prefix[] = [];
-    for (const local of shardChains) {
-      for (const prefix of local[bucket]) {
-        if (prefix.len === 0) continue;
-        owners[prefix.physical] = bucket;
-        bucketSources[bucket].push(sources.length);
-        sources.push({ bucket, len: prefix.len });
-        location.push(prefix.physical);
-        joined.push(prefix);
-        end += prefix.len;
-      }
-    }
-    chains[bucket] = joined;
-  }
-  if (end !== n) throw new Error(`ledger holds ${end} of ${n} records`);
-  // One free cache per bucket, and the shared reserve last.
-  const free: number[][] = Array.from({ length: R + 1 }, () => []);
-  owners.forEach((owner, physical) => {
-    if (owner === "free") free[R].push(physical);
-  });
-  const sourceOf = new Map<number, number>();
-  location.forEach((physical, source) => {
-    sourceOf.set(physical, source);
-  });
-  snap(
-    "complete",
-    `Every record has moved once. The ledger lists each bucket's prefixes in chain order: ` +
-      chains.map((chain, k) => `bucket ${k} [${blocks(chain)}]`).join(", ") +
-      ". Bucket k's final band starts where bucket k−1's ends.",
-  );
-
-  const transfers = { final: 0, relocation: 0 };
-  const takeFree = (bucket: number) => {
-    // The local cache, then the reserve, then the other buckets' caches.
-    for (const cache of [
-      bucket,
-      R,
-      ...Array.from({ length: R - 1 }, (_, i) => (bucket + i + 1) % R),
-    ]) {
-      while (free[cache].length) {
-        const physical = free[cache].pop()!;
-        // An entry turns stale once its block is final.
-        if (owners![physical] === "free") return physical;
-      }
-    }
-    throw new Error("no free block");
-  };
-  const protect = (physical: number, bucket: number) => {
-    const owner = owners![physical];
-    if (owner !== "free" && owner !== "final") {
-      const target = takeFree(bucket);
-      const source = sourceOf.get(physical)!;
-      move(blockLoc(physical, 0), blockLoc(target, 0), sources[source].len);
-      transfers.relocation += sources[source].len;
-      owners![target] = owner;
-      location[source] = target;
-      sourceOf.delete(physical);
-      sourceOf.set(target, source);
-      const chain = chains[owner];
-      chain[chain.findIndex((prefix) => prefix.physical === physical)].physical = target;
-      owners![physical] = "final";
+    if (pending.ledger) {
       snap(
         "complete",
-        `${name(physical)} lies in bucket ${bucket}'s band but still holds a source of bucket ` +
-          `${owner}. That source moves to the free block ${name(target)} first.`,
-        { focus: [physical, target] },
+        `Every record has moved once. The ledger lists each bucket's prefixes in chain order: ` +
+          chains.map((chain, k) => `bucket ${k} [${blocks(chain)}]`).join(", ") +
+          ". Bucket k's final band starts where bucket k−1's ends.",
       );
-      return;
     }
-    owners![physical] = "final";
-  };
-  // Protects every full block the band touches, except the source's own block.
-  const protectBand = (start: number, len: number, source: number, bucket: number) => {
-    let skipped = false;
-    for (let position = start; position < start + len; ) {
-      const block = Math.floor(position / b);
-      if (block < fullBlocks) {
-        const physical = scratchBlocks + block;
-        if (physical === source) skipped = true;
-        else protect(physical, bucket);
-      }
-      position += Math.min(b - (position % b), start + len - position);
-    }
-    return skipped;
+    pending.writers = false;
+    pending.ledger = false;
   };
 
-  for (const bucket of config.order ?? Array.from({ length: R }, (_, k) => k)) {
-    let start = starts[bucket];
-    for (const source of bucketSources[bucket]) {
-      const { len } = sources[source];
-      const initial = location[source];
-      const skipped = protectBand(start, len, initial, bucket);
-      // Protection may have relocated this source: resolve it only now.
-      const physical = location[source];
-      if (owners[physical] !== bucket) throw new Error("source owner changed");
-      const wrote = Array.from({ length: len }, (_, i) => inputLoc(start + i));
-      move(blockLoc(physical, 0), inputLoc(start), len);
-      transfers.final += len;
-      chains[bucket].shift();
-      sourceOf.delete(physical);
-      if (skipped && physical === initial) {
-        // The source overlaps its own destination: one overlapping copy, and
-        // the block holds no unread source afterwards.
-        owners[physical] = "final";
-      } else {
-        owners[physical] = "free";
-        free[bucket].push(physical);
-      }
-      snap(
-        "complete",
-        `Copy ${name(physical)}'s ${len} record${len === 1 ? "" : "s"} to positions ` +
-          `${start}–${start + len - 1}` +
-          (skipped && physical === initial
-            ? `, overlapping the block itself, which becomes final.`
-            : `; ${name(physical)} becomes free.`),
-        { focus: [physical], wrote },
-      );
-      start += len;
-    }
-    snap(
-      "complete",
-      `Bucket ${bucket}'s band is final: its callback may sort it while it is in cache.`,
-    );
+  for (const event of events.slice(1)) {
+    if (event.kind !== "writer" && event.kind !== "source") flush();
+    apply(event);
   }
+  flush();
   snap(
     "done",
     "The input slice holds every record once, grouped by digit, each group in input order.",
   );
 
-  return {
-    frames,
-    output: input.map((c) => {
-      if (!c.live || !c.rec) throw new Error("completion left a hole");
-      return c.rec;
-    }),
-    blockCount,
-    scratchBlocks,
-    fullBlocks,
-    transfers,
-  };
+  function apply(event: Event) {
+    switch (event.kind) {
+      case "begin":
+        throw new Error("one partition per log");
+      case "writer": {
+        if (!writers) {
+          writers = [];
+          pending.writers = true;
+        }
+        const full = writers[event.bucket];
+        writers[event.bucket] = { physical: event.physical };
+        chains[event.bucket].push({ physical: event.physical, len: 0 });
+        if (full) {
+          snap(
+            "scatter",
+            `${name(full.physical)} is full. Bucket ${event.bucket} links the next input block, ` +
+              `${name(event.physical)}, which has been read completely.`,
+            { focus: [full.physical, event.physical] },
+          );
+        }
+        return;
+      }
+      case "scatter": {
+        const from = inputLoc(event.input);
+        const to = blockLoc(event.physical, event.slot);
+        const key = input[event.input].rec!.key;
+        move(from, to, 1);
+        const chain = chains[event.bucket];
+        chain[chain.length - 1].len = event.slot + 1;
+        snap(
+          "scatter",
+          `Read key ${key}; digit ${event.bucket} appends it to ${name(event.physical)}.`,
+          { read: from, wrote: [to], focus: [event.physical] },
+        );
+        return;
+      }
+      case "source": {
+        if (!owners) {
+          // The ledger replaces the scatter chains: every block without a source is free.
+          writers = null;
+          owners = Array<Owner>(blockCount).fill("free");
+          for (const chain of chains) chain.length = 0;
+          pending.ledger = true;
+        }
+        owners[event.physical] = event.bucket;
+        sources.push({ ...event });
+        chains[event.bucket].push({ physical: event.physical, len: event.len });
+        return;
+      }
+      case "final":
+        owners![event.physical] = "final";
+        return;
+      case "relocate": {
+        const source = sources[event.source];
+        move(blockLoc(event.from, 0), blockLoc(event.to, 0), source.len);
+        transfers.relocation += source.len;
+        source.physical = event.to;
+        owners![event.to] = source.bucket;
+        owners![event.from] = "final";
+        const chain = chains[source.bucket];
+        chain[chain.findIndex((prefix) => prefix.physical === event.from)].physical = event.to;
+        // Serial completion transfers sources in ledger order.
+        const completing = sources[transferred].bucket;
+        snap(
+          "complete",
+          `${name(event.from)} lies in bucket ${completing}'s band but still holds a source of ` +
+            `bucket ${source.bucket}. That source moves to the free block ${name(event.to)} first.`,
+          { focus: [event.from, event.to] },
+        );
+        return;
+      }
+      case "transfer": {
+        const source = sources[event.source];
+        const { len } = source;
+        const wrote = Array.from({ length: len }, (_, i) => inputLoc(event.start + i));
+        move(blockLoc(event.physical, 0), inputLoc(event.start), len);
+        transfers.final += len;
+        transferred++;
+        chains[source.bucket].shift();
+        owners![event.physical] = event.overlapped ? "final" : "free";
+        snap(
+          "complete",
+          `Copy ${name(event.physical)}'s ${len} record${len === 1 ? "" : "s"} to positions ` +
+            `${event.start}–${event.start + len - 1}` +
+            (event.overlapped
+              ? `, overlapping the block itself, which becomes final.`
+              : `; ${name(event.physical)} becomes free.`),
+          { focus: [event.physical], wrote },
+        );
+        return;
+      }
+      case "band":
+        snap(
+          "complete",
+          `Bucket ${event.bucket}'s band is final: its callback may sort it while it is in cache.`,
+        );
+        return;
+    }
+  }
+
+  const output = input.map((c) => {
+    if (!c.live || !c.rec) throw new Error("completion left a hole");
+    return c.rec;
+  });
+  if (output.some((rec, i) => rec.key !== engineOutput[i])) {
+    throw new Error("the replay disagrees with the engine's output");
+  }
+  return { frames, output, blockCount, scratchBlocks, fullBlocks, transfers };
 }

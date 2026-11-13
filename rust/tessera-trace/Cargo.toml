@@ -1,0 +1,25 @@
+[package]
+name = "tessera-trace"
+version = "0.0.0"
+publish = false
+description = "WebAssembly build of Tessera's block partition for the documentation figures"
+edition = "2024"
+rust-version = "1.89"
+license = "BSD-2-Clause"
+
+# Outside the main workspace, so that the `trace` feature never unifies into
+# library tests or benchmark builds.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tessera-sort = { path = "../tessera-sort", features = ["trace"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

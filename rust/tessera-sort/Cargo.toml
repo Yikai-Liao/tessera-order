@@ -17,6 +17,9 @@ authors.workspace = true
 # Rayon entry points. Large roots scatter across disjoint shards and sort
 # completed buckets in the caller's pool.
 rayon = ["dep:rayon"]
+# Internal and unstable: records block-partition steps for the documentation
+# figures (`rust/tessera-trace`). Not covered by semantic versioning.
+trace = []
 
 [dependencies]
 fearless_simd = "1.2"

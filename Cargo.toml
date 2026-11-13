@@ -1,5 +1,7 @@
 [workspace]
 members = ["rust/tessera-sort", "bench/rust"]
+# Built for the documentation site only; see its manifest.
+exclude = ["rust/tessera-trace"]
 resolver = "3"
 
 [workspace.package]

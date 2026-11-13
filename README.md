@@ -11,14 +11,14 @@
 
 <p align="center">
   <a href="https://github.com/Yikai-Liao/tessera-sort/actions/workflows/ci.yml"><img src="https://github.com/Yikai-Liao/tessera-sort/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSD--2--Clause-blue.svg" alt="License: BSD-2-Clause"></a>
+  <a href="https://github.com/Yikai-Liao/tessera-sort/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-BSD--2--Clause-blue.svg" alt="License: BSD-2-Clause"></a>
   <img src="https://img.shields.io/badge/MSRV-1.89-orange.svg" alt="MSRV 1.89">
   <img src="https://img.shields.io/badge/status-pre--release-lightgrey.svg" alt="Status: pre-release">
   <a href="https://yikai-liao.github.io/tessera-sort/"><img src="https://img.shields.io/badge/docs-online-8b5cf6.svg" alt="Documentation"></a>
 </p>
 
 > [!IMPORTANT]
-> Tessera is in pre-release. The Rust engine has been ported to Stable Rust and checked against the research prototype. Nothing is on crates.io yet; see the [roadmap](ROADMAP.md).
+> Tessera is in pre-release. The Rust engine has been ported to Stable Rust and checked against the research prototype. Nothing is on crates.io yet; see the [roadmap](https://github.com/Yikai-Liao/tessera-sort/blob/main/ROADMAP.md).
 
 ## Why Tessera
 
@@ -62,14 +62,14 @@ assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 
 Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 
-The optional `rayon` feature adds `par_stable_sort` and `par_stable_sort_by_key`, requiring `Send` records and a shared `Fn + Sync` key function. Large inputs scatter disjoint root shards in the caller's Rayon pool. Buckets transfer directly into exclusive final bands through a shared source ledger, then sort in their movement tasks. Small inputs and one-thread pools use the serial engine. See [parallel usage](docs/guide/getting-started.md#parallel-sorting) and the [parallel contract](conformance/semantics.md#rust-rayon-entry-points).
+The optional `rayon` feature adds `par_stable_sort` and `par_stable_sort_by_key`, requiring `Send` records and a shared `Fn + Sync` key function. Large inputs scatter disjoint root shards in the caller's Rayon pool. Buckets transfer directly into exclusive final bands through a shared source ledger, then sort in their movement tasks. Small inputs and one-thread pools use the serial engine. See [parallel usage](https://github.com/Yikai-Liao/tessera-sort/blob/main/docs/guide/getting-started.md#parallel-sorting) and the [parallel contract](https://github.com/Yikai-Liao/tessera-sort/blob/main/conformance/semantics.md#rust-rayon-entry-points).
 
 ## Performance
 
-Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). These continuous measurements flag changes to investigate; use the [benchmark protocol](docs/development/benchmarking.md#command-capabilities) for paired algorithm comparisons and source-change attribution.
+Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). These continuous measurements flag changes to investigate; use the [benchmark protocol](https://github.com/Yikai-Liao/tessera-sort/blob/main/docs/development/benchmarking.md#command-capabilities) for paired algorithm comparisons and source-change attribution.
 
 > [!NOTE]
-> The first complete release comparison remains on the [roadmap](ROADMAP.md). The preview below tracks Tessera on main, not an algorithm ranking.
+> The first complete release comparison remains on the [roadmap](https://github.com/Yikai-Liao/tessera-sort/blob/main/ROADMAP.md). The preview below tracks Tessera on main, not an algorithm ranking.
 
 Main trend: the geometric mean of each mode's run-time change since the first run on the current runner specification; lower is faster. The [interactive page](https://yikai-liao.github.io/tessera-sort/benchmarks/) filters cases by type, distribution, length and mode, compares cases over any time range and lists absolute times.
 
@@ -83,7 +83,7 @@ Main trend: the geometric mean of each mode's run-time change since the first ru
 
 ## Status by language
 
-Each language package is versioned and released separately ([`RELEASING.md`](RELEASING.md)). No package has been released yet.
+Each language package is versioned and released separately ([`RELEASING.md`](https://github.com/Yikai-Liao/tessera-sort/blob/main/RELEASING.md)). No package has been released yet.
 
 | Capability | Rust (unreleased) | C++ |
 |---|---|---|
@@ -92,21 +92,21 @@ Each language package is versioned and released separately ([`RELEASING.md`](REL
 | 128-bit keys | Signed and unsigned | Planned |
 | Records that own resources or hold `&mut` | Supported | Trivially copyable records only (planned) |
 
-A Python binding is planned as well; see the [roadmap](ROADMAP.md).
+A Python binding is planned as well; see the [roadmap](https://github.com/Yikai-Liao/tessera-sort/blob/main/ROADMAP.md).
 
 ## Learn more
 
 | Topic | Document |
 |---|---|
-| Ordering, key functions, floats, panics and memory bounds | [`conformance/semantics.md`](conformance/semantics.md) |
+| Ordering, key functions, floats, panics and memory bounds | [`conformance/semantics.md`](https://github.com/Yikai-Liao/tessera-sort/blob/main/conformance/semantics.md) |
 | How the algorithm works, with interactive figures | [Algorithm explanation](https://yikai-liao.github.io/tessera-sort/explain/) |
-| How the engine works | [`docs/design/engine.md`](docs/design/engine.md) |
-| Why user key functions cache bucket IDs | [Record handling](docs/design/engine.md#record-handling) |
-| All documentation | [Documentation site](https://yikai-liao.github.io/tessera-sort/) · [Source index](docs/README.md) |
+| How the engine works | [`docs/design/engine.md`](https://github.com/Yikai-Liao/tessera-sort/blob/main/docs/design/engine.md) |
+| Why user key functions cache bucket IDs | [Record handling](https://github.com/Yikai-Liao/tessera-sort/blob/main/docs/design/engine.md#record-handling) |
+| All documentation | [Documentation site](https://yikai-liao.github.io/tessera-sort/) · [Source index](https://github.com/Yikai-Liao/tessera-sort/blob/main/docs/README.md) |
 
 ## Contributing
 
-Bug reports, benchmark results from other machines, and integration reports are welcome, and so are AI-assisted contributions, as long as a person has reviewed the change and takes responsibility for it. Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. Commits are signed off under the [Developer Certificate of Origin](https://developercertificate.org/), and everyone in the project follows the [code of conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in [`SECURITY.md`](SECURITY.md).
+Bug reports, benchmark results from other machines, and integration reports are welcome, and so are AI-assisted contributions, as long as a person has reviewed the change and takes responsibility for it. Please read [`CONTRIBUTING.md`](https://github.com/Yikai-Liao/tessera-sort/blob/main/CONTRIBUTING.md) first. Commits are signed off under the [Developer Certificate of Origin](https://developercertificate.org/), and everyone in the project follows the [code of conduct](https://github.com/Yikai-Liao/tessera-sort/blob/main/CODE_OF_CONDUCT.md). Report security issues privately as described in [`SECURITY.md`](https://github.com/Yikai-Liao/tessera-sort/blob/main/SECURITY.md).
 
 ## Acknowledgements
 
@@ -116,4 +116,4 @@ Tessera was developed and measured with Lukas Bergdoll's [sort-research-rs](http
 
 ## License
 
-Tessera is licensed under the [BSD 2-Clause License](LICENSE). This covers the code adapted from `radixsort_permuted.c`, which is distributed under the same license.
+Tessera is licensed under the [BSD 2-Clause License](https://github.com/Yikai-Liao/tessera-sort/blob/main/LICENSE). This covers the code adapted from `radixsort_permuted.c`, which is distributed under the same license.

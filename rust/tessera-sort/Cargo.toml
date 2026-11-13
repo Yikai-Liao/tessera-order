@@ -26,7 +26,8 @@ fearless_simd = "1.2"
 rayon = { version = "1.12", optional = true }
 
 [package.metadata.docs.rs]
-all-features = true
+# `trace` is internal (documentation figures only), so docs.rs builds the public features.
+features = ["rayon"]
 
 [lints]
 workspace = true

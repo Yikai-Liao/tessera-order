@@ -25,8 +25,6 @@ unsafe trait MetadataCell<Value> {
     fn new(value: Value) -> Self;
     /// Acquires exclusive access; callers never reacquire a held cell.
     fn acquire(&self) -> impl DerefMut<Target = Value>;
-    /// Attempts exclusive access without waiting.
-    fn try_acquire(&self) -> Option<impl DerefMut<Target = Value>>;
     /// Accesses the value during uniquely owned construction.
     fn exclusive(&mut self) -> &mut Value;
 }
@@ -39,13 +37,6 @@ unsafe impl<Value> MetadataCell<Value> for Mutex<Value> {
     fn acquire(&self) -> impl DerefMut<Target = Value> {
         self.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-    fn try_acquire(&self) -> Option<impl DerefMut<Target = Value>> {
-        match self.try_lock() {
-            Ok(guard) => Some(guard),
-            Err(std::sync::TryLockError::Poisoned(error)) => Some(error.into_inner()),
-            Err(std::sync::TryLockError::WouldBlock) => None,
-        }
     }
     fn exclusive(&mut self) -> &mut Value {
         self.get_mut()
@@ -60,9 +51,6 @@ unsafe impl<Value> MetadataCell<Value> for core::cell::RefCell<Value> {
     }
     fn acquire(&self) -> impl DerefMut<Target = Value> {
         self.borrow_mut()
-    }
-    fn try_acquire(&self) -> Option<impl DerefMut<Target = Value>> {
-        self.try_borrow_mut().ok()
     }
     fn exclusive(&mut self) -> &mut Value {
         self.get_mut()
@@ -85,8 +73,8 @@ struct Bucket {
     pending_sources: core::ops::Range<usize>,
     start: usize,
     len: usize,
-    /// The bucket index, which also selects the bucket's free-block cache.
-    cache: usize,
+    /// The bucket identity passed to trace events and the band callback.
+    index: usize,
 }
 
 /// Owns restoration after partition guards hand off their sources. Structured
@@ -109,8 +97,8 @@ impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Drop
 }
 
 /// Per-block metadata capacity that coexists with record scratch. Bucket and
-/// shard descriptors add O(Rq) separately. Free-cache capacities sum to at most
-/// the physical-block count plus one slot per bucket.
+/// shard descriptors add O(Rq) separately. The free stack reserves one slot per
+/// physical block before movement begins.
 const fn descriptor_bytes<Owner>() -> usize {
     core::mem::size_of::<u32>()
         + core::mem::size_of::<*mut ()>()
@@ -139,7 +127,7 @@ struct Storage<T, Owner = Mutex<usize>, Free = Mutex<Vec<usize>>> {
     block_size: usize,
     owners: Vec<Owner>,
     sources: Vec<Source>,
-    free: Vec<Free>,
+    free: Free,
 }
 
 // SAFETY: no T references are shared. A physical owner mutex protects source
@@ -147,28 +135,15 @@ struct Storage<T, Owner = Mutex<usize>, Free = Mutex<Vec<usize>>> {
 unsafe impl<T: Send, Owner: Sync, Free: Sync> Sync for Storage<T, Owner, Free> {}
 
 impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Storage<T, Owner, Free> {
-    /// Finds a free candidate in the local cache, reserve, or another bucket.
-    fn take_free(&self, current: usize, local: &mut Vec<usize>) -> usize {
-        if let Some(physical) = local.pop() {
-            return physical;
-        }
-        let buckets = self.free.len() - 1;
+    /// Checks out one free candidate, releasing the stack before owner access.
+    fn take_free(&self) -> usize {
         loop {
-            if let Some(physical) = lock(&self.free[buckets]).pop() {
+            let candidate = lock(&self.free).pop();
+            if let Some(physical) = candidate {
                 return physical;
             }
-            for offset in 1..buckets {
-                let peer = (current + offset) % buckets;
-                let Some(mut free) = self.free[peer].try_acquire() else {
-                    continue;
-                };
-                if let Some(physical) = free.pop() {
-                    return physical;
-                }
-            }
-            // A candidate can be checked out or its cache can be temporarily
-            // locked. Hold no physical owner while waiting. Cache holders run
-            // no user callbacks and can therefore finish or publish progress.
+            // Peers may have checked out candidates. Hold neither an owner nor
+            // the free stack while waiting; holders perform finite movement.
             std::thread::yield_now();
         }
     }
@@ -176,16 +151,10 @@ impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Storage<T, O
     /// Transfers one complete live prefix to its final input range, allowing
     /// overlap with that same source. Retires or recycles its physical block
     /// and returns the number of records written.
-    fn transfer(
-        &self,
-        logical: usize,
-        start: usize,
-        local: &mut Vec<usize>,
-        cache: usize,
-    ) -> usize {
+    fn transfer(&self, logical: usize, start: usize) -> usize {
         let source = &self.sources[logical];
         let initial = source.location.load(Ordering::Acquire);
-        let skipped = self.protect_band(start, source.len, initial, local, cache);
+        let skipped = self.protect_band(start, source.len, initial);
         loop {
             let physical = source.location.load(Ordering::Acquire);
             let mut owner = lock(&self.owners[physical]);
@@ -216,14 +185,14 @@ impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Storage<T, O
                 // from the whole final interval, even after relocation.
                 unsafe { ptr::copy_nonoverlapping(self.addresses[physical], output, source.len) };
                 *owner = FREE;
-                local.push(physical);
+                lock(&self.free).push(physical);
             }
             return source.len;
         }
     }
 
     /// Evacuates an occupied destination using locks in physical ID order.
-    fn protect(&self, physical: usize, local: &mut Vec<usize>, cache: usize) {
+    fn protect(&self, physical: usize) {
         loop {
             let mut owner = lock(&self.owners[physical]);
             if *owner == FINAL || *owner == FREE {
@@ -232,7 +201,7 @@ impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Storage<T, O
                 return;
             }
             drop(owner);
-            let free = self.take_free(cache, local);
+            let free = self.take_free();
             if free == physical {
                 // A free-list entry can become stale only after finalization.
                 let mut owner = lock(&self.owners[physical]);
@@ -278,7 +247,7 @@ impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Storage<T, O
                     to: free,
                 });
             } else {
-                local.push(free);
+                lock(&self.free).push(free);
                 trace::emit(|| Event::Final { physical });
             }
             *owner = FINAL;
@@ -288,14 +257,7 @@ impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Storage<T, O
 
     /// Protects the final range except `source`, returning whether that
     /// physical block actually overlapped and was skipped.
-    fn protect_band(
-        &self,
-        start: usize,
-        len: usize,
-        source: usize,
-        local: &mut Vec<usize>,
-        cache: usize,
-    ) -> bool {
+    fn protect_band(&self, start: usize, len: usize, source: usize) -> bool {
         let mut skipped = false;
         let mut offset = 0;
         while offset < len {
@@ -308,7 +270,7 @@ impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Storage<T, O
                 if physical == source {
                     skipped = true;
                 } else {
-                    self.protect(physical, local, cache);
+                    self.protect(physical);
                 }
             }
             offset += count;
@@ -341,17 +303,16 @@ impl Bucket {
         // validates the source, which peers may have relocated. After g retired
         // prefixes a bucket touches at most g + 2 destination blocks. While it
         // waits for one of those blocks, at most g + 1 are final: with at least
-        // two shards, the shared reserve still covers outstanding candidates.
+        // two shards, the free blocks still cover outstanding candidates.
         let mut offset = 0;
         for logical in self.pending_sources.clone() {
-            let mut free = lock(&storage.free[self.cache]);
-            offset += storage.transfer(logical, self.start + offset, &mut free, self.cache);
+            offset += storage.transfer(logical, self.start + offset);
         }
         // Recovery must not revisit this band if its callback retains a borrow
         // or unwinds. Completion restores the other bands after all jobs join.
         self.pending_sources.start = self.pending_sources.end;
         trace::emit(|| Event::Band {
-            bucket: self.cache,
+            bucket: self.index,
             start: self.start,
             len: self.len,
         });
@@ -361,7 +322,7 @@ impl Bucket {
             // disjoint bands, even if they share a physical block fragment.
             let band =
                 unsafe { core::slice::from_raw_parts_mut(storage.input.add(self.start), self.len) };
-            visit(self.cache, band);
+            visit(self.index, band);
         }
     }
 }
@@ -427,7 +388,7 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
             }
         }
         buckets.push(Bucket {
-            cache: bucket,
+            index: bucket,
             pending_sources: first_source..sources.len(),
             start,
             len,
@@ -435,23 +396,15 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
         start += len;
     }
     assert_eq!(start, input_len);
-    let mut free = Vec::with_capacity(count - sources.len());
+    // Every physical ID has at most one candidate, in this stack or checked
+    // out. A stale candidate is FINAL forever and cannot be registered again.
+    // Reserve all IDs now so returning candidates cannot allocate in recovery.
+    let mut free = Vec::with_capacity(count);
     for (physical, owner) in owners.iter_mut().enumerate() {
         if *owner.exclusive() == FREE {
             free.push(physical);
         }
     }
-    let mut caches = Vec::with_capacity(bucket_count + 1);
-    caches.extend(buckets.iter().map(|bucket| {
-        // Empty buckets perform no transfers and need no free cache.
-        let capacity = if bucket.pending_sources.is_empty() {
-            0
-        } else {
-            bucket.pending_sources.len() + 1
-        };
-        Free::new(Vec::with_capacity(capacity))
-    }));
-    caches.push(Free::new(free));
     let ends = buckets
         .iter()
         .map(|bucket| bucket.start + bucket.len)
@@ -465,7 +418,7 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
             block_size,
             owners,
             sources,
-            free: caches,
+            free: Free::new(free),
         },
         buckets,
         ends,
@@ -576,6 +529,8 @@ mod tests {
             let expected = input[(physical - 1) * 4..(physical - 1) * 4 + len].to_vec();
             let mut owners = vec![Mutex::new(FREE), Mutex::new(FREE), Mutex::new(FREE)];
             *owners[physical].get_mut().unwrap() = 0;
+            let mut free = Vec::with_capacity(owners.len());
+            free.push(0);
             let storage = Storage {
                 // SAFETY: both input blocks and the disjoint scratch hold four
                 // records and stay alive until this complete transfer returns.
@@ -589,13 +544,15 @@ mod tests {
                     location: AtomicUsize::new(physical),
                     len,
                 }],
-                free: vec![Mutex::new(Vec::new()), Mutex::new(vec![0])],
+                free: Mutex::new(free),
             };
-            let mut free = Vec::new();
-            assert_eq!(storage.transfer(0, start, &mut free, 0), len);
+            assert_eq!(storage.transfer(0, start), len);
             assert_eq!(&input[start..start + len], expected);
             assert_eq!(*lock(&storage.owners[physical]), expected_owner);
-            assert_eq!(free.contains(&physical), expected_owner == FREE);
+            assert_eq!(
+                lock(&storage.free).contains(&physical),
+                expected_owner == FREE
+            );
         }
     }
 
@@ -745,6 +702,8 @@ mod tests {
         let mut scratch: Vec<MaybeUninit<BorrowedRecord<'_>>> = Vec::with_capacity(2);
         scratch.resize_with(2, MaybeUninit::uninit);
         let scratch_pointer = scratch.as_mut_ptr().cast::<BorrowedRecord<'_>>();
+        let mut free = Vec::with_capacity(4);
+        free.extend([0, 1]);
         let storage = Storage {
             // SAFETY: all addresses derive from their allocation's ancestor.
             addresses: unsafe {
@@ -762,17 +721,13 @@ mod tests {
                     len: 1,
                 })
                 .collect(),
-            free: vec![
-                Mutex::new(Vec::with_capacity(2)),
-                Mutex::new(Vec::with_capacity(2)),
-                Mutex::new(vec![0, 1]),
-            ],
+            free: Mutex::new(free),
         };
         let mut buckets = [0, 1].map(|bucket| Bucket {
             pending_sources: bucket..bucket + 1,
             start: 1 - bucket,
             len: 1,
-            cache: bucket,
+            index: bucket,
         });
         std::thread::scope(|scope| {
             for bucket in &mut buckets {
@@ -795,15 +750,14 @@ mod tests {
     }
 
     #[test]
-    fn suspended_caches_keep_progress() {
-        // Completed helpers retain registered free caches while suspended.
-        // Later buckets must use those candidates without waiting for helpers
-        // to return. No key callback needs to panic.
+    fn unfinished_bands_recover_with_published_borrows() {
+        // Published borrows can outlive movement in later bands and recovery
+        // of the remaining bands. No callback needs to return its band first.
         const SHARDS: usize = 8;
         const BUCKETS: usize = 16;
         const BLOCK: usize = 2;
-        const SHARD_LEN: usize = 256;
-        const BUCKET_LEN: usize = 128;
+        const HEAVY_LEN: usize = if cfg!(miri) { 3 } else { 121 };
+        const SHARD_LEN: usize = 2 * HEAVY_LEN + BUCKETS - 2;
         let mut records = Vec::new();
         for shard in 0..SHARDS {
             let (first, second) = if shard < 4 {
@@ -812,7 +766,7 @@ mod tests {
                 (9 + 2 * (shard - 4), 2 * (shard - 4))
             };
             for bucket in [first, second] {
-                for _ in 0..121 {
+                for _ in 0..HEAVY_LEN {
                     records.push((bucket as u32, records.len()));
                 }
             }
@@ -849,45 +803,22 @@ mod tests {
         };
         let storage = &completion.storage;
         let buckets = &mut completion.buckets;
-        assert!(
-            buckets
-                .iter()
-                .all(|bucket| bucket.pending_sources.len() == 68 && bucket.len == BUCKET_LEN)
-        );
-        assert_eq!(lock(&storage.free[BUCKETS]).len(), 192);
-        // Transfer recovery responsibility to this controlled state-machine
-        // fixture; all records are plain Copy values and are restored below.
+        let published = Mutex::new(Vec::<&mut [(u32, usize)]>::new());
+        let visit = |_: usize, band| published.lock().unwrap().push(band);
         for helper in [0, 2, 4, 6] {
-            buckets[helper].finish(storage, None::<fn(usize, &mut [_])>);
+            buckets[helper].finish(storage, Some(&visit));
         }
-        // Concentrate unused candidates in a completed helper's registered
-        // cache, forcing subsequent work to discover a suspended peer's blocks.
-        for cache in 1..storage.free.len() {
-            let mut free = lock(&storage.free[cache]);
-            lock(&storage.free[0]).append(&mut free);
+        for victim in [8, 10, 12, 14] {
+            buckets[victim].finish(storage, None::<fn(usize, &mut [_])>);
         }
-        let held = lock(&storage.free[0]).len();
-        let result = unwind::catch(|| {
-            for victim in [8, 10, 12, 14] {
-                buckets[victim].finish(storage, None::<fn(usize, &mut [_])>);
-            }
-        });
-        assert!(
-            lock(&storage.free[0]).len() < held,
-            "victims must steal a helper block"
-        );
-        // Helpers stay paused. Their registered caches must support victims
-        // before any helper returns to publish or release its allocation.
-        for bucket in buckets {
-            bucket.finish(storage, None::<fn(usize, &mut [_])>);
-        }
+        // The guard restores every unvisited band while published borrows
+        // remain alive. Their sources are retired and must never be accessed.
         drop(completion);
         drop(shards);
+        for band in published.into_inner().unwrap() {
+            assert!(band.windows(2).all(|pair| pair[0].1 < pair[1].1));
+        }
         assert_eq!(records, expected);
-        assert!(
-            result.is_ok(),
-            "free blocks retained by suspended helpers must remain available"
-        );
     }
 
     #[test]

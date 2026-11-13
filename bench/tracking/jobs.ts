@@ -10,11 +10,11 @@ export const JOB_TIMEOUT_S = 300;
  *
  * The catalog budget is a floor, not a duration: VM start, input preparation,
  * verification and Criterion analysis come on top, and a slow algorithm's
- * flat sampling can exceed its window. The 62-case `std-stable` run
- * (148 s of catalog budget) took 185 s remotely, so 60% of the timeout leaves
- * room for that overhead and for slower opponents.
+ * flat sampling can exceed its window. Remotely, `std-stable`'s 62 cases
+ * (148 s of budget) took 185 s, and Tessera's 34 four-thread cases (164 s)
+ * took 234 s; half the timeout keeps such jobs near 200 s.
  */
-const JOB_SAMPLING_S = 0.6 * JOB_TIMEOUT_S;
+const JOB_SAMPLING_S = 0.5 * JOB_TIMEOUT_S;
 
 /** A case's catalog warm-up and sampling budget, in seconds. */
 function samplingSeconds(id: string) {

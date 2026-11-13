@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parseHTML } from "linkedom/worker";
 import { z } from "zod";
+import { explainFailure } from "./failure.ts";
 import {
   comparableRuns,
   formatTimestamp,
@@ -446,13 +447,13 @@ test("remote jobs split an inventory by catalog budget, in order and balanced", 
     ...Array.from({ length: 44 }, (_, i) => long(i)),
   ];
   const jobs = remoteJobs(tessera);
-  assert.equal(jobs.length, 2);
+  assert.equal(jobs.length, 3);
   assert.deepEqual(jobs.flat(), tessera);
   // Catalog warm-up plus window: 2 s below a million records, 5 s from there.
   const seconds = (job: string[]) =>
     job.reduce((sum, id) => sum + (Number(id.split("/")[3]) >= 1_000_000 ? 5 : 2), 0);
-  // Midpoint assignment may exceed the 180 s budget by part of one case.
-  for (const job of jobs) assert.ok(seconds(job) <= 0.6 * 300 + 5, String(seconds(job)));
+  // Midpoint assignment may exceed the 150 s budget by part of one case.
+  for (const job of jobs) assert.ok(seconds(job) <= 0.5 * 300 + 5, String(seconds(job)));
   // An opponent selecting one mode of the same inventory fits one job.
   const opponent = [
     ...Array.from({ length: 54 }, (_, i) => short(i)),
@@ -475,4 +476,18 @@ test("a run combines its remote jobs only for one source and hardware", () => {
   assert.deepEqual(Object.keys(run.values).sort(), [other, PREVIEW_CASE].sort());
   assert.throws(() => combineReports([jobs[0], { ...jobs[1], spec: second.uuid }]));
   assert.throws(() => combineReports([]));
+});
+
+test("known remote failures are explained once, unknown ones are not guessed", () => {
+  assert.match(
+    explainFailure(
+      "x\nRemote job failed: Firecracker error: Timeout: VM execution timed out after 300s\n",
+    )!,
+    /longer than Bencher's 300 s limit/,
+  );
+  assert.match(
+    explainFailure("Timed out waiting for remote job after 600 seconds")!,
+    /within 600 s of waiting, queueing included/,
+  );
+  assert.equal(explainFailure("error: linker failed"), null);
 });

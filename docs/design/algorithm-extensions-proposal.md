@@ -150,7 +150,7 @@ The structural stages are successful only if these real changes follow their own
 
 The [engine reference](engine.md) owns current boundaries and invariants. Today, block classification and the completion ledger are already more general than sorting. The full-sort assumption lives in `Split::partition`, large-child continuation, tile finishing and the parallel root callback: each continues all unfinished children. The ledger already knows every bucket's final start and length before publishing any band.
 
-There is also an upward implementation dependency: `key::Extract` defaults and `portable_simd` call insertion and ascending-scan primitives currently defined in `engine.rs`. Those operations do not own routing policy and should not make lower-level consumers depend on recursive execution.
+Foundations A and B remove the former upward dependencies of key/order primitives and tile leaf planning on recursive execution. Their current owners are documented in the [engine reference](engine.md#knowledge-boundaries). This separation lets later ordered and category operations use complete tile capabilities without importing full-sort control.
 
 The intended responsibility dependencies are:
 
@@ -222,7 +222,7 @@ The [roadmap](../../ROADMAP.md#algorithm-extension-experiment) owns progress and
 | Stage | Complete deliverable | Separation and acceptance |
 |---|---|---|
 | Foundation A | Shared order primitives: [implemented boundary](engine.md#insertion-and-scans). | Retain existing scan, dispatch, routing and allocation behavior. Validate current serial and Rayon entry points. |
-| Foundation B | Give the tile subsystem its complete leaf analysis and storage boundary outside recursive node ownership; centralize encoded digit meaning and candidate scans at their lower-level owners. | Relocate existing implementations without wrapper layers or rule changes. Preserve LSD alternation, scan-free small leaves and order-aware large children; validate the existing tile and node consumers. |
+| Foundation B | Tile-owned leaf analysis and storage: [implemented boundary](engine.md#knowledge-boundaries). Encoded digits and candidate scans live at their lower-level owners. | Relocate existing implementations without wrapper layers or rule changes. Preserve LSD alternation, scan-free small leaves and order-aware large children; validate the existing tile and node consumers. |
 | Foundation C | Provide final band ranges and migrate every serial, parallel, recovery and trace consumer. | Another structural commit: no new public algorithm, scan, allocation policy or scheduling rule. Check callback ranges against independent cumulative bucket lengths, including sparse buckets. |
 | Foundation D | Establish the common rank-requirement authority, ordered execution boundary and private workspace handoff; migrate existing full sorting as the first complete consumer. | No prefix-only execution branch or second engine. Preserve root and child facts, tile fast paths, serial scratch reuse and current parallel admission. Demonstrate the target change paths above before adding public algorithms. |
 | 1 | Stable argsort; documented multi-field and grouping compositions. | Use existing sorting. Verify index identity and ties; no new movement kernel or custom grouping engine. |

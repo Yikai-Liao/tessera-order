@@ -221,6 +221,26 @@ unsafe impl<T, E: Extract<T>> Extract<T> for &mut E {
     }
 }
 
+/// Number of bits needed to represent `value`; 0 for 0.
+#[inline]
+pub(crate) fn bit_len(value: u128) -> usize {
+    (u128::BITS - value.leading_zeros()) as usize
+}
+
+/// One pass worth of key bits: `width` bits starting at `shift`.
+#[derive(Clone, Copy)]
+pub(crate) struct Digit {
+    pub(crate) shift: usize,
+    pub(crate) width: usize,
+}
+
+impl Digit {
+    #[inline]
+    pub(crate) fn mask<V: Unsigned>(self) -> V {
+        (V::from_usize((1usize << self.width) - 1)) << V::from_usize(self.shift)
+    }
+}
+
 /// Classifies records by the key digit that starts at bit `shift`.
 ///
 /// The partition keeps the digit's low bits; bits above the key width count

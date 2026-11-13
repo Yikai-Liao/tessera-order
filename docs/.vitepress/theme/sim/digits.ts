@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
-// `plan_digits` and `top_window` from `rust/tessera-sort/src/engine/plan.rs`, on
+// `plan_digits` and `top_window` from `rust/tessera-sort/src/tile/plan.rs`, on
 // BigInt masks so that the explanation pages can plan keys of any width.
 
 /** One key per equal stratum at a golden-ratio offset, mirroring `KeySample::collect`. */

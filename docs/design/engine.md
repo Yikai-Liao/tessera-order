@@ -20,9 +20,9 @@ This page owns the engine's code boundaries and invariants in `rust/tessera-sort
 | Owner | Complete responsibility | Consumers need to know |
 |---|---|---|
 | `engine.rs` | Root preparation, candidate-bit progress, recursive node execution. Both entries take the extractor by value and wrap a narrowed 128-bit key in one `KeyHalf` (`key.rs`), which owns truncation and counting-window translation | Public sort contracts and complete partition and finishing operations |
-| `order.rs` | Scalar order scans and stable insertion loops, independent of recursive execution | Extractors supply keys; direct-key callers supply a scan in their selected SIMD context |
-| `engine/plan.rs` | Bounded sampling, node and tile decisions, digit work estimates | Records, candidate variation and tile capacity go in; an executable decision comes out |
-| `engine/tile.rs` | Capacity, scratch allocation, cached classification, counting passes and restoration | Finish a cursor-bounded slice; no raw pointer, cursor layout or guard crosses the boundary |
+| `order.rs` | Scalar order and candidate-masked variation scans, stable insertion loops, independent of recursive execution | Extractors supply keys; direct-key callers supply a scan in their selected SIMD context |
+| `engine/plan.rs` | Bounded sampling and executable node partition decisions | Records, candidate variation and tile capacity go in; a node decision comes out |
+| `tile.rs`, `tile/plan.rs` | Capacity, complete leaf planning, scratch allocation, cached classification, counting passes and restoration | Finish a cursor-bounded slice; no raw pointer, cursor layout or guard crosses the boundary |
 | `block.rs`, `block/` | Physical block storage, stable bucket chains, ledger costs, completion and recovery | A `Classify` bucket per record goes in; bucket boundaries and completed bands come out |
 | `engine/parallel.rs` | Shard count, task scheduling and scratch pooling for the shared decisions | Exclusive bucket borrows and the planner's decision, not a second cost model |
 
@@ -52,14 +52,14 @@ Node samples choose partitions; they never certify ownership, equality of actual
 | Order probe, budgeted insertion, varying bits, constant and flat inputs | [Routing an input](../explain/routing.md) | `engine.rs` |
 | Child order, equality, run and top-digit partitions, counted window | [Nodes and tiles](../explain/routing.md#nodes-and-tiles) | `engine.rs`, `engine/plan.rs` |
 | Stable block partition, completion ledger, block size | [The block partition](../explain/block-partition.md) | `block.rs`, `block/` |
-| Tile leaves, digit planning, cached bucket IDs | [Finishing tiles](../explain/tiles.md) | `engine/tile.rs`, `engine/plan.rs` |
-| Key encoding and varying bits | [Keys as unsigned integers](../explain/keys.md) | `key.rs` |
+| Tile leaves, digit planning, cached bucket IDs | [Finishing tiles](../explain/tiles.md) | `tile.rs`, `tile/plan.rs` |
+| Key encoding and digit meaning; varying-bit scans | [Keys as unsigned integers](../explain/keys.md) | `key.rs`; `order.rs` |
 
 A stage's rule changes on its page, in the code and in the page's model together. Structural facts across stages:
 
 - `prepare` is shared by the serial and parallel entries. `insertion_probe` owns insertion eligibility, its window and budget, including unlimited finishing for insertion-sized inputs.
 - `finish_ordered` owns ascending completion and strict or stable descending reversal, for the root probe, deferred flat confirmation and partition children.
-- Root and child variation share one candidate-masked scan.
+- Root, node-child and tile-child variation share `order::scan_varying_bits`; key digit windows have one representation in `key::Digit`.
 - Serial and parallel execution consume one `NodePlan` decision once. Parallel roots shard equality and digit partitions; an existing-run split runs serially without resampling.
 - A `Direct` extractor may finish a covering digit by counting, because every sealed encoding is a bijection on bit patterns. `ByKey` declines, because a user key does not identify its payload.
 - Scratch is created only after the root fast paths, so confirmed ordered and constant inputs never allocate.

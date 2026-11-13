@@ -4,7 +4,7 @@
 //!
 //! A *node* is a slice larger than the tile budget (64 KiB of records by
 //! default); [`block`] splits it with a stable block partition. A *tile* fits
-//! the budget and is finished here by insertion sort, a tile-local MSD
+//! the budget and is finished by [`tile`] with insertion, a tile-local MSD
 //! partition, or LSD counting passes through scratch. A *digit* ([`Digit`]) is
 //! the window of key bits one pass handles, and a *cursor table* holds one
 //! `u16` position per bucket. `docs/design/engine.md` describes each stage.
@@ -17,49 +17,21 @@
 pub(crate) mod parallel;
 
 mod plan;
-mod tile;
-pub(crate) use tile::Cursor;
 
+use crate::tile;
+
+use crate::order::scan_varying_bits;
 use crate::thresholds::{INSERTION_MAX, TILE_BYTES};
-use plan::{Digit, NodePlan, bit_len, plan_node};
+use plan::{NodePlan, plan_node};
 use tile::capacity as tile_capacity;
 
 use alloc::vec::Vec;
 
 use crate::block;
 use crate::block::Classify;
-use crate::key::{self, Direct, Extract, KeyDigit, KeyHalf, Rank, Unsigned};
+use crate::key::{self, Digit, Direct, Extract, KeyDigit, KeyHalf, Rank, Unsigned, bit_len};
 
 type KeyValue<T, E> = <E as Extract<T>>::Value;
-
-/// Scans until all candidate bits have appeared in both states, or the input ends.
-/// Only candidate bits are returned, so even changing keys cannot restore a
-/// parent partition digit and prevent the recursion from making progress.
-fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor: &mut E) -> u128 {
-    if candidate == 0 {
-        return 0;
-    }
-    let first = extractor.key(&records[0]);
-    let (mut union, mut intersection) = (first, first);
-    let mut index = 1;
-    let mut batch = 64;
-    while index < records.len() {
-        let end = index + batch.min(records.len() - index);
-        for record in &records[index..end] {
-            let key = extractor.key(record);
-            union |= key;
-            intersection = intersection & key;
-        }
-        let seen = union.to_u128() ^ intersection.to_u128();
-        if seen & candidate == candidate {
-            break;
-        }
-        index = end;
-        // Early witnesses stay cheap; long scans get vectorizable stretches.
-        batch = batch.saturating_mul(2);
-    }
-    (union.to_u128() ^ intersection.to_u128()) & candidate
-}
 
 /// The candidate bits left when every child holds the top bit of a nonzero
 /// `varying` constant, as after a run or equality split.

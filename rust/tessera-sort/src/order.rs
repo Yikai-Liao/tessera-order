@@ -5,7 +5,7 @@
 //! Key extractors select the scan; direct-key callers keep the insertion loop
 //! inside their once-per-pass SIMD dispatch. These operations own no routing policy.
 
-use crate::key::Extract;
+use crate::key::{Extract, Unsigned};
 
 /// Returns the first descending pair, retaining the previous extracted key so
 /// a user callback runs once per scanned record. The callback may panic or
@@ -20,6 +20,40 @@ pub(crate) fn by_key<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Opti
         previous = current;
         inverted
     })
+}
+
+/// Scans until all candidate bits have appeared in both states, or the input ends.
+/// Only candidate bits are returned, so even changing keys cannot restore a
+/// parent partition digit and prevent the recursion from making progress.
+/// A nonzero candidate requires a nonempty slice.
+pub(crate) fn scan_varying_bits<T, E: Extract<T>>(
+    records: &[T],
+    candidate: u128,
+    extractor: &mut E,
+) -> u128 {
+    if candidate == 0 {
+        return 0;
+    }
+    let first = extractor.key(&records[0]);
+    let (mut union, mut intersection) = (first, first);
+    let mut index = 1;
+    let mut batch = 64;
+    while index < records.len() {
+        let end = index + batch.min(records.len() - index);
+        for record in &records[index..end] {
+            let key = extractor.key(record);
+            union |= key;
+            intersection = intersection & key;
+        }
+        let seen = union.to_u128() ^ intersection.to_u128();
+        if seen & candidate == candidate {
+            break;
+        }
+        index = end;
+        // Early witnesses stay cheap; long scans get vectorizable stretches.
+        batch = batch.saturating_mul(2);
+    }
+    (union.to_u128() ^ intersection.to_u128()) & candidate
 }
 
 /// Stably inserts inverted records until sorted or the swap budget runs out.

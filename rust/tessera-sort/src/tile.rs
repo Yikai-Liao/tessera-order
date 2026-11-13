@@ -2,14 +2,17 @@
 
 //! Bounded tile finishing owns scratch layout, cached classification and restoration.
 //! Callers supply records, remaining variation and an extractor; raw pass pointers
-//! and the live-copy guard never cross this boundary.
+//! and the live-copy guard never cross this boundary. The private leaf planner
+//! consumes this module's cursor limits without depending on node execution.
 
-use super::plan::{Digit, TilePlan, plan_tile};
-use super::scan_varying_bits;
-use crate::key::{Extract, Unsigned};
+mod plan;
+
+use crate::key::{Digit, Extract, Unsigned};
+use crate::order::scan_varying_bits;
 use crate::thresholds::{INSERTION_MAX, MAX_CURSOR_BYTES, MAX_TILE_RECORDS};
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
+use plan::{TilePlan, plan_tile};
 
 /// Positions and cached bucket IDs used by tile passes.
 pub(crate) type Cursor = u16;
@@ -349,9 +352,9 @@ mod tests {
         let mut records: Vec<_> = (0..1000u64).collect();
         let mut scratch = Scratch::new();
         let mut calls = 0;
-        // Every sample and histogram puts all records in one bucket. Each child
-        // scan then reintroduces every key bit, including the partitioned digit.
-        let constant_calls = super::super::plan::KEY_SAMPLE_LEN + records.len();
+        // Sustain constant answers beyond a histogram, independently of node
+        // sampling. Child scans then reintroduce every bit, including the digit.
+        let constant_calls = 128 + records.len();
         let mut extractor = ByKey(|_: &u64| {
             assert!(calls < 12_000, "tile recursion did not make progress");
             let phase = calls % (constant_calls + 65);

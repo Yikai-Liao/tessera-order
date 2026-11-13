@@ -20,6 +20,8 @@ export interface PlotRow {
   span?: [number, number];
   cells: string[];
   strong?: boolean;
+  /** The last cell states a lead, such as a first rank, and takes Tessera's colour. */
+  lead?: boolean;
 }
 export type Swatch = Tone | "alternate" | "hollow" | "reference";
 export interface RowChart {
@@ -189,7 +191,12 @@ export function renderRows(spec: RowChart) {
         annotations.push(
           label(cell, columns[index], cy + 4, {
             size: 12,
-            tone: row.strong ? ink.text : ink.muted,
+            tone:
+              row.lead && index === row.cells.length - 1
+                ? ink.primary
+                : row.strong
+                  ? ink.text
+                  : ink.muted,
             strong: !!row.strong && index === row.cells.length - 1,
             anchor: "end",
           }),

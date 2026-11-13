@@ -210,20 +210,14 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
     cells: [times(e.speeds[at]), ...(memory ? [e.peak === null ? "–" : formatBytes(e.peak)] : [])],
     strong: e.cell.strong,
   });
-  const sorts = `${others.length + 1} sorts on ${formatLength(cohort.n)} u64 keys`;
-  const title =
-    rank === 1
-      ? `Tessera is the fastest of ${sorts}`
-      : `Tessera ranks ${ordinal(rank)} of ${sorts}`;
+  const sorts = `${others.length + 1} sorts`;
+  const title = rank === 1 ? `Fastest of ${sorts}` : `Ranked ${ordinal(rank)} of ${sorts}`;
   return {
     name: memory ? "overview" : "ranking",
     title,
     ...rendered({
       title,
-      // The guide is one line; with memory, its wording stays within the panel width.
-      guide: memory
-        ? `Geometric mean speed vs slice::sort over ${cohort.shapesLabel}; worst extra heap`
-        : `Speed relative to slice::sort, geometric mean over ${cohort.shapesLabel}`,
+      guide: `${formatLength(cohort.n)} u64 keys · speed vs slice::sort, geometric mean over ${cohort.shapesLabel}`,
       columns: ["Speed", ...(memory ? ["Extra memory"] : [])],
       groups: [
         { title: "Stable sorts", rows: complete.filter((e) => e.stable).map(row) },
@@ -287,6 +281,7 @@ function fieldRow(name: NameCell, s: Standing): Row {
     ],
     cells: [times(s.tessera), ordinal(s.rank)],
     strong: true,
+    lead: s.rank === 1,
   };
 }
 
@@ -295,11 +290,16 @@ function fieldTitle(standings: Standing[], unit: string) {
   const total = standings.length,
     first = standings.filter((s) => s.rank === 1).length,
     top3 = standings.filter((s) => s.rank <= 3).length;
-  if (first === total) return `Tessera is fastest on all ${total} ${unit}`;
+  if (first === total) return `Fastest on all ${total} ${unit}`;
   // A podium needs more than three sorts in the field.
   const field = Math.max(...standings.map((s) => s.speeds.length + 1));
-  const top = top3 > first && field > 3 ? `, top 3 on ${top3}` : "";
-  return `Tessera is fastest on ${first} of ${total} ${unit}${top}`;
+  const podium = top3 > first && field > 3;
+  // Without a first place, the podium is the finding.
+  if (!first && podium)
+    return top3 === total
+      ? `Top 3 on all ${total} ${unit}`
+      : `Top 3 on ${top3} of ${total} ${unit}`;
+  return `Fastest on ${first} of ${total} ${unit}${podium ? `, top 3 on ${top3}` : ""}`;
 }
 
 function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
@@ -360,16 +360,13 @@ function renderInputs(
   })).filter((g) => g.rows.length);
   if (!plotted.length) return null;
   const standings = plotted.map(([, s]) => s);
-  const title = fieldTitle(
-    standings,
-    ty === "u64" ? "input patterns" : `${record.label} input patterns`,
-  );
+  const title = fieldTitle(standings, "inputs");
   return {
     name,
     title,
     ...rendered({
       title,
-      guide: `${formatLength(n)} ${ty === "u64" ? "u64 keys" : record.label}; each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to slice::sort`,
+      guide: `${formatLength(n)} ${ty === "u64" ? "u64 keys" : record.label} · each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to slice::sort`,
       columns: ["Speed", "Rank"],
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
@@ -397,13 +394,13 @@ function renderTypes(field: Field, cohort: Cohort): Figure | null {
   // A comparison of element types needs at least two of them.
   if (plotted.length < 2) return null;
   const standings = plotted.map(([, s]) => s);
-  const title = fieldTitle(standings, "element types");
+  const title = fieldTitle(standings, "types");
   return {
     name: "types",
     title,
     ...rendered({
       title,
-      guide: `${formatLength(cohort.n)} elements; speed relative to slice::sort, geometric mean over ${cohort.shapesLabel}`,
+      guide: `${formatLength(cohort.n)} elements · speed relative to slice::sort, geometric mean over ${cohort.shapesLabel}`,
       columns: ["Speed", "Rank"],
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
@@ -457,13 +454,13 @@ function renderMemory(field: Field, cohort: Cohort): Figure | null {
     };
   };
   const input = n * 8;
-  const title = `Tessera sorts ${formatLength(n)} u64 keys in at most ${formatBytes(anchor.peak.worst)} of extra memory`;
+  const title = `At most ${formatBytes(anchor.peak.worst)} of extra memory`;
   return {
     name: "memory",
     title,
     ...rendered({
       title,
-      guide: `Peak heap allocation during one sort, beyond the ${formatBytes(input)} input`,
+      guide: `${formatLength(n)} u64 keys · peak heap allocation during one sort, beyond the ${formatBytes(input)} input`,
       columns: ["Worst"],
       groups: [
         { title: "Stable sorts", rows: entries.filter((e) => e.stable).map(row) },

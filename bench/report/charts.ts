@@ -80,6 +80,9 @@ export interface Cohort {
 const RATIO_LIMIT = 32;
 
 const displayName = (id: string) => algorithm(id).label;
+// Tables name a sort with its chart subtitle, so a footnote mark such as Block LSD*'s keeps its note.
+const tableName = (id: string) =>
+  algorithm(id).detail ? `${displayName(id)} (${algorithm(id).detail})` : displayName(id);
 const family = (id: string) => algorithm(id).description ?? `${algorithm(id).family} sort`;
 const sortName = (id: string): NameCell => ({
   input: displayName(id),
@@ -201,6 +204,7 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
     return peaks.every((v): v is number => v !== null) ? Math.max(...peaks) : null;
   };
   const entries = field.algorithms.map((v) => ({
+    name: v.name,
     cell: sortName(v.name),
     kind: family(v.name),
     tone: toneOf(v.name),
@@ -251,7 +255,7 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
         ...(memory ? ["Largest extra memory"] : []),
       ],
       complete.map((e) => [
-        e.cell.input,
+        tableName(e.name),
         e.kind,
         e.stable ? "stable" : "unstable",
         ...e.speeds.map(times),
@@ -333,7 +337,7 @@ function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
       times(s.tessera),
       [...s.speeds]
         .sort((a, b) => b.speed - a.speed)
-        .map((v) => `${displayName(v.variant)} ${times(v.speed)}`)
+        .map((v) => `${tableName(v.variant)} ${times(v.speed)}`)
         .join(", "),
     ]),
   );
@@ -458,7 +462,7 @@ function renderMemory(field: Field, cohort: Cohort): Figure | null {
   const plotted: string[][] = [];
   const row = (e: (typeof entries)[number]): Row => {
     const { random, worst } = e.peak;
-    plotted.push([displayName(e.name), formatBytes(random), formatBytes(worst)]);
+    plotted.push([tableName(e.name), formatBytes(random), formatBytes(worst)]);
     const tone = toneOf(e.name);
     // The random-input value is the ring; only the worst case is a number.
     const cells = [worst ? formatBytes(worst) : "0"];

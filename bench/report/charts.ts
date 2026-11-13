@@ -219,7 +219,10 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
     .sort((a, b) => b.speeds[at] - a.speeds[at]);
   const anchor = complete.find((e) => e.cell.input === "Tessera");
   if (!anchor) return null;
-  const others = complete.filter((e) => !e.cell.strong);
+  // Records rank Tessera among stable sorts only, because stability is observable there;
+  // unstable sorts stay in their own group for context.
+  const records = recordType(cohort.ranking.ty).task === "records";
+  const others = complete.filter((e) => !e.cell.strong && (!records || e.stable));
   const rank = 1 + others.filter((e) => e.speeds[at] > anchor.speeds[at]).length;
   const row = (e: (typeof complete)[number]): Row => ({
     name: e.cell,
@@ -227,12 +230,12 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
     cells: [times(e.speeds[at]), ...(memory ? [e.peak === null ? "–" : formatBytes(e.peak)] : [])],
     strong: e.cell.strong,
   });
-  const sorts = `${others.length + 1} sorts`;
+  const sorts = `${others.length + 1} ${records ? "stable " : ""}sorts`;
   const title = rank === 1 ? `Fastest of ${sorts}` : `Ranked ${ordinal(rank)} of ${sorts}`;
   return {
     name: memory ? "overview" : "ranking",
     subject: "Overall ranking",
-    summary: `Every sort on the same ${elements(cohort.ranking.ty)}, ranked by speed relative to slice::sort${memory ? ", with the largest extra memory it allocated" : ""}. Stable and unstable sorts are grouped separately.`,
+    summary: `Every sort on the same ${elements(cohort.ranking.ty)}, ranked by speed relative to slice::sort${memory ? ", with the largest extra memory it allocated" : ""}. ${recordType(cohort.ranking.ty).task === "records" ? "Records rank Tessera among stable sorts; unstable sorts, which may reorder equal keys, are shown separately." : "Stable and unstable sorts are grouped separately."}`,
     title,
     ...rendered({
       title,

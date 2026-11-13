@@ -665,6 +665,9 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   // Equal pattern counts take the longest length.
   assert.match(data.overview!.chart.guide, /^1,000,000 \{u32, u32\} records/);
   assert.equal(data.overview!.subject, "Overall ranking");
+  // A faster unstable sort does not displace Tessera among stable record sorts.
+  const unstable = comparisonData(new Map([...runs, ["std-unstable", [serial([1, 1, 1])]]]));
+  assert.equal(unstable.overview!.title, "Fastest of 2 stable sorts");
   const latest = new Map([...runs].map(([id, list]) => [id, list[0]]));
   const scaling = trackingScaling(latest)!;
   assert.deepEqual([scaling.n, scaling.threads], [1000000, [1, 2]]);

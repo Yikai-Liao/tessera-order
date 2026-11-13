@@ -9,18 +9,20 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn sort_group<T: Send, E: Extract<T> + Clone + Send>(records: &mut [T], extractor: E) {
-    let mut scratch = Scratch::new();
-    let mut child_scratch = Scratch::new();
+    let mut scratch = Workspace::new();
+    let mut child_scratch = Workspace::new();
     let mut visit = |_: usize,
                      _: core::ops::Range<usize>,
                      bucket: &mut [T],
                      digit: &mut KeyDigit<E, E::Value>| {
+        let ranks = 0..bucket.len();
+        let required = Requirement::new(bucket.len(), core::slice::from_ref(&ranks));
         Sorter::<T, E> {
             scratch: &mut child_scratch,
             extractor: &mut digit.extractor,
             tile_len: tile_capacity::<T>(TILE_BYTES),
         }
-        .sort_child(bucket, 3);
+        .sort_child(bucket, 3, required);
     };
     let digit = KeyDigit::new(extractor, 2);
     block::partition(records, 1, digit, &mut scratch.block, &mut visit);
@@ -67,11 +69,15 @@ fn streamed_child_can_reenter_and_panic() {
                 });
                 // Finish a digit root through the direct final-band callback.
                 Sorter {
-                    scratch: &mut Scratch::new(),
+                    scratch: &mut Workspace::new(),
                     extractor: &mut extractor,
                     tile_len: 8,
                 }
-                .sort_root(&mut records, u128::from(u64::MAX));
+                .sort_root(
+                    &mut records,
+                    u128::from(u64::MAX),
+                    Requirement::new(len, core::slice::from_ref(&(0..len))),
+                );
             });
         }));
         assert!(entered.load(Ordering::Relaxed));
@@ -117,23 +123,26 @@ fn equality_roots_match_serial_policy() {
         let mut serial = records.clone();
         let mut expected = records.clone();
         expected.sort_by_key(|row| row.0.get());
+        let len = records.len();
+        let ranks = 0..len;
+        let required = Requirement::new(len, core::slice::from_ref(&ranks));
         let mut extractor = ByKey(|row: &(Cell<u128>, Box<usize>)| row.0.get());
         assert!(
             matches!(plan_node(&records, u128::MAX, 1, &mut extractor), NodePlan::Equal(pivot) if pivot == equal)
         );
         Sorter {
-            scratch: &mut Scratch::new(),
+            scratch: &mut Workspace::new(),
             extractor: &mut extractor,
             tile_len: 1,
         }
-        .partition_equal(&mut serial, equal, u128::MAX);
+        .partition_equal(&mut serial, equal, u128::MAX, required);
         pool.install(|| {
             Sorter {
-                scratch: &mut Scratch::new(),
+                scratch: &mut Workspace::new(),
                 extractor: &mut extractor,
                 tile_len: 1,
             }
-            .sort_root(&mut records, u128::MAX)
+            .sort_root(&mut records, u128::MAX, required)
         });
         assert_eq!(records, serial);
         assert_eq!(records, expected);
@@ -171,13 +180,100 @@ fn descending_children_keep_equal_key_order() {
         let mut records = band.to_vec();
         let mut expected = records.clone();
         expected.sort_by_key(|row| row.0);
+        let ranks = 0..records.len();
+        let required = Requirement::new(records.len(), core::slice::from_ref(&ranks));
         Sorter::<_, _> {
-            scratch: &mut Scratch::new(),
+            scratch: &mut Workspace::new(),
             extractor: &mut ByKey(|row: &(u64, usize)| row.0),
             tile_len: tile::finishing_capacity::<(u64, usize)>(records.len(), 1),
         }
-        .sort_child(&mut records, 3);
+        .sort_child(&mut records, 3, required);
         assert_eq!(records, expected);
+    }
+}
+
+#[test]
+#[cfg(not(miri))]
+fn partial_root_bands_keep_exclusive_records_and_recover() {
+    use super::super::refinement_tests::assert_members;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .unwrap();
+    let len = 257;
+    let one = 3..7;
+    let pair = [3..7, len - 7..len - 3];
+    for intervals in [core::slice::from_ref(&one), pair.as_slice()] {
+        for fail in [false, true] {
+            let mut backing: Vec<_> = (0..len).map(Cell::new).collect();
+            let mut records: Vec<_> = backing
+                .iter_mut()
+                .enumerate()
+                .map(|(id, value)| {
+                    let low = (id as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 1;
+                    (
+                        low | if id % 3 == 0 { 0 } else { 1 << 63 },
+                        id,
+                        value,
+                        Cell::new(false),
+                    )
+                })
+                .collect();
+            let mut expected: Vec<_> = (0..len).collect();
+            expected.sort_by_key(|&id| records[id].0);
+            let entered = std::sync::atomic::AtomicBool::new(false);
+            let key = |record: &(u64, usize, &mut Cell<usize>, Cell<bool>)| {
+                if record.3.replace(true) {
+                    assert!(
+                        intervals.len() > 1 || record.0 >> 63 == 0,
+                        "skipped root band was analyzed"
+                    );
+                    entered.store(true, Ordering::Relaxed);
+                    assert!(!fail, "panic in partial root child");
+                }
+                record.0
+            };
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                pool.install(|| {
+                    let mut extractor = ByKey(&key);
+                    Sorter {
+                        scratch: &mut Workspace::new(),
+                        extractor: &mut extractor,
+                        tile_len: 4,
+                    }
+                    .partition_root(
+                        &mut records,
+                        KeyDigit::new(ByKey(&key), 63),
+                        Split {
+                            radix: 1,
+                            candidate: u64::MAX as u128 >> 1,
+                            finished: None,
+                        },
+                        3,
+                        Requirement::new(len, intervals),
+                    );
+                });
+            }));
+            assert!(entered.load(Ordering::Relaxed));
+            assert_eq!(result.is_err(), fail);
+            let mut ids: Vec<_> = records.iter().map(|record| record.1).collect();
+            if !fail {
+                assert_members(&ids, &expected, intervals);
+            }
+            ids.sort_unstable();
+            assert_eq!(ids, (0..len).collect::<Vec<_>>());
+            for (_, id, value, _) in records {
+                assert_eq!(value.get(), id);
+                value.set(id + 1);
+            }
+            assert!(
+                backing
+                    .iter()
+                    .enumerate()
+                    .all(|(id, value)| value.get() == id + 1)
+            );
+        }
     }
 }
 

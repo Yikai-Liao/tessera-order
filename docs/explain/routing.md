@@ -1,6 +1,6 @@
 # 3. Routing an input
 
-Before any radix pass, Tessera checks whether the input needs one. Many real inputs are already sorted, nearly sorted, reversed, constant, or dominated by one key, and a radix sort that ignores this does full passes for nothing. This page follows `sort_with_tile_bytes` and `Sorter::sort_node` in [`engine.rs`](../../rust/tessera-sort/src/engine.rs) in order.
+Before any radix pass, Tessera checks whether the input needs one. Many real inputs are already sorted, nearly sorted, reversed, constant, or dominated by one key, and a radix sort that ignores this does full passes for nothing. This page follows `engine::refine` and `Sorter::sort_node` in [`engine.rs`](../../rust/tessera-sort/src/engine.rs) in order.
 
 ## Order probe
 
@@ -39,7 +39,9 @@ Only now is tile and block scratch allocated. Budgeted insertion on a larger uns
 
 ## Nodes and tiles
 
-From here on, the engine works on slices of the input and sorts each one in place:
+From here on, the engine works on subproblems and refines the requested ordered ranks. Public full sorting requests every rank; private partial requests use the same routing. A partition always completes stable movement for every band, but an unrequested band receives no further key analysis. The [engine reference](../design/engine.md#ordered-rank-requirements) owns projection and workspace invariants.
+
+Requested subproblems continue in place:
 
 - a **tile** is a slice that fits the cache-resident tile budget, the [size defined on the tiles page](tiles.md). It is finished in a scratch buffer of the same size;
 - a **node** is anything larger. It is split by a stable partition into children, and each child is routed again.
@@ -79,7 +81,7 @@ Otherwise the node is split on the digit under its highest varying bit, with the
 
 Serial and parallel roots share this decision. A parallel root shards equality and digit partitions across threads and executes an existing-run split serially, without resampling.
 
-While the block partition completes, each child that fits a tile is finished **at once**, while its records are still in cache. Larger children are routed again after the partition.
+While the block partition completes, each requested child that fits a tile is finished **at once**, while its records are still in cache. Larger requested children are routed again after the partition. A requested tile may be fully sorted even when only some of its ranks are needed; the existing leaf mechanisms stay unchanged.
 
 ## Summary
 

@@ -71,10 +71,12 @@ mod order;
 #[cfg(feature = "rayon")]
 mod parallel;
 mod portable_simd;
+mod rank;
 mod tile;
 mod trace;
 #[cfg(test)]
 mod unwind;
+mod workspace;
 
 pub use key::RadixKey;
 #[cfg(feature = "rayon")]

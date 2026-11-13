@@ -8,7 +8,7 @@ This page owns the engine's code boundaries and invariants in `rust/tessera-sort
 |---|---|
 | Key | The unsigned integer a record sorts by. Signed integers, floats and `Reverse` keys are encoded into unsigned keys whose integer order is the requested order. |
 | Digit | A window of key bits handled by one pass: a shift and a width. |
-| Subproblem | A record slice and a candidate mask of key bits still to be ordered. A completed digit leaves the mask even if a key function changes its answers. |
+| Subproblem | An exclusive record slice, candidate key bits and a borrowed requirement for ordered ranks. A completed digit leaves the mask even if a key function changes its answers. |
 | Bucket | A logical, stable classification group. It may span physical blocks; once complete it is a contiguous subproblem, not necessarily a task or a tile. |
 | Block | A physical storage and ownership-transfer unit of the stable partition. Its size and metadata costs belong to the block mechanism. |
 | Node | A subproblem larger than the tile capacity, split by a stable block partition or by existing ordered runs. |
@@ -19,7 +19,9 @@ This page owns the engine's code boundaries and invariants in `rust/tessera-sort
 
 | Owner | Complete responsibility | Consumers need to know |
 |---|---|---|
-| `engine.rs` | Root preparation, candidate-bit progress, recursive node execution. Both entries take the extractor by value and wrap a narrowed 128-bit key in one `KeyHalf` (`key.rs`), which owns truncation and counting-window translation | Public sort contracts and complete partition and finishing operations |
+| `engine.rs` | Root preparation, candidate-bit progress and ordered refinement. Serial and parallel entries preserve actual variation and narrow a 128-bit key through one `KeyHalf` (`key.rs`) | Required rank views and complete partition and finishing operations |
+| `rank.rs` | Validate normalized required intervals once and project immutable borrowed views into final bands | Parent-relative final ranges, not keys, classifications or callback order |
+| `workspace.rs` | Invocation-owned reusable tile and block capacity, lent through complete operations | Capacity is reusable after restoration; no live movement state survives an operation |
 | `order.rs` | Scalar order and candidate-masked variation scans, stable insertion loops, independent of recursive execution | Extractors supply keys; direct-key callers supply a scan in their selected SIMD context |
 | `engine/plan.rs` | Bounded sampling and executable node partition decisions | Records, candidate variation and tile capacity go in; a node decision comes out |
 | `tile.rs`, `tile/plan.rs` | Capacity, complete leaf planning, scratch allocation, cached classification, counting passes and restoration | Finish a cursor-bounded slice; no raw pointer, cursor layout or guard crosses the boundary |
@@ -64,13 +66,21 @@ A stage's rule changes on its page, in the code and in the page's model together
 - A `Direct` extractor may finish a covering digit by counting, because every sealed encoding is a bijection on bit patterns. `ByKey` declines, because a user key does not identify its payload.
 - Scratch is created only after the root fast paths, so confirmed ordered and constant inputs never allocate.
 
+## Ordered rank requirements
+
+Existing full sorting uses the common `engine::refine` entry with All required ranks. Private partial requests borrow sorted, nonempty, separated intervals in root coordinates. Root validation precedes mutation and key calls; an empty requirement returns before preparation. A full interval becomes the All representation, including the empty full input. No public selection or prefix API is implied.
+
+`Requirement::project` intersects a final parent-relative band with the borrowed intervals and translates its origin without allocation. Covered children become All; absent intersections skip further analysis. Binary searches are independent of callback order, so serial and concurrent completion use one authority. Equality bands are already complete; their stable movement establishes ranked identity even when requests cut through equal keys. Existing-run ranges are projected after rotation.
+
+Every partition completes movement for every band. Only further analysis and finishing may be skipped. Requested tiles may be completely sorted; this preserves insertion, counting and LSD/MSD leaves rather than adding a partial tile engine. Root preparation, narrowed key facts and child candidate masks pass directly to execution. A serial invocation reuses one workspace; parallel tasks borrow workspace capacity from their invocation-owned pool.
+
 ## Parallel root completion
 
 With the optional `rayon` feature, inputs below the parallel byte threshold and one-thread pools use the serial engine. Larger roots share `prepare` with serial sorting. The [parallel layout](../explain/block-partition.md#parallel-roots) owns the byte gates, shard clamps and block sizing.
 
 Each shard scatters its own input range with its own scratch. `Partition` borrows the reusable `Buffers` directly: record scratch stays in that allocation, and its capacity cannot change until completion and recovery finish. The source ledger is built directly from the shard chains: bucket prefixes in original shard order, over each shard's own scratch. Shard guards own recovery until every ledger table exists, then hand it over without a fallible step; no packed output is allocated.
 
-An equality decision partitions with the `Rank` classifier (the below/equal/above rank plus one at or above the sampled key's top-varying-bit boundary), a digit decision with `KeyDigit`. Both use the same sharded partition and band callbacks. The callback receives the bucket index, skips the complete equal bucket, and continues every other bucket without the top bit.
+An equality decision partitions with the `Rank` classifier (the below/equal/above rank plus one at or above the sampled key's top-varying-bit boundary), a digit decision with `KeyDigit`. Both use the same sharded partition and band callbacks. The callback receives the bucket index and final range, skips complete or unrequested bands, and continues requested unfinished buckets without the top bit. Existing public parallel sorts request All.
 
 ### Ledger movement
 
@@ -80,7 +90,7 @@ Serial and parallel partitions use one relocatable-source ledger. A flat source 
 - If the source is still in its skipped block, an overlap-safe copy moves the prefix and marks that block final. Otherwise the source is disjoint from its destination, and its block becomes free. A relocated source's new owner lock also observes its old block becoming final.
 - Physical-owner locks are taken in increasing ID order. *Final* means no unread source remains, not that the block is filled. Adjacent bands may share block fragments but never live record slots.
 
-Once all of a band's sources retire and every destination block is protected, the movement task lends its bucket index, parent-relative range and exclusive records with all locks released. The range comes directly from the ledger's final start and length, not from callback order. Empty buckets publish no borrow; their cumulative ends remain in the returned directory. One callback owns child analysis: candidate-masked variation, constant completion, order confirmation, stable reversal, then node or tile routing. Tile storage owns the [whole-child allowance](../explain/tiles.md#parallel-child-allowance); larger children keep ordinary descendant tiles. No queue or second job retains the borrow. Serial partitions finish tile-sized bands in the same callback position while they are cache-hot.
+Once all of a band's sources retire and every destination block is protected, the movement task lends its bucket index, parent-relative range and exclusive records with all locks released. The range comes directly from the ledger's final start and length, not from callback order. Empty buckets publish no borrow; their cumulative ends remain in the returned directory. After rank projection, one callback owns child analysis: candidate-masked variation, constant completion, order confirmation, stable reversal, then node or tile routing. Tile storage owns the [whole-child allowance](../explain/tiles.md#parallel-child-allowance); larger children keep ordinary descendant tiles. No queue or second job retains the borrow. Serial partitions finish tile-sized bands in the same callback position while they are cache-hot.
 
 ### Progress, recovery and retained scratch
 

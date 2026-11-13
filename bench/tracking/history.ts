@@ -14,7 +14,7 @@ import type { TrackingCase, TrackingRun } from "./result.ts";
 const MIN_SPAN = 0.05;
 const MAJOR = 0.2;
 
-const seriesOf = (run: TrackingRun) => run.algorithm + "/" + run.protocol + "/" + run.spec;
+const seriesOf = (run: TrackingRun) => run.spec;
 const short = (hash: string) => hash.slice(0, 7);
 const day = (time: string) => time.slice(0, 10);
 const commit = (hash: string) => "https://github.com/Yikai-Liao/tessera-sort/commit/" + hash;
@@ -23,8 +23,7 @@ const estimate = (run: TrackingRun, id: string) => run.values[id]?.[0];
 /** UTC readout shared by inline figures and their host, including time of day. */
 export const formatTimestamp = (time: string | number) =>
   new Date(time).toISOString().replace("T", " ").replace("Z", " UTC");
-/** Old journals remain readable; the host explicitly identifies this fallback. */
-export const historyTimestamp = (run: TrackingRun) => Date.parse(run.commit_time ?? run.time);
+export const historyTimestamp = (run: TrackingRun) => Date.parse(run.commit_time);
 export type HistoryAxis = "commit" | "time";
 const positions = (runs: TrackingRun[], horizontal: HistoryAxis) =>
   runs.map((run, index) => (horizontal === "time" ? historyTimestamp(run) : index));
@@ -164,7 +163,7 @@ function mainTrend(
   return {
     title: {
       input: "Run time on main",
-      sub: `${day(first.commit_time ?? first.time)} → ${day(last.commit_time ?? last.time)}`,
+      sub: `${day(first.commit_time)} → ${day(last.commit_time)}`,
       tag: "",
       strong: true,
     },
@@ -277,7 +276,7 @@ export interface ComparisonRun {
   position: number;
   id: string;
   time: number;
-  commitTime?: string;
+  commitTime: string;
   hash: string;
   values: ({ value: number; lower: number; upper: number; change: number } | null)[];
 }
@@ -377,7 +376,7 @@ export function renderComparison(
         x: horizontal === "time" ? new Date(run.position) : run.position,
         ...(point ? ys(point, baselines[index]!.value) : { y: null, lower: null, upper: null }),
         title: point
-          ? `${entry.label}\n${short(run.hash)} · measured ${formatTimestamp(run.time)}\nCommit time: ${run.commitTime ? formatTimestamp(run.commitTime) : "unavailable (measurement-time fallback)"}\n${formatTime(point.value)} (${formatTime(point.lower)} – ${formatTime(point.upper)})\n${formatChange(point.change)} vs ${short(baselines[index]!.hash)} · measured ${formatTimestamp(baselines[index]!.time)}`
+          ? `${entry.label}\n${short(run.hash)} · measured ${formatTimestamp(run.time)}\nCommit time: ${formatTimestamp(run.commitTime)}\n${formatTime(point.value)} (${formatTime(point.lower)} – ${formatTime(point.upper)})\n${formatChange(point.change)} vs ${short(baselines[index]!.hash)} · measured ${formatTimestamp(baselines[index]!.time)}`
           : "",
         href: commit(run.hash),
       };

@@ -44,9 +44,8 @@ export function parsePlan(value: unknown): Plan {
 
 /** Load a TOML preset or a JSON/TOML file, then apply explicit axis overrides. */
 export async function loadPlan(name: string, options: SelectionOptions = {}): Promise<Plan> {
-  const preset = name === "main" ? "continuous" : name;
-  const path = ["local", "continuous", "smoke", "release", "parallel"].includes(preset)
-    ? fileURLToPath(new URL(`./plans/${preset}.toml`, import.meta.url))
+  const path = ["local", "continuous", "smoke", "release", "parallel"].includes(name)
+    ? fileURLToPath(new URL(`./plans/${name}.toml`, import.meta.url))
     : name;
   const plan = schema.parse(decodeConfig(await readFile(path, "utf8"), path));
   const { algorithms, ...axes } = options;

@@ -143,7 +143,7 @@ test("revision selection checks parallel IDs from both binaries", {
 if (process.env.TESSERA_BENCH_LIST !== "1" || process.env.TESSERA_BENCH_PLAN !== ${JSON.stringify(plan)}) process.exit(1);
 const supported = [${JSON.stringify(serial)}];
 if (${withParallel} && JSON.parse(require("node:fs").readFileSync(process.env.TESSERA_BENCH_PLAN)).parallel?.length) supported.push(${JSON.stringify(parallel)});
-console.log(JSON.stringify({supported, unsupported: []}));
+console.log(supported.join("\\n"));
 `;
     for (const path of Object.values(binaries))
       await writeFile(path, source(true), { mode: 0o755 });

@@ -14,7 +14,7 @@ const fixture = decodeConfig(
 ) as { plan: Record<string, unknown> };
 
 test("presets load through the same validator and overrides replace selection", async () => {
-  for (const preset of ["local", "continuous", "main", "smoke", "release", "parallel"])
+  for (const preset of ["local", "continuous", "smoke", "release", "parallel"])
     assert.ok((await loadPlan(preset)).algorithms.includes("tessera"));
   const plan = await loadPlan("local", {
     types: ["u64"],
@@ -23,17 +23,10 @@ test("presets load through the same validator and overrides replace selection", 
   });
   assert.deepEqual(plan.include, [{ types: ["u64"], distributions: ["random"], lengths: [1234] }]);
   assert.deepEqual(parsePlan(fixture.plan).algorithms, ["tessera"]);
-  assert.deepEqual((await loadPlan("main", { algorithms: ["glidesort"] })).algorithms, [
+  assert.deepEqual((await loadPlan("continuous", { algorithms: ["glidesort"] })).algorithms, [
     "glidesort",
   ]);
   assert.deepEqual(parsePlan(decodeConfig(JSON.stringify(plan), "plan.json")), plan);
-});
-
-test("main and PR load one shared selection without hidden cases or algorithms", async () => {
-  const pr = await loadPlan("continuous");
-  const main = await loadPlan("main");
-  assert.deepEqual(main, pr);
-  assert.deepEqual(parsePlan({ ...main, algorithms: ["glidesort"] }).algorithms, ["glidesort"]);
 });
 
 test("Reverse direct keys are opt-in comparison inputs", async () => {

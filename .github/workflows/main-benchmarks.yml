@@ -7,36 +7,10 @@ on:
   workflow_dispatch:
     inputs:
       algorithm:
-        description: Algorithm to measure; all runs algorithms sequentially
+        description: Catalog algorithm ID to measure, or all to measure every production algorithm in turn
         required: true
-        type: choice
+        type: string
         default: tessera
-        options:
-          - tessera
-          - all
-          - rust-std-stable
-          - rust-std-unstable
-          - glidesort
-          - glidesort-sqrt
-          - radsort
-          - voracious
-          - rdst
-          - clausecker
-          - fluxsort
-          - ips2ra
-          - ips4o
-          - vqsort
-          - x86simdsort
-          - crumsort
-          - duckdb
-          - tessera-par-1
-          - tessera-par-2
-          - tessera-par-4
-          - tessera-par-8
-          - rayon-stable-1
-          - rayon-stable-2
-          - rayon-stable-4
-          - rayon-stable-8
 
 permissions:
   contents: read
@@ -80,7 +54,7 @@ jobs:
       matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     runs-on: ubuntu-24.04
     environment: benchmark
-    timeout-minutes: 90
+    timeout-minutes: 45
     permissions:
       contents: write
     env:
@@ -113,7 +87,7 @@ jobs:
       - uses: bencherdev/bencher@7de3c69a85380826613050826b4bce062be2f07d # v0.6.16
         with:
           version: 0.6.16
-      - name: Build frozen image and measure complete algorithm coverage
+      - name: Build frozen image and measure one complete run
         env:
           BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
           BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
@@ -141,8 +115,8 @@ jobs:
             else
               git checkout --orphan "initial-$attempt"
             fi
-            bun "$GITHUB_WORKSPACE/bench/tracking/publish.ts" ../tracking/*.jsonl
-            git add .
+            bun "$GITHUB_WORKSPACE/bench/tracking/publish.ts" "$TRACKING_ALGORITHM" ../tracking/*.jsonl
+            git add -- "$TRACKING_ALGORITHM"
             git diff --cached --quiet && break
             git commit -s -m "chore(bench): record $TRACKING_ALGORITHM performance ${GITHUB_SHA:0:7}" -m 'Assisted-by: OpenAI'
             git push origin HEAD:refs/heads/benchmark-data && break
@@ -154,8 +128,7 @@ jobs:
           name: performance-evidence-${{ matrix.algorithm }}
           path: |
             bench/results/tracking/*.jsonl
-            bench/results/tracking/bencher-*.json
-            bench/results/tracking/inventory.json
+            bench/results/tracking/bencher.json
             bench/results/tracking.log
           retention-days: 14
           if-no-files-found: ignore

@@ -32,10 +32,6 @@ export const catalog = z
         family: z.string(),
         adapter: z.string(),
         threads: z.number().int().positive().optional(),
-        tracking_path: z
-          .string()
-          .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
-          .optional(),
         detail: z.string().optional(),
         description: z.string().optional(),
       }),
@@ -174,22 +170,6 @@ export function parseCriterionId(id: string) {
     throw new Error(`Invalid Criterion benchmark ID: ${id}`);
   return { ty, distribution, len: Number(length), seed, mode };
 }
-
-export const inventorySchema = z
-  .object({ supported: z.array(z.string()), unsupported: z.array(z.string()) })
-  .superRefine(({ supported, unsupported }, ctx) => {
-    const all = [...supported, ...unsupported];
-    if (!supported.length || new Set(all).size !== all.length)
-      ctx.addIssue({ code: "custom", message: "Empty or overlapping tracking inventory" });
-    for (const id of all) {
-      try {
-        parseCriterionId(id);
-      } catch {
-        ctx.addIssue({ code: "custom", message: "Invalid tracking case: " + id });
-      }
-    }
-  });
-export type BenchmarkInventory = z.infer<typeof inventorySchema>;
 
 /** Preserve raw Criterion components for local reports, including old unknown IDs. */
 export function rawCaseParts(id: string) {

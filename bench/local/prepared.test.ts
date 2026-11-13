@@ -28,7 +28,7 @@ async function fixture(t: TestContext) {
 const fs = require('node:fs');
 const id = ${JSON.stringify(id)};
 fs.appendFileSync(${JSON.stringify(calls)}, 'worker\\n');
-if (process.env.TESSERA_BENCH_LIST) { console.log(JSON.stringify({supported: [id], unsupported: []})); process.exit(0); }
+if (process.env.TESSERA_BENCH_LIST) { console.log(id); process.exit(0); }
 require('node:readline').createInterface({input: process.stdin}).on('line', request => {
   const value = request === 'warm' ? {id, samples: ${revisionSampling(48).samples}}
     : request === 'sample' ? {elapsed_ns: 100, sorts: 1} : request === 'stop' ? {} : {id};

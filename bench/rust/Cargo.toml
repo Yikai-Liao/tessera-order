@@ -38,9 +38,12 @@ name = "memory"
 [dev-dependencies]
 criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
 
+# Built only by explicit `--bench smoke` with its plan's features (see `bench/workspace.ts`);
+# a featureless `--all-targets` build cannot run the continuous plan's parallel mode.
 [[bench]]
 name = "smoke"
 harness = false
+bench = false
 
 [lints]
 workspace = true

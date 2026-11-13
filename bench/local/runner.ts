@@ -6,7 +6,7 @@ import { arch, cpus, platform, release } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
-import { inventorySchema, parseCriterionId } from "../catalog.ts";
+import { parseCriterionId } from "../catalog.ts";
 import { type Plan, selectCaseIds } from "../plan.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
@@ -246,20 +246,19 @@ export async function selectedCases(
   parallel = false,
 ) {
   const list = async (binary: string) =>
-    inventorySchema
-      .parse(
-        JSON.parse(
-          await command(binary, ["--bench"], {
-            cwd,
-            capture: true,
-            env: {
-              TESSERA_BENCH_LIST: "1",
-              TESSERA_BENCH_PLAN: planPath,
-            },
-          }),
-        ),
-      )
-      .supported.sort();
+    (
+      await command(binary, ["--bench"], {
+        cwd,
+        capture: true,
+        env: {
+          TESSERA_BENCH_LIST: "1",
+          TESSERA_BENCH_PLAN: planPath,
+        },
+      })
+    )
+      .split("\n")
+      .filter(Boolean)
+      .sort();
   const current = await list(binaries.current);
   if (parallel && !current.some((id) => parseCriterionId(id).mode === "par-4"))
     throw new Error("Parallel plan did not list any four-thread cases");

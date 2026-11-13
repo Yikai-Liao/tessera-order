@@ -41,22 +41,18 @@ const reportSchema = z.object({
 
 export const runSchema = z.object({
   id: z.uuid(),
-  algorithm: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  reports: z.array(z.uuid()).min(1).optional(),
-  unsupported: z.array(z.string()).optional(),
   time: z.iso.datetime(),
-  // Git committer time, normalized to UTC; older journals have only measurement time.
-  commit_time: z.iso.datetime().optional(),
+  // Git committer time, normalized to UTC.
+  commit_time: z.iso.datetime(),
   hash: z.string().regex(/^[a-f0-9]{40}$/),
   spec: z.uuid(),
-  // Numeric journals share a shape across protocols; trend selection keeps them apart.
-  protocol: z.string().min(1),
   image: z.string().regex(/^registry\.bencher\.dev\/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$/),
   workflow: z
     .url()
     .regex(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+(?:\/attempts\/\d+)?$/),
   rustc: z.string(),
   rustflags: z.string(),
+  // C++ adapters only: the compilers and flags that built the measured code.
   native: z.object({ cc: z.string(), cxx: z.string(), build: z.json() }).optional(),
   values: z.record(
     z.string().min(1),
@@ -64,10 +60,7 @@ export const runSchema = z.object({
   ),
 });
 export type TrackingRun = z.infer<typeof runSchema>;
-/** A case's catalog presentation; the browser cannot read the catalog, so publication supplies it.
- *
- * `label` keeps the first index format readable, so readers of either version share one file.
- */
+/** A case's catalog presentation; the browser cannot read the catalog, so publication supplies it. */
 export const caseSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
@@ -100,7 +93,7 @@ export function summarizeReport(
   hash: string,
   project: string,
   ids: string[],
-  branch = "main",
+  branch: string,
 ) {
   const report = reportSchema.parse(input);
   if (
@@ -121,33 +114,6 @@ export function summarizeReport(
   }
   if (expected.size) throw new Error("Incomplete tracking report");
   return { id: report.uuid, time: report.start_time, hash, spec: report.testbed.spec.uuid, values };
-}
-
-/** Join only disjoint, complete reports from one hardware spec. Individual reports have
- * already passed source/branch/project and per-shard completeness validation. */
-export function mergeReports(reports: ReturnType<typeof summarizeReport>[], ids: string[]) {
-  const first = reports[0];
-  if (
-    !first ||
-    reports.some((report) => report.spec !== first.spec || report.hash !== first.hash) ||
-    new Set(reports.map((report) => report.id)).size !== reports.length
-  )
-    throw new Error("Missing, mixed-hardware or duplicate shard reports");
-  const values: TrackingRun["values"] = {};
-  const expected = new Set(ids);
-  if (!ids.length || expected.size !== ids.length) throw new Error("Invalid complete inventory");
-  for (const report of reports)
-    for (const [id, metric] of Object.entries(report.values)) {
-      if (!expected.delete(id)) throw new Error("Unexpected or overlapping shard case: " + id);
-      values[id] = metric;
-    }
-  if (expected.size) throw new Error("Incomplete algorithm run");
-  return {
-    ...first,
-    time: reports.map((report) => report.time).sort()[0],
-    values,
-    reports: reports.map((report) => report.id),
-  };
 }
 
 /** JSONL is the only stored measurement representation, shared by writers and the browser. */

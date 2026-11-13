@@ -110,8 +110,8 @@ fn main() {
         variants.len(),
         "Criterion requires one algorithm per API mode"
     );
+    // An adapter's capability decides coverage; unsupported cases are simply not listed.
     let mut supported = Vec::new();
-    let mut unsupported = Vec::new();
     for variant in variants {
         let mode = variant
             .threads
@@ -134,16 +134,13 @@ fn main() {
                 ..case.clone()
             })) {
                 supported.push((variant, case, mode.clone(), id));
-            } else {
-                unsupported.push(id);
             }
         }
     }
     if std::env::var_os("TESSERA_BENCH_LIST").is_some() {
-        println!(
-            "{}",
-            serde_json::json!({"supported": supported.iter().map(|(_,_,_,id)| id).collect::<Vec<_>>(), "unsupported": unsupported})
-        );
+        for (_, _, _, id) in &supported {
+            println!("{id}");
+        }
         return;
     }
     let selected = std::env::var("TESSERA_BENCH_IDS").ok();

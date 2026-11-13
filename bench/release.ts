@@ -3,7 +3,7 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { command, diagnostic } from "../tools/process.ts";
-import { catalog, inventorySchema } from "./catalog.ts";
+import { catalog } from "./catalog.ts";
 import { loadPlan, type Plan, parsePlan } from "./plan.ts";
 import { writeReport } from "./report/index.ts";
 import { prepareRevisions, type Revisions } from "./revisions.ts";
@@ -101,14 +101,11 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
       if (catalog.algorithms.find((entry) => entry.id === id)?.adapter === "revision") continue;
       await writeFile(planPath, JSON.stringify({ ...plan, algorithms: [id] }));
       const env: NodeJS.ProcessEnv = { TESSERA_BENCH_PLAN: planPath };
-      inventorySchema.parse(
-        JSON.parse(
-          await command(worker.executable, [], {
-            capture: true,
-            env: { ...env, TESSERA_BENCH_LIST: "1" },
-          }),
-        ),
-      );
+      const listed = await command(worker.executable, [], {
+        capture: true,
+        env: { ...env, TESSERA_BENCH_LIST: "1" },
+      });
+      if (!listed.trim()) throw new Error(`Shared worker lists no cases for ${id}`);
       if (id === "glidesort-sqrt") {
         const memoryPlan = join(check, "memory-plan.json");
         await writeFile(memoryPlan, JSON.stringify({ ...plan, algorithms: ["tessera"] }));

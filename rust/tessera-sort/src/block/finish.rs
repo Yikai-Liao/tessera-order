@@ -80,14 +80,13 @@ struct Source {
     len: usize,
 }
 
-/// A bucket's source prefixes and final input range.
+/// A bucket's pending source prefixes and final input range.
 struct Bucket {
-    sources: core::ops::Range<usize>,
+    pending_sources: core::ops::Range<usize>,
     start: usize,
     len: usize,
     /// The bucket index, which also selects the bucket's free-block cache.
     cache: usize,
-    completed: bool,
 }
 
 /// Owns restoration after partition guards hand off their sources. Structured
@@ -334,7 +333,7 @@ impl Bucket {
         Free: MetadataCell<Vec<usize>>,
         Visit: FnOnce(usize, &'records mut [T]),
     {
-        if self.completed {
+        if self.pending_sources.is_empty() {
             return;
         }
         // No allocation, user code or Rayon reentry interrupts movement, so
@@ -344,21 +343,19 @@ impl Bucket {
         // waits for one of those blocks, at most g + 1 are final: with at least
         // two shards, the shared reserve still covers outstanding candidates.
         let mut offset = 0;
-        for logical in self.sources.clone() {
+        for logical in self.pending_sources.clone() {
             let mut free = lock(&storage.free[self.cache]);
             offset += storage.transfer(logical, self.start + offset, &mut free, self.cache);
         }
         // Recovery must not revisit this band if its callback retains a borrow
         // or unwinds. Completion restores the other bands after all jobs join.
-        self.completed = true;
+        self.pending_sources.start = self.pending_sources.end;
         trace::emit(|| Event::Band {
             bucket: self.cache,
             start: self.start,
             len: self.len,
         });
-        if self.len != 0
-            && let Some(visit) = visit
-        {
+        if let Some(visit) = visit {
             // SAFETY: all this band's sources are retired and every physical
             // destination is FINAL. Peers cannot read it and write only their
             // disjoint bands, even if they share a physical block fragment.
@@ -432,10 +429,9 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
         }
         buckets.push(Bucket {
             cache: bucket,
-            sources: first_source..sources.len(),
+            pending_sources: first_source..sources.len(),
             start,
             len,
-            completed: false,
         });
         start += len;
     }
@@ -449,10 +445,10 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
     let mut caches = Vec::with_capacity(bucket_count + 1);
     caches.extend(buckets.iter().map(|bucket| {
         // Empty buckets perform no transfers and need no free cache.
-        let capacity = if bucket.sources.is_empty() {
+        let capacity = if bucket.pending_sources.is_empty() {
             0
         } else {
-            bucket.sources.len() + 1
+            bucket.pending_sources.len() + 1
         };
         Free::new(Vec::with_capacity(capacity))
     }));
@@ -774,11 +770,10 @@ mod tests {
             ],
         };
         let mut buckets = [0, 1].map(|bucket| Bucket {
-            sources: bucket..bucket + 1,
+            pending_sources: bucket..bucket + 1,
             start: 1 - bucket,
             len: 1,
             cache: bucket,
-            completed: false,
         });
         std::thread::scope(|scope| {
             for bucket in &mut buckets {
@@ -858,7 +853,7 @@ mod tests {
         assert!(
             buckets
                 .iter()
-                .all(|bucket| bucket.sources.len() == 68 && bucket.len == BUCKET_LEN)
+                .all(|bucket| bucket.pending_sources.len() == 68 && bucket.len == BUCKET_LEN)
         );
         assert_eq!(lock(&storage.free[BUCKETS]).len(), 192);
         // Transfer recovery responsibility to this controlled state-machine

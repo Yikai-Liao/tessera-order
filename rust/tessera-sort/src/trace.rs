@@ -68,7 +68,7 @@ pub enum Event {
         start: usize,
         overlapped: bool,
     },
-    /// `bucket`'s band of `len` records from `start` is final.
+    /// Nonempty `bucket`'s band of `len` records from `start` is final.
     Band {
         bucket: usize,
         start: usize,

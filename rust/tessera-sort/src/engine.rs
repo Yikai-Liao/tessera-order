@@ -729,21 +729,23 @@ mod tests {
     #[test]
     fn variation_covers_late_bits_and_key_widths() {
         for len in [1, 2, 3, 4, 5, 64, 65, 66, 67, 68, 192, 193, 1025] {
-            let mut records = alloc::vec![7u128; len];
-            records[len - 1] |= 1 << 127;
-            for candidate in [0, 0xff, u128::MAX] {
-                let expected = records
-                    .iter()
-                    .fold(0, |bits, key| bits | (key ^ records[0]));
-                assert_eq!(
-                    scan_varying_bits(&records, candidate, &mut Direct),
-                    expected & candidate
-                );
-                assert_eq!(
-                    fearless_simd::dispatch!(fearless_simd::Level::baseline(), simd =>
-                        scan_varying_bits_with(simd, &records, candidate, &mut Direct)),
-                    expected & candidate
-                );
+            for first in [7u128, !7u128] {
+                let mut records = alloc::vec![first; len];
+                records[len - 1] ^= (1 << 127) | 1;
+                for candidate in [0, 0xff, u128::MAX] {
+                    let expected = records
+                        .iter()
+                        .fold(0, |bits, key| bits | (key ^ records[0]));
+                    assert_eq!(
+                        scan_varying_bits(&records, candidate, &mut Direct),
+                        expected & candidate
+                    );
+                    assert_eq!(
+                        fearless_simd::dispatch!(fearless_simd::Level::baseline(), simd =>
+                            scan_varying_bits_with(simd, &records, candidate, &mut Direct)),
+                        expected & candidate
+                    );
+                }
             }
             let narrow = alloc::vec![17u8; len];
             assert_eq!(scan_varying_bits(&narrow, u8::MAX as u128, &mut Direct), 0);

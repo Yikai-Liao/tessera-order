@@ -23,6 +23,8 @@ Read the [engine reference](docs/design/engine.md), [shared semantics](conforman
 
 Keep tests focused on public contracts, unsafe ownership invariants, historical defects and external trust or recovery boundaries. Prefer one end-to-end check plus focused boundary cases to repeated assertions at every layer. Vary independent dimensions separately; combine them where their interaction can fail. Do not pin internal call counts, exact report wording, SVG snapshots or incidental layout. Keep ordering, stability, panic, inconsistent-key, owned-record and `&mut`-record coverage.
 
+Miri fixtures check memory validity, aliasing and record ownership with small inputs that still cross the relevant storage, tail, panic and recovery boundaries. Keep exhaustive arithmetic searches and large combinatorial or stress coverage in native tests; use a documented `cfg_attr(miri, ignore = "...")` for tests that add no distinct Miri safety coverage. When reducing a fixture under `cfg!(miri)`, retain the production path and its boundary conditions rather than substituting a different implementation. Native tests retain the full cases, including panic, changing-key, owned-record and mutable-reference coverage. A slow test is a reason to inspect its purpose, not to suppress a timeout or silently drop a safety boundary.
+
 Run the applicable [local checks](AGENTS.md#commands), including workspace tests and doctests. Engine changes exercise serial and Rayon builds and affected tests under Miri:
 
 ```sh

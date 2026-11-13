@@ -329,7 +329,10 @@ mod tests {
             .unwrap()
     }
 
+    // The recursive oracle checks plan optimality using safe integer arithmetic;
+    // interpreting its exhaustive search adds no ownership or aliasing coverage.
     #[test]
+    #[cfg_attr(miri, ignore = "exhaustive arithmetic is checked by native tests")]
     fn digit_plan_finishes_short_plans_optimally() {
         for bits in 1..256u128 {
             for width in 1..=5 {

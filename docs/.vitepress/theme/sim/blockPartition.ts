@@ -100,7 +100,6 @@ export function simulate(engine: Engine, config: Config): Result {
   const fullBlocks = Math.floor(n / b);
   const blockCount = scratchBlocks + fullBlocks;
   const name = (p: number) => blockName(p, scratchBlocks);
-  const blocks = (list: Prefix[]) => list.map((prefix) => name(prefix.physical)).join(", ");
 
   // The engine reports each record's bucket as it scatters it.
   const bucketOf: number[] = [];
@@ -159,9 +158,9 @@ export function simulate(engine: Engine, config: Config): Result {
 
   snap(
     "setup",
-    `${n} records go into R = ${R} buckets by one digit of their key. Memory is cut into ` +
-      `blocks of ${b}: the input holds ${fullBlocks} full blocks and a tail of ${n % b}, and ` +
-      `scratch holds 2R = ${scratchBlocks} blocks. Press Next to read the input front to back.`,
+    `${n} records, R = ${R} buckets, chosen by one digit of the key. Blocks of b = ${b}: ` +
+      `${fullBlocks} in the input${n % b ? `, a ${n % b}-record tail` : ""}, 2R = ${scratchBlocks} ` +
+      `in scratch. Each bucket is a singly linked list of blocks.`,
   );
 
   const sources: { bucket: number; len: number; physical: number }[] = [];
@@ -174,18 +173,16 @@ export function simulate(engine: Engine, config: Config): Result {
     if (pending.writers && writers) {
       snap(
         "scatter",
-        `Each bucket starts its chain in a scratch block: ` +
-          writers.map((w, k) => `bucket ${k} → ${name(w.physical)}`).join(", ") +
-          `. Blocks ${name(R)}–${name(scratchBlocks - 1)} stay free.`,
+        "Each bucket's list starts in its own scratch block, bucket k in Sk. " +
+          `${name(R)}–${name(scratchBlocks - 1)} stay free for completion.`,
         { focus: writers.map((w) => w.physical) },
       );
     }
     if (pending.ledger) {
       snap(
         "ledger",
-        `Every record has moved once. The ledger lists each bucket's prefixes in chain order: ` +
-          chains.map((chain, k) => `bucket ${k} [${blocks(chain)}]`).join(", ") +
-          ". Bucket k's final band starts where bucket k−1's ends.",
+        "Every record has moved once. The ledger lists each bucket's blocks in order; " +
+          "bucket k's final band starts where bucket k−1's ends.",
       );
     }
     pending.writers = false;
@@ -218,7 +215,8 @@ export function simulate(engine: Engine, config: Config): Result {
           snap(
             "scatter",
             `${name(full.physical)} is full. Bucket ${event.bucket} links the next input block, ` +
-              `${name(event.physical)}, which has been read completely.`,
+              `${name(event.physical)}, already read completely: ${name(full.physical)}'s next ` +
+              `link names ${name(event.physical)}, and writing continues there.`,
             { focus: [full.physical, event.physical] },
           );
         }
@@ -234,7 +232,8 @@ export function simulate(engine: Engine, config: Config): Result {
         snap(
           "scatter",
           `Position ${event.input} holds key ${key}. Its digit is ${event.bucket}, so it goes ` +
-            `to the next free slot of bucket ${event.bucket}'s current block, ${name(event.physical)}.`,
+            `to bucket ${event.bucket}'s last block, ${name(event.physical)}: slot ` +
+            `${event.slot + 1} of ${b}.`,
           { read: from, wrote: [to], focus: [event.physical], reads: event.input },
         );
         return;

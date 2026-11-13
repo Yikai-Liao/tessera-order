@@ -14,9 +14,9 @@ The extra memory is 2R scratch blocks plus per-block metadata, O(√n) when b is
 
 ## Step by step
 
-A bucket is not an array of its own. Each record's bucket is one digit of its key, and a pass with a d-bit digit has R = 2^d buckets, numbered by the digit's value; the [planner](routing.md#nodes-and-tiles) chooses d for each node. A bucket is a chain of fixed-size blocks: its records sit in the blocks it has filled, in input order, and the ledger records which blocks those are.
+A bucket is not an array of its own. Each record's bucket is one digit of its key, and a pass with a d-bit digit has R = 2^d buckets, numbered by the digit's value; the [planner](routing.md#nodes-and-tiles) chooses d for each node. A bucket is a singly linked list of fixed-size blocks: its records sit in the blocks it has filled, in input order. The head is the bucket's scratch block, each full block's link names the next block, and the bucket keeps a write cursor in its last block. The links live in one side array indexed by physical block, not inside the blocks, so a block holds only records. After the pass the ledger records which blocks each list holds.
 
-The figure runs the engine's own serial block partition, compiled to WebAssembly, on two-digit keys 0–39. The digit is the tens place, so R = 4 and a key's tens digit is its bucket. Blocks hold 2–4 records instead of the [derived size](#choosing-the-block-size). The engine reports each step it takes; [`blockPartition.ts`](../.vitepress/theme/sim/blockPartition.ts) only draws them. Its tests check that the replay ends in the engine's stable order and that every frame holds each record exactly once.
+The figure runs the engine's own serial block partition, compiled to WebAssembly, on two-digit keys 0–39. The digit is the tens place, so R = 4 and a key's tens digit is its bucket. It calls the partition directly, past the [routing](routing.md#budgeted-insertion) that would send an input this short to insertion sort, and its blocks hold 2–4 records instead of the [derived size](#choosing-the-block-size). The engine reports each step it takes; [`blockPartition.ts`](../.vitepress/theme/sim/blockPartition.ts) only draws them. Its tests check that the replay ends in the engine's stable order and that every frame holds each record exactly once.
 
 <BlockPartitionDemo />
 
@@ -24,8 +24,8 @@ How to read the figure:
 
 - **Rows.** The top row is the input slice with each position's index. `I0`, `I1`, … are its full blocks; the last, partial block is the *tail*, which is read but never becomes an output block. `S0`–`S3` are the first block of each bucket and `S4`–`S7` the reserve that completion needs: 2R scratch blocks in all. The bottom rows show each bucket's chain, the same records as above in chain order. Hovering a block marks it in both views.
 - **Cells.** A coloured cell is a live record: its key, with the tens digit in bold, and its input position below. A grey cell is a stale copy left behind after the record moved. Stale bytes are never read as a record again.
-- **Labels.** During scatter, `k writes` marks bucket k's current block. From the ledger on, a block is a `source` (coloured by its bucket), `free`, or `final` (no unread source remains in it), and coloured bars under the input mark each bucket's final band, whose positions the bucket's row lists.
-- **Steps.** The phase buttons jump to scatter, the ledger or completion. Clicking an input position jumps to the step that reads it, and clicking a block in a bucket row during completion jumps to the step that copies it.
+- **Labels.** Each tinted box is one block of b slots. During scatter, `k writes` marks bucket k's last block, the one it is filling, and `next X` under a full block is its link to the next block of the same bucket. From the ledger on, a block is a `source` (coloured by its bucket), `free`, or `final` (no unread source remains in it), and coloured bars under the input mark each bucket's final band, whose positions the bucket's row lists.
+- **Steps.** The phase buttons jump to scatter, the ledger or completion; Play steps on its own at the chosen speed. Clicking an input position jumps to the step that reads it, and clicking a block in a bucket row during completion jumps to the step that copies it.
 
 ## Scatter
 

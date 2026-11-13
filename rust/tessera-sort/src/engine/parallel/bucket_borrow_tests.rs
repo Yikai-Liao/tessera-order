@@ -11,7 +11,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 fn sort_group<T: Send, E: Extract<T> + Clone + Send>(records: &mut [T], extractor: E) {
     let mut scratch = Scratch::new();
     let mut child_scratch = Scratch::new();
-    let mut visit = |_: usize, bucket: &mut [T], digit: &mut KeyDigit<E, E::Value>| {
+    let mut visit = |_: usize,
+                     _: core::ops::Range<usize>,
+                     bucket: &mut [T],
+                     digit: &mut KeyDigit<E, E::Value>| {
         Sorter::<T, E> {
             scratch: &mut child_scratch,
             extractor: &mut digit.extractor,

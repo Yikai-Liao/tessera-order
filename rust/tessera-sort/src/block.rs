@@ -48,7 +48,7 @@ use crate::trace::{self, Event};
 #[cfg(test)]
 use crate::unwind;
 use alloc::vec::Vec;
-use core::{marker::PhantomData, mem::MaybeUninit, ptr};
+use core::{marker::PhantomData, mem::MaybeUninit, ops::Range, ptr};
 
 /// Widest digit, in bits, that one pass accepts. Callers that choose their own
 /// digit width (the Tessera engine) bound it by this constant.
@@ -167,13 +167,15 @@ fn balanced_block_size_integer(len: usize, record_bytes: usize, radix: usize) ->
 }
 
 /// Transfers a retired bucket borrow; later compaction never accesses it again.
-/// Receives each bucket's index and records.
-type Visit<'callback, 'records, T> = &'callback mut dyn FnMut(usize, &'records mut [T]);
+/// Receives each nonempty bucket's index, parent-relative range and records.
+/// Empty buckets have ends in the returned directory but publish no borrow.
+type Visit<'callback, 'records, T> =
+    &'callback mut dyn FnMut(usize, Range<usize>, &'records mut [T]);
 
 /// A [`Visit`] that also receives the classifier, which classification has
 /// finished borrowing by the time buckets are visited.
 type ClassifierVisit<'callback, 'records, T, C> =
-    &'callback mut dyn FnMut(usize, &'records mut [T], &mut C);
+    &'callback mut dyn FnMut(usize, Range<usize>, &'records mut [T], &mut C);
 
 /// Assigns each record its bucket in a stable partition.
 ///
@@ -195,8 +197,9 @@ impl<T, F: FnMut(&T) -> usize> Classify<T> for F {
 /// Partitions `records` stably into the `2^radix` buckets `classifier`
 /// assigns and returns each bucket's cumulative end in records.
 ///
-/// `visit` is called on each bucket as soon as its records are contiguous in
-/// `records`, while they are still in cache.
+/// `visit` is called on each nonempty bucket as soon as its records are contiguous
+/// in `records`, while they are still in cache. Its range is relative to this
+/// input, independent of callback order. The returned ends include empty buckets.
 ///
 /// Returns an empty vector for inputs of fewer than two records or zero-sized
 /// records.
@@ -237,8 +240,9 @@ pub(crate) fn partition_in_blocks<'records, T, C: Classify<T>>(
     let mut classifier = sorter.step(classifier);
     // The ledger lends only retired final bands; both classification and
     // child finishing borrow this same mutable classifier in sequence.
-    let mut callback =
-        |bucket: usize, child: &'records mut [T]| visit(bucket, child, &mut classifier);
+    let mut callback = |bucket: usize, range: Range<usize>, child: &'records mut [T]| {
+        visit(bucket, range, child, &mut classifier)
+    };
     finish::complete_serial(&mut sorter, Some(&mut callback))
 }
 
@@ -619,7 +623,7 @@ mod tests {
                         **record % 4
                     },
                     &mut buffers,
-                    &mut |bucket, band, _| {
+                    &mut |bucket, _, band, _| {
                         assert!(band.iter().all(|record| **record % 4 == bucket))
                     },
                 )
@@ -635,6 +639,41 @@ mod tests {
             ids.sort_unstable();
             assert_eq!(ids, (0..len).collect::<Vec<_>>());
             assert!(records.iter().all(|record| Rc::strong_count(record) == 1));
+        }
+    }
+
+    #[test]
+    fn sparse_bands_publish_ledger_ranges() {
+        for (len, block_size) in configs() {
+            let mut records: Vec<_> = (0..len)
+                .map(|id| (if id % 3 == 0 { 5 } else { 1 }, id))
+                .collect();
+            let mut expected = records.clone();
+            expected.sort_by_key(|record| record.0);
+            let mut ends = Vec::new();
+            let mut end = 0;
+            for bucket in 0..8 {
+                end += records.iter().filter(|record| record.0 == bucket).count();
+                ends.push(end);
+            }
+            let mut seen = [false; 8];
+            let actual_ends = partition_in_blocks(
+                &mut records,
+                3,
+                block_size,
+                |record: &(usize, usize)| record.0,
+                &mut Buffers::new(),
+                &mut |bucket, range, band, _| {
+                    let start = if bucket == 0 { 0 } else { ends[bucket - 1] };
+                    assert_eq!(range, start..ends[bucket]);
+                    assert_eq!(band, &expected[range]);
+                    assert!(!band.is_empty());
+                    assert!(!core::mem::replace(&mut seen[bucket], true));
+                },
+            );
+            assert_eq!(actual_ends, ends);
+            assert_eq!(seen, [false, true, false, false, false, true, false, false]);
+            assert_eq!(records, expected);
         }
     }
 
@@ -788,7 +827,7 @@ mod tests {
                 let payload = {
                     let mut sorter = Partition::new(&mut records, 4, block_size, &mut buffers);
                     let _ = sorter.step(|record: &(u32, u32)| (record.0 & 3) as usize);
-                    let mut callback = |_: usize, bucket: &mut [(u32, u32)]| {
+                    let mut callback = |_: usize, _: Range<usize>, bucket: &mut [(u32, u32)]| {
                         // Buckets materialize in order, so the slice must hold
                         // exactly the records of the bucket that just landed.
                         assert!(

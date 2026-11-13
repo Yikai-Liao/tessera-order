@@ -143,7 +143,7 @@ impl<T: Send, E: Extract<T> + Clone + Sync> Sorter<'_, T, E> {
         let pool = Pool::new();
         let extractor = &*self.extractor;
         let tile_len = self.tile_len;
-        let visit = |bucket: usize, child: &mut [T]| {
+        let visit = |bucket: usize, _range: core::ops::Range<usize>, child: &mut [T]| {
             if split.candidate == 0 || split.finished == Some(bucket) {
                 return;
             }

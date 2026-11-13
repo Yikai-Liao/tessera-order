@@ -5,10 +5,10 @@
 use super::*;
 use rayon::prelude::*;
 
-/// Publishes a bucket's index and exclusive final band, independently of other
-/// bucket movement.
+/// Publishes a nonempty bucket's index, parent-relative range and exclusive
+/// final band. Ranges do not depend on callback order; empty buckets are absent.
 pub(super) type BucketVisit<'callback, 'records, T> =
-    &'callback (dyn Fn(usize, &'records mut [T]) + Sync);
+    &'callback (dyn Fn(usize, Range<usize>, &'records mut [T]) + Sync);
 
 pub(super) struct Config {
     pub(super) shards: usize,
@@ -81,11 +81,17 @@ pub(super) fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clon
     let full_blocks = arr.len() / block_size;
     let shards = shards.min(full_blocks.max(1));
     if shards == 1 && config.block_size.is_none() {
-        return partition(arr, radix, classifier, buffers, &mut |bucket, child, _| {
-            if let Some(callback) = visit {
-                callback(bucket, child);
-            }
-        });
+        return partition(
+            arr,
+            radix,
+            classifier,
+            buffers,
+            &mut |bucket, range, child, _| {
+                if let Some(callback) = visit {
+                    callback(bucket, range, child);
+                }
+            },
+        );
     }
     let input_len = arr.len();
     let input = arr.as_mut_ptr();
@@ -160,7 +166,7 @@ mod tests {
             KeyDigit::new(ByKey(|row: &(u64, alloc::string::String)| row.0), 4),
             &mut buffers,
             config(3, 7),
-            Some(&|_, child| {
+            Some(&|_, _, child| {
                 let mut pending = pending.lock().unwrap();
                 if let Some(previous) = pending.take() {
                     previous.sort_by_key(|row| row.0);
@@ -189,7 +195,7 @@ mod tests {
                 KeyDigit::new(ByKey(|row: &(u64, alloc::string::String)| row.0), 4),
                 &mut buffers,
                 config(3, 7),
-                Some(&|_, _| panic!("callback panic")),
+                Some(&|_, _, _| panic!("callback panic")),
             );
         }));
         assert!(result.is_err());
@@ -312,7 +318,7 @@ mod tests {
             KeyDigit::new(ByKey(|r: &(u64, usize, &mut usize)| r.0), 4),
             &mut Buffers::new(),
             config(3, 7),
-            Some(&|_, child| {
+            Some(&|_, _, child| {
                 callbacks.fetch_add(1, Ordering::Relaxed);
                 let mut pending = pending.lock().unwrap();
                 if let Some(previous) = pending.take() {
@@ -356,7 +362,7 @@ mod tests {
                     KeyDigit::new(ByKey(|r: &(u64, usize, &mut usize)| r.0), 4),
                     &mut Buffers::new(),
                     config(3, 7),
-                    Some(&|_, child| {
+                    Some(&|_, _, child| {
                         let mut pending = pending
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner);

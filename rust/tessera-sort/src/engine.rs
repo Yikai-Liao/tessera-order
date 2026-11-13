@@ -93,7 +93,10 @@ impl Split {
         tile_len: usize,
     ) -> Vec<usize> {
         let tile = &mut scratch.tile;
-        let mut visit = |bucket: usize, child: &mut [T], classifier: &mut C| {
+        let mut visit = |bucket: usize,
+                         _range: core::ops::Range<usize>,
+                         child: &mut [T],
+                         classifier: &mut C| {
             if child.len() <= tile_len && self.finished != Some(bucket) {
                 tile.finish_child(child, self.candidate, lend(classifier));
             }

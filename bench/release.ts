@@ -53,7 +53,7 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
     throw new Error("Native linkage checks require Linux and ldd");
   await mkdir(out, { recursive: false });
   await withComparisonWorkspace(root, native, async ({ tree, target }) => {
-    const features = ["compare", "rayon", ...(native ? ["compare-native"] : [])];
+    const features = ["rayon", ...(native ? ["compare-native"] : [])];
     await prepareRevisions(root, tree, { baseline: "HEAD" }, features);
     await withBuildCache(target, async () => {
       const env = await benchmarkEnvironment(tree);
@@ -170,7 +170,6 @@ async function prepareComparison(options: ReleaseOptions) {
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
   const build = await withComparisonWorkspace(root, native, async ({ tree, target }) => {
     const features = [
-      "compare",
       ...(native ? ["compare-native"] : []),
       ...(plan.algorithms.some((id) =>
         catalog.algorithms.some((entry) => entry.id === id && entry.threads),

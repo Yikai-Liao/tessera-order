@@ -11,7 +11,6 @@ use tessera_sort::thresholds::{INSERTION_MAX, TILE_BYTES};
 #[derive(Deserialize)]
 pub(crate) struct Catalog {
     schema: u32,
-    #[cfg(feature = "compare")]
     #[serde(rename = "pairedBlocks")]
     pub(crate) paired_blocks: PairedBlocks,
     pub(crate) algorithms: Vec<Algorithm>,
@@ -22,14 +21,12 @@ pub(crate) struct Catalog {
     revision_sampling: Vec<RevisionSampling>,
 }
 /// Supported short and extended paired measurement budgets.
-#[cfg(feature = "compare")]
 #[derive(Deserialize)]
 pub(crate) struct PairedBlocks {
     pub(crate) short: BlockBudget,
     pub(crate) extended: BlockBudget,
 }
 /// Number of blocks to retain; report statistics own agreement checks.
-#[cfg(feature = "compare")]
 #[derive(Deserialize)]
 pub(crate) struct BlockBudget {
     pub(crate) count: usize,
@@ -72,11 +69,8 @@ pub fn revision_sampling(len: usize) -> &'static RevisionSampling {
 #[derive(Deserialize)]
 pub(crate) struct Algorithm {
     pub(crate) id: String,
-    #[cfg(feature = "compare")]
     pub(crate) stable: bool,
-    #[cfg(feature = "compare")]
     pub(crate) adapter: String,
-    #[cfg(feature = "compare")]
     #[serde(default)]
     pub(crate) threads: Option<usize>,
 }
@@ -182,7 +176,6 @@ pub struct InputCase {
     pub len: usize,
 }
 
-#[cfg(feature = "compare")]
 impl InputCase {
     /// Formats the stable identifier used in raw samples and reports.
     pub fn id(&self) -> String {
@@ -437,7 +430,6 @@ mod tests {
                 criterion_id!(&group, entry["mode"].as_str().unwrap()),
                 entry["criterion"].as_str().unwrap()
             );
-            #[cfg(feature = "compare")]
             assert_eq!(case.id(), entry["comparison"].as_str().unwrap());
         }
     }

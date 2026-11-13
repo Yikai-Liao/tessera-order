@@ -145,7 +145,6 @@ export async function buildRevisions(
   let env: NodeJS.ProcessEnv | undefined;
   const build = async (role: "baseline" | "current", seed: number | undefined) => {
     const selectedFeatures = [
-      "compare",
       ...features,
       ...simdFeatures(await readFile(manifest, "utf8")).map((feature) => `tessera-sort/${feature}`),
     ];

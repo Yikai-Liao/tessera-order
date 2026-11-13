@@ -2,8 +2,6 @@
 
 //! Recovery contracts exercised through the retained executable pair.
 
-#![cfg(feature = "compare")]
-
 use std::{fs, process::Command};
 
 #[test]

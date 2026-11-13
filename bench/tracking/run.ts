@@ -43,7 +43,7 @@ await runTask(out, false, async () => {
       env: { CC: "clang", CXX: "clang++" },
     });
     if (!native) env.CARGO_ENCODED_RUSTFLAGS += "\x1f-C\x1ftarget-feature=+crt-static";
-    const features = ["compare", "rayon", ...(native ? ["compare-native"] : [])];
+    const features = ["rayon", ...(native ? ["compare-native"] : [])];
     const built = await buildBenchmark(tree, target, "smoke", features, {
       targetTriple: "x86_64-unknown-linux-gnu",
       env,

@@ -217,7 +217,7 @@ Use the binaries directly only to split groups across directories or debug the h
 
 ```sh
 bun run tools native fetch
-cargo build --release -p tessera-bench --features compare,compare-native --target-dir target/compare-default
+cargo build --release -p tessera-bench --features compare-native --target-dir target/compare-default
 taskset -c 2 target/compare-default/release/compare run --suite release --out bench/results/release
 bun run tools report bench/results/release
 ```

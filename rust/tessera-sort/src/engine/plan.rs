@@ -248,17 +248,6 @@ pub(super) fn plan_node<T, E: Extract<T>>(
     if let Some(equal) = sample.as_ref().and_then(KeySample::mode) {
         return NodePlan::Equal(equal);
     }
-    plan_digit(records, varying, tile_len, extractor, sample)
-}
-
-/// Reuses any equality sample when planning a bit-consuming partition.
-fn plan_digit<T, E: Extract<T>>(
-    records: &[T],
-    varying: u128,
-    tile_len: usize,
-    extractor: &mut E,
-    sample: Option<KeySample<E::Value>>,
-) -> NodePlan<E::Value> {
     let top = bit_len(varying);
     if let Some((boundary, set)) = two_runs(records, 1u128 << (top - 1), extractor) {
         NodePlan::Runs { boundary, set }

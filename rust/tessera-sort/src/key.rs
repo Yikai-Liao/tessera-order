@@ -161,6 +161,14 @@ pub(crate) unsafe trait Extract<T> {
     /// Returns the encoded key of `record`.
     fn key(&mut self, record: &T) -> Self::Value;
 
+    /// Finds varying encoded bits within `candidate`, for a nonempty slice.
+    fn varying_bits(&mut self, records: &[T], candidate: u128) -> u128
+    where
+        Self: Sized,
+    {
+        crate::engine::scan_varying_bits_scalar(records, candidate, self)
+    }
+
     /// Returns whether `previous` and the keys of `records` are in ascending
     /// order. `previous` is the already encoded key of the preceding record.
     fn confirm_ascending(&mut self, records: &[T], previous: Self::Value) -> bool
@@ -203,6 +211,11 @@ unsafe impl<T, E: Extract<T>> Extract<T> for &mut E {
     #[inline]
     fn key(&mut self, record: &T) -> Self::Value {
         (**self).key(record)
+    }
+
+    #[inline]
+    fn varying_bits(&mut self, records: &[T], candidate: u128) -> u128 {
+        (**self).varying_bits(records, candidate)
     }
 
     #[inline]
@@ -324,6 +337,11 @@ unsafe impl<K: RadixKey> Extract<K> for Direct {
         count_parallel: count_keys_parallel::<K>,
     });
     type Value = K::Encoded;
+
+    #[inline]
+    fn varying_bits(&mut self, records: &[K], candidate: u128) -> u128 {
+        crate::portable_simd::varying_bits(records, candidate)
+    }
 
     #[inline]
     fn confirm_ascending(&mut self, records: &[K], previous: Self::Value) -> bool {

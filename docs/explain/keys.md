@@ -28,11 +28,12 @@ Normalize the key in the key function if you want every NaN equal, or both zeros
 
 Real keys rarely use all of their bits. Timestamps share their high bits, small IDs in a `u64` have dozens of leading zeros, and a flag stored in bit 40 is the only bit that changes. A bit that has the same value in every key cannot affect the order.
 
-Tessera finds these bits with one scan (`scan_varying_bits` in [`engine.rs`](../../rust/tessera-sort/src/engine.rs)):
+Tessera finds these bits with one scan (`scan_varying_bits` in [`engine.rs`](../../rust/tessera-sort/src/engine.rs)). The scalar and direct-key vector paths both use the equivalent difference from the first encoded key:
 
-- the **union** (bitwise OR) of all keys has a 1 wherever *some* key has a 1;
-- the **intersection** (bitwise AND) has a 1 wherever *every* key has a 1;
-- `union XOR intersection` is 1 exactly where the keys disagree.
+- XOR each encoded key with the first encoded key;
+- OR those differences together: a bit is set exactly where some key disagrees with the first.
+
+This equals the union of the keys XOR their intersection, as shown below. Direct integer and float keys through 64 bits use explicit SIMD; user extractors, 128-bit and pointer-sized keys use scalar scans. `Reverse` has the same varying bits as its underlying key.
 
 <VaryingBits />
 
@@ -43,4 +44,4 @@ The result, `varying`, is used everywhere later:
 - For 128-bit keys whose variation fits in one 64-bit half, the engine sorts by that half as a `u64` (`KeyHalf` in `key.rs`), which halves the work per key.
 - After a partition on a digit, that digit is constant inside each child, so the child's scan excludes it and stops once every remaining candidate bit has been seen in both states (`scan_varying_bits` in `engine.rs`).
 
-The scan reads a 1,025-record prefix first. If every bit already varies there, as with random wide keys, it stops early.
+The scan checks an initial batch of 64 records after the first key and doubles each subsequent batch. It stops once every candidate bit varies.

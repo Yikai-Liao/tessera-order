@@ -48,9 +48,9 @@
 //!
 //! Tessera requires `std` and Rust 1.89 or newer. Every build uses
 //! [`fearless_simd`](https://docs.rs/fearless_simd) for adjacent-key
-//! scans, ascending-order confirmation and bucket-count prefix sums. On x86 it
-//! selects a supported instruction set at run time, once per insertion pass,
-//! ascending confirmation or prefix sum. Other targets use their compile-time
+//! scans, ascending-order confirmation, direct-key variation scans and
+//! bucket-count prefix sums. On x86 it selects a supported instruction set at
+//! run time, once per insertion pass, confirmation, variation scan or prefix sum. Other targets use their compile-time
 //! baseline, including Arm Neon and WebAssembly SIMD when enabled for the
 //! target. Keys without a vector kernel use scalar scans. There is no backend
 //! feature switch; `--no-default-features` uses this same implementation.

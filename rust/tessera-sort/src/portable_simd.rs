@@ -30,6 +30,17 @@ const PEEL: usize = 4;
 /// backend's lane count and comparison in its encoded order. One lane denotes
 /// a scalar fallback, used by wide and pointer-sized keys.
 pub trait SimdKey: Copy {
+    /// Whether this key has an explicit vector variation scan.
+    const VECTOR_VARIATION: bool = false;
+
+    /// Scans variation in encoded key bits under a selected backend.
+    fn varying_with<S: Simd>(_simd: S, values: &[Self], candidate: u128) -> u128
+    where
+        Self: RadixKey,
+    {
+        crate::engine::scan_varying_bits_scalar(values, candidate, &mut Direct)
+    }
+
     /// Number of pairs compared by [`Self::pair_mask`] under this backend,
     /// from one through 64, matching the backend's native vector width.
     fn lanes<S: Simd>() -> usize {
@@ -45,6 +56,17 @@ pub trait SimdKey: Copy {
     {
         u64::from(left[0].encode() > right[0].encode())
     }
+}
+
+/// Scans direct keys using explicit vectors when supported.
+pub(crate) fn varying_bits<K: RadixKey>(values: &[K], candidate: u128) -> u128 {
+    if candidate == 0 {
+        return 0;
+    }
+    if !K::VECTOR_VARIATION || values.len() < SIMD_MIN {
+        return crate::engine::scan_varying_bits_scalar(values, candidate, &mut Direct);
+    }
+    dispatch!(Level::new(), simd => K::varying_with(simd, values, candidate))
 }
 
 /// Sorts `keys` stably by insertion, without a swap limit.
@@ -173,8 +195,30 @@ fn scan_pairs<S: Simd, K: RadixKey>(simd: S, values: &[K]) -> Option<usize> {
 }
 
 macro_rules! integer_key {
-    ($($ty:ty),* $(,)?) => {$(
+    ($(($ty:ty, $unsigned:ty)),* $(,)?) => {$(
         impl SimdKey for $ty {
+            const VECTOR_VARIATION: bool = true;
+
+            #[inline(always)]
+            fn varying_with<S: Simd>(simd: S, values: &[Self], candidate: u128) -> u128 {
+                type V<S> = <$ty as SimdIntElement>::Native<S>;
+                let first = values[0];
+                let base = V::<S>::splat(simd, first);
+                crate::engine::varying_batches(&values[1..], candidate, |batch| {
+                    let mut chunks = batch.chunks_exact(V::<S>::LEN);
+                    let mut acc = V::<S>::splat(simd, 0);
+                    for chunk in &mut chunks {
+                        acc |= V::<S>::from_slice(simd, chunk) ^ base;
+                    }
+                    let mut lanes = [0 as $ty; 64];
+                    acc.store_slice(&mut lanes[..V::<S>::LEN]);
+                    let mut seen = lanes[..V::<S>::LEN].iter().fold(0u128, |bits, &lane| bits | (lane as $unsigned as u128));
+                    for &value in chunks.remainder() {
+                        seen |= ((value ^ first) as $unsigned) as u128;
+                    }
+                    seen
+                })
+            }
             #[inline(always)]
             fn lanes<S: Simd>() -> usize {
                 <Self as SimdIntElement>::Native::<S>::LEN
@@ -190,11 +234,48 @@ macro_rules! integer_key {
         }
     )*};
 }
-integer_key!(u8, u16, u32, u64, i8, i16, i32, i64);
+integer_key!(
+    (u8, u8),
+    (u16, u16),
+    (u32, u32),
+    (u64, u64),
+    (i8, u8),
+    (i16, u16),
+    (i32, u32),
+    (i64, u64)
+);
 
 macro_rules! float_key {
     ($(($f:ty, $u:ty)),* $(,)?) => {$(
         impl SimdKey for $f {
+            const VECTOR_VARIATION: bool = true;
+
+            #[inline(always)]
+            fn varying_with<S: Simd>(simd: S, values: &[Self], candidate: u128) -> u128 {
+                type V<S> = <$f as SimdFloatElement>::Native<S>;
+                type Bits<S> = <V<S> as SimdFloat<S>>::Bits;
+                let first = values[0].encode();
+                let base: Bits<S> = first.simd_into(simd);
+                let zero: Bits<S> = (0 as $u).simd_into(simd);
+                let sign: Bits<S> = ((1 as $u) << (<$u>::BITS - 1)).simd_into(simd);
+                crate::engine::varying_batches(&values[1..], candidate, |batch| {
+                    let mut chunks = batch.chunks_exact(V::<S>::LEN);
+                    let mut acc = zero;
+                    for chunk in &mut chunks {
+                        let bits = V::<S>::from_slice(simd, chunk).to_bits();
+                        let encoded = bits ^ ((zero - (bits >> (<$u>::BITS - 1))) | sign);
+                        acc |= encoded ^ base;
+                    }
+                    let mut lanes = [0 as $u; 64];
+                    acc.store_slice(&mut lanes[..V::<S>::LEN]);
+                    let mut seen = lanes[..V::<S>::LEN].iter().fold(0u128, |bits, &lane| bits | lane as u128);
+                    for &value in chunks.remainder() {
+                        seen |= (value.encode() ^ first) as u128;
+                    }
+                    seen
+                })
+            }
+
             #[inline(always)]
             fn lanes<S: Simd>() -> usize {
                 <Self as SimdFloatElement>::Native::<S>::LEN
@@ -224,6 +305,18 @@ macro_rules! scalar_key {
 scalar_key!(u128, usize, i128, isize);
 
 impl<K: RadixKey> SimdKey for core::cmp::Reverse<K> {
+    const VECTOR_VARIATION: bool = K::VECTOR_VARIATION;
+
+    #[inline(always)]
+    fn varying_with<S: Simd>(simd: S, values: &[Self], candidate: u128) -> u128 {
+        // SAFETY: Reverse<K> is transparent over K, with identical validity,
+        // alignment and lifetime for the shared slice.
+        let values =
+            unsafe { core::slice::from_raw_parts(values.as_ptr().cast::<K>(), values.len()) };
+        // Complementing all encoded keys does not change which bits vary.
+        K::varying_with(simd, values, candidate)
+    }
+
     #[inline(always)]
     fn lanes<S: Simd>() -> usize {
         K::lanes::<S>()
@@ -247,6 +340,69 @@ impl<K: RadixKey> SimdKey for core::cmp::Reverse<K> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn check_variation<K: RadixKey>(values: &[K]) {
+        for candidate in [0, 1, 0xff, 0xffff_ffff, u128::MAX] {
+            let expected = crate::engine::scan_varying_bits_scalar(values, candidate, &mut Direct);
+            assert_eq!(varying_bits(values, candidate), expected);
+            if candidate != 0 {
+                for level in [Level::baseline(), Level::new()] {
+                    assert_eq!(
+                        dispatch!(level, simd => K::varying_with(simd, values, candidate)),
+                        expected
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn variation_matches_scalar_encodings() {
+        use core::cmp::Reverse;
+        let lengths: &[usize] = if cfg!(miri) {
+            &[1, 64, 65, 193]
+        } else {
+            &[1, 2, 63, 64, 65, 127, 128, 129, 193, 1025]
+        };
+        for &len in lengths {
+            for shape in 0..3 {
+                let mut seed = 17u64;
+                let values: Vec<u64> = (0..len)
+                    .map(|i| {
+                        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                        match shape {
+                            0 => 7,
+                            1 => {
+                                if i + 1 == len {
+                                    u64::MAX
+                                } else {
+                                    7
+                                }
+                            }
+                            _ => seed,
+                        }
+                    })
+                    .collect();
+                macro_rules! check_int {
+                    ($($ty:ty),* $(,)?) => {$({
+                        let keys: Vec<$ty> = values.iter().map(|&v| v as $ty).collect();
+                        check_variation(&keys);
+                        let reversed: Vec<_> = keys.iter().copied().map(Reverse).collect();
+                        check_variation(&reversed);
+                    })*};
+                }
+                check_int!(
+                    u8, u16, u32, u64, i8, i16, i32, i64, u128, i128, usize, isize
+                );
+                let f64s: Vec<_> = values.iter().map(|&v| f64::from_bits(v)).collect();
+                let f32s: Vec<_> = values.iter().map(|&v| f32::from_bits(v as u32)).collect();
+                check_variation(&f64s);
+                check_variation(&f32s);
+                check_variation(&f64s.iter().copied().map(Reverse).collect::<Vec<_>>());
+                check_variation(&f32s.iter().copied().map(Reverse).collect::<Vec<_>>());
+            }
+        }
+    }
 
     fn check_sorted_scans<K: RadixKey>(mut values: Vec<K>) {
         if let Some(first) = values.first() {

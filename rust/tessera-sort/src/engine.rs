@@ -92,29 +92,46 @@ pub(crate) fn finish_insertion<T, E: Extract<T>>(
 /// Only candidate bits are returned, so even changing keys cannot restore a
 /// parent partition digit and prevent the recursion from making progress.
 fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor: &mut E) -> u128 {
+    extractor.varying_bits(records, candidate)
+}
+
+/// Scalar variation scan for user extractors and unsupported direct key widths.
+pub(crate) fn scan_varying_bits_scalar<T, E: Extract<T>>(
+    records: &[T],
+    candidate: u128,
+    extractor: &mut E,
+) -> u128 {
     if candidate == 0 {
         return 0;
     }
-    let first = extractor.key(&records[0]);
-    let (mut union, mut intersection) = (first, first);
-    let mut index = 1;
-    let mut batch = 64;
+    let first = extractor.key(&records[0]).to_u128();
+    varying_batches(&records[1..], candidate, |batch| {
+        batch.iter().fold(0, |seen, record| {
+            seen | (extractor.key(record).to_u128() ^ first)
+        })
+    })
+}
+
+/// Shares early-exit and candidate masking between scalar and vector scans.
+#[inline(always)]
+pub(crate) fn varying_batches<T>(
+    records: &[T],
+    candidate: u128,
+    mut scan: impl FnMut(&[T]) -> u128,
+) -> u128 {
+    let mut seen = 0;
+    let mut index = 0;
+    let mut batch: usize = 64;
     while index < records.len() {
         let end = index + batch.min(records.len() - index);
-        for record in &records[index..end] {
-            let key = extractor.key(record);
-            union |= key;
-            intersection = intersection & key;
-        }
-        let seen = union.to_u128() ^ intersection.to_u128();
+        seen |= scan(&records[index..end]);
         if seen & candidate == candidate {
             break;
         }
         index = end;
-        // Early witnesses stay cheap; long scans get vectorizable stretches.
         batch = batch.saturating_mul(2);
     }
-    (union.to_u128() ^ intersection.to_u128()) & candidate
+    seen & candidate
 }
 
 /// The candidate bits left when every child holds the top bit of a nonzero

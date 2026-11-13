@@ -77,7 +77,12 @@ await reportFailure(`Track (${algorithm.id})`, `${out}.log`, () =>
     const deadline = Date.now() + QUEUE_WAIT_S * 1000;
     const jobs = [];
     for (const { index, ids, job } of submitted) {
-      const wait = Math.max(JOB_TIMEOUT_S, Math.ceil((deadline - Date.now()) / 1000));
+      // The shared deadline bounds every attachment, so the workflow keeps time to publish.
+      const wait = Math.floor((deadline - Date.now()) / 1000);
+      if (wait < 1)
+        throw new Error(
+          `Timed out waiting for remote job after ${QUEUE_WAIT_S} seconds: the run's shared queue wait is spent before job ${index + 1} of ${submitted.length} finished`,
+        );
       const response = await command(
         "bencher",
         [

@@ -16,8 +16,16 @@ import {
   renderMainOverview,
   renderMainTrend,
 } from "./history.ts";
+import { remoteJobs } from "./jobs.ts";
 import { appendRun, trackingCases, trackingFacets } from "./publish.ts";
-import { indexSchema, parseRuns, runSchema, summarizeReport, type TrackingRun } from "./result.ts";
+import {
+  combineReports,
+  indexSchema,
+  parseRuns,
+  runSchema,
+  summarizeReport,
+  type TrackingRun,
+} from "./result.ts";
 
 const PREVIEW_CASE = "rust/u64/random/65536/s1/api";
 
@@ -427,4 +435,44 @@ test("only runs on the latest hardware specification form the trend", () => {
     latestValues(runs, cases).map((row) => row.current),
     [true],
   );
+});
+
+test("remote jobs split an inventory by catalog budget, in order and balanced", () => {
+  const short = (i: number) => `rust/u64/random/${1000 + i}/s1/api`;
+  const long = (i: number) => `rust/u64/random/${1000000 + i}/s1/par-4`;
+  // Tessera's continuous inventory: 54 short serial cases and 44 million-record cases.
+  const tessera = [
+    ...Array.from({ length: 54 }, (_, i) => short(i)),
+    ...Array.from({ length: 44 }, (_, i) => long(i)),
+  ];
+  const jobs = remoteJobs(tessera);
+  assert.equal(jobs.length, 2);
+  assert.deepEqual(jobs.flat(), tessera);
+  // Catalog warm-up plus window: 2 s below a million records, 5 s from there.
+  const seconds = (job: string[]) =>
+    job.reduce((sum, id) => sum + (Number(id.split("/")[3]) >= 1_000_000 ? 5 : 2), 0);
+  // Midpoint assignment may exceed the 180 s budget by part of one case.
+  for (const job of jobs) assert.ok(seconds(job) <= 0.6 * 300 + 5, String(seconds(job)));
+  // An opponent selecting one mode of the same inventory fits one job.
+  const opponent = [
+    ...Array.from({ length: 54 }, (_, i) => short(i)),
+    ...Array.from({ length: 8 }, (_, i) => long(i).replace("par-4", "api")),
+  ];
+  assert.deepEqual(remoteJobs(opponent), [opponent]);
+});
+
+test("a run combines its remote jobs only for one source and hardware", () => {
+  const other = "rust/u64/random/1000/s1/api";
+  const second = report();
+  second.uuid = "01a1cdb1-9445-76dd-89c4-e4220d49e6f8";
+  second.results[0][0].benchmark.name = other;
+  const jobs = [
+    summarizeReport(report(), source, "example", [PREVIEW_CASE], "main"),
+    summarizeReport(second, source, "example", [other], "main"),
+  ];
+  const run = combineReports(jobs);
+  assert.equal(run.id, uuid);
+  assert.deepEqual(Object.keys(run.values).sort(), [other, PREVIEW_CASE].sort());
+  assert.throws(() => combineReports([jobs[0], { ...jobs[1], spec: second.uuid }]));
+  assert.throws(() => combineReports([]));
 });

@@ -8,8 +8,8 @@ import type { RowChart } from "../../bench/plot/rows.ts";
 
 const example: RowChart = {
   id: "figure-guide",
-  title: "Recorded release: three stable sorts on 1,000,000 u64 keys",
-  guide: "AMD Ryzen 7 8845H · speed relative to slice::sort · geometric mean over 10 inputs",
+  title: "Three stable sorts in a recorded release",
+  guide: "1,000,000 u64 keys · AMD Ryzen 7 8845H · speed vs slice::sort, geometric mean over 10 inputs",
   columns: ["Speed"],
   groups: [{
     title: "Stable sorts",
@@ -61,7 +61,8 @@ A new dataset does not require a new template; a genuinely different question ma
 
 [`theme.ts`](../../bench/plot/theme.ts) owns the palette, typography and spacing tokens. [`figure.ts`](../../bench/plot/figure.ts) owns the panel, shared stylesheet and accessible SVG envelope. Templates use those foundations, not copied style blocks.
 
-- One figure answers one question. Its title states a measured finding when results support one; the guide names the quantity, reference and aggregation.
+- One figure answers one question. Its title states a measured finding in a few words when results support one, such as "Fastest on 9 of 14 inputs"; Tessera is the implied subject. The guide below it names the length, key type, quantity, reference and aggregation, so the large title carries no parameters.
+- A rank cell for a first place takes Tessera's blue, so leads stand out from the other ranks.
 - Labels form a left column; numbers form right-aligned value columns. Words do not repeat inside every plotted cell.
 - Blue emphasizes Tessera or less run time, orange identifies other radix sorts or more run time, and neutral grey provides context. A chart's legend states its meaning; colour alone does not carry the verdict.
 - Use dots and ranges for comparisons. A reference line makes the denominator visible. Ratio comparisons use logarithmic spacing; equal multiplicative changes occupy equal distances.

@@ -262,8 +262,12 @@ mod tests {
             );
             assert_eq!(first_inversion(&values), None);
             for index in 0..values.len().saturating_sub(1) {
-                // Miri still crosses the peel, vector blocks and scalar tail.
-                if cfg!(miri) && index % 16 > 1 && index != 4 && index + 2 != values.len() {
+                // Native tests move an inversion through every pair. Miri
+                // keeps the peel, both 32- and 64-pair block edges and last
+                // tail pair, for every encoding, backend and Reverse wrapper.
+                if cfg!(miri)
+                    && ![0, 3, 4, 35, 36, 67, 68, values.len().saturating_sub(2)].contains(&index)
+                {
                     continue;
                 }
                 if values[index].encode() == values[index + 1].encode() {
@@ -288,7 +292,8 @@ mod tests {
     #[test]
     fn integer_scans() {
         let lengths: &[usize] = if cfg!(miri) {
-            &[0, 1, 64, 65]
+            // One long slice reaches even a 64-pair vector plus its scalar tail.
+            &[0, 1, 97]
         } else {
             &[0, 1, 2, 31, 63, 64, 65, 97, 129]
         };
@@ -330,7 +335,7 @@ mod tests {
     #[test]
     fn float_scans() {
         let lengths: &[usize] = if cfg!(miri) {
-            &[0, 1, 64, 65]
+            &[0, 1, 97]
         } else {
             &[0, 1, 2, 31, 63, 64, 65, 97, 129]
         };

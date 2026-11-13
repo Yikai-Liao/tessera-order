@@ -554,7 +554,10 @@ mod tests {
     use super::*;
     use alloc::vec::Vec;
 
+    // This enumerates the arithmetic classification rule, not record movement.
+    // Miri exercises Rank through the engine's ownership and recovery fixtures.
     #[test]
+    #[cfg_attr(miri, ignore = "exhaustive arithmetic is checked by native tests")]
     fn equality_digits_order_keys_and_hold_the_top_bit() {
         // Every pivot and every highest varying bit of a node whose keys share
         // the bits above it: digits ascend with keys, the equal bucket holds

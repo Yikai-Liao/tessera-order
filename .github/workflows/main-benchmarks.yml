@@ -112,8 +112,8 @@ jobs:
       matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     runs-on: ubuntu-24.04
     environment: benchmark
-    # Several remote jobs of at most five minutes each, plus Bencher queueing.
-    timeout-minutes: 45
+    # run.ts waits up to 50 minutes for its remote jobs, queueing included.
+    timeout-minutes: 60
     permissions:
       contents: write
     env:
@@ -162,7 +162,7 @@ jobs:
               git checkout --orphan "initial-$attempt"
             fi
             bun "$GITHUB_WORKSPACE/bench/tracking/publish.ts" "$TRACKING_ALGORITHM" ../tracking/*.jsonl
-            git add -- "$TRACKING_ALGORITHM"
+            git add -- "$TRACKING_ALGORITHM" comparison.json
             git diff --cached --quiet && break
             git commit -s -m "chore(bench): record $TRACKING_ALGORITHM performance ${GITHUB_SHA:0:7}" -m 'Assisted-by: OpenAI'
             git push origin HEAD:refs/heads/benchmark-data && break

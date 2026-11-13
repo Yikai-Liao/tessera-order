@@ -7,6 +7,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parseHTML } from "linkedom/worker";
 import { z } from "zod";
+import { trackingMemory } from "./build.ts";
+import { comparisonData, latestRuns } from "./comparison.ts";
+import { explainFailure } from "./failure.ts";
 import {
   comparableRuns,
   formatTimestamp,
@@ -446,13 +449,13 @@ test("remote jobs split an inventory by catalog budget, in order and balanced", 
     ...Array.from({ length: 44 }, (_, i) => long(i)),
   ];
   const jobs = remoteJobs(tessera);
-  assert.equal(jobs.length, 2);
+  assert.equal(jobs.length, 3);
   assert.deepEqual(jobs.flat(), tessera);
   // Catalog warm-up plus window: 2 s below a million records, 5 s from there.
   const seconds = (job: string[]) =>
     job.reduce((sum, id) => sum + (Number(id.split("/")[3]) >= 1_000_000 ? 5 : 2), 0);
-  // Midpoint assignment may exceed the 180 s budget by part of one case.
-  for (const job of jobs) assert.ok(seconds(job) <= 0.6 * 300 + 5, String(seconds(job)));
+  // Midpoint assignment may exceed the 150 s budget by part of one case.
+  for (const job of jobs) assert.ok(seconds(job) <= 0.5 * 300 + 5, String(seconds(job)));
   // An opponent selecting one mode of the same inventory fits one job.
   const opponent = [
     ...Array.from({ length: 54 }, (_, i) => short(i)),
@@ -475,4 +478,152 @@ test("a run combines its remote jobs only for one source and hardware", () => {
   assert.deepEqual(Object.keys(run.values).sort(), [other, PREVIEW_CASE].sort());
   assert.throws(() => combineReports([jobs[0], { ...jobs[1], spec: second.uuid }]));
   assert.throws(() => combineReports([]));
+});
+
+test("known remote failures are explained once, unknown ones are not guessed", () => {
+  assert.match(
+    explainFailure(
+      "x\nRemote job failed: Firecracker error: Timeout: VM execution timed out after 300s\n",
+    )!,
+    /longer than Bencher's 300 s limit/,
+  );
+  assert.match(
+    explainFailure("Timed out waiting for remote job after 600 seconds")!,
+    /within 600 s of waiting, queueing included/,
+  );
+  assert.equal(explainFailure("error: linker failed"), null);
+});
+
+test("memory rows key timed cases by mode and must cover every timed case", () => {
+  const row = (case_id: string, variant: string, peak_extra_bytes: number) =>
+    JSON.stringify({ case_id, variant, build: "default", peak_extra_bytes, verified: true });
+  const journal = [
+    row("u64/random/65536/s1", "tessera", 4096),
+    row("u64/random/65536/s1", "tessera-par-4", 8192),
+    // Inputs and algorithms the run does not time are dropped.
+    row("u64/sorted/1000000/s1", "tessera", 0),
+    row("u64/random/65536/s1", "std-stable", 524288),
+  ].join("\n");
+  const ids = ["rust/u64/random/65536/s1/api", "rust/u64/random/65536/s1/par-4"];
+  assert.deepEqual(trackingMemory(journal, ["tessera", "tessera-par-4"], ids), {
+    "rust/u64/random/65536/s1/api": 4096,
+    "rust/u64/random/65536/s1/par-4": 8192,
+  });
+  assert.throws(() => trackingMemory(journal, ["tessera"], ids), /Missing memory rows/);
+  assert.throws(() =>
+    trackingMemory(
+      journal + "\n" + row("u64/random/65536/s1", "tessera", 1),
+      ["tessera"],
+      [ids[0]],
+    ),
+  );
+});
+
+test("a run's memory covers exactly its timed cases", () => {
+  assert.ok(runSchema.safeParse({ ...run, memory: { [PREVIEW_CASE]: 0 } }).success);
+  assert.ok(!runSchema.safeParse({ ...run, memory: {} }).success);
+  assert.ok(!runSchema.safeParse({ ...run, memory: { [PREVIEW_CASE]: 1, other: 1 } }).success);
+  assert.ok(runSchema.safeParse(run).success);
+});
+
+test("the comparison ranks latest runs on Tessera's hardware over a common cohort", () => {
+  const other = "01a1cdb1-9445-76dd-89c4-e4220d49e6f8";
+  const tracked = (
+    spec: string,
+    time: string,
+    ns: Record<string, number>,
+    memory?: Record<string, number>,
+  ): TrackingRun => {
+    const values = Object.fromEntries(
+      Object.entries(ns).map(([id, value]) => [`rust/${id}/api`, [value, value, value]]),
+    );
+    return runSchema.parse({
+      ...run,
+      id: crypto.randomUUID(),
+      spec,
+      time,
+      values,
+      ...(memory
+        ? {
+            memory: Object.fromEntries(
+              Object.entries(memory).map(([id, bytes]) => [`rust/${id}/api`, bytes]),
+            ),
+          }
+        : {}),
+    });
+  };
+  const cases = ["u64/random/65536/s1", "u64/reverse/65536/s1", "u64/random/1048576/s1"];
+  const at = (values: number[]) => Object.fromEntries(cases.map((id, i) => [id, values[i]]));
+  const runs = new Map([
+    [
+      "tessera",
+      [
+        tracked(other, "2026-10-01T00:00:00Z", at([1, 1, 1])),
+        tracked(uuid, "2026-11-01T00:00:00Z", at([10, 20, 100]), at([100, 100, 1000])),
+      ],
+    ],
+    ["std-stable", [tracked(uuid, "2026-11-02T00:00:00Z", at([40, 20, 800]), at([1, 2, 3]))]],
+    // Latest on another spec: the comparison uses the earlier run on Tessera's spec.
+    [
+      "glidesort",
+      [
+        tracked(uuid, "2026-11-03T00:00:00Z", at([20, 20, 400])),
+        tracked(other, "2026-11-04T00:00:00Z", at([1, 1, 1])),
+      ],
+    ],
+    // Lacks the reverse input, so it is listed but not ranked as a loss or a win.
+    ["radsort", [tracked(uuid, "2026-11-05T00:00:00Z", { [cases[0]]: 5 })]],
+  ]);
+  assert.equal(latestRuns(new Map())?.spec, undefined);
+  const latest = latestRuns(runs)!;
+  assert.equal(latest.spec, uuid);
+  assert.equal(latest.runs.get("glidesort")?.time, "2026-11-03T00:00:00Z");
+  const data = comparisonData(runs)!;
+  assert.deepEqual(
+    data.runs.map((entry) => [entry.algorithm, entry.memory]),
+    [
+      ["tessera", true],
+      ["std-stable", true],
+      ["glidesort", false],
+      ["radsort", false],
+    ],
+  );
+  assert.deepEqual(data.overview, data.figures[0]);
+  const overview = data.overview!.chart;
+  assert.match(overview.guide, /the 2 measured input patterns/);
+  assert.deepEqual(overview.columns, ["Speed", "Extra memory"]);
+  const rows = overview.groups.flatMap((group) => group.rows);
+  const tessera = rows.find((row) => row.strong)!;
+  // Geometric mean of 40/10 and 20/20; the worst peak over the cohort's cases.
+  assert.deepEqual(tessera.cells, ["2×", "100 B"]);
+  assert.ok(!JSON.stringify(rows).includes("radsort"));
+  // Without a cohort, the comparison is published empty, replacing any earlier one.
+  const alone = comparisonData(new Map([["tessera", runs.get("tessera")!]]));
+  assert.deepEqual([alone.spec, alone.runs, alone.overview, alone.figures], [uuid, [], null, []]);
+  assert.equal(comparisonData(new Map()).spec, null);
+  // Element types compare over the patterns every type has: here only random.
+  const types = comparisonData(
+    new Map([
+      ...runs,
+      [
+        "tessera",
+        [
+          tracked(uuid, "2026-11-06T00:00:00Z", {
+            ...at([10, 20, 100]),
+            "f64/random/65536/s1": 10,
+          }),
+        ],
+      ],
+      [
+        "std-stable",
+        [
+          tracked(uuid, "2026-11-06T00:00:00Z", {
+            ...at([40, 20, 800]),
+            "f64/random/65536/s1": 30,
+          }),
+        ],
+      ],
+    ]),
+  ).figures.find((figure) => figure.name === "types");
+  assert.match(types!.chart.guide, /on the random input$/);
 });

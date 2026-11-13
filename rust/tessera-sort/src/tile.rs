@@ -349,11 +349,16 @@ mod tests {
 
     #[test]
     fn changing_keys_finish_tile() {
-        let mut records: Vec<_> = (0..1000u64).collect();
+        // Keep a late varying witness after 128 constant child-scan keys.
+        // Miri must retain that suffix, not just exceed the insertion leaf.
+        let len = if cfg!(miri) { 193 } else { 1000 };
+        let mut records: Vec<_> = (0..len).collect();
         let mut scratch = Scratch::new();
         let mut calls = 0;
-        // Sustain constant answers beyond a histogram, independently of node
-        // sampling. Child scans then reintroduce every bit, including the digit.
+        let mut changed = false;
+        // Each histogram puts all records in one bucket. The following child
+        // scan reintroduces every bit, including the consumed partition digit.
+        // Tiles do not sample; the 128-key delay tests a late scan witness.
         let constant_calls = 128 + records.len();
         let mut extractor = ByKey(|_: &u64| {
             assert!(calls < 12_000, "tile recursion did not make progress");
@@ -362,12 +367,14 @@ mod tests {
             if phase < constant_calls || phase.is_multiple_of(2) {
                 0
             } else {
+                changed = true;
                 u64::MAX
             }
         });
         scratch.sort(&mut records, u64::MAX as u128, &mut extractor);
+        assert!(changed, "fixture never supplied a varying key");
         records.sort_unstable();
-        assert_eq!(records, (0..1000u64).collect::<Vec<_>>());
+        assert_eq!(records, (0..len).collect::<Vec<_>>());
     }
 
     /// Narrowing must retain callback caching through both scatter and recovery.
@@ -411,9 +418,14 @@ mod tests {
     fn cache_tail_after_odd_records() {
         #[derive(Clone, Debug, PartialEq, Eq)]
         struct Odd([u8; 3]);
+        // Alignment after odd-sized records is independent of table width.
+        // Miri keeps the cached scatter and tail padding with a small table;
+        // native tests also initialize and scan the wide cursor prefix.
+        let width = if cfg!(miri) { 6 } else { 14 };
+        let mask = (1u16 << width) - 1;
         let mut records: Vec<_> = (0..65u16)
             .map(|id| {
-                let bits = (id * 251).to_le_bytes();
+                let bits = ((id * 251) & mask).to_le_bytes();
                 Odd([bits[0], bits[1], id as u8])
             })
             .collect();
@@ -423,11 +435,8 @@ mod tests {
         let mut key = ByKey(|x: &Odd| u16::from_le_bytes([x.0[0], x.0[1]]));
         scratch.partition_tile(
             &mut records,
-            Digit {
-                shift: 0,
-                width: 14,
-            },
-            0x3fff,
+            Digit { shift: 0, width },
+            u128::from(mask),
             &mut key,
         );
         assert_eq!(records, expected);

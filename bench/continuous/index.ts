@@ -2,6 +2,7 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { codeChange } from "../code-change.ts";
 import { chartSvg } from "./chart.ts";
 import {
   type ActionContext,
@@ -23,6 +24,7 @@ interface PublicationOptions {
   context: ActionContext;
   core: ActionsCore;
   fetchHistory?: typeof fetch;
+  readCodeChange?: typeof codeChange;
   inputs: PairedSource & {
     artifacts: string;
     prepared: string;
@@ -44,6 +46,7 @@ export async function publishReport({
   core,
   inputs,
   fetchHistory,
+  readCodeChange = codeChange,
 }: PublicationOptions) {
   const { hash, baseHash, number, baseRef = "main", artifacts } = inputs;
   const publish = inputs.publish !== false;
@@ -78,6 +81,12 @@ export async function publishReport({
   } catch (error) {
     reason = String(error);
   }
+  let code: Awaited<ReturnType<typeof codeChange>> | undefined;
+  try {
+    code = await readCodeChange(baseHash, hash);
+  } catch (error) {
+    core.notice(`Core engine line analysis unavailable: ${String(error)}`);
+  }
   let links: ChartLinks = {};
   let imagesUnavailable = false;
   try {
@@ -108,6 +117,7 @@ export async function publishReport({
     chartRef: links.comparison,
     trendRef: links.trend,
     imagesUnavailable,
+    codeChange: code,
   };
   const body = summary ? render(summary, options) : renderFailure({ ...options, reason });
   if (checkId !== undefined)

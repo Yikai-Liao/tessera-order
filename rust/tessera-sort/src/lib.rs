@@ -67,10 +67,10 @@ extern crate alloc;
 mod block;
 mod engine;
 mod key;
+mod order;
 #[cfg(feature = "rayon")]
 mod parallel;
 mod portable_simd;
-mod scan;
 mod trace;
 #[cfg(test)]
 mod unwind;

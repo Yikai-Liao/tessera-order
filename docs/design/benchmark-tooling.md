@@ -28,6 +28,10 @@ The catalog is the language-neutral authority for identities and display names. 
 
 Plans decode into one validated selection ([plan grammar](../development/benchmarking.md#experiment-plans)); they contain no harness selector or implicit algorithms. TypeScript owns CLI overrides and the editor schema; Rust validates external plans and expands cases, including boundaries resolved from the measured crate. The catalog supplies one set of input identities and default lengths. All consumers use `CaseInput::new` and `Variant::prepare`; presets change coverage, not the implementation route. The [continuous plan](../../bench/plans/continuous.toml) owns PR and main coverage. Algorithm-block preparation explicitly retains its controls in the frozen plan. The Criterion/paired worker lists the timed IDs its adapters support, one per line, for both local preparation and remote tracking; no reference build reconstructs it. Criterion IDs are `rust/type/distribution/length/s1/mode`, comparison IDs `type/distribution/length/s1`; their formatters and decoders live in [`catalog.ts`](../../bench/catalog.ts) and [`plan.rs`](../../bench/rust/src/plan.rs) with a shared fixture. Reports check shards against their prepared inventory.
 
+## Planned operation workloads
+
+The [algorithm extensions proposal](algorithm-extensions-proposal.md#benchmark-workloads-and-the-existing-tools-cli) specifies how non-sort operations will reuse this pipeline. This is not implemented: current cases, kernels and CLI selections still mean full sorting. Operation identity, output validation and full-call allocation must be admitted end to end before new samples can share the existing report and recovery paths.
+
 ## Common changes
 
 The [validation commands](../../AGENTS.md#commands) and [CI coverage](../development/ci.md) apply to the changed boundary.

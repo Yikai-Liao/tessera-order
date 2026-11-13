@@ -167,7 +167,7 @@ pub(crate) unsafe trait Extract<T> {
     where
         Self: Sized,
     {
-        crate::engine::confirm_ascending(records, self, previous)
+        crate::order::confirm_ascending(records, self, previous)
     }
 
     /// Sorts `records` stably by insertion, without a swap limit.
@@ -177,7 +177,7 @@ pub(crate) unsafe trait Extract<T> {
     where
         Self: Sized,
     {
-        crate::engine::finish_insertion(records, self, crate::scan::by_key);
+        crate::order::finish_insertion(records, self, crate::order::by_key);
     }
 
     /// Sorts `records` stably by insertion within `budget` swaps.
@@ -189,7 +189,7 @@ pub(crate) unsafe trait Extract<T> {
     where
         Self: Sized,
     {
-        crate::engine::insertion_loop(records, budget, self, crate::scan::by_key)
+        crate::order::insertion_loop(records, budget, self, crate::order::by_key)
     }
 }
 
@@ -681,7 +681,7 @@ mod tests {
             let agrees = |records: &[K]| {
                 assert_eq!(
                     Direct.confirm_ascending(records, previous),
-                    crate::engine::confirm_ascending(records, &mut ByKey(|key: &K| *key), previous,),
+                    crate::order::confirm_ascending(records, &mut ByKey(|key: &K| *key), previous,),
                 );
             };
             agrees(&keys);

@@ -15,7 +15,7 @@ Every fact has one owner. Other pages link to it and never restate its numbers o
 | Change benchmark tooling or figures | [Tooling design](design/benchmark-tooling.md), [figure guide](development/benchmark-figures.md) |
 | Change CI, the site or a release | [CI](development/ci.md), [site guide](development/docs-site.md), [releases](../RELEASING.md) |
 | Contribute | [Contributing](../CONTRIBUTING.md) |
-| Plan future work | [Roadmap](../ROADMAP.md), [algorithm extensions proposal](design/algorithm-extensions-proposal.md), [Python binding design](design/python-binding.md) (both unimplemented) |
+| Plan future work | [Roadmap](../ROADMAP.md), [algorithm extensions proposal](design/algorithm-extensions-proposal.md), [Python binding design](design/python-binding.md) (not implemented) |
 
 ## Who owns what
 

@@ -32,62 +32,6 @@ use crate::key::{self, Direct, Extract, KeyDigit, KeyHalf, Rank, Unsigned};
 
 type KeyValue<T, E> = <E as Extract<T>>::Value;
 
-/// Stably inserts inverted records until sorted or the swap budget runs out.
-/// A failed pass still leaves a stable permutation of the input.
-///
-/// The scanner returns the earliest descending adjacent pair in its shared
-/// suffix, using the same extractor where it needs user keys. Direct-key
-/// callers instead capture the backend selected for this entire pass.
-/// The SIMD caller enters this from a target-feature context. Keeping the
-/// loop in that context avoids out-of-line calls for each vector operation.
-#[inline(always)]
-pub(crate) fn insertion_loop<T, E: Extract<T>>(
-    records: &mut [T],
-    budget: usize,
-    extractor: &mut E,
-    mut first_inversion: impl FnMut(&[T], &mut E) -> Option<usize>,
-) -> Option<usize> {
-    let mut swaps = 0;
-    let mut start = 0;
-    while let Some(offset) = first_inversion(&records[start..], extractor) {
-        let index = start + offset + 1;
-        let (prefix, tail) = records.split_at_mut(index);
-        let (mut current, prefix) = prefix.split_last_mut().unwrap();
-        // The scan already compared this pair, so swap without re-reading keys.
-        core::mem::swap(current, &mut tail[0]);
-        swaps += 1;
-        if swaps > budget {
-            return None;
-        }
-        for before in prefix.iter_mut().rev() {
-            if extractor.key(before) <= extractor.key(current) {
-                break;
-            }
-            core::mem::swap(before, current);
-            current = before;
-            swaps += 1;
-            if swaps > budget {
-                return None;
-            }
-        }
-        start = index;
-    }
-    Some(swaps)
-}
-
-/// Finishes insertion without a swap limit.
-///
-/// The unit return keeps the unused swap total inside the inlined operation,
-/// so it can be discarded before returning across a target-feature boundary.
-#[inline(always)]
-pub(crate) fn finish_insertion<T, E: Extract<T>>(
-    records: &mut [T],
-    extractor: &mut E,
-    first_inversion: impl FnMut(&[T], &mut E) -> Option<usize>,
-) {
-    let _ = insertion_loop(records, usize::MAX, extractor, first_inversion);
-}
-
 /// Scans until all candidate bits have appeared in both states, or the input ends.
 /// Only candidate bits are returned, so even changing keys cannot restore a
 /// parent partition digit and prevent the recursion from making progress.
@@ -422,22 +366,6 @@ fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
         current = after;
     }
     Order::Descending { strict }
-}
-
-/// Confirms ascending keys after an already encoded predecessor.
-#[inline]
-pub(crate) fn confirm_ascending<T, E: Extract<T>>(
-    records: &[T],
-    extractor: &mut E,
-    previous: E::Value,
-) -> bool {
-    records
-        .iter()
-        .try_fold(previous, |before, record| {
-            let after = extractor.key(record);
-            (before <= after).then_some(after)
-        })
-        .is_some()
 }
 
 /// Finishes a strictly descending array: every key is distinct, so one

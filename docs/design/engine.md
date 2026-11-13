@@ -20,6 +20,7 @@ This page owns the engine's code boundaries and invariants in `rust/tessera-sort
 | Owner | Complete responsibility | Consumers need to know |
 |---|---|---|
 | `engine.rs` | Root preparation, candidate-bit progress, recursive node execution. Both entries take the extractor by value and wrap a narrowed 128-bit key in one `KeyHalf` (`key.rs`), which owns truncation and counting-window translation | Public sort contracts and complete partition and finishing operations |
+| `order.rs` | Scalar order scans and stable insertion loops, independent of recursive execution | Extractors supply keys; direct-key callers supply a scan in their selected SIMD context |
 | `engine/plan.rs` | Bounded sampling, node and tile decisions, digit work estimates | Records, candidate variation and tile capacity go in; an executable decision comes out |
 | `engine/tile.rs` | Capacity, scratch allocation, cached classification, counting passes and restoration | Finish a cursor-bounded slice; no raw pointer, cursor layout or guard crosses the boundary |
 | `block.rs`, `block/` | Physical block storage, stable bucket chains, ledger costs, completion and recovery | A `Classify` bucket per record goes in; bucket boundaries and completed bands come out |
@@ -106,7 +107,7 @@ When the root digit covers all remaining variation in at most eight bits, direct
 
 ## Insertion and scans
 
-Every insertion pass, a budgeted probe or the finish of a tile or bucket, runs `insertion_loop`: find the first descending adjacent pair, move the later record left, resume after it. A probe returns its swap count and may stop at its budget. `finish_insertion` has no budget and returns `()`, so no unused count crosses a target-feature boundary. The loop receives an inversion scan alongside the extractor: user-key scans use the same mutable extractor, direct-key passes capture the backend selected before entering the loop. No insertion-only extractor carries a SIMD token.
+Every insertion pass, a budgeted probe or the finish of a tile or bucket, runs `order::insertion_loop`: find the first descending adjacent pair, move the later record left, resume after it. A probe returns its swap count and may stop at its budget. `finish_insertion` has no budget and returns `()`, so no unused count crosses a target-feature boundary. The loop receives an inversion scan alongside the extractor: user-key scans use the same mutable extractor, direct-key passes capture the backend selected before entering the loop. No insertion-only extractor carries a SIMD token.
 
 | Pass | Implementation |
 |---|---|

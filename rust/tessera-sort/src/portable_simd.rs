@@ -52,10 +52,10 @@ pub(crate) fn finish_insertion<K: RadixKey>(keys: &mut [K]) {
     // Every slice the scan sees is a suffix of `keys`, so a short pass never
     // reaches the vector kernel and skips dispatch.
     if keys.len() < SIMD_MIN {
-        crate::engine::finish_insertion(keys, &mut Direct, crate::scan::by_key);
+        crate::order::finish_insertion(keys, &mut Direct, crate::order::by_key);
         return;
     }
-    dispatch!(Level::new(), simd => crate::engine::finish_insertion(keys, &mut Direct, |values, _| first_inversion_with(simd, values)));
+    dispatch!(Level::new(), simd => crate::order::finish_insertion(keys, &mut Direct, |values, _| first_inversion_with(simd, values)));
 }
 
 /// Sorts `keys` stably by insertion within `budget` swaps, dispatched once.
@@ -64,9 +64,9 @@ pub(crate) fn finish_insertion<K: RadixKey>(keys: &mut [K]) {
 /// that case `keys` is a stable permutation of its input.
 pub(crate) fn insertion_sort<K: RadixKey>(keys: &mut [K], budget: usize) -> Option<usize> {
     if keys.len() < SIMD_MIN {
-        return crate::engine::insertion_loop(keys, budget, &mut Direct, crate::scan::by_key);
+        return crate::order::insertion_loop(keys, budget, &mut Direct, crate::order::by_key);
     }
-    dispatch!(Level::new(), simd => crate::engine::insertion_loop(keys, budget, &mut Direct, |values, _| first_inversion_with(simd, values)))
+    dispatch!(Level::new(), simd => crate::order::insertion_loop(keys, budget, &mut Direct, |values, _| first_inversion_with(simd, values)))
 }
 
 /// Converts per-bucket counts to per-bucket starts, in place.
@@ -113,7 +113,7 @@ fn prefix_sum_with<S: Simd>(simd: S, counts: &mut [u16]) {
 #[inline]
 pub(crate) fn confirm_ascending<K: RadixKey>(values: &[K], previous: K::Encoded) -> bool {
     if values.len() < SIMD_MIN {
-        return crate::engine::confirm_ascending(values, &mut Direct, previous);
+        return crate::order::confirm_ascending(values, &mut Direct, previous);
     }
     previous <= values[0].encode() && first_inversion(values).is_none()
 }
@@ -127,10 +127,10 @@ pub(crate) fn first_inversion<K: RadixKey>(values: &[K]) -> Option<usize> {
 #[inline(always)]
 fn first_inversion_with<S: Simd, K: RadixKey>(simd: S, values: &[K]) -> Option<usize> {
     if values.len() < SIMD_MIN {
-        return crate::scan::by_key(values, &mut Direct);
+        return crate::order::by_key(values, &mut Direct);
     }
     let peel = PEEL.min(values.len() - 1);
-    if let Some(index) = crate::scan::by_key(&values[..=peel], &mut Direct) {
+    if let Some(index) = crate::order::by_key(&values[..=peel], &mut Direct) {
         return Some(index);
     }
     scan_pairs(simd, &values[peel..]).map(|offset| offset + peel)
@@ -142,7 +142,7 @@ fn scan_pairs<S: Simd, K: RadixKey>(simd: S, values: &[K]) -> Option<usize> {
     const BLOCK: usize = 32;
     let lanes = K::lanes::<S>();
     if lanes == 1 {
-        return crate::scan::by_key(values, &mut Direct);
+        return crate::order::by_key(values, &mut Direct);
     }
     let vectors = (BLOCK / lanes).max(1);
     let block_len = vectors * lanes;

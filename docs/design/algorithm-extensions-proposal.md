@@ -1,6 +1,6 @@
 # Algorithm extensions proposal
 
-Status: proposed, not implemented. This page specifies candidate Rust interfaces, internal dependency changes and implementation order. It does not add public exports or change the current [semantics](../../conformance/semantics.md). Unimplemented interfaces stay in this document, not as exported stubs or `todo!()` functions.
+Status: experiment in progress; new public interfaces are not implemented. This page specifies candidate Rust interfaces, internal dependency changes and implementation order. Implemented boundaries belong in the [engine reference](engine.md); the [roadmap](../../ROADMAP.md#algorithm-extension-experiment) tracks acceptance. It does not add public exports or change the current [semantics](../../conformance/semantics.md). Unimplemented interfaces stay in this document, not as exported stubs or `todo!()` functions.
 
 ## Scope and direction
 
@@ -221,7 +221,7 @@ The [roadmap](../../ROADMAP.md#algorithm-extension-experiment) owns progress and
 
 | Stage | Complete deliverable | Separation and acceptance |
 |---|---|---|
-| Foundation A | Move shared order primitives out of recursive engine ownership. | A structural commit: retain existing scan, dispatch, routing and allocation behavior. Validate current serial and Rayon entry points. |
+| Foundation A | Shared order primitives: [implemented boundary](engine.md#insertion-and-scans). | Retain existing scan, dispatch, routing and allocation behavior. Validate current serial and Rayon entry points. |
 | Foundation B | Give the tile subsystem its complete leaf analysis and storage boundary outside recursive node ownership; centralize encoded digit meaning and candidate scans at their lower-level owners. | Relocate existing implementations without wrapper layers or rule changes. Preserve LSD alternation, scan-free small leaves and order-aware large children; validate the existing tile and node consumers. |
 | Foundation C | Provide final band ranges and migrate every serial, parallel, recovery and trace consumer. | Another structural commit: no new public algorithm, scan, allocation policy or scheduling rule. Check callback ranges against independent cumulative bucket lengths, including sparse buckets. |
 | Foundation D | Establish the common rank-requirement authority, ordered execution boundary and private workspace handoff; migrate existing full sorting as the first complete consumer. | No prefix-only execution branch or second engine. Preserve root and child facts, tile fast paths, serial scratch reuse and current parallel admission. Demonstrate the target change paths above before adding public algorithms. |
@@ -234,6 +234,30 @@ The [roadmap](../../ROADMAP.md#algorithm-extension-experiment) owns progress and
 | 7 | Incremental prefix completion. | First establish borrowing, panic invalidation and frontier-space invariants; then reuse one-shot analysis. Do not add insertion, record-removing iteration or PQ operations. |
 
 The sequence is an implementation order, not permission to postpone the target dependency design until each feature arrives. A public function is exported only with its complete implementation, rustdoc and tests. Keep structural changes separate from algorithm, routing and capacity changes. After each stage, remove temporary entry points and update the owning current documents; replace implemented proposal sections with links rather than keeping a second contract.
+
+## Benchmark workloads and the existing tools CLI
+
+Extend the existing `bun run tools` pipeline, not a second benchmark executable or an algorithm-specific command family. Its current input generation, `Variant::prepare` capability boundary, restorable `Kernel`, process-isolated allocation measurement, retained builds, journals and offline statistics remain useful. The assumptions to remove are that every case means a full sort, every output is a reordered input buffer, and exact full-reference equality is always the right checker.
+
+A workload is an operation with validated parameters plus an input case. An implementation identity remains an implementation identity: do not encode argsort or Top-k by inventing sorting-algorithm names or abusing the serial/parallel mode. Resolve parameters once into the prepared inventory; include them in grouping, sample identity, memory evidence, resume validation and report labels. Requested rank fractions become exact ranks before any adapter runs, with their rounding rule recorded. Do not compare or aggregate ratios across different result contracts.
+
+| Operation | Parameter axes | Verification and equivalent baseline |
+|---|---|---|
+| Full sort | Existing input and mode axes. | Current exact stable-reference or unstable permutation checker. Preserve existing measurements and figures. |
+| Argsort | Input representation and distribution; the returned index vector is part of the operation. | Verify an exact stable index permutation against source keys. Compare with index construction plus standard stable index sorting, not direct record sorting. |
+| Segments | Validated segment offsets or a reproducible segment-length specification. | Reference-sort each segment independently. Include public-call allocation and initialization; do not time only one isolated segment as a batch API. |
+| Binary / multiway partition | A deterministic classifier and category count, with a reproducible category distribution. | Verify complete category boundaries and stable member identity. Use a stable reference distribution; distinguish sort-based and output-buffer baselines by their full costs. |
+| Prefix / rank range | Prefix length or nonempty rank interval, including boundary-heavy ties. | Compare required positions and all outer memberships with complete stable sorting. Charge the full public operation, not only the final prefix sort. |
+| Single / multiple selection | Exact target indices or a normalized index specification. | Verify selected record identities and memberships of all intervening regions. Unstable selection is a separately labelled weaker-contract comparison, not the stable anchor. |
+| Incremental prefix | A recorded sequence of increasing requests. | Verify every published prefix. Report whole-session cost and individual extension latency; do not substitute repeated fresh Top-k calls or mix persistent setup with steady-state samples. |
+
+`Kernel::measure_batch` remains the common clock boundary, but its documented meaning becomes operation execution, not sorting. Each prepared kernel owns the required output shape, restoration and checker. An argsort kernel may share immutable source records across repetitions but must create the public result inside the timed call, retain it through verification and account for its memory; resetting and destroying a previous output happen outside the timed region. A separate allocation process reports peak call allocation, with mandatory output bytes explicitly distinguished from extra workspace. Partition and partial-order checks must inspect identities, not just key values or locally sorted windows.
+
+`Variant::prepare` remains the authority for supported operation/input/implementation combinations. Reuse typed record semantics and generation; do not duplicate support matrices in TypeScript, the catalog and worker code. Preparation returns the concrete inventory and reasons unsupported selections were omitted or rejected. Required controls must implement the same operation; an unavailable old-revision API is an explicit capability limitation, never silent fallback to complete sorting. Hosted full-sort tracking stays unchanged until an operation has local verification and evidence support.
+
+Keep task-oriented commands: `plan` previews selection, `compare algorithms` compares implementations of one operation, `compare revisions` compares sources implementing the same operation, and `report` regenerates retained data. Add an operation selector and only the relevant validated parameters when the first new kernel exists. Default existing invocations to full sorting. Show the selected operation, resolved parameters, valid implementations and experiment size in preview output; fail incompatible parameter combinations before building. No interactive wizard is required for iteration. Rework command spelling only if this complete workflow cannot be expressed clearly; the old sorting-only parser is not the design authority.
+
+Persisted formats need an explicit version and workload identity before non-sort samples are admitted. Continue reading historical sorting results as sorting without changing their IDs or figures; never infer a new operation from an algorithm label or report text. Admit the first new operation end to end (plan, preparation, timing, verification, memory, resume and offline report) before adding more axes. This benchmark slice follows the engine foundations and accompanies the first new public operation.
 
 ## Validation and evidence
 

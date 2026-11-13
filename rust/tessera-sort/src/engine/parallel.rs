@@ -61,34 +61,6 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
     .sort_root(records, varying);
 }
 
-/// Recycles scratch between bucket finishers without locking during user code.
-struct Pool<T> {
-    free: std::sync::Mutex<Vec<Scratch<T>>>,
-}
-
-impl<T> Pool<T> {
-    fn new() -> Self {
-        Self {
-            free: std::sync::Mutex::new(Vec::new()),
-        }
-    }
-
-    fn take(&self) -> Scratch<T> {
-        self.free
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .pop()
-            .unwrap_or_else(Scratch::new)
-    }
-
-    fn give(&self, scratch: Scratch<T>) {
-        self.free
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .push(scratch);
-    }
-}
-
 impl<T: Send, E: Extract<T> + Clone + Sync> Sorter<'_, T, E> {
     /// Partitions the root and finishes each bucket in its movement task.
     fn sort_root(&mut self, records: &mut [T], varying: u128)
@@ -140,25 +112,28 @@ impl<T: Send, E: Extract<T> + Clone + Sync> Sorter<'_, T, E> {
         split: Split,
         shards: usize,
     ) {
-        let pool = Pool::new();
         let extractor = &*self.extractor;
         let tile_len = self.tile_len;
-        let visit = |bucket: usize, child: &mut [T]| {
-            if split.candidate == 0 || split.finished == Some(bucket) {
-                return;
+        // Rayon initializes after splitting jobs; grown scratch is never cloned.
+        // Each live or suspended visitor owns a disjoint group of root buckets.
+        // Charge every retained Vec high-water mark to that group's largest bucket,
+        // not its current bucket or worker count; see docs/design/engine.md.
+        let make_visit = || {
+            let mut scratch = Scratch::new();
+            move |bucket: usize, child: &mut [T]| {
+                if split.candidate == 0 || split.finished == Some(bucket) {
+                    return;
+                }
+                // Movement retired every source and released its locks before
+                // lending this final band. Finish in the same movement task.
+                let mut key = extractor.clone();
+                Sorter::<T, E> {
+                    scratch: &mut scratch,
+                    extractor: &mut key,
+                    tile_len: tile::finishing_capacity::<T>(child.len(), tile_len),
+                }
+                .sort_child(child, split.candidate);
             }
-            // Movement retired every source and released its locks before lending
-            // this final band. Finish in that task instead of handing it to a second
-            // queue. Tile storage owns whether the whole child fits one tile.
-            let mut key = extractor.clone();
-            let mut scratch = pool.take();
-            Sorter::<T, E> {
-                scratch: &mut scratch,
-                extractor: &mut key,
-                tile_len: tile::finishing_capacity::<T>(child.len(), tile_len),
-            }
-            .sort_child(child, split.candidate);
-            pool.give(scratch);
         };
         block::partition_parallel(
             records,
@@ -166,7 +141,7 @@ impl<T: Send, E: Extract<T> + Clone + Sync> Sorter<'_, T, E> {
             classifier,
             &mut self.scratch.block,
             shards,
-            &visit,
+            &make_visit,
         );
     }
 }

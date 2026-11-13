@@ -21,8 +21,9 @@ use crate::{RadixKey, engine};
 ///
 /// For pool width `P`, auxiliary space is O(P√n) for fixed record size and
 /// key width. Root scratch and directories use O(√(nP)). Up to the fixed root
-/// fan-out R of 4096 finishers can retain serial scratch, including suspended
-/// callbacks; checked-out and pooled allocations both count. Whole-child tiles
+/// fan-out R of 4096 completion jobs can retain serial scratch, including
+/// suspended callbacks and capacities grown by earlier buckets. Each job reuses
+/// its scratch across its own group of buckets. Whole-child tiles
 /// have bounded byte and cursor capacity, independent of n. Direct counting
 /// uses O(PR) histogram storage. No contiguous n-record output or private bucket
 /// staging is allocated. Rayon runtime storage and thread stacks are separate.

@@ -2,8 +2,6 @@
 
 //! Direct final-band completion through one relocatable-source ledger.
 
-#[cfg(feature = "rayon")]
-use super::parallel::BucketVisit;
 use super::*;
 use crate::trace::{self, Event};
 use core::ops::DerefMut;
@@ -507,20 +505,26 @@ pub(super) fn complete_serial<'records, T>(
 
 /// Completes all scattered partitions in the caller's pool and lends final
 /// bands. The completion guard restores pending bands after all jobs join.
+/// A factory panic also leaves recovery to this guard, without creating another
+/// visitor during restoration.
 ///
 /// # Safety
 ///
 /// The [`build_completion`] requirements hold.
 #[cfg(feature = "rayon")]
-pub(super) unsafe fn complete<'records, T: Send>(
+pub(super) unsafe fn complete<'records, T: Send, F, Visit>(
     input: *mut T,
     input_len: usize,
     partitions: &mut [Partition<'records, '_, T>],
     parallel: bool,
-    visit: Option<BucketVisit<'_, 'records, T>>,
-) -> Vec<usize> {
+    make_visit: &F,
+) -> Vec<usize>
+where
+    F: Fn() -> Visit + Sync,
+    Visit: FnMut(usize, &'records mut [T]),
+{
     // SAFETY: forwarded from the caller.
-    unsafe { complete_with_fault(input, input_len, partitions, parallel, visit, None) }
+    unsafe { complete_with_fault(input, input_len, partitions, parallel, make_visit, None) }
 }
 
 /// Completes with an injected scheduler failure between bucket jobs.
@@ -529,22 +533,26 @@ pub(super) unsafe fn complete<'records, T: Send>(
 ///
 /// The [`build_completion`] requirements hold.
 #[cfg(feature = "rayon")]
-unsafe fn complete_with_fault<'records, T: Send>(
+unsafe fn complete_with_fault<'records, T: Send, F, Visit>(
     input: *mut T,
     input_len: usize,
     partitions: &mut [Partition<'records, '_, T>],
     parallel: bool,
-    visit: Option<BucketVisit<'_, 'records, T>>,
+    make_visit: &F,
     fail_after: Option<usize>,
-) -> Vec<usize> {
+) -> Vec<usize>
+where
+    F: Fn() -> Visit + Sync,
+    Visit: FnMut(usize, &'records mut [T]),
+{
     use rayon::prelude::*;
     // SAFETY: forwarded from the caller.
     let mut completion = unsafe {
         build_completion::<T, Mutex<usize>, Mutex<Vec<usize>>>(input, input_len, partitions)
     };
     let completed = AtomicUsize::new(0);
-    let run = |bucket: &mut Bucket| {
-        bucket.finish(&completion.storage, visit);
+    let run = |visit: &mut Visit, bucket: &mut Bucket| {
+        bucket.finish(&completion.storage, Some(visit));
         if let Some(fail_after) = fail_after {
             let position = completed.fetch_add(1, Ordering::Relaxed);
             assert_ne!(
@@ -554,9 +562,16 @@ unsafe fn complete_with_fault<'records, T: Send>(
         }
     };
     if parallel {
-        completion.buckets.par_iter_mut().for_each(run);
+        completion
+            .buckets
+            .par_iter_mut()
+            .for_each_init(make_visit, run);
     } else {
-        completion.buckets.iter_mut().for_each(run);
+        let mut visit = make_visit();
+        completion
+            .buckets
+            .iter_mut()
+            .for_each(|bucket| run(&mut visit, bucket));
     }
     core::mem::take(&mut completion.ends)
 }
@@ -611,6 +626,7 @@ mod tests {
         shards: usize,
         finish: &(dyn Fn(&mut [T]) + Sync),
     ) {
+        let visit = |_, band| finish(band);
         partition_impl_with_visit(
             records,
             3,
@@ -621,7 +637,7 @@ mod tests {
                 block_size: Some(block_size),
                 parallel: !cfg!(miri),
             },
-            Some(&|_, band| finish(band)),
+            &|| &visit,
         );
     }
 
@@ -908,6 +924,16 @@ mod tests {
                     .map(|(id, value)| (((id * 7919 + 73) % 256) as u32, id, value))
                     .collect();
                 let result = unwind::catch(|| {
+                    let visit = |_, band: &mut [(u32, usize, &mut Cell<usize>)]| {
+                        if !cfg!(miri) {
+                            let (a, b) = rayon::join(|| 13 * 7, || 13 * 7);
+                            assert_eq!(a, b);
+                        }
+                        crate::stable_sort_by_key(band, |record| {
+                            assert_ne!(Some(record.1), fail, "streamed callback panic");
+                            record.0
+                        });
+                    };
                     partition_impl_with_visit(
                         &mut records,
                         3,
@@ -918,16 +944,7 @@ mod tests {
                             block_size: Some(block_size),
                             parallel: !cfg!(miri),
                         },
-                        Some(&|_, band| {
-                            if !cfg!(miri) {
-                                let (a, b) = rayon::join(|| 13 * 7, || 13 * 7);
-                                assert_eq!(a, b);
-                            }
-                            crate::stable_sort_by_key(band, |record| {
-                                assert_ne!(Some(record.1), fail, "streamed callback panic");
-                                record.0
-                            });
-                        }),
+                        &|| &visit,
                     )
                 });
                 assert_eq!(result.is_err(), fail.is_some());
@@ -986,7 +1003,9 @@ mod tests {
                 assert!(sorter.step(|record: &Owned| record.id * 37 % 4).is_ok());
                 let mut shards = [sorter];
                 // SAFETY: one shard covers all records from their ancestor.
-                unsafe { complete_with_fault(input, len, &mut shards, parallel, None, Some(0)) };
+                unsafe {
+                    complete_with_fault(input, len, &mut shards, parallel, &|| |_, _| {}, Some(0))
+                };
             });
             assert!(result.is_err());
             let mut ids: Vec<_> = records.iter().map(|record| record.id).collect();

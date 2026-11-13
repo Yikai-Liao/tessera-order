@@ -23,7 +23,7 @@ This page owns the engine's code boundaries and invariants in `rust/tessera-sort
 | `engine/plan.rs` | Bounded sampling, node and tile decisions, digit work estimates | Records, candidate variation and tile capacity go in; an executable decision comes out |
 | `engine/tile.rs` | Capacity, scratch allocation, cached classification, counting passes and restoration | Finish a cursor-bounded slice; no raw pointer, cursor layout or guard crosses the boundary |
 | `block.rs`, `block/` | Physical block storage, stable bucket chains, ledger costs, completion and recovery | A `Classify` bucket per record goes in; bucket boundaries and completed bands come out |
-| `engine/parallel.rs` | Shard count, task scheduling and scratch pooling for the shared decisions | Exclusive bucket borrows and the planner's decision, not a second cost model |
+| `engine/parallel.rs` | Shard count, task scheduling and job-local scratch for the shared decisions | Exclusive bucket borrows and the planner's decision, not a second cost model |
 
 A change to sampled occupancy or a leaf estimate stays in planning and does not touch record movement. A change to tile scratch layout stays with its counting and recovery operation. Tile cursor size, record capacity, alignment padding and table capacity derive from the cursor type and the shared byte budget, and planning consumes those facts. Block metadata costs are derived beside the physical representation (`finish::serial_descriptor_bytes`), not copied into the strategy model.
 
@@ -83,7 +83,7 @@ Once all of a band's sources retire and every destination block is protected, th
 
 ### Progress, recovery and retained scratch
 
-Every free cache is registered before jobs start and stays discoverable until movement and recovery finish. Writers try their own cache, then the shared reserve, then peers without blocking. A free search holds no physical-owner lock, and no cache, owner or scratch-pool lock spans user code.
+Every free cache is registered before jobs start and stays discoverable until movement and recovery finish. Writers try their own cache, then the shared reserve, then peers without blocking. A free search holds no physical-owner lock, and no cache or owner lock spans user code.
 
 After retiring g source prefixes, a bucket touches at most g + 2 destination blocks; while waiting to protect the next one, at most one extra is final. With q shards and R buckets, the ledger starts with at least qR free blocks, so at least qR − R genuinely free blocks remain to cover the other buckets' at most R − 1 checked-out candidates when q ≥ 2. Lock holders perform finite movement without callbacks or Rayon scheduling. This rules out an internal resource wait cycle, given returning callbacks and eventual execution of runnable work; it does not cover arbitrary user blocking or starvation.
 
@@ -98,7 +98,11 @@ Serial completion uses exclusive `RefCell` metadata, which keeps non-`Send` reco
 - Once all ledger tables and bucket ends exist, each shard clears `owns_recovery` before movement begins; the ledger then owns restoring the whole input. Shard scratch stays alive until completion and recovery return, and stale source bytes are never treated as live records.
 - Building the ledger during scatter-panic recovery can allocate; once built, its recovery moves records without allocating or calling user code.
 
-Root scratch, the shard links and the ledger use O(√(nP)) space for pool width P. Reentrant callbacks can suspend up to R finishers, not merely P, and each checked-out or pooled scratch allocation stays charged: tile records, cached IDs, block scratch and serial continuation metadata. The tile allowance bounds one complete child independently of n, not all finisher storage. Nested public calls own separate scratch. The [P5 analysis](evidence.md#p5-recursive-parallel-nodes) requires retiring all parent capacities before admitting another parallel phase; the key-width depth bound alone does not justify recursive parallel admission.
+Root scratch, the shard links and the ledger use O(√(nP)) space for pool width P. Each Rayon completion job creates empty serial scratch and reuses it across its own group of root buckets; scratch never crosses jobs. Active and reentrantly suspended jobs can retain up to R scratch allocations, not merely P.
+
+Charge every component's retained high-water capacity, including tile records, cached IDs, block buffers and serial continuation metadata, against the largest bucket mⱼ that its group has processed or is processing. For J retained groups, disjoint root buckets give J ≤ R and Σmⱼ ≤ n. With fixed record size, radix and key width, a monotone a√m+b bounds all these components together; summing gives at most a√(Rn)+bR for finishers. The constant b includes the fixed tile allowance and block floors, not just the current bucket's live contents. Job completion releases its scratch; a different job starts empty. Finite-input peak capacity and allocation counts depend on job grouping.
+
+Nested public calls own separate scratch. The [P5 analysis](evidence.md#p5-recursive-parallel-nodes) requires retiring all parent capacities before admitting another parallel phase; the key-width depth bound alone does not justify recursive parallel admission.
 
 ### Narrow direct keys
 

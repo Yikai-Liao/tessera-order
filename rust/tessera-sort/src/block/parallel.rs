@@ -5,11 +5,6 @@
 use super::*;
 use rayon::prelude::*;
 
-/// Publishes a bucket's index and exclusive final band, independently of other
-/// bucket movement.
-pub(super) type BucketVisit<'callback, 'records, T> =
-    &'callback (dyn Fn(usize, &'records mut [T]) + Sync);
-
 pub(super) struct Config {
     pub(super) shards: usize,
     pub(super) block_size: Option<usize>,
@@ -17,15 +12,21 @@ pub(super) struct Config {
 }
 
 /// Partitions the root into the `2^radix` buckets `classifier` assigns and
-/// completes it through the shared source ledger.
-pub(crate) fn partition_parallel<'records, T: Send, C: Classify<T> + Clone + Send>(
+/// completes it through the shared source ledger. Each Rayon job creates one
+/// mutable visitor, which may retain final bands and need not be Send or Sync.
+pub(crate) fn partition_parallel<'records, T: Send, C, F, Visit>(
     records: &'records mut [T],
     radix: usize,
     classifier: C,
     buffers: &mut Buffers<T>,
     shards: usize,
-    visit: BucketVisit<'_, 'records, T>,
-) -> Vec<usize> {
+    make_visit: &F,
+) -> Vec<usize>
+where
+    C: Classify<T> + Clone + Send,
+    F: Fn() -> Visit + Sync,
+    Visit: FnMut(usize, &'records mut [T]),
+{
     partition_impl_with_visit(
         records,
         radix,
@@ -36,7 +37,7 @@ pub(crate) fn partition_parallel<'records, T: Send, C: Classify<T> + Clone + Sen
             block_size: None,
             parallel: true,
         },
-        Some(visit),
+        make_visit,
     )
 }
 
@@ -48,17 +49,22 @@ fn partition_impl<T: Send, C: Classify<T> + Clone + Send>(
     buffers: &mut Buffers<T>,
     config: Config,
 ) -> Vec<usize> {
-    partition_impl_with_visit(arr, radix, classifier, buffers, config, None)
+    partition_impl_with_visit(arr, radix, classifier, buffers, config, &|| |_, _| {})
 }
 
-pub(super) fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clone + Send>(
+pub(super) fn partition_impl_with_visit<'records, T: Send, C, F, Visit>(
     arr: &'records mut [T],
     radix: usize,
     classifier: C,
     buffers: &mut Buffers<T>,
     config: Config,
-    visit: Option<BucketVisit<'_, 'records, T>>,
-) -> Vec<usize> {
+    make_visit: &F,
+) -> Vec<usize>
+where
+    C: Classify<T> + Clone + Send,
+    F: Fn() -> Visit + Sync,
+    Visit: FnMut(usize, &'records mut [T]),
+{
     assert!((1..=MAX_RADIX_BITS).contains(&radix));
     assert!(core::mem::size_of::<T>() != 0);
     assert!(arr.len() >= 2);
@@ -81,10 +87,9 @@ pub(super) fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clon
     let full_blocks = arr.len() / block_size;
     let shards = shards.min(full_blocks.max(1));
     if shards == 1 && config.block_size.is_none() {
+        let mut visit = make_visit();
         return partition(arr, radix, classifier, buffers, &mut |bucket, child, _| {
-            if let Some(callback) = visit {
-                callback(bucket, child);
-            }
+            visit(bucket, child);
         });
     }
     let input_len = arr.len();
@@ -134,7 +139,15 @@ pub(super) fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clon
     };
     // SAFETY: these completed guards cover consecutive disjoint block-aligned
     // ranges from the same ancestor. Only the final partition has a tail.
-    unsafe { finish::complete(input, input_len, &mut partitions, config.parallel, visit) }
+    unsafe {
+        finish::complete(
+            input,
+            input_len,
+            &mut partitions,
+            config.parallel,
+            make_visit,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -156,19 +169,20 @@ mod tests {
         expected.sort_by_key(|row| row.0);
         let pending = std::sync::Mutex::new(None::<&mut [(u64, String)]>);
         let mut buffers = Buffers::new();
+        let visit = |_, child| {
+            let mut pending = pending.lock().unwrap();
+            if let Some(previous) = pending.take() {
+                previous.sort_by_key(|row| row.0);
+            }
+            *pending = Some(child);
+        };
         partition_impl_with_visit(
             &mut rows,
             2,
             KeyDigit::new(ByKey(|row: &(u64, alloc::string::String)| row.0), 4),
             &mut buffers,
             config(3, 7),
-            Some(&|_, child| {
-                let mut pending = pending.lock().unwrap();
-                if let Some(previous) = pending.take() {
-                    previous.sort_by_key(|row| row.0);
-                }
-                *pending = Some(child);
-            }),
+            &|| &visit,
         );
         if let Some(previous) = pending.into_inner().unwrap() {
             previous.sort_by_key(|row| row.0);
@@ -185,18 +199,61 @@ mod tests {
         expected.sort();
         let mut buffers = Buffers::new();
         let result = catch_unwind(AssertUnwindSafe(|| {
+            let visit = |_, _| panic!("callback panic");
             partition_impl_with_visit(
                 &mut rows,
                 2,
                 KeyDigit::new(ByKey(|row: &(u64, alloc::string::String)| row.0), 4),
                 &mut buffers,
                 config(3, 7),
-                Some(&|_, _| panic!("callback panic")),
+                &|| &visit,
             );
         }));
         assert!(result.is_err());
         rows.sort();
         assert_eq!(rows, expected);
+    }
+
+    #[test]
+    fn job_local_visitor_can_own_non_send_state() {
+        use core::cell::Cell;
+        use std::rc::Rc;
+
+        let len = if cfg!(miri) { 23 } else { 113 };
+        let mut backing: Vec<_> = (0..len).map(Cell::new).collect();
+        let mut rows: Vec<_> = backing
+            .iter_mut()
+            .enumerate()
+            .map(|(id, record)| (((id * 37) % 16) as u64, id, record))
+            .collect();
+        let make_visit = || {
+            // Owning Rc requires job-local state; mutation requires FnMut.
+            let mut visited = Rc::new(0usize);
+            move |_: usize, band: &mut [(u64, usize, &mut Cell<usize>)]| {
+                *Rc::get_mut(&mut visited).unwrap() += band.len();
+                band.sort_by_key(|row| row.0);
+            }
+        };
+        partition_impl_with_visit(
+            &mut rows,
+            2,
+            KeyDigit::new(ByKey(|row: &(u64, usize, &mut Cell<usize>)| row.0), 2),
+            &mut Buffers::new(),
+            config(3, 5),
+            &make_visit,
+        );
+        assert!(
+            rows.windows(2)
+                .all(|pair| (pair[0].0, pair[0].1) <= (pair[1].0, pair[1].1))
+        );
+        for (_, id, record) in rows {
+            assert_eq!(record.get(), id);
+            record.set(id + 1);
+        }
+        assert_eq!(
+            backing.iter().map(Cell::get).collect::<Vec<_>>(),
+            (1..=len).collect::<Vec<_>>()
+        );
     }
 
     fn config(shards: usize, block_size: usize) -> Config {
@@ -218,6 +275,45 @@ mod tests {
         fn drop(&mut self) {
             assert_eq!(self.text, self.id.to_string());
             self.drops[self.id].fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn visitor_factory_panic_restores_owned_records() {
+        let len = if cfg!(miri) { 19 } else { 97 };
+        for block_size in [None, Some(5)] {
+            for parallel in [false, !cfg!(miri)] {
+                let drops = Arc::new((0..len).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
+                let mut rows: Vec<_> = (0..len)
+                    .map(|id| Owned {
+                        key: ((id * 37 + 11) % 16) as u64,
+                        id,
+                        text: id.to_string(),
+                        drops: drops.clone(),
+                    })
+                    .collect();
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    partition_impl_with_visit(
+                        &mut rows,
+                        2,
+                        KeyDigit::new(ByKey(|row: &Owned| row.key), 2),
+                        &mut Buffers::new(),
+                        Config {
+                            shards: if block_size.is_none() { 1 } else { 3 },
+                            block_size,
+                            parallel,
+                        },
+                        &|| -> fn(usize, &mut [Owned]) { panic!("visitor factory panic") },
+                    );
+                }));
+                assert!(result.is_err());
+                let mut ids: Vec<_> = rows.iter().map(|row| row.id).collect();
+                ids.sort_unstable();
+                assert_eq!(ids, (0..len).collect::<Vec<_>>());
+                assert!(drops.iter().all(|count| count.load(Ordering::SeqCst) == 0));
+                drop(rows);
+                assert!(drops.iter().all(|count| count.load(Ordering::SeqCst) == 1));
+            }
         }
     }
 
@@ -308,20 +404,21 @@ mod tests {
         expected.sort_by_key(|r| r.0);
         let pending = std::sync::Mutex::new(None::<&mut [(u64, usize, &mut usize)]>);
         let callbacks = AtomicUsize::new(0);
+        let visit = |_, child| {
+            callbacks.fetch_add(1, Ordering::Relaxed);
+            let mut pending = pending.lock().unwrap();
+            if let Some(previous) = pending.take() {
+                previous.sort_by_key(|r| r.0);
+            }
+            *pending = Some(child);
+        };
         partition_impl_with_visit(
             &mut rows,
             2,
             KeyDigit::new(ByKey(|r: &(u64, usize, &mut usize)| r.0), 4),
             &mut Buffers::new(),
             config(3, 7),
-            Some(&|_, child| {
-                callbacks.fetch_add(1, Ordering::Relaxed);
-                let mut pending = pending.lock().unwrap();
-                if let Some(previous) = pending.take() {
-                    previous.sort_by_key(|r| r.0);
-                }
-                *pending = Some(child);
-            }),
+            &|| &visit,
         );
         if let Some(previous) = pending.into_inner().unwrap() {
             previous.sort_by_key(|r| r.0);
@@ -352,30 +449,31 @@ mod tests {
             let consumed = AtomicUsize::new(0);
             let result = catch_unwind(AssertUnwindSafe(|| {
                 let pending = std::sync::Mutex::new(None::<&mut [(u64, usize, &mut usize)]>);
+                let visit = |_, child| {
+                    let mut pending = pending
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let position = callbacks.fetch_add(1, Ordering::Relaxed);
+                    if position == 1 {
+                        if consume_saved && let Some(previous) = pending.take() {
+                            previous.sort_by_key(|r| r.0);
+                            consumed.fetch_add(previous.len(), Ordering::Relaxed);
+                        }
+                        assert_eq!(pending.is_none(), consume_saved);
+                        drop(pending);
+                        panic!("second callback with saved or consumed exclusive bucket");
+                    }
+                    if position == 0 {
+                        *pending = Some(child);
+                    }
+                };
                 partition_impl_with_visit(
                     &mut rows,
                     2,
                     KeyDigit::new(ByKey(|r: &(u64, usize, &mut usize)| r.0), 4),
                     &mut Buffers::new(),
                     config(3, 7),
-                    Some(&|_, child| {
-                        let mut pending = pending
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        let position = callbacks.fetch_add(1, Ordering::Relaxed);
-                        if position == 1 {
-                            if consume_saved && let Some(previous) = pending.take() {
-                                previous.sort_by_key(|r| r.0);
-                                consumed.fetch_add(previous.len(), Ordering::Relaxed);
-                            }
-                            assert_eq!(pending.is_none(), consume_saved);
-                            drop(pending);
-                            panic!("second callback with saved or consumed exclusive bucket");
-                        }
-                        if position == 0 {
-                            *pending = Some(child);
-                        }
-                    }),
+                    &|| &visit,
                 );
             }));
             assert!(result.is_err());

@@ -8,6 +8,9 @@ import { computed, ref } from "vue";
 // on a 64-bit target: a chain link, a block address, an owner cell, a source
 // and a free-cache slot.
 const DESCRIPTOR_BYTES = 52;
+const LOG_N = { min: 4, max: 9 };
+const RECORD_BYTES = [4, 8, 16, 32, 64];
+const RADIX_BITS = [4, 6, 8, 10, 12];
 const logN = ref(7);
 const recordBytes = ref(8);
 const radix = ref(8);
@@ -17,30 +20,43 @@ const R = computed(() => 2 ** radix.value);
 const scratch = (b: number) => 2 * R.value * b * recordBytes.value;
 const tables = (b: number) => (DESCRIPTOR_BYTES * n.value) / b;
 const total = (b: number) => scratch(b) + tables(b);
-const balanced = computed(() =>
-  Math.ceil(Math.sqrt((DESCRIPTOR_BYTES * n.value) / (2 * R.value * recordBytes.value))),
-);
-const floors = computed(() => Math.max(Math.floor(1024 / recordBytes.value), 32));
-const chosen = computed(() => Math.max(1, 4 * balanced.value, floors.value));
+const balancedSize = (records: number, buckets: number, bytes: number) =>
+  Math.ceil(Math.sqrt((DESCRIPTOR_BYTES * records) / (2 * buckets * bytes)));
+const chosenSize = (records: number, buckets: number, bytes: number) =>
+  Math.max(1, 4 * balancedSize(records, buckets, bytes), Math.floor(1024 / bytes), 32);
+const balanced = computed(() => balancedSize(n.value, R.value, recordBytes.value));
+const chosen = computed(() => chosenSize(n.value, R.value, recordBytes.value));
 const lsdBuffer = computed(() => n.value * recordBytes.value);
 
 // Log-log axes: both cost terms are straight lines and the total is a V.
 const W = 640;
 const H = 300;
-const M = { left: 64, right: 16, top: 16, bottom: 40 };
+const M = { left: 64, right: 24, top: 16, bottom: 40 };
+// The axis ends at the power of 4 that holds the largest size any control
+// combination chooses: most records, fewest buckets, smallest records.
 const bMin = 1;
-const bMax = 1 << 14;
+const bMax =
+  4 **
+  Math.ceil(
+    Math.log2(chosenSize(10 ** LOG_N.max, 2 ** Math.min(...RADIX_BITS), Math.min(...RECORD_BYTES))) / 2,
+  );
 const yMin = computed(() => Math.min(total(balanced.value), scratch(bMin), tables(bMax)) / 4);
 const yMax = computed(() => Math.max(scratch(bMax), tables(bMin)) * 2);
 const x = (b: number) =>
   M.left +
   ((Math.log2(b) - Math.log2(bMin)) / (Math.log2(bMax) - Math.log2(bMin))) * (W - M.left - M.right);
+// Labels beside a mark in the right fifth of the plot sit on its left; the
+// rising total leaves room above-left of the used size.
+const label = (b: number, gap: number) =>
+  x(b) > W - M.right - (W - M.left - M.right) / 5
+    ? { x: x(b) - gap, anchor: "end" }
+    : { x: x(b) + gap, anchor: "start" };
 const y = (v: number) =>
   H -
   M.bottom -
   ((Math.log2(v) - Math.log2(yMin.value)) / (Math.log2(yMax.value) - Math.log2(yMin.value))) *
     (H - M.top - M.bottom);
-const samples = Array.from({ length: 141 }, (_, i) => 2 ** (i / 10));
+const samples = Array.from({ length: 10 * Math.log2(bMax) + 1 }, (_, i) => 2 ** (i / 10));
 const path = (f: (b: number) => number) =>
   samples
     .map((b) => [x(b), y(f(b))] as const)
@@ -64,7 +80,7 @@ function bytes(v: number): string {
   return `${v < 10 && !Number.isInteger(v) ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
 }
 
-const xTicks = [1, 4, 16, 64, 256, 1024, 4096, 16384];
+const xTicks = Array.from({ length: Math.log2(bMax) / 2 + 1 }, (_, i) => 4 ** i);
 // Ticks at powers of two, so that every label is a round KiB/MiB value.
 const yTicks = computed(() => {
   const low = Math.ceil(Math.log2(yMin.value));
@@ -101,16 +117,16 @@ function onMove(event: PointerEvent) {
   <figure class="tsr-figure">
     <div class="tsr-input">
       <label>n = {{ n.toLocaleString('en-US') }}
-        <input v-model.number="logN" type="range" min="4" max="9" step="0.25" aria-label="Number of records, log scale" />
+        <input v-model.number="logN" type="range" :min="LOG_N.min" :max="LOG_N.max" step="0.25" aria-label="Number of records, log scale" />
       </label>
       <label>record size s
         <select v-model.number="recordBytes">
-          <option v-for="s in [4, 8, 16, 32, 64]" :key="s" :value="s">{{ s }} bytes</option>
+          <option v-for="s in RECORD_BYTES" :key="s" :value="s">{{ s }} bytes</option>
         </select>
       </label>
       <label>digit
         <select v-model.number="radix">
-          <option v-for="r in [4, 6, 8, 10, 12]" :key="r" :value="r">{{ r }} bits (R = {{ 2 ** r }})</option>
+          <option v-for="r in RADIX_BITS" :key="r" :value="r">{{ r }} bits (R = {{ 2 ** r }})</option>
         </select>
       </label>
     </div>
@@ -138,9 +154,11 @@ function onMove(event: PointerEvent) {
       <path v-for="s in series" :key="s.name" :d="s.d" fill="none" :stroke="s.color" stroke-width="2" stroke-linejoin="round" />
 
       <line :x1="x(balanced)" :x2="x(balanced)" :y1="M.top" :y2="H - M.bottom" stroke="var(--vp-c-text-3)" stroke-dasharray="3 3" />
-      <text :x="x(balanced) + 4" :y="M.top + 10" font-size="10" style="fill: var(--vp-c-text-2)">b* = {{ balanced }}</text>
+      <text :x="label(balanced, 4).x" :y="M.top + 10" :text-anchor="label(balanced, 4).anchor" font-size="10" style="fill: var(--vp-c-text-2)">b* = {{ balanced }}</text>
       <circle :cx="x(chosen)" :cy="y(total(chosen))" r="5" fill="#1baf7a" stroke="var(--tsr-panel)" stroke-width="2" />
-      <text :x="x(chosen) + 8" :y="y(total(chosen)) + 16" font-size="10" style="fill: var(--vp-c-text-1)">
+      <text
+        :x="label(chosen, 8).x"
+        :y="y(total(chosen)) + (label(chosen, 8).anchor === 'end' ? -10 : 16)" :text-anchor="label(chosen, 8).anchor" font-size="10" style="fill: var(--vp-c-text-1)">
         used: b = {{ chosen }}
       </text>
 

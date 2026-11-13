@@ -476,16 +476,24 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         mut state: C,
         mut classify: F,
     ) -> C {
-        debug_assert!(self.buffers.writers.len().is_power_of_two());
-        let last_bucket = self.buffers.writers.len() - 1;
+        let input_ptr = self.input;
+        let input_len = self.input_len;
+        let block_size = self.block_size;
+        let scratch_blocks = self.scratch_blocks;
+        let full_blocks = self.block_count - scratch_blocks;
+        let position = &mut self.position;
+        let buckets = self.buffers.writers.as_mut_slice();
+        let block_links = self.buffers.block_links.as_mut_slice();
+        debug_assert!(buckets.len().is_power_of_two());
+        let last_bucket = buckets.len() - 1;
         let mut begin = first_offset;
-        while self.position.input * self.block_size < self.input_len {
-            let input = self.position.input;
-            let begin_record = input * self.block_size;
+        while position.input * block_size < input_len {
+            let input = position.input;
+            let begin_record = input * block_size;
             // SAFETY: this block's unread records still occupy their original
             // input range. Only fully read input blocks can become outputs.
-            let source = unsafe { self.input.add(begin_record) };
-            let length = self.block_size.min(self.input_len - begin_record);
+            let source = unsafe { input_ptr.add(begin_record) };
+            let length = block_size.min(input_len - begin_record);
             let mut write = |offset: usize| {
                 // SAFETY: only the initialized, unread suffix is read. Blocks
                 // become output only after all of their input records are read.
@@ -496,7 +504,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 // SAFETY: there is one writer per bucket and the bucket count
                 // is a power of two, so the mask keeps the index in bounds;
                 // the check would otherwise run once per record in the hot loop.
-                let bucket = unsafe { self.buffers.writers.get_unchecked_mut(b) };
+                let bucket = unsafe { buckets.get_unchecked_mut(b) };
                 let next = bucket.next;
                 let end = bucket.end;
                 // SAFETY: next is an unused cell of a reserved output block;
@@ -511,21 +519,24 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                     bucket: b,
                     physical: bucket.physical as usize,
                     // SAFETY: both cursors delimit the same reserved block.
-                    slot: self.block_size - unsafe { end.offset_from(next) } as usize - 1,
+                    slot: block_size - unsafe { end.offset_from(next) } as usize - 1,
                 });
                 if unlikely(next == end) {
-                    debug_assert!(self.position.output <= input);
-                    let physical = self.scratch_blocks + self.position.output;
-                    let previous = bucket.physical;
-                    let out = self.block_ptr(physical);
-                    self.buffers.block_links[previous as usize] = physical as u32;
-                    self.buffers.writers[b] = BucketWriter {
+                    debug_assert!(position.output <= input);
+                    let physical = scratch_blocks + position.output;
+                    assert!(position.output < full_blocks);
+                    // SAFETY: output <= input; equality can occur only on
+                    // this full input block's last record. The recycled block
+                    // is fully read and uses the same raw input ancestor.
+                    let out = unsafe { input_ptr.add(position.output * block_size) };
+                    block_links[bucket.physical as usize] = physical as u32;
+                    *bucket = BucketWriter {
                         next: out,
-                        // SAFETY: block_ptr reserves a complete block.
-                        end: unsafe { out.add(self.block_size) },
+                        // SAFETY: the checked recycled input block is complete.
+                        end: unsafe { out.add(block_size) },
                         physical: physical as u32,
                     };
-                    self.position.output += 1;
+                    position.output += 1;
                     trace::emit(|| Event::Writer {
                         bucket: b,
                         physical,
@@ -546,7 +557,7 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             for offset in complete..length {
                 write(offset);
             }
-            self.position.input += 1;
+            position.input += 1;
             begin = 0;
         }
         state

@@ -340,54 +340,56 @@ mod tests {
 
     #[test]
     fn callback_panic_restores_exclusive() {
-        let len = if cfg!(miri) { 53 } else { 293 };
-        let mut backing: Vec<_> = (0..len).collect();
-        let mut rows: Vec<_> = backing
-            .iter_mut()
-            .enumerate()
-            .map(|(id, r)| (((id * 73) % 64) as u64, id, r))
-            .collect();
-        let callbacks = AtomicUsize::new(0);
-        let consumed = AtomicUsize::new(0);
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            let pending = std::sync::Mutex::new(None::<&mut [(u64, usize, &mut usize)]>);
-            partition_impl_with_visit(
-                &mut rows,
-                2,
-                KeyDigit::new(ByKey(|r: &(u64, usize, &mut usize)| r.0), 4),
-                &mut Buffers::new(),
-                config(3, 7),
-                Some(&|_, child| {
-                    let mut pending = pending
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    let position = callbacks.fetch_add(1, Ordering::Relaxed);
-                    if position == 1 {
-                        if let Some(previous) = pending.take() {
-                            previous.sort_by_key(|r| r.0);
-                            consumed.fetch_add(previous.len(), Ordering::Relaxed);
+        for consume_saved in [false, true] {
+            let len = if cfg!(miri) { 53 } else { 293 };
+            let mut backing: Vec<_> = (0..len).collect();
+            let mut rows: Vec<_> = backing
+                .iter_mut()
+                .enumerate()
+                .map(|(id, r)| (((id * 73) % 64) as u64, id, r))
+                .collect();
+            let callbacks = AtomicUsize::new(0);
+            let consumed = AtomicUsize::new(0);
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let pending = std::sync::Mutex::new(None::<&mut [(u64, usize, &mut usize)]>);
+                partition_impl_with_visit(
+                    &mut rows,
+                    2,
+                    KeyDigit::new(ByKey(|r: &(u64, usize, &mut usize)| r.0), 4),
+                    &mut Buffers::new(),
+                    config(3, 7),
+                    Some(&|_, child| {
+                        let mut pending = pending
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        let position = callbacks.fetch_add(1, Ordering::Relaxed);
+                        if position == 1 {
+                            if consume_saved && let Some(previous) = pending.take() {
+                                previous.sort_by_key(|r| r.0);
+                                consumed.fetch_add(previous.len(), Ordering::Relaxed);
+                            }
+                            assert_eq!(pending.is_none(), consume_saved);
+                            drop(pending);
+                            panic!("second callback with saved or consumed exclusive bucket");
                         }
-                        assert!(pending.is_none());
-                        drop(pending);
-                        panic!("second callback after previous exclusive bucket consumed");
-                    }
-                    if position == 0 {
-                        *pending = Some(child);
-                    }
-                }),
-            );
-        }));
-        assert!(result.is_err());
-        assert!(callbacks.load(Ordering::Relaxed) >= 2);
-        assert!(consumed.load(Ordering::Relaxed) > 0);
-        let mut ids = Vec::new();
-        for (_, id, r) in rows {
-            assert_eq!(*r, id);
-            *r += 1;
-            ids.push(id);
+                        if position == 0 {
+                            *pending = Some(child);
+                        }
+                    }),
+                );
+            }));
+            assert!(result.is_err());
+            assert!(callbacks.load(Ordering::Relaxed) >= 2);
+            assert_eq!(consumed.load(Ordering::Relaxed) > 0, consume_saved);
+            let mut ids = Vec::new();
+            for (_, id, r) in rows {
+                assert_eq!(*r, id);
+                *r += 1;
+                ids.push(id);
+            }
+            ids.sort_unstable();
+            assert_eq!(ids, (0..len).collect::<Vec<_>>());
+            assert_eq!(backing, (1..=len).collect::<Vec<_>>());
         }
-        ids.sort_unstable();
-        assert_eq!(ids, (0..len).collect::<Vec<_>>());
-        assert_eq!(backing, (1..=len).collect::<Vec<_>>());
     }
 }

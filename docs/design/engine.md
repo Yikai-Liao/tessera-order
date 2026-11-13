@@ -89,9 +89,11 @@ After retiring g source prefixes, a bucket touches at most g + 2 destination blo
 
 Serial output advances in bucket order. After g retired prefixes, at most g complete input blocks are final; with at least R initially free blocks the free count stays at least R, and the next prefix protects at most one new block. This one-active-band argument needs no two-shard premise.
 
+One partition also supports unordered bucket jobs: every bucket has only full source blocks followed by at most one partial prefix. The first nonempty band starts at zero, so it stays block-aligned until its last prefix. If all unfinished movement jobs wait for a free candidate, that band has at most g₀ final blocks after g₀ retired sources; each other band has at most gᵢ + 1. Thus the total is at most g + R − 1 and the initial R free blocks leave at least one genuinely free block. It is either in the reserve or in a discoverable cache; a waiting job holds an empty cache, and callbacks hold none. A job holding a candidate or owner lock instead has finite movement left, so it is not part of this all-waiting state. Relocation preserves prefix lengths, and final blocks are never reused as sources.
+
 Serial completion uses exclusive `RefCell` metadata, which keeps non-`Send` records and mutable extractors; parallel completion uses mutexes under the same exclusive-access contract. A bucket's `completed` flag records finished movement before its borrow is published, not successful sorting.
 
-- A callback panic is caught after the serial sorter restores its slice, and all jobs join before it propagates.
+- A callback panic unwinds through its child sorter, which restores that band first. Parallel jobs join before the parent completion guard restores unpublished bands; no per-bucket panic payload is stored.
 - After any execution failure, once all jobs join, the completion guard finishes every unpublished band without callbacks. Recovery never touches a published band.
 - Once all ledger tables and bucket ends exist, each shard clears `owns_recovery` before movement begins; the ledger then owns restoring the whole input. Shard scratch stays alive until completion and recovery return, and stale source bytes are never treated as live records.
 - Building the ledger during scatter-panic recovery can allocate; once built, its recovery moves records without allocating or calling user code.

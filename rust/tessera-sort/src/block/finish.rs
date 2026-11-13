@@ -87,7 +87,6 @@ struct Bucket {
     /// The bucket index, which also selects the bucket's free-block cache.
     cache: usize,
     completed: bool,
-    panic: Option<unwind::Payload>,
 }
 
 /// Owns restoration after partition guards hand off their sources. Structured
@@ -322,7 +321,7 @@ impl Bucket {
         if self.completed {
             return;
         }
-        // No allocation, user code or scheduler call interrupts movement, so
+        // No allocation, user code or Rayon reentry interrupts movement, so
         // unwind recovery sees whole buckets. Transfer protects output and then
         // validates the source, which peers may have relocated. After g retired
         // prefixes a bucket touches at most g + 2 destination blocks. While it
@@ -333,6 +332,8 @@ impl Bucket {
             let mut free = lock(&storage.free[self.cache]);
             offset += storage.transfer(logical, self.start + offset, &mut free, self.cache);
         }
+        // Recovery must not revisit this band if its callback retains a borrow
+        // or unwinds. Completion restores the other bands after all jobs join.
         self.completed = true;
         if self.len != 0
             && let Some(visit) = visit
@@ -342,7 +343,7 @@ impl Bucket {
             // disjoint bands, even if they share a physical block fragment.
             let band =
                 unsafe { core::slice::from_raw_parts_mut(storage.input.add(self.start), self.len) };
-            self.panic = unwind::catch(|| visit(self.cache, band)).err();
+            visit(self.cache, band);
         }
     }
 }
@@ -409,7 +410,6 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
             start,
             len,
             completed: false,
-            panic: None,
         });
         start += len;
     }
@@ -476,16 +476,6 @@ pub(super) fn complete_serial<'records, T>(
     };
     for bucket in &mut completion.buckets {
         bucket.finish(&completion.storage, visit.as_deref_mut());
-        if bucket.panic.is_some() {
-            visit = None;
-        }
-    }
-    if let Some(payload) = completion
-        .buckets
-        .iter_mut()
-        .find_map(|bucket| bucket.panic.take())
-    {
-        unwind::resume(payload);
     }
     core::mem::take(&mut completion.ends)
 }
@@ -542,13 +532,6 @@ unsafe fn complete_with_fault<'records, T: Send>(
         completion.buckets.par_iter_mut().for_each(run);
     } else {
         completion.buckets.iter_mut().for_each(run);
-    }
-    if let Some(payload) = completion
-        .buckets
-        .iter_mut()
-        .find_map(|bucket| bucket.panic.take())
-    {
-        unwind::resume(payload);
     }
     core::mem::take(&mut completion.ends)
 }
@@ -770,7 +753,6 @@ mod tests {
             len: 1,
             cache: bucket,
             completed: false,
-            panic: None,
         });
         std::thread::scope(|scope| {
             for bucket in &mut buckets {

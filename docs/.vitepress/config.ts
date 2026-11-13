@@ -8,7 +8,7 @@ import { defineConfig, type MarkdownRenderer } from "vitepress";
 // same files read correctly on GitHub, in an editor, and on the site. Pages
 // are the files under `docs/` plus the shared documents listed here.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const repository = "https://github.com/Yikai-Liao/tessera-sort";
+const repository = "https://github.com/Yikai-Liao/tessera-order";
 const sharedPages = new Set([
   "conformance/semantics.md",
   "ROADMAP.md",

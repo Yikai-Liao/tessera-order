@@ -110,6 +110,19 @@ export async function copySnapshot(source: string, destination: string, root: st
   });
 }
 
+/** The library's directory in a checkout; commits before the rename keep `rust/tessera-sort`. */
+export async function libraryDirectory(tree: string) {
+  for (const name of ["rust/tessera-order", "rust/tessera-sort"]) {
+    try {
+      await lstat(join(tree, name));
+      return join(tree, name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  throw new Error("Revision has no Tessera library directory");
+}
+
 /** Materialize a library revision against its own repository, keeping the current harness. */
 export async function copyLibraryRevision(root: string, revision: string, destination: string) {
   const directory = await mkdtemp(join(dirname(destination), "baseline-"));
@@ -121,7 +134,7 @@ export async function copyLibraryRevision(root: string, revision: string, destin
       cwd: root,
     });
     await command("tar", ["-xf", archive, "-C", tree]);
-    await copySnapshot(join(tree, "rust/tessera-sort"), destination, tree);
+    await copySnapshot(await libraryDirectory(tree), destination, tree);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -164,7 +177,7 @@ export async function withWorkspace<T>(
   try {
     await command("git", ["worktree", "add", "--detach", tree, "HEAD"], { cwd: root });
     added = true;
-    for (const path of ["rust/tessera-sort", "bench/rust", "bench/plans"]) {
+    for (const path of ["rust/tessera-order", "bench/rust", "bench/plans"]) {
       await rm(join(tree, path), { recursive: true, force: true });
       await copySnapshot(join(root, path), join(tree, path), root);
     }
@@ -214,7 +227,7 @@ export async function buildArtifact(output: string, name: string) {
   const libraries = messages.filter(
     (value) =>
       value.reason === "compiler-artifact" &&
-      value.target.name === "tessera_sort" &&
+      value.target.name === "tessera_order" &&
       value.target.kind?.includes("lib"),
   );
   if (

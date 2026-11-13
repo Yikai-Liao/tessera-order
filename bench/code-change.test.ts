@@ -28,7 +28,8 @@ test("shared code statistics exclude comments and tests and support commits and 
       ],
       { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     ).trim();
-  const source = join(root, "rust/tessera-sort/src");
+  // The baseline predates the crate rename; the comparison matches files across it.
+  let source = join(root, "rust/tessera-sort/src");
   await mkdir(join(source, "engine"), { recursive: true });
   const write = (name: string, text: string) => writeFile(join(source, name), text);
   const engine =
@@ -41,6 +42,8 @@ test("shared code statistics exclude comments and tests and support commits and 
   git("add", ".");
   git("commit", "-qm", "baseline");
   const base = git("rev-parse", "HEAD");
+  git("mv", "rust/tessera-sort", "rust/tessera-order");
+  source = join(root, "rust/tessera-order/src");
   await write("engine.rs", engine.replace(" use_key();", " use_key();\n extra();"));
   await write("scan.rs", "fn scan() {}\n");
   await rm(join(source, "block.rs"));
@@ -71,12 +74,12 @@ test("shared code statistics exclude comments and tests and support commits and 
     [9, 10, 1, null],
   );
   assert.equal((await codeChange("HEAD", "HEAD", root)).current, 9);
-  await writeFile(join(root, ".gitattributes"), "rust/tessera-sort/src/engine.rs export-ignore\n");
+  await writeFile(join(root, ".gitattributes"), "rust/tessera-order/src/engine.rs export-ignore\n");
   git("add", ".gitattributes");
   git("commit", "-qm", "archive excludes source");
   await assert.rejects(codeChange("HEAD", "HEAD", root), /ENOENT/);
   git("reset", "--hard", "HEAD^");
-  await rm(join(root, "rust/tessera-sort"), { recursive: true });
+  await rm(join(root, "rust/tessera-order"), { recursive: true });
   assert.equal((await codeChange("HEAD", undefined, root)).current, 0);
 });
 

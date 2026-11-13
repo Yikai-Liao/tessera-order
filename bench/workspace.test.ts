@@ -42,7 +42,7 @@ async function commit(root: string, message: string) {
 test("snapshots preserve dirty sources and clean up failures", async () => {
   const root = await mkdtemp(join(tmpdir(), "tessera-workspace-test-"));
   try {
-    for (const path of ["rust/tessera-sort/src", "bench/rust/src", "bench/plans"])
+    for (const path of ["rust/tessera-order/src", "bench/rust/src", "bench/plans"])
       await mkdir(join(root, path), { recursive: true });
     for (const path of [
       "Cargo.toml",
@@ -50,16 +50,16 @@ test("snapshots preserve dirty sources and clean up failures", async () => {
       "rust-toolchain.toml",
       "bench/catalog.toml",
       "bench/plans/continuous.toml",
-      "rust/tessera-sort/src/lib.rs",
+      "rust/tessera-order/src/lib.rs",
       "bench/rust/src/lib.rs",
     ])
       await writeFile(join(root, path), "original\n");
     await command("git", ["init", "-q", root], { capture: true });
     await commit(root, "fixture");
-    await writeFile(join(root, "rust/tessera-sort/src/lib.rs"), "modified\n");
-    await writeFile(join(root, "rust/tessera-sort/src/new.rs"), "untracked\n");
+    await writeFile(join(root, "rust/tessera-order/src/lib.rs"), "modified\n");
+    await writeFile(join(root, "rust/tessera-order/src/new.rs"), "untracked\n");
     await writeFile(join(root, "bench/plans/continuous.toml"), "dirty plan\n");
-    const crate = join(root, "rust/tessera-sort");
+    const crate = join(root, "rust/tessera-order");
     await symlink("new.rs", join(crate, "src/relative.rs"));
     await symlink(join(crate, "src/new.rs"), join(crate, "src/absolute.rs"));
     await symlink("src", join(crate, "linked-directory"), "dir");
@@ -75,18 +75,18 @@ test("snapshots preserve dirty sources and clean up failures", async () => {
             : join(root, "target/tessera-bench"),
         );
         assert.equal(
-          await readFile(join(workspace.tree, "rust/tessera-sort/src/lib.rs"), "utf8"),
+          await readFile(join(workspace.tree, "rust/tessera-order/src/lib.rs"), "utf8"),
           "modified\n",
         );
         assert.equal(
-          await readFile(join(workspace.tree, "rust/tessera-sort/src/new.rs"), "utf8"),
+          await readFile(join(workspace.tree, "rust/tessera-order/src/new.rs"), "utf8"),
           "untracked\n",
         );
         assert.equal(
           await readFile(join(workspace.tree, "bench/plans/continuous.toml"), "utf8"),
           "dirty plan\n",
         );
-        const snapshot = join(workspace.tree, "rust/tessera-sort");
+        const snapshot = join(workspace.tree, "rust/tessera-order");
         const hash = await sourceHash(snapshot);
         await writeFile(join(crate, "src/new.rs"), "changed after snapshot\n");
         for (const name of ["src/relative.rs", "src/absolute.rs", "linked-directory/new.rs"]) {
@@ -140,6 +140,7 @@ test("baseline links resolve in their own revision without replacing the harness
   const directory = await mkdtemp(join(tmpdir(), "tessera-revision-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const root = join(directory, "repository");
+  // The baseline predates the crate rename and keeps the library in `rust/tessera-sort`.
   await mkdir(join(root, "rust/tessera-sort/src"), { recursive: true });
   await writeFile(join(root, "shared.rs"), "old implementation");
   await writeFile(join(root, "Cargo.lock"), "old lockfile");
@@ -148,13 +149,14 @@ test("baseline links resolve in their own revision without replacing the harness
   await symlink("../../../shared.rs", join(root, "rust/tessera-sort/src/shared.rs"));
   await command("git", ["init", "-q", root], { capture: true });
   await commit(root, "baseline");
+  await command("git", ["mv", "rust/tessera-sort", "rust/tessera-order"], { cwd: root });
   await writeFile(join(root, "shared.rs"), "new implementation");
   await writeFile(join(root, "Cargo.lock"), "current lockfile");
   await writeFile(join(root, "bench/rust/harness.rs"), "current harness");
   await commit(root, "current");
   const tree = join(directory, "current-tree");
   await copySnapshot(root, tree, root);
-  const crate = join(tree, "rust/tessera-sort");
+  const crate = join(tree, "rust/tessera-order");
   assert.equal(await readFile(join(crate, "src/shared.rs"), "utf8"), "new implementation");
   await rm(crate, { recursive: true });
   await copyLibraryRevision(root, "HEAD~1", crate);
@@ -162,9 +164,9 @@ test("baseline links resolve in their own revision without replacing the harness
   assert.equal((await lstat(join(crate, "src/shared.rs"))).isSymbolicLink(), false);
   assert.equal(await readFile(join(tree, "Cargo.lock"), "utf8"), "current lockfile");
   assert.equal(await readFile(join(tree, "bench/rust/harness.rs"), "utf8"), "current harness");
-  assert.deepEqual(await readdir(join(tree, "rust")), ["tessera-sort"]);
+  assert.deepEqual(await readdir(join(tree, "rust")), ["tessera-order"]);
   await assert.rejects(copyLibraryRevision(root, "missing-revision", join(tree, "rust/missing")));
-  assert.deepEqual(await readdir(join(tree, "rust")), ["tessera-sort"]);
+  assert.deepEqual(await readdir(join(tree, "rust")), ["tessera-order"]);
 });
 
 test("snapshot boundaries reject escapes and cycles", async (t) => {
@@ -209,7 +211,7 @@ test("Cargo artifacts retain paths and build provenance", async (t) => {
         {
           reason: "compiler-artifact",
           package_id: "library",
-          target: { name: "tessera_sort", kind: ["lib"] },
+          target: { name: "tessera_order", kind: ["lib"] },
           features: library_features,
         },
       ];
@@ -220,7 +222,7 @@ test("Cargo artifacts retain paths and build provenance", async (t) => {
       });
       const revision = {
         revisions: {
-          libraries: { "tessera-sort": library_features, "revision-baseline": ["portable-simd"] },
+          libraries: { "tessera-order": library_features, "revision-baseline": ["portable-simd"] },
         },
       };
       await writeFile(
@@ -355,7 +357,7 @@ fs.writeFileSync(path.join(directory, "provenance.json"), JSON.stringify({ rustc
 for (const message of [
   { reason: "compiler-artifact", package_id: "benchmark", target: { name: "compare" }, executable: path.join(directory, "compare") },
   { reason: "build-script-executed", package_id: "benchmark", out_dir: directory },
-  { reason: "compiler-artifact", target: { name: "tessera_sort", kind: ["lib"] }, features: [] },
+  { reason: "compiler-artifact", target: { name: "tessera_order", kind: ["lib"] }, features: [] },
 ]) console.log(JSON.stringify(message));
 `,
     { mode: 0o755 },

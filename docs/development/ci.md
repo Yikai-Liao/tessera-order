@@ -34,7 +34,7 @@ Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, 
 
 ### Rust tests
 
-Each test cell tests only `tessera-sort`, with the SIMD backend and the `rayon` entry points, also on Rust 1.89. There are no scalar or no-std configurations. The cells disable test-profile debug information to save compilation, at the cost of less informative backtraces; Miri, sanitizers, benchmarks and release builds are unaffected. Rayon tests cover sharded root scatter, caller-pool bucket scheduling, the one-thread fallback, task panics and record preservation. Miri uses [bounded safety fixtures](../../CONTRIBUTING.md#validation), leaving exhaustive arithmetic to native tests. The two Miri jobs interpret the serial and Rayon ownership fixtures, the latter including sequential fixtures for parallel storage and bucket handoff; native tests cover threaded scheduling. AddressSanitizer runs the library's serial and Rayon builds; benchmark executables stay with the comparison job, unsanitized.
+Each test cell tests only `tessera-order`, with the SIMD backend and the `rayon` entry points, also on Rust 1.89. There are no scalar or no-std configurations. The cells disable test-profile debug information to save compilation, at the cost of less informative backtraces; Miri, sanitizers, benchmarks and release builds are unaffected. Rayon tests cover sharded root scatter, caller-pool bucket scheduling, the one-thread fallback, task panics and record preservation. Miri uses [bounded safety fixtures](../../CONTRIBUTING.md#validation), leaving exhaustive arithmetic to native tests. The two Miri jobs interpret the serial and Rayon ownership fixtures, the latter including sequential fixtures for parallel storage and bucket handoff; native tests cover threaded scheduling. AddressSanitizer runs the library's serial and Rayon builds; benchmark executables stay with the comparison job, unsanitized.
 
 A cell's commands live in one composite action, [`rust-test`](../../.github/actions/rust-test/action.yml), called by both the pull request cells and the extra `main` cells. They are two jobs over one action because a job's `if` is evaluated before its matrix expands.
 
@@ -59,7 +59,7 @@ The [benchmark diagnostics workflow](../../.github/workflows/bench-diagnostics.y
 For a local correctness iteration, disable test-profile debug information for one command:
 
 ```sh
-CARGO_PROFILE_TEST_DEBUG=0 cargo test -p tessera-sort --lib --tests --features rayon
+CARGO_PROFILE_TEST_DEBUG=0 cargo test -p tessera-order --lib --tests --features rayon
 ```
 
 Backtraces may be less informative. Still run the normal validation commands, and never apply this to benchmark or release builds.

@@ -15,7 +15,7 @@ license = "BSD-2-Clause"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-tessera-sort = { path = "../tessera-sort", features = ["trace"] }
+tessera-order = { path = "../tessera-order", features = ["trace"] }
 
 [profile.release]
 codegen-units = 1

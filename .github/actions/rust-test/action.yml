@@ -25,11 +25,11 @@ runs:
         toolchain: ${{ inputs.toolchain }}
     - uses: Swatinem/rust-cache@v2
     - shell: bash
-      run: cargo test -p tessera-sort --lib --tests
+      run: cargo test -p tessera-order --lib --tests
     - shell: bash
-      run: cargo test -p tessera-sort --doc
+      run: cargo test -p tessera-order --doc
     # Exercise Rayon on every platform and the MSRV, including serial fallback.
     - shell: bash
-      run: cargo test -p tessera-sort --lib --tests --features rayon
+      run: cargo test -p tessera-order --lib --tests --features rayon
     - shell: bash
-      run: cargo test -p tessera-sort --doc --features rayon
+      run: cargo test -p tessera-order --doc --features rayon

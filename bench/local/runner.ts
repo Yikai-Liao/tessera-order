@@ -96,7 +96,7 @@ export async function buildRevisions(
   control?: LayoutControl,
 ) {
   const { tree, directory, target } = workspace;
-  const crate = join(tree, "rust/tessera-sort");
+  const crate = join(tree, "rust/tessera-order");
   const saved = join(directory, "current-source");
   await copySnapshot(crate, saved, tree);
   const source = {
@@ -146,7 +146,9 @@ export async function buildRevisions(
   const build = async (role: "baseline" | "current", seed: number | undefined) => {
     const selectedFeatures = [
       ...features,
-      ...simdFeatures(await readFile(manifest, "utf8")).map((feature) => `tessera-sort/${feature}`),
+      ...simdFeatures(await readFile(manifest, "utf8")).map(
+        (feature) => `tessera-order/${feature}`,
+      ),
     ];
     const args = rustcArgs(seed);
     if (extraFlags.length && !env) {

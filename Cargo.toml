@@ -1,5 +1,5 @@
 [workspace]
-members = ["rust/tessera-sort", "bench/rust"]
+members = ["rust/tessera-order", "bench/rust"]
 # Built for the documentation site only; see its manifest.
 exclude = ["rust/tessera-trace"]
 resolver = "3"
@@ -8,7 +8,7 @@ resolver = "3"
 edition = "2024"
 rust-version = "1.89"
 license = "BSD-2-Clause"
-repository = "https://github.com/Yikai-Liao/tessera-sort"
+repository = "https://github.com/Yikai-Liao/tessera-order"
 authors = ["Yikai Liao <lyk-boya@outlook.com>"]
 
 [profile.bench]

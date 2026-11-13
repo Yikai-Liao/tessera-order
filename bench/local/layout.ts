@@ -24,7 +24,7 @@ export function engineOrderingSymbols(raw: string, demangled: string) {
       const name = /^(.+) ([tT]) ([a-f\d]+)(?: ([a-f\d]+))?$/i.exec(names[index]);
       if (!name || symbol.slice(2).join() !== name.slice(2).join())
         throw new Error("nm symbol views differ");
-      return /^(?:tessera_sort::|<tessera_sort::|<[^<>]+ as tessera_sort::)/.test(name[1])
+      return /^(?:tessera_order::|<tessera_order::|<[^<>]+ as tessera_order::)/.test(name[1])
         ? [symbol[1]]
         : [];
     })

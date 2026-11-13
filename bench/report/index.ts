@@ -130,7 +130,7 @@ function renderProvenance(dataset: Dataset) {
       version = block.match(/^version = "(.+)"$/m)?.[1];
     return name &&
       version &&
-      ["radsort", "rdst", "glidesort", "voracious_radix_sort", "tessera-sort"].includes(name)
+      ["radsort", "rdst", "glidesort", "voracious_radix_sort", "tessera-order"].includes(name)
       ? [[name, version]]
       : [];
   });

@@ -9,10 +9,10 @@ Tessera sorts slices by a primitive key: an integer up to 128 bits, an `f32` or 
 
 ```toml
 [dependencies]
-tessera-sort = "0.1"
+tessera-order = "0.1"
 ```
 
-The crate requires `std`, Rust 1.89 or newer and `fearless_simd`. Vector scans and prefix sums automatically select supported instructions; keys without a vector kernel use scalar scans. There is no `portable-simd` or `std` feature, and disabling default features does not change these requirements. Rayon remains optional; see the [Cargo feature documentation](../../rust/tessera-sort/src/lib.rs).
+The crate requires `std`, Rust 1.89 or newer and `fearless_simd`. Vector scans and prefix sums automatically select supported instructions; keys without a vector kernel use scalar scans. There is no `portable-simd` or `std` feature, and disabling default features does not change these requirements. Rayon remains optional; see the [Cargo feature documentation](../../rust/tessera-order/src/lib.rs).
 
 ## Sort keys
 
@@ -20,7 +20,7 @@ The crate requires `std`, Rust 1.89 or newer and `fearless_simd`. Vector scans a
 
 ```rust
 let mut values: Vec<i64> = vec![42, -7, 19, -7, 3];
-tessera_sort::stable_sort(&mut values);
+tessera_order::stable_sort(&mut values);
 assert_eq!(values, [-7, -7, 3, 19, 42]);
 ```
 
@@ -39,7 +39,7 @@ let mut rows = vec![
     Row { timestamp: 10, name: "a".into() },
     Row { timestamp: 30, name: "d".into() },
 ];
-tessera_sort::stable_sort_by_key(&mut rows, |row| row.timestamp);
+tessera_order::stable_sort_by_key(&mut rows, |row| row.timestamp);
 let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
 assert_eq!(names, ["a", "c", "d"]);
 ```
@@ -54,7 +54,7 @@ Wrap the key in `Reverse`. Equal keys still keep their input order:
 use std::cmp::Reverse;
 
 let mut rows = vec![(2u32, "first"), (1, "middle"), (2, "last")];
-tessera_sort::stable_sort_by_key(&mut rows, |row| Reverse(row.0));
+tessera_order::stable_sort_by_key(&mut rows, |row| Reverse(row.0));
 assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 ```
 
@@ -66,7 +66,7 @@ Floats sort in `total_cmp` order: negative NaNs, `-inf`, negative numbers, `-0.0
 
 ```rust
 let mut values = [0.5f64, -0.0, f64::NAN, 0.0, -1.0];
-tessera_sort::stable_sort_by_key(&mut values, |&x| {
+tessera_order::stable_sort_by_key(&mut values, |&x| {
     if x.is_nan() { f64::NAN } else if x == 0.0 { 0.0 } else { x }
 });
 // -0.0 and 0.0 are now equal keys, so they keep their input order.
@@ -83,7 +83,7 @@ Enable the optional `rayon` feature for `par_stable_sort` and `par_stable_sort_b
 
 ```toml
 [dependencies]
-tessera-sort = { version = "0.1", features = ["rayon"] }
+tessera-order = { version = "0.1", features = ["rayon"] }
 rayon = "1.10"
 ```
 
@@ -92,7 +92,7 @@ The entry points use Rayon's current pool. A caller can select its own pool with
 ```rust
 let pool = rayon::ThreadPoolBuilder::new().num_threads(8).build().unwrap();
 let mut records = [(2u32, "first"), (1, "middle"), (2, "last")];
-pool.install(|| tessera_sort::par_stable_sort_by_key(&mut records, |record| record.0));
+pool.install(|| tessera_order::par_stable_sort_by_key(&mut records, |record| record.0));
 assert_eq!(records, [(1, "middle"), (2, "first"), (2, "last")]);
 ```
 

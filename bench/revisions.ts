@@ -29,11 +29,21 @@ export async function prepareRevisions(
   const current = revisions.current ? await resolveCommit(root, revisions.current) : undefined;
   // Fresh CI hosts need the locked registry metadata before offline path resolution.
   await command("cargo", ["fetch", "--locked"], { cwd: tree });
-  const library = join(tree, "rust/tessera-sort");
+  const library = join(tree, "rust/tessera-order");
   if (current) {
     // The current harness stays in place; only the requested library is replaced.
     await rm(library, { recursive: true });
     await copyLibraryRevision(root, current, library);
+    // A commit before the crate rename names its package `tessera-sort`; the harness depends on
+    // `tessera-order`, and only the manifest's package name differs.
+    const path = join(library, "Cargo.toml");
+    const copy = parse(await readFile(path, "utf8"));
+    const named = copy.package as { name: string };
+    // Rewrite only an old manifest, so a current copy keeps its source hash.
+    if (named.name !== "tessera-order") {
+      named.name = "tessera-order";
+      await writeFile(path, stringify(copy));
+    }
   }
   const copies = join(tree, "bench/revision-libraries");
   await mkdir(copies);
@@ -41,7 +51,7 @@ export async function prepareRevisions(
   const manifest = parse(await readFile(manifestPath, "utf8"));
   const dependencies = manifest.dependencies as Record<string, object>;
   const sources: Record<string, string> = {};
-  const primary = dependencies["tessera-sort"] as { features?: string[] };
+  const primary = dependencies["tessera-order"] as { features?: string[] };
   primary.features = [
     ...new Set([
       ...(primary.features ?? []),
@@ -97,7 +107,7 @@ export async function prepareRevisions(
   };
   verifyRevisionLock(originalLock, await readFile(join(tree, "Cargo.lock"), "utf8"));
   const libraries = Object.fromEntries(
-    ["tessera-sort", ...Object.keys(sources)].map((name) => {
+    ["tessera-order", ...Object.keys(sources)].map((name) => {
       const id = metadata.packages.find((entry) => entry.name === name)!.id;
       return [name, metadata.resolve.nodes.find((entry) => entry.id === id)!.features.sort()];
     }),

@@ -28,11 +28,11 @@ Miri fixtures check memory validity, aliasing and record ownership with small in
 Run the applicable [local checks](AGENTS.md#commands), including workspace tests and doctests. Engine changes exercise serial and Rayon builds and affected tests under Miri:
 
 ```sh
-cargo test -p tessera-sort
-cargo test -p tessera-sort --features rayon
+cargo test -p tessera-order
+cargo test -p tessera-order --features rayon
 rustup +nightly component add miri
-cargo +nightly miri test -p tessera-sort
-cargo +nightly miri test -p tessera-sort --lib --features rayon block::
+cargo +nightly miri test -p tessera-order
+cargo +nightly miri test -p tessera-order --lib --features rayon block::
 ```
 
 Run `bun run docs:test` when simulation models, the `trace` hooks or the block partition change, and the [site checks](docs/development/docs-site.md#commands) when their pages change. CI owns the remaining platform, MSRV and sanitizer lanes; the [Rust workflow](.github/workflows/rust-ci.yml) is the command source for reproducing a lane. It uses cargo-nextest for test processes and runs doctests separately.

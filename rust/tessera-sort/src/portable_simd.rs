@@ -108,7 +108,8 @@ fn prefix_sum_with<S: Simd>(simd: S, counts: &mut [u16]) {
 }
 
 /// Confirms ascending direct keys after an already encoded predecessor.
-// Keep short scalar suffixes in the caller; shared-order evidence is in port.md.
+// Keep short scalar suffixes in the caller; see
+// docs/design/evidence.md#shared-ordered-finishing-controls.
 #[inline]
 pub(crate) fn confirm_ascending<K: RadixKey>(values: &[K], previous: K::Encoded) -> bool {
     if values.len() < SIMD_MIN {

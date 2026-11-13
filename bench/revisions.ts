@@ -7,6 +7,7 @@ import { command } from "../tools/process.ts";
 import {
   copyLibraryRevision,
   copySnapshot,
+  nameLibraryPackage,
   resolveCommit,
   simdFeatures,
   sourceHash,
@@ -34,16 +35,7 @@ export async function prepareRevisions(
     // The current harness stays in place; only the requested library is replaced.
     await rm(library, { recursive: true });
     await copyLibraryRevision(root, current, library);
-    // A commit before the crate rename names its package `tessera-sort`; the harness depends on
-    // `tessera-order`, and only the manifest's package name differs.
-    const path = join(library, "Cargo.toml");
-    const copy = parse(await readFile(path, "utf8"));
-    const named = copy.package as { name: string };
-    // Rewrite only an old manifest, so a current copy keeps its source hash.
-    if (named.name !== "tessera-order") {
-      named.name = "tessera-order";
-      await writeFile(path, stringify(copy));
-    }
+    await nameLibraryPackage(library);
   }
   const copies = join(tree, "bench/revision-libraries");
   await mkdir(copies);

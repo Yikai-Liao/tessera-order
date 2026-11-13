@@ -17,7 +17,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import lockfile from "proper-lockfile";
-import { parse } from "smol-toml";
+import { parse, stringify } from "smol-toml";
 import { command } from "../tools/process.ts";
 
 /** Select the same vector backend on historical opt-in and current required builds.
@@ -137,6 +137,21 @@ export async function copyLibraryRevision(root: string, revision: string, destin
     await copySnapshot(await libraryDirectory(tree), destination, tree);
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Give a built library copy the package name the harness depends on. A commit before the crate
+ * rename names its package `tessera-sort`; only an old manifest is rewritten, so a current copy
+ * keeps its source hash.
+ */
+export async function nameLibraryPackage(library: string) {
+  const path = join(library, "Cargo.toml");
+  const manifest = parse(await readFile(path, "utf8"));
+  const named = manifest.package as { name: string };
+  if (named.name !== "tessera-order") {
+    named.name = "tessera-order";
+    await writeFile(path, stringify(manifest));
   }
 }
 

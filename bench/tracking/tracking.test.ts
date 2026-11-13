@@ -447,13 +447,13 @@ test("remote jobs split an inventory by catalog budget, in order and balanced", 
     ...Array.from({ length: 44 }, (_, i) => long(i)),
   ];
   const jobs = remoteJobs(tessera);
-  assert.equal(jobs.length, 2);
+  assert.equal(jobs.length, 3);
   assert.deepEqual(jobs.flat(), tessera);
   // Catalog warm-up plus window: 2 s below a million records, 5 s from there.
   const seconds = (job: string[]) =>
     job.reduce((sum, id) => sum + (Number(id.split("/")[3]) >= 1_000_000 ? 5 : 2), 0);
-  // Midpoint assignment may exceed the 180 s budget by part of one case.
-  for (const job of jobs) assert.ok(seconds(job) <= 0.6 * 300 + 5, String(seconds(job)));
+  // Midpoint assignment may exceed the 150 s budget by part of one case.
+  for (const job of jobs) assert.ok(seconds(job) <= 0.5 * 300 + 5, String(seconds(job)));
   // An opponent selecting one mode of the same inventory fits one job.
   const opponent = [
     ...Array.from({ length: 54 }, (_, i) => short(i)),

@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { z } from "zod";
 import { command } from "../../tools/process.ts";
 import { repositoryRoot, runTask } from "../../tools/tasks.ts";
-import { TRACKING_SPEC, trackingAlgorithm, trackingBranch } from "./algorithms.ts";
+import { trackingAlgorithm, trackingBranch } from "./algorithms.ts";
 import { localImage, type TrackingBuild } from "./build.ts";
 import { reportFailure } from "./failure.ts";
 import { JOB_TIMEOUT_S } from "./jobs.ts";
-import { combineReports, runSchema, summarizeReport } from "./result.ts";
+import { combineReports, runSchema, summarizeReport, TRACKING_SPEC } from "./result.ts";
 
 /** A detached submission's pending report names the remote job to attach to. */
 const pendingSchema = z.object({ job: z.uuid() });

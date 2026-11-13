@@ -2,9 +2,7 @@
 
 import { appendFile } from "node:fs/promises";
 import { catalog } from "../catalog.ts";
-
-/** The Bencher hardware every tracking job runs on. */
-export const TRACKING_SPEC = { slug: "intel-v1", cpus: 4 } as const;
+import { TRACKING_SPEC } from "./result.ts";
 
 /**
  * Production adapters are the tracking inventory; revision placements are controls, not

@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { parseHTML } from "linkedom/worker";
 import { z } from "zod";
 import { catalog } from "../catalog.ts";
-import { TRACKING_SPEC, trackingAlgorithms } from "./algorithms.ts";
+import { trackingAlgorithms } from "./algorithms.ts";
 import { trackingMemory } from "./build.ts";
 import { comparisonData, latestRuns } from "./comparison.ts";
 import { explainFailure } from "./failure.ts";
@@ -29,6 +29,7 @@ import {
   parseRuns,
   runSchema,
   summarizeReport,
+  TRACKING_SPEC,
   type TrackingRun,
 } from "./result.ts";
 

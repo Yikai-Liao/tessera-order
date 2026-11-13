@@ -132,10 +132,9 @@ pub(super) fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clon
     } else {
         tasks.into_iter().map(scatter).collect()
     };
-    let mut borrows: Vec<_> = partitions.iter_mut().collect();
     // SAFETY: these completed guards cover consecutive disjoint block-aligned
     // ranges from the same ancestor. Only the final partition has a tail.
-    unsafe { finish::complete(input, input_len, &mut borrows, config.parallel, visit) }
+    unsafe { finish::complete(input, input_len, &mut partitions, config.parallel, visit) }
 }
 
 #[cfg(test)]

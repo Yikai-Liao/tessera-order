@@ -359,7 +359,7 @@ impl Bucket {
 unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>>(
     input: *mut T,
     input_len: usize,
-    partitions: &mut [&mut Partition<'_, '_, T>],
+    partitions: &mut [Partition<'_, '_, T>],
 ) -> Completion<T, Owner, Free> {
     let block_size = partitions[0].blocks.block_size;
     let local_scratch = partitions[0].blocks.scratch_blocks;
@@ -471,7 +471,7 @@ pub(super) fn complete_serial<'records, T>(
         build_completion::<T, core::cell::RefCell<usize>, core::cell::RefCell<Vec<usize>>>(
             input,
             len,
-            &mut [partition],
+            core::slice::from_mut(partition),
         )
     };
     for bucket in &mut completion.buckets {
@@ -500,7 +500,7 @@ pub(super) fn complete_serial<'records, T>(
 pub(super) unsafe fn complete<'records, T: Send>(
     input: *mut T,
     input_len: usize,
-    partitions: &mut [&mut Partition<'records, '_, T>],
+    partitions: &mut [Partition<'records, '_, T>],
     parallel: bool,
     visit: Option<BucketVisit<'_, 'records, T>>,
 ) -> Vec<usize> {
@@ -517,7 +517,7 @@ pub(super) unsafe fn complete<'records, T: Send>(
 unsafe fn complete_with_fault<'records, T: Send>(
     input: *mut T,
     input_len: usize,
-    partitions: &mut [&mut Partition<'records, '_, T>],
+    partitions: &mut [Partition<'records, '_, T>],
     parallel: bool,
     visit: Option<BucketVisit<'_, 'records, T>>,
     fail_after: Option<usize>,
@@ -837,13 +837,12 @@ mod tests {
             );
             shards.push(sorter);
         }
-        let mut partitions: Vec<_> = shards.iter_mut().collect();
         // SAFETY: these partitions cover the records in order from their ancestor.
         let mut completion = unsafe {
             build_completion::<_, Mutex<usize>, Mutex<Vec<usize>>>(
                 input,
                 SHARDS * SHARD_LEN,
-                &mut partitions,
+                &mut shards,
             )
         };
         let storage = &completion.storage;
@@ -979,11 +978,8 @@ mod tests {
                 let mut sorter = Partition::new(records, 4, 3, &mut buffers);
                 assert!(sorter.step(|record: &Owned| record.id * 37 % 4).is_ok());
                 let mut shards = [sorter];
-                let mut partitions: Vec<_> = shards.iter_mut().collect();
                 // SAFETY: one shard covers all records from their ancestor.
-                unsafe {
-                    complete_with_fault(input, len, &mut partitions, parallel, None, Some(0))
-                };
+                unsafe { complete_with_fault(input, len, &mut shards, parallel, None, Some(0)) };
             });
             assert!(result.is_err());
             let mut ids: Vec<_> = records.iter().map(|record| record.id).collect();

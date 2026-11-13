@@ -1,12 +1,18 @@
 # How Tessera works
 
-These pages explain the algorithm from first principles: what a radix sort does, why the textbook versions need a second buffer or give up stability, and how Tessera avoids both. The interactive figures run TypeScript models of the Rust source, tested against reference sorts. The text says everything the figures show, so the Markdown files in [`docs/explain/`](.) read on their own.
+Tessera sorts stably, in linear time, with O(√n) extra memory. Below, its core step runs in the engine itself, compiled to WebAssembly.
 
-These pages own the routing rules, thresholds and their reasons; the [engine reference](../design/engine.md) owns code boundaries and invariants.
+## Tessera: a stable split without a second buffer
 
-## The problem in one paragraph
+<BlockPartitionDemo />
 
-A radix sort reads digits of the key instead of comparing keys, so it runs in time linear in n for a fixed key width. The stable textbook version, LSD radix sort, moves every record into a second buffer as large as the input on every pass. The in-place textbook version, American flag sort (an MSD radix sort), needs no buffer, but its swaps break stability. Tessera stays stable and linear and uses O(√n) extra memory: for 10 million 8-byte records, about 6 MiB instead of a 76 MiB buffer.
+The input splits on the tens digit of two-digit keys into four buckets. Each bucket fills a chain of fixed-size blocks, and once an input block has been read it becomes free for any bucket's output. A short ledger then copies each chain into its final range. Equal keys keep their input order (the small number under each key), and the only extra memory is a few spare blocks. [The block partition](block-partition.md#step-by-step) explains every row, label and control.
+
+## The textbook: LSD needs an input-sized buffer
+
+<CountingPassDemo />
+
+A textbook LSD radix sort repeats this counting pass once per digit: count each digit value, turn the counts into start positions, then copy every record into its bucket in a second array as large as the input. For 10 million 8-byte records that buffer is 76 MiB; Tessera needs about 6 MiB. [Radix sort in one pass](radix-sort.md) builds LSD, MSD and Tessera from this pass and compares them on one input.
 
 ## The idea in three sentences
 
@@ -41,3 +47,5 @@ The figure, as a list (the rules, thresholds and reasons for each stage are on [
 ## Memory
 
 Memory is O(√n) block scratch plus a fixed-size tile buffer and small tables, all on the heap except the tile-local cursor tables. [Ordering semantics](../../conformance/semantics.md#space) states the contract, and each part is explained where it arises: [block scratch](block-partition.md#choosing-the-block-size), [tile scratch and cursor tables](tiles.md).
+
+These pages own the routing rules, thresholds and their reasons; the [engine reference](../design/engine.md) owns code boundaries and invariants.

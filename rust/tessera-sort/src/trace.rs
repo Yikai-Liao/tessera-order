@@ -18,7 +18,7 @@
 /// One observable step of a block partition on the calling thread.
 ///
 /// Physical block IDs number the partition's scratch blocks first, then the
-/// full blocks of its input slice, as in `BlockStorage`. Record positions are
+/// full blocks of its input slice, as in `block::Partition`. Record positions are
 /// indices into the input slice.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(missing_docs, reason = "each variant documents its fields")]

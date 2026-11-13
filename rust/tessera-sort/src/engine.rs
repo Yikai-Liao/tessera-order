@@ -92,6 +92,7 @@ pub(crate) fn finish_insertion<T, E: Extract<T>>(
 /// Scans until all candidate bits have appeared in both states, or the input ends.
 /// Only candidate bits are returned, so even changing keys cannot restore a
 /// parent partition digit and prevent the recursion from making progress.
+#[inline(always)]
 fn scan_varying_bits<S: Simd, T, E: Extract<T>>(
     simd: S,
     records: &[T],
@@ -113,41 +114,72 @@ fn scan_varying_bits_with<S: fearless_simd::Simd, T, E: Extract<T>>(
     candidate: u128,
     extractor: &mut E,
 ) -> u128 {
-    use fearless_simd::{prelude::*, u64x4};
+    use fearless_simd::{prelude::*, u8x32, u16x16, u32x8, u64x4};
     if candidate == 0 {
         return 0;
     }
     let first = extractor.key(&records[0]).to_u128();
-    let (mut union, mut intersection) = (first, first);
+    let mut seen = 0;
+    // Keep encoded keys at their own width instead of widening narrow lanes.
+    macro_rules! reduce {
+        ($ty:ty, $vector:ident, $lanes:literal, $values:expr) => {{
+            let (chunks, tail) = $values.as_chunks::<$lanes>();
+            let base = $vector::<S>::splat(simd, first as $ty);
+            let (mut ors, mut ands) = (base, base);
+            for chunk in chunks {
+                let keys = chunk
+                    .each_ref()
+                    .map(|record| extractor.key(record).to_u128() as $ty);
+                let keys = $vector::<S>::from_slice(simd, &keys);
+                ors |= keys;
+                ands &= keys;
+            }
+            let varying = ors ^ ands;
+            for lane in 0..$lanes {
+                seen |= varying[lane] as u128;
+            }
+            tail
+        }};
+    }
     let mut index = 1;
     let mut batch = 64;
     while index < records.len() {
         let end = index + batch.min(records.len() - index);
-        let (chunks, tail) = records[index..end].as_chunks::<4>();
-        // Two halves preserve the complete encoding, including 128-bit keys.
-        let (mut lo_or, mut lo_and) = (u64x4::splat(simd, 0), u64x4::splat(simd, u64::MAX));
-        let (mut hi_or, mut hi_and) = (lo_or, lo_and);
-        for chunk in chunks {
-            let keys = chunk
-                .each_ref()
-                .map(|record| extractor.key(record).to_u128());
-            let lo = u64x4::from_slice(simd, &keys.map(|key| key as u64));
-            let hi = u64x4::from_slice(simd, &keys.map(|key| (key >> 64) as u64));
-            lo_or |= lo;
-            lo_and &= lo;
-            hi_or |= hi;
-            hi_and &= hi;
-        }
-        for lane in 0..4 {
-            union |= lo_or[lane] as u128 | ((hi_or[lane] as u128) << 64);
-            intersection &= lo_and[lane] as u128 | ((hi_and[lane] as u128) << 64);
-        }
+        let values = &records[index..end];
+        let tail = match E::Value::BITS {
+            8 => reduce!(u8, u8x32, 32, values),
+            16 => reduce!(u16, u16x16, 16, values),
+            32 => reduce!(u32, u32x8, 8, values),
+            64 => reduce!(u64, u64x4, 4, values),
+            _ => {
+                let (chunks, tail) = values.as_chunks::<4>();
+                // Two halves preserve the complete encoding of 128-bit keys.
+                let lo_base = u64x4::splat(simd, first as u64);
+                let hi_base = u64x4::splat(simd, (first >> 64) as u64);
+                let (mut lo_or, mut lo_and) = (lo_base, lo_base);
+                let (mut hi_or, mut hi_and) = (hi_base, hi_base);
+                for chunk in chunks {
+                    let keys = chunk
+                        .each_ref()
+                        .map(|record| extractor.key(record).to_u128());
+                    let lo = u64x4::from_slice(simd, &keys.map(|key| key as u64));
+                    let hi = u64x4::from_slice(simd, &keys.map(|key| (key >> 64) as u64));
+                    lo_or |= lo;
+                    lo_and &= lo;
+                    hi_or |= hi;
+                    hi_and &= hi;
+                }
+                let lo = lo_or ^ lo_and;
+                let hi = hi_or ^ hi_and;
+                for lane in 0..4 {
+                    seen |= lo[lane] as u128 | ((hi[lane] as u128) << 64);
+                }
+                tail
+            }
+        };
         for record in tail {
-            let key = extractor.key(record).to_u128();
-            union |= key;
-            intersection &= key;
+            seen |= extractor.key(record).to_u128() ^ first;
         }
-        let seen = union ^ intersection;
         if seen & candidate == candidate {
             break;
         }
@@ -155,7 +187,7 @@ fn scan_varying_bits_with<S: fearless_simd::Simd, T, E: Extract<T>>(
         // Keep early witnesses cheap and amortize batch checks on long scans.
         batch = batch.saturating_mul(2);
     }
-    (union ^ intersection) & candidate
+    seen & candidate
 }
 
 /// The candidate bits left when every child holds the top bit of a nonzero
@@ -772,31 +804,42 @@ mod tests {
 
     #[test]
     fn variation_covers_late_bits_and_key_widths() {
-        for len in [1, 2, 3, 4, 5, 64, 65, 66, 67, 68, 192, 193, 1025] {
-            for first in [7u128, !7u128] {
-                let mut records = alloc::vec![first; len];
-                records[len - 1] ^= (1 << 127) | 1;
-                for candidate in [0, 0xff, u128::MAX] {
-                    let expected = records
-                        .iter()
-                        .fold(0, |bits, key| bits | (key ^ records[0]));
-                    assert_eq!(
-                        dispatch!(Level::new(), simd => scan_varying_bits(simd, &records, candidate, &mut Direct)),
-                        expected & candidate
-                    );
-                    assert_eq!(
-                        fearless_simd::dispatch!(fearless_simd::Level::baseline(), simd =>
-                            scan_varying_bits_with(simd, &records, candidate, &mut Direct)),
-                        expected & candidate
-                    );
+        macro_rules! check_width {
+            ($ty:ty, $len:expr) => {
+                for first in [7 as $ty, !(7 as $ty)] {
+                    let mut records = alloc::vec![first; $len];
+                    records[$len - 1] ^= (1 << (<$ty>::BITS - 1)) | 1;
+                    for candidate in [0, 0xff, u128::MAX] {
+                        let expected = records.iter().fold(0, |bits, key| {
+                            bits | ((*key ^ records[0]) as u128)
+                        });
+                        assert_eq!(
+                            dispatch!(Level::new(), simd => scan_varying_bits(simd, &records, candidate, &mut Direct)),
+                            expected & candidate
+                        );
+                        assert_eq!(
+                            fearless_simd::dispatch!(fearless_simd::Level::baseline(), simd =>
+                                scan_varying_bits_with(simd, &records, candidate, &mut Direct)),
+                            expected & candidate
+                        );
+                    }
                 }
-            }
-            let narrow = alloc::vec![17u8; len];
-            assert_eq!(
-                dispatch!(Level::new(), simd => scan_varying_bits(simd, &narrow, u8::MAX as u128, &mut Direct)),
-                0
-            );
+            };
         }
+        // Cover every tail length of the widest vector, both sides of the
+        // first batch boundary, and a bit first observed in a later batch.
+        for len in (1..=97).chain([192, 193, 1025]) {
+            check_width!(u8, len);
+            check_width!(u16, len);
+            check_width!(u32, len);
+            check_width!(u64, len);
+            check_width!(u128, len);
+        }
+        let narrow = alloc::vec![17u8; 1025];
+        assert_eq!(
+            dispatch!(Level::new(), simd => scan_varying_bits(simd, &narrow, u8::MAX as u128, &mut Direct)),
+            0
+        );
     }
 
     /// Places a new, smaller key on exactly the records each node samples, so

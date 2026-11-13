@@ -58,7 +58,7 @@ A stage's rule changes on its page, in the code and in the page's model together
 
 - Serial and parallel roots share `prepare` for order/insertion exits and `root_varying` for variation and deferred flat confirmation. Variation backend selection belongs between these phases, so roots that finish without a variation scan do not pay for it. `insertion_probe` owns insertion eligibility, its window and budget, including unlimited finishing for insertion-sized inputs.
 - `finish_ordered` owns ascending completion and strict or stable descending reversal, for the root probe, deferred flat confirmation and partition children.
-- Root and child variation share one candidate-masked scan.
+- Root and child variation share one candidate-masked scan. Explicit OR/AND vectors retain each encoded key's width; 128-bit keys use two halves. The selected SIMD token follows the existing sorter, tile and parallel completion paths; each scan enters its target-feature context without selecting a backend again.
 - Serial and parallel execution consume one `NodePlan` decision once. Parallel roots shard equality and digit partitions; an existing-run split runs serially without resampling.
 - A `Direct` extractor may finish a covering digit by counting, because every sealed encoding is a bijection on bit patterns. `ByKey` declines, because a user key does not identify its payload.
 - Scratch is created only after the root fast paths, so confirmed ordered and constant inputs never allocate.

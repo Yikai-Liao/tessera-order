@@ -132,7 +132,7 @@ The code-and-contract audit found concentrated ownership, not proven minimality.
 
 Here `sim/` abbreviates `.vitepress/theme/sim/`. Sampling, capacity and partition changes also follow their owning Rust tests; movement and scheduling do not reinterpret those policies.
 
-**Ownership group.** Each shard's `Partition` owns its chains and recovery until the ledger exists, then clearing `owns_recovery` hands recovery to the ledger. The source ledger uses physical-owner locks, atomic source locations and registered free caches for direct final bands. Recovery finishes every band, without callbacks, before the panic resumes: `completed` records movement. Direct prefix copies transfer ownership; protection evacuates unread sources. The direct variant deletes parallel cycle permutation and compaction recovery rather than merely sharing their callbacks; serial partitions now complete through the same ledger.
+**Ownership group.** Each shard's `Partition` owns its chains and recovery until the ledger exists, then clearing `owns_recovery` hands recovery to the ledger. The source ledger uses physical-owner locks, atomic source locations and registered free caches for direct final bands. Recovery finishes every band, without callbacks, before the panic resumes: an emptied `pending_sources` range records completed movement. Direct prefix copies transfer ownership; protection evacuates unread sources. The direct variant deletes parallel cycle permutation and compaction recovery rather than merely sharing their callbacks; serial partitions now complete through the same ledger.
 
 | Alternative | Mechanisms and ownership change | Moves, critical path and decision |
 |---|---|---|

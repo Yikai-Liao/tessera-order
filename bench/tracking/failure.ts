@@ -41,10 +41,10 @@ export async function reportFailure(title: string, log: string, stage: () => Pro
     const text = await readFile(log, "utf8").catch(() => "");
     const cause = explainFailure(text) ?? message;
     const actions = process.env.GITHUB_ACTIONS === "true";
-    const escape = (value: string) =>
+    const encode = (value: string) =>
       value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
     console.error(
-      actions ? `::error title=${escape(title)}::${escape(cause)}` : `${title}: ${cause}`,
+      actions ? `::error title=${encode(title)}::${encode(cause)}` : `${title}: ${cause}`,
     );
     if (cause !== message) console.error(message);
     const tail = text.trimEnd().split("\n").slice(-LOG_TAIL_LINES).join("\n");

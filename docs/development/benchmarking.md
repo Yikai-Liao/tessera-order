@@ -20,6 +20,7 @@ Run `bun run tools` from the repository root after `bun install --frozen-lockfil
 | Preview or customize inputs | `bun run --silent tools plan NAME` | Validated selection without compiling or measuring |
 | Regenerate a report | `bun run tools report DIR` | Statistics and figures from retained results, without new measurements |
 | Read main or PR feedback | `bun run --silent tools status main` or `bun run --silent tools status --pr NUMBER` | Exact-ref workflow and benchmark states; [read-only interpretation](continuous-benchmarks.md#read-feedback-from-a-pr) |
+| Inspect core engine production lines | `bun run --silent tools code [BASE] [--current COMMIT] [--text] [--details]` | The same source scope and line statistics as PR reports, without builds or measurements |
 
 `compare commit` defaults to `HEAD` and the `local` plan; `compare algorithms` to the `smoke` plan. Incomplete algorithm sessions report only with `--partial`; revision reports need every case's full sample budget.
 
@@ -43,6 +44,20 @@ Build and measurement tasks print one compact JSON object with `out`, `log` and 
 A completed comparison returns the protocol, ratio denominator, interval meaning, measured and faster/slower/within-noise counts, the host affinity, and up to five changes with numeric evidence: current regressions first for revision screens, opponents faster than Tessera first otherwise. `omittedChanges` counts the rest and `summaries.json` has everything. Algorithm counts cover opponent/input pairs, excluding the two Tessera controls; layout results stay per layout; preparation returns an identity and case count, not a verdict. An affinity of `inherited` or a multi-CPU mask means no single CPU was pinned. `report` returns the same summary from retained files; `plan` prints compact JSON or editable TOML.
 
 Exit status describes execution, not a speedup: a successful `status` means the read succeeded, not that workflows passed. `status` prints one object for the exact `target.head` of a remote ref, keeping the latest run per workflow/event/branch and listing only unfinished or failed jobs; `--details` adds check summaries, the report comment and links, `--text` a short overview. It changes no GitHub state and needs `gh auth login`. [PR feedback](continuous-benchmarks.md#read-feedback-from-a-pr) explains how to read it.
+
+## Core engine code size
+
+`code` compares the working tree with `HEAD` by default, including staged, unstaged and unignored untracked files. An explicit base selects another commit; `--current` selects a committed current revision instead of the working tree. It resolves commits locally and performs no build, measurement or network request. JSON output identifies the resolved baseline/current hashes (`hash: null` means the working tree), totals and net change; `--details` adds every source file's before/after counts and additions/removals. `--text` prints the compact table shared with PR reports: totals followed by files with added or removed production lines, including replacements with zero net change. With `--details`, the local table also includes unchanged files.
+
+```sh
+bun run --silent tools code --text
+bun run --silent tools code main --text --details
+bun run --silent tools code main --current HEAD --text
+```
+
+[`bench/code-change.ts`](../../bench/code-change.ts) owns the source selection: engine execution/planning, block partitioning, key encoding/classification, SIMD/scalar scans and panic recovery. API entry files, figure instrumentation and benchmark/tooling sources are outside this metric. The filter excludes blank lines, comments and test-only items (`#[test]` and `cfg` expressions that cannot hold with `test=false`), including top-level external test modules at their default paths; feature and target predicates remain eligible. It declines test-dependent `cfg_attr`, nested inner test attributes, nested or path-attributed test modules and nonregular source files rather than guessing their scope. Working-tree files use the shared snapshot boundary checks.
+
+Git diffs the filtered physical lines, ignoring comment and within-line whitespace edits; file moves count as removal and addition. This is a source-size metric across features, not a measure of maintainability or compiled code size. Missing history or unsupported source syntax fails the CLI command; the [PR report](continuous-benchmarks.md#reports) shows the statistic as unavailable without changing its performance verdict.
 
 ## Run an experiment
 

@@ -96,6 +96,8 @@ test("routing keeps library, comparison and revision checks with their owners", 
     [
       [
         "tools/status.ts",
+        "tools/code.ts",
+        "bench/code-change.ts",
         "tools/repository.ts",
         "biome.json",
         "tsconfig.json",

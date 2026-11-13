@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { modeName } from "../catalog.ts";
-import type { CodeChange } from "./code-change.ts";
+import { type CodeChange, codeTable } from "../code-change.ts";
 import { formatChange, type ReportSummary, type Row, short } from "./report.ts";
 
 interface RenderOptions {
@@ -61,22 +61,7 @@ export function render(summary: ReportSummary, options: RenderOptions) {
   const out = [`### Benchmarks · ${options.language} · ${headline(summary)}`];
   const code = options.codeChange;
   if (code) {
-    const net = code.current - code.baseline;
-    const signed = (value: number) => `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value)}`;
-    out.push(
-      "",
-      `**Core sorting engine: ${signed(net)} production lines** against \`${baseRef}\` (${code.baseline} → ${code.current}; +${code.added} / −${code.removed}).`,
-      "",
-      "Scope: `rust/tessera-sort/src/{engine,block}.rs` and their submodules, across features. Blank lines, comments and test-only code are excluded.",
-    );
-    if (code.files.length) {
-      out.push("", "| File | Added | Removed | Net |", "|---|---:|---:|---:|");
-      for (const file of code.files.slice(0, 5))
-        out.push(
-          `| \`${cell(file.path)}\` | +${file.added} | −${file.removed} | ${signed(file.added - file.removed)} |`,
-        );
-      if (code.files.length > 5) out.push("", `${code.files.length - 5} more files changed.`);
-    } else out.push("", "No production-line changes in the core sorting engine.");
+    out.push("", codeTable(code, { baseline: baseRef, current: "PR" }));
   } else {
     out.push("", "Core sorting engine production-line analysis unavailable; see the workflow log.");
   }

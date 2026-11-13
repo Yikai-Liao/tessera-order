@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { command } from "../../tools/process.ts";
+import { command } from "../tools/process.ts";
+import { copySnapshot, resolveCommit } from "./workspace.ts";
 
 export interface CodeChange {
+  baseHash: string;
+  hash: string | null;
   baseline: number;
   current: number;
   added: number;
   removed: number;
-  files: { path: string; added: number; removed: number }[];
+  files: { path: string; baseline: number; current: number; added: number; removed: number }[];
 }
 
 interface Token {
@@ -185,17 +188,42 @@ export function productionLines(source: string) {
 
 const SOURCE = "rust/tessera-sort/src/";
 
-async function snapshot(root: string, hash: string, out: string) {
+// Runtime engine mechanisms, including key classification, SIMD/scalar scans
+// and panic recovery. API entry points and figure instrumentation stay outside.
+const ENGINE_SOURCE =
+  /^rust\/tessera-sort\/src\/(engine|block|key|portable_simd|scan|unwind)(\.rs$|\/.*\.rs$)/;
+
+async function snapshot(root: string, hash: string | null, out: string) {
   const git = (args: string[]) => command("git", args, { cwd: root, capture: true });
-  const paths = (await git(["ls-tree", "-r", "--name-only", "-z", hash, "--", SOURCE]))
-    .split("\0")
-    .filter((path) => /^rust\/tessera-sort\/src\/(engine|block)(\.rs$|\/.*\.rs$)/.test(path));
+  const entries = hash
+    ? (await git(["ls-tree", "-r", "-z", hash, "--", SOURCE])).split("\0").filter(Boolean)
+    : (await git(["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", SOURCE]))
+        .split("\0")
+        .filter(Boolean);
   const files = new Map<string, string[]>();
   const excluded: string[] = [];
-  for (const path of paths) {
-    const { lines, testModules, testOnly } = productionLines(
-      await git(["show", `${hash}:${path}`]),
-    );
+  for (const entry of new Set(entries)) {
+    const path = hash ? entry.slice(entry.indexOf("\t") + 1) : entry;
+    if (!ENGINE_SOURCE.test(path)) continue;
+    let source: string;
+    if (hash) {
+      if (!/^100(644|755) blob /.test(entry))
+        throw new Error(`Expected regular engine source: ${path}`);
+      source = await git(["show", `${hash}:${path}`]);
+    } else {
+      const target = join(root, path);
+      const stat = await lstat(target).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (!stat) continue;
+      if (!stat.isFile()) throw new Error(`Expected regular engine source: ${path}`);
+      const frozen = join(out, "input", path.slice(SOURCE.length));
+      await mkdir(dirname(frozen), { recursive: true });
+      await copySnapshot(target, frozen, root);
+      source = await readFile(frozen, "utf8");
+    }
+    const { lines, testModules, testOnly } = productionLines(source);
     files.set(path.slice(SOURCE.length), lines);
     const moduleDir = path.endsWith("/mod.rs") ? dirname(path) : path.slice(0, -3);
     if (testOnly) excluded.push(moduleDir.slice(SOURCE.length));
@@ -213,25 +241,30 @@ async function snapshot(root: string, hash: string, out: string) {
   return files;
 }
 
-/** Compare core engine production lines at the exact measured commits, using Git's
- * line diff after filtering both snapshots. No checkout, build or network is needed.
+/** Compare core engine production lines at Git revisions or against the working tree
+ * (when currentRef is omitted), using Git's line diff after filtering both snapshots.
+ * Working-tree input includes tracked and unignored untracked files. No checkout,
+ * build or network is needed; results identify resolved commits, or null for the tree.
  * Missing source or unsupported test syntax rejects; callers retain the benchmark verdict.
  */
 export async function codeChange(
-  baseHash: string,
-  hash: string,
+  baseRef: string,
+  currentRef?: string,
   root = process.cwd(),
 ): Promise<CodeChange> {
-  if (![baseHash, hash].every((value) => /^[a-f0-9]{40}$/.test(value)))
-    throw new Error("Expected exact source commits");
+  const baseHash = await resolveCommit(root, baseRef);
+  const hash = currentRef === undefined ? null : await resolveCommit(root, currentRef);
   const temporary = await mkdtemp(join(tmpdir(), "tessera-code-change-"));
   try {
     const baseline = await snapshot(root, baseHash, join(temporary, "baseline"));
     const current = await snapshot(root, hash, join(temporary, "current"));
     const files: CodeChange["files"] = [];
     for (const path of new Set([...baseline.keys(), ...current.keys()])) {
-      if (JSON.stringify(baseline.get(path) ?? []) === JSON.stringify(current.get(path) ?? []))
-        continue;
+      const before = baseline.get(path) ?? [];
+      const after = current.get(path) ?? [];
+      const file = { path, baseline: before.length, current: after.length, added: 0, removed: 0 };
+      files.push(file);
+      if (JSON.stringify(before) === JSON.stringify(after)) continue;
       const diff = spawnSync(
         "git",
         [
@@ -251,9 +284,12 @@ export async function codeChange(
       const [added, removed] = diff.stdout.split("\t").map(Number);
       if (!Number.isInteger(added) || !Number.isInteger(removed))
         throw new Error("Invalid code diff");
-      files.push({ path, added, removed });
+      file.added = added;
+      file.removed = removed;
     }
     return {
+      baseHash,
+      hash,
       baseline: [...baseline.values()].reduce((sum, lines) => sum + lines.length, 0),
       current: [...current.values()].reduce((sum, lines) => sum + lines.length, 0),
       added: files.reduce((sum, file) => sum + file.added, 0),
@@ -265,4 +301,26 @@ export async function codeChange(
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
+}
+
+/** Show totals and changed files; detailed local output also includes unchanged files. */
+export function codeTable(
+  change: CodeChange,
+  options: { baseline: string; current: string; details?: boolean },
+) {
+  const signed = (value: number) => `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value)}`;
+  const cell = (text: string) => text.replaceAll("|", "\\|").replace(/[\r\n]/g, " ");
+  const row = (
+    label: string,
+    value: Pick<CodeChange, "baseline" | "current" | "added" | "removed">,
+  ) =>
+    `| ${label} | ${value.baseline} | ${value.current} | ${value.added} | ${value.removed} | ${signed(value.current - value.baseline)} |`;
+  return [
+    `| Production LOC | ${cell(options.baseline)} | ${cell(options.current)} | Added | Removed | Net |`,
+    "|---|---:|---:|---:|---:|---:|",
+    row("Core engine", change),
+    ...change.files
+      .filter((file) => options.details || file.added || file.removed)
+      .map((file) => row(`\`${cell(file.path)}\``, file)),
+  ].join("\n");
 }

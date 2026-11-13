@@ -2,8 +2,8 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { codeChange } from "../code-change.ts";
 import { chartSvg } from "./chart.ts";
-import { codeChange } from "./code-change.ts";
 import {
   type ActionContext,
   type ActionsCore,

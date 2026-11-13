@@ -19,6 +19,41 @@ Branch alignment is not a free speedup: it changed the prototype's own time by �
 
 The engine is a Stable Rust port of the research prototype in `sort-research-rs` at `6c0877f0491dc3b8fc052aa529bce44bf8a53fa8`. Measured inside one Nightly binary of the prototype's harness (fixed seed, one pinned core, rotated order, every output checked), the median per-case ratio `port / prototype` was 0.984–1.004 over 27–136 cases per matrix (ranges 0.53–1.23, placement-dominated), for both `stable_sort_by_key` and `stable_sort`, in the default build and with `target-cpu=native` and fat LTO. Cases outside the control range were within 3% of the prototype forced onto cached bucket IDs (`record128` zipf 1.3 n = 128: 1.168 against 1.030), the cost of the caching policy the port adopts on purpose ([record handling](engine.md#record-handling)); its cost on 8-byte rows is an open [roadmap](../../ROADMAP.md#rust-01) question. The harness is Apache-2.0 code and stays outside the repository.
 
+## Unstable node-partition feasibility
+
+A serial feasibility study against `0499d35` shared root preparation, key encoding and half-key dispatch, node planning, candidate-bit progress, child routing and stable tile finishing. Only node movement changed: a histogram defined final bucket bands, then bounded cursors placed records with safe in-slice swaps instead of stable block chains and ledger completion. Classification could panic without leaving a hole; a changed key targeting a full band stopped that partition, while candidate-bit consumption still bounded recursion. Ordered reversal stayed stable. This is a research prototype, not a supported release API or a production-ready kernel.
+
+The maintained comparison pipeline linked two independently named placements per implementation, repeated the prototype for A/A, verified every output under the appropriate stability contract, and measured heap allocations separately. Temporary adapters selected the two contracts without changing inputs, sampling or statistics. Coverage comprised 54 inputs across u32, u64, f64, 16-byte rows, 128-byte records and owned records; a focused nine-block repeat covered the following 1M-record cases on an i7-10875H, Rust 1.99.1, one pinned logical CPU. Times are median milliseconds per sort; ratios are medians of paired stable/prototype comparisons inverted to prototype/stable, not quotients of the displayed marginal medians.
+
+| Records | Distribution | Stable ms | Prototype ms | Prototype / stable |
+|---|---|---:|---:|---:|
+| u64 | random | 8.80 | 15.33 | 1.740 |
+| u64 | 16 values | 2.06 | 2.06 | 1.000 |
+| u64 | Zipf 2 | 6.50 | 15.22 | 2.346 |
+| 16-byte row | random | 12.19 | 24.17 | 1.978 |
+| 16-byte row | 16 values | 4.67 | 9.62 | 2.066 |
+| 16-byte row | Zipf 2 | 9.47 | 18.53 | 1.978 |
+| 128-byte record | random | 68.26 | 72.95 | 1.069 |
+| 128-byte record | 16 values | 33.01 | 23.86 | 0.723 |
+| 128-byte record | Zipf 2 | 61.37 | 42.10 | 0.687 |
+
+Both stable placements reproduced the non-neutral results, and the prototype copy tracked the primary within about 2%. Symbol and disassembly inspection confirmed distinct node-execution bodies for the wide-record placements. Focused A/A ranges were within ±4.4% except wide-record Zipf 2 (±7.3%); the broader run reached ±28.6%, so it does not establish small improvements. Short tiles, ordered, nearly ordered and constant inputs retained their existing mechanisms; small timing differences there are not evidence of a stability saving. Peak extra heap for the wide-record random / 16-value / Zipf cases fell from 8,101,648 / 1,969,648 / 34,627,076 bytes to 41,600 / 4,096 / 94,560 bytes; stack storage is excluded.
+
+The prototype trades streaming movement and one classification per stable block pass for a histogram plus dependent record swaps and reclassification. Its measured benefit is limited to wide records with repeated keys, not a general unstable speedup or an upper bound on better kernels. Standard unstable comparison sorting was another viable low-code option: in the focused Zipf cases it used about 0.58 / 0.57 / 0.41 of stable Tessera's time for u64 / rows / wide records, but lost on their random inputs and severely on nearly ordered inputs in the broader run. These opponent results do not isolate stability from algorithm choice.
+
+**Design conclusion:** keep one recursive engine if an unstable kernel is pursued. A private compile-time choice at the complete node-partition operation can hide movement, scratch and recovery while sharing its classifier, boundaries and child completion. Do not build a strategy-trait hierarchy or duplicate planning and recursion. Stable tile leaves remain reusable: LSD depends on stable digit passes even under an unstable public contract, and counting direct keys is already permitted by their bitwise identity. The current planner's legality is reusable, but its fan-out is tuned for stable movement; a new primitive does not inherit that tuning's performance validity. Retain the stable kernel as the default rather than promote this swap primitive or add distribution-specific dispatch. Reusing it behind a weaker unstable contract is correct but has no intrinsic speed benefit; delegating to standard unstable sort is simpler than a new kernel but loses Tessera's fixed-key-width linear-time algorithm.
+
+Serial and Rayon suites, doctests, Clippy and a focused borrowed-record panic/changing-key test passed for the prototype; benchmark verification also covered owned payloads. Miri was unavailable. Parallel unstable execution, expensive extractors, other hosts and broader large-input/threshold coverage remain unmeasured. This experimental branch retains the node kernel behind the doc-hidden `prototype_unstable_sort` and `prototype_unstable_sort_by_key` entries, plus a separately named `tessera-unstable-prototype` benchmark adapter. Stable APIs, the ordinary `tessera` adapter, A/A controls and default presets remain stable. The initial measurements above used temporary linked-revision adapters; those adapters, raw measurements and executables stay outside Git. The branch adds no supported unstable release API.
+
+For a fresh serial algorithm screen, run the maintained pipeline with the opt-in plan below. It verifies unstable payloads separately and measures memory through the existing worker; unlike the initial linked study, it does not provide independent placements and cannot establish source attribution.
+
+```sh
+bun run --silent tools compare algorithms --plan bench/plans/unstable-prototype.toml \
+  --blocks 9 --sample-ms 20 --memory-mib 64 --cpu 2
+```
+
+Choose a logical CPU permitted by the local affinity policy. Retain results outside Git, and do not present this plan as the release comparison.
+
 ## Rejected or on hold
 
 - **Job-local finisher scratch (C), rejected.** Replacing the engine-local pool with a factory/mutable-visitor protocol spread initialization and lifetime obligations through the block entry points without simplifying the complete interface ([PR #181](https://github.com/Yikai-Liao/tessera-order/pull/181)). Reopen only for a required job-local mutable consumer or measured pool-lock cost.

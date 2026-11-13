@@ -118,7 +118,7 @@ fn equality_roots_match_serial_policy() {
         assert!(
             matches!(plan_node(&records, u128::MAX, 1, &mut extractor), NodePlan::Equal(pivot) if pivot == equal)
         );
-        Sorter {
+        Sorter::<_, _> {
             scratch: &mut Scratch::new(),
             extractor: &mut extractor,
             tile_len: 1,

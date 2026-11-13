@@ -18,6 +18,8 @@ use voracious_radix_sort::{RadixSort as VoraciousSort, Radixable};
 pub(super) trait TesseraAdapter: BenchmarkRecord {
     /// Sorts scalar keys directly and keyed records through the by-key API.
     fn tessera(records: &mut [Self]);
+    /// Calls the experimental serial node-partition kernel.
+    fn tessera_unstable(records: &mut [Self]);
     /// Sorts through the independently named baseline crate.
     #[cfg(tessera_bench_revisions)]
     fn baseline(records: &mut [Self]);
@@ -71,6 +73,9 @@ macro_rules! tessera_keys {
             fn tessera(records: &mut [Self]) {
                 tessera_order::stable_sort(records);
             }
+            fn tessera_unstable(records: &mut [Self]) {
+                tessera_order::prototype_unstable_sort(records);
+            }
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort);
             #[cfg(feature = "rayon")]
@@ -89,6 +94,9 @@ macro_rules! tessera_records {
             #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
                 tessera_order::stable_sort_by_key(records, |r| r.key);
+            }
+            fn tessera_unstable(records: &mut [Self]) {
+                tessera_order::prototype_unstable_sort_by_key(records, |r| r.key);
             }
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort_by_key, |r| r.key);
@@ -255,6 +263,7 @@ fn try_prepare_common<T: TesseraAdapter>(
     }
     Some(match v.name {
         "tessera" => prepare_kernel(input, true, T::tessera),
+        "tessera-unstable-prototype" => prepare_kernel(input, false, T::tessera_unstable),
         #[cfg(tessera_bench_revisions)]
         "tessera-baseline" => prepare_kernel(input, true, T::baseline),
         #[cfg(tessera_bench_revisions)]
@@ -429,8 +438,13 @@ mod tests {
                     for variant in list_variants().into_iter().filter(|v| v.threads.is_none()) {
                         let kernel = variant.prepare(&input, 32768);
                         let supported = ["common", "revision"].contains(&variant.adapter)
-                            || ["glidesort", "glidesort-sqrt", "std-unstable"]
-                                .contains(&variant.name);
+                            || [
+                                "glidesort",
+                                "glidesort-sqrt",
+                                "std-unstable",
+                                "tessera-unstable-prototype",
+                            ]
+                            .contains(&variant.name);
                         assert_eq!(kernel.is_some(), supported, "{ty}/{}", variant.name);
                         if let Some(mut kernel) = kernel {
                             kernel.restore(2);

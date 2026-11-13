@@ -57,6 +57,10 @@ Smaller candidates remain available; none waits for P1's acceptance:
 | P2 | Residual partition configuration | One description consumed by the block layer | `BucketFinish` and `BoundedFinish` are gone; reassess `Config` only if it duplicates policy rather than owning test geometry and execution controls |
 | P3 | `tile::Scratch`, `block::Buffers`, job `Pool` | A shared scratch lifecycle | `engine::Scratch` now pairs the first two per sort; preserve nested/reentrant lifetimes and allocation reuse rather than assume one buffer per worker |
 
+### Unstable sorting
+
+The [node-partition feasibility study](docs/design/evidence.md#unstable-node-partition-feasibility) found a wide-record memory/performance niche, not a general speedup. A dedicated kernel remains post-0.1 research. Reopen for a concrete workload; acceptance requires shared planning and recursion without a second engine, measured timing and memory against stable Tessera and standard unstable sort, individually accounted regressions, and ownership/panic/changing-key validation including Miri. Validate primitive-specific tuning rather than add distribution-specific dispatch; parallel support needs its own evidence.
+
 ### Rayon
 
 The optional feature and bounded completion are implemented ([semantics](conformance/semantics.md#rust-rayon-entry-points), [engine reference](docs/design/engine.md#parallel-root-completion), [baseline](docs/design/evidence.md#parallel-completion-baseline)). Done when whole-call scaling and memory coverage extend to other hosts, wide records and expensive extraction, with source-attribution controls for causal claims.

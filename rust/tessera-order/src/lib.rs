@@ -148,6 +148,18 @@ pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], k
     engine::sort::<T, _>(values, key::ByKey(key));
 }
 
+/// Research-only unstable entry; shares encoding, routing and tile leaves.
+#[doc(hidden)]
+pub fn prototype_unstable_sort<K: RadixKey>(values: &mut [K]) {
+    engine::sort_unstable(values, key::Direct);
+}
+
+/// Research-only unstable entry with the stable API's key and panic contracts.
+#[doc(hidden)]
+pub fn prototype_unstable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
+    engine::sort_unstable(values, key::ByKey(key));
+}
+
 /// Internal thresholds, exported for benchmarks that probe boundary sizes.
 ///
 /// Not part of the public API: the values may change in any release.

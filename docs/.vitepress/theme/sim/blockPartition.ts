@@ -35,12 +35,14 @@ export interface Writer {
 export interface Prefix {
   physical: number;
   len: number;
+  /** The ledger's source number, once the ledger exists. */
+  source?: number;
 }
 
 /** Ledger state of a physical block: the bucket whose source it holds, or free or final. */
 export type Owner = number | "free" | "final";
 
-export type Phase = "setup" | "scatter" | "complete" | "done";
+export type Phase = "setup" | "scatter" | "ledger" | "complete" | "done";
 
 export interface Frame {
   phase: Phase;
@@ -57,6 +59,10 @@ export interface Frame {
   wrote: Loc[];
   /** Physical blocks to emphasise in this frame. */
   focus: number[];
+  /** The input position this frame reads, during scatter. */
+  reads?: number;
+  /** The source this frame copies into its band, during completion. */
+  source?: number;
 }
 
 export interface Config {
@@ -74,6 +80,8 @@ export interface Result {
   blockCount: number;
   scratchBlocks: number;
   fullBlocks: number;
+  /** Each bucket's final band in the input. */
+  bands: { start: number; len: number }[];
   /** Records written to their final band, and records moved out of a destination first. */
   transfers: { final: number; relocation: number };
 }
@@ -151,11 +159,13 @@ export function simulate(engine: Engine, config: Config): Result {
 
   snap(
     "setup",
-    `${n} records, ${R} buckets, blocks of ${b}. The input holds ${fullBlocks} full blocks ` +
-      `and a tail of ${n % b}; scratch holds 2R = ${scratchBlocks} blocks.`,
+    `${n} records go into R = ${R} buckets by one digit of their key. Memory is cut into ` +
+      `blocks of ${b}: the input holds ${fullBlocks} full blocks and a tail of ${n % b}, and ` +
+      `scratch holds 2R = ${scratchBlocks} blocks. Press Next to read the input front to back.`,
   );
 
   const sources: { bucket: number; len: number; physical: number }[] = [];
+  const bands = Array.from({ length: R }, () => ({ start: 0, len: 0 }));
   let transferred = 0;
   const transfers = { final: 0, relocation: 0 };
   // Frames that summarise several events are taken once the run ends.
@@ -172,7 +182,7 @@ export function simulate(engine: Engine, config: Config): Result {
     }
     if (pending.ledger) {
       snap(
-        "complete",
+        "ledger",
         `Every record has moved once. The ledger lists each bucket's prefixes in chain order: ` +
           chains.map((chain, k) => `bucket ${k} [${blocks(chain)}]`).join(", ") +
           ". Bucket k's final band starts where bucket k−1's ends.",
@@ -223,8 +233,9 @@ export function simulate(engine: Engine, config: Config): Result {
         chain[chain.length - 1].len = event.slot + 1;
         snap(
           "scatter",
-          `Read key ${key}; digit ${event.bucket} appends it to ${name(event.physical)}.`,
-          { read: from, wrote: [to], focus: [event.physical] },
+          `Position ${event.input} holds key ${key}. Its digit is ${event.bucket}, so it goes ` +
+            `to the next free slot of bucket ${event.bucket}'s current block, ${name(event.physical)}.`,
+          { read: from, wrote: [to], focus: [event.physical], reads: event.input },
         );
         return;
       }
@@ -238,7 +249,12 @@ export function simulate(engine: Engine, config: Config): Result {
         }
         owners[event.physical] = event.bucket;
         sources.push({ ...event });
-        chains[event.bucket].push({ physical: event.physical, len: event.len });
+        chains[event.bucket].push({
+          physical: event.physical,
+          len: event.len,
+          source: sources.length - 1,
+        });
+        bands[event.bucket].len += event.len;
         return;
       }
       case "final":
@@ -274,12 +290,12 @@ export function simulate(engine: Engine, config: Config): Result {
         owners![event.physical] = event.overlapped ? "final" : "free";
         snap(
           "complete",
-          `Copy ${name(event.physical)}'s ${len} record${len === 1 ? "" : "s"} to positions ` +
-            `${event.start}–${event.start + len - 1}` +
+          `Copy ${name(event.physical)}'s ${len === 1 ? "record to position" : `${len} records to positions`} ` +
+            `${event.start}${len === 1 ? "" : `–${event.start + len - 1}`}` +
             (event.overlapped
               ? `, overlapping the block itself, which becomes final.`
               : `; ${name(event.physical)} becomes free.`),
-          { focus: [event.physical], wrote },
+          { focus: [event.physical], wrote, source: event.source },
         );
         return;
       }
@@ -299,5 +315,10 @@ export function simulate(engine: Engine, config: Config): Result {
   if (output.some((rec, i) => rec.key !== engineOutput[i])) {
     throw new Error("the replay disagrees with the engine's output");
   }
-  return { frames, output, blockCount, scratchBlocks, fullBlocks, transfers };
+  let start = 0;
+  for (const band of bands) {
+    band.start = start;
+    start += band.len;
+  }
+  return { frames, output, blockCount, scratchBlocks, fullBlocks, bands, transfers };
 }

@@ -30,7 +30,7 @@ A key has several digits. A 32-bit key read 8 bits at a time has four.
 
 ## Side by side
 
-All four sorts get the same twelve two-digit keys, with three repeated pairs. The letter under each key is its input position. A stable result lists equal keys in alphabetical order.
+All four sorts get the same twelve two-digit keys, with three repeated pairs. The small number under each key is its input position. A stable result lists equal keys in ascending position.
 
 <RadixComparison />
 

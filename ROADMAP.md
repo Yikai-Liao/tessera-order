@@ -92,9 +92,9 @@ An independent track binding the Rust crate; see the [design](docs/design/python
 
 ## Documentation figures
 
-The block-partition figure replays the engine through WebAssembly ([site guide](docs/development/docs-site.md#writing-pages)); the next steps make it explain the mechanism and retire the remaining engine models.
+The block-partition figure replays the engine through WebAssembly ([site guide](docs/development/docs-site.md#writing-pages)); the next step retires the remaining engine model.
 
-- Redesign the block-partition figure for readers new to the algorithm: show each bucket as a chain of linked blocks before the physical layout, link both views, animate records moving between cells, label input positions with indices instead of letters, and make each record's digit visible. Replace the frame slider with navigation by the algorithm's own structure: the input is the scatter timeline and the ledger the completion timeline, a phase header shows the position, and one step control advances by record, block or phase, with captions placed at the focus. A uniform frame index carries no meaning because steps differ in weight. Done when the figure alone answers how many buckets there are, which bucket a record joins and what a bucket is in memory.
+- Move `CountingPassDemo` from the frame slider in `StepControls` to structural navigation, then retire `StepControls`.
 - Replace `sim/digits.ts` (`KeySample::collect`, `plan_digits`, `top_window`) with engine events, and extend the trace to tile finishing where a figure needs it.
 
 ## Integrations

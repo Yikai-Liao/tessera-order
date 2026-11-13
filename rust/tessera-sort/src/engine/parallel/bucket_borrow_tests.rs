@@ -63,13 +63,12 @@ fn streamed_child_can_reenter_and_panic() {
                     row.0
                 });
                 // Finish a digit root through the direct final-band callback.
-                sort_root(
-                    &mut records,
-                    &mut extractor,
-                    &mut Scratch::new(),
-                    u128::from(u64::MAX),
-                    8,
-                );
+                Sorter {
+                    scratch: &mut Scratch::new(),
+                    extractor: &mut extractor,
+                    tile_len: 8,
+                }
+                .sort_root(&mut records, u128::from(u64::MAX));
             });
         }));
         assert!(entered.load(Ordering::Relaxed));
@@ -126,13 +125,12 @@ fn equality_roots_match_serial_policy() {
         }
         .partition_equal(&mut serial, equal, u128::MAX);
         pool.install(|| {
-            sort_root(
-                &mut records,
-                &mut extractor,
-                &mut Scratch::new(),
-                u128::MAX,
-                1,
-            )
+            Sorter {
+                scratch: &mut Scratch::new(),
+                extractor: &mut extractor,
+                tile_len: 1,
+            }
+            .sort_root(&mut records, u128::MAX)
         });
         assert_eq!(records, serial);
         assert_eq!(records, expected);

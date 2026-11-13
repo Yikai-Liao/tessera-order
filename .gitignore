@@ -26,3 +26,5 @@ docs/.vitepress/.temp/
 
 # Pinned third-party benchmark sources
 /bench/vendor/
+# Figure engine, built from rust/tessera-trace by `bun run docs:wasm`
+/docs/.vitepress/theme/sim/tessera_trace.wasm

@@ -17,7 +17,7 @@ Read the [engine reference](docs/design/engine.md), [shared semantics](conforman
 1. Identify the affected stage and invariant in the reference, source and tests. Reproduce a bug before changing its implementation.
 2. Make the smallest complete change. Follow ownership through moves, panic recovery and inconsistent keys; preserve exactly one live owner. Explain each `unsafe` block with a `// SAFETY:` invariant and document `# Safety` on every `unsafe fn`.
 3. Add focused regression coverage at the changed boundary. Preserve panic, inconsistent-key, owned-record and `&mut`-record tests; extend them where affected rather than weakening them.
-4. Update semantics for intentional contract changes. A changed rule or constant updates its one [owner](docs/README.md#who-owns-what): the explanation page and its model in `docs/.vitepress/theme/sim/`.
+4. Update semantics for intentional contract changes. A changed rule or constant updates its one [owner](docs/README.md#who-owns-what): the explanation page and its model in `docs/.vitepress/theme/sim/`, unless the figure replays the engine's [trace events](docs/development/docs-site.md#writing-pages).
 
 ### Validation
 
@@ -33,7 +33,7 @@ cargo +nightly miri test -p tessera-sort
 cargo +nightly miri test -p tessera-sort --lib --features rayon block::
 ```
 
-Run `bun run docs:test` when simulation models change and the [site checks](docs/development/docs-site.md#commands) when their pages change. CI owns the remaining platform, MSRV and sanitizer lanes; the [Rust workflow](.github/workflows/rust-ci.yml) is the command source for reproducing a lane. It uses cargo-nextest for test processes and runs doctests separately.
+Run `bun run docs:test` when simulation models, the `trace` hooks or the block partition change, and the [site checks](docs/development/docs-site.md#commands) when their pages change. CI owns the remaining platform, MSRV and sanitizer lanes; the [Rust workflow](.github/workflows/rust-ci.yml) is the command source for reproducing a lane. It uses cargo-nextest for test processes and runs doctests separately.
 
 Report the invariant preserved or contract changed, regression coverage, commands actually run and anything left to CI or unavailable locally. For performance choices, include paired evidence with A/A ranges and investigate results outside the controls under the protocol below.
 

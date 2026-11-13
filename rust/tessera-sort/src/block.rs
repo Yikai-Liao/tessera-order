@@ -44,6 +44,7 @@
 //! the completion ledger moves every live record back into the input, so records
 //! need neither `Copy` nor `Clone`.
 
+use crate::trace::{self, Event};
 use crate::unwind;
 use alloc::vec::Vec;
 use core::{marker::PhantomData, mem::MaybeUninit, ptr};
@@ -216,6 +217,21 @@ pub(crate) fn partition<'records, T, C: Classify<T>>(
     }
     assert!((1..=MAX_RADIX_BITS).contains(&radix));
     let block_size = default_block_size(records.len(), record_bytes, radix);
+    partition_in_blocks(records, radix, block_size, classifier, buffers, visit)
+}
+
+/// [`partition`] with an explicit block size of `block_size` records.
+///
+/// Requires at least two non-zero-sized records and a valid `radix`.
+pub(crate) fn partition_in_blocks<'records, T, C: Classify<T>>(
+    records: &'records mut [T],
+    radix: usize,
+    block_size: usize,
+    classifier: C,
+    buffers: &mut Buffers<T>,
+    visit: ClassifierVisit<'_, 'records, T, C>,
+) -> Vec<usize> {
+    assert!((1..=MAX_RADIX_BITS).contains(&radix));
     let mut sorter = Partition::new(records, 1 << radix, block_size, buffers);
     let mut classifier = match sorter.step(classifier) {
         Ok(classifier) => classifier,
@@ -386,6 +402,12 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             core::mem::take(&mut buffers.scratch),
         );
         buffers.block_links.resize(blocks.block_count, 0);
+        trace::emit(|| Event::Begin {
+            len: blocks.input_len,
+            block_size,
+            buckets: bucket_count,
+            scratch_blocks: blocks.scratch_blocks,
+        });
         Self {
             buffers,
             blocks,
@@ -499,6 +521,10 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                 end: unsafe { out.add(self.blocks.block_size) },
                 physical: physical as u32,
             });
+            trace::emit(|| Event::Writer {
+                bucket: physical,
+                physical,
+            });
         }
         buckets
     }
@@ -548,6 +574,13 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                     next.add(1)
                 };
                 bucket.next = next;
+                trace::emit(|| Event::Scatter {
+                    input: begin_record + offset,
+                    bucket: b,
+                    physical: bucket.physical as usize,
+                    // SAFETY: both cursors delimit the same reserved block.
+                    slot: self.blocks.block_size - unsafe { end.offset_from(next) } as usize - 1,
+                });
                 if unlikely(next == end) {
                     debug_assert!(position.output <= input);
                     let physical = self.blocks.scratch_blocks + position.output;
@@ -560,6 +593,10 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
                         physical: physical as u32,
                     };
                     position.output += 1;
+                    trace::emit(|| Event::Writer {
+                        bucket: b,
+                        physical,
+                    });
                 }
             };
             // Four records per bucket-cursor reload. Measured cheaper than one

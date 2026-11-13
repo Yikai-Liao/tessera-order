@@ -22,7 +22,20 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
+      # The figures replay the engine, built for WebAssembly by `docs:wasm`.
+      # wasm32 is a documentation build target, not a supported library platform.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust/tessera-trace -> ../../target/trace"
       - run: bun install --frozen-lockfile
+      - run: "cargo test -p tessera-sort --lib --features trace trace::"
+      - run: >-
+          cargo clippy --manifest-path rust/tessera-trace/Cargo.toml
+          --target wasm32-unknown-unknown --target-dir target/trace -- -D warnings
       - run: bun run docs:test
       - run: bun run docs:typecheck
       - run: bun run docs:build

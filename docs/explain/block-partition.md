@@ -14,7 +14,7 @@ The extra memory is 2R scratch blocks plus per-block metadata, O(√n) when b is
 
 ## Step by step
 
-The figure runs the algorithm on a small input: R = 4 buckets on the tens digit, blocks of 2–4 records. Its model, [`blockPartition.ts`](../.vitepress/theme/sim/blockPartition.ts), follows `begin_pass` and `scatter` in `block.rs` and `build_completion`, `transfer` and `protect` in `block/finish.rs` with the same index arithmetic. Its tests check the stable order and that every frame holds each record exactly once.
+The figure runs the engine's own serial block partition, compiled to WebAssembly, on a small input: R = 4 buckets on the tens digit, blocks of 2–4 records instead of the [derived size](#choosing-the-block-size). The engine reports each step it takes; [`blockPartition.ts`](../.vitepress/theme/sim/blockPartition.ts) only draws them. Its tests check that the replay ends in the engine's stable order and that every frame holds each record exactly once.
 
 <BlockPartitionDemo />
 

@@ -30,6 +30,9 @@ const ROUTES: [RegExp, Lane[]][] = [
     /^rust\/[^/]+\/(tests\/|LICENSE$)|^(rustfmt\.toml|\.github\/workflows\/rust-ci\.yml|\.github\/actions\/rust-test\/)/,
     ["rust"],
   ],
+  // The figures replay the library through this WebAssembly crate.
+  [/^rust\/tessera-trace\//, ["docs"]],
+  [/^rust\/tessera-sort\/(src\/|Cargo\.toml$)/, ["rust", "benchmark", "docs"]],
   [/^rust\//, ["rust", "benchmark"]],
   [
     /^\.cargo\/|^(Cargo\.toml|Cargo\.lock|rust-toolchain(\.toml)?)$/,

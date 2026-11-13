@@ -71,6 +71,7 @@ mod key;
 mod parallel;
 mod portable_simd;
 mod scan;
+mod trace;
 mod unwind;
 
 pub use key::RadixKey;
@@ -159,4 +160,13 @@ pub mod thresholds {
     pub const MAX_TILE_RECORDS: usize = crate::engine::Cursor::MAX as usize;
     /// Largest cursor table of a tile-local pass, in bytes.
     pub const MAX_CURSOR_BYTES: usize = 32 * 1024;
+}
+
+/// Block-partition steps for the documentation figures (feature `trace`).
+///
+/// Not part of the public API: the events may change in any release.
+#[cfg(feature = "trace")]
+#[doc(hidden)]
+pub mod figures {
+    pub use crate::trace::{Event, partition};
 }

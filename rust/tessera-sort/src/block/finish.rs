@@ -5,6 +5,7 @@
 #[cfg(feature = "rayon")]
 use super::parallel::BucketVisit;
 use super::*;
+use crate::trace::{self, Event};
 use core::ops::DerefMut;
 use std::sync::{
     Mutex,
@@ -196,7 +197,14 @@ impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Storage<T, O
             // SAFETY: the final interval fits the input. Every overlapping
             // destination block is FINAL except an explicitly skipped source.
             let output = unsafe { self.input.add(start) };
-            if skipped && physical == initial {
+            let overlapped = skipped && physical == initial;
+            trace::emit(|| Event::Transfer {
+                source: logical,
+                physical,
+                start,
+                overlapped,
+            });
+            if overlapped {
                 // SAFETY: this owner still protects the skipped live prefix.
                 // Its only overlap is with its own final range; memmove
                 // transfers ownership before that block becomes FINAL.
@@ -222,6 +230,7 @@ impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Storage<T, O
             let mut owner = lock(&self.owners[physical]);
             if *owner == FINAL || *owner == FREE {
                 *owner = FINAL;
+                trace::emit(|| Event::Final { physical });
                 return;
             }
             drop(owner);
@@ -231,6 +240,7 @@ impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Storage<T, O
                 let mut owner = lock(&self.owners[physical]);
                 assert!(*owner == FREE || *owner == FINAL);
                 *owner = FINAL;
+                trace::emit(|| Event::Final { physical });
                 return;
             }
             let (lower, upper) = if physical < free {
@@ -264,8 +274,14 @@ impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Storage<T, O
                 self.sources[logical]
                     .location
                     .store(free, Ordering::Release);
+                trace::emit(|| Event::Relocate {
+                    source: logical,
+                    from: physical,
+                    to: free,
+                });
             } else {
                 local.push(free);
+                trace::emit(|| Event::Final { physical });
             }
             *owner = FINAL;
             return;
@@ -334,6 +350,11 @@ impl Bucket {
             offset += storage.transfer(logical, self.start + offset, &mut free, self.cache);
         }
         self.completed = true;
+        trace::emit(|| Event::Band {
+            bucket: self.cache,
+            start: self.start,
+            len: self.len,
+        });
         if self.len != 0
             && let Some(visit) = visit
         {
@@ -396,6 +417,11 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
                     scratch_blocks + first_block + local - local_scratch
                 };
                 *owners[physical].exclusive() = sources.len();
+                trace::emit(|| Event::Source {
+                    bucket,
+                    physical,
+                    len: prefix,
+                });
                 sources.push(Source {
                     location: AtomicUsize::new(physical),
                     len: prefix,

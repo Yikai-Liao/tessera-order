@@ -90,6 +90,13 @@ An independent track binding the Rust crate; see the [design](docs/design/python
 - Add cold-cache experiments, more seeds and threshold cases, and native-CPU placement controls for source A/B studies (existing CGU, alignment and engine-order screens are process-level). Validate alignment's dispersion across hosted CPU models; revisit multi-layout sampling only with held-out false-alert, detection and whole-job cost evidence.
 - Add hosted algorithm comparison groups after the local release report, keeping complete per-type length groups apart from revision-ratio Cloud history.
 
+## Documentation figures
+
+The block-partition figure replays the engine through WebAssembly ([site guide](docs/development/docs-site.md#writing-pages)); the next steps make it explain the mechanism and retire the remaining engine models.
+
+- Redesign the block-partition figure for readers new to the algorithm: show each bucket as a chain of linked blocks before the physical layout, link both views, animate records moving between cells, label input positions with indices instead of letters, and make each record's digit visible. Replace the frame slider with navigation by the algorithm's own structure: the input is the scatter timeline and the ledger the completion timeline, a phase header shows the position, and one step control advances by record, block or phase, with captions placed at the focus. A uniform frame index carries no meaning because steps differ in weight. Done when the figure alone answers how many buckets there are, which bucket a record joins and what a bucket is in memory.
+- Replace `sim/digits.ts` (`KeySample::collect`, `plan_digits`, `top_window`) with engine events, and extend the trace to tile finishing where a figure needs it.
+
 ## Integrations
 
 Rerun the StarRocks and ClickHouse benchmarks against a released crate and link the results from the README. They contain upstream Apache-2.0 code, so they live outside this repository ([rationale](CONTRIBUTING.md#license)).

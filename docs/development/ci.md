@@ -4,14 +4,14 @@
 
 | Changed boundary | Additional automatic checks |
 |---|---|
-| Library source or library manifest | Rust validation and PR revision measurement |
+| Library source or library manifest | Rust validation, PR revision measurement and Docs (the figures replay the engine) |
 | Library tests or Rust validation workflow | Rust validation |
 | Root Cargo manifest/lockfile, toolchain or `.cargo/` | Rust validation, algorithm comparison checks and PR revision measurement |
 | Comparator-only Rust, native adapters or algorithm-session tooling | Algorithm comparison checks |
 | Shared benchmark Rust inputs, plan expansion, sampling or build configuration | Algorithm comparison checks and PR revision measurement |
 | Revision execution, shard validation or local/continuous selection plans | PR revision measurement |
 | Reports, status or publication tooling | Repository tooling checks only |
-| Markdown, site inputs or shared figure templates | Docs |
+| Markdown, site inputs, shared figure templates or the figure engine (`rust/tessera-trace/`) | Docs |
 | C++ library inputs | C++ validation, when its manifest exists |
 
 An engine-only PR fetches no native sources, installs no TBB and skips the algorithm harness (`Algorithm harness (Rust and C++)`, job ID `comparison`): its automatic checks are library correctness and the `prepare → measure → report` revision measurement. Comparator-only changes skip the library platform, Miri and sanitizer jobs. Shared build inputs select both.
@@ -50,7 +50,7 @@ A cached Cargo target keeps workspace outputs, including native objects, keyed b
 
 ### Docs and diagnostics
 
-The docs workflow runs the ownership model tests and site type checks, then builds the site and checks its links.
+The docs workflow builds the figure engine for WebAssembly, tests the library's `trace` hooks, lints the engine crate, runs the model and replay tests and site type checks, then builds the site and checks its links.
 
 The [benchmark diagnostics workflow](../../.github/workflows/bench-diagnostics.yml) runs only by manual dispatch: fixed-work counters or a five-layout sample on the four serial inputs of the diagnostics plan, with an optional baseline. It has read-only permissions, no Cloud submission and a 45-minute timeout, and keeps results and logs as 14-day artifacts.
 

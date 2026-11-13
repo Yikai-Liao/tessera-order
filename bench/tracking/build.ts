@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { command } from "../../tools/process.ts";
 import { repositoryRoot, runTask } from "../../tools/tasks.ts";
+import { algorithm as catalogAlgorithm } from "../catalog.ts";
 import { loadPlan } from "../plan.ts";
 import { withComparisonWorkspace } from "../release.ts";
 import {
@@ -28,9 +29,42 @@ export type TrackingBuild = {
   rustc: string;
   rustflags: string;
   native?: TrackingRun["native"];
+  /** Peak extra allocation bytes per timed case ID. */
+  memory: Record<string, number>;
   /** Case IDs of each remote job, in run order; `job-N.ids` in the image holds job N. */
   jobs: string[][];
 };
+
+/**
+ * Key the memory worker's rows by timed case ID and require one row per timed case.
+ *
+ * The worker measures each selected algorithm on every input of the plan; rows for an
+ * algorithm or mode the run does not time are dropped. A row's mode follows its algorithm.
+ */
+export function trackingMemory(journal: string, algorithms: string[], ids: string[]) {
+  const timed = new Set(ids);
+  const peaks: Record<string, number> = {};
+  for (const line of journal.split("\n").filter(Boolean)) {
+    const row = JSON.parse(line) as {
+      case_id: string;
+      variant: string;
+      build: string;
+      peak_extra_bytes: number;
+      verified: boolean;
+    };
+    if (row.build !== "default" || !algorithms.includes(row.variant)) continue;
+    const threads = catalogAlgorithm(row.variant).threads;
+    const id = `rust/${row.case_id}/${threads ? `par-${threads}` : "api"}`;
+    if (!timed.has(id)) continue;
+    if (!row.verified || !Number.isSafeInteger(row.peak_extra_bytes) || row.peak_extra_bytes < 0)
+      throw new Error("Invalid memory row: " + id);
+    if (id in peaks) throw new Error("Duplicate memory row: " + id);
+    peaks[id] = row.peak_extra_bytes;
+  }
+  const missing = ids.filter((id) => !(id in peaks));
+  if (missing.length) throw new Error("Missing memory rows: " + missing.join(", "));
+  return peaks;
+}
 
 // CI-only, without credentials: freeze one algorithm into one tested image.
 // Builds of different algorithms run in parallel; measurement (`run.ts`) is serialized.
@@ -79,25 +113,26 @@ if (import.meta.main) {
           algorithm.id === "tessera" ? {} : { algorithms: [algorithm.id] },
         );
         await writeFile(join(context, "plan.json"), JSON.stringify(plan));
-        if (algorithm.id === "glidesort-sqrt") {
-          // Allocation counts do not depend on the host, so the image carries Tessera's
-          // exact-case scratch instead of a second worker.
-          const memory = await buildBenchmark(tree, target, "memory", features, {
-            profile: "bench",
-            targetTriple: "x86_64-unknown-linux-gnu",
-            env,
-          });
-          await writeFile(
-            join(out, "memory-plan.json"),
-            JSON.stringify({ ...plan, algorithms: ["tessera"] }),
-          );
-          await command(memory.executable, [
-            "--plan",
-            join(out, "memory-plan.json"),
-            "--out",
-            join(context, "scratch"),
-          ]);
-        }
+        // Peak extra allocation per case, measured by the same instrumented worker as local
+        // comparisons. Counts do not depend on the host, so Actions measures them once per build.
+        // The image carries the rows: `glidesort-sqrt` sizes its buffer from Tessera's peak.
+        const memory = await buildBenchmark(tree, target, "memory", features, {
+          profile: "bench",
+          targetTriple: "x86_64-unknown-linux-gnu",
+          env,
+        });
+        const memoryAlgorithms =
+          algorithm.id === "glidesort-sqrt" ? ["tessera", algorithm.id] : plan.algorithms;
+        await writeFile(
+          join(out, "memory-plan.json"),
+          JSON.stringify({ ...plan, algorithms: memoryAlgorithms }),
+        );
+        await command(memory.executable, [
+          "--plan",
+          join(out, "memory-plan.json"),
+          "--out",
+          join(context, "scratch"),
+        ]);
         const ids = (
           await command(built.executable, [], {
             capture: true,
@@ -108,6 +143,11 @@ if (import.meta.main) {
           .filter(Boolean);
         if (!ids.length) throw new Error("Tracking plan selects no supported cases");
         await writeFile(join(context, "cases.ids"), ids.join("\n") + "\n");
+        const peaks = trackingMemory(
+          await readFile(join(context, "scratch/memory.jsonl"), "utf8"),
+          plan.algorithms,
+          ids,
+        );
         const jobs = remoteJobs(ids);
         for (const [index, job] of jobs.entries())
           await writeFile(join(context, `job-${index + 1}.ids`), job.join("\n") + "\n");
@@ -141,6 +181,7 @@ if (import.meta.main) {
                 }),
               }
             : {}),
+          memory: peaks,
           jobs,
         };
         await writeFile(join(out, "build.json"), JSON.stringify(build));

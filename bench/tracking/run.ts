@@ -105,6 +105,7 @@ await reportFailure(`Track (${algorithm.id})`, `${out}.log`, () =>
       workflow: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`,
       rustc: build.rustc,
       rustflags: build.rustflags,
+      memory: build.memory,
       ...(build.native ? { native: build.native } : {}),
     });
     await writeFile(join(out, run.time.slice(0, 7) + ".jsonl"), JSON.stringify(run) + "\n");

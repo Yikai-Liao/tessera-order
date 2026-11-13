@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parseHTML } from "linkedom/worker";
 import { z } from "zod";
+import { trackingMemory } from "./build.ts";
 import { explainFailure } from "./failure.ts";
 import {
   comparableRuns,
@@ -490,4 +491,36 @@ test("known remote failures are explained once, unknown ones are not guessed", (
     /within 600 s of waiting, queueing included/,
   );
   assert.equal(explainFailure("error: linker failed"), null);
+});
+
+test("memory rows key timed cases by mode and must cover every timed case", () => {
+  const row = (case_id: string, variant: string, peak_extra_bytes: number) =>
+    JSON.stringify({ case_id, variant, build: "default", peak_extra_bytes, verified: true });
+  const journal = [
+    row("u64/random/65536/s1", "tessera", 4096),
+    row("u64/random/65536/s1", "tessera-par-4", 8192),
+    // Inputs and algorithms the run does not time are dropped.
+    row("u64/sorted/1000000/s1", "tessera", 0),
+    row("u64/random/65536/s1", "std-stable", 524288),
+  ].join("\n");
+  const ids = ["rust/u64/random/65536/s1/api", "rust/u64/random/65536/s1/par-4"];
+  assert.deepEqual(trackingMemory(journal, ["tessera", "tessera-par-4"], ids), {
+    "rust/u64/random/65536/s1/api": 4096,
+    "rust/u64/random/65536/s1/par-4": 8192,
+  });
+  assert.throws(() => trackingMemory(journal, ["tessera"], ids), /Missing memory rows/);
+  assert.throws(() =>
+    trackingMemory(
+      journal + "\n" + row("u64/random/65536/s1", "tessera", 1),
+      ["tessera"],
+      [ids[0]],
+    ),
+  );
+});
+
+test("a run's memory covers exactly its timed cases", () => {
+  assert.ok(runSchema.safeParse({ ...run, memory: { [PREVIEW_CASE]: 0 } }).success);
+  assert.ok(!runSchema.safeParse({ ...run, memory: {} }).success);
+  assert.ok(!runSchema.safeParse({ ...run, memory: { [PREVIEW_CASE]: 1, other: 1 } }).success);
+  assert.ok(runSchema.safeParse(run).success);
 });

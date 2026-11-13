@@ -178,7 +178,7 @@ bun run tools compare algorithms --plan smoke --algorithms glidesort,radsort \
 bun run --silent tools plan --schema > benchmark-plan.schema.json                         # editor schema
 ```
 
-`--plan` takes a preset name or a `.toml`/`.json` path. Comma-separated CLI axes replace that axis in every inclusion rule; exclusions stay. `--algorithms` (only `compare algorithms` and `plan`) replaces the algorithm selection; only algorithm-block preparation adds its required controls. Presets are not different execution routes: use `local` or `continuous` for revision/counter work, and `smoke`, `release` or `parallel` for algorithm comparisons. Revision scheduling supports serial and four-thread modes, one algorithm per mode; counters require a serial-only selection. These are operation constraints, not plan formats. `--group` runs one resumable group and marks the report partial. Every result keeps its frozen `plan.json`.
+`--plan` takes a preset name or a `.toml`/`.json` path. Comma-separated CLI axes replace that axis in every inclusion rule; exclusions stay. `--algorithms` (only `compare algorithms` and `plan`) replaces the algorithm selection; only algorithm-block preparation adds its required controls. Presets are not different execution routes: use `local` or `continuous` for revision/counter work, and `smoke`, `release` or `parallel` for algorithm comparisons. Revision comparisons measure only `tessera`, `tessera-par-4` or both, because their builds replace only the Tessera library; counters require a serial-only selection. These are operation constraints, not plan formats. `--group` runs one resumable group and marks the report partial. Every result keeps its frozen `plan.json`.
 
 ## Local parallel comparisons
 

@@ -173,7 +173,8 @@ test("revision scheduling follows selected algorithms, not the presence of paral
   assert.equal(revisionThreads(await loadPlan("continuous")), 4);
   assert.equal(revisionThreads(await loadPlan("local", { algorithms: ["tessera-par-4"] })), 4);
   assert.throws(() => revisionThreads({ ...local, algorithms: ["tessera-par-8"] }));
-  assert.throws(() => revisionThreads({ ...local, algorithms: ["tessera", "std-stable"] }));
+  for (const algorithms of [["tessera", "std-stable"], ["std-stable"], ["rayon-stable-4"]])
+    assert.throws(() => revisionThreads({ ...local, algorithms }), /only tessera/);
 });
 
 test("revision comparison enables historical SIMD without changing current builds", () => {

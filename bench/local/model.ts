@@ -2,24 +2,18 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { catalog, parseCriterionId, revisionSampling } from "../catalog.ts";
+import { parseCriterionId, revisionSampling } from "../catalog.ts";
 import { type Plan, parsePlan } from "../plan.ts";
 import { summarizeRatios } from "../statistics.ts";
 import type { BuildProvenance } from "../workspace.ts";
 
-/** Validate the revision scheduler's serial/four-thread lanes from explicit algorithms. */
+/** Revision builds replace only the Tessera library, so a revision comparison measures exactly
+ * Tessera's serial API, its four-thread API, or both; any other algorithm would be identical
+ * code in both builds. Returns the worker threads the scheduler must reserve. */
 export function revisionThreads(plan: Plan): 1 | 4 {
-  const selected = plan.algorithms.map(
-    (id) => catalog.algorithms.find((entry) => entry.id === id)!,
-  );
-  if (
-    selected.some((entry) => entry.threads !== undefined && entry.threads !== 4) ||
-    new Set(selected.map((entry) => entry.threads)).size !== selected.length
-  )
-    throw new Error(
-      "Revision comparisons require one algorithm per mode and support serial or four-thread modes",
-    );
-  return selected.some((entry) => entry.threads === 4) ? 4 : 1;
+  if (!plan.algorithms.every((id) => id === "tessera" || id === "tessera-par-4"))
+    throw new Error("Revision comparisons measure only tessera and tessera-par-4");
+  return plan.algorithms.includes("tessera-par-4") ? 4 : 1;
 }
 
 /** One deterministic partition of a complete timed-ID listing. */

@@ -64,6 +64,7 @@
 
 extern crate alloc;
 
+mod algorithms;
 mod block;
 mod engine;
 mod key;
@@ -78,6 +79,12 @@ mod trace;
 mod unwind;
 mod workspace;
 
+pub use algorithms::{
+    stable_argsort, stable_argsort_by_key, stable_select_nth, stable_select_nth_by_key,
+    stable_select_nth_many, stable_select_nth_many_by_key, stable_sort_prefix,
+    stable_sort_prefix_by_key, stable_sort_rank_range, stable_sort_rank_range_by_key,
+    stable_sort_segments, stable_sort_segments_by_key, stable_top_k, stable_top_k_by_key,
+};
 pub use key::RadixKey;
 #[cfg(feature = "rayon")]
 pub use parallel::{par_stable_sort, par_stable_sort_by_key};

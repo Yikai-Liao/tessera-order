@@ -4,7 +4,29 @@
 //! A root borrows normalized disjoint intervals; child projection borrows a
 //! smaller view and translates its origin, without allocation or normalization.
 
+use alloc::vec::Vec;
 use core::ops::Range;
+
+/// Validates every index before allocating or executing, then merges adjacent
+/// singleton requests once. Recursive consumers only borrow projected views.
+pub(crate) fn normalize_indices(len: usize, indices: &[usize]) -> Vec<Range<usize>> {
+    assert!(
+        indices.iter().all(|&index| index < len),
+        "selection index out of bounds"
+    );
+    let mut ranges: Vec<_> = indices.iter().map(|&index| index..index + 1).collect();
+    ranges.sort_unstable_by_key(|range| range.start);
+    // Vec passes the later element first; merge into the retained predecessor.
+    ranges.dedup_by(|next, previous| {
+        if next.start <= previous.end {
+            previous.end = previous.end.max(next.end);
+            true
+        } else {
+            false
+        }
+    });
+    ranges
+}
 
 /// Positions that still need ordered refinement within one subproblem.
 ///

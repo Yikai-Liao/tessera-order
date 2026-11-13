@@ -59,6 +59,15 @@ assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 |---|---|
 | `stable_sort(&mut [K])` | Sort keys themselves |
 | `stable_sort_by_key(&mut [T], F)` | Sort any records by a key computed by `F` |
+| `stable_argsort` / `_by_key` | Return sorted indices without moving source records |
+| `stable_sort_segments` / `_by_key` | Sort independent segments with invocation workspace reuse |
+| `stable_top_k` / `_by_key` | Partition an unordered minimum-k set with stable boundary membership |
+| `stable_sort_prefix` / `_by_key` | Produce an ordered minimum-k prefix |
+| `stable_select_nth` / `_by_key` | Select one exact stable ranked member |
+| `stable_sort_rank_range` / `_by_key` | Sort one global rank interval |
+| `stable_select_nth_many` / `_by_key` | Select several exact stable ranked members |
+
+The [slice-operation guide](docs/guide/getting-started.md#top-k-and-selected-ranks) gives examples; [semantics](conformance/semantics.md#serial-slice-operations) distinguishes mandatory output and request metadata from sorting scratch.
 
 Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 

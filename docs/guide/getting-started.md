@@ -77,6 +77,61 @@ assert!(values[4].is_nan());
 
 [Keys as unsigned integers](../explain/keys.md) shows how each key type is encoded.
 
+## Top-k and selected ranks
+
+Use `stable_top_k_by_key` for an unordered minimum-k set. Its boundary uses stable membership, even though the two regions need not be sorted:
+
+```rust
+let mut rows = [(2u32, "first"), (1, "middle"), (2, "last"), (3, "end")];
+let (chosen, remaining) = tessera_sort::stable_top_k_by_key(&mut rows, 2, |r| r.0);
+assert_eq!(chosen.len(), 2);
+assert!(chosen.iter().any(|r| r.1 == "first"));
+assert!(chosen.iter().any(|r| r.1 == "middle"));
+assert!(remaining.iter().any(|r| r.1 == "last"));
+```
+
+For an ordered Top-k result, use `stable_sort_prefix` or its by-key form. Single selection, sorted rank intervals and multiple exact ranks use the same ordering:
+
+```rust
+let mut values = [9u64, 3, 1, 7, 2];
+tessera_sort::stable_sort_prefix(&mut values, 3);
+assert_eq!(&values[..3], &[1, 2, 3]);
+let (_, median, _) = tessera_sort::stable_select_nth(&mut values, 2);
+assert_eq!(*median, 3);
+tessera_sort::stable_select_nth_many(&mut values, &[0, 4]);
+assert_eq!((values[0], values[4]), (1, 9));
+```
+
+See [serial slice semantics](../../conformance/semantics.md#serial-slice-operations) for each operation's bounds, membership, empty-request and memory contract. These APIs are serial and need no feature; they do not create a persistent incremental sorter.
+
+## Index output and independent segments
+
+Argsort leaves records in place. Segmented sorting takes existing offsets and sorts every segment independently in one invocation:
+
+```rust
+let source = [(2u32, "first"), (1, "middle"), (2, "last")];
+assert_eq!(tessera_sort::stable_argsort_by_key(&source, |r| r.0), [1, 0, 2]);
+let mut values = [3u64, 1, 9, 7, 8];
+tessera_sort::stable_sort_segments(&mut values, &[0, 2, 5]);
+assert_eq!(values, [1, 3, 7, 8, 9]);
+```
+
+## Multi-field sorting and groups
+
+Compose stable sorts from the least significant field to the most significant. Traverse equal grouping keys with the standard slice API rather than a separate grouping engine:
+
+```rust
+let mut rows = [(2u32, 30u64), (1, 40), (2, 10), (1, 20)];
+tessera_sort::stable_sort_by_key(&mut rows, |r| r.1); // Secondary: timestamp.
+tessera_sort::stable_sort_by_key(&mut rows, |r| r.0); // Primary: user.
+assert_eq!(rows, [(1, 20), (1, 40), (2, 10), (2, 30)]);
+let counts: Vec<_> = rows.chunk_by(|a, b| a.0 == b.0)
+    .map(|group| (group[0].0, group.len())).collect();
+assert_eq!(counts, [(1, 2), (2, 2)]);
+```
+
+These public calls own independent workspace lifetimes; this composition does not promise cross-call allocation reuse. Group equality must match the chosen normalized key. Ordinary iterators and collections provide counting, reduction and deduplication, with their own consuming and callback-panic contracts.
+
 ## Parallel sorting
 
 Enable the optional `rayon` feature for `par_stable_sort` and `par_stable_sort_by_key`. Add a direct Rayon dependency if the application configures a custom pool:

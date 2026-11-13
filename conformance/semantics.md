@@ -45,9 +45,29 @@ Descending order is expressed by reversing the key, not by reversing an ascendin
 
 ## Space
 
-Implementations document the scratch memory one call needs and fixed-size storage on the stack separately. Each Rust call owns its scratch and releases it before returning, including when a key function unwinds. Already ordered or constant inputs do not allocate.
+Implementations document the scratch memory one call needs and fixed-size storage on the stack separately. Each Rust call owns its scratch and releases it before returning, including when a key function unwinds. Complete in-place sorting of already ordered or constant inputs does not allocate. The serial extensions below distinguish mandatory output and request metadata from sorting workspace.
 
 The Rust implementation requires `std` and allocates heap scratch through the global allocator. One call needs O(√n) block scratch for a fixed record size and key width, plus storage whose size does not depend on `n`: a tile of records (at least one record), up to two bytes of cached bucket ID per tile record, a probe-key buffer of at most one tile of encoded keys, and cursor tables on the stack, one per tile-local MSD level, with depth bounded by the key width. Node partitions also nest at most once per key bit, whatever the key distribution. [Finishing tiles](../docs/explain/tiles.md) defines the tile and cursor-table sizes.
+
+## Serial slice operations
+
+These entry points are implemented without a feature gate. Each has a direct-key form and a `_by_key` form accepting `FnMut(&T) -> K`. Ordering and extractor behavior follow the contracts above; records need not implement `Clone`, `Send` or `Sync`. Bounds are validated before mutation or key calls. Invalid arguments panic. An extractor panic restores every record before propagating, without promising a valid partial result. User callback side effects are not rolled back.
+
+Let `S` be a conceptual complete stable sort of the original records. Identity matters, not merely equality of keys; implementations need not materialize `S` or decorate records with indices.
+
+| Entry | Successful result | Bounds and additional memory |
+|---|---|---|
+| `stable_argsort` | Return a permutation of source indices in stable encoded-key order. Source records are never moved. | O(n) index output plus the workspace for sorting those indices. A panic drops the partial output. |
+| `stable_sort_segments` | Stably sort every segment independently. One invocation reuses private workspace across segments. | Borrowed offsets are nondecreasing, start at zero and end at the slice length; repeated offsets permit empty segments, and an empty slice accepts `[0]`. Workspace is bounded by the largest segment. On a panic, earlier segments may be sorted and later ones remain unvisited. |
+| `stable_top_k` | Return disjoint mutable slices of the smallest k records and the remainder. Each contains exactly its corresponding stable ranked members, in unspecified internal order. | Accept `0..=len`. Zero and full length are no-ops without keys or allocation. No output allocation. |
+| `stable_sort_prefix` | `values[..prefix_len]` equals `S[..prefix_len]`; the suffix contains exactly the other members, in unspecified order. This is sorted Top-k. | Accept `0..=len`. Zero is a no-op without keys or allocation; full length is a complete stable sort. No output allocation. |
+| `stable_select_nth` | Return disjoint mutable borrows of the preceding records, `S[index]` and following records. Each outer region contains exactly its corresponding stable ranked members, without internal ordering guarantees. | Require `index < len`. No output allocation. |
+| `stable_sort_rank_range` | For a nonempty range, `values[ranks.clone()]` equals `S[ranks.clone()]`. Prefix and suffix contain exactly their corresponding ranked members, in unspecified order. | Require `start <= end <= len`. An empty range is a no-op without keys or allocation and establishes no outer boundary. These are global ranks, not original subslice positions. No output allocation. |
+| `stable_select_nth_many` | Every requested position holds `S[index]`; each intervening region contains exactly its corresponding ranked members, in unspecified order. | Accept unordered and repeated indices, all less than `len`. Normalize once, with O(m) request metadata for m indices. Empty requests are no-ops without keys or allocation. |
+
+Stable Top-k and selection mean stable membership and ranked identity: when a boundary cuts an equal-key run, earlier input members are chosen first. They do not promise input order across different keys. For largest-k results, reverse the key; do not reverse a stable result. Statistical quantile definitions and interpolation remain caller choices; multiple selection accepts exact integer ranks.
+
+In-place rank operations retain the full sort's [workspace bound](#space), not O(k) or O(requested output length). All scratch and request metadata are invocation-owned and released on return or unwind. Only argsort returns an allocated output. No public workspace, resumable session, category partition or parallel extension API is implied.
 
 ## Rust Rayon entry points
 

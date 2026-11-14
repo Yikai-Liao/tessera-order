@@ -12,29 +12,19 @@ use crate::{
 };
 use alloc::{vec, vec::Vec};
 
-/// Widest category ID one stable distribution assigns, limited by block
-/// fan-out and tile cursor tables. Cached keys whose varying bits fit this
-/// width sort in one distribution.
-pub(crate) const MAX_DISTRIBUTION_BITS: usize = {
-    let tile_bits = tile::MAX_DIGIT_BUCKETS.ilog2() as usize;
-    if block::MAX_RADIX_BITS < tile_bits {
-        block::MAX_RADIX_BITS
-    } else {
-        tile_bits
-    }
-};
-
 /// Largest category count accepted by [`stable_partition_by_bucket`].
 ///
-/// Derived from the widest distribution and category-ID storage. Counts need
-/// not be powers of two; padding adds no public categories.
+/// Derived from block fan-out, tile table capacity and category-ID storage.
+/// Counts need not be powers of two; padding adds no public categories.
 pub const MAX_PARTITION_BUCKETS: usize = {
-    let limit = 1usize << MAX_DISTRIBUTION_BITS;
-    if limit < 1 << u16::BITS {
-        limit
-    } else {
-        1 << u16::BITS
+    let mut limit = 1usize << u16::BITS;
+    if 1usize << block::MAX_RADIX_BITS < limit {
+        limit = 1usize << block::MAX_RADIX_BITS;
     }
+    if tile::MAX_DIGIT_BUCKETS < limit {
+        limit = tile::MAX_DIGIT_BUCKETS;
+    }
+    limit
 };
 
 /// Stably places matching records before nonmatching records.
@@ -140,7 +130,7 @@ pub(crate) fn distribute<T, E: Extract<T>>(
     mut extractor: E,
 ) -> Vec<usize> {
     debug_assert!(values.len() >= 2 && size_of::<T>() != 0);
-    debug_assert!((1..=MAX_DISTRIBUTION_BITS).contains(&radix));
+    debug_assert!(1 << radix <= MAX_PARTITION_BUCKETS);
     if values.len() <= tile::capacity::<T>(TILE_BYTES) {
         tile::Scratch::new().distribute(values, radix, &mut extractor)
     } else {

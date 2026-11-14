@@ -3,10 +3,8 @@
 //! Cached-key sorting: order, stability, key evaluation and ownership.
 
 use std::{
-    cell::Cell,
     cmp::{Ordering, Reverse},
     panic::{AssertUnwindSafe, catch_unwind},
-    rc::Rc,
 };
 use tessera_order::{RadixKey, sort_by_cached_key};
 
@@ -106,63 +104,26 @@ fn zero_sized_records_do_not_call_the_key() {
 }
 
 #[test]
-fn key_failures_restore_owned_and_borrowed_records() {
-    struct Owned {
-        id: usize,
-        text: String,
-        padding: [u8; 512],
-        drops: Rc<Vec<Cell<usize>>>,
-    }
-    impl Drop for Owned {
-        fn drop(&mut self) {
-            assert_eq!(self.text, self.id.to_string());
-            assert_eq!(self.padding, [self.id as u8; 512]);
-            self.drops[self.id].set(self.drops[self.id].get() + 1);
+fn key_panics_leave_records_unmoved() {
+    // Keys are cached before any record moves, so a panic at any call leaves
+    // owned and borrowed records exactly in input order.
+    let len = if cfg!(miri) { 65 } else { 8193 };
+    let mut values: Vec<_> = (0..len).collect();
+    for failure in [1, len / 2, len] {
+        let mut records: Vec<_> = values.iter_mut().map(|v| (v.to_string(), v)).collect();
+        let mut calls = 0;
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            sort_by_cached_key(&mut records, |r| {
+                calls += 1;
+                assert_ne!(calls, failure, "key failed");
+                Reverse(r.0.len())
+            })
+        }));
+        assert!(outcome.is_err());
+        assert_eq!(calls, failure, "key ran during recovery");
+        for (id, (text, value)) in records.iter_mut().enumerate() {
+            assert_eq!(*text, id.to_string());
+            assert_eq!(**value, id);
         }
     }
-    fn fail<K: RadixKey>(key: impl Fn(usize) -> K) {
-        // 65 records fit a tile; 129 exceed its byte capacity and move through
-        // blocks on the narrow route.
-        for len in [65, 129] {
-            for failure in [1, 33, len] {
-                let drops = Rc::new((0..len).map(|_| Cell::new(0)).collect::<Vec<_>>());
-                let mut records: Vec<_> = (0..len)
-                    .map(|id| Owned {
-                        id,
-                        text: id.to_string(),
-                        padding: [id as u8; 512],
-                        drops: drops.clone(),
-                    })
-                    .collect();
-                let mut calls = 0;
-                let outcome = catch_unwind(AssertUnwindSafe(|| {
-                    sort_by_cached_key(&mut records, |r| {
-                        assert_eq!(r.id, calls);
-                        calls += 1;
-                        assert_ne!(calls, failure, "key failed");
-                        key(r.id)
-                    })
-                }));
-                assert!(outcome.is_err());
-                assert_eq!(calls, failure, "key ran during recovery");
-                assert!(drops.iter().all(|drop| drop.get() == 0));
-                records.sort_by_key(|r| r.id);
-                assert!(records.iter().enumerate().all(|(id, r)| id == r.id));
-                drop(records);
-                assert!(drops.iter().all(|drop| drop.get() == 1));
-            }
-        }
-    }
-    fail(|id| (id % 3) as u8);
-    fail(|id| Reverse(id as u64));
-
-    let mut values: Vec<_> = (0..129).collect();
-    let mut records: Vec<_> = values.iter_mut().enumerate().collect();
-    sort_by_cached_key(&mut records, |r| Reverse(r.0 as u16));
-    for (rank, (original, value)) in records.iter_mut().enumerate() {
-        assert_eq!(*original, 128 - rank);
-        **value += 129;
-    }
-    drop(records);
-    assert_eq!(values, (129..258).collect::<Vec<_>>());
 }

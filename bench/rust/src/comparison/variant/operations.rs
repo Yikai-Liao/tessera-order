@@ -240,10 +240,7 @@ fn sort_by_category<T: BenchmarkRecord>(
         "tessera-cached" if bucket_count <= 1 << u8::BITS => {
             tessera_order::sort_by_cached_key(values, |r| category(r) as u8);
         }
-        "tessera-cached" if bucket_count <= 1 << u16::BITS => {
-            tessera_order::sort_by_cached_key(values, |r| category(r) as u16);
-        }
-        "tessera-cached" => tessera_order::sort_by_cached_key(values, |r| category(r) as u32),
+        "tessera-cached" => tessera_order::sort_by_cached_key(values, |r| category(r) as u16),
         "std-stable" => values.sort_by_key(category),
         "glidesort" => glidesort::sort_by(values, |a, b| category(a).cmp(&category(b))),
         "radsort" => radsort::sort_by_key(values, category),

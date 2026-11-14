@@ -184,15 +184,11 @@ pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], k
 ///
 /// # Memory
 ///
-/// Caches one encoded key per record, of the size of `K`, also for ordered and
-/// constant inputs: their order is known only after every key has been
-/// evaluated. Ordered inputs need nothing more. When the keys differ only in
-/// a narrow window of bits, as category keys do, the records then move once
-/// by that window with the [`stable_sort_by_key`] scratch bound. Otherwise
-/// each key is paired with its record index, as [`slice::sort_by_cached_key`]
-/// does, and the pairs are sorted with [`stable_sort`] scratch; the keys and
-/// pairs coexist while the pairs are built. All scratch is freed before
-/// returning.
+/// Caches every key, O(n) as in the standard library, also for ordered
+/// inputs, whose order is known only once every key is evaluated. Keys that
+/// differ only in a narrow bit window, such as category IDs, then move the
+/// records once within the [`stable_sort_by_key`] scratch bound; other keys
+/// sort (key, index) pairs with [`stable_sort`] scratch.
 ///
 /// # Examples
 ///

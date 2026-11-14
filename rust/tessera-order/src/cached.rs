@@ -13,7 +13,7 @@
 use crate::{
     engine,
     key::{ByKey, RadixKey, Unsigned, bit_len},
-    partition::{self, MAX_DISTRIBUTION_BITS},
+    partition::{self, MAX_PARTITION_BUCKETS},
 };
 use alloc::vec::Vec;
 
@@ -46,7 +46,7 @@ pub(crate) fn sort<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], mut key:
     // orders the records.
     let low = varying.trailing_zeros() as usize;
     let width = bit_len(varying) - low;
-    if width <= MAX_DISTRIBUTION_BITS {
+    if width <= MAX_PARTITION_BUCKETS.ilog2() as usize {
         let shift = <K::Encoded as Unsigned>::from_usize(low);
         let mask = <K::Encoded as Unsigned>::from_usize((1 << width) - 1);
         // The distribution classifies each record exactly once, in input
@@ -61,33 +61,25 @@ pub(crate) fn sort<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], mut key:
                 digit
             }),
         );
-    } else if values.len() <= u32::MAX as usize {
-        sort_by_index::<_, _, u32>(values, keys);
     } else {
-        sort_by_index::<_, _, usize>(values, keys);
+        sort_by_index(values, keys);
     }
 }
 
-/// Pairs every cached key with its input index `I`, sorts the pairs stably by
-/// key and moves each record to its sorted position.
-///
-/// `keys[i]` is the key of `values[i]`, and `I` holds every index of `values`.
-/// Nothing here runs caller code or can panic once records start moving.
-fn sort_by_index<T, V: Unsigned, I: Unsigned>(values: &mut [T], keys: Vec<V>) {
-    let mut cache: Vec<(V, I)> = keys
-        .into_iter()
-        .enumerate()
-        .map(|(index, key)| (key, I::from_usize(index)))
-        .collect();
-    engine::sort(&mut cache, ByKey(|entry: &(V, I)| entry.0));
+/// Pairs every cached key with its input index, sorts the pairs stably by key
+/// and moves each record to its sorted position. `keys[i]` is the key of
+/// `values[i]`. Nothing here runs caller code or can panic.
+fn sort_by_index<T, V: Unsigned>(values: &mut [T], keys: Vec<V>) {
+    let mut cache: Vec<(V, usize)> = keys.into_iter().zip(0..).collect();
+    engine::sort(&mut cache, ByKey(|entry: &(V, usize)| entry.0));
     // The sorted position `j` takes the record at input index `cache[j].1`.
     // Each cycle of that permutation is applied with swaps; a finished
     // position records itself as its source, so later starts skip it.
     for start in 0..values.len() {
         let mut position = start;
         loop {
-            let source = cache[position].1.to_usize();
-            cache[position].1 = I::from_usize(position);
+            let source = cache[position].1;
+            cache[position].1 = position;
             if source == start {
                 break;
             }
@@ -96,29 +88,5 @@ fn sort_by_index<T, V: Unsigned, I: Unsigned>(values: &mut [T], keys: Vec<V>) {
             values.swap(position, source);
             position = source;
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::sort_by_index;
-    use alloc::{string::ToString, vec::Vec};
-
-    /// Both index widths apply the same permutation; `usize` serves inputs
-    /// longer than `u32::MAX` records, which tests cannot allocate.
-    #[test]
-    fn index_widths_apply_the_same_permutation() {
-        let len = if cfg!(miri) { 65 } else { 1000 };
-        let input: Vec<_> = (0..len).map(|id| (id, id.to_string())).collect();
-        let key = |record: &(usize, _)| (record.0.wrapping_mul(37) % 11) as u16;
-        let mut expected = input.clone();
-        expected.sort_by_key(key);
-        let keys: Vec<_> = input.iter().map(key).collect();
-        let mut narrow = input.clone();
-        sort_by_index::<_, _, u32>(&mut narrow, keys.clone());
-        let mut wide = input;
-        sort_by_index::<_, _, usize>(&mut wide, keys);
-        assert_eq!(narrow, expected);
-        assert_eq!(wide, expected);
     }
 }

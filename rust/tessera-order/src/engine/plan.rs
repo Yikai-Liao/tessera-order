@@ -165,6 +165,7 @@ fn tile_digit_bits(len: usize, record_bytes: usize) -> usize {
 fn choose_split_digit<V: Unsigned>(
     len: usize,
     top: usize,
+    varying: u128,
     tile_len: usize,
     sample: &KeySample<V>,
 ) -> Digit {
@@ -190,7 +191,13 @@ fn choose_split_digit<V: Unsigned>(
         }
         // Clamp to the highest varying bit, or `top - width` underflows: a
         // 9-bit node would widen to 10 bits.
-        width = (width + 2).min(top);
+        let wider = (width + 2).min(top);
+        // Bits no key varies in cannot occupy another bucket.
+        let added = ((1u128 << (wider - width)) - 1) << (top - wider);
+        if varying & added == 0 {
+            break;
+        }
+        width = wider;
     }
     Digit {
         shift: top - width,
@@ -253,7 +260,13 @@ pub(super) fn plan_node<T, E: Extract<T>>(
         NodePlan::Runs { boundary, set }
     } else {
         let sample = sample.unwrap_or_else(|| KeySample::collect(records, extractor));
-        NodePlan::Digit(choose_split_digit(records.len(), top, tile_len, &sample))
+        NodePlan::Digit(choose_split_digit(
+            records.len(),
+            top,
+            varying,
+            tile_len,
+            &sample,
+        ))
     }
 }
 
@@ -310,7 +323,32 @@ mod tests {
         // keys would under-count occupancy and widen past what it can test.
         let records: Vec<u64> = (0..65536).collect();
         let sample = KeySample::collect(&records, &mut Direct);
-        assert_eq!(choose_split_digit(records.len(), 16, 512, &sample).width, 8);
+        assert_eq!(
+            choose_split_digit(records.len(), 16, 0xffff, 512, &sample).width,
+            8
+        );
+    }
+
+    #[test]
+    fn concentrated_windows_do_not_widen_over_constant_bits() {
+        // Two clusters 2^63 apart, each uniform over 2^40 keys: every window
+        // below the top bit up to bit 40 holds the same two values, so a wider
+        // digit adds empty buckets, and with them block scratch, but no split.
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let records: Vec<u64> = (0..65536)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                (state & (1 << 63)) | (state & ((1 << 40) - 1))
+            })
+            .collect();
+        let varying = (1u128 << 63) | ((1 << 40) - 1);
+        let sample = KeySample::collect(&records, &mut Direct);
+        assert_eq!(
+            choose_split_digit(records.len(), 64, varying, 512, &sample).width,
+            8
+        );
     }
 
     /// Exhaustively enumerates window partitions independently of the planner.

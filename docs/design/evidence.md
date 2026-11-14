@@ -46,6 +46,12 @@ The engine is a Stable Rust port of the research prototype in `sort-research-rs`
   - A sixteen-lane prefix sum lost to eight lanes (cross-lane swizzle).
   - Stable three-way compress scatter of 64K `u32` took 460 µs against 147 µs for scalar cursor writes, and AVX-512CD conflict detection would double the 32 KiB cursor table.
 
+## Counted terminal tiles
+
+[Single-digit tiles](../explain/tiles.md#inside-a-pass) reuse the node counting operation to avoid scatter scratch and copy-back for eligible direct keys. The first implementation exposed a short wide-key loss: fewer record moves did not compensate for the shared counting operation’s histogram movement, indexing and short-run control flow. The repair belongs in that operation, not in a type or distribution exception. `KeyCounts` builds its histogram in the final summary and lends its populated slice to run iteration rather than moving the full array. An assertion establishes the existing window bound before histogram updates; the measured compiler then removes their repeated bounds checks. Disassembly confirms the histogram copies are gone, and fixed-work counters show fewer instructions and branches; short-run branch prediction is not eliminated.
+
+[PR #214](https://github.com/Yikai-Liao/tessera-order/pull/214) retains the measurements and placement caveats. The repaired `u128/d256/1000` case no longer reproduces the initial 12.3–14.0% loss: its paired process-level screen is 3.8% faster than the pre-PR engine, while linked copies favor the repair but some runs have wide A/A ranges. The shared counted-window eligibility and insertion leaves remain unchanged. This supports the bounded repair, not equivalence for every width or placement.
+
 ## Child order before variation
 
 [PR #211](https://github.com/Yikai-Liao/tessera-order/pull/211) reuses the existing root order probe for partition children before scanning their remaining variation. Confirmed ordered children skip that full scan; flat samples still need variation and, when nonconstant, full confirmation. No new detector, threshold or scratch is introduced. The first hosted screen improves four `sorted_tail` cases by 8.1–19.0% with no slowdown alert over the continuous inventory. This is a saving for ordered children exposed by any partition, not a tail classifier.

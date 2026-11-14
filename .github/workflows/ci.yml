@@ -104,7 +104,8 @@ jobs:
   # what lets a later push trust them.
   record:
     needs: [changes, ci-ok]
-    if: needs.changes.outputs.record != '[]'
+    # Skipped lanes upstream would skip this job under the implicit success().
+    if: always() && needs.ci-ok.result == 'success' && needs.changes.outputs.record != '[]'
     runs-on: ubuntu-latest
     strategy:
       matrix:

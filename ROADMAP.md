@@ -8,13 +8,12 @@ The first crates.io release: stable sort only.
 
 | Deliverable | Done when |
 |---|---|
-| First release comparison of the always-enabled SIMD backend on Stable | The complete local session regenerates from its raw directory; README and the site show its figures; the release attaches the archive |
-| Release | Robert Clausecker has been told before publication; `rust/v0.1.0` follows [`RELEASING.md`](RELEASING.md) |
+| Release | `rust/v0.1.0` follows [`RELEASING.md`](RELEASING.md). Performance claims cite [main tracking](docs/development/continuous-benchmarks.md) at the release commit; the [algorithm comparison](docs/benchmarks/algorithms.md) is the published ranking |
 
-Open questions:
+After 0.1:
 
-- **Sample duration and prepared-memory cap.** Fix the defaults from the test machine's memory and the time a 10M-record case takes.
-- **Cost of cached bucket IDs on 8-byte rows.** Evaluate `{u32 key, u32 row}` in the first release report. If the cost is large, consider an `unsafe` entry point that skips the cache ([rationale](docs/design/engine.md#record-handling)).
+- **Cost of cached bucket IDs on 8-byte rows.** Read `{u32 key, u32 row}` against Block LSD* in the algorithm comparison. If the cost is large, consider an `unsafe` entry point that skips the cache ([rationale](docs/design/engine.md#record-handling)); a new entry point is a minor release.
+- **Local session defaults.** Fix the sample duration and prepared-memory cap of local paired sessions from the test machine's memory and the time a 10M-record case takes.
 
 ## Engine
 

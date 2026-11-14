@@ -6,7 +6,7 @@
 
 use crate::{
     block,
-    key::{ByKey, KeyDigit},
+    key::{ByKey, Extract, KeyDigit},
     thresholds::TILE_BYTES,
     tile,
 };
@@ -110,8 +110,28 @@ pub fn stable_partition_by_bucket<T, F: FnMut(&T) -> usize>(
         return offsets;
     }
     let radix = bucket_count.next_power_of_two().trailing_zeros() as usize;
-    let mut extractor = ByKey(category);
-    let ends = if values.len() <= tile::capacity::<T>(TILE_BYTES) {
+    let ends = distribute(values, radix, ByKey(category));
+    // Validation ran before masking, so padded buckets are empty. Both complete
+    // movement operations return cumulative ends, including empty categories.
+    offsets[1..].copy_from_slice(&ends[..bucket_count]);
+    offsets
+}
+
+/// Stably moves at least two sized records into the `2^radix` categories that
+/// `extractor` assigns, evaluating it exactly once per record, in input order.
+/// Cached-key sorting relies on that order to replay keys by call count.
+///
+/// Returns the cumulative end of every category, including empty ones. Keys
+/// must be below `2^radix`. An extractor panic propagates after every record
+/// is restored to `values`, in unspecified order.
+pub(crate) fn distribute<T, E: Extract<T>>(
+    values: &mut [T],
+    radix: usize,
+    mut extractor: E,
+) -> Vec<usize> {
+    debug_assert!(values.len() >= 2 && size_of::<T>() != 0);
+    debug_assert!(1 << radix <= MAX_PARTITION_BUCKETS);
+    if values.len() <= tile::capacity::<T>(TILE_BYTES) {
         tile::Scratch::new().distribute(values, radix, &mut extractor)
     } else {
         block::partition(
@@ -121,9 +141,5 @@ pub fn stable_partition_by_bucket<T, F: FnMut(&T) -> usize>(
             &mut block::Buffers::new(),
             &mut |_, _, _, _| {},
         )
-    };
-    // Validation ran before masking, so padded buckets are empty. Both complete
-    // movement operations return cumulative ends, including empty categories.
-    offsets[1..].copy_from_slice(&ends[..bucket_count]);
-    offsets
+    }
 }

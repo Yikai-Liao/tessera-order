@@ -417,6 +417,7 @@ impl Variant {
                 self.name,
                 "tessera"
                     | "tessera-full"
+                    | "tessera-cached"
                     | "std-stable"
                     | "std-unstable"
                     | "glidesort"

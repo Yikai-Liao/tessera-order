@@ -24,6 +24,8 @@ runs:
       with:
         toolchain: ${{ inputs.toolchain }}
     - uses: Swatinem/rust-cache@v2
+      with:
+        save-if: ${{ github.ref == 'refs/heads/main' }}
     - shell: bash
       run: cargo test -p tessera-order --lib --tests
     - shell: bash

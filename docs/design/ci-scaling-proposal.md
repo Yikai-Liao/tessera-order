@@ -33,7 +33,7 @@ Comparisons with other algorithms answer "how does Tessera compare", not "did th
 
 ## Cache hygiene
 
-- Save large caches only from `main` (`save-if: github.ref == 'refs/heads/main'`); PRs restore them and save nothing. This bounds the total to one copy per key and stops PR copies from evicting `main`'s.
+- Implemented: Cargo caches are saved from `main` only ([CI](../development/ci.md#lanes)).
 - Keep native build products out of the native comparison cache unless their reuse saves more time than their download costs.
 - Long-lived branches take workflow fixes from `main` promptly, without waiting for an engine merge.
 

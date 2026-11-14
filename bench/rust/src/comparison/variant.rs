@@ -71,19 +71,14 @@ pub(super) trait TesseraAdapter: BenchmarkRecord {
 }
 
 /// Calls the same public API with identical record and key types in every copy.
-/// Baseline revisions before 0.2 have only the `stable_` names; switch to `sort`
-/// once every compared baseline has it.
 #[cfg(tessera_bench_revisions)]
 macro_rules! revision_sorts {
     ($api:ident $(, $key:expr)?) => {
         #[inline(never)]
-        #[allow(deprecated)]
         fn baseline(records: &mut [Self]) { revision_baseline::$api(records $(, $key)?); }
         #[inline(never)]
-        #[allow(deprecated)]
         fn baseline_copy(records: &mut [Self]) { revision_baseline_copy::$api(records $(, $key)?); }
         #[inline(never)]
-        #[allow(deprecated)]
         fn current_copy(records: &mut [Self]) { revision_current_copy::$api(records $(, $key)?); }
     };
 }
@@ -91,62 +86,69 @@ macro_rules! revision_sorts {
 /// Supplies only the direct/by-key API distinction; operation behavior stays
 /// in the library and kernel preparation owns the workload/output shape.
 macro_rules! slice_operations {
-    ($argsort:ident, $segments:ident, $prefix:ident, $top_k:ident, $select:ident, $range:ident, $many:ident $(, $key:expr)?) => {
+    ($argsort:ident, $chunks:ident, $partial:ident, $select:ident, $many:ident $(, $key:expr)?) => {
         #[cfg(feature = "operations")]
         fn argsort(records: &[Self]) -> Vec<usize> { tessera_order::$argsort(records $(, $key)?) }
         #[cfg(feature = "operations")]
-        fn segments(records: &mut [Self], segment_len: usize) { tessera_order::$segments(records, segment_len $(, $key)?); }
+        fn segments(records: &mut [Self], segment_len: usize) { tessera_order::$chunks(records, segment_len $(, $key)?); }
         #[cfg(feature = "operations")]
-        fn prefix(records: &mut [Self], len: usize) { tessera_order::$prefix(records, ..len $(, $key)?); }
+        fn prefix(records: &mut [Self], len: usize) { tessera_order::$partial(records, ..len $(, $key)?); }
         #[cfg(feature = "operations")]
-        fn top_k(records: &mut [Self], k: usize) { tessera_order::$top_k(records, k..k $(, $key)?); }
+        fn top_k(records: &mut [Self], k: usize) { tessera_order::$partial(records, k..k $(, $key)?); }
         #[cfg(feature = "operations")]
         fn select(records: &mut [Self], index: usize) { tessera_order::$select(records, index $(, $key)?); }
         #[cfg(feature = "operations")]
-        fn rank_range(records: &mut [Self], ranks: std::ops::Range<usize>) { tessera_order::$range(records, ranks $(, $key)?); }
+        fn rank_range(records: &mut [Self], ranks: std::ops::Range<usize>) { tessera_order::$partial(records, ranks $(, $key)?); }
         #[cfg(feature = "operations")]
         fn select_many(records: &mut [Self], indices: &[usize]) { tessera_order::$many(records, indices $(, $key)?); }
     };
 }
 
 /// Keeps scalar adapters on Tessera's direct-key entry points.
+///
+/// Sorting adapters also build against baseline libraries, which before 0.2
+/// offer only the deprecated `stable_` names. Switch them to `sort` and
+/// `par_sort` once every compared baseline has those names.
 macro_rules! tessera_keys {
     ($($t:ty),+ $(,)?) => {$(
+        #[allow(deprecated)]
         impl TesseraAdapter for $t {
             #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
-                tessera_order::sort(records);
+                tessera_order::stable_sort(records);
             }
 
-            slice_operations!(argsort, sort_chunks, partial_sort, partial_sort, select_nth, partial_sort, select_nth_many);
+            slice_operations!(argsort, sort_chunks, partial_sort, select_nth, select_nth_many);
 
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort);
             #[cfg(feature = "rayon")]
             fn tessera_parallel(records: &mut [Self]) {
-                tessera_order::par_sort(records);
+                tessera_order::par_stable_sort(records);
             }
         }
     )+};
 }
 tessera_keys!(u32, u64, u128, f64, Reverse<u64>, Reverse<f64>);
 
-/// Keeps keyed-record adapters on Tessera's by-key entry points.
+/// Keeps keyed-record adapters on Tessera's by-key entry points, with the
+/// baseline naming constraint of [`tessera_keys`].
 macro_rules! tessera_records {
     ($($t:ty),+ $(,)?) => {$(
+        #[allow(deprecated)]
         impl TesseraAdapter for $t {
             #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
-                tessera_order::sort_by_key(records, |r| r.key);
+                tessera_order::stable_sort_by_key(records, |r| r.key);
             }
 
-            slice_operations!(argsort_by_key, sort_chunks_by_key, partial_sort_by_key, partial_sort_by_key, select_nth_by_key, partial_sort_by_key, select_nth_many_by_key, |r| r.key);
+            slice_operations!(argsort_by_key, sort_chunks_by_key, partial_sort_by_key, select_nth_by_key, select_nth_many_by_key, |r| r.key);
 
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort_by_key, |r| r.key);
             #[cfg(feature = "rayon")]
             fn tessera_parallel(records: &mut [Self]) {
-                tessera_order::par_sort_by_key(records, |r| r.key);
+                tessera_order::par_stable_sort_by_key(records, |r| r.key);
             }
         }
     )+};

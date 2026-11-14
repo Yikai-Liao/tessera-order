@@ -54,11 +54,3 @@ test("bounded sampling covers short inputs and does not alias periodic keys", ()
   const ordered = Array.from({ length: 65536 }, (_, index) => BigInt(index));
   assert.equal(new Set(sampleKeys(ordered).map((key) => key >> 9n)).size, 128);
 });
-
-// Same digit facts, different output requirements: only complete ordering can
-// use two low-to-high passes before exposing globally ordered bands.
-test("partial ranks retain covering and insertion leaves but split wider keys", () => {
-  assert.equal(chooseTileLeaf(8192, 0xfffffn, 14, 64, "partial"), "msd");
-  assert.equal(chooseTileLeaf(8192, 0xffn, 14, 64, "partial"), "lsd");
-  assert.equal(chooseTileLeaf(48, 0xfffffn, 6, 64, "partial"), "insertion");
-});

@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 //! Bounded tile finishing owns scratch layout, cached classification and restoration.
-//! Callers supply records, remaining variation, rank requirements and an extractor.
-//! Raw pass pointers and the live-copy guard never cross this boundary. The private leaf planner
+//! Callers supply records, remaining variation and an extractor; raw pass pointers
+//! and the live-copy guard never cross this boundary. The private leaf planner
 //! consumes this module's cursor limits without depending on node execution.
 
 mod plan;
 
 use crate::engine::key::{self, Digit, Extract, Unsigned};
 use crate::engine::order::scan_varying_bits;
-use crate::engine::rank::Requirement;
 use crate::engine::thresholds::{INSERTION_MAX, MAX_CURSOR_BYTES, MAX_TILE_RECORDS};
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
@@ -135,24 +134,22 @@ impl<T> Scratch<T> {
         Self(Vec::new())
     }
 
-    /// Refines a cursor-bounded slice for its projected requirement. Every
-    /// record is restored before return or key panic, including skipped bands.
-    pub(super) fn refine<E: Extract<T>>(
+    /// Stably sorts a cursor-bounded slice, restoring its records on key panic.
+    pub(super) fn sort<E: Extract<T>>(
         &mut self,
         records: &mut [T],
         varying: u128,
         extractor: &mut E,
-        required: Requirement<'_>,
     ) {
         let len = records.len();
         debug_assert!(len <= MAX_TILE_RECORDS);
         if len < 2 || varying == 0 {
             return;
         }
-        match plan_tile::<T>(len, varying, required) {
+        match plan_tile::<T>(len, varying) {
             TilePlan::Insertion => extractor.finish_insertion(records),
             TilePlan::Msd(digit) => {
-                self.partition_tile::<_>(records, digit, varying, extractor, required);
+                self.partition_tile::<_>(records, digit, varying, extractor);
             }
             TilePlan::Lsd { digits, passes } => {
                 // A terminal digit can count interchangeable keys without scratch.
@@ -201,7 +198,6 @@ impl<T> Scratch<T> {
         records: &mut [T],
         candidate: u128,
         extractor: &mut E,
-        required: Requirement<'_>,
     ) {
         debug_assert!(records.len() <= MAX_TILE_RECORDS);
         if candidate == 0 || records.len() < 2 {
@@ -209,7 +205,7 @@ impl<T> Scratch<T> {
         }
         if records.len() > INSERTION_MAX {
             let varying = scan_varying_bits(records, candidate, extractor);
-            self.refine::<_>(records, varying, extractor, required);
+            self.sort::<_>(records, varying, extractor);
         } else {
             extractor.finish_insertion(records);
         }
@@ -305,21 +301,20 @@ impl<T> Scratch<T> {
         largest
     }
 
-    /// Restores an MSD partition, then refines only requested final bands.
+    /// Partitions a tile through scratch, then finishes each bucket.
     fn partition_tile<E: Extract<T>>(
         &mut self,
         records: &mut [T],
         digit: Digit,
         varying: u128,
         extractor: &mut E,
-        required: Requirement<'_>,
     ) {
         let len = records.len();
         let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
         let largest = self.counting_passes(records, &[digit], &mut counts, extractor);
         // With insertion-sized buckets, whole-tile insertion has the same inversion
         // count as separate bucket sorts and skips the boundary walk.
-        if required.is_all() && largest as usize <= INSERTION_MAX {
+        if largest as usize <= INSERTION_MAX {
             extractor.finish_insertion(records);
             return;
         }
@@ -334,9 +329,7 @@ impl<T> Scratch<T> {
         for &end in ends {
             let end = end as usize;
             debug_assert!(start <= end && end <= len);
-            if let Some(child) = required.project(start..end) {
-                self.finish_child::<_>(&mut records[start..end], candidate, extractor, child);
-            }
+            self.finish_child::<_>(&mut records[start..end], candidate, extractor);
             start = end;
         }
     }
@@ -389,50 +382,6 @@ mod tests {
     }
 
     #[test]
-    fn partial_tiles_prune_final_bands_and_boundary_cuts() {
-        use core::cell::Cell;
-        let len: usize = 193;
-        let boundary = len.div_ceil(2);
-        for ranks in [boundary..boundary, 2..3] {
-            let cut = ranks.is_empty();
-            let mut records: Vec<_> = (0..len)
-                .map(|id| {
-                    let key = ((id * 37) % 97) as u64 | ((id % 2) as u64) << 63;
-                    (key, id, Cell::new(false))
-                })
-                .collect();
-            let mut expected: Vec<_> = (0..len).collect();
-            expected.sort_by_key(|&id| records[id].0);
-            let mut extractor = ByKey(|record: &(u64, usize, Cell<bool>)| {
-                assert!(
-                    !record.2.replace(true) || (!cut && record.0 >> 63 == 0),
-                    "completed band was analyzed after restoration"
-                );
-                record.0
-            });
-            Scratch::new().refine(
-                &mut records,
-                (1 << 63) | 127,
-                &mut extractor,
-                Requirement::new(len, core::slice::from_ref(&ranks)),
-            );
-            let ids: Vec<_> = records.iter().map(|record| record.1).collect();
-            for band in [0..ranks.start, ranks.clone(), ranks.end..len] {
-                let mut actual = ids[band.clone()].to_vec();
-                let mut members = expected[band].to_vec();
-                actual.sort_unstable();
-                members.sort_unstable();
-                assert_eq!(actual, members);
-            }
-            records.sort_by_key(|record| record.0);
-            assert_eq!(
-                records.iter().map(|record| record.1).collect::<Vec<_>>(),
-                expected
-            );
-        }
-    }
-
-    #[test]
     fn terminal_tiles_keep_the_omitted_key_half_without_scratch() {
         fn check<const SHIFT: usize>() {
             let mask = 255u128 << SHIFT;
@@ -443,11 +392,10 @@ mod tests {
             let mut expected = records.clone();
             expected.sort();
             let mut scratch = Scratch::new();
-            scratch.refine(
+            scratch.sort(
                 &mut records,
                 255,
                 &mut key::KeyHalf::<_, SHIFT>(key::Direct),
-                Requirement::new(129, core::slice::from_ref(&(0..129))),
             );
             assert_eq!(records, expected);
             assert!(
@@ -483,12 +431,7 @@ mod tests {
                 u64::MAX
             }
         });
-        scratch.refine::<_>(
-            &mut records,
-            u64::MAX as u128,
-            &mut extractor,
-            Requirement::new(len as usize, core::slice::from_ref(&(0..len as usize))),
-        );
+        scratch.sort::<_>(&mut records, u64::MAX as u128, &mut extractor);
         assert!(changed, "fixture never supplied a varying key");
         records.sort_unstable();
         assert_eq!(records, (0..len).collect::<Vec<_>>());
@@ -511,7 +454,6 @@ mod tests {
                     Digit { shift: 0, width: 6 },
                     63,
                     &mut crate::engine::key::KeyHalf::<_, SHIFT>(key),
-                    Requirement::new(65, core::slice::from_ref(&(0..65))),
                 );
             }));
             assert_eq!(result.is_err(), panic_at.is_some());
@@ -556,7 +498,6 @@ mod tests {
             Digit { shift: 0, width },
             u128::from(mask),
             &mut key,
-            Requirement::new(65, core::slice::from_ref(&(0..65))),
         );
         assert_eq!(records, expected);
     }

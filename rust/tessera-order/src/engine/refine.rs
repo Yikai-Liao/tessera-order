@@ -86,9 +86,9 @@ impl Split {
             |bucket: usize, range: core::ops::Range<usize>, child: &mut [T], classifier: &mut C| {
                 if child.len() <= tile_len
                     && self.finished != Some(bucket)
-                    && let Some(required) = required.project(range)
+                    && required.project(range).is_some()
                 {
-                    tile.finish_child::<_>(child, self.candidate, lend(classifier), required);
+                    tile.finish_child::<_>(child, self.candidate, lend(classifier));
                 }
             };
         block::partition(
@@ -459,7 +459,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         if len <= self.tile_len {
             self.scratch
                 .tile
-                .refine::<E>(records, varying, self.extractor, required);
+                .sort::<E>(records, varying, self.extractor);
             return;
         }
         let plan = plan_node(records, varying, self.tile_len, self.extractor);

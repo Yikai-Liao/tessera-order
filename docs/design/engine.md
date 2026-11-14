@@ -33,7 +33,7 @@ Keeping every module at crate root allowed an adapter to depend on a block direc
 | `workspace.rs` | Invocation-owned reusable tile and block capacity, lent through complete operations | Capacity is reusable after restoration; no live movement state survives an operation |
 | `order.rs` | Scalar order and candidate-masked variation scans, stable insertion loops, independent of recursive execution | Extractors supply keys; direct-key callers supply a scan in their selected SIMD context |
 | `refine/plan.rs` | Bounded sampling and executable node partition decisions | Records, candidate variation and tile capacity go in; a node decision comes out |
-| `tile.rs`, `tile/plan.rs` | Capacity, complete leaf planning, scratch allocation, cached classification, counting passes and restoration | Refine a cursor-bounded slice for a projected requirement; no raw pointer, cursor layout or guard crosses the boundary |
+| `tile.rs`, `tile/plan.rs` | Capacity, complete leaf planning, scratch allocation, cached classification, counting passes and restoration | Finish a cursor-bounded slice; no raw pointer, cursor layout or guard crosses the boundary |
 | `block.rs`, `block/` | Physical block storage, stable bucket chains, ledger costs, completion and recovery | A `Classify` bucket per record goes in; bucket boundaries and completed bands come out |
 | `refine/parallel.rs` | Shard count, task scheduling and scratch pooling for the shared decisions | Exclusive bucket borrows and the planner's decision, not a second cost model |
 
@@ -53,7 +53,7 @@ The planner keeps exact facts, advisory estimates and empirical budgets apart. A
 |---|---|---|
 | Flat digit plan | Remaining varying positions and maximum width | Fewest passes, then fewest table slots over legal splits |
 | Tile table width | Cursor size and actual tile bytes | A minimum width and a bucket-per-record cap |
-| Tile MSD versus LSD | Remaining bits, cursor width and whether all ranks are required | Complete requests retain short flat plans; partial requests expose ordered bands before projection |
+| Tile MSD versus LSD | Whether the width-bounded windows cover the remaining bits | Finish short flat plans; otherwise partition the highest digit and inspect actual children |
 | Node digit width | Tile capacity and block fan-out limit | Target children of a fraction of a tile; widen a concentrated digit using sampled occupancy |
 | Equality partition | Repeated complete keys in the bounded sample | A sample-share threshold, sampled only on nodes of several tiles |
 | Block size | Metadata bytes, bucket count, record size and input length | Storage owns its balanced-memory formula, scale and floors |
@@ -87,7 +87,7 @@ Full sorting and the stable serial [slice operations](../../conformance/semantic
 
 `Requirement::project` intersects a final parent-relative band with the borrowed intervals and translates its origin without allocation. Covered children become All; absent intersections skip further analysis. Binary searches are independent of callback order, so serial and concurrent completion use one authority. Equality bands are already complete; their stable movement establishes ranked identity even when requests cut through equal keys. Existing-run ranges are projected after rotation.
 
-Every partition completes movement for every band. Only further analysis and finishing may be skipped. Requested tiles receive the same projected requirement. Partial tiles expose ordered MSD bands before pruning; covered bands become All and retain complete leaves. Insertion leaves, covering counted windows and root preparation may still complete more than requested. The tile owns this choice; adapters never choose digits or assemble counting passes. Root preparation, narrowed key facts and child candidate masks pass directly to execution. A serial invocation reuses one workspace; segmented sorting lends that invocation’s workspace successively to complete segment refinements. Argsort creates the index output and sorts it with `ByKey` source extraction: numeric indices are payloads, never direct keys eligible for count/refill. Parallel tasks borrow workspace capacity from their invocation-owned pool.
+Every partition completes movement for every band. Only further analysis and finishing may be skipped. Requested tiles may be completely sorted; this preserves insertion, counting and LSD/MSD leaves rather than adding a partial tile engine. Root preparation, narrowed key facts and child candidate masks pass directly to execution. A serial invocation reuses one workspace; segmented sorting lends that invocation’s workspace successively to complete segment refinements. Argsort creates the index output and sorts it with `ByKey` source extraction: numeric indices are payloads, never direct keys eligible for count/refill. Parallel tasks borrow workspace capacity from their invocation-owned pool.
 
 ## Parallel root completion
 

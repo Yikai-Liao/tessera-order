@@ -4,7 +4,6 @@
 
 use super::{Cursor, MAX_DIGIT_BUCKETS};
 use crate::engine::key::Digit;
-use crate::engine::rank::Requirement;
 use crate::engine::thresholds::INSERTION_MAX;
 
 /// Widest digit supported by the tile cursor representation and budget.
@@ -83,20 +82,11 @@ pub(super) enum TilePlan {
 }
 
 /// Chooses a leaf for a nonconstant, nonempty tile without allocating scratch.
-pub(super) fn plan_tile<T>(len: usize, varying: u128, required: Requirement<'_>) -> TilePlan {
+pub(super) fn plan_tile<T>(len: usize, varying: u128) -> TilePlan {
     if len <= INSERTION_MAX {
         return TilePlan::Insertion;
     }
-    let width = tile_digit_bits(len, core::mem::size_of::<T>());
-    if !required.is_all() {
-        // Rank projection is valid only after an ordered (MSD) split. A
-        // covering digit finishes every bucket, including partial requests.
-        let (digit, window) = top_window(varying, width);
-        if varying & !window != 0 {
-            return TilePlan::Msd(digit);
-        }
-    }
-    plan_digits(varying, width)
+    plan_digits(varying, tile_digit_bits(len, core::mem::size_of::<T>()))
 }
 
 #[cfg(test)]
@@ -170,11 +160,7 @@ mod tests {
             (1 << 127) | 1
         );
         assert!(matches!(
-            plan_tile::<u64>(
-                48,
-                u64::MAX as u128,
-                Requirement::new(48, core::slice::from_ref(&(0..48)))
-            ),
+            plan_tile::<u64>(48, u64::MAX as u128),
             TilePlan::Insertion
         ));
     }

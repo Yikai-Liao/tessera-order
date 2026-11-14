@@ -1,17 +1,25 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parseHTML } from "linkedom/worker";
 import { z } from "zod";
 import { catalog } from "../catalog.ts";
+import type { RowChart } from "../plot/rows.ts";
 import { trackingAlgorithms } from "./algorithms.ts";
 import { trackingMemory } from "./build.ts";
-import { comparisonData, latestRuns, trackingScaling } from "./comparison.ts";
+import {
+  comparisonData,
+  GROWTH_FILE,
+  latestRuns,
+  trackingScaling,
+  writeComparison,
+} from "./comparison.ts";
 import { explainFailure } from "./failure.ts";
+import { growthPeaks } from "./growth.ts";
 import {
   comparableRuns,
   formatTimestamp,
@@ -25,6 +33,8 @@ import { remoteJobs } from "./jobs.ts";
 import { appendRun, trackingCases, trackingFacets } from "./publish.ts";
 import {
   combineReports,
+  type GrowthRecord,
+  growthSchema,
   indexSchema,
   parseRuns,
   runSchema,
@@ -592,7 +602,7 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
     ],
   );
   assert.deepEqual(data.overview, data.figures[0]);
-  const overview = data.overview!.chart;
+  const overview = data.overview!.chart as RowChart;
   assert.match(overview.guide, /the 2 measured input patterns/);
   assert.deepEqual(overview.columns, ["Speed", "Extra memory"]);
   const rows = overview.groups.flatMap((group) => group.rows);
@@ -680,4 +690,82 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   // Without Rayon on one thread there is no baseline.
   latest.delete("rayon-stable-1");
   assert.equal(trackingScaling(latest), null);
+});
+
+test("the growth sweep keeps one peak per algorithm and length", () => {
+  const plan = {
+    schema: 1 as const,
+    algorithms: ["tessera", "glidesort"],
+    include: [
+      { types: ["row_u32" as const], distributions: ["random" as const], lengths: [1024, 4096] },
+    ],
+    exclude: [],
+  };
+  const row = (len: number, variant: string, peak: number) =>
+    JSON.stringify({
+      case_id: `row_u32/random/${len}/s1`,
+      variant,
+      build: "default",
+      peak_extra_bytes: peak,
+      verified: true,
+    });
+  const journal = [row(1024, "tessera", 10), row(4096, "tessera", 20), row(4096, "glidesort", 0)];
+  assert.deepEqual(growthPeaks(journal.join("\n"), plan), {
+    type: "row_u32",
+    distribution: "random",
+    lengths: [1024, 4096],
+    peaks: { tessera: [10, 20], glidesort: [null, 0] },
+  });
+  assert.throws(() => growthPeaks([...journal, journal[0]].join("\n"), plan), /Duplicate/);
+  assert.throws(() => growthPeaks(journal.slice(1).join("\n"), plan), /every length/);
+  assert.throws(() => growthPeaks(row(1024, "radsort", 1), plan), /Unplanned/);
+});
+
+test("the growth sweep replaces the memory figure with curves over length", async (t) => {
+  const tracked = (values: Record<string, number>) =>
+    runSchema.parse({
+      ...run,
+      id: crypto.randomUUID(),
+      values: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, [v, v, v]])),
+    });
+  const runs = new Map([
+    ["tessera", [tracked({ "rust/u64/random/1000000/s1/api": 100 })]],
+    ["std-stable", [tracked({ "rust/u64/random/1000000/s1/api": 400 })]],
+  ]);
+  const growth: GrowthRecord = growthSchema.parse({
+    time: run.time,
+    hash: source,
+    workflow: run.workflow,
+    rustc: "rustc",
+    native: { cc: "clang", cxx: "clang++", build: {} },
+    type: "row_u32",
+    distribution: "random",
+    lengths: [1 << 20, 1 << 22, 1 << 24],
+    // Tessera doubles when the input quadruples: √n.
+    peaks: { tessera: [2e6, 4e6, 8e6], "std-stable": [8e6, 32e6, 128e6], crumsort: [0, 0, 0] },
+  });
+  assert.equal(
+    comparisonData(runs).figures.find((figure) => figure.name === "memory")?.kind,
+    undefined,
+  );
+  const figure = comparisonData(runs, growth).figures.find((entry) => entry.name === "memory")!;
+  assert.equal(figure.kind, "curves");
+  assert.equal(figure.subject, "Extra memory by input length");
+  assert.equal(figure.title, "Grows as √n, to 8 MB at 16M records");
+  assert.match(figure.chart.guide, /Tessera at aaaaaaa/);
+  // A sort that never reaches the axis is named in the note and keeps its values in the table.
+  assert.match(JSON.stringify(figure.chart), /Below 1 kB at every length: crumsort \(0 B\)/);
+  assert.match(figure.table, /\| crumsort \| 0 B \| 0 B \| 0 B \|/);
+  assert.match(figure.table, /\| Tessera \| 2 MB \| 4 MB \| 8 MB \|/);
+
+  // Publication reads the sweep from the data root.
+  const root = await mkdtemp(join(tmpdir(), "tessera-growth-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const [id, list] of runs) {
+    await mkdir(join(root, id));
+    await writeFile(join(root, id, "2026-11.jsonl"), `${JSON.stringify(list[0])}\n`);
+  }
+  await writeFile(join(root, GROWTH_FILE), JSON.stringify(growth));
+  const written = await writeComparison(root);
+  assert.equal(written.figures.find((entry) => entry.name === "memory")?.kind, "curves");
 });

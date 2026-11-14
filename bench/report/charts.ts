@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { algorithm, type CaseIdentity, catalog, recordType } from "../catalog.ts";
+import { algorithm, type CaseIdentity, catalog, distribution, recordType } from "../catalog.ts";
+import { type CurveChart, renderCurves } from "../plot/curves.ts";
 import type { NameCell } from "../plot/layout.ts";
 import {
   type RowChart as Chart,
   type Mark,
   type PlotRow as Row,
   renderRows,
-  type Swatch,
   type Tone,
 } from "../plot/rows.ts";
 import { geomean, median } from "../statistics.ts";
@@ -22,7 +22,9 @@ export interface Figure {
   /** The finding, as the chart's own title. */
   title: string;
   /** The chart description, for callers that render it themselves, such as the site. */
-  chart: Chart;
+  chart: Chart | CurveChart;
+  /** Which template draws `chart`; row charts are the default. */
+  kind?: "curves";
   svg: string;
   table: string;
 }
@@ -62,8 +64,6 @@ export interface Cohort {
   typeShapes: string[];
   /** How the element-type figure combines them, after "speed relative to slice::sort, ". */
   typeShapesLabel: string;
-  /** Length of the memory figure. */
-  memoryN: number;
 }
 
 // Every figure answers one question on one horizontal axis, so it reads
@@ -109,7 +109,6 @@ const TYPE_GROUPS = catalog.comparison.typeGroups.map((group) => ({
 
 const LARGE = 1000000;
 const SHORT = 1000;
-const LARGEST = 10000000;
 
 // Two significant digits, except that values near 1 keep two decimals so a
 // small difference does not print as "1×". Small positive values keep
@@ -189,7 +188,7 @@ const rankingCases = ({ ranking }: Cohort, n: number) =>
 /** Elements of one type in a guide: "u64 keys" or "{u32, u32} records". */
 const elements = (ty: string) => `${recordType(ty).label} ${recordType(ty).task}`;
 
-const kindLegend: [Swatch[], string][] = [
+const kindLegend: [Tone[], string][] = [
   [["primary"], "Tessera"],
   [["radix"], "other radix sorts"],
   [["comparison"], "comparison sorts"],
@@ -440,75 +439,142 @@ function renderTypes(field: Field, cohort: Cohort): Figure | null {
   };
 }
 
-function renderMemory(field: Field, cohort: Cohort): Figure | null {
-  const n = cohort.memoryN;
-  const patterns = field.cases
-    .filter((input) => input.ty === "u64" && input.len === n)
-    .map((input) => input.distribution);
-  if (!patterns.includes("random")) return null;
-  const peaks = (variant: string) => {
-    const found = patterns.map((shape) =>
-      field.peak(caseId({ ty: "u64", distribution: shape, len: n }), variant),
+/** Each sort's peak extra memory on one input pattern at several lengths. */
+export interface Growth {
+  ty: string;
+  distribution: string;
+  /** Increasing record counts. */
+  lengths: number[];
+  /** One peak per length, null where unmeasured. */
+  peaks: { name: string; values: (number | null)[] }[];
+  /** Provenance appended to the guide, such as "Tessera at 1a2b3c4". */
+  source?: string;
+}
+
+/** A field's peaks on one type's random input, at every length Tessera's peak was measured. */
+export function fieldGrowth(field: Field, ty: string): Growth {
+  const id = (len: number) => caseId({ ty, distribution: "random", len });
+  const lengths = [
+    ...new Set(
+      field.cases
+        .filter((input) => input.ty === ty && input.distribution === "random")
+        .map((input) => input.len),
+    ),
+  ]
+    .filter((len) => field.peak(id(len), "tessera") !== null)
+    .toSorted((a, b) => a - b);
+  return {
+    ty,
+    distribution: "random",
+    lengths,
+    peaks: field.algorithms.map((v) => ({
+      name: v.name,
+      values: lengths.map((len) => field.peak(id(len), v.name)),
+    })),
+  };
+}
+
+// The memory axis starts at a kilobyte: smaller peaks are constant bookkeeping, and an
+// in-place sort's zero has no place on a logarithmic axis.
+const MEMORY_FLOOR = 1e3;
+
+/** Count records compactly: binary prefixes for powers of two, which the sweep uses. */
+const countLabel = (n: number) =>
+  n >= 2 ** 20 && n % 2 ** 20 === 0
+    ? `${n / 2 ** 20}M`
+    : n >= 2 ** 10 && n % 2 ** 10 === 0
+      ? `${n / 2 ** 10}K`
+      : formatLength(n);
+
+/** Growth order of a power law through two points, as the exponent of n. */
+const exponent = ([n1, y1]: [number, number], [n2, y2]: [number, number]) =>
+  Math.log(y2 / y1) / Math.log(n2 / n1);
+
+export function renderGrowth(growth: Growth): Figure | null {
+  const { ty, lengths } = growth;
+  const tessera = growth.peaks.find((entry) => entry.name === "tessera");
+  const measured = (values: (number | null)[]) =>
+    lengths.flatMap((n, index) =>
+      values[index] === null ? [] : [[n, values[index]] as [number, number]],
     );
-    return found.every((v): v is number => v !== null)
-      ? { random: found[patterns.indexOf("random")], worst: Math.max(...found) }
-      : null;
+  const own = tessera ? measured(tessera.values) : [];
+  if (own.length < 2) return null;
+  const sorts = growth.peaks
+    .map((entry) => ({ ...entry, points: measured(entry.values) }))
+    .filter((entry) => entry.points.length);
+  // Sorts that never reach the axis are named in a note; the table keeps their values.
+  const plotted = sorts.filter((entry) => entry.points.some(([, y]) => y >= MEMORY_FLOOR));
+  const small = sorts.filter((entry) => !plotted.includes(entry));
+  const last = own.at(-1)!;
+  const order = exponent(own.at(-2)!, last);
+  const growthName = Math.abs(order - 0.5) <= 0.1 ? "√n" : `n^${order.toFixed(2)}`;
+  // Half a decade of headroom above the largest value keeps the top line inside the plot.
+  const high = Math.max(...plotted.flatMap((e) => e.points.map(([, y]) => y))) * Math.sqrt(10);
+  const title = `Grows as ${growthName}, to ${formatBytes(last[1])} at ${countLabel(last[0])} records`;
+  const decades = Array.from(
+    { length: Math.floor(Math.log10(high / MEMORY_FLOOR)) + 1 },
+    (_, index) => MEMORY_FLOOR * 10 ** index,
+  );
+  const footnotes = [
+    ...new Set(plotted.map((e) => algorithm(e.name).detail).filter((d): d is string => !!d)),
+  ];
+  const note = [
+    ...(small.length
+      ? [
+          `Below ${formatBytes(MEMORY_FLOOR)} at every length: ${small
+            .map(
+              (e) =>
+                `${displayName(e.name)} (${formatBytes(Math.max(...e.points.map(([, y]) => y)))})`,
+            )
+            .join(", ")}.`,
+        ]
+      : []),
+    ...footnotes,
+  ].join(" ");
+  const table = markdownTable(
+    ["Sort", ...lengths.map(formatLength)],
+    sorts
+      .toSorted((a, b) => (b.values.at(-1) ?? 0) - (a.values.at(-1) ?? 0))
+      .map((e) => [tableName(e.name), ...e.values.map((v) => (v === null ? "–" : formatBytes(v)))]),
+  );
+  const chart: CurveChart = {
+    title,
+    guide: `${elements(ty)}, ${distribution(growth.distribution).label} input · peak heap allocation during one sort, beyond the input${growth.source ? ` · ${growth.source}` : ""}`,
+    x: {
+      low: lengths[0],
+      high: lengths.at(-1)!,
+      ticks: lengths.map((n) => ({ value: n, label: countLabel(n) })),
+      label: "records →",
+    },
+    y: {
+      low: MEMORY_FLOOR,
+      high,
+      ticks: decades.map((value) => ({ value, label: formatBytes(value) })),
+      label: "extra memory",
+    },
+    curves: plotted.map((e) => ({
+      name: displayName(e.name),
+      tone: toneOf(e.name),
+      points: e.points,
+    })),
+    references: [
+      {
+        dotted: true,
+        points: lengths.map((n) => [n, last[1] * Math.sqrt(n / last[0])] as [number, number]),
+      },
+    ],
+    legend: [...kindLegend, [["dotted"], "√n slope through Tessera"]],
+    ...(note ? { note } : {}),
   };
-  const entries = field.algorithms
-    .map((v) => ({ ...v, peak: peaks(v.name)! }))
-    .filter((e) => e.peak)
-    .sort((a, b) => a.peak.worst - b.peak.worst);
-  const anchor = entries.find((e) => e.name === "tessera");
-  if (!anchor) return null;
-  const low = 1e5,
-    high = 1e9;
-  const plotted: string[][] = [];
-  const row = (e: (typeof entries)[number]): Row => {
-    const { random, worst } = e.peak;
-    plotted.push([tableName(e.name), formatBytes(random), formatBytes(worst)]);
-    const tone = toneOf(e.name);
-    // The random-input value is the ring; only the worst case is a number.
-    const cells = [worst ? formatBytes(worst) : "0"];
-    if (!worst) return { name: sortName(e.name), marks: [], cells };
-    const spread = random !== worst;
-    return {
-      name: sortName(e.name),
-      marks: [
-        ...(spread ? [{ value: Math.max(low, random), tone, hollow: true }] : []),
-        { value: worst, tone },
-      ],
-      span: spread ? [Math.max(low, random), worst] : undefined,
-      cells,
-      strong: tone === "primary",
-    };
-  };
-  const input = n * 8;
-  const title = `At most ${formatBytes(anchor.peak.worst)} of extra memory`;
   return {
     name: "memory",
-    subject: "Extra memory",
-    summary:
-      "The largest heap allocation each sort makes beyond its input. The ring is the random input, the dot the worst input; the dashed line is the size of the input itself.",
+    subject: "Extra memory by input length",
+    summary: `How much memory each sort allocates beyond its input as the input grows. Both axes are logarithmic, so memory proportional to a power of n is a straight line, and a steeper line grows faster: sorts that copy their input rise with the input itself, and the dotted line has the slope of √n.`,
     title,
-    ...rendered({
-      title,
-      guide: `${formatLength(n)} ${elements("u64")} · peak heap allocation during one sort, beyond the ${formatBytes(input)} input`,
-      columns: ["Worst"],
-      groups: [
-        { title: "Stable sorts", rows: entries.filter((e) => e.stable).map(row) },
-        { title: "Unstable sorts", rows: entries.filter((e) => !e.stable).map(row) },
-      ].filter((g) => g.rows.length),
-      scale: {
-        low,
-        high,
-        clamp: false,
-        ticks: [1e5, 1e6, 1e7, 1e8, 1e9].map((v) => ({ value: v, label: formatBytes(v) })),
-      },
-      marker: { value: input, label: "input size" },
-      axis: ["← less memory", "more memory →"],
-      legend: [...kindLegend, [["hollow"], "random input"], [["reference"], "input size"]],
-    }),
-    table: markdownTable(["Sort", "Random input", `Worst of ${patterns.length} inputs`], plotted),
+    kind: "curves",
+    chart,
+    svg: renderCurves(chart),
+    table,
   };
 }
 
@@ -664,7 +730,6 @@ const RELEASE: Cohort = {
   shapes,
   typeShapes: shapes,
   typeShapesLabel: `geometric mean over the ${shapes.length} baseline input patterns`,
-  memoryN: LARGEST,
 };
 
 /** One figure for a first impression: the ranking with each sort's extra memory. */
@@ -677,6 +742,7 @@ export function comparisonFigures(
   cohort: Cohort,
   short?: number,
   memory = false,
+  growth?: Growth,
 ): Figure[] {
   return [
     renderRanking(field, cohort, memory),
@@ -686,7 +752,7 @@ export function comparisonFigures(
       .map((ty) => renderInputs(field, cohort, `inputs-${ty}`, cohort.n, ty)),
     ...(short === undefined ? [] : [renderInputs(field, cohort, "short", short)]),
     renderTypes(field, cohort),
-    renderMemory(field, cohort),
+    renderGrowth(growth ?? fieldGrowth(field, "u64")),
   ].filter((f): f is Figure => f !== null);
 }
 

@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+# Extra memory against input length, for the comparison's growth figure. Peak
+# allocation counts do not depend on the host, so this plan only feeds the
+# memory worker, never timing. The records match the comparison's ranking:
+# 32-bit-key rows are the one format every radix opponent sorts, including the
+# original Block LSD code. glidesort-sqrt is omitted: its buffer is sized from
+# Tessera's own peak.
+schema = 1
+algorithms = [
+  "tessera", "std-stable", "radsort", "glidesort", "std-unstable", "rdst",
+  "clausecker", "fluxsort", "ips2ra", "ips4o", "crumsort", "duckdb",
+]
+
+[[include]]
+types = [ "row_u32" ]
+distributions = [ "random" ]
+lengths = [ 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216 ]

@@ -64,7 +64,9 @@ $$
 b^{*} = \sqrt{\frac{d\, n}{2 R s}}, \qquad \text{memory}(b^{*}) = 2\sqrt{2 d\, R\, s\, n} = O(\sqrt{n}).
 $$
 
-With b = c·b\*, the total is (c + 1/c)/2 times the minimum. Minimum memory is not minimum time: every block costs an ownership check and a copy at a scattered address, whatever its size. `default_block_size` therefore takes **2·b\*** (rounded up), at 1.25 times the minimum memory, with two floors:
+With b = c·b\*, the total is (c + 1/c)/2 times the minimum. Minimum memory is not minimum time: every block costs an ownership check and a copy at a scattered address, whatever its size. `default_block_size` therefore takes **2·b\*** (rounded up), at 1.25 times the minimum memory, with two floors. The multiple was 4 (2.1 times the minimum) until [#202](https://github.com/Yikai-Liao/tessera-order/pull/202) halved it to cut scratch by about 40% at a million records and more: the PR benchmark measured up to 8.8% more time for `{u64, u32}` records at 65,536 and 1,000,000, and 2–5% on most large random inputs. The cost was accepted for memory closer to the original Block LSD's.
+
+The floors:
 
 - at least **1,024 bytes** of records per block, so one copy is worth its overhead;
 - at least **32 records** per block, because a block's bookkeeping costs the same whatever the record width.

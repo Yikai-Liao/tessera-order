@@ -124,15 +124,7 @@ impl Length {
             Self::Count(len) => *len,
             Self::Boundary(Boundary::InsertionMax) => INSERTION_MAX,
             Self::Boundary(Boundary::InsertionNext) => INSERTION_MAX + 1,
-            Self::Boundary(Boundary::TileNext) => {
-                let bytes = catalog()
-                    .types
-                    .iter()
-                    .find(|entry| entry.id == ty)
-                    .expect("validated record type")
-                    .bytes;
-                TILE_BYTES / bytes + 1
-            }
+            Self::Boundary(Boundary::TileNext) => TILE_BYTES / record_bytes(ty) + 1,
         }
     }
 }
@@ -165,6 +157,16 @@ impl Rule {
     }
 }
 
+/// Storage width of a validated catalog record type.
+fn record_bytes(ty: &str) -> usize {
+    catalog()
+        .types
+        .iter()
+        .find(|entry| entry.id == ty)
+        .expect("validated record type")
+        .bytes
+}
+
 /// One concrete seed-one input, shared by every selected API mode.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub struct InputCase {
@@ -180,6 +182,10 @@ impl InputCase {
     /// Formats the stable identifier used in raw samples and reports.
     pub fn id(&self) -> String {
         format!("{}/{}/{}/s1", self.ty, self.distribution, self.len)
+    }
+    /// Bytes of the input records, excluding owned payloads.
+    pub fn input_bytes(&self) -> usize {
+        self.len * record_bytes(&self.ty)
     }
     /// Names the resumable group containing this case's lengths.
     pub(crate) fn group(&self) -> String {

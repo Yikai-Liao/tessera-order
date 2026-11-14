@@ -21,6 +21,8 @@ The engine is a Stable Rust port of the research prototype in `sort-research-rs`
 
 ## Rejected or on hold
 
+- **Moving insertion-key cache, on hold.** Reusing the moving record’s encoded key across adjacent swaps improved local keyed-row screens, but the first hosted [PR #210](https://github.com/Yikai-Liao/tessera-order/pull/210) head measured `row_u32/random/49` +79.1%, with no improvement alert elsewhere. Linked local measurements did not reproduce the loss; source versus placement remains unresolved. The cache was withdrawn rather than spending a regression budget. Reopen only with consistent cross-placement and hosted evidence for the insertion/tile boundary.
+- **Precomputed insertion point plus rotation, rejected.** Computing the position before moving preserved panic safety without a hole guard and helped wide records, but slowed small direct-key insertion substantially. The extra search and rotation are not a general replacement for adjacent swaps. Reopen only with a construction that keeps the small-record cost.
 - <span id="recomputed-tile-buckets-rejected">**Recomputed tile buckets, rejected.**</span> Since inconsistent keys may make the sort panic, a tile scatter could call the key function again and panic on a bucket overflow instead of reading cached `u16` bucket IDs. A local prototype removed 30 net production lines and about 20% of the whole-tile heap scratch for 8-byte rows, but needed a stack bucket-bound table of up to 32 KiB, and several 8-byte row groups ran 8–10% slower, one owned-`String` group about 5%. The cache is bounded by the tile, not by n, so it does not affect the O(√n) bound. Reopen only with a construction that keeps the cache's speed.
 - **Job-local finisher scratch (C), rejected.** Replacing the engine-local pool with a factory/mutable-visitor protocol spread initialization and lifetime obligations through the block entry points without simplifying the complete interface ([PR #181](https://github.com/Yikai-Liao/tessera-order/pull/181)). Reopen only for a required job-local mutable consumer or measured pool-lock cost.
 - **One shared free-block stack, rejected.** Local paired comparisons reproduced parallel slowdowns, so per-bucket caches remain ([PR #183](https://github.com/Yikai-Liao/tessera-order/pull/183)). Reopen only with a construction that removes peer discovery while preserving the retained design's measured cost.
@@ -43,6 +45,12 @@ The engine is a Stable Rust port of the research prototype in `sort-research-rs`
   - Materializing user keys on an 8,192-record near-sorted tile was 1.4–1.6× slower than scalar callbacks, so user-key tiles keep callbacks.
   - A sixteen-lane prefix sum lost to eight lanes (cross-lane swizzle).
   - Stable three-way compress scatter of 64K `u32` took 460 µs against 147 µs for scalar cursor writes, and AVX-512CD conflict detection would double the 32 KiB cursor table.
+
+## Child order before variation
+
+[PR #211](https://github.com/Yikai-Liao/tessera-order/pull/211) reuses the existing root order probe for partition children before scanning their remaining variation. Confirmed ordered children skip that full scan; flat samples still need variation and, when nonconstant, full confirmation. No new detector, threshold or scratch is introduced. The first hosted screen improves four `sorted_tail` cases by 8.1–19.0% with no slowdown alert over the continuous inventory. This is a saving for ordered children exposed by any partition, not a tail classifier.
+
+The scan order has a cost: constant and unordered children may pay a bounded pair sample before variation, and short constant children use order confirmation instead of the former variation scan. The hosted screen measures `u128/sparse8/1M` +3.3%, consistent in direction with an earlier local combined screen; this remains an open trade-off, not proven equivalence. It also measures `u64/random/8193` +4.2% and `row_u64/sorted/48` +6.0% without alerts. The latter root finishes before child routing, so its difference does not establish a child-analysis cost, but placement causality is unproven. Retain these observations when assessing later revisions rather than treating the absence of an alert as no regression.
 
 ## Shared ordered finishing controls
 

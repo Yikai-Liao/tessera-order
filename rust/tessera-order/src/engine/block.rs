@@ -44,7 +44,7 @@
 //! the completion ledger moves every live record back into the input, so records
 //! need neither `Copy` nor `Clone`.
 
-use crate::trace::{self, Event};
+use crate::engine::trace::{self, Event};
 #[cfg(test)]
 use crate::unwind;
 use alloc::vec::Vec;

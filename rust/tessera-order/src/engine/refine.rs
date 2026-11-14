@@ -20,20 +20,22 @@ mod plan;
 #[cfg(test)]
 mod refinement_tests;
 
-use crate::tile;
+use crate::engine::tile;
 
-use crate::order::scan_varying_bits;
-use crate::rank::Requirement;
-use crate::thresholds::{INSERTION_MAX, TILE_BYTES};
-use crate::workspace::Workspace;
+use crate::engine::order::scan_varying_bits;
+use crate::engine::rank::Requirement;
+use crate::engine::thresholds::{INSERTION_MAX, TILE_BYTES};
+use crate::engine::workspace::Workspace;
 use plan::{NodePlan, plan_node};
 use tile::capacity as tile_capacity;
 
 use alloc::vec::Vec;
 
-use crate::block;
-use crate::block::Classify;
-use crate::key::{self, Digit, Direct, Extract, KeyDigit, KeyHalf, Rank, Unsigned, bit_len};
+use crate::engine::block;
+use crate::engine::block::Classify;
+use crate::engine::key::{
+    self, Digit, Direct, Extract, KeyDigit, KeyHalf, Rank, Unsigned, bit_len,
+};
 
 type KeyValue<T, E> = <E as Extract<T>>::Value;
 
@@ -84,9 +86,9 @@ impl Split {
             |bucket: usize, range: core::ops::Range<usize>, child: &mut [T], classifier: &mut C| {
                 if child.len() <= tile_len
                     && self.finished != Some(bucket)
-                    && required.project(range).is_some()
+                    && let Some(required) = required.project(range)
                 {
-                    tile.finish_child::<_>(child, self.candidate, lend(classifier));
+                    tile.finish_child::<_>(child, self.candidate, lend(classifier), required);
                 }
             };
         block::partition(
@@ -457,7 +459,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         if len <= self.tile_len {
             self.scratch
                 .tile
-                .sort::<E>(records, varying, self.extractor);
+                .refine::<E>(records, varying, self.extractor, required);
             return;
         }
         let plan = plan_node(records, varying, self.tile_len, self.extractor);
@@ -562,7 +564,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::key::ByKey;
+    use crate::engine::key::ByKey;
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     #[test]

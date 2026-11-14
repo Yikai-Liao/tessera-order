@@ -16,7 +16,7 @@ Step 3 reads the input in order and fills each bucket in order. Records with the
 
 It also needs an output buffer as large as the input, because a record cannot be written to its bucket position until that position has been vacated, and nothing guarantees that it has. This buffer is what Tessera avoids.
 
-In the engine, this is `counting_pass` in [`engine.rs`](../../rust/tessera-order/src/engine.rs). It is used only inside tiles, where the buffer is small enough to stay in cache.
+In the engine, this is `counting_pass` in [`tile.rs`](../../rust/tessera-order/src/engine/tile.rs). It is used only inside tiles, where the buffer is small enough to stay in cache.
 
 ## Two ways to use more than one digit
 

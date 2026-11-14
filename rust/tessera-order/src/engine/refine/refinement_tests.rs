@@ -3,7 +3,7 @@
 //! Private rank consumers exercise the production executor before public APIs.
 
 use super::*;
-use crate::key::{ByKey, RadixKey};
+use crate::engine::key::{ByKey, RadixKey};
 use core::cell::Cell;
 use core::ops::Range;
 
@@ -32,23 +32,25 @@ fn check_keys<K: RadixKey>(keys: &[K]) {
     expected.sort_by_key(|&id| keys[id].encode());
     let mut workspace = Workspace::new();
     let mut check = |intervals: &[Range<usize>]| {
-        let mut records: Vec<_> = keys.iter().copied().zip(0..len).collect();
-        refine_with_tile_bytes(
-            &mut records,
-            ByKey(|record: &(K, usize)| record.0),
-            Requirement::new(len, intervals),
-            Some(&mut workspace),
-            128,
-        );
-        let ids: Vec<_> = records.iter().map(|record| record.1).collect();
-        assert_members(&ids, &expected, intervals);
-        // All equal-key members, including skipped ones, must remain in their
-        // original relative order so later refinement needs no original index.
-        records.sort_by_key(|record| record.0.encode());
-        assert_eq!(
-            records.iter().map(|record| record.1).collect::<Vec<_>>(),
-            expected
-        );
+        for tile_bytes in [128, TILE_BYTES] {
+            let mut records: Vec<_> = keys.iter().copied().zip(0..len).collect();
+            refine_with_tile_bytes(
+                &mut records,
+                ByKey(|record: &(K, usize)| record.0),
+                Requirement::new(len, intervals),
+                Some(&mut workspace),
+                tile_bytes,
+            );
+            let ids: Vec<_> = records.iter().map(|record| record.1).collect();
+            assert_members(&ids, &expected, intervals);
+            // All equal-key members, including skipped ones, must remain in their
+            // original relative order so later refinement needs no original index.
+            records.sort_by_key(|record| record.0.encode());
+            assert_eq!(
+                records.iter().map(|record| record.1).collect::<Vec<_>>(),
+                expected
+            );
+        }
     };
     check(&[]);
     for range in [
@@ -56,9 +58,17 @@ fn check_keys<K: RadixKey>(keys: &[K]) {
         0..len / 3,
         len / 3..2 * len / 3,
         len / 2..len / 2 + 1,
+        0..0,
+        len / 2..len / 2,
+        len..len,
     ] {
         check(core::slice::from_ref(&range));
     }
+    check(&[
+        len / 4..len / 4,
+        len / 2..len / 2 + 1,
+        3 * len / 4..3 * len / 4,
+    ]);
     for count in [7, 31] {
         let intervals: Vec<_> = (1..=count)
             .map(|i| {

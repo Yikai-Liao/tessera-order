@@ -144,7 +144,7 @@ pub(super) fn partition_impl_with_visit<'records, T: Send, C: Classify<T> + Clon
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::key::{ByKey, KeyDigit};
+    use crate::engine::key::{ByKey, KeyDigit};
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{
         Arc,

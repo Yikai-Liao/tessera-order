@@ -27,7 +27,7 @@ function testOnly(attribute: SgNode) {
 // so their calls and imports are instrumentation, not engine code.
 function figureTrace(node: SgNode) {
   if (node.kind() === "use_declaration")
-    return /^crate::trace\b/.test(node.field("argument")?.text() ?? "");
+    return /^crate::(?:engine::)?trace\b/.test(node.field("argument")?.text() ?? "");
   const call = node.kind() === "expression_statement" ? node.child(0) : node;
   return call?.kind() === "call_expression" && call.field("function")?.text() === "trace::emit";
 }

@@ -1,6 +1,6 @@
 # 2. Keys as unsigned integers
 
-A radix sort indexes arrays with digits, so it needs keys whose **bit pattern** sorts in the same order as their **values**. Unsigned integers already do. Every other key type that Tessera supports is first *encoded* into an unsigned integer of the same width, and the engine only ever sees the encoded key. The encodings are in [`key.rs`](../../rust/tessera-order/src/key.rs), and the order they produce is part of the [ordering semantics](../../conformance/semantics.md#key-encoding).
+A radix sort indexes arrays with digits, so it needs keys whose **bit pattern** sorts in the same order as their **values**. Unsigned integers already do. Every other key type that Tessera supports is first *encoded* into an unsigned integer of the same width, and the engine only ever sees the encoded key. The encodings are in [`key.rs`](../../rust/tessera-order/src/engine/key.rs), and the order they produce is part of the [ordering semantics](../../conformance/semantics.md#key-encoding).
 
 ## Encodings
 
@@ -28,7 +28,7 @@ Normalize the key in the key function if you want every NaN equal, or both zeros
 
 Real keys rarely use all of their bits. Timestamps share their high bits, small IDs in a `u64` have dozens of leading zeros, and a flag stored in bit 40 is the only bit that changes. A bit that has the same value in every key cannot affect the order.
 
-Tessera finds these bits with one scan (`scan_varying_bits` in [`engine.rs`](../../rust/tessera-order/src/engine.rs)):
+Tessera finds these bits with one scan (`scan_varying_bits` in [`order.rs`](../../rust/tessera-order/src/engine/order.rs)):
 
 - the **union** (bitwise OR) of all keys has a 1 wherever *some* key has a 1;
 - the **intersection** (bitwise AND) has a 1 wherever *every* key has a 1;
@@ -41,6 +41,6 @@ The result, `varying`, is used everywhere later:
 - If `varying` is 0, every key is equal and the input is already sorted.
 - Every digit is placed over varying bits only. A digit never spends a pass on constant bits ([digit planning](tiles.md#digit-planning)).
 - For 128-bit keys whose variation fits in one 64-bit half, the engine sorts by that half as a `u64` (`KeyHalf` in `key.rs`), which halves the work per key.
-- After a partition on a digit, that digit is constant inside each child, so the child's scan excludes it and stops once every remaining candidate bit has been seen in both states (`scan_varying_bits` in `engine.rs`).
+- After a partition on a digit, that digit is constant inside each child, so the child's scan excludes it and stops once every remaining candidate bit has been seen in both states (`scan_varying_bits` in `engine/order.rs`).
 
 The scan reads a 1,025-record prefix first. If every bit already varies there, as with random wide keys, it stops early.

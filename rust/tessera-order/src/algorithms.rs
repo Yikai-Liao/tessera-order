@@ -4,12 +4,7 @@
 //! and normalization precede execution; no adapter owns partition decisions,
 //! live scratch records or a separate selection engine.
 
-use crate::{
-    engine,
-    key::{ByKey, Direct, Extract, RadixKey},
-    rank::{self, Requirement},
-    workspace::Workspace,
-};
+use crate::engine::{self, ByKey, Direct, Extract, RadixKey, Requirement, Workspace};
 use alloc::vec::Vec;
 use core::{
     cmp::Reverse,
@@ -288,14 +283,8 @@ fn ranks(range: impl RangeBounds<usize>, len: usize) -> Range<usize> {
     }
 }
 
-/// Orders `ranks` in place. An empty interior range isolates its first
-/// excluded rank, which establishes both memberships through the same request.
+/// Requests ordered positions or an empty range's membership boundary.
 fn partial<T, E: Extract<T>>(values: &mut [T], ranks: Range<usize>, extractor: E) {
-    let ranks = match ranks {
-        Range { start, end } if start < end => start..end,
-        Range { start, .. } if 0 < start && start < values.len() => start..start + 1,
-        _ => return,
-    };
     let required = Requirement::new(values.len(), core::slice::from_ref(&ranks));
     engine::refine(values, extractor, required, None);
 }
@@ -319,7 +308,7 @@ fn select<T, E: Extract<T>>(
 }
 
 fn select_many<T, E: Extract<T>>(values: &mut [T], indices: &[usize], extractor: E) {
-    let ranges = rank::normalize_indices(values.len(), indices);
+    let ranges = engine::normalize_indices(values.len(), indices);
     let required = Requirement::new(values.len(), &ranges);
     engine::refine(values, extractor, required, None);
 }

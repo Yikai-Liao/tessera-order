@@ -74,29 +74,21 @@
 extern crate alloc;
 
 mod algorithms;
-mod block;
 mod cached;
 mod engine;
-mod key;
-mod order;
 #[cfg(feature = "rayon")]
 mod parallel;
 mod partition;
-mod portable_simd;
-mod rank;
-mod tile;
-mod trace;
 
 #[cfg(test)]
 mod unwind;
-mod workspace;
 
 pub use algorithms::{
     argsort, argsort_by_key, k_largest, k_largest_by_key, k_smallest, k_smallest_by_key,
     partial_sort, partial_sort_by_key, select_nth, select_nth_by_key, select_nth_many,
     select_nth_many_by_key, sort_chunks, sort_chunks_by_key,
 };
-pub use key::RadixKey;
+pub use engine::RadixKey;
 #[cfg(feature = "rayon")]
 #[allow(deprecated)]
 pub use parallel::{par_sort, par_sort_by_key, par_stable_sort, par_stable_sort_by_key};
@@ -124,7 +116,7 @@ pub use partition::partition;
 /// assert_eq!(bits, expected);
 /// ```
 pub fn sort<K: RadixKey>(values: &mut [K]) {
-    engine::sort::<K, _>(values, key::Direct);
+    engine::sort::<K, _>(values, engine::Direct);
 }
 
 /// Sorts records by a key, keeping records with equal keys in input order.
@@ -168,7 +160,7 @@ pub fn sort<K: RadixKey>(values: &mut [K]) {
 /// assert_eq!(names, ["a", "c", "d"]);
 /// ```
 pub fn sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
-    engine::sort::<T, _>(values, key::ByKey(key));
+    engine::sort::<T, _>(values, engine::ByKey(key));
 }
 
 /// Renamed to [`sort`]; the contract is unchanged.
@@ -228,16 +220,7 @@ pub fn sort_by_cached_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], k
 ///
 /// Not part of the public API: the values may change in any release.
 #[doc(hidden)]
-pub mod thresholds {
-    /// Largest leaf finished by stable insertion.
-    pub const INSERTION_MAX: usize = 48;
-    /// Default tile budget, in bytes of records.
-    pub const TILE_BYTES: usize = 64 * 1024;
-    /// Most records in one tile, so that a `u16` cursor addresses any of them.
-    pub const MAX_TILE_RECORDS: usize = crate::tile::Cursor::MAX as usize;
-    /// Largest cursor table of a tile-local pass, in bytes.
-    pub const MAX_CURSOR_BYTES: usize = 32 * 1024;
-}
+pub use engine::thresholds;
 
 /// Block-partition steps for the documentation figures (feature `trace`).
 ///
@@ -245,5 +228,5 @@ pub mod thresholds {
 #[cfg(feature = "trace")]
 #[doc(hidden)]
 pub mod figures {
-    pub use crate::trace::{Event, partition};
+    pub use crate::engine::{Event, trace_partition as partition};
 }

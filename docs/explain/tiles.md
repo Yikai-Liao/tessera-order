@@ -1,6 +1,6 @@
 # 5. Finishing tiles
 
-A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so that one `u16` can hold any position in it. Its scratch buffer is the same size and stays in the L2 cache. Inside a tile a second buffer is cheap, so Tessera uses ordinary counting passes; the questions are which digits to use and whether to finish with MSD or LSD. [`tile/plan.rs`](../../rust/tessera-order/src/tile/plan.rs) selects the leaf; [`tile.rs`](../../rust/tessera-order/src/tile.rs) executes it and owns its scratch and panic recovery.
+A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so that one `u16` can hold any position in it. Its scratch buffer is the same size and stays in the L2 cache. Inside a tile a second buffer is cheap, so Tessera uses ordinary counting passes; the questions are which digits to use and whether to finish with MSD or LSD. [`tile/plan.rs`](../../rust/tessera-order/src/engine/tile/plan.rs) selects the leaf; [`tile.rs`](../../rust/tessera-order/src/engine/tile.rs) executes it and owns its scratch and panic recovery.
 
 ## One-shot category distribution
 
@@ -18,8 +18,14 @@ A complete child of a parallel root may use a larger tile: up to 1 MiB of record
 | <span id="tile-msd">**Tile MSD**</span> | more than two width-bounded passes would be needed to finish flat | one counting pass on the top digit through scratch, then each bucket is finished on its own: insertion for buckets of at most 48 records, another tile leaf for larger ones |
 | <span id="tile-lsd">**Tile LSD**</span> | otherwise | one counting pass per planned digit, from the lowest digit up, alternating between the tile and scratch |
 
-Below 48 records, the work of clearing and scanning bucket tables costs more than insertion's shifts. The threshold is `thresholds::INSERTION_MAX` in `lib.rs`.
+Below 48 records, the work of clearing and scanning bucket tables costs more than insertion's shifts. The threshold is `INSERTION_MAX` in `engine/thresholds.rs`.
 
+
+## Partial rank requirements
+
+Tiles consume the same borrowed requirement as nodes. A partial requirement above the insertion leaf uses a top-digit MSD pass until each requested child is either fully covered or needs no more key bits. Once the pass restores every record to its final band, `Requirement::project` decides which children need work. A cut exactly at a band boundary is finished; an unrequested band receives no child scan or insertion pass.
+
+A digit covering all remaining variation still finishes in one pass, and fully covered children retain the complete planner's short LSD plans and whole-tile insertion shortcut. Small insertion leaves and the root's existing order/insertion preparation may finish more than requested. Low-digit LSD intermediates are not global rank bands, so partial requirements cannot prune them. This shares the tile's storage and recovery operation without building another selection engine. The planner model below defaults to a complete requirement.
 
 ## Digit planning
 
@@ -60,4 +66,4 @@ Tile passes are the classic [counting pass](radix-sort.md#the-counting-pass) wit
 
 Before recursing, each child is scanned for varying bits only within the parent's remaining candidate mask. Already partitioned digits cannot reappear, even if a user key function changes its answers, so each recursive level removes key bits.
 
-An MSD tile pass reads its bucket boundaries from the finished cursor table instead of recomputing them from keys. Recomputing measured 48% slower when there was about one bucket per record. If every bucket is small enough for insertion, one insertion sort over the whole tile does the same work without walking the boundaries.
+An MSD tile pass reads its bucket boundaries from the finished cursor table instead of recomputing them from keys. Recomputing measured 48% slower when there was about one bucket per record. For a complete requirement, if every bucket is small enough for insertion, one insertion sort over the whole tile does the same work without walking the boundaries.

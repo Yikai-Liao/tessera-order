@@ -20,8 +20,10 @@ export interface CodeChange {
 // Commits before the crate rename keep the library in `rust/tessera-sort`; files are keyed
 // by their path under `src/`, so a comparison across the rename matches them.
 const SOURCES = ["rust/tessera-order/src/", "rust/tessera-sort/src/"];
+// Preserve the historical metric when core modules move under engine/ and the
+// old engine traversal becomes engine/refine. API and trace code stay excluded.
 const ENGINE =
-  /^rust\/tessera-(?:order|sort)\/src\/((?:engine|block|key|portable_simd|scan|unwind)(?:\.rs$|\/.*\.rs$))/;
+  /^rust\/tessera-(?:order|sort)\/src\/((?:engine\/)?(?:block|key|portable_simd|scan|unwind)(?:\.rs$|\/.*\.rs$)|engine(?:\.rs$|\/(?:refine|plan|parallel|refinement_tests)(?:\.rs$|\/.*\.rs$)))/;
 
 /** Compare core production lines from commits or the working tree; owns temporary snapshots. */
 export async function codeChange(

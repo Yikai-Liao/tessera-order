@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-2-Clause
-// `plan_digits` and `top_window` from `rust/tessera-order/src/tile/plan.rs`, on
+// `plan_digits` and `top_window` from `rust/tessera-order/src/engine/tile/plan.rs`, on
 // BigInt masks so that the explanation pages can plan keys of any width.
 
 /** One key per equal stratum at a golden-ratio offset, mirroring `KeySample::collect`. */
@@ -66,17 +66,19 @@ export function planDigits(varying: bigint, width: number, bits: number): Digit[
 
 export type TileLeaf = "done" | "insertion" | "msd" | "lsd";
 
-/** Mirrors the bounded planner: finish at most two flat passes, otherwise split. */
+/** Mirrors tile planning: partial ranks need ordered bands before projection. */
 export function chooseTileLeaf(
   records: number,
   varying: bigint,
   tableWidth: number,
   bits: number,
+  required: "all" | "partial" = "all",
 ): TileLeaf {
   if (records < 2 || varying === 0n) return "done";
   if (records <= 48) return "insertion";
   const remaining = varying & ~topWindow(varying, tableWidth, bits).window;
-  return remaining === 0n || topWindow(remaining, bits, bits).digit.width <= tableWidth
+  return remaining === 0n ||
+    (required === "all" && topWindow(remaining, bits, bits).digit.width <= tableWidth)
     ? "lsd"
     : "msd";
 }

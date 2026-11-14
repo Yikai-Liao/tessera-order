@@ -92,7 +92,7 @@ function repositoryLinks(md: MarkdownRenderer) {
 
 export default defineConfig({
   title: "Tessera",
-  description: "Stable radix sort with O(√n) auxiliary memory",
+  description: "Stable radix ordering with O(√n) auxiliary memory",
   lang: "en-US",
   // GitHub Pages serves the project under /<repository>/; the workflow sets it.
   base: process.env.DOCS_BASE ?? "/",

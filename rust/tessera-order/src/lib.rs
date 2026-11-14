@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Stable radix sort with O(√n) auxiliary memory.
+//! Stable radix ordering with O(√n) auxiliary memory: one engine behind
+//! sorting and the standard ordering operations.
 //!
 //! Tessera sorts slices by a primitive key: an integer up to 128 bits, an
 //! `f32` or `f64`, or [`Reverse`](core::cmp::Reverse) of one of these. It runs

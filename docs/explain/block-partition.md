@@ -69,7 +69,7 @@ With b = c·b\*, the total is (c + 1/c)/2 times the minimum. Minimum memory is n
 - at least **1,024 bytes** of records per block, so one copy is worth its overhead;
 - at least **32 records** per block, because a block's bookkeeping costs the same whatever the record width.
 
-Neither floor depends on n, so the bound stays O(√n). A parallel root balances the same metadata against the scratch of all shards, b\* = √(dn / (2qRs)) for q shards, with the same scale and floors.
+Neither floor depends on n, so the bound stays O(√n). The floors' scratch grows with R instead: 2R·max(1024, 32s) bytes, so a 12-bit digit reserves 8 MiB at any n. [Routing](routing.md) therefore widens a digit only over bits some key varies in. A parallel root balances the same metadata against the scratch of all shards, b\* = √(dn / (2qRs)) for q shards, with the same scale and floors.
 
 <BlockSizeChart />
 

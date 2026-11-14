@@ -75,7 +75,7 @@ A node may already hold the two runs its top varying bit separates. `two_runs` r
 Otherwise the node is split on the digit under its highest varying bit, with the [stable block partition](block-partition.md). `choose_split_digit` picks the width:
 
 1. Aim for children of half a tile: with `target = tile records / 2`, start with enough bits for `n / target` children, clamped to 3–8 bits. Wider splits measured slower on 10 million records because of page and TLB pressure.
-2. Project the key sample onto the digit. If it hits fewer than a quarter of the digit's buckets, widen the digit by 2 bits and check again, up to 12 bits. Above 9 bits, 128 keys cannot fill a quarter of the buckets, so widening continues without a check. The equality check's sample is reused; a node below four tiles samples here for the first time.
+2. Project the key sample onto the digit. If it hits fewer than a quarter of the digit's buckets, widen the digit by 2 bits and check again, up to 12 bits. Above 9 bits, 128 keys cannot fill a quarter of the buckets, so widening continues without a check. Widening stops at bits no key varies in: they add empty buckets, and every bucket reserves block scratch, without separating a single key. The equality check's sample is reused; a node below four tiles samples here for the first time.
 
 Serial and parallel roots share this decision. A parallel root shards equality and digit partitions across threads and executes an existing-run split serially, without resampling.
 

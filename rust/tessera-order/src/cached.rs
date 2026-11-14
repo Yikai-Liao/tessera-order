@@ -2,15 +2,17 @@
 
 //! Sorting with one key evaluation per record.
 //!
-//! The key type decides the route. A key whose encoding fits one stable
-//! distribution is its own category: the records move once, keyed by IDs the
-//! distribution already caches, and no key is evaluated again. Wider keys are
-//! cached as (encoded key, input index) pairs, the pairs are sorted, and the
+//! Every encoded key is cached once, in input order. The cached keys reveal
+//! what a key function cannot promise in advance: whether the input is already
+//! ordered and which bits vary. When the varying bits fit one stable
+//! distribution, as with category keys, the records move once by those bits
+//! and the distribution replays the cached keys instead of calling the key
+//! function. Otherwise the keys are sorted as (key, input index) pairs and the
 //! records follow the sorted indices.
 
 use crate::{
     engine,
-    key::{ByKey, RadixKey, Unsigned},
+    key::{ByKey, RadixKey, Unsigned, bit_len},
     partition::{self, MAX_DISTRIBUTION_BITS},
 };
 use alloc::vec::Vec;
@@ -22,28 +24,52 @@ pub(crate) fn sort<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], mut key:
     if values.len() < 2 || size_of::<T>() == 0 {
         return;
     }
-    let bits = <K::Encoded as Unsigned>::BITS;
-    if bits <= MAX_DISTRIBUTION_BITS {
-        // Ascending categories are ascending encoded keys, each in input order.
-        partition::distribute(values, bits, ByKey(|record: &T| key(record).encode()));
+    // A key panic propagates here, before any record has moved.
+    let keys: Vec<K::Encoded> = values.iter().map(|record| key(record).encode()).collect();
+    let first = keys[0].to_u128();
+    let mut varying = 0;
+    let mut ordered = true;
+    for pair in keys.windows(2) {
+        varying |= pair[1].to_u128() ^ first;
+        ordered &= pair[0] <= pair[1];
+    }
+    if ordered {
+        return;
+    }
+    // Bits outside the window are equal in every key, so the window alone
+    // orders the records.
+    let shift = varying.trailing_zeros() as usize;
+    let width = bit_len(varying) - shift;
+    if width <= MAX_DISTRIBUTION_BITS {
+        let mask = (1 << width) - 1;
+        // The distribution classifies each record exactly once, in input
+        // order, so its `n`th call belongs to the `n`th cached key.
+        let mut replay = keys.iter();
+        partition::distribute(
+            values,
+            width,
+            ByKey(|_: &T| {
+                let key = replay.next().expect("one classification per record");
+                (key.to_u128() >> shift) as u16 & mask
+            }),
+        );
     } else if values.len() <= u32::MAX as usize {
-        sort_by_index::<_, _, u32>(values, |record| key(record).encode());
+        sort_by_index::<_, _, u32>(values, keys);
     } else {
-        sort_by_index::<_, _, usize>(values, |record| key(record).encode());
+        sort_by_index::<_, _, usize>(values, keys);
     }
 }
 
-/// Caches every encoded key with its input index `I`, sorts the pairs stably by
+/// Pairs every cached key with its input index `I`, sorts the pairs stably by
 /// key and moves each record to its sorted position.
 ///
-/// `I` holds every index of `values`. A key panic leaves `values` untouched:
-/// records move only after all keys are cached, and nothing after that point
-/// runs caller code or can panic.
-fn sort_by_index<T, V: Unsigned, I: Unsigned>(values: &mut [T], mut key: impl FnMut(&T) -> V) {
-    let mut cache: Vec<(V, I)> = values
-        .iter()
+/// `keys[i]` is the key of `values[i]`, and `I` holds every index of `values`.
+/// Nothing here runs caller code or can panic once records start moving.
+fn sort_by_index<T, V: Unsigned, I: Unsigned>(values: &mut [T], keys: Vec<V>) {
+    let mut cache: Vec<(V, I)> = keys
+        .into_iter()
         .enumerate()
-        .map(|(index, record)| (key(record), I::from_usize(index)))
+        .map(|(index, key)| (key, I::from_usize(index)))
         .collect();
     engine::sort(&mut cache, ByKey(|entry: &(V, I)| entry.0));
     // The sorted position `j` takes the record at input index `cache[j].1`.
@@ -79,10 +105,11 @@ mod tests {
         let key = |record: &(usize, _)| (record.0.wrapping_mul(37) % 11) as u16;
         let mut expected = input.clone();
         expected.sort_by_key(key);
+        let keys: Vec<_> = input.iter().map(key).collect();
         let mut narrow = input.clone();
-        sort_by_index::<_, _, u32>(&mut narrow, key);
+        sort_by_index::<_, _, u32>(&mut narrow, keys.clone());
         let mut wide = input;
-        sort_by_index::<_, _, usize>(&mut wide, key);
+        sort_by_index::<_, _, usize>(&mut wide, keys);
         assert_eq!(narrow, expected);
         assert_eq!(wide, expected);
     }

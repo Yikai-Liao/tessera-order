@@ -128,6 +128,7 @@ pub fn stable_partition_by_bucket<T, F: FnMut(&T) -> usize>(
 
 /// Stably moves at least two sized records into the `2^radix` categories that
 /// `extractor` assigns, evaluating it exactly once per record, in input order.
+/// Cached-key sorting relies on that order to replay keys by call count.
 ///
 /// Returns the cumulative end of every category, including empty ones. Keys
 /// must be below `2^radix`. An extractor panic propagates after every record

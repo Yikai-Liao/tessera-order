@@ -47,17 +47,25 @@ fn scramble(id: usize) -> u64 {
 }
 
 #[test]
-fn narrow_keys_sort_stably_with_one_call_per_record() {
+fn keys_varying_within_one_distribution_sort_stably_with_one_call_per_record() {
     check(|id| scramble(id) as u8, u8::cmp);
     check(|id| scramble(id) as i8, i8::cmp);
     check(|id| Reverse(scramble(id) as u8), Reverse::cmp);
     check(|id| (scramble(id) % 3) as u8, u8::cmp);
-    check(|_| 7u8, u8::cmp);
+    check(|id| (scramble(id) % 16) as u16, u16::cmp);
+    // A shifted window with constant bits on both sides.
+    check(
+        |id| 0xab00_0000 | ((scramble(id) % 64) << 12) as u32,
+        u32::cmp,
+    );
+    // The widest single distribution, then one bit more.
+    check(|id| scramble(id) % 4096, u64::cmp);
+    check(|id| scramble(id) % 8192, u64::cmp);
+    check(|id| Reverse((scramble(id) % 257) as u128), Reverse::cmp);
 }
 
 #[test]
-fn wide_keys_sort_stably_with_one_call_per_record() {
-    check(|id| (scramble(id) % 16) as u16, u16::cmp);
+fn keys_varying_beyond_one_distribution_sort_stably_with_one_call_per_record() {
     check(|id| scramble(id) as u16, u16::cmp);
     check(|id| scramble(id) as i32 >> 20, i32::cmp);
     check(|id| Reverse(scramble(id) >> 40), Reverse::cmp);
@@ -71,7 +79,19 @@ fn wide_keys_sort_stably_with_one_call_per_record() {
         },
         f64::total_cmp,
     );
+}
+
+#[test]
+fn ordered_and_constant_keys_sort_with_one_call_per_record() {
     check(|_| 7u32, u32::cmp);
+    check(|id| id as u64, u64::cmp);
+    check(|id| (id / 3) as u8, u8::cmp);
+    // Ordered except for the last record.
+    let len = lengths().last().copied().unwrap_or_default();
+    check(
+        move |id| if id + 1 == len { 0 } else { id as u32 + 1 },
+        u32::cmp,
+    );
 }
 
 #[test]

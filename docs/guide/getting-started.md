@@ -140,7 +140,7 @@ assert_eq!(offsets, [0, 2, 2, 4]);
 assert_eq!(jobs, [(0, "b"), (0, "d"), (2, "a"), (2, "c")]);
 ```
 
-When the classifier is costly or must not run twice for a record, sort by it with `sort_by_cached_key` and traverse the groups. It evaluates the key once per record; a `u8` or `i8` key moves the records in one distribution, as above, without caching keys:
+When the classifier is costly or must not run twice for a record, sort by it with `sort_by_cached_key` and traverse the groups. It caches each key once; when the keys span a small range, as category IDs do, the records move once, as above:
 
 ```rust
 let mut jobs = [(2, "a"), (0, "b"), (2, "c"), (0, "d")];

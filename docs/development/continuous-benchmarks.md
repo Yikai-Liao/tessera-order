@@ -33,11 +33,15 @@ The [CI workflow](../../.github/workflows/ci.yml) runs `prepare → measure → 
 - **Report** reads this run's prepared plan and inventory, verifies complete disjoint shards with matching identity, and recomputes verdicts from raw samples without running binaries. Cloud submission comes first so the report carries links; its failure leaves verdict, figures and summary intact.
 - Same-repository PRs report through the `benchmark` environment and publish checks and Cloud ratios. Forks and Dependabot get artifacts and summaries without Cloud publication; a regression still fails their report job.
 
+PR preparation sets `CARGO_PROFILE_BENCH_DEBUG=0` for both revisions to avoid generating and transferring full debug information. Optimization levels, codegen units and sampling stay unchanged; local builds retain the workspace's bench profile unless explicitly overridden. Cargo provenance records the effective debug setting, and executable hashes are computed from the final builds, without post-build stripping.
+
 Both revisions enable Rayon and the runtime-dispatched SIMD backend, with no forced ISA or `target-cpu=native`. Linux workers run under `setarch -R`, which disables address randomization without host changes but does not control code layout or physical page placement. The runner checks this support before building and before measuring, and fails rather than measure an uncontrolled pair.
 
 ### Capacity and recovery
 
 Only preparation compiles, with `TESSERA_BENCH_TARGET_DIR` and `Swatinem/rust-cache` supplying the Cargo target. Ordinary Rust CI keeps its own parallelism and never waits for benchmarks. PR updates cancel obsolete runs; GitHub offers no priority or preemption guarantee. The target is four minutes from trigger to archival, judged on the measured critical path rather than budgets or cache hits.
+
+When evaluating preparation changes, compare cold-cache and restored-cache runs separately. Retain each revision's Cargo build duration from `preparation.log`, the uploaded prepared artifact size and the Rust cache restore result. For debug-setting changes, also compare representative measurements with the previous configuration before claiming measurement compatibility or a speedup.
 
 Rerun failed jobs in their original run. Missing or expired artifacts need a new complete run; an archival retry can reuse complete artifacts. A plan change is handled by the branch's own preparation and report code.
 

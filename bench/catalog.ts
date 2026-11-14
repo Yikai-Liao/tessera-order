@@ -240,8 +240,6 @@ export function comparisonGroup(input: CaseIdentity) {
 
 /** Format a Criterion timed identity; catalog membership is checked by its consumer. */
 export function criterionId(input: CaseIdentity, mode: string) {
-  if (input.operation && input.operation.kind !== "sort")
-    throw new Error("Criterion tracking supports full sorting only");
   return `rust/${comparisonId(input)}/${mode}`;
 }
 
@@ -313,19 +311,22 @@ export function parseComparisonId(id: string) {
 
 /** Strictly decode Criterion IDs with known catalog fields, not display fallbacks. */
 export function parseCriterionId(id: string) {
-  const [language, ty, distribution, length, seed, mode, ...extra] = id.split("/");
+  const parts = id.split("/");
+  const mode = parts.at(-1) ?? "";
+  let input: ReturnType<typeof parseComparisonId> | undefined;
+  try {
+    input = parseComparisonId(parts.slice(1, -1).join("/"));
+  } catch {}
   if (
-    language !== "rust" ||
-    extra.length ||
-    !records.has(ty) ||
-    !distributions.has(distribution) ||
-    !/^[1-9]\d*$/.test(length) ||
-    !Number.isSafeInteger(Number(length)) ||
-    !/^s[1-9]\d*$/.test(seed) ||
-    !modes.has(mode)
+    parts[0] !== "rust" ||
+    !input ||
+    !records.has(input.ty) ||
+    !distributions.has(input.distribution) ||
+    !modes.has(mode) ||
+    (input.operation !== undefined && mode !== "api")
   )
     throw new Error(`Invalid Criterion benchmark ID: ${id}`);
-  return { ty, distribution, len: Number(length), seed, mode };
+  return { ...input, mode };
 }
 
 /** Preserve raw Criterion components for local reports, including old unknown IDs. */
@@ -339,19 +340,29 @@ export function rawCaseParts(id: string) {
 
 /** Decode a continuous case ID into its display fields. */
 export function caseParts(id: string) {
+  // Display keeps historical type and distribution names, so it does not
+  // require catalog membership as `parseCriterionId` does.
   const parts = id.split("/");
-  if (parts.length !== 6 || !/^\d+$/.test(parts[3]))
+  const mode = parts.at(-1) ?? "";
+  let parsed: ReturnType<typeof parseComparisonId>;
+  try {
+    if (parts[0] !== "rust" || parts.length < 6) throw new Error();
+    parsed = parseComparisonId(parts.slice(1, -1).join("/"));
+  } catch {
     return { type: "", input: id, n: "", extra: "", seed: "", mode: "" };
-  const [, type, input, length, seed, mode] = parts;
-  const record = recordType(type),
-    shape = distribution(input);
-  const extra = [seed === "s1" ? "" : `seed ${seed.slice(1)}`, mode === "api" ? "" : mode].filter(
-    Boolean,
-  );
+  }
+  const { ty, seed, operation } = parsed;
+  const record = recordType(ty),
+    shape = distribution(parsed.distribution);
+  const extra = [
+    operation ? operationLabel(operation) : "",
+    seed === "s1" ? "" : `seed ${seed.slice(1)}`,
+    mode === "api" ? "" : mode,
+  ].filter(Boolean);
   return {
     type: record.compact ?? record.label,
     input: shape.compact ?? shape.label,
-    n: Number(length).toLocaleString("en-US"),
+    n: parsed.len.toLocaleString("en-US"),
     extra: extra.join(", "),
     seed,
     mode,

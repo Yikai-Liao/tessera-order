@@ -9,15 +9,25 @@ import type { BuildProvenance } from "../workspace.ts";
 
 /** Revision builds replace only the Tessera library, so a revision comparison measures exactly
  * Tessera's serial API, its four-thread API, or both; any other algorithm would be identical
- * code in both builds. Returns the worker threads the scheduler must reserve. */
+ * code in both builds. Other operations are serial. Returns the worker threads the scheduler
+ * must reserve. */
 export function revisionThreads(plan: Plan): 1 | 4 {
-  if (plan.operation && plan.operation.kind !== "sort")
-    throw new Error(
-      "Revision/continuous workers currently support full sorting only; use compare algorithms for other operations",
-    );
+  if (plan.operation && plan.operation.kind !== "sort") {
+    if (plan.algorithms.join() !== "tessera")
+      throw new Error("Revision comparisons of an operation measure only serial tessera");
+    return 1;
+  }
   if (!plan.algorithms.every((id) => id === "tessera" || id === "tessera-par-4"))
     throw new Error("Revision comparisons measure only tessera and tessera-par-4");
   return plan.algorithms.includes("tessera-par-4") ? 4 : 1;
+}
+
+/** Whether a plan measures any operation other than full sorting, which needs the harness's
+ * `operations` feature in both builds; baselines before 0.2 do not compile with it. */
+export function isOperation(plan: Plan) {
+  return [plan.operation, ...plan.include.map((rule) => rule.operation)].some(
+    (operation) => operation !== undefined && operation.kind !== "sort",
+  );
 }
 
 /** One deterministic partition of a complete timed-ID listing. */

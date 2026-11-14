@@ -61,6 +61,8 @@ The [continuous plan](../../bench/plans/continuous.toml) caps inputs at 1,000,00
 - `u128/sparse8`, `f64/finite_signed` and `rec128_u64/sparse_digits` at 1M.
 - Random 65,536-record `u32`, `u64`, `row_u32` and `row_u64`, for entry overhead and the serial fallback below the byte threshold.
 
+Each serial [operation](../../conformance/semantics.md#serial-slice-operations) has random 65,536-record `u64` and `row_u64` cases, through include-rule `operation` fields ([plan grammar](benchmarking.md#serial-operation-comparisons)). They guard each operation's entry and finishing work, not its coverage across inputs; the sorting cases cover the shared engine. Both executables compile the harness's operation adapters, so a PR that renames or removes an operation keeps the old entry until that change reaches the baseline. The case IDs follow the [comparison grammar](benchmarking.md#serial-operation-comparisons) with the `api` mode. Main tracking records full sorting only.
+
 Larger lengths are explicit local plan overrides; historical reports keep their original inventories. The [catalog](../../bench/catalog.toml) owns per-revision budgets, divided across fresh workers; startup, input preparation and at least one complete batch add to them.
 
 | Length | Warm-up | Paired samples | Sampling budget per revision |

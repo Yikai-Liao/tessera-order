@@ -91,6 +91,7 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
     await mkdir(check);
     const planPath = join(check, "plan.json");
     const plan = await loadPlan("continuous", {
+      operation: "sort",
       types: catalog.types.map((entry) => entry.id),
       distributions: ["random", "equal"],
       lengths: [32],

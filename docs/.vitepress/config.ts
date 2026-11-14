@@ -198,6 +198,7 @@ function developmentSidebar() {
         { text: "Engine reference", link: "/design/engine" },
         { text: "Python binding design", link: "/design/python-binding" },
         { text: "Engine evidence", link: "/design/evidence" },
+        { text: "CI scaling proposal", link: "/design/ci-scaling-proposal" },
         { text: "Benchmark tooling", link: "/design/benchmark-tooling" },
       ],
     },

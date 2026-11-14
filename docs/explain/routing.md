@@ -24,8 +24,10 @@ An unsorted input no longer than the [insertion leaf's threshold](tiles.md#three
 
 A larger unsorted input may still be *nearly* sorted: a sorted log with a few late entries, for example. Insertion sort finishes such an input in linear time, but on a random input it is quadratic. Tessera therefore gives it a **swap budget** and abandons it when the budget runs out.
 
-- If the input fits in one tile, insertion runs on the records with a budget of n swaps.
-- Otherwise, the keys of a probe window (one tile's worth of records) are copied into a buffer and insertion-sorted there first. The number of swaps on the window predicts the number on the whole input: the budget for the records is `floor(swaps × n / window)`. The product is computed in a wider integer type, so it cannot overflow before division on a 32-bit target; the resulting budget is at most n. A window that needed no swaps proves nothing, because the inversions are elsewhere, so the radix path continues.
+- If the input fits in one tile, insertion runs on the records with a budget of `floor(n / 4)` swaps.
+- Otherwise, the keys of a probe window (one tile's worth of records) are copied into a buffer and insertion-sorted there first, with a budget of `floor(window / 4)`. The number of swaps on the window predicts the number on the whole input: the budget for the records is `floor(swaps × n / window)`. The product is computed in a wider integer type, so it cannot overflow before division on a 32-bit target; the resulting budget is at most `floor(n / 4)`. A window that needed no swaps proves nothing, because the inversions are elsewhere, so the radix path continues.
+
+The quarter-record allowance limits wasted exchanges before a failed probe falls back to radix sorting. It is an empirical work budget, not a test for any distribution: inputs with more inversions may leave insertion earlier, while insertion-sized leaves still finish without a budget.
 
 An abandoned insertion pass leaves the records in a different order, but every swap exchanged two adjacent out-of-order records, so equal keys never crossed. The input is still a *stable permutation* of itself, and the radix path sorts it correctly.
 

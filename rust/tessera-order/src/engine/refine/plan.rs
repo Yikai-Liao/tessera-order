@@ -3,8 +3,8 @@
 //! Node partition decisions from key variation, bounded samples and work estimates.
 //! The executor receives a complete decision, not sample layout or cost-model steps.
 
-use crate::block;
-use crate::key::{Digit, Extract, Unsigned, bit_len};
+use crate::engine::block;
+use crate::engine::key::{Digit, Extract, Unsigned, bit_len};
 
 /// Initial split width; also the block engine's tuned width.
 const SPLIT_BITS: usize = 8;
@@ -184,7 +184,7 @@ pub(super) fn plan_node<T, E: Extract<T>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::key::Direct;
+    use crate::engine::key::Direct;
     use alloc::vec::Vec;
     #[test]
     fn sampled_keys_cover_short_inputs_and_top_buckets() {

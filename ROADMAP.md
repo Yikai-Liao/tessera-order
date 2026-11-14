@@ -14,6 +14,16 @@ Foundations A and B place scalar order and insertion primitives below recursive 
 
 The [release surface](docs/design/algorithm-extensions-proposal.md#release-surface-alignment) is implemented: the operations carry their standard names, the 0.1 sorts are deprecated aliases of `sort`, `sort_by_key`, `par_sort` and `par_sort_by_key`, and category grouping uses `sort_by_cached_key` with its [measured cost](docs/design/evidence.md#cached-key-category-grouping) accepted. Remaining after 0.2: remove the revision benchmarks' use of the deprecated names once no compared baseline predates them. Refinement now owns its production tile budget while retaining the private explicit-budget execution body for ownership tests. Its [linked full-sort assessment](docs/design/evidence.md#refinement-tile-budget-ownership) leaves timing acceptance open, including the listed short-input differences and unmeasured partial, segmented and Rayon calls.
 
+### Engine and algorithm boundary
+
+The private `engine/` boundary and opaque workspace separate output adapters from movement and recovery. Degenerate requirements express membership cuts directly. Requested tiles are still fully sorted; a [tile-local selection policy](docs/design/algorithm-extensions-proposal.md#ordered-refinement-without-a-general-policy-framework) remains open after its first attempt measured slower. Correctness and ownership validation accompany the implementation. Performance acceptance is explicitly deferred until the architecture is complete: measure cut-at-band boundaries, sparse/dense ranks, full sorting, short inputs and parallel large-child completion against the preceding stages, with A/A and placement controls where supported. No speedup or regression acceptance is established by the structural change.
+
+Next capabilities follow the [engine capability design](docs/design/algorithm-extensions-proposal.md#further-engine-capabilities), each with a concrete consumer and independent acceptance:
+
+- Reuse cached order/variation facts while preserving descending and near-order completion; keep the exactly-once caller-key contract.
+- Let complete-key counts support unique/count outputs without refilling duplicate keys first; retain outside-bit proof and float encoding semantics.
+- Evaluate read-only kth and small-k index outputs with bounded candidates, before adding multiple-prefix scheduling or parallel rank APIs.
+
 ### Acceptance debt
 
 The consolidated engine (shared root preparation, node planning and order confirmation; one half-key extractor; shared direct-key counting; segmented scratch; bounded tile planner; single SIMD backend) has measured losses that no exception compensates for; they are listed under [landed with open losses](docs/design/evidence.md#landed-with-open-losses). Done when the shared paths are validated against the pre-consolidation baseline with A/A and placement controls, the open losses are resolved or individually accepted, and a fresh current-head Actions run passes preparation, every measurement shard, Cloud archival and publication. Raw artifacts alone do not satisfy publication acceptance. R3's ordered-finishing implementation is merged; its [short-input controls](docs/design/evidence.md#shared-ordered-finishing-controls) remain unresolved here rather than as an implementation candidate.

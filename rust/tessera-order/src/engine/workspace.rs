@@ -5,13 +5,13 @@
 //! can reuse capacity only after those operations return or finish unwinding;
 //! no live scratch-backed records or cross-call progress live in this owner.
 
-use crate::{block, tile};
+use super::{block, tile};
 
 /// Lazy storage shared across serial subproblems of the owning invocation.
 /// Parallel finishers borrow separate owners from the invocation-local pool.
 pub(crate) struct Workspace<T> {
-    pub(crate) tile: tile::Scratch<T>,
-    pub(crate) block: block::Buffers<T>,
+    pub(super) tile: tile::Scratch<T>,
+    pub(super) block: block::Buffers<T>,
 }
 
 impl<T> Workspace<T> {

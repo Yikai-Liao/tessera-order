@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 // Runs the engine's own block partition, compiled to WebAssembly from
 // `rust/tessera-trace`, and decodes its event log. The events and their meaning
-// are owned by `Event` in `rust/tessera-order/src/trace.rs`; this file only
+// are owned by `Event` in `rust/tessera-order/src/engine/trace.rs`; this file only
 // mirrors the five-word encoding in `rust/tessera-trace/src/lib.rs`.
 
 export type Event =

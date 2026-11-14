@@ -10,11 +10,7 @@
 //! function. Otherwise the keys are sorted as (key, input index) pairs and the
 //! records follow the sorted indices.
 
-use crate::{
-    engine,
-    key::{ByKey, RadixKey, Unsigned, bit_len},
-    partition::{self, MAX_PARTITION_BUCKETS},
-};
+use crate::engine::{self, ByKey, MAX_PARTITION_BUCKETS, RadixKey, Unsigned, bit_len};
 use alloc::vec::Vec;
 
 /// Sorts `values` stably by `key`, evaluating it at most once per record.
@@ -52,7 +48,7 @@ pub(crate) fn sort<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], mut key:
         // The distribution classifies each record exactly once, in input
         // order, so its `n`th call belongs to the `n`th cached key.
         let mut next = 0;
-        partition::distribute(
+        engine::distribute(
             values,
             width,
             ByKey(|_: &T| {

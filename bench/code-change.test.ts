@@ -79,6 +79,17 @@ test("shared code statistics exclude comments and tests and support commits and 
   git("commit", "-qm", "archive excludes source");
   await assert.rejects(codeChange("HEAD", "HEAD", root), /ENOENT/);
   git("reset", "--hard", "HEAD^");
+  // Core files remain counted after moving behind the private engine boundary.
+  await mkdir(join(source, "engine/refine"));
+  git("mv", "rust/tessera-order/src/engine.rs", "rust/tessera-order/src/engine/refine.rs");
+  git(
+    "mv",
+    "rust/tessera-order/src/engine/checks.rs",
+    "rust/tessera-order/src/engine/refine/checks.rs",
+  );
+  const moved = await codeChange("HEAD", undefined, root);
+  assert.equal(moved.current, 9);
+  assert.ok(moved.files.some((file) => file.path === "engine/refine.rs" && file.current === 5));
   await rm(join(root, "rust/tessera-order"), { recursive: true });
   assert.equal((await codeChange("HEAD", undefined, root)).current, 0);
 });
@@ -87,10 +98,10 @@ test("figure trace instrumentation is not production code", async () => {
   const { production } = await import("./code-source.ts");
   const source =
     "use crate::trace::{self, Event};\nuse crate::key;\nfn run() {\n trace::emit(|| Event::Begin {\n len: 1,\n });\n work();\n trace::emit(|| Event::Final { physical })\n}\n";
-  assert.deepEqual(production(source).lines, [
-    "use crate :: key ;",
-    "fn run ( ) {",
-    "work ( ) ;",
-    "}",
-  ]);
+  const expected = ["use crate :: key ;", "fn run ( ) {", "work ( ) ;", "}"];
+  assert.deepEqual(production(source).lines, expected);
+  assert.deepEqual(
+    production(source.replace("crate::trace", "crate::engine::trace")).lines,
+    expected,
+  );
 });

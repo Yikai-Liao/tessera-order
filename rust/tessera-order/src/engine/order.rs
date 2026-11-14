@@ -5,7 +5,7 @@
 //! Key extractors select the scan; direct-key callers keep the insertion loop
 //! inside their once-per-pass SIMD dispatch. These operations own no routing policy.
 
-use crate::key::{Extract, Unsigned};
+use crate::engine::key::{Extract, Unsigned};
 
 /// Returns the first descending pair, retaining the previous extracted key so
 /// a user callback runs once per scanned record. The callback may panic or

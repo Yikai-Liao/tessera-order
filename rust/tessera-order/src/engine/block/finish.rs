@@ -5,7 +5,7 @@
 #[cfg(feature = "rayon")]
 use super::parallel::BucketVisit;
 use super::*;
-use crate::trace::{self, Event};
+use crate::engine::trace::{self, Event};
 use core::ops::DerefMut;
 use std::sync::{
     Mutex,
@@ -561,7 +561,7 @@ unsafe fn complete_with_fault<'records, T: Send>(
 mod tests {
     use super::super::parallel::{Config, partition_impl_with_visit};
     use super::*;
-    use crate::key::{ByKey, Extract, KeyDigit};
+    use crate::engine::key::{ByKey, Extract, KeyDigit};
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},

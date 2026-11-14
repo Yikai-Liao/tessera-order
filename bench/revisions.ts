@@ -35,7 +35,7 @@ export async function prepareRevisions(
     // The current harness stays in place; only the requested library is replaced.
     await rm(library, { recursive: true });
     await copyLibraryRevision(root, current, library);
-    await nameLibraryPackage(library);
+    await nameLibraryPackage(library, tree);
   }
   const copies = join(tree, "bench/revision-libraries");
   await mkdir(copies);
@@ -57,7 +57,7 @@ export async function prepareRevisions(
     else {
       await copyLibraryRevision(root, baseline, destination);
       // Hash every copy under the harness's package name, so one commit has one identity.
-      await nameLibraryPackage(destination);
+      await nameLibraryPackage(destination, tree);
     }
     sources[name] = await sourceHash(destination);
     const path = join(destination, "Cargo.toml");

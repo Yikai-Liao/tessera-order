@@ -110,7 +110,7 @@ export async function buildRevisions(
   };
   await rm(crate, { recursive: true });
   await copyLibraryRevision(root, baseline, crate);
-  await nameLibraryPackage(crate);
+  await nameLibraryPackage(crate, tree);
   // Cargo validates inactive forwarding and locks optional dependency edges.
   // Only serial baselines may receive the inactive optional dependency shim.
   const manifest = join(crate, "Cargo.toml");

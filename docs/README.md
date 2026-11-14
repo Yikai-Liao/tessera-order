@@ -32,5 +32,6 @@ Every fact has one owner. Other pages link to it and never restate its numbers o
 | Hosted benchmark pipeline, PR reports, alerts | [continuous benchmarks](development/continuous-benchmarks.md) | The hosted pipeline changes |
 | Benchmark module ownership and change paths | [tooling design](design/benchmark-tooling.md) | A module boundary moves |
 | CI lanes and routing, release procedure | [CI](development/ci.md), [releasing](../RELEASING.md) | A workflow changes |
+| Planned CI reuse, operation benchmark selection and cache policy | [CI scaling proposal](design/ci-scaling-proposal.md) | A planned step changes or lands; move landed facts to CI or continuous benchmarks |
 
 An algorithm change normally edits the Rust code, its explanation page and that page's model, plus semantics only when a guarantee changes. If a page needs a number it does not own, it links to the owner.

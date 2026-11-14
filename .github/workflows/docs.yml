@@ -30,6 +30,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: "rust/tessera-trace -> ../../target/trace"
       - run: bun install --frozen-lockfile
       - run: "cargo test -p tessera-order --lib --features trace trace::"

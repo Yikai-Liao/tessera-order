@@ -226,7 +226,7 @@ fn prepare<T, E: Extract<T>>(
 /// did.
 ///
 /// A small tile finishes by stable insertion; another tile gets one
-/// swap per record. A longer input first insertion-sorts one tile of keys in a
+/// swap per four records. A longer input first insertion-sorts one tile of keys in a
 /// local buffer, and scales that window's swap count to the whole input as the
 /// budget for the records.
 /// A window that needs no swaps says nothing about the rest, so the records are
@@ -245,14 +245,16 @@ fn insertion_probe<T, E: Extract<T>>(
         return true;
     }
     let probe_len = tile_len.max(2).min(records.len());
+    // Bound failed probes without changing the unlimited insertion leaf.
+    let probe_budget = probe_len / 4;
     if probe_len == records.len() {
-        return extractor.insertion_sort(records, probe_len).is_some();
+        return extractor.insertion_sort(records, probe_budget).is_some();
     }
     let mut keys: Vec<_> = records[..probe_len]
         .iter()
         .map(|record| extractor.key(record))
         .collect();
-    match Direct.insertion_sort(&mut keys, probe_len) {
+    match Direct.insertion_sort(&mut keys, probe_budget) {
         Some(0) | None => false,
         Some(swaps) => {
             // The successful probe bounds swaps by probe_len, so the quotient
@@ -427,15 +429,21 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         if records.len() < 2 || candidate == 0 {
             return;
         }
-        // Constant children finish after the varying scan; confirming order
-        // lets ordered children skip partitioning.
+        // Ordered children need only one full scan. Flat samples retain the
+        // varying-bit scan, which can finish constant children cheaply.
+        let sampled = probe_order(records, self.extractor);
+        if finish_ordered(records, sampled, self.extractor) {
+            return;
+        }
         let varying = scan_varying_bits(records, candidate, self.extractor);
         if varying == 0 {
             return;
         }
-        let order = confirm_order(records, self.extractor);
-        if finish_ordered(records, order, self.extractor) {
-            return;
+        if sampled == Order::Flat {
+            let order = confirm_order(records, self.extractor);
+            if finish_ordered(records, order, self.extractor) {
+                return;
+            }
         }
         self.sort_node(records, varying, required);
     }
@@ -600,6 +608,29 @@ mod tests {
         assert!(confirm_order(&values, &mut Direct) == Order::Unsorted);
         crate::sort(&mut values);
         assert_eq!(values, (0..len as u64).collect::<Vec<_>>());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "sampling adds no distinct ownership boundary")]
+    fn child_flat_sample_does_not_certify_order() {
+        let mut records = alloc::vec![0u64; 3 * ORDER_SAMPLES];
+        // At stride three, index four belongs to neither sampled pair.
+        records[4] = 1;
+        let mut expected = records.clone();
+        expected.sort();
+        let len = records.len();
+        let mut scratch = Workspace::new();
+        Sorter {
+            scratch: &mut scratch,
+            extractor: &mut Direct,
+            tile_len: tile_capacity::<u64>(TILE_BYTES),
+        }
+        .sort_child(
+            &mut records,
+            u64::MAX as u128,
+            Requirement::new(len, core::slice::from_ref(&(0..len))),
+        );
+        assert_eq!(records, expected);
     }
 
     // Tiny tiles exercise block materialization and cache-hot callbacks under

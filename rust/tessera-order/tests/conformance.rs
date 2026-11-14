@@ -18,10 +18,18 @@ fn next(state: &mut u64) -> u64 {
 #[test]
 #[cfg(not(miri))]
 fn insertion_budget_handles_large_input() {
-    // The 64 KiB probe completes with 8,192 swaps. Its scaled budget is
-    // 550,000, but the intermediate product exceeds a 32-bit usize.
+    // The 64 KiB probe completes with 4,096 swaps. Its scaled budget is
+    // 275,000, but the intermediate product exceeds a 32-bit usize.
     let mut records: Vec<u32> = (0..1_100_000)
-        .map(|id| if id < 16_384 { id ^ 1 } else { 5_000_000 - id })
+        .map(|id| {
+            if id < 8_192 {
+                id ^ 1
+            } else if id < 16_384 {
+                id
+            } else {
+                5_000_000 - id
+            }
+        })
         .collect();
     let mut expected = records.clone();
     expected.sort();

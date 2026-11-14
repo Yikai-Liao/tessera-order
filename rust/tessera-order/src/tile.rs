@@ -7,7 +7,7 @@
 
 mod plan;
 
-use crate::key::{Digit, Extract, Unsigned};
+use crate::key::{self, Digit, Extract, Unsigned};
 use crate::order::scan_varying_bits;
 use crate::thresholds::{INSERTION_MAX, MAX_CURSOR_BYTES, MAX_TILE_RECORDS};
 use alloc::vec::Vec;
@@ -152,6 +152,11 @@ impl<T> Scratch<T> {
                 self.partition_tile::<_>(records, digit, varying, extractor);
             }
             TilePlan::Lsd { digits, passes } => {
+                // A terminal digit can count interchangeable keys without scratch.
+                let digit = digits[0];
+                if passes == 1 && key::try_count_window::<T, E>(records, digit.shift, digit.width) {
+                    return;
+                }
                 let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
                 self.counting_passes(records, &digits[..passes], &mut counts, extractor);
             }
@@ -374,6 +379,32 @@ mod tests {
         }
         check::<u64>();
         check::<[u8; 128]>();
+    }
+
+    #[test]
+    fn terminal_tiles_keep_the_omitted_key_half_without_scratch() {
+        fn check<const SHIFT: usize>() {
+            let mask = 255u128 << SHIFT;
+            let base = 0x73a5_491b_c621_d8e0_2b93_a3f7_1d05_0000u128 & !mask;
+            let mut records: Vec<_> = (0..129)
+                .map(|index| base | (((index * 37) as u128) << SHIFT & mask))
+                .collect();
+            let mut expected = records.clone();
+            expected.sort();
+            let mut scratch = Scratch::new();
+            scratch.sort(
+                &mut records,
+                255,
+                &mut key::KeyHalf::<_, SHIFT>(key::Direct),
+            );
+            assert_eq!(records, expected);
+            assert!(
+                scratch.0.is_empty(),
+                "terminal keys should not be scattered"
+            );
+        }
+        check::<0>();
+        check::<64>();
     }
 
     #[test]

@@ -24,8 +24,10 @@ An unsorted input no longer than the [small-leaf threshold](tiles.md#three-leave
 
 A larger unsorted input may still be *nearly* sorted: a sorted log with a few late entries, for example. Insertion sort finishes such an input in linear time, but on a random input it is quadratic. Tessera therefore gives it a **swap budget** and abandons it when the budget runs out.
 
-- If the input fits in one tile, insertion runs on the records with a budget of n swaps.
-- Otherwise, the keys of a probe window (one tile's worth of records) are copied into a buffer and insertion-sorted there first. The number of swaps on the window predicts the number on the whole input: the budget for the records is `floor(swaps × n / window)`. The product is computed in a wider integer type, so it cannot overflow before division on a 32-bit target; the resulting budget is at most n. A window that needed no swaps proves nothing, because the inversions are elsewhere, so the radix path continues.
+- If the input fits in one tile, insertion runs on the records with a budget of `floor(n / 4)` swaps.
+- Otherwise, the keys of a probe window (one tile's worth of records) are copied into a buffer and insertion-sorted there first, with a budget of `floor(window / 4)`. The number of swaps on the window predicts the number on the whole input: the budget for the records is `floor(swaps × n / window)`. The product is computed in a wider integer type, so it cannot overflow before division on a 32-bit target; the resulting budget is at most `floor(n / 4)`. A window that needed no swaps proves nothing, because the inversions are elsewhere, so the radix path continues.
+
+The quarter-record allowance limits wasted exchanges before a failed probe falls back to radix sorting. It is an empirical work budget, not a test for any distribution: inputs with more inversions may leave insertion earlier, while insertion-sized leaves still finish without a budget.
 
 An abandoned insertion pass leaves the records in a different order, but every swap exchanged two adjacent out-of-order records, so equal keys never crossed. The input is still a *stable permutation* of itself, and the radix path sorts it correctly.
 
@@ -46,7 +48,7 @@ Requested subproblems continue in place:
 - a **tile** is a slice that fits the cache-resident tile budget, the [size defined on the tiles page](tiles.md). It is finished in a scratch buffer of the same size;
 - a **node** is anything larger. It is split by a stable partition into children, and each child is routed again.
 
-A partition child larger than a tile, and every child of a parallel root, enters `sort_child`. It first scans its varying bits within the remaining candidate mask; a constant child is done. It then runs the full order scan without sampling: an ascending child returns, and a descending one takes the same strict or stable reversal. A partition can thus expose an ordered child anywhere in the input, without an end-run detector or a length cap. Only unordered children continue to `sort_node`. The check costs at most one linear scan and allocates nothing. Tile-sized children of a serial partition skip the order scan and go straight to their [tile leaf](tiles.md).
+A partition child larger than a tile, and every child of a parallel root, enters `sort_child`. It reuses the root’s order probe first: confirmed ascending children return, and descending ones take the same strict or stable reversal, without a varying-bit scan. Unfinished children scan varying bits within the remaining candidate mask; constant children are done. A flat sample with actual variation then receives the deferred full order confirmation, just as at the root. This keeps constant children’s vectorizable scan while saving a full pass over confirmed ordered children. A partition can expose an ordered child anywhere in the input, without an end-run detector or a length cap. Only unordered children continue to `sort_node`, and the analysis allocates nothing. Tile-sized children of a serial partition skip the order probe and go straight to their [tile leaf](tiles.md).
 
 `plan_node` then chooses a node's partition, in this order. If its varying bits span at most 8 bits, one window sorts it completely: a counted window or a block partition of that window.
 

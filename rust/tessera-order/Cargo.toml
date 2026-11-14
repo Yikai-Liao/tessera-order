@@ -1,8 +1,6 @@
 [package]
 name = "tessera-order"
-# Unreleased. RELEASING.md lists the steps before publication.
-version = "0.0.0"
-publish = false
+version = "0.1.0"
 description = "Order algorithms on stable block partitions; 0.1 provides stable radix sort with O(sqrt(n)) auxiliary memory"
 readme = "README.md"
 keywords = ["sort", "radix-sort", "stable-sort", "sorting", "algorithm"]

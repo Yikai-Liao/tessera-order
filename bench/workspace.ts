@@ -141,16 +141,23 @@ export async function copyLibraryRevision(root: string, revision: string, destin
 }
 
 /**
- * Give a built library copy the package name the harness depends on. A commit before the crate
- * rename names its package `tessera-sort`; only an old manifest is rewritten, so a current copy
- * keeps its source hash.
+ * Give a built library copy the package identity the harness's `Cargo.lock` expects, so locked
+ * builds accept any revision. A commit before the crate rename names its package `tessera-sort`,
+ * and a commit before a version bump carries an older version; only a differing manifest is
+ * rewritten, so a current copy keeps its source hash.
  */
-export async function nameLibraryPackage(library: string) {
+export async function nameLibraryPackage(library: string, tree: string) {
+  const lock = parse(await readFile(join(tree, "Cargo.lock"), "utf8")) as {
+    package?: { name: string; version: string; source?: string }[];
+  };
+  const locked = lock.package?.filter((p) => p.name === "tessera-order" && !p.source) ?? [];
+  if (locked.length !== 1) throw new Error("Cargo.lock has no single local tessera-order package");
   const path = join(library, "Cargo.toml");
   const manifest = parse(await readFile(path, "utf8"));
-  const named = manifest.package as { name: string };
-  if (named.name !== "tessera-order") {
+  const named = manifest.package as { name: string; version: string };
+  if (named.name !== "tessera-order" || named.version !== locked[0].version) {
     named.name = "tessera-order";
+    named.version = locked[0].version;
     await writeFile(path, stringify(manifest));
   }
 }

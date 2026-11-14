@@ -1,6 +1,6 @@
 # Versions and releases
 
-Each language package is versioned and released independently so fixes need not wait for other implementations. No package has been released yet; the versions below are examples.
+Each language package is versioned and released independently so fixes need not wait for other implementations. The versions below are examples.
 
 | Object | Identifier | Identifies |
 |---|---|---|
@@ -42,7 +42,7 @@ Benchmark manifests record the implementation, package version, full commit, act
 
 | Language | Active when | Release |
 |---|---|---|
-| Rust | Now. Publishing needs `publish = false` removed and the `CARGO_REGISTRY_TOKEN` secret | crates.io and a GitHub release with the `.crate` file |
+| Rust | Now. Publishes through crates.io [trusted publishing](https://crates.io/docs/trusted-publishing): the crate's settings name repository `Yikai-Liao/tessera-order` and workflow `release.yml`, so no registry token is stored | crates.io and a GitHub release with the `.crate` file |
 | C++ | `cpp/CMakeLists.txt` exists, honoring `BUILD_TESTING`, registering CTest tests and configuring CPack with the package version | CI builds and runs CTest on Linux x86-64 and AArch64, macOS and Windows; the release checks `CPACK_PACKAGE_VERSION` against the tag and attaches a TGZ to a GitHub release |
 
 Until C++ exists, CI skips it and says so; no placeholder job passes without testing. Python publication is designed with the [binding](docs/design/python-binding.md), not maintained as inactive CI.

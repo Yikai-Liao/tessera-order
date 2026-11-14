@@ -2,8 +2,8 @@
 
 Tessera sorts slices by a primitive key: an integer up to 128 bits, an `f32` or `f64`, or `Reverse` of one of these. It is stable, runs in linear time for a fixed key width, and moves records of any type.
 
-> [!IMPORTANT]
-> Tessera is in pre-release, and nothing is on crates.io yet. The examples use the implemented 0.1 API. See the [roadmap](../../ROADMAP.md).
+> [!NOTE]
+> These examples use the 0.1 API. 0.x minor releases may still change it; see the [roadmap](../../ROADMAP.md).
 
 ## Install
 

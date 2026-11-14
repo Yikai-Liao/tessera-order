@@ -13,6 +13,7 @@ import {
   buildBenchmark,
   copyLibraryRevision,
   copySnapshot,
+  nameLibraryPackage,
   sourceHash,
   withWorkspace,
 } from "./workspace.ts";
@@ -377,4 +378,29 @@ for (const message of [
     assert.equal(await readFile(join(result.executable, "..", "memory"), "utf8"), trees[index]);
     assert.equal(result.provenance.rustc, trees[index]);
   }
+});
+
+test("library copies take the locked package name and version", async (t) => {
+  const tree = await mkdtemp(join(tmpdir(), "tessera-lock-"));
+  t.after(() => rm(tree, { recursive: true, force: true }));
+  const library = join(tree, "library");
+  await mkdir(library);
+  await writeFile(
+    join(tree, "Cargo.lock"),
+    'version = 4\n\n[[package]]\nname = "tessera-order"\nversion = "0.2.0"\n',
+  );
+  await writeFile(
+    join(library, "Cargo.toml"),
+    '[package]\nname = "tessera-sort"\nversion = "0.0.0"\nedition = "2024"\n',
+  );
+  await nameLibraryPackage(library, tree);
+  const text = await readFile(join(library, "Cargo.toml"), "utf8");
+  assert.match(text, /name = "tessera-order"/);
+  assert.match(text, /version = "0\.2\.0"/);
+  assert.match(text, /edition = "2024"/);
+  // A matching manifest is left byte-identical, keeping its source hash.
+  const current = '[package]\nname = "tessera-order"\nversion = "0.2.0" # kept\n';
+  await writeFile(join(library, "Cargo.toml"), current);
+  await nameLibraryPackage(library, tree);
+  assert.equal(await readFile(join(library, "Cargo.toml"), "utf8"), current);
 });

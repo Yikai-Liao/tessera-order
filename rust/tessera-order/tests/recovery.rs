@@ -6,7 +6,7 @@
 use std::cell::{Cell, RefCell};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
-use tessera_order::stable_sort_by_key;
+use tessera_order::sort_by_key;
 
 struct Owned {
     id: usize,
@@ -35,7 +35,7 @@ fn exercise(len: usize, changing: bool) {
     let original_key = |id: usize| (id as u64).wrapping_mul(0x9e3779b97f4a7c15);
     let mut probe = build();
     let mut total = 0;
-    stable_sort_by_key(&mut probe, |x| {
+    sort_by_key(&mut probe, |x| {
         total += 1;
         original_key(x.id)
     });
@@ -47,7 +47,7 @@ fn exercise(len: usize, changing: bool) {
         let at = 1 + step * total / steps;
         let mut calls = 0;
         let result = catch_unwind(AssertUnwindSafe(|| {
-            stable_sort_by_key(&mut input, |x| {
+            sort_by_key(&mut input, |x| {
                 calls += 1;
                 x.edited.set(true);
                 if !changing && calls == at {
@@ -72,7 +72,7 @@ fn exercise(len: usize, changing: bool) {
             assert_eq!(x.text, format!("record {id}"));
         }
         // Recovered records remain usable with a different key width.
-        stable_sort_by_key(&mut input, |x| (x.id as u128) << 64);
+        sort_by_key(&mut input, |x| (x.id as u128) << 64);
         assert!(input.iter().enumerate().all(|(id, x)| x.id == id));
         drop(input);
         drops.borrow_mut().sort_unstable();
@@ -119,7 +119,7 @@ fn changing_keys_borrowed_records() {
                 .enumerate()
                 .map(|(id, value)| Borrowed { id, value })
                 .collect();
-            stable_sort_by_key(&mut probe, |record| {
+            sort_by_key(&mut probe, |record| {
                 total += 1;
                 original_key(record.id)
             });
@@ -134,7 +134,7 @@ fn changing_keys_borrowed_records() {
                     .collect();
                 let mut calls = 0;
                 let result = catch_unwind(AssertUnwindSafe(|| {
-                    stable_sort_by_key(&mut records, |x| {
+                    sort_by_key(&mut records, |x| {
                         calls += 1;
                         if panic && calls == at {
                             std::panic::panic_any(0x72u32);

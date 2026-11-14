@@ -177,11 +177,11 @@ pub(super) fn categories<T: BenchmarkRecord>(
     let operation = input.operation().clone();
     let bucket_count = operation.bucket_count()?;
     let description = match name {
-        "tessera" if bucket_count <= tessera_order::MAX_PARTITION_BUCKETS => {
-            "public one-shot stable category partition including boundary output"
+        "tessera" if matches!(operation, Operation::Partition {}) => {
+            "public one-shot stable binary partition including boundary output"
         }
+        "tessera" => "public cached-key category sorting plus boundary construction",
         "tessera-full" => "Tessera by-key category sorting plus boundary construction",
-        "tessera-cached" => "Tessera cached-key category sorting plus boundary construction",
         "std-stable" => "standard stable category sorting plus boundary construction",
         "glidesort" => "glidesort stable category sorting plus boundary construction",
         "radsort" => "radsort stable category sorting plus boundary construction",
@@ -194,18 +194,8 @@ pub(super) fn categories<T: BenchmarkRecord>(
         outputs: Vec::new(),
         description,
         call: move |values: &mut [T]| {
-            if name == "tessera" {
-                return if matches!(operation, Operation::Partition {}) {
-                    Boundaries::Cut(tessera_order::stable_partition(values, |r| {
-                        r.category(2) == 0
-                    }))
-                } else {
-                    Boundaries::Offsets(tessera_order::stable_partition_by_bucket(
-                        values,
-                        bucket_count,
-                        |r| r.category(bucket_count),
-                    ))
-                };
+            if name == "tessera" && matches!(operation, Operation::Partition {}) {
+                return Boundaries::Cut(tessera_order::partition(values, |r| r.category(2) == 0));
             }
             // Keep mandatory output live while sorting scratch is live too,
             // as in the public partition. Peak minus output then measures
@@ -226,7 +216,7 @@ pub(super) fn categories<T: BenchmarkRecord>(
 }
 
 /// Sorts by the supplied category, sharing its literal or runtime fan-out
-/// specialization across all sorting references. The cached-key route takes
+/// specialization across all sorting references. The `tessera` cached-key route takes
 /// the narrowest unsigned key holding `bucket_count` categories, as a caller
 /// would write it, since that type sets the size of its key cache.
 fn sort_by_category<T: BenchmarkRecord>(
@@ -236,11 +226,14 @@ fn sort_by_category<T: BenchmarkRecord>(
     category: impl Fn(&T) -> usize,
 ) {
     match name {
-        "tessera-full" => tessera_order::stable_sort_by_key(values, category),
-        "tessera-cached" if bucket_count <= 1 << u8::BITS => {
+        "tessera-full" => tessera_order::sort_by_key(values, category),
+        "tessera" if bucket_count <= 1 << u8::BITS => {
             tessera_order::sort_by_cached_key(values, |r| category(r) as u8);
         }
-        "tessera-cached" => tessera_order::sort_by_cached_key(values, |r| category(r) as u16),
+        "tessera" if bucket_count <= 1 << u16::BITS => {
+            tessera_order::sort_by_cached_key(values, |r| category(r) as u16);
+        }
+        "tessera" => tessera_order::sort_by_cached_key(values, |r| category(r) as u32),
         "std-stable" => values.sort_by_key(category),
         "glidesort" => glidesort::sort_by(values, |a, b| category(a).cmp(&category(b))),
         "radsort" => radsort::sort_by_key(values, category),
@@ -312,15 +305,12 @@ pub(super) fn prepare<T: TesseraAdapter>(
     }
     Some(match v.name {
         "tessera" => match operation {
-            Operation::Segments { .. } => {
-                let offsets = operation.offsets(input.original().len()).unwrap();
-                prepare_call(
-                    input,
-                    true,
-                    move |values| T::segments(values, &offsets),
-                    "public segmented sort with invocation workspace reuse",
-                )
-            }
+            Operation::Segments { segment_len } => prepare_call(
+                input,
+                true,
+                move |values| T::segments(values, segment_len),
+                "public chunked sort with invocation workspace reuse",
+            ),
             Operation::TopK { k } => prepare_call(
                 input,
                 true,
@@ -400,6 +390,10 @@ fn partial_unstable<T: BenchmarkRecord>(values: &mut [T], operation: &Operation)
         }
         Operation::RankRange { start, end } => {
             if start == end {
+                // An empty interior range partitions at `start`, like top-k.
+                if *start > 0 && *start < values.len() {
+                    values.select_nth_unstable_by(*start, T::order);
+                }
                 return;
             }
             if *start > 0 {
@@ -486,7 +480,6 @@ mod tests {
                                 operation.required_ranges().is_some()
                                     || operation.bucket_count().is_some()
                             }
-                            "tessera-cached" => operation.bucket_count().is_some(),
                             "radsort" => {
                                 operation.bucket_count().is_some() || !ty.starts_with("reverse_")
                             }
@@ -546,12 +539,12 @@ mod tests {
             distribution: "random".into(),
             len: 1,
             operation: Operation::PartitionBuckets {
-                bucket_count: tessera_order::MAX_PARTITION_BUCKETS,
+                bucket_count: 70_000, // above u16 keys
             },
         }) else {
             unreachable!()
         };
-        let retained = (tessera_order::MAX_PARTITION_BUCKETS + 1) * size_of::<usize>();
+        let retained = (70_000 + 1) * size_of::<usize>();
         let mut kernel = categories("tessera", input).unwrap();
         assert_eq!(kernel.buffer_bytes(), size_of::<u32>() + retained);
         kernel.restore(3);
@@ -606,7 +599,7 @@ mod tests {
             Operation::TopK { k: 0 },
             Operation::TopK { k: len },
             Operation::Prefix { prefix_len: 0 },
-            Operation::RankRange { start: 19, end: 19 },
+            Operation::RankRange { start: 0, end: 0 },
             Operation::SelectMany { indices: vec![] },
         ] {
             let CaseInput::U64(input) = CaseInput::new(&InputCase {

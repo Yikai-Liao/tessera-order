@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Rayon entry points for stable sorting.
+//! Rayon entry points for sorting.
 //!
 //! The parallel engine shares the serial probes and node/tile sorting.
 //! Large inputs partition the root across disjoint shards, then transfer each
@@ -13,7 +13,7 @@ use crate::{RadixKey, engine};
 /// Sorts keys stably through the Rayon entry point.
 ///
 /// Available with the `rayon` feature. Ordering and stability are the same as
-/// [`crate::stable_sort`], including floats and [`Reverse`](core::cmp::Reverse).
+/// [`crate::sort`], including floats and [`Reverse`](core::cmp::Reverse).
 /// Small inputs and one-thread pools use the serial engine; large inputs
 /// partition the root and sort completed buckets across Rayon's current pool.
 ///
@@ -31,17 +31,17 @@ use crate::{RadixKey, engine};
 ///
 /// ```
 /// let mut keys = [42u64, 7, 19, 7, 3];
-/// tessera_order::par_stable_sort(&mut keys);
+/// tessera_order::par_sort(&mut keys);
 /// assert_eq!(keys, [3, 7, 7, 19, 42]);
 /// ```
-pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
+pub fn par_sort<K: RadixKey + Send>(values: &mut [K]) {
     engine::parallel::sort::<K, _>(values, Direct);
 }
 
 /// Sorts records stably by a key through the Rayon entry point.
 ///
 /// Available with the `rayon` feature. Ordering, stability and record
-/// preservation are the same as [`crate::stable_sort_by_key`]. Records need
+/// preservation are the same as [`crate::sort_by_key`]. Records need
 /// `Send`, but do not need `Sync`, `Copy`, `Clone`, `Default` or `Ord`. Small
 /// inputs and one-thread pools use the serial engine.
 ///
@@ -61,7 +61,7 @@ pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
 ///
 /// # Memory
 ///
-/// Uses the same O(P√n) auxiliary-space bound as [`par_stable_sort`] for
+/// Uses the same O(P√n) auxiliary-space bound as [`par_sort`] for
 /// pool width `P` and fixed record size and key width. Reentrant callbacks can
 /// retain serial scratch for up to the fixed root fan-out, not just `P` buckets.
 /// A nested public call owns its own scratch; suspended outer buffers remain
@@ -73,14 +73,31 @@ pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
 /// use core::cmp::Reverse;
 ///
 /// let mut rows = [(2u32, "first"), (1, "middle"), (2, "last")];
-/// tessera_order::par_stable_sort_by_key(&mut rows, |row| Reverse(row.0));
+/// tessera_order::par_sort_by_key(&mut rows, |row| Reverse(row.0));
 /// assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 /// ```
-pub fn par_stable_sort_by_key<T, K, F>(values: &mut [T], key: F)
+pub fn par_sort_by_key<T, K, F>(values: &mut [T], key: F)
 where
     T: Send,
     K: RadixKey,
     F: Fn(&T) -> K + Sync,
 {
     engine::parallel::sort::<T, _>(values, ByKey(&key));
+}
+
+/// Renamed to [`par_sort`]; the contract is unchanged.
+#[deprecated(since = "0.2.0", note = "renamed to `par_sort`")]
+pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
+    par_sort(values);
+}
+
+/// Renamed to [`par_sort_by_key`]; the contract is unchanged.
+#[deprecated(since = "0.2.0", note = "renamed to `par_sort_by_key`")]
+pub fn par_stable_sort_by_key<T, K, F>(values: &mut [T], key: F)
+where
+    T: Send,
+    K: RadixKey,
+    F: Fn(&T) -> K + Sync,
+{
+    par_sort_by_key(values, key);
 }

@@ -12,11 +12,7 @@ The implemented first slice covers argsort, standard-library compositions for mu
 
 ## Public surface and remaining proposals
 
-Argsort, segmented sorting, stable-membership Top-k, sorted prefixes, single and multiple selection, and sorted rank ranges are implemented. Their one contract owner is [serial slice semantics](../../conformance/semantics.md#serial-slice-operations); [public Rust docs](../../rust/tessera-order/src/algorithms.rs) provide signatures and examples. These are normal serial functions, not research features or stubs. The existing full-sort and Rayon interfaces are unchanged.
-
-Stable binary and bounded multiway partitions are implemented. Their current contract belongs to [category semantics](../../conformance/semantics.md#stable-category-partitions), signatures and examples to [public Rust docs](../../rust/tessera-order/src/partition.rs), and the complete-operation boundary to the [engine reference](engine.md#category-distribution). Incremental prefix completion remains the next proposed algorithm with persistent state.
-
-None of these operations is released. [Release surface alignment](#release-surface-alignment) proposes which of them to publish, under which names and with which contract changes.
+Argsort, chunk sorting, partial sorting, `k_smallest` and `k_largest`, single and multiple selection, cached-key sorting and binary partition are implemented under the names of the [release surface](#release-surface-alignment). Their one contract owner is [serial slice semantics](../../conformance/semantics.md#serial-slice-operations); [public Rust docs](../../rust/tessera-order/src/algorithms.rs) provide signatures and examples, and the [engine reference](engine.md#category-distribution) owns the one-call movement behind `partition` and `sort_by_cached_key`. None of them is released; they ship with 0.2. Incremental prefix completion remains the next proposed algorithm with persistent state.
 
 ### Composition and persistent use
 
@@ -26,7 +22,7 @@ Incremental completion remains a proposed borrowing object, not a record-removin
 
 ## Release surface alignment
 
-Status: accepted by the operator, not implemented. It decides how the unreleased operations are published, and renames the released 0.1 entry points once, in 0.2, so that every Rust name follows one convention. The Python binding follows NumPy names. When implemented, the contracts move to [semantics](../../conformance/semantics.md) and this section shrinks to the remaining proposals.
+Status: accepted by the operator and implemented on the experimental branch for 0.2. Contracts now belong to [semantics](../../conformance/semantics.md#serial-slice-operations). This section keeps the rules and decisions that later additions follow, such as a future `_unstable` variant.
 
 ### Rules
 
@@ -44,7 +40,7 @@ The user-visible value is consistency with the complete stable sort. Pages or ba
 
 ### Released entry points
 
-In 0.2, rename `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key` to `sort`, `sort_by_key`, `par_sort` and `par_sort_by_key`, with unchanged contracts. The old names remain as `#[deprecated]` forwarding functions for the 0.2 series and are removed in a later breaking release. The rename is cheapest now, while 0.1 has just been published; the cost is one breaking minor release and updates to the guide, site, benchmark labels and semantics.
+0.2 renames `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key` to `sort`, `sort_by_key`, `par_sort` and `par_sort_by_key`, with unchanged contracts. The old names remain as `#[deprecated]` forwarding functions for the 0.2 series and are removed in a later breaking release. Revision benchmarks keep calling the old names until every compared baseline has the new ones, because both library copies must offer the called name. The rename is cheapest now, while 0.1 has just been published; the cost is one breaking minor release and updates to the guide, site, benchmark labels and semantics.
 
 ### Decisions
 
@@ -68,7 +64,8 @@ The Python binding follows NumPy names instead ([binding design](python-binding.
 - Range-bound conversion rejects inverted, out-of-bounds and overflowing bounds such as `Excluded(usize::MAX)` before mutation or key calls.
 - Each released function's rustdoc opens with its delta from the standard operation; the semantics rows become those deltas. The crate documentation gains an operation overview and the membership-only `partial_sort(values, k..k)` recipe.
 - Category grouping moves to `sort_by_cached_key`, accepting the [measured losses](evidence.md#cached-key-category-grouping) against the count-taking movement: with one classifier evaluation per record and no range given in advance, the keys are cached and the records move in a second pass. Faster `sort_by_key` on category keys is general engine work, not a release gate: without a known range it must scan for varying bits before choosing a digit.
-- Tests, doctests and the operation benchmark workload names follow the renamed functions; `sort_chunks` replaces offset validation with the `chunks_mut` rule. The change is confined to adapters, documentation and tests; the engine, movement and recovery are unchanged.
+- Tests and doctests follow the renamed functions; `sort_chunks` replaces offset validation with the `chunks_mut` rule. The engine, movement and recovery are unchanged.
+- Benchmark workload names (`top-k`, `prefix`, `rank-range`, `segments`, `partition-buckets`) stay. A workload is an input and an expected result, not a function: `top-k`, `prefix` and `rank-range` all call `partial_sort`, so function names would not identify them, and renaming would invalidate retained plans and results. `partition-buckets` measures `sort_by_cached_key` as the `tessera` route, which keeps the required Tessera control for that workload.
 
 ## Derive the architecture from all known consumers
 

@@ -36,9 +36,9 @@ A change to sampled occupancy or a leaf estimate stays in planning and does not 
 
 ## Category distribution
 
-Arbitrary classifiers are not sorting keys: an order probe or comparison-based leaf could reevaluate them or change their evaluation order. `partition.rs` therefore bypasses ordered refinement. It validates category IDs before converting them to an encoded digit, pads only the private fan-out, and removes padding from the returned offsets. Trivial physical-movement cases still owe the classifier calls in the [category contract](../../conformance/semantics.md#stable-category-partitions).
+Arbitrary classifiers are not sorting keys: an order probe or comparison-based leaf could reevaluate them or change their evaluation order. `partition::distribute` therefore bypasses ordered refinement and calls its classifier exactly once per record, in input order. It has two callers: binary [`partition`](../../conformance/semantics.md#binary-partition), whose trivial cases (fewer than two records, zero-sized records) still owe every predicate call and do not move, and `sort_by_cached_key`, which replays [cached keys](../../conformance/semantics.md#cached-keys) by call count when they vary only within one distribution's bit window.
 
-A bounded tile uses `Scratch::distribute`: one counting pass, the existing cached-ID storage and restoration guard, and completed cursor ends. A larger input uses `block::partition` with no child finishing; it returns only after every band retires. Neither route retains live ownership state, nor reconstructs boundaries by calling user code again. Binary partition composes this operation with two categories. Sorting by category is a simpler reference composition, but cannot supply the classifier-evaluation contract and is not used as the public implementation.
+A bounded tile uses `Scratch::distribute`: one counting pass, the existing cached-ID storage and restoration guard, and completed cursor ends. A larger input uses `block::partition` with no child finishing; it returns only after every band retires. Neither route retains live ownership state, nor reconstructs boundaries by calling user code again. Sorting by category is a simpler reference composition, but cannot supply the classifier-evaluation contract and is not used for either caller.
 
 ## Cost model
 
@@ -78,7 +78,7 @@ A stage's rule changes on its page, in the code and in the page's model together
 
 ## Ordered rank requirements
 
-Full sorting and the stable serial [slice operations](../../conformance/semantics.md#serial-slice-operations) use the common `engine::refine` entry. Full sorting requests All ranks. Partial requests borrow sorted, nonempty, separated intervals in root coordinates. Root validation precedes mutation and key calls; an empty requirement returns before preparation. A full interval becomes the All representation, including the empty full input. A prefix and rank range borrow one interval without allocation; multiple selection validates and normalizes indices once in `rank.rs`. Top-k isolates the first excluded rank, then returns the two regions without requiring internal order; empty and full-set requests return before refinement.
+Full sorting and the stable serial [slice operations](../../conformance/semantics.md#serial-slice-operations) use the common `engine::refine` entry. Full sorting requests All ranks. Partial requests borrow sorted, nonempty, separated intervals in root coordinates. Root validation precedes mutation and key calls; an empty requirement returns before preparation. A full interval becomes the All representation, including the empty full input. A partial sort, `k_smallest` and selection borrow one interval without allocation; multiple selection validates and normalizes indices once in `rank.rs`. An empty interior partial-sort range `k..k` isolates rank `k`, which establishes both memberships through the same request; empty ranges at either end return before refinement.
 
 `Requirement::project` intersects a final parent-relative band with the borrowed intervals and translates its origin without allocation. Covered children become All; absent intersections skip further analysis. Binary searches are independent of callback order, so serial and concurrent completion use one authority. Equality bands are already complete; their stable movement establishes ranked identity even when requests cut through equal keys. Existing-run ranges are projected after rotation.
 
@@ -131,7 +131,7 @@ Every insertion pass, a budgeted probe or the finish of a tile or bucket, runs `
 
 | Pass | Implementation |
 |---|---|
-| Key function (`stable_sort_by_key`) | One record at a time, keeping the previous key, so the key function runs once per scanned record |
+| Key function (`sort_by_key`) | One record at a time, keeping the previous key, so the key function runs once per scanned record |
 | Primitive direct keys, probe and finish | Vector scan, instruction set selected once per pass |
 | Primitive direct keys, ascending confirmation | The same vector scan, dispatched once after checking the encoded predecessor |
 | `Reverse<K>` direct keys | The scan of `K`, with the pair sides exchanged |
@@ -146,8 +146,8 @@ Records move by bitwise copies between the input and `MaybeUninit<T>` scratch. E
 
 A counting pass reads each key twice, for the histogram and for the scatter:
 
-- **User key functions** (`stable_sort_by_key`). The histogram stores a two-byte bucket per record and the scatter reads it back. Bucket ranges are disjoint, so each output slot is written exactly once whatever the key function returns. This keeps `String`, `Box<T>` and `&mut T` records safe on one path.
-- **Library-encoded keys** (`stable_sort`). The records are their own keys, encoded deterministically by Tessera, so the scatter recomputes them and stores nothing.
+- **User key functions** (`sort_by_key`). The histogram stores a two-byte bucket per record and the scatter reads it back. Bucket ranges are disjoint, so each output slot is written exactly once whatever the key function returns. This keeps `String`, `Box<T>` and `&mut T` records safe on one path.
+- **Library-encoded keys** (`sort`). The records are their own keys, encoded deterministically by Tessera, so the scatter recomputes them and stores nothing.
 
 `Extract::DIRECT` owns this distinction, not a mode passed through the executors. It is present only when every record is its own sealed key; its unsafe contract requires deterministic, panic-free extraction, and narrowed extractors inherit it with a translated offset. Tile allocation, histogram, scatter and window counting consume this one fact.
 

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parseHTML } from "linkedom/worker";
 import { z } from "zod";
+import { catalog } from "../catalog.ts";
 import { trackingAlgorithm, trackingAlgorithms, trackingBranch } from "./algorithms.ts";
 import { trackingMemory } from "./build.ts";
 import { comparisonData, latestRuns } from "./comparison.ts";
@@ -28,6 +29,7 @@ import {
   parseRuns,
   runSchema,
   summarizeReport,
+  TRACKING_SPEC,
   type TrackingRun,
 } from "./result.ts";
 
@@ -68,9 +70,16 @@ const run: TrackingRun = {
 test("tracking excludes revision controls and operation-only references", () => {
   assert.ok(trackingAlgorithms.some((entry) => entry.id === "tessera"));
   assert.ok(
-    trackingAlgorithms.every((entry) => !["revision", "reference"].includes(entry.adapter)),
+    trackingAlgorithms.every(
+      (entry) => !["revision", "reference", "unstable"].includes(entry.adapter),
+    ),
   );
-  for (const id of ["tessera-full", "tessera-copy", "tessera-baseline"]) {
+  for (const id of [
+    "tessera-full",
+    "tessera-copy",
+    "tessera-baseline",
+    "tessera-unstable-prototype",
+  ]) {
     assert.throws(() => trackingAlgorithm(id), /Unknown tracking algorithm/);
     assert.throws(() => trackingBranch(id), /Unknown tracking algorithm/);
   }
@@ -638,4 +647,11 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
     ]),
   ).figures.find((figure) => figure.name === "types");
   assert.match(types!.chart.guide, /on the random input$/);
+});
+
+test("tracking schedules only variants that fit the tracking hardware", () => {
+  assert.ok(trackingAlgorithms.every((entry) => (entry.threads ?? 1) <= TRACKING_SPEC.cpus));
+  // Wider catalog variants stay available to local comparisons.
+  assert.ok(catalog.algorithms.some((entry) => (entry.threads ?? 1) > TRACKING_SPEC.cpus));
+  assert.ok(!trackingAlgorithms.some((entry) => entry.id === "tessera-par-8"));
 });

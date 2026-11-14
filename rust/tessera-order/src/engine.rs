@@ -43,7 +43,45 @@ fn without_top_bit(varying: u128) -> u128 {
     varying & !(1 << (bit_len(varying) - 1))
 }
 
-/// How a stable block partition leaves its children.
+/// Partitions in place using histogram-sized bands and bounded swap cursors.
+/// No record leaves the slice, including if classification panics. A changed
+/// classification that targets a full band stops the pass; callers still
+/// consume candidate bits, so inconsistent keys cannot prevent progress.
+fn partition_unstable<T, C: Classify<T>>(
+    records: &mut [T],
+    radix: usize,
+    classifier: &mut C,
+) -> Vec<usize> {
+    let buckets = 1usize << radix;
+    let mut ends = alloc::vec![0; buckets];
+    for record in records.iter() {
+        ends[classifier.bucket(record) & (buckets - 1)] += 1;
+    }
+    let mut next = alloc::vec![0; buckets];
+    let mut total = 0;
+    for bucket in 0..buckets {
+        next[bucket] = total;
+        total += ends[bucket];
+        ends[bucket] = total;
+    }
+    for bucket in 0..buckets {
+        while next[bucket] < ends[bucket] {
+            let target = classifier.bucket(&records[next[bucket]]) & (buckets - 1);
+            if target == bucket {
+                next[bucket] += 1;
+            } else {
+                if next[target] == ends[target] {
+                    return ends;
+                }
+                records.swap(next[bucket], next[target]);
+                next[target] += 1;
+            }
+        }
+    }
+    ends
+}
+
+/// How a node partition leaves its children.
 #[derive(Clone, Copy)]
 struct Split {
     /// Bits of the classifier's bucket index.
@@ -70,10 +108,10 @@ impl Split {
     /// Partitions all records and finishes requested tile-sized children
     /// while they are cache-hot, using the extractor `lend` returns for child
     /// work. Returns each bucket's end; larger children remain.
-    fn partition<T, E: Extract<T>, C: Classify<T>>(
+    fn partition<T, E: Extract<T>, C: Classify<T>, const UNSTABLE: bool>(
         self,
         records: &mut [T],
-        classifier: C,
+        mut classifier: C,
         lend: fn(&mut C) -> &mut E,
         scratch: &mut Workspace<T>,
         tile_len: usize,
@@ -89,6 +127,22 @@ impl Split {
                     tile.finish_child(child, self.candidate, lend(classifier));
                 }
             };
+        if UNSTABLE {
+            let ends = partition_unstable(records, self.radix, &mut classifier);
+            let mut start = 0;
+            for (bucket, &end) in ends.iter().enumerate() {
+                if start < end {
+                    visit(
+                        bucket,
+                        start..end,
+                        &mut records[start..end],
+                        &mut classifier,
+                    );
+                }
+                start = end;
+            }
+            return ends;
+        }
         block::partition(
             records,
             self.radix,
@@ -101,7 +155,7 @@ impl Split {
 
 /// Refines requested ranks through shared node and tile decisions.
 /// Unrequested bands have completed movement but receive no further key work.
-struct Sorter<'a, T, E> {
+struct Sorter<'a, T, E, const UNSTABLE: bool = false> {
     scratch: &'a mut Workspace<T>,
     extractor: &'a mut E,
     tile_len: usize,
@@ -123,6 +177,23 @@ pub(crate) fn sort<T, E: Extract<T>>(records: &mut [T], extractor: E) {
 /// tests reach node routes with small inputs. Ordered and constant roots do not
 /// allocate or initialize unused movement storage.
 pub(crate) fn refine<T, E: Extract<T>>(
+    records: &mut [T],
+    extractor: E,
+    required: Requirement<'_>,
+    workspace: Option<&mut Workspace<T>>,
+    tile_bytes: usize,
+) {
+    refine_mode::<T, E, false>(records, extractor, required, workspace, tile_bytes);
+}
+
+/// Research entry sharing complete refinement, not a second root pipeline.
+pub(crate) fn sort_unstable<T, E: Extract<T>>(records: &mut [T], extractor: E) {
+    let ranks = 0..records.len();
+    let required = Requirement::new(records.len(), core::slice::from_ref(&ranks));
+    refine_mode::<T, E, true>(records, extractor, required, None, TILE_BYTES);
+}
+
+fn refine_mode<T, E: Extract<T>, const UNSTABLE: bool>(
     records: &mut [T],
     mut extractor: E,
     required: Requirement<'_>,
@@ -150,7 +221,7 @@ pub(crate) fn refine<T, E: Extract<T>>(
     };
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
-            Sorter::<T, _> {
+            Sorter::<T, _, UNSTABLE> {
                 scratch: workspace,
                 extractor: &mut KeyHalf::<_, 0>(extractor),
                 tile_len,
@@ -159,7 +230,7 @@ pub(crate) fn refine<T, E: Extract<T>>(
             return;
         }
         if varying & ((1u128 << 64) - 1) == 0 {
-            Sorter::<T, _> {
+            Sorter::<T, _, UNSTABLE> {
                 scratch: workspace,
                 extractor: &mut KeyHalf::<_, 64>(extractor),
                 tile_len,
@@ -168,7 +239,7 @@ pub(crate) fn refine<T, E: Extract<T>>(
             return;
         }
     }
-    Sorter::<T, E> {
+    Sorter::<T, E, UNSTABLE> {
         scratch: workspace,
         extractor: &mut extractor,
         tile_len,
@@ -383,7 +454,7 @@ fn reverse_stably<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
     }
 }
 
-impl<T, E: Extract<T>> Sorter<'_, T, E> {
+impl<T, E: Extract<T>, const UNSTABLE: bool> Sorter<'_, T, E, UNSTABLE> {
     /// Consumes an ordered-run decision without probing or partitioning again.
     fn split_ordered(
         &mut self,
@@ -483,7 +554,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             candidate,
             finished: None,
         };
-        let ends = split.partition(
+        let ends = split.partition::<_, _, _, UNSTABLE>(
             records,
             KeyDigit::new(&mut *self.extractor, digit.shift),
             |digit| &mut *digit.extractor,
@@ -505,7 +576,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
     ) {
         let rank = Rank::new(&mut *self.extractor, equal, varying);
         let split = Split::equality(&rank, varying);
-        let ends = split.partition(
+        let ends = split.partition::<_, _, _, UNSTABLE>(
             records,
             rank,
             |rank| &mut *rank.extractor,

@@ -18,7 +18,7 @@ Open questions:
 
 ## Engine
 
-The [structure analysis](docs/design/evidence.md#structure-analysis) finds concentrated ownership, not proven minimality. [PR #120](https://github.com/Yikai-Liao/tessera-sort/pull/120) has merged the direct source ledger, so the completion study is no longer waiting for a design choice. The [post-ledger proposal](docs/design/evidence.md#post-ledger-simplification-proposal) evaluates further simplification against that engine. Start with the independent scan and stream-capacity experiments below, then shared split completion; none is a prerequisite for resolving [acceptance debt](#acceptance-debt) or extending [Rayon](#rayon) coverage.
+The [structure analysis](docs/design/evidence.md#structure-analysis) finds concentrated ownership, not proven minimality. [PR #120](https://github.com/Yikai-Liao/tessera-order/pull/120) has merged the direct source ledger, so the completion study is no longer waiting for a design choice. The [post-ledger proposal](docs/design/evidence.md#post-ledger-simplification-proposal) evaluates further simplification against that engine. Start with the independent scan and stream-capacity experiments below, then shared split completion; none is a prerequisite for resolving [acceptance debt](#acceptance-debt) or extending [Rayon](#rayon) coverage.
 
 ### Algorithm extension experiment
 
@@ -32,7 +32,7 @@ The consolidated engine (shared root preparation, node planning and order confir
 
 ### Parallel completion study
 
-The merged direct source ledger is the chosen C design: it retired parallel permutation/compaction recovery, and [#154](https://github.com/Yikai-Liao/tessera-sort/pull/154) then retired private staging (P1 below). Its accepted losses and remaining evidence limits are in the [shared-ledger study](docs/design/evidence.md#shared-ledger-study). The independent A prototype and B's packed-output-stream model have [recorded blockers](docs/design/evidence.md#structure-analysis); those constructions need not be repeated, and their rejection does not exclude every packing or scattered-recursion design.
+The merged direct source ledger is the chosen C design: it retired parallel permutation/compaction recovery, and [#154](https://github.com/Yikai-Liao/tessera-order/pull/154) then retired private staging (P1 below). Its accepted losses and remaining evidence limits are in the [shared-ledger study](docs/design/evidence.md#shared-ledger-study). The independent A prototype and B's packed-output-stream model have [recorded blockers](docs/design/evidence.md#structure-analysis); those constructions need not be repeated, and their rejection does not exclude every packing or scattered-recursion design.
 
 Remaining work:
 
@@ -62,6 +62,10 @@ Smaller candidates remain available; none waits for P1's acceptance:
 |---|---|---|---|
 | P2 | Residual partition configuration | One description consumed by the block layer | `BucketFinish` and `BoundedFinish` are gone; reassess `Config` only if it duplicates policy rather than owning test geometry and execution controls |
 | P3 | `tile::Scratch`, `block::Buffers`, job `Pool` | A shared scratch lifecycle | `engine::Scratch` now pairs the first two per sort; preserve nested/reentrant lifetimes and allocation reuse rather than assume one buffer per worker |
+
+### Unstable sorting
+
+The [node-partition feasibility study](docs/design/evidence.md#unstable-node-partition-feasibility) found a wide-record memory/performance niche, not a general speedup. A dedicated kernel remains post-0.1 research. Reopen for a concrete workload; acceptance requires shared planning and recursion without a second engine, measured timing and memory against stable Tessera and standard unstable sort, individually accounted regressions, and ownership/panic/changing-key validation including Miri. Validate primitive-specific tuning rather than add distribution-specific dispatch; parallel support needs its own evidence.
 
 ### Rayon
 

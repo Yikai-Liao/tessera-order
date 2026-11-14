@@ -9,7 +9,7 @@ import { trackingAlgorithm, trackingBranch } from "./algorithms.ts";
 import { localImage, type TrackingBuild } from "./build.ts";
 import { reportFailure } from "./failure.ts";
 import { JOB_TIMEOUT_S } from "./jobs.ts";
-import { combineReports, runSchema, summarizeReport } from "./result.ts";
+import { combineReports, runSchema, summarizeReport, TRACKING_SPEC } from "./result.ts";
 
 /** A detached submission's pending report names the remote job to attach to. */
 const pendingSchema = z.object({ job: z.uuid() });
@@ -60,7 +60,7 @@ await reportFailure(`Track (${algorithm.id})`, `${out}.log`, () =>
           `--branch=${branch}`,
           `--hash=${build.hash}`,
           "--testbed=main",
-          "--spec=intel-v1",
+          `--spec=${TRACKING_SPEC.slug}`,
           `--image=${image}`,
           `--job-timeout=${JOB_TIMEOUT_S}`,
           "--adapter=rust_criterion",

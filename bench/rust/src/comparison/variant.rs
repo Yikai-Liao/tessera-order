@@ -37,6 +37,9 @@ pub(super) trait TesseraAdapter: BenchmarkRecord {
     fn rank_range(records: &mut [Self], ranks: std::ops::Range<usize>);
     #[cfg(feature = "operations")]
     fn select_many(records: &mut [Self], indices: &[usize]);
+    /// Calls the experimental serial node-partition kernel.
+    #[cfg(feature = "operations")]
+    fn tessera_unstable(records: &mut [Self]);
     /// Sorts through the independently named baseline crate.
     #[cfg(tessera_bench_revisions)]
     fn baseline(records: &mut [Self]);
@@ -87,19 +90,19 @@ macro_rules! revision_sorts {
 macro_rules! slice_operations {
     ($argsort:ident, $segments:ident, $prefix:ident, $top_k:ident, $select:ident, $range:ident, $many:ident $(, $key:expr)?) => {
         #[cfg(feature = "operations")]
-        fn argsort(records: &[Self]) -> Vec<usize> { tessera_sort::$argsort(records $(, $key)?) }
+        fn argsort(records: &[Self]) -> Vec<usize> { tessera_order::$argsort(records $(, $key)?) }
         #[cfg(feature = "operations")]
-        fn segments(records: &mut [Self], offsets: &[usize]) { tessera_sort::$segments(records, offsets $(, $key)?); }
+        fn segments(records: &mut [Self], offsets: &[usize]) { tessera_order::$segments(records, offsets $(, $key)?); }
         #[cfg(feature = "operations")]
-        fn prefix(records: &mut [Self], len: usize) { tessera_sort::$prefix(records, len $(, $key)?); }
+        fn prefix(records: &mut [Self], len: usize) { tessera_order::$prefix(records, len $(, $key)?); }
         #[cfg(feature = "operations")]
-        fn top_k(records: &mut [Self], k: usize) { tessera_sort::$top_k(records, k $(, $key)?); }
+        fn top_k(records: &mut [Self], k: usize) { tessera_order::$top_k(records, k $(, $key)?); }
         #[cfg(feature = "operations")]
-        fn select(records: &mut [Self], index: usize) { tessera_sort::$select(records, index $(, $key)?); }
+        fn select(records: &mut [Self], index: usize) { tessera_order::$select(records, index $(, $key)?); }
         #[cfg(feature = "operations")]
-        fn rank_range(records: &mut [Self], ranks: std::ops::Range<usize>) { tessera_sort::$range(records, ranks $(, $key)?); }
+        fn rank_range(records: &mut [Self], ranks: std::ops::Range<usize>) { tessera_order::$range(records, ranks $(, $key)?); }
         #[cfg(feature = "operations")]
-        fn select_many(records: &mut [Self], indices: &[usize]) { tessera_sort::$many(records, indices $(, $key)?); }
+        fn select_many(records: &mut [Self], indices: &[usize]) { tessera_order::$many(records, indices $(, $key)?); }
     };
 }
 
@@ -109,14 +112,18 @@ macro_rules! tessera_keys {
         impl TesseraAdapter for $t {
             #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
-                tessera_sort::stable_sort(records);
+                tessera_order::stable_sort(records);
+            }
+            #[cfg(feature = "operations")]
+            fn tessera_unstable(records: &mut [Self]) {
+                tessera_order::prototype_unstable_sort(records);
             }
             slice_operations!(stable_argsort, stable_sort_segments, stable_sort_prefix, stable_top_k, stable_select_nth, stable_sort_rank_range, stable_select_nth_many);
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort);
             #[cfg(feature = "rayon")]
             fn tessera_parallel(records: &mut [Self]) {
-                tessera_sort::par_stable_sort(records);
+                tessera_order::par_stable_sort(records);
             }
         }
     )+};
@@ -129,14 +136,18 @@ macro_rules! tessera_records {
         impl TesseraAdapter for $t {
             #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
-                tessera_sort::stable_sort_by_key(records, |r| r.key);
+                tessera_order::stable_sort_by_key(records, |r| r.key);
+            }
+            #[cfg(feature = "operations")]
+            fn tessera_unstable(records: &mut [Self]) {
+                tessera_order::prototype_unstable_sort_by_key(records, |r| r.key);
             }
             slice_operations!(stable_argsort_by_key, stable_sort_segments_by_key, stable_sort_prefix_by_key, stable_top_k_by_key, stable_select_nth_by_key, stable_sort_rank_range_by_key, stable_select_nth_many_by_key, |r| r.key);
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort_by_key, |r| r.key);
             #[cfg(feature = "rayon")]
             fn tessera_parallel(records: &mut [Self]) {
-                tessera_sort::par_stable_sort_by_key(records, |r| r.key);
+                tessera_order::par_stable_sort_by_key(records, |r| r.key);
             }
         }
     )+};
@@ -321,7 +332,8 @@ pub fn list_variants() -> Vec<Variant> {
         .iter()
         .filter(|algorithm| {
             algorithm.adapter == "common"
-                || (algorithm.adapter == "reference" && cfg!(feature = "operations"))
+                || (matches!(algorithm.adapter.as_str(), "reference" | "unstable")
+                    && cfg!(feature = "operations"))
                 || (cfg!(feature = "rayon") && algorithm.threads.is_some())
                 || (algorithm.adapter == "revision" && cfg!(tessera_bench_revisions))
                 || algorithm.adapter == "rust"
@@ -353,6 +365,8 @@ fn try_prepare_common<T: TesseraAdapter>(
     }
     Some(match v.name {
         "tessera" => prepare_kernel(input, true, T::tessera),
+        #[cfg(feature = "operations")]
+        "tessera-unstable-prototype" => prepare_kernel(input, false, T::tessera_unstable),
         #[cfg(tessera_bench_revisions)]
         "tessera-baseline" => prepare_kernel(input, true, T::baseline),
         #[cfg(tessera_bench_revisions)]
@@ -547,8 +561,13 @@ mod tests {
                     for variant in list_variants().into_iter().filter(|v| v.threads.is_none()) {
                         let kernel = variant.prepare(&input, 32768);
                         let supported = ["common", "revision"].contains(&variant.adapter)
-                            || ["glidesort", "glidesort-sqrt", "std-unstable"]
-                                .contains(&variant.name);
+                            || [
+                                "glidesort",
+                                "glidesort-sqrt",
+                                "std-unstable",
+                                "tessera-unstable-prototype",
+                            ]
+                            .contains(&variant.name);
                         assert_eq!(kernel.is_some(), supported, "{ty}/{}", variant.name);
                         if let Some(mut kernel) = kernel {
                             kernel.restore(2);

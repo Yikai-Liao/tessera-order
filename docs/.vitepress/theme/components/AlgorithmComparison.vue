@@ -9,7 +9,7 @@ import { type ComparisonData, comparisonSchema } from "../../../../bench/trackin
 const props = withDefaults(defineProps<{ view?: "overview" | "all"; source?: string }>(), {
   view: "all",
   source:
-    "https://raw.githubusercontent.com/Yikai-Liao/tessera-sort/benchmark-data/comparison.json",
+    "https://raw.githubusercontent.com/Yikai-Liao/tessera-order/benchmark-data/comparison.json",
 });
 
 const data = shallowRef<ComparisonData | null>(null);
@@ -70,7 +70,7 @@ const tessera = computed(() => {
   const run = data.value?.runs.find((entry) => entry.algorithm === "tessera");
   return run && {
     short: run.hash.slice(0, 7),
-    link: `https://github.com/Yikai-Liao/tessera-sort/commit/${run.hash}`,
+    link: `https://github.com/Yikai-Liao/tessera-order/commit/${run.hash}`,
   };
 });
 const summary = computed(() => {

@@ -9,10 +9,10 @@ Tessera sorts slices by a primitive key: an integer up to 128 bits, an `f32` or 
 
 ```toml
 [dependencies]
-tessera-sort = "0.1"
+tessera-order = "0.1"
 ```
 
-The crate requires `std`, Rust 1.89 or newer and `fearless_simd`. Vector scans and prefix sums automatically select supported instructions; keys without a vector kernel use scalar scans. There is no `portable-simd` or `std` feature, and disabling default features does not change these requirements. Rayon remains optional; see the [Cargo feature documentation](../../rust/tessera-sort/src/lib.rs).
+The crate requires `std`, Rust 1.89 or newer and `fearless_simd`. Vector scans and prefix sums automatically select supported instructions; keys without a vector kernel use scalar scans. There is no `portable-simd` or `std` feature, and disabling default features does not change these requirements. Rayon remains optional; see the [Cargo feature documentation](../../rust/tessera-order/src/lib.rs).
 
 ## Sort keys
 
@@ -20,7 +20,7 @@ The crate requires `std`, Rust 1.89 or newer and `fearless_simd`. Vector scans a
 
 ```rust
 let mut values: Vec<i64> = vec![42, -7, 19, -7, 3];
-tessera_sort::stable_sort(&mut values);
+tessera_order::stable_sort(&mut values);
 assert_eq!(values, [-7, -7, 3, 19, 42]);
 ```
 
@@ -39,7 +39,7 @@ let mut rows = vec![
     Row { timestamp: 10, name: "a".into() },
     Row { timestamp: 30, name: "d".into() },
 ];
-tessera_sort::stable_sort_by_key(&mut rows, |row| row.timestamp);
+tessera_order::stable_sort_by_key(&mut rows, |row| row.timestamp);
 let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
 assert_eq!(names, ["a", "c", "d"]);
 ```
@@ -54,7 +54,7 @@ Wrap the key in `Reverse`. Equal keys still keep their input order:
 use std::cmp::Reverse;
 
 let mut rows = vec![(2u32, "first"), (1, "middle"), (2, "last")];
-tessera_sort::stable_sort_by_key(&mut rows, |row| Reverse(row.0));
+tessera_order::stable_sort_by_key(&mut rows, |row| Reverse(row.0));
 assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 ```
 
@@ -66,7 +66,7 @@ Floats sort in `total_cmp` order: negative NaNs, `-inf`, negative numbers, `-0.0
 
 ```rust
 let mut values = [0.5f64, -0.0, f64::NAN, 0.0, -1.0];
-tessera_sort::stable_sort_by_key(&mut values, |&x| {
+tessera_order::stable_sort_by_key(&mut values, |&x| {
     if x.is_nan() { f64::NAN } else if x == 0.0 { 0.0 } else { x }
 });
 // -0.0 and 0.0 are now equal keys, so they keep their input order.
@@ -83,7 +83,7 @@ Use `stable_top_k_by_key` for an unordered minimum-k set. Its boundary uses stab
 
 ```rust
 let mut rows = [(2u32, "first"), (1, "middle"), (2, "last"), (3, "end")];
-let (chosen, remaining) = tessera_sort::stable_top_k_by_key(&mut rows, 2, |r| r.0);
+let (chosen, remaining) = tessera_order::stable_top_k_by_key(&mut rows, 2, |r| r.0);
 assert_eq!(chosen.len(), 2);
 assert!(chosen.iter().any(|r| r.1 == "first"));
 assert!(chosen.iter().any(|r| r.1 == "middle"));
@@ -94,11 +94,11 @@ For an ordered Top-k result, use `stable_sort_prefix` or its by-key form. Single
 
 ```rust
 let mut values = [9u64, 3, 1, 7, 2];
-tessera_sort::stable_sort_prefix(&mut values, 3);
+tessera_order::stable_sort_prefix(&mut values, 3);
 assert_eq!(&values[..3], &[1, 2, 3]);
-let (_, median, _) = tessera_sort::stable_select_nth(&mut values, 2);
+let (_, median, _) = tessera_order::stable_select_nth(&mut values, 2);
 assert_eq!(*median, 3);
-tessera_sort::stable_select_nth_many(&mut values, &[0, 4]);
+tessera_order::stable_select_nth_many(&mut values, &[0, 4]);
 assert_eq!((values[0], values[4]), (1, 9));
 ```
 
@@ -110,9 +110,9 @@ Argsort leaves records in place. Segmented sorting takes existing offsets and so
 
 ```rust
 let source = [(2u32, "first"), (1, "middle"), (2, "last")];
-assert_eq!(tessera_sort::stable_argsort_by_key(&source, |r| r.0), [1, 0, 2]);
+assert_eq!(tessera_order::stable_argsort_by_key(&source, |r| r.0), [1, 0, 2]);
 let mut values = [3u64, 1, 9, 7, 8];
-tessera_sort::stable_sort_segments(&mut values, &[0, 2, 5]);
+tessera_order::stable_sort_segments(&mut values, &[0, 2, 5]);
 assert_eq!(values, [1, 3, 7, 8, 9]);
 ```
 
@@ -122,8 +122,8 @@ Compose stable sorts from the least significant field to the most significant. T
 
 ```rust
 let mut rows = [(2u32, 30u64), (1, 40), (2, 10), (1, 20)];
-tessera_sort::stable_sort_by_key(&mut rows, |r| r.1); // Secondary: timestamp.
-tessera_sort::stable_sort_by_key(&mut rows, |r| r.0); // Primary: user.
+tessera_order::stable_sort_by_key(&mut rows, |r| r.1); // Secondary: timestamp.
+tessera_order::stable_sort_by_key(&mut rows, |r| r.0); // Primary: user.
 assert_eq!(rows, [(1, 20), (1, 40), (2, 10), (2, 30)]);
 let counts: Vec<_> = rows.chunk_by(|a, b| a.0 == b.0)
     .map(|group| (group[0].0, group.len())).collect();
@@ -138,7 +138,7 @@ Enable the optional `rayon` feature for `par_stable_sort` and `par_stable_sort_b
 
 ```toml
 [dependencies]
-tessera-sort = { version = "0.1", features = ["rayon"] }
+tessera-order = { version = "0.1", features = ["rayon"] }
 rayon = "1.10"
 ```
 
@@ -147,7 +147,7 @@ The entry points use Rayon's current pool. A caller can select its own pool with
 ```rust
 let pool = rayon::ThreadPoolBuilder::new().num_threads(8).build().unwrap();
 let mut records = [(2u32, "first"), (1, "middle"), (2, "last")];
-pool.install(|| tessera_sort::par_stable_sort_by_key(&mut records, |record| record.0));
+pool.install(|| tessera_order::par_stable_sort_by_key(&mut records, |record| record.0));
 assert_eq!(records, [(1, "middle"), (2, "first"), (2, "last")]);
 ```
 

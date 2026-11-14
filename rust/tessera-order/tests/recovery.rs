@@ -6,7 +6,7 @@
 use std::cell::{Cell, RefCell};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
-use tessera_sort::stable_sort_by_key;
+use tessera_order::stable_sort_by_key;
 
 struct Owned {
     id: usize,

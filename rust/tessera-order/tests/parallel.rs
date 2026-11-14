@@ -11,8 +11,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 #[cfg(not(miri))]
-use tessera_sort::par_stable_sort;
-use tessera_sort::par_stable_sort_by_key;
+use tessera_order::par_stable_sort;
+use tessera_order::par_stable_sort_by_key;
 
 #[test]
 #[cfg(not(miri))]
@@ -105,7 +105,7 @@ fn separated_runs_match_serial() {
         let mut expected = rows.clone();
         expected.sort_by_key(|row| row.0);
         let mut serial = rows.clone();
-        tessera_sort::stable_sort_by_key(&mut serial, |row| row.0);
+        tessera_order::stable_sort_by_key(&mut serial, |row| row.0);
         pool.install(|| par_stable_sort_by_key(&mut rows, |row| row.0));
         assert_eq!(serial, expected);
         assert_eq!(rows, expected);

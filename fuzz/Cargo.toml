@@ -1,5 +1,5 @@
 [package]
-name = "tessera-sort-fuzz"
+name = "tessera-order-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2024"
@@ -9,7 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-tessera-sort = { path = "../rust/tessera-sort" }
+tessera-order = { path = "../rust/tessera-order" }
 
 [[bin]]
 name = "sort"

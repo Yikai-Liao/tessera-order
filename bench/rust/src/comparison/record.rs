@@ -306,7 +306,7 @@ impl CaseInput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tessera_sort::RadixKey;
+    use tessera_order::RadixKey;
 
     #[test]
     fn reverse_inputs_preserve_encoded_geometry() {

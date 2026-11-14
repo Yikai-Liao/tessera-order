@@ -9,7 +9,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "629c9d6b6f30b5604089e0980f4d924a013aacb1654a6cdf5d3d852224f68651"
 
 [[package]]
-name = "tessera-sort"
+name = "tessera-order"
 version = "0.0.0"
 dependencies = [
  "fearless_simd",
@@ -19,5 +19,5 @@ dependencies = [
 name = "tessera-trace"
 version = "0.0.0"
 dependencies = [
- "tessera-sort",
+ "tessera-order",
 ]

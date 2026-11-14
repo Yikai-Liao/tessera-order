@@ -66,7 +66,7 @@ fn main() {
     let out = env::var("OUT_DIR").unwrap();
     let mut digest = Sha256::new();
     for path in [
-        "../../rust/tessera-sort/src",
+        "../../rust/tessera-order/src",
         "src",
         "native",
         "build.rs",

@@ -17,7 +17,7 @@ hero:
       link: /guide/getting-started
     - theme: alt
       text: GitHub
-      link: https://github.com/Yikai-Liao/tessera-sort
+      link: https://github.com/Yikai-Liao/tessera-order
 
 features:
   - title: Stable, without a second buffer

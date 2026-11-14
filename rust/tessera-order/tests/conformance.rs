@@ -5,7 +5,7 @@
 //! the standard library's stable sort.
 
 use std::cmp::Reverse;
-use tessera_sort::{stable_sort, stable_sort_by_key};
+use tessera_order::{stable_sort, stable_sort_by_key};
 
 fn next(state: &mut u64) -> u64 {
     *state = state.wrapping_add(0x9e3779b97f4a7c15);

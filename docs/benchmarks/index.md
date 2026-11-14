@@ -4,15 +4,24 @@ aside: false
 pageClass: performance-page
 ---
 
-# Main performance history
+# Performance
 
 <script setup lang="ts">
+import AlgorithmComparison from "../.vitepress/theme/components/AlgorithmComparison.vue";
 import PerformanceHistory from "../.vitepress/theme/components/PerformanceHistory.vue";
 </script>
+
+<AlgorithmComparison view="overview" />
+
+Each sort's latest run, ranked by speed relative to `slice::sort`, with its largest extra heap allocation; [algorithm comparison](algorithms.md) explains the figures.
+
+## Main history
 
 How long Tessera takes to sort fixed inputs on main, measured on Bencher's Intel v1 Bare Metal runners: whether main is getting faster, which cases moved at which commit, and how long each case takes now.
 
 <PerformanceHistory />
+
+## Using the history
 
 **Filters.** Type, distribution, length and mode filter independently; any selected value matches, and "All" clears a filter. The trend, its group means and the table cover the matching cases.
 

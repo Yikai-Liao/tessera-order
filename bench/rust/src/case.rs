@@ -3,7 +3,7 @@
 //! Deterministic seed-one inputs shared by the continuous and comparison suites.
 
 use std::cmp::Ordering;
-use tessera_sort::RadixKey;
+use tessera_order::RadixKey;
 
 /// A key type with a name for case IDs and an exact equality for validation.
 pub trait Key: RadixKey + Copy {

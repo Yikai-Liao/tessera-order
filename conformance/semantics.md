@@ -9,7 +9,7 @@ Status: implemented by the unreleased Rust crate; the planned C++ implementation
 | Stable | The output is ordered by key, and records with equal keys appear in their input order. |
 | Unstable | The output is ordered by key. The order of records with equal keys is unspecified. |
 
-Release 0.1 provides the stable contract only. The unstable contract is reserved for a dedicated unstable kernel in a later release.
+Release 0.1 provides the stable contract only. This experimental branch exposes doc-hidden `prototype_unstable_sort` and `prototype_unstable_sort_by_key` entries with the unstable contract and the same key-encoding, extraction and permutation guarantees below. They are not a supported release API; their scope and memory evidence are in the [feasibility study](../docs/design/evidence.md#unstable-node-partition-feasibility). Parallel unstable sorting is not implemented.
 
 Both contracts output a permutation of the input: no record is lost, duplicated or modified, whatever the key function returns.
 

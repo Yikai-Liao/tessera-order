@@ -2,10 +2,15 @@
 
 import { appendFile } from "node:fs/promises";
 import { catalog } from "../catalog.ts";
+import { TRACKING_SPEC } from "./result.ts";
 
-/** Track production sort adapters, not revision controls or operation-only references. */
+/** Track production sort adapters that fit the tracking hardware, not revision or operation controls. */
 export const trackingAlgorithms = catalog.algorithms.filter(
-  (entry) => entry.adapter !== "revision" && entry.adapter !== "reference",
+  (entry) =>
+    entry.adapter !== "revision" &&
+    entry.adapter !== "reference" &&
+    entry.adapter !== "unstable" &&
+    (entry.threads ?? 1) <= TRACKING_SPEC.cpus,
 );
 
 /** Resolve a catalog ID before it enters a command, data directory or Cloud branch. */

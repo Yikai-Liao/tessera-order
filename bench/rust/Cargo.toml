@@ -9,14 +9,14 @@ license.workspace = true
 [features]
 layout-study = []
 # Tessera's optional parallel API; opponent pools use rayon unconditionally.
-rayon = ["tessera-sort/rayon"]
+rayon = ["tessera-order/rayon"]
 compare-native = []
 # Current serial operation adapters; historical full-sort builds leave this off.
 operations = []
 
 [dependencies]
 rayon = "1.12"
-tessera-sort = { path = "../../rust/tessera-sort" }
+tessera-order = { path = "../../rust/tessera-order" }
 radsort = "=0.1.1"
 rdst = { version = "=0.20.14", default-features = false }
 glidesort = "=0.1.2"

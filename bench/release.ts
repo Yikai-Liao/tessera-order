@@ -171,7 +171,12 @@ async function prepareComparison(options: ReleaseOptions) {
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
   const build = await withComparisonWorkspace(root, native, async ({ tree, target }) => {
     const features = [
-      ...(plan.operation ? ["operations"] : []),
+      ...(plan.operation ||
+      plan.algorithms.some((id) =>
+        catalog.algorithms.some((entry) => entry.id === id && entry.adapter === "unstable"),
+      )
+        ? ["operations"]
+        : []),
       ...(native ? ["compare-native"] : []),
       ...(plan.algorithms.some((id) =>
         catalog.algorithms.some((entry) => entry.id === id && entry.threads),

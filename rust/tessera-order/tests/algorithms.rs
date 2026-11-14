@@ -8,7 +8,7 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     rc::Rc,
 };
-use tessera_sort::*;
+use tessera_order::*;
 
 fn ranked(values: &[(u64, usize)], original: &[(u64, usize)], ranges: &[std::ops::Range<usize>]) {
     let mut reference = original.to_vec();

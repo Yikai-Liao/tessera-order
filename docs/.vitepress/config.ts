@@ -8,7 +8,7 @@ import { defineConfig, type MarkdownRenderer } from "vitepress";
 // same files read correctly on GitHub, in an editor, and on the site. Pages
 // are the files under `docs/` plus the shared documents listed here.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const repository = "https://github.com/Yikai-Liao/tessera-sort";
+const repository = "https://github.com/Yikai-Liao/tessera-order";
 const sharedPages = new Set([
   "conformance/semantics.md",
   "ROADMAP.md",
@@ -126,8 +126,8 @@ export default defineConfig({
         text: "Performance",
         activeMatch: "^/benchmarks/",
         items: [
+          { text: "Overview and history", link: "/benchmarks/" },
           { text: "Algorithm comparison", link: "/benchmarks/algorithms" },
-          { text: "Main history", link: "/benchmarks/" },
         ],
       },
       {
@@ -150,6 +150,15 @@ export default defineConfig({
             { text: "4. The block partition", link: "/explain/block-partition" },
             { text: "5. Finishing tiles", link: "/explain/tiles" },
             { text: "6. Ownership and panics", link: "/explain/safety" },
+          ],
+        },
+      ],
+      "/benchmarks/": [
+        {
+          text: "Performance",
+          items: [
+            { text: "Overview and history", link: "/benchmarks/" },
+            { text: "Algorithm comparison", link: "/benchmarks/algorithms" },
           ],
         },
       ],

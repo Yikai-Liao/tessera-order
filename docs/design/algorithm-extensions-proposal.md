@@ -12,7 +12,7 @@ The implemented first slice covers argsort, standard-library compositions for mu
 
 ## Public surface and remaining proposals
 
-Argsort, segmented sorting, stable-membership Top-k, sorted prefixes, single and multiple selection, and sorted rank ranges are implemented. Their one contract owner is [serial slice semantics](../../conformance/semantics.md#serial-slice-operations); [public Rust docs](../../rust/tessera-sort/src/algorithms.rs) provide signatures and examples. These are normal serial functions, not research features or stubs. The existing full-sort and Rayon interfaces are unchanged.
+Argsort, segmented sorting, stable-membership Top-k, sorted prefixes, single and multiple selection, and sorted rank ranges are implemented. Their one contract owner is [serial slice semantics](../../conformance/semantics.md#serial-slice-operations); [public Rust docs](../../rust/tessera-order/src/algorithms.rs) provide signatures and examples. These are normal serial functions, not research features or stubs. The existing full-sort and Rayon interfaces are unchanged.
 
 The remaining one-shot proposals are stable category partitions:
 

@@ -48,11 +48,14 @@ test("routing keeps library, comparison and revision checks with their owners", 
   const none = { rust: false, cpp: false, comparison: false, benchmark: false, docs: false };
   const owners: [string[], Partial<typeof none>][] = [
     [
-      ["rust/tessera-sort/src/lib.rs", "rust/tessera-sort/Cargo.toml"],
+      ["rust/tessera-order/src/lib.rs", "rust/tessera-order/Cargo.toml"],
       { rust: true, benchmark: true, docs: true },
     ],
     [["rust/tessera-trace/src/lib.rs", "rust/tessera-trace/Cargo.lock"], { docs: true }],
-    [["rust/tessera-sort/tests/memory.rs", ".github/actions/rust-test/action.yml"], { rust: true }],
+    [
+      ["rust/tessera-order/tests/memory.rs", ".github/actions/rust-test/action.yml"],
+      { rust: true },
+    ],
     [
       ["Cargo.lock", "Cargo.toml", ".cargo/config.toml", "rust-toolchain.toml"],
       { rust: true, comparison: true, benchmark: true },
@@ -133,7 +136,7 @@ test("routing keeps library, comparison and revision checks with their owners", 
   // A path no row names, and an unavailable base, select every lane.
   for (const path of ["unknown-input", "conformance/vectors/keys.json", ".gitignore"])
     assert.ok(Object.values(select([path])).every(Boolean), path);
-  assert.deepEqual(select(["rust/tessera-sort/src/lib.rs", "bench/rust/native/ips.cpp"]), {
+  assert.deepEqual(select(["rust/tessera-order/src/lib.rs", "bench/rust/native/ips.cpp"]), {
     ...none,
     rust: true,
     comparison: true,

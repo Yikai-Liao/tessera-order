@@ -12,7 +12,7 @@
 //!
 //! ```
 //! use core::cmp::Reverse;
-//! use tessera_sort::{stable_sort, stable_sort_by_key};
+//! use tessera_order::{stable_sort, stable_sort_by_key};
 //!
 //! let mut keys = [42, -7, 42, 0];
 //! stable_sort(&mut keys);
@@ -105,7 +105,7 @@ pub use parallel::{par_stable_sort, par_stable_sort_by_key};
 ///
 /// ```
 /// let mut values = [0.5f64, -0.0, f64::NAN, 0.0, -1.0];
-/// tessera_sort::stable_sort(&mut values);
+/// tessera_order::stable_sort(&mut values);
 /// let bits: Vec<u64> = values.iter().map(|x| x.to_bits()).collect();
 /// let expected = [-1.0f64, -0.0, 0.0, 0.5, f64::NAN].map(f64::to_bits);
 /// assert_eq!(bits, expected);
@@ -150,12 +150,24 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 ///     Row { timestamp: 10, name: "a".into() },
 ///     Row { timestamp: 30, name: "d".into() },
 /// ];
-/// tessera_sort::stable_sort_by_key(&mut rows, |row| row.timestamp);
+/// tessera_order::stable_sort_by_key(&mut rows, |row| row.timestamp);
 /// let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
 /// assert_eq!(names, ["a", "c", "d"]);
 /// ```
 pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
     engine::sort::<T, _>(values, key::ByKey(key));
+}
+
+/// Research-only unstable entry; shares encoding, routing and tile leaves.
+#[doc(hidden)]
+pub fn prototype_unstable_sort<K: RadixKey>(values: &mut [K]) {
+    engine::sort_unstable(values, key::Direct);
+}
+
+/// Research-only unstable entry with the stable API's key and panic contracts.
+#[doc(hidden)]
+pub fn prototype_unstable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
+    engine::sort_unstable(values, key::ByKey(key));
 }
 
 /// Internal thresholds, exported for benchmarks that probe boundary sizes.

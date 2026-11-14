@@ -23,7 +23,7 @@ use core::ops::Range;
 /// # Examples
 /// ```
 /// let values = [3u64, 1, 3, 2];
-/// assert_eq!(tessera_sort::stable_argsort(&values), [1, 3, 0, 2]);
+/// assert_eq!(tessera_order::stable_argsort(&values), [1, 3, 0, 2]);
 /// assert_eq!(values, [3, 1, 3, 2]);
 /// ```
 pub fn stable_argsort<K: RadixKey>(values: &[K]) -> Vec<usize> {
@@ -41,7 +41,7 @@ pub fn stable_argsort<K: RadixKey>(values: &[K]) -> Vec<usize> {
 /// # Examples
 /// ```
 /// let rows = [(2u32, "first"), (1, "middle"), (2, "last")];
-/// assert_eq!(tessera_sort::stable_argsort_by_key(&rows, |r| r.0), [1, 0, 2]);
+/// assert_eq!(tessera_order::stable_argsort_by_key(&rows, |r| r.0), [1, 0, 2]);
 /// ```
 pub fn stable_argsort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
     values: &[T],
@@ -67,7 +67,7 @@ pub fn stable_argsort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
 /// # Examples
 /// ```
 /// let mut values = [3u64, 1, 2, 9, 7];
-/// tessera_sort::stable_sort_segments(&mut values, &[0, 3, 3, 5]);
+/// tessera_order::stable_sort_segments(&mut values, &[0, 3, 3, 5]);
 /// assert_eq!(values, [1, 2, 3, 7, 9]);
 /// ```
 pub fn stable_sort_segments<K: RadixKey>(values: &mut [K], offsets: &[usize]) {
@@ -106,7 +106,7 @@ pub fn stable_sort_segments_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
 /// # Examples
 /// ```rust
 /// let mut values = [9u64, 3, 1, 7, 2];
-/// let (smallest, remaining) = tessera_sort::stable_top_k(&mut values, 3);
+/// let (smallest, remaining) = tessera_order::stable_top_k(&mut values, 3);
 /// let mut members = smallest.to_vec();
 /// members.sort();
 /// assert_eq!(members, [1, 2, 3]);
@@ -146,7 +146,7 @@ pub fn stable_top_k_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
 /// # Examples
 /// ```
 /// let mut values = [9u64, 3, 1, 7, 2];
-/// tessera_sort::stable_sort_prefix(&mut values, 3);
+/// tessera_order::stable_sort_prefix(&mut values, 3);
 /// assert_eq!(&values[..3], &[1, 2, 3]);
 /// ```
 pub fn stable_sort_prefix<K: RadixKey>(values: &mut [K], prefix_len: usize) {
@@ -185,7 +185,7 @@ pub fn stable_sort_prefix_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
 /// # Examples
 /// ```
 /// let mut values = [9u64, 3, 1, 7, 2];
-/// let (before, selected, after) = tessera_sort::stable_select_nth(&mut values, 2);
+/// let (before, selected, after) = tessera_order::stable_select_nth(&mut values, 2);
 /// assert_eq!(*selected, 3);
 /// assert!(before.iter().all(|v| *v < 3));
 /// assert!(after.iter().all(|v| *v > 3));
@@ -227,7 +227,7 @@ pub fn stable_select_nth_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
 /// # Examples
 /// ```
 /// let mut values = [9u64, 3, 1, 7, 2];
-/// tessera_sort::stable_sort_rank_range(&mut values, 1..4);
+/// tessera_order::stable_sort_rank_range(&mut values, 1..4);
 /// assert_eq!(&values[1..4], &[2, 3, 7]);
 /// ```
 pub fn stable_sort_rank_range<K: RadixKey>(values: &mut [K], ranks: Range<usize>) {
@@ -264,7 +264,7 @@ pub fn stable_sort_rank_range_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
 /// # Examples
 /// ```
 /// let mut values = [9u64, 3, 1, 7, 2];
-/// tessera_sort::stable_select_nth_many(&mut values, &[3, 1, 3]);
+/// tessera_order::stable_select_nth_many(&mut values, &[3, 1, 3]);
 /// assert_eq!(values[1], 2);
 /// assert_eq!(values[3], 7);
 /// ```

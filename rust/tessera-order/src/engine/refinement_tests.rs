@@ -163,7 +163,7 @@ fn skipped_bands_receive_only_parent_classification() {
             );
             record.0
         });
-        Sorter {
+        Sorter::<_, _> {
             scratch: &mut Workspace::new(),
             extractor: &mut extractor,
             tile_len,
@@ -213,7 +213,7 @@ fn equality_band_satisfies_multiple_ranks_without_analysis() {
         );
         record.0
     });
-    Sorter {
+    Sorter::<_, _> {
         scratch: &mut Workspace::new(),
         extractor: &mut extractor,
         tile_len: 2,
@@ -253,7 +253,7 @@ fn rotated_runs_project_post_rotation_coordinates() {
             );
             record.0
         });
-        Sorter {
+        Sorter::<_, _> {
             scratch: &mut Workspace::new(),
             extractor: &mut extractor,
             tile_len: 2,
@@ -326,7 +326,7 @@ fn partial_child_failure_restores_records_and_releases_workspace() {
                     }
                     record.key
                 });
-                Sorter {
+                Sorter::<_, _> {
                     scratch: &mut workspace,
                     extractor: &mut extractor,
                     tile_len,

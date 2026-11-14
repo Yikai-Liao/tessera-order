@@ -1,6 +1,8 @@
 # Engine reference
 
-This page owns the engine's code boundaries and invariants in `rust/tessera-sort`. Routing rules, thresholds and their reasons live on the [explanation pages](../explain/index.md); [engine evidence](evidence.md) keeps failed experiments and open measured losses.
+This page owns the engine's code boundaries and invariants in `rust/tessera-order`. Routing rules, thresholds and their reasons live on the [explanation pages](../explain/index.md); [engine evidence](evidence.md) keeps failed experiments and open measured losses.
+
+The experimental serial entries share these decisions and stable tile leaves but use bounded in-slice swapping for node movement; the [feasibility study](evidence.md#unstable-node-partition-feasibility) owns their status and measured limits. The stable and Rayon contracts below are unchanged.
 
 ## Vocabulary
 

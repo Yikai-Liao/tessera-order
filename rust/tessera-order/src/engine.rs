@@ -280,7 +280,7 @@ fn prepare<T, E: Extract<T>>(
 /// did.
 ///
 /// An insertion-sized tile gets an unlimited budget; another tile gets one
-/// swap per record. A longer input first insertion-sorts one tile of keys in a
+/// swap per four records. A longer input first insertion-sorts one tile of keys in a
 /// local buffer, and scales that window's swap count to the whole input as the
 /// budget for the records.
 /// A window that needs no swaps says nothing about the rest, so the records are
@@ -299,14 +299,16 @@ fn insertion_probe<T, E: Extract<T>>(
         return true;
     }
     let probe_len = tile_len.max(2).min(records.len());
+    // Bound failed probes without changing the unlimited insertion leaf.
+    let probe_budget = probe_len / 4;
     if probe_len == records.len() {
-        return extractor.insertion_sort(records, probe_len).is_some();
+        return extractor.insertion_sort(records, probe_budget).is_some();
     }
     let mut keys: Vec<_> = records[..probe_len]
         .iter()
         .map(|record| extractor.key(record))
         .collect();
-    match Direct.insertion_sort(&mut keys, probe_len) {
+    match Direct.insertion_sort(&mut keys, probe_budget) {
         Some(0) | None => false,
         Some(swaps) => {
             // The successful probe bounds swaps by probe_len, so the quotient

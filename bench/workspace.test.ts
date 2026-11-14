@@ -271,7 +271,10 @@ test("Cargo artifacts retain paths and build provenance", async (t) => {
   }
 });
 
-test("Cargo resolves configured flags before a single aligned benchmark build", async (t) => {
+// Real Cargo probe builds; a cold CI runner has needed more than the suite's 30 s default.
+test("Cargo resolves configured flags before a single aligned benchmark build", {
+  timeout: 120_000,
+}, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-flags-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const tree = join(directory, "tree");

@@ -65,6 +65,7 @@ The following additions are **unreleased**, not part of the published 0.1 packag
 |---|---|
 | `stable_argsort` / `_by_key` | Return sorted indices without moving source records |
 | `stable_sort_segments` / `_by_key` | Sort independent segments with invocation workspace reuse |
+| `sort_by_cached_key` | Sort stably, evaluating the key once per record |
 | `stable_partition` | Stably place predicate matches before nonmatches |
 | `stable_partition_by_bucket` | Stably group finite categories and return every category boundary |
 | `stable_top_k` / `_by_key` | Partition an unordered minimum-k set with stable boundary membership |

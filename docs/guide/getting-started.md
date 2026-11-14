@@ -140,6 +140,15 @@ assert_eq!(offsets, [0, 2, 2, 4]);
 assert_eq!(jobs, [(0, "b"), (0, "d"), (2, "a"), (2, "c")]);
 ```
 
+When the classifier is costly or must not run twice for a record, sort by it with `sort_by_cached_key` and traverse the groups. It evaluates the key once per record; a `u8` or `i8` key moves the records in one distribution, as above, without caching keys:
+
+```rust
+let mut jobs = [(2, "a"), (0, "b"), (2, "c"), (0, "d")];
+tessera_order::sort_by_cached_key(&mut jobs, |job| job.0 as u8);
+let groups: Vec<_> = jobs.chunk_by(|a, b| a.0 == b.0).map(<[_]>::len).collect();
+assert_eq!(groups, [2, 2]);
+```
+
 See [category semantics](../../conformance/semantics.md#stable-category-partitions) for classifier evaluation, supported counts, panic recovery and category-dependent memory. Categories need not correspond to key bits or ordered ranks.
 
 ## Multi-field sorting and groups

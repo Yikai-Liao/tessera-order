@@ -185,10 +185,12 @@ pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], k
 /// # Memory
 ///
 /// Depends on the key type. A key whose encoding has at most eight bits, such
-/// as `u8`, `i8` or [`Reverse<u8>`](core::cmp::Reverse), needs the memory of
-/// [`stable_sort_by_key`]. Wider keys allocate one (encoded key, record index)
-/// pair per record, plus [`stable_sort`] scratch for the pairs, and free it
-/// before returning.
+/// as `u8`, `i8` or [`Reverse<u8>`](core::cmp::Reverse), stays within the
+/// scratch bound of [`stable_sort_by_key`]. Wider keys allocate one (encoded
+/// key, record index) pair per record, plus [`stable_sort`] scratch for the
+/// pairs. Unlike the other sorts, ordered and constant inputs also allocate:
+/// their order is known only after every key has been evaluated. All scratch
+/// is freed before returning.
 ///
 /// # Examples
 ///

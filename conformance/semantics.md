@@ -49,11 +49,11 @@ Descending order is expressed by reversing the key, not by reversing an ascendin
 
 ## Space
 
-Implementations document the scratch memory one call needs and fixed-size storage on the stack separately. Each Rust call owns its scratch and releases it before returning, including when a key function unwinds. Complete in-place sorting of already ordered or constant inputs does not allocate. The serial extensions below distinguish mandatory output and request metadata from sorting workspace.
+Implementations document the scratch memory one call needs and fixed-size storage on the stack separately. Each Rust call owns its scratch and releases it before returning, including when a key function unwinds. Complete in-place sorting of already ordered or constant inputs does not allocate, except with [cached keys](#cached-keys). The serial extensions below distinguish mandatory output and request metadata from sorting workspace.
 
 The Rust implementation requires `std` and allocates heap scratch through the global allocator. One call needs O(√n) block scratch for a fixed record size and key width, plus storage whose size does not depend on `n`: a tile of records (at least one record), up to two bytes of cached bucket ID per tile record, a probe-key buffer of at most one tile of encoded keys, and cursor tables on the stack, one per tile-local MSD level, with depth bounded by the key width. Node partitions also nest at most once per key bit, whatever the key distribution. [Finishing tiles](../docs/explain/tiles.md) defines the tile and cursor-table sizes.
 
-`sort_by_cached_key` keeps that bound when one stable distribution covers the encoded key width (`u8`, `i8` and their `Reverse`): each key is its own category, and the distribution caches only the tile bucket IDs above. Wider keys cache one (encoded key, record index) pair per record, O(n) like the standard library's cached-key sort, plus the sort scratch for those pairs.
+`sort_by_cached_key` keeps that bound when one stable distribution covers the encoded key width (`u8`, `i8` and their `Reverse`): each key is its own category, and the distribution caches only the tile bucket IDs above. Wider keys cache one (encoded key, record index) pair per record, O(n) like the standard library's cached-key sort, plus the sort scratch for those pairs. Both routes allocate even for ordered or constant inputs, since the order is known only after every key has been evaluated.
 
 ## Serial slice operations
 

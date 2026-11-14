@@ -58,7 +58,11 @@ jobs:
       TRACKING_ALGORITHM: ${{ matrix.algorithm }}
       CC: clang
       CXX: clang++
-      TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/main-tracking
+      TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/benchmark
+      CARGO_BUILD_TARGET: x86_64-unknown-linux-gnu
+      CARGO_PROFILE_BENCH_DEBUG: "0"
+      # Native adapters need the GNU C++ shared runtime; Rust workers match PR preparation.
+      RUSTFLAGS: ${{ !matrix.native && '-C target-feature=+crt-static' || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -75,8 +79,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: ". -> target/main-tracking"
-          shared-key: main-tracking-static-gnu
+          workspaces: ". -> target/benchmark"
+          # Only static Rust workers share the PR cache; keep native outputs separate.
+          shared-key: ${{ matrix.native && 'benchmark-native' || 'benchmark-static' }}-${{ hashFiles('Cargo.toml', 'bench/workspace.ts') }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json

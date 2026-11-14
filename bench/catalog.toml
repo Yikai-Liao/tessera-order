@@ -92,7 +92,8 @@ modes = [
 [continuous]
 # One required SIMD backend; Cloud history lives under this Testbed.
 testbed = "ci"
-features = ["rayon"]
+# The continuous plan's four-thread and operation cases select these harness features.
+features = ["operations", "rayon"]
 
 [inputs]
 lengths = [1000,65536,1000000,10000000]

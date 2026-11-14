@@ -142,3 +142,59 @@ lengths = [ 1000000 ]
 types = [ "u128" ]
 distributions = [ "random", "sparse8" ]
 lengths = [ 1000000 ]
+
+# Each operation enters the shared engine through its own route and finishing work;
+# one direct-key and one keyed-record input per operation guard that wrapper cost.
+[[include]]
+types = [ "u64", "row_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+operation = { kind = "argsort" }
+
+[[include]]
+types = [ "u64", "row_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+operation = { kind = "partition" }
+
+[[include]]
+types = [ "u64", "row_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+operation = { kind = "partition-buckets", bucket_count = 16 }
+
+[[include]]
+types = [ "u64", "row_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+operation = { kind = "segments", segment_len = 1024 }
+
+[[include]]
+types = [ "u64", "row_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+operation = { kind = "top-k", k = 1024 }
+
+[[include]]
+types = [ "u64", "row_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+operation = { kind = "prefix", prefix_len = 8192 }
+
+[[include]]
+types = [ "u64", "row_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+operation = { kind = "select", index = 32768 }
+
+[[include]]
+types = [ "u64", "row_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+operation = { kind = "rank-range", start = 16384, end = 24576 }
+
+[[include]]
+types = [ "u64", "row_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+operation = { kind = "select-many", indices = [ 8192, 32768, 57344 ] }

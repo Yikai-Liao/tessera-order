@@ -109,6 +109,24 @@ test("operation overrides retain exact raw requests and reject unrelated flags",
   });
 });
 
+test("revision suites place operations on include rules; an override replaces them", async () => {
+  const rule = { types: ["u64"], distributions: ["random"], lengths: [1000] };
+  const top = { ...rule, operation: { kind: "top-k", k: 10 } };
+  parsePlan({ schema: 1, algorithms: ["tessera"], include: [rule, top] });
+  for (const invalid of [
+    { schema: 1, algorithms: ["tessera"], include: [rule], exclude: [top] },
+    { schema: 1, algorithms: ["tessera"], include: [rule], parallel: [top] },
+    { schema: 2, algorithms: ["tessera"], operation: { kind: "argsort" }, include: [top] },
+    { schema: 1, algorithms: ["tessera"], include: [{ ...top, lengths: ["tile-next"] }] },
+    { schema: 1, algorithms: ["tessera"], include: [{ ...top, lengths: [5] }] },
+  ])
+    assert.throws(() => parsePlan(invalid));
+  const continuous = await loadPlan("continuous");
+  assert.ok(continuous.include.some((entry) => entry.operation));
+  const sorting = await loadPlan("continuous", { operation: "sort" });
+  assert.ok(sorting.include.length > 0 && sorting.include.every((entry) => !entry.operation));
+});
+
 test("plan CLI defaults to JSON and retains explicit TOML export", async () => {
   const expected = await loadPlan("local");
   for (const format of ["json", "toml"]) {

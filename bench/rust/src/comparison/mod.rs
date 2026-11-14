@@ -120,6 +120,9 @@ impl Options {
         {
             return Err("paired algorithm runs require tessera and std-stable controls".into());
         }
+        if options.plan.has_rule_operations() {
+            return Err("algorithm comparisons take one plan-level operation; rule operations are for revision suites".into());
+        }
         if !options.plan.operation().is_sort() && !cfg!(feature = "operations") {
             return Err("non-sort workloads require the operations benchmark feature; the library APIs are always available".into());
         }

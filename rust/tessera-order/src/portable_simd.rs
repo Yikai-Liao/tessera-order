@@ -497,6 +497,46 @@ mod tests {
     }
 
     #[test]
+    fn insertion_continuation_with_encoded_keys() {
+        use crate::key::{ByKey, Extract};
+
+        fn check<K: RadixKey>(mut keys: Vec<K>)
+        where
+            K::Encoded: core::fmt::Debug,
+        {
+            keys.sort_by_key(|key| K::encode(*key));
+            let expected: Vec<_> = keys.iter().copied().map(K::encode).collect();
+            for index in (0..keys.len() - 1).step_by(8) {
+                keys.swap(index, index + 1);
+            }
+            let mut direct = keys.clone();
+            let mut scalar = keys;
+            assert!(try_insertion(&mut direct, 64));
+            assert!(ByKey(|key: &K| *key).try_insertion(&mut scalar, 64));
+            assert_eq!(
+                direct.iter().copied().map(K::encode).collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(
+                scalar.iter().copied().map(K::encode).collect::<Vec<_>>(),
+                expected
+            );
+        }
+
+        let mut floats: Vec<_> = (1..=193).map(f64::from_bits).collect();
+        floats[..5].copy_from_slice(&[
+            -0.0,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::from_bits(0xfff8_0000_0000_0001),
+            f64::from_bits(0x7ff8_0000_0000_0001),
+        ]);
+        check(floats.clone());
+        check(floats.into_iter().map(core::cmp::Reverse).collect());
+        check((0..193u128).map(|key| (key << 80) | (key * 31)).collect());
+    }
+
+    #[test]
     fn insertion_budget() {
         for length in [0u32, 1, 48, 63, 64, 65, if cfg!(miri) { 97 } else { 500 }] {
             let mut keys: Vec<_> = (0..length).map(|index| (index * 37) % length).collect();

@@ -262,3 +262,4 @@ fn direct_entries_follow_encoded_rank_order() {
         assert_eq!(values[index], sorted[index]);
     }
 }
+// reuse probe

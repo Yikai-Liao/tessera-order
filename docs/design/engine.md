@@ -79,7 +79,7 @@ Serial and parallel partitions use one relocatable-source ledger. A flat source 
 - If the source is still in its skipped block, an overlap-safe copy moves the prefix and marks that block final. Otherwise the source is disjoint from its destination, and its block becomes free. A relocated source's new owner lock also observes its old block becoming final.
 - Physical-owner locks are taken in increasing ID order. *Final* means no unread source remains, not that the block is filled. Adjacent bands may share block fragments but never live record slots.
 
-Once all of a band's sources retire and every destination block is protected, the movement task lends the band with all locks released. One callback owns child analysis: candidate-masked variation, constant completion, order confirmation, stable reversal, then node or tile routing. Tile storage owns the [whole-child allowance](../explain/tiles.md#parallel-child-allowance); larger children keep ordinary descendant tiles. No queue or second job retains the borrow. Serial partitions finish tile-sized bands in the same callback position while they are cache-hot.
+Once all of a band's sources retire and every destination block is protected, the movement task lends the band with all locks released. One callback owns child analysis: order probing and completion, candidate-masked variation for unfinished children, constant completion, deferred flat confirmation, then node or tile routing. Tile storage owns the [whole-child allowance](../explain/tiles.md#parallel-child-allowance); larger children keep ordinary descendant tiles. No queue or second job retains the borrow. Serial partitions finish tile-sized bands in the same callback position while they are cache-hot.
 
 ### Progress, recovery and retained scratch
 
@@ -106,7 +106,7 @@ When the root digit covers all remaining variation in at most eight bits, direct
 
 ## Insertion and scans
 
-Every insertion pass, a budgeted probe or the finish of a tile or bucket, runs `insertion_loop`: find the first descending adjacent pair, move the later record left, resume after it. The moving record’s encoded key is reused across its adjacent swaps; only preceding records need fresh extraction. A probe returns its swap count and may stop at its budget. `finish_insertion` has no budget and returns `()`, so no unused count crosses a target-feature boundary. The loop receives an inversion scan alongside the extractor: user-key scans use the same mutable extractor, direct-key passes capture the backend selected before entering the loop. No insertion-only extractor carries a SIMD token.
+Every insertion pass, a budgeted probe or the finish of a tile or bucket, runs `insertion_loop`: find the first descending adjacent pair, move the later record left, resume after it. A probe returns its swap count and may stop at its budget. `finish_insertion` has no budget and returns `()`, so no unused count crosses a target-feature boundary. The loop receives an inversion scan alongside the extractor: user-key scans use the same mutable extractor, direct-key passes capture the backend selected before entering the loop. No insertion-only extractor carries a SIMD token.
 
 | Pass | Implementation |
 |---|---|

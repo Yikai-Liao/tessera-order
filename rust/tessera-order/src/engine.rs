@@ -59,10 +59,8 @@ pub(crate) fn insertion_loop<T, E: Extract<T>>(
         if swaps > budget {
             return None;
         }
-        // This record keeps its key while adjacent swaps move it left.
-        let key = extractor.key(current);
         for before in prefix.iter_mut().rev() {
-            if extractor.key(before) <= key {
+            if extractor.key(before) <= extractor.key(current) {
                 break;
             }
             core::mem::swap(before, current);
@@ -487,15 +485,21 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         if records.len() < 2 || candidate == 0 {
             return;
         }
-        // Constant children finish after the varying scan; confirming order
-        // lets ordered children skip partitioning.
+        // Ordered children need only one full scan. Flat samples retain the
+        // varying-bit scan, which can finish constant children cheaply.
+        let sampled = probe_order(records, self.extractor);
+        if finish_ordered(records, sampled, self.extractor) {
+            return;
+        }
         let varying = scan_varying_bits(records, candidate, self.extractor);
         if varying == 0 {
             return;
         }
-        let order = confirm_order(records, self.extractor);
-        if finish_ordered(records, order, self.extractor) {
-            return;
+        if sampled == Order::Flat {
+            let order = confirm_order(records, self.extractor);
+            if finish_ordered(records, order, self.extractor) {
+                return;
+            }
         }
         self.sort_node(records, varying);
     }
@@ -629,6 +633,24 @@ mod tests {
         assert!(confirm_order(&values, &mut Direct) == Order::Unsorted);
         crate::stable_sort(&mut values);
         assert_eq!(values, (0..len as u64).collect::<Vec<_>>());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "sampling adds no distinct ownership boundary")]
+    fn child_flat_sample_does_not_certify_order() {
+        let mut records = alloc::vec![0u64; 3 * ORDER_SAMPLES];
+        // At stride three, index four belongs to neither sampled pair.
+        records[4] = 1;
+        let mut expected = records.clone();
+        expected.sort();
+        let mut scratch = Scratch::new();
+        Sorter {
+            scratch: &mut scratch,
+            extractor: &mut Direct,
+            tile_len: tile_capacity::<u64>(TILE_BYTES),
+        }
+        .sort_child(&mut records, u64::MAX as u128);
+        assert_eq!(records, expected);
     }
 
     // Tiny tiles exercise block materialization and cache-hot callbacks under

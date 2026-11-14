@@ -2,18 +2,6 @@
 
 This page tracks unfinished work and its acceptance conditions. Current behavior belongs in the [user guide](docs/guide/getting-started.md), the [engine reference](docs/design/engine.md) and [shared semantics](conformance/semantics.md); delete an item when it lands or is rejected, after moving any conclusion later work depends on to its owner.
 
-## Rust 0.1
-
-The first crates.io release: stable sort only.
-
-| Deliverable | Done when |
-|---|---|
-| Release | `rust/v0.1.0` follows [`RELEASING.md`](RELEASING.md). Performance claims cite [main tracking](docs/development/continuous-benchmarks.md) at the release commit; the [algorithm comparison](docs/benchmarks/algorithms.md) is the published ranking |
-
-After 0.1:
-
-- **Local session defaults.** Fix the sample duration and prepared-memory cap of local paired sessions from the test machine's memory and the time a 10M-record case takes.
-
 ## Engine
 
 The [structure analysis](docs/design/evidence.md#structure-analysis) finds concentrated ownership, not proven minimality. [PR #120](https://github.com/Yikai-Liao/tessera-order/pull/120) has merged the direct source ledger, so the completion study is no longer waiting for a design choice. The [post-ledger proposal](docs/design/evidence.md#post-ledger-simplification-proposal) evaluates further simplification against that engine. Start with the independent scan and stream-capacity experiments below, then shared split completion; none is a prerequisite for resolving [acceptance debt](#acceptance-debt) or extending [Rayon](#rayon) coverage.
@@ -72,6 +60,7 @@ An independent track binding the Rust crate; see the [design](docs/design/python
 
 ## Benchmark tooling and investigations
 
+- Fix the sample duration and prepared-memory cap of local paired sessions from the test machine's memory and the time a 10M-record case takes.
 - Investigate benchmark build invalidation without weakening provenance. Missing watched paths can force repeated rebuilds, but the existing watches do not cover every file that can affect Git dirty state. A solution must reliably detect dirty-state changes outside the benchmark source trees, optional revision file transitions and packed or detached Git references. Validate actual Cargo builds and snapshot workflows before changing the watches.
 - Study monomorphization work in the optimized smoke harness before changing generic engine boundaries: LLVM IR inspection showed repeated `Partition::adopt_shards` instances across record and extractor types (adoption is since retired; the ledger is generic over the record type only). IR size alone does not establish compile-time savings or justify losing inlining; any extraction needs compile-time measurements and the engine performance and ownership controls.
 

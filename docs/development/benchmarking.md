@@ -1,6 +1,6 @@
 # Benchmarking
 
-The comparison runner in `bench/rust` measures sorting algorithms on one machine: Tessera against the standard stable sort, other stable sorts, unstable sorts where equal keys are indistinguishable, and the extra memory of each. [Continuous benchmarks](continuous-benchmarks.md) track PR regressions; release comparisons use the paired measurements described here.
+The comparison runner in `bench/rust` measures sorting algorithms on one machine: Tessera against the standard stable sort, other stable sorts, unstable sorts where equal keys are indistinguishable, and the extra memory of each. [Continuous benchmarks](continuous-benchmarks.md) track PR regressions and publish the algorithm comparison; local experiments and source attribution use the paired measurements described here.
 
 ## Command capabilities
 
@@ -301,7 +301,7 @@ Each case has its declared budget: three blocks for a short screen, nine for an 
 
 A variant's per-block ratio is its time per sort over the mean of the two Tessera times. The report gives the median ratio, per-block extremes and median ns per element. The A/A noise range spans both Tessera times over their block mean, across blocks. A variant is faster or slower only when all three short-screen blocks (or at least eight of nine) agree on direction and its median lies outside that range; otherwise it is inconclusive. The range is not a confidence interval: controls of 100 and 120 give the range 100/110 to 120/110, so an opponent at 109 is within noise. `tessera-aa` reports A2/A1 separately.
 
-The standard report shows the 1M-key ranking, 1M and 1,000-key distribution comparisons, the 1M element-type comparison, 1M per-type panels and 10M-key peak heap. Rankings and cross-type geometric means use the ten baseline distributions. Key rankings admit stable and unstable opponents, record rankings stable ones only. Speed panels anchor to `slice::sort` within the same blocks; [the figure guide](benchmark-figures.md) owns encoding. Native-CPU builds, branch alignment and cold-cache studies are outside the release comparison.
+The standard report shows the 1M-key ranking, 1M and 1,000-key distribution comparisons, the 1M element-type comparison, 1M per-type panels and 10M-key peak heap. Rankings and cross-type geometric means use the ten baseline distributions. Key rankings admit stable and unstable opponents, record rankings stable ones only. Speed panels anchor to `slice::sort` within the same blocks; [the figure guide](benchmark-figures.md) owns encoding. Native-CPU builds, branch alignment and cold-cache studies are outside the standard report.
 
 ## Results and provenance
 
@@ -325,4 +325,4 @@ Manifests record the source revision and dirty state, source and executable SHA-
 
 The memory executable measures one sort after input and reference are allocated. Rust-only builds count requested bytes through a global allocator. Native builds count usable sizes through wrapped `malloc`, `calloc`, `realloc`, `free`, `aligned_alloc` and `posix_memalign`, plus overridden C++ operators, since libstdc++'s internal calls bypass linker wrapping; a self-test checks both paths for double counting. Input buffers, owned payloads and stack storage are not counted. `glidesort-sqrt` allocates as many whole records as fit Tessera's measured peak for that case.
 
-Published performance claims come from a release archive of the complete results directory; synthetic chart fixtures only test layout. The first release comparison is on the [roadmap](../../ROADMAP.md).
+Published performance claims come from [main tracking](continuous-benchmarks.md), whose journals are kept on the `benchmark-data` branch; a local report supports a claim only with its complete results directory. Synthetic chart fixtures only test layout.

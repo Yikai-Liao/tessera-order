@@ -1,6 +1,6 @@
 [package]
 name = "tessera-order"
-# Unreleased. Publication waits for the benchmark runner and release report.
+# Unreleased. RELEASING.md lists the steps before publication.
 version = "0.0.0"
 publish = false
 description = "Order algorithms on stable block partitions; 0.1 provides stable radix sort with O(sqrt(n)) auxiliary memory"

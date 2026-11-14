@@ -471,19 +471,21 @@ impl<K: RadixKey> KeyCounts<K> {
     /// Counts a nonempty slice in a window of at most `SMALL_WINDOW_BITS` bits.
     /// Full encodings must agree outside that window, including omitted halves.
     fn count(records: &[K], low: usize, width: usize) -> Self {
+        // Establish the table bound once, not at every histogram update.
+        assert!(width <= SMALL_WINDOW_BITS);
         let buckets = 1 << width;
         let mask = K::Encoded::from_usize(buckets - 1);
         let shift = K::Encoded::from_usize(low);
-        let mut counts = [0; SMALL_WINDOW_BUCKETS];
-        for &record in records {
-            counts[((record.encode() >> shift) & mask).to_usize()] += 1;
-        }
-        Self {
+        let mut summary = Self {
             low,
             buckets,
-            counts,
+            counts: [0; SMALL_WINDOW_BUCKETS],
             outside: records[0].encode() & !(mask << shift),
+        };
+        for &record in records {
+            summary.counts[((record.encode() >> shift) & mask).to_usize()] += 1;
         }
+        summary
     }
 
     /// Combines disjoint shards with the same window and shared outside bits.
@@ -498,11 +500,11 @@ impl<K: RadixKey> KeyCounts<K> {
 
     /// Pairs each nonempty destination run with its decoded key.
     /// The slice must contain exactly the records summarized by this histogram.
-    fn runs(self, records: &mut [K]) -> impl Iterator<Item = (&mut [K], K)> {
+    fn runs<'a>(&self, records: &'a mut [K]) -> impl Iterator<Item = (&'a mut [K], K)> {
         let (outside, shift) = (self.outside, K::Encoded::from_usize(self.low));
-        self.counts
-            .into_iter()
-            .take(self.buckets)
+        self.counts[..self.buckets]
+            .iter()
+            .copied()
             .enumerate()
             .scan(records, move |remaining, (bucket, count)| {
                 let (run, rest) = core::mem::take(remaining).split_at_mut(count);

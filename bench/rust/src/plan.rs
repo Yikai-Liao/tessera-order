@@ -2,6 +2,9 @@
 
 //! Shared experiment selection and expansion, independent of measurement scheduling.
 
+mod operation;
+pub use operation::Operation;
+
 use serde::{Deserialize, Serialize};
 
 use std::{collections::BTreeSet, sync::OnceLock};
@@ -176,12 +179,21 @@ pub struct InputCase {
     pub distribution: String,
     /// Number of records.
     pub len: usize,
+    /// Operation and exact parameters; absent historical inputs mean sorting.
+    #[serde(default, skip_serializing_if = "Operation::is_sort")]
+    pub operation: Operation,
 }
 
 impl InputCase {
     /// Formats the stable identifier used in raw samples and reports.
     pub fn id(&self) -> String {
-        format!("{}/{}/{}/s1", self.ty, self.distribution, self.len)
+        format!(
+            "{}/{}/{}/s1{}",
+            self.ty,
+            self.distribution,
+            self.len,
+            self.operation.suffix()
+        )
     }
     /// Bytes of the input records, excluding owned payloads.
     pub fn input_bytes(&self) -> usize {
@@ -189,7 +201,22 @@ impl InputCase {
     }
     /// Names the resumable group containing this case's lengths.
     pub(crate) fn group(&self) -> String {
-        format!("{}/{}", self.ty, self.distribution)
+        format!(
+            "{}/{}{}",
+            self.ty,
+            self.distribution,
+            self.operation.suffix()
+        )
+    }
+
+    /// Small valid input for typed capability checks, never for measurement.
+    pub(crate) fn probe(&self) -> Self {
+        Self {
+            len: 32,
+            distribution: "random".into(),
+            operation: self.operation.probe(),
+            ..self.clone()
+        }
     }
 }
 
@@ -200,6 +227,8 @@ pub struct Plan {
     #[serde(rename = "$comment", skip_serializing_if = "Option::is_none")]
     _comment: Option<String>,
     schema: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    operation: Option<Operation>,
     /// Explicit algorithm selection; measurement drivers own their controls.
     pub(crate) algorithms: Vec<String>,
     include: Vec<Rule>,
@@ -220,8 +249,13 @@ impl Plan {
                 format!("invalid plan document\nJSON: {json_error}\nTOML: {toml_error}")
             })
         })?;
-        if plan.schema != 1 || plan.include.is_empty() || plan.algorithms.is_empty() {
-            return Err("expected a nonempty schema 1 plan".into());
+        let valid_schema = match (plan.schema, &plan.operation) {
+            (1, None) => true,
+            (2, Some(operation)) => !operation.is_sort(),
+            _ => false,
+        };
+        if !valid_schema || plan.include.is_empty() || plan.algorithms.is_empty() {
+            return Err("expected a nonempty schema 1 plan, or schema 2 with an operation".into());
         }
         let types: Vec<_> = catalog().types.iter().map(|ty| ty.id.clone()).collect();
         let distributions: Vec<_> = catalog()
@@ -269,7 +303,29 @@ impl Plan {
                 return Err("length selectors must be unique, nonempty and positive".into());
             }
         }
+        if !plan.operation().is_sort() {
+            if plan
+                .include
+                .iter()
+                .chain(&plan.exclude)
+                .chain(&plan.parallel)
+                .any(|r| {
+                    r.lengths.as_ref().is_some_and(|values| {
+                        values.iter().any(|n| matches!(n, Length::Boundary(_)))
+                    })
+                })
+            {
+                return Err("non-sort plans require literal record counts".into());
+            }
+            plan.inputs()?;
+            plan.parallel_inputs()?;
+        }
         Ok(plan)
+    }
+
+    /// Returns the requested result contract; old plans remain full sorting.
+    pub fn operation(&self) -> Operation {
+        self.operation.clone().unwrap_or_default()
     }
 
     /// Returns exactly the algorithms selected in this plan.
@@ -336,10 +392,13 @@ impl Plan {
                             .iter()
                             .any(|rule| rule.matches(ty, distribution, len))
                         {
+                            let operation = self.operation();
+                            operation.validate(len)?;
                             cases.insert(InputCase {
                                 ty: ty.clone(),
                                 distribution: distribution.clone(),
                                 len,
+                                operation,
                             });
                         }
                     }
@@ -429,6 +488,7 @@ mod tests {
                 ty: entry["type"].as_str().unwrap().into(),
                 distribution: entry["distribution"].as_str().unwrap().into(),
                 len: entry["length"].as_u64().unwrap() as usize,
+                operation: Operation::Sort {},
             };
             let group = criterion_group!("{}", &case.ty; &case.distribution, case.len);
             assert_eq!(group, entry["criterion_group"].as_str().unwrap());
@@ -437,6 +497,28 @@ mod tests {
                 entry["criterion"].as_str().unwrap()
             );
             assert_eq!(case.id(), entry["comparison"].as_str().unwrap());
+        }
+    }
+
+    #[test]
+    fn operation_grammar_and_ids_match_shared_contract() {
+        let fixture: Value =
+            toml::from_str(include_str!("../../plans/selection.fixture.toml")).unwrap();
+        let input = &fixture["operation_case"];
+        for entry in fixture["operations"].as_array().unwrap() {
+            let plan = serde_json::json!({
+                "schema": 2, "algorithms": ["tessera"], "operation": entry["operation"],
+                "include": [{"types": [input["ty"]], "distributions": [input["distribution"]], "lengths": [input["len"]]}]
+            });
+            let parsed = Plan::parse(&plan.to_string());
+            if let Some(id) = entry["comparison"].as_str() {
+                let cases = parsed.unwrap().inputs().unwrap();
+                assert_eq!(cases.len(), 1);
+                assert_eq!(cases[0].id(), id);
+                assert_eq!(cases[0].group(), entry["group"].as_str().unwrap());
+            } else {
+                assert!(parsed.is_err(), "{entry}");
+            }
         }
     }
 

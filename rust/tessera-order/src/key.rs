@@ -167,7 +167,7 @@ pub(crate) unsafe trait Extract<T> {
     where
         Self: Sized,
     {
-        crate::engine::confirm_ascending(records, self, previous)
+        crate::order::confirm_ascending(records, self, previous)
     }
 
     /// Sorts `records` stably by insertion, without a swap limit.
@@ -177,7 +177,7 @@ pub(crate) unsafe trait Extract<T> {
     where
         Self: Sized,
     {
-        crate::engine::finish_insertion(records, self, crate::scan::by_key);
+        crate::order::finish_insertion(records, self, crate::order::by_key);
     }
 
     /// Sorts `records` stably by insertion within `budget` swaps.
@@ -189,7 +189,7 @@ pub(crate) unsafe trait Extract<T> {
     where
         Self: Sized,
     {
-        crate::engine::insertion_loop(records, budget, self, crate::scan::by_key)
+        crate::order::insertion_loop(records, budget, self, crate::order::by_key)
     }
 }
 
@@ -218,6 +218,26 @@ unsafe impl<T, E: Extract<T>> Extract<T> for &mut E {
     #[inline]
     fn insertion_sort(&mut self, records: &mut [T], budget: usize) -> Option<usize> {
         (**self).insertion_sort(records, budget)
+    }
+}
+
+/// Number of bits needed to represent `value`; 0 for 0.
+#[inline]
+pub(crate) fn bit_len(value: u128) -> usize {
+    (u128::BITS - value.leading_zeros()) as usize
+}
+
+/// One pass worth of key bits: `width` bits starting at `shift`.
+#[derive(Clone, Copy)]
+pub(crate) struct Digit {
+    pub(crate) shift: usize,
+    pub(crate) width: usize,
+}
+
+impl Digit {
+    #[inline]
+    pub(crate) fn mask<V: Unsigned>(self) -> V {
+        (V::from_usize((1usize << self.width) - 1)) << V::from_usize(self.shift)
     }
 }
 
@@ -686,7 +706,7 @@ mod tests {
             let agrees = |records: &[K]| {
                 assert_eq!(
                     Direct.confirm_ascending(records, previous),
-                    crate::engine::confirm_ascending(records, &mut ByKey(|key: &K| *key), previous,),
+                    crate::order::confirm_ascending(records, &mut ByKey(|key: &K| *key), previous,),
                 );
             };
             agrees(&keys);

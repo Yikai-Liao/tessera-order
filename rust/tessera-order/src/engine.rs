@@ -4,7 +4,7 @@
 //!
 //! A *node* is a slice larger than the tile budget (64 KiB of records by
 //! default); [`block`] splits it with a stable block partition. A *tile* fits
-//! the budget and is finished here by insertion sort, a tile-local MSD
+//! the budget and is finished by [`tile`] with insertion, a tile-local MSD
 //! partition, or LSD counting passes through scratch. A *digit* ([`Digit`]) is
 //! the window of key bits one pass handles, and a *cursor table* holds one
 //! `u16` position per bucket. `docs/design/engine.md` describes each stage.
@@ -17,105 +17,25 @@
 pub(crate) mod parallel;
 
 mod plan;
-mod tile;
-pub(crate) use tile::Cursor;
+#[cfg(test)]
+mod refinement_tests;
 
+use crate::tile;
+
+use crate::order::scan_varying_bits;
+use crate::rank::Requirement;
 use crate::thresholds::{INSERTION_MAX, TILE_BYTES};
-use plan::{Digit, NodePlan, bit_len, plan_node};
+use crate::workspace::Workspace;
+use plan::{NodePlan, plan_node};
 use tile::capacity as tile_capacity;
 
 use alloc::vec::Vec;
 
 use crate::block;
 use crate::block::Classify;
-use crate::key::{self, Direct, Extract, KeyDigit, KeyHalf, Rank, Unsigned};
+use crate::key::{self, Digit, Direct, Extract, KeyDigit, KeyHalf, Rank, Unsigned, bit_len};
 
 type KeyValue<T, E> = <E as Extract<T>>::Value;
-
-/// Stably inserts inverted records until sorted or the swap budget runs out.
-/// A failed pass still leaves a stable permutation of the input.
-///
-/// The scanner returns the earliest descending adjacent pair in its shared
-/// suffix, using the same extractor where it needs user keys. Direct-key
-/// callers instead capture the backend selected for this entire pass.
-/// The SIMD caller enters this from a target-feature context. Keeping the
-/// loop in that context avoids out-of-line calls for each vector operation.
-#[inline(always)]
-pub(crate) fn insertion_loop<T, E: Extract<T>>(
-    records: &mut [T],
-    budget: usize,
-    extractor: &mut E,
-    mut first_inversion: impl FnMut(&[T], &mut E) -> Option<usize>,
-) -> Option<usize> {
-    let mut swaps = 0;
-    let mut start = 0;
-    while let Some(offset) = first_inversion(&records[start..], extractor) {
-        let index = start + offset + 1;
-        let (prefix, tail) = records.split_at_mut(index);
-        let (mut current, prefix) = prefix.split_last_mut().unwrap();
-        // The scan already compared this pair, so swap without re-reading keys.
-        core::mem::swap(current, &mut tail[0]);
-        swaps += 1;
-        if swaps > budget {
-            return None;
-        }
-        for before in prefix.iter_mut().rev() {
-            if extractor.key(before) <= extractor.key(current) {
-                break;
-            }
-            core::mem::swap(before, current);
-            current = before;
-            swaps += 1;
-            if swaps > budget {
-                return None;
-            }
-        }
-        start = index;
-    }
-    Some(swaps)
-}
-
-/// Finishes insertion without a swap limit.
-///
-/// The unit return keeps the unused swap total inside the inlined operation,
-/// so it can be discarded before returning across a target-feature boundary.
-#[inline(always)]
-pub(crate) fn finish_insertion<T, E: Extract<T>>(
-    records: &mut [T],
-    extractor: &mut E,
-    first_inversion: impl FnMut(&[T], &mut E) -> Option<usize>,
-) {
-    let _ = insertion_loop(records, usize::MAX, extractor, first_inversion);
-}
-
-/// Scans until all candidate bits have appeared in both states, or the input ends.
-/// Only candidate bits are returned, so even changing keys cannot restore a
-/// parent partition digit and prevent the recursion from making progress.
-fn scan_varying_bits<T, E: Extract<T>>(records: &[T], candidate: u128, extractor: &mut E) -> u128 {
-    if candidate == 0 {
-        return 0;
-    }
-    let first = extractor.key(&records[0]);
-    let (mut union, mut intersection) = (first, first);
-    let mut index = 1;
-    let mut batch = 64;
-    while index < records.len() {
-        let end = index + batch.min(records.len() - index);
-        for record in &records[index..end] {
-            let key = extractor.key(record);
-            union |= key;
-            intersection = intersection & key;
-        }
-        let seen = union.to_u128() ^ intersection.to_u128();
-        if seen & candidate == candidate {
-            break;
-        }
-        index = end;
-        // Early witnesses stay cheap; long scans get vectorizable stretches.
-        batch = batch.saturating_mul(2);
-    }
-    (union.to_u128() ^ intersection.to_u128()) & candidate
-}
 
 /// The candidate bits left when every child holds the top bit of a nonzero
 /// `varying` constant, as after a run or equality split.
@@ -123,25 +43,7 @@ fn without_top_bit(varying: u128) -> u128 {
     varying & !(1 << (bit_len(varying) - 1))
 }
 
-/// Buffers shared by the nodes and tiles of one sort.
-struct Scratch<T> {
-    /// Tile-owned record scratch and cached classification storage.
-    tile: tile::Scratch<T>,
-    /// Block buffers allocated when a node first needs them.
-    block: block::Buffers<T>,
-}
-
-impl<T> Scratch<T> {
-    /// Creates empty scratch without allocating.
-    fn new() -> Self {
-        Self {
-            tile: tile::Scratch::new(),
-            block: block::Buffers::new(),
-        }
-    }
-}
-
-/// How a stable block partition leaves its children.
+/// How a node partition leaves its children.
 #[derive(Clone, Copy)]
 struct Split {
     /// Bits of the classifier's bucket index.
@@ -165,7 +67,7 @@ impl Split {
         }
     }
 
-    /// Partitions `records` by `classifier` and finishes tile-sized children
+    /// Partitions all records and finishes requested tile-sized children
     /// while they are cache-hot, using the extractor `lend` returns for child
     /// work. Returns each bucket's end; larger children remain.
     fn partition<T, E: Extract<T>, C: Classify<T>>(
@@ -173,15 +75,20 @@ impl Split {
         records: &mut [T],
         classifier: C,
         lend: fn(&mut C) -> &mut E,
-        scratch: &mut Scratch<T>,
+        scratch: &mut Workspace<T>,
         tile_len: usize,
+        required: Requirement<'_>,
     ) -> Vec<usize> {
         let tile = &mut scratch.tile;
-        let mut visit = |bucket: usize, child: &mut [T], classifier: &mut C| {
-            if child.len() <= tile_len && self.finished != Some(bucket) {
-                tile.finish_child(child, self.candidate, lend(classifier));
-            }
-        };
+        let mut visit =
+            |bucket: usize, range: core::ops::Range<usize>, child: &mut [T], classifier: &mut C| {
+                if child.len() <= tile_len
+                    && self.finished != Some(bucket)
+                    && required.project(range).is_some()
+                {
+                    tile.finish_child::<_>(child, self.candidate, lend(classifier));
+                }
+            };
         block::partition(
             records,
             self.radix,
@@ -192,63 +99,102 @@ impl Split {
     }
 }
 
-/// Runs nodes, tiles and parallel roots with one extractor and shared scratch.
+/// Refines requested ranks through shared node and tile decisions.
+/// Unrequested bands have completed movement but receive no further key work.
 struct Sorter<'a, T, E> {
-    scratch: &'a mut Scratch<T>,
+    scratch: &'a mut Workspace<T>,
     extractor: &'a mut E,
     tile_len: usize,
 }
 
-/// Sorts `records` stably by the keys `key` extracts.
-///
-/// Allocates tile and block buffers only after the order probe and varying-bit
-/// scan have not finished the sort.
+/// Sorts the complete input through the shared ordered-refinement entry.
 pub(crate) fn sort<T, E: Extract<T>>(records: &mut [T], extractor: E) {
-    sort_with_tile_bytes::<T, E>(records, extractor, TILE_BYTES);
+    let ranks = 0..records.len();
+    let required = Requirement::new(records.len(), core::slice::from_ref(&ranks));
+    refine(records, extractor, required, None);
 }
 
-/// [`sort`] with a tile budget of `tile_bytes`, so tests can reach node routes
-/// with small inputs.
-fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], mut extractor: E, tile_bytes: usize) {
+/// Refines requested ranks with invocation-owned reusable capacity.
+///
+/// Root preparation and half-key narrowing are performed once here, not in
+/// algorithm adapters. Empty requirements do no key work. A borrowed workspace
+/// retains capacity for the owning invocation; otherwise fresh storage is
+/// constructed only after preparation. The engine chooses its default tile
+/// budget; ordered and constant roots do not allocate or initialize unused
+/// movement storage.
+pub(crate) fn refine<T, E: Extract<T>>(
+    records: &mut [T],
+    extractor: E,
+    required: Requirement<'_>,
+    workspace: Option<&mut Workspace<T>>,
+) {
+    refine_with_tile_bytes(records, extractor, required, workspace, TILE_BYTES);
+}
+
+/// Executes refinement with an explicit budget, shared by the production entry
+/// and ownership tests that need node routes with small inputs.
+fn refine_with_tile_bytes<T, E: Extract<T>>(
+    records: &mut [T],
+    mut extractor: E,
+    required: Requirement<'_>,
+    workspace: Option<&mut Workspace<T>>,
+    tile_bytes: usize,
+) {
     let record_bytes = core::mem::size_of::<T>();
     if records.len() < 2 || record_bytes == 0 {
         return;
     }
-    let tile_len = tile_capacity::<T>(tile_bytes);
-    let Some(varying) = prepare(records, &mut extractor, tile_len) else {
+    let Some(required) = required.project(0..records.len()) else {
         return;
     };
-    let mut scratch = Scratch::new();
-    let scratch = &mut scratch;
+    let tile_len = tile_capacity::<T>(tile_bytes);
+    let Some(varying) = prepare::<_, _>(records, &mut extractor, tile_len) else {
+        return;
+    };
+    let mut local;
+    let workspace = match workspace {
+        Some(workspace) => workspace,
+        None => {
+            local = Workspace::new();
+            &mut local
+        }
+    };
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
             Sorter::<T, _> {
-                scratch,
+                scratch: workspace,
                 extractor: &mut KeyHalf::<_, 0>(extractor),
                 tile_len,
             }
-            .sort_node(records, varying);
+            .sort_node(records, varying, required);
             return;
         }
         if varying & ((1u128 << 64) - 1) == 0 {
             Sorter::<T, _> {
-                scratch,
+                scratch: workspace,
                 extractor: &mut KeyHalf::<_, 64>(extractor),
                 tile_len,
             }
-            .sort_node(records, varying >> 64);
+            .sort_node(records, varying >> 64, required);
             return;
         }
     }
     Sorter::<T, E> {
-        scratch,
+        scratch: workspace,
         extractor: &mut extractor,
         tile_len,
     }
-    .sort_node(records, varying);
+    .sort_node(records, varying, required);
 }
 
-/// Finishes ordered or insertion-friendly roots, otherwise returns their varying bits.
+#[cfg(test)]
+fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], extractor: E, tile_bytes: usize) {
+    let ranks = 0..records.len();
+    let required = Requirement::new(records.len(), core::slice::from_ref(&ranks));
+    refine_with_tile_bytes(records, extractor, required, None, tile_bytes);
+}
+
+/// Finishes ordered or small roots, otherwise returns their varying bits.
 /// Shared by serial and parallel entries before either allocates partition scratch.
 fn prepare<T, E: Extract<T>>(
     records: &mut [T],
@@ -259,7 +205,7 @@ fn prepare<T, E: Extract<T>>(
     if finish_ordered(records, sampled, extractor) {
         return None;
     }
-    if sampled == Order::Unsorted && insertion_probe(records, extractor, tile_len) {
+    if sampled == Order::Unsorted && insertion_probe::<_, _>(records, extractor, tile_len) {
         return None;
     }
     let candidate = u128::MAX >> (128 - E::Value::BITS);
@@ -279,7 +225,7 @@ fn prepare<T, E: Extract<T>>(
 /// Tries to finish `records` with a budgeted insertion pass and returns whether it
 /// did.
 ///
-/// An insertion-sized tile gets an unlimited budget; another tile gets one
+/// A small tile finishes by stable insertion; another tile gets one
 /// swap per four records. A longer input first insertion-sorts one tile of keys in a
 /// local buffer, and scales that window's swap count to the whole input as the
 /// budget for the records.
@@ -291,9 +237,9 @@ fn insertion_probe<T, E: Extract<T>>(
     extractor: &mut E,
     tile_len: usize,
 ) -> bool {
-    // A failed limited pass on an insertion leaf would scan varying bits
-    // only to select insertion again. The finishing entry also avoids carrying
-    // an unused swap count across the direct extractor's dispatch boundary.
+    // A failed limited pass on a small leaf would scan varying bits only to
+    // select comparison finishing again. Keep its result unit-returning, so
+    // stable direct insertion discards the unused count inside SIMD dispatch.
     if records.len() <= INSERTION_MAX && records.len() <= tile_len {
         extractor.finish_insertion(records);
         return true;
@@ -426,22 +372,6 @@ fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     Order::Descending { strict }
 }
 
-/// Confirms ascending keys after an already encoded predecessor.
-#[inline]
-pub(crate) fn confirm_ascending<T, E: Extract<T>>(
-    records: &[T],
-    extractor: &mut E,
-    previous: E::Value,
-) -> bool {
-    records
-        .iter()
-        .try_fold(previous, |before, record| {
-            let after = extractor.key(record);
-            (before <= after).then_some(after)
-        })
-        .is_some()
-}
-
 /// Finishes a strictly descending array: every key is distinct, so one
 /// reversal sorts it without moving equal keys past each other.
 // Keep the reversal loop out of the general sort path.
@@ -468,7 +398,14 @@ fn reverse_stably<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
 
 impl<T, E: Extract<T>> Sorter<'_, T, E> {
     /// Consumes an ordered-run decision without probing or partitioning again.
-    fn split_ordered(&mut self, records: &mut [T], boundary: usize, set: bool, varying: u128) {
+    fn split_ordered(
+        &mut self,
+        records: &mut [T],
+        boundary: usize,
+        set: bool,
+        varying: u128,
+        required: Requirement<'_>,
+    ) {
         // Rotation preserves each run's internal order.
         let boundary = if set {
             let len = records.len();
@@ -478,12 +415,17 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             boundary
         };
         let candidate = without_top_bit(varying);
-        self.sort_child(&mut records[..boundary], candidate);
-        self.sort_child(&mut records[boundary..], candidate);
+        let len = records.len();
+        if let Some(child) = required.project(0..boundary) {
+            self.sort_child(&mut records[..boundary], candidate, child);
+        }
+        if let Some(child) = required.project(boundary..len) {
+            self.sort_child(&mut records[boundary..], candidate, child);
+        }
     }
 
     /// Finishes a child using remaining variation, order and the shared node policy.
-    fn sort_child(&mut self, records: &mut [T], candidate: u128) {
+    fn sort_child(&mut self, records: &mut [T], candidate: u128, required: Requirement<'_>) {
         if records.len() < 2 || candidate == 0 {
             return;
         }
@@ -503,11 +445,11 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
                 return;
             }
         }
-        self.sort_node(records, varying);
+        self.sort_node(records, varying, required);
     }
 
     /// Routes a slice whose order has already been probed.
-    fn sort_node(&mut self, records: &mut [T], varying: u128) {
+    fn sort_node(&mut self, records: &mut [T], varying: u128, required: Requirement<'_>) {
         let len = records.len();
         if len < 2 || varying == 0 {
             return;
@@ -519,20 +461,34 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             return;
         }
         let plan = plan_node(records, varying, self.tile_len, self.extractor);
-        self.execute_node(records, varying, plan);
+        self.execute_node(records, varying, plan, required);
     }
 
     /// Executes an already selected partition; parallel fallbacks do not resample.
-    fn execute_node(&mut self, records: &mut [T], varying: u128, plan: NodePlan<E::Value>) {
+    fn execute_node(
+        &mut self,
+        records: &mut [T],
+        varying: u128,
+        plan: NodePlan<E::Value>,
+        required: Requirement<'_>,
+    ) {
         match plan {
-            NodePlan::Equal(equal) => self.partition_equal(records, equal, varying),
-            NodePlan::Runs { boundary, set } => self.split_ordered(records, boundary, set, varying),
-            NodePlan::Digit(digit) => self.partition_digit(records, digit, varying),
+            NodePlan::Equal(equal) => self.partition_equal(records, equal, varying, required),
+            NodePlan::Runs { boundary, set } => {
+                self.split_ordered(records, boundary, set, varying, required)
+            }
+            NodePlan::Digit(digit) => self.partition_digit(records, digit, varying, required),
         }
     }
 
     /// Partitions by digit, then sorts each unfinished child.
-    fn partition_digit(&mut self, records: &mut [T], digit: Digit, varying: u128) {
+    fn partition_digit(
+        &mut self,
+        records: &mut [T],
+        digit: Digit,
+        varying: u128,
+        required: Requirement<'_>,
+    ) {
         // The split digit is constant inside each child, so its bits are
         // excluded from the next scan.
         let candidate = varying & !digit.mask::<E::Value>().to_u128();
@@ -546,38 +502,55 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             candidate,
             finished: None,
         };
-        let ends = split.partition(
+        let ends = split.partition::<_, _, _>(
             records,
             KeyDigit::new(&mut *self.extractor, digit.shift),
             |digit| &mut *digit.extractor,
             self.scratch,
             self.tile_len,
+            required,
         );
-        self.finish_children(records, ends, split);
+        self.finish_children(records, ends, split, required);
     }
 
     /// Partitions below, equal to, and above a sampled key, splitting the
     /// outer band that crosses the top varying bit. The equal band is done.
-    fn partition_equal(&mut self, records: &mut [T], equal: KeyValue<T, E>, varying: u128) {
+    fn partition_equal(
+        &mut self,
+        records: &mut [T],
+        equal: KeyValue<T, E>,
+        varying: u128,
+        required: Requirement<'_>,
+    ) {
         let rank = Rank::new(&mut *self.extractor, equal, varying);
         let split = Split::equality(&rank, varying);
-        let ends = split.partition(
+        let ends = split.partition::<_, _, _>(
             records,
             rank,
             |rank| &mut *rank.extractor,
             self.scratch,
             self.tile_len,
+            required,
         );
-        self.finish_children(records, ends, split);
+        self.finish_children(records, ends, split, required);
     }
 
-    /// Sorts the partition children that exceed the tile; the partition
-    /// finished smaller ones while they were cache-hot.
-    fn finish_children(&mut self, records: &mut [T], ends: Vec<usize>, split: Split) {
+    /// Continues requested large children after parent movement has retired.
+    /// Requested tiles were finished cache-hot; unrelated bands remain untouched.
+    fn finish_children(
+        &mut self,
+        records: &mut [T],
+        ends: Vec<usize>,
+        split: Split,
+        required: Requirement<'_>,
+    ) {
         let mut start = 0;
         for (bucket, &end) in ends.iter().enumerate() {
-            if end - start > self.tile_len && split.finished != Some(bucket) {
-                self.sort_child(&mut records[start..end], split.candidate);
+            if end - start > self.tile_len
+                && split.finished != Some(bucket)
+                && let Some(child) = required.project(start..end)
+            {
+                self.sort_child(&mut records[start..end], split.candidate, child);
             }
             start = end;
         }
@@ -633,7 +606,7 @@ mod tests {
         // At 8192 records the strided gate checks odd pair offsets. Miri
         // exercises the confirmation directly on a shorter vector scan.
         assert!(confirm_order(&values, &mut Direct) == Order::Unsorted);
-        crate::stable_sort(&mut values);
+        crate::sort(&mut values);
         assert_eq!(values, (0..len as u64).collect::<Vec<_>>());
     }
 
@@ -645,13 +618,18 @@ mod tests {
         records[4] = 1;
         let mut expected = records.clone();
         expected.sort();
-        let mut scratch = Scratch::new();
+        let len = records.len();
+        let mut scratch = Workspace::new();
         Sorter {
             scratch: &mut scratch,
             extractor: &mut Direct,
             tile_len: tile_capacity::<u64>(TILE_BYTES),
         }
-        .sort_child(&mut records, u64::MAX as u128);
+        .sort_child(
+            &mut records,
+            u64::MAX as u128,
+            Requirement::new(len, core::slice::from_ref(&(0..len))),
+        );
         assert_eq!(records, expected);
     }
 
@@ -817,7 +795,7 @@ mod tests {
                     drops: drops.clone(),
                 })
                 .collect();
-            let mut scratch = Scratch::new();
+            let mut scratch = Workspace::new();
             let planning = Cell::new(true);
             let mut extractor = ByKey(|record: &Owned| {
                 if planning.get() {
@@ -839,7 +817,12 @@ mod tests {
                 extractor: &mut extractor,
                 tile_len,
             }
-            .execute_node(&mut records, 0x1ff, plan);
+            .execute_node(
+                &mut records,
+                0x1ff,
+                plan,
+                Requirement::new(len, core::slice::from_ref(&(0..len))),
+            );
 
             assert!(drops.borrow().is_empty());
             for (id, record) in records.iter().enumerate() {
@@ -848,7 +831,7 @@ mod tests {
                 assert_eq!(record.key.get(), (id as u16 % 2) << 8);
             }
             // The owned records remain usable through another public key width.
-            crate::stable_sort_by_key(&mut records, |record| (record.id as u128) << 64);
+            crate::sort_by_key(&mut records, |record| (record.id as u128) << 64);
             assert!(
                 records
                     .iter()

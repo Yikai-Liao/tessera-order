@@ -98,3 +98,79 @@ mode = "par-4"
 comparison = "row_u64/random/1000000/s1"
 criterion_group = "rust/row_u64/random/1000000/s1"
 criterion = "rust/row_u64/random/1000000/s1/par-4"
+
+# Operation grammar, bounds and IDs are retained boundary copies in TS/Rust.
+[operation_case]
+ty = "u64"
+distribution = "random"
+len = 1000
+
+[[operations]]
+operation = { kind = "argsort" }
+comparison = "u64/random/1000/s1/argsort"
+group = "u64/random/argsort"
+
+[[operations]]
+operation = { kind = "partition" }
+comparison = "u64/random/1000/s1/partition"
+group = "u64/random/partition"
+
+[[operations]]
+operation = { kind = "partition-buckets", bucket_count = 7 }
+comparison = "u64/random/1000/s1/partition-buckets/7"
+group = "u64/random/partition-buckets/7"
+
+[[operations]]
+operation = { kind = "segments", segment_len = 73 }
+comparison = "u64/random/1000/s1/segments/73"
+group = "u64/random/segments/73"
+
+[[operations]]
+operation = { kind = "top-k", k = 513 }
+comparison = "u64/random/1000/s1/top-k/513"
+group = "u64/random/top-k/513"
+
+[[operations]]
+operation = { kind = "prefix", prefix_len = 0 }
+comparison = "u64/random/1000/s1/prefix/0"
+group = "u64/random/prefix/0"
+
+[[operations]]
+operation = { kind = "select", index = 999 }
+comparison = "u64/random/1000/s1/select/999"
+group = "u64/random/select/999"
+
+[[operations]]
+operation = { kind = "rank-range", start = 20, end = 20 }
+comparison = "u64/random/1000/s1/rank-range/20-20"
+group = "u64/random/rank-range/20-20"
+
+[[operations]]
+operation = { kind = "select-many", indices = [999, 0, 999] }
+comparison = "u64/random/1000/s1/select-many/999,0,999"
+group = "u64/random/select-many/999,0,999"
+
+[[operations]]
+operation = { kind = "select-many", indices = [] }
+comparison = "u64/random/1000/s1/select-many/none"
+group = "u64/random/select-many/none"
+
+# No comparison field means the plan must be rejected before generation.
+[[operations]]
+operation = { kind = "partition-buckets", bucket_count = 0 }
+[[operations]]
+operation = { kind = "partition", bucket_count = 2 }
+[[operations]]
+operation = { kind = "segments", segment_len = 0 }
+[[operations]]
+operation = { kind = "top-k", k = 1001 }
+[[operations]]
+operation = { kind = "prefix", prefix_len = -1 }
+[[operations]]
+operation = { kind = "select", index = 1000 }
+[[operations]]
+operation = { kind = "select-many", indices = [0, 1000] }
+[[operations]]
+operation = { kind = "rank-range", start = 9, end = 8 }
+[[operations]]
+operation = { kind = "argsort", unexpected = true }

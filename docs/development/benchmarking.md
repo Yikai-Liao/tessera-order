@@ -1,6 +1,6 @@
 # Benchmarking
 
-The comparison runner in `bench/rust` measures sorting algorithms on one machine: Tessera against the standard stable sort, other stable sorts, unstable sorts where equal keys are indistinguishable, and the extra memory of each. [Continuous benchmarks](continuous-benchmarks.md) track PR regressions and publish the algorithm comparison; local experiments and source attribution use the paired measurements described here.
+The comparison runner in `bench/rust` measures sorting algorithms on one machine: Tessera against the standard stable sort, other stable sorts, unstable sorts under their weaker tie contract, and the extra memory of each. [Continuous benchmarks](continuous-benchmarks.md) track PR regressions and publish the algorithm comparison; local experiments and source attribution use the paired measurements described here.
 
 ## Command capabilities
 
@@ -153,7 +153,7 @@ If the host libc needs instructions Valgrind lacks, build the baseline-ISA conta
 
 ## Experiment plans
 
-Plans in [`bench/plans/`](../../bench/plans/) are schema-1 TOML (repository presets) or TOML/JSON (custom files) and decode into one validated model. They describe what to measure; the harness owns input generation and the protocol.
+Plans in [`bench/plans/`](../../bench/plans/) use TOML or JSON and decode into one validated selection. Repository sorting presets retain schema 1; explicit non-sort operations use [schema 2](#serial-operation-comparisons). They describe what to measure; the harness owns input generation and the protocol.
 
 | Preset | Default selection |
 |---|---|
@@ -194,6 +194,51 @@ bun run --silent tools plan --schema > benchmark-plan.schema.json               
 ```
 
 `--plan` takes a preset name or a `.toml`/`.json` path. Comma-separated CLI axes replace that axis in every inclusion rule; exclusions stay. `--algorithms` (only `compare algorithms` and `plan`) replaces the algorithm selection; only algorithm-block preparation adds its required controls. Presets are not different execution routes: use `local` or `continuous` for revision/counter work, and `smoke`, `release` or `parallel` for algorithm comparisons. Revision comparisons measure only `tessera`, `tessera-par-4` or both, because their builds replace only the Tessera library; counters require a serial-only selection. These are operation constraints, not plan formats. `--group` runs one resumable group and marks the report partial. Every result keeps its frozen `plan.json`.
+
+## Serial operation comparisons
+
+`compare algorithms` also measures the implemented [serial slice operations](../../conformance/semantics.md#serial-slice-operations). Omit `--operation` for historical full sorting. Select one operation and only its applicable parameters:
+
+| Operation | CLI parameters | Equivalent Rust comparison |
+|---|---|---|
+| `argsort` | None | Index construction plus stable index sorting; `std-unstable` breaks ties by original index. |
+| `partition` | None | Stable two-category sorting plus matching-count construction. |
+| `partition-buckets` | `--bucket-count R` | Stable category sorting plus all R+1 offsets, including empty categories. |
+| `segments` | `--segment-len N` | Sort every consecutive segment independently, with a final shorter segment if needed. |
+| `top-k` | `--k K` | Unordered minimum-k membership; standard unstable selection under the weak tie contract. |
+| `prefix` | `--prefix-len K` | Ordered minimum-k prefix; standard selection plus prefix sorting under the weak tie contract. |
+| `select` | `--index I` | One ranked member; standard unstable selection under the weak tie contract. |
+| `rank-range` | `--rank-range START:END` | Sorted global rank interval; two boundary selections plus interval sorting under the weak tie contract. |
+| `select-many` | `--indices I,J,...` or `none` | Requested positions; recursive median-target standard selection under the weak tie contract. Raw order and duplicates remain part of the request. |
+
+The `tessera` route calls the public entry for each workload: `argsort`, `partition`, `sort_by_cached_key` plus boundary construction, `sort_chunks`, `partial_sort(k..k)`, `partial_sort(..K)`, `select_nth`, `partial_sort(START..END)` and `select_nth_many`. Workload names stay benchmark vocabulary, so retained results remain comparable across the 0.2 renames.
+
+Category workloads classify by the encoded key modulo R (binary uses R=2, with category zero matching). `std-stable`, Glidesort and Radsort stably sort by that deterministic category, not the complete original key, and construct the boundary result inside timing. These are labelled sorting compositions, not direct output-buffer partition algorithms. No Tessera route limits the count; unsupported routes, including unstable sorting, are omitted by typed preparation. This comparison alone does not establish an advantage over a dedicated buffered partition. Native timing-run admission requires both Tessera and the standard stable control to support every manifest case before writing measurement journals, including for a restricted group; unsupported required controls are errors, not omissions.
+
+For partial ranks, `std-stable`, Glidesort and Radsort explicitly sort the complete input as semantic references. Select `tessera-full` to compare with Tessera's complete sorting as well. These are not native partial algorithms. Stable routes require exact stable boundary membership; unstable routes permit arbitrary equal-key members and are marked separately in the report. Scalar equal keys are bitwise indistinguishable, so either route satisfies the stable result as well. Typed Rust preparation owns capabilities; manifests record implementation routes and omissions rather than relying on algorithm names to imply them.
+
+```sh
+bun run --silent tools plan smoke --operation top-k --k 1024 \
+  --types u64,row_u64 --distributions random,d16 --lengths 65536
+bun run tools compare algorithms --operation top-k --k 1024 \
+  --algorithms std-stable,std-unstable,glidesort,radsort,tessera-full \
+  --types u64,row_u64 --distributions random,d16 --lengths 65536 --cpu 2
+bun run tools compare algorithms --operation argsort \
+  --algorithms std-stable,std-unstable,glidesort,radsort \
+  --types u64,record128 --distributions random --lengths 65536 --cpu 2
+```
+
+A custom non-sort plan uses `schema = 2` with, for example, `operation = { kind = "top-k", k = 1024 }`. Other parameter keys are `bucket_count`, `segment_len`, `prefix_len`, `index`, `start`/`end` and `indices` as applicable. Sorting presets remain schema 1 without an operation field. Operation overrides resolve into schema 2; `--operation sort` returns to schema 1. Non-sort plans require literal positive input lengths and exact nonnegative integer ranks, not threshold-relative lengths or fractions. Every surviving input is checked against those parameters before building or generating records. Unrelated parameter flags are errors.
+
+Comparison IDs append the operation and parameters to the historical seed-one ID; resumable groups include that same suffix. For example, `u64/random/65536/s1/top-k/1024` and group `u64/random/top-k/1024`. Schema-2 measurement manifests retain the exact operation in each case and the frozen plan, with explicit support and implementation-route evidence. Resume, memory compatibility and offline reporting preserve these facts. Linked revisions, counters and hosted Criterion tracking currently accept full sorting only and reject other operations rather than substituting full sorting.
+
+Timing includes each complete public call, its normalization, scratch allocation and mandatory output construction. Argsort retains its newly allocated output through checking; discarding the previous result and restoring inputs stay outside the clock. Other operations restore independent record buffers. The prepared batch-memory cap includes mutable record/payload buffers and retained per-call output; shared originals/references and transient call workspace are separate. The same paired blocks, A/A statistic, process-isolated allocation counter and journals apply. Independent checkers verify exact indices, each segment, stable category order and every boundary, or required ranked keys and every intervening region’s membership; stable routes additionally require exact original ranked identities. Unordered Top-k verifies membership only, not an incidental pivot position. Unstable payload checking also verifies the complete original record permutation. Times are divided by input records, not requested ranks or output count.
+
+For `partition` and `partition-buckets`, `tessera-full` calls Tessera’s by-key sort with the same deterministic category as its key, then constructs the same boundaries. This compares general sorting with the one-call movement of `partition` and `sort_by_cached_key` on identical inputs, including classification, scratch and boundary output. The sorting composition does not promise one classifier call per record; its keys must be consistent. It uses the existing full-sort reference identity, not a second category API. For `partition-buckets`, `tessera` calls `sort_by_cached_key` with the narrowest unsigned category key a caller would choose (`u8` up to 256 categories, `u16` up to 65,536, `u32` beyond), which sets the size of its key cache. It keeps the one-call-per-record classifier contract; boundary construction then evaluates the category again, as a caller grouping by a computed key would.
+
+The `std-unstable` partial adapters accept a weak tie contract, including payload records: required ranks and gaps must contain the correct keys, and the complete output must preserve every record. Ratios to stable operations compare different guarantees, not the isolated cost of stability. Index-decorated argsort remains stable, and standard unstable segmented sorting remains restricted to scalars because the segment task still requires stability.
+
+Operation memory rows retain peak extra heap and mandatory output bytes separately. Argsort's O(n) index result and multiway partition's O(R) offsets are included in their peaks; workspace peak is peak minus retained output bytes. Argsort allocates its result before index sorting. Binary partition returns a scalar; other operations without a heap-allocated result also have zero output bytes. Every admitted operation/input/variant has a verified memory row. These reports contain tables and JSON only: no new operation figures are generated, and full-sort figures keep their existing cohorts and meaning.
 
 ## Local parallel comparisons
 
@@ -285,7 +330,7 @@ The opt-in `Reverse` inputs wrap the base generator's `!key` (`u64`) or `-key` (
 
 ## Implementations
 
-Rust competitors are optional dependencies behind `compare`, pinned to exact versions. Native sources are pinned by repository, commit, archive SHA-256 and license in `native/sources.toml`, verified by `bench/rust/native/fetch.ts` and the build, and kept in the ignored `bench/vendor/`. The [catalog](../../bench/catalog.toml) owns variant identities, stability and names; adapters in [variant.rs](../../bench/rust/src/comparison/variant.rs) own capabilities, which the runner's `list` reports.
+Rust competitors are pinned dependencies of the benchmark package, not the library. Native sources are pinned by repository, commit, archive SHA-256 and license in `native/sources.toml`, verified by `bench/rust/native/fetch.ts` and the build, and kept in the ignored `bench/vendor/`. The [catalog](../../bench/catalog.toml) owns variant identities, stability and names; adapters in [variant.rs](../../bench/rust/src/comparison/variant.rs) own capabilities, which the runner's `list` reports.
 
 Unsupported tasks: Voracious 1.2.0 records (its stable path fails on duplicate keys) and small floats (partial comparison); VQSort and x86-simd-sort floats (no NaN-payload and signed-zero total order) and rows (different pair layouts). The DuckDB adapter pins the v1.4.0 headers from [Sorting, Again](https://duckdb.org/2025/09/24/sorting-again) (Vergesort over Ska Sort with pdqsort fallback): an **unstable, single-threaded in-memory kernel** on raw integer keys and records, without SQL key encoding, external merging, cancellation checks, floats or owned strings.
 

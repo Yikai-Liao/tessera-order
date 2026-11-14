@@ -25,6 +25,11 @@ pub(super) fn check<T: BenchmarkRecord>(
     if values.windows(2).any(|v| v[0].order(&v[1]).is_gt()) {
         return Err("keys out of order".into());
     }
+    permutation(values, input)
+}
+
+/// Payload indices identify original records independently of rank or tie order.
+fn permutation<T: BenchmarkRecord>(values: &[T], input: &[T]) -> Result<(), String> {
     let mut seen = vec![false; input.len()];
     for value in values {
         let index = value.index();
@@ -36,10 +41,111 @@ pub(super) fn check<T: BenchmarkRecord>(
     Ok(())
 }
 
+/// Checks required keys and each gap; stable calls also require ranked identity.
+/// Payload preservation is checked independently before allowing reordered ties.
+pub(super) fn refinement<T: BenchmarkRecord>(
+    values: &[T],
+    input: &[T],
+    reference: &[T],
+    ranges: &[std::ops::Range<usize>],
+    stable: bool,
+) -> Result<(), String> {
+    if values.len() != reference.len() || values.len() != input.len() {
+        return Err("output length changed".into());
+    }
+    if !stable && T::HAS_PAYLOAD {
+        permutation(values, input)?;
+    }
+    let matches = |a: &T, b: &T| {
+        if stable {
+            a.same(b)
+        } else {
+            a.order(b).is_eq()
+        }
+    };
+    let gap = |start: usize, end: usize| {
+        let mut members: Vec<_> = values[start..end].iter().collect();
+        members.sort_unstable_by(|a, b| a.order(b).then_with(|| a.index().cmp(&b.index())));
+        members
+            .iter()
+            .zip(&reference[start..end])
+            .all(|(a, b)| matches(a, b))
+    };
+    let mut start = 0;
+    for range in ranges {
+        if !gap(start, range.start) {
+            return Err("outer region has incorrect ranked members".into());
+        }
+        if !values[range.start..range.end]
+            .iter()
+            .zip(&reference[range.start..range.end])
+            .all(|(a, b)| matches(a, b))
+        {
+            return Err("required positions differ from the requested rank contract".into());
+        }
+        start = range.end;
+    }
+    if !gap(start, values.len()) {
+        return Err("outer region has incorrect ranked members".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::case::Row;
+    #[test]
+    fn refinement_checks_stable_rank_identity_and_each_gap() {
+        let reference: Vec<_> = (0..4).map(|row| Row { key: 0u64, row }).collect();
+        // Unordered Top-k accepts any order inside either exact member set;
+        // the checker must not accidentally require a selected pivot identity.
+        let permuted = vec![reference[1], reference[0], reference[3], reference[2]];
+        let cut = 2..2;
+        assert!(
+            refinement(
+                &permuted,
+                &reference,
+                &reference,
+                std::slice::from_ref(&cut),
+                true
+            )
+            .is_ok()
+        );
+        let ranges = [1..2, 3..4];
+        assert!(refinement(&reference, &reference, &reference, &ranges, true).is_ok());
+        let mut wrong = reference.clone();
+        wrong.swap(0, 2); // Required record is right; gap membership is wrong.
+        assert!(refinement(&wrong, &reference, &reference, &ranges, true).is_err());
+        wrong = reference.clone();
+        wrong.swap(1, 2); // Right key but wrong stable ranked identity.
+        assert!(refinement(&wrong, &reference, &reference, &ranges, true).is_err());
+    }
+
+    #[test]
+    fn weak_ranks_allow_ties_but_reject_missing_or_damaged_payloads() {
+        let input: Vec<_> = (0..4).map(|row| Row { key: 0u64, row }).collect();
+        let ranges = Vec::from_iter(std::iter::once(1..2));
+        let mut values = input.clone();
+        values.swap(0, 2);
+        assert!(refinement(&values, &input, &input, &ranges, false).is_ok());
+        assert!(refinement(&values, &input, &input, &ranges, true).is_err());
+        values[0] = values[1];
+        assert!(refinement(&values, &input, &input, &ranges, false).is_err());
+        values = input.clone();
+        values[0].key = 1;
+        assert!(refinement(&values, &input, &input, &ranges, false).is_err());
+        let input: Vec<_> = (0..4)
+            .map(|row| Row {
+                key: row as u64,
+                row,
+            })
+            .collect();
+        values = input.clone();
+        values.swap(0, 3);
+        assert!(refinement(&values, &input, &input, &ranges, false).is_err());
+    }
+
     #[test]
     fn records_preserve_payloads() {
         let input = vec![

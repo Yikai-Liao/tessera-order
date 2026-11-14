@@ -8,19 +8,28 @@
 //! input order, and needs no `Copy`, `Clone`, `Default` or `Ord` on the
 //! records it moves.
 //!
+//! The other operations are the standard ones they are named after:
+//! [`partial_sort`], [`k_smallest`], [`k_largest`], [`select_nth`],
+//! [`select_nth_many`], [`sort_chunks`], [`argsort`] and [`partition`]. Each
+//! returns a result that its standard counterpart may return, with equal keys
+//! resolved as the stable [`sort`] resolves them. Every operation is stable, so
+//! names carry no `stable_` prefix; an `_unstable` suffix stays reserved for a
+//! cheaper variant. There are no `_by` comparator variants, because the radix
+//! engine needs keys, not comparisons.
+//!
 //! # Examples
 //!
 //! ```
 //! use core::cmp::Reverse;
-//! use tessera_order::{stable_sort, stable_sort_by_key};
+//! use tessera_order::{sort, sort_by_key};
 //!
 //! let mut keys = [42, -7, 42, 0];
-//! stable_sort(&mut keys);
+//! sort(&mut keys);
 //! assert_eq!(keys, [-7, 0, 42, 42]);
 //!
 //! // Equal keys keep their input order, also when sorting in descending order.
 //! let mut rows = [(2u32, "first"), (1, "middle"), (2, "last")];
-//! stable_sort_by_key(&mut rows, |row| Reverse(row.0));
+//! sort_by_key(&mut rows, |row| Reverse(row.0));
 //! assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 //! ```
 //!
@@ -39,7 +48,7 @@
 //! that needs O(√n) records of scratch for a fixed record size and key width.
 //! Each tile is then sorted in a scratch buffer of at most 64 KiB of records,
 //! plus up to two bytes per record of cached bucket IDs for
-//! [`stable_sort_by_key`]. Each tile-local MSD level also keeps a cursor table
+//! [`sort_by_key`]. Each tile-local MSD level also keeps a cursor table
 //! of up to 32 KiB on the stack, with at most 22 levels for 128-bit keys.
 //!
 //! Each call allocates scratch as needed and frees it before returning.
@@ -55,8 +64,7 @@
 //! target. Keys without a vector kernel use scalar scans. There is no backend
 //! feature switch; `--no-default-features` uses this same implementation.
 //!
-//! `rayon` is off by default and enables `par_stable_sort` and
-//! `par_stable_sort_by_key`. Large inputs partition the root across disjoint
+//! `rayon` is off by default and enables `par_sort` and `par_sort_by_key`. Large inputs partition the root across disjoint
 //! shards and order each bucket's records by shard. Buckets transfer directly
 //! to exclusive final bands and sort there while peers continue moving their
 //! records. Small inputs and one-thread pools use the serial engine. The
@@ -64,20 +72,34 @@
 
 extern crate alloc;
 
+mod algorithms;
 mod block;
+mod cached;
 mod engine;
 mod key;
+mod order;
 #[cfg(feature = "rayon")]
 mod parallel;
+mod partition;
 mod portable_simd;
-mod scan;
+mod rank;
+mod tile;
 mod trace;
+
 #[cfg(test)]
 mod unwind;
+mod workspace;
 
+pub use algorithms::{
+    argsort, argsort_by_key, k_largest, k_largest_by_key, k_smallest, k_smallest_by_key,
+    partial_sort, partial_sort_by_key, select_nth, select_nth_by_key, select_nth_many,
+    select_nth_many_by_key, sort_chunks, sort_chunks_by_key,
+};
 pub use key::RadixKey;
 #[cfg(feature = "rayon")]
-pub use parallel::{par_stable_sort, par_stable_sort_by_key};
+#[allow(deprecated)]
+pub use parallel::{par_sort, par_sort_by_key, par_stable_sort, par_stable_sort_by_key};
+pub use partition::partition;
 
 /// Sorts keys in ascending order, keeping equal keys in input order.
 ///
@@ -95,12 +117,12 @@ pub use parallel::{par_stable_sort, par_stable_sort_by_key};
 ///
 /// ```
 /// let mut values = [0.5f64, -0.0, f64::NAN, 0.0, -1.0];
-/// tessera_order::stable_sort(&mut values);
+/// tessera_order::sort(&mut values);
 /// let bits: Vec<u64> = values.iter().map(|x| x.to_bits()).collect();
 /// let expected = [-1.0f64, -0.0, 0.0, 0.5, f64::NAN].map(f64::to_bits);
 /// assert_eq!(bits, expected);
 /// ```
-pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
+pub fn sort<K: RadixKey>(values: &mut [K]) {
     engine::sort::<K, _>(values, key::Direct);
 }
 
@@ -124,7 +146,7 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 ///
 /// # Memory
 ///
-/// As [`stable_sort`], plus up to two bytes per tile record of cached bucket
+/// As [`sort`], plus up to two bytes per tile record of cached bucket
 /// IDs.
 ///
 /// # Examples
@@ -140,12 +162,65 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 ///     Row { timestamp: 10, name: "a".into() },
 ///     Row { timestamp: 30, name: "d".into() },
 /// ];
-/// tessera_order::stable_sort_by_key(&mut rows, |row| row.timestamp);
+/// tessera_order::sort_by_key(&mut rows, |row| row.timestamp);
 /// let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
 /// assert_eq!(names, ["a", "c", "d"]);
 /// ```
-pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
+pub fn sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
     engine::sort::<T, _>(values, key::ByKey(key));
+}
+
+/// Renamed to [`sort`]; the contract is unchanged.
+#[deprecated(since = "0.2.0", note = "renamed to `sort`")]
+pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
+    sort(values);
+}
+
+/// Renamed to [`sort_by_key`]; the contract is unchanged.
+#[deprecated(since = "0.2.0", note = "renamed to `sort_by_key`")]
+pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
+    sort_by_key(values, key);
+}
+
+/// Sorts records by a key, evaluating the key function at most once per record
+/// and keeping records with equal keys in input order.
+///
+/// Use this instead of [`sort_by_key`] when `key` is expensive or must
+/// not run twice for a record, as with [`slice::sort_by_cached_key`]. Records
+/// of any type are moved, never cloned or dropped.
+///
+/// # Key function
+///
+/// `key` is called exactly once per record, in input order, when `values` holds
+/// at least two records that are not zero-sized; otherwise it is not called.
+///
+/// # Panics
+///
+/// If `key` panics, the panic propagates to the caller with every record still
+/// in `values`, in an unspecified order. No record is dropped or duplicated.
+///
+/// # Memory
+///
+/// Caches every key, O(n) as in the standard library, also for ordered
+/// inputs, whose order is known only once every key is evaluated. Keys that
+/// differ only in a narrow bit window, such as category IDs, then move the
+/// records once within the [`sort_by_key`] scratch bound; other keys sort
+/// (key, index) pairs with [`sort`] scratch.
+///
+/// # Examples
+///
+/// ```
+/// let mut words = ["delta", "Alpha", "charlie", "Bravo"];
+/// let mut calls = 0;
+/// tessera_order::sort_by_cached_key(&mut words, |word| {
+///     calls += 1;
+///     word.to_lowercase().as_bytes()[0]
+/// });
+/// assert_eq!(words, ["Alpha", "Bravo", "charlie", "delta"]);
+/// assert_eq!(calls, 4);
+/// ```
+pub fn sort_by_cached_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
+    cached::sort(values, key);
 }
 
 /// Internal thresholds, exported for benchmarks that probe boundary sizes.
@@ -153,12 +228,12 @@ pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], k
 /// Not part of the public API: the values may change in any release.
 #[doc(hidden)]
 pub mod thresholds {
-    /// Largest tile or bucket that is finished by insertion sort.
+    /// Largest leaf finished by stable insertion.
     pub const INSERTION_MAX: usize = 48;
     /// Default tile budget, in bytes of records.
     pub const TILE_BYTES: usize = 64 * 1024;
     /// Most records in one tile, so that a `u16` cursor addresses any of them.
-    pub const MAX_TILE_RECORDS: usize = crate::engine::Cursor::MAX as usize;
+    pub const MAX_TILE_RECORDS: usize = crate::tile::Cursor::MAX as usize;
     /// Largest cursor table of a tile-local pass, in bytes.
     pub const MAX_CURSOR_BYTES: usize = 32 * 1024;
 }

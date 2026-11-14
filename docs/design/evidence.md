@@ -17,11 +17,90 @@ Branch alignment is not a free speedup: it changed the prototype's own time by �
 
 ## Port parity baseline
 
-The engine is a Stable Rust port of the research prototype in `sort-research-rs` at `6c0877f0491dc3b8fc052aa529bce44bf8a53fa8`. Measured inside one Nightly binary of the prototype's harness (fixed seed, one pinned core, rotated order, every output checked), the median per-case ratio `port / prototype` was 0.984–1.004 over 27–136 cases per matrix (ranges 0.53–1.23, placement-dominated), for both `stable_sort_by_key` and `stable_sort`, in the default build and with `target-cpu=native` and fat LTO. Cases outside the control range were within 3% of the prototype forced onto cached bucket IDs (`record128` zipf 1.3 n = 128: 1.168 against 1.030), the cost of the caching policy the port adopts on purpose ([record handling](engine.md#record-handling)); replacing it on 8-byte rows was [rejected](#recomputed-tile-buckets-rejected). The harness is Apache-2.0 code and stays outside the repository.
+The engine is a Stable Rust port of the research prototype in `sort-research-rs` at `6c0877f0491dc3b8fc052aa529bce44bf8a53fa8`. Measured inside one Nightly binary of the prototype's harness (fixed seed, one pinned core, rotated order, every output checked), the median per-case ratio `port / prototype` was 0.984–1.004 over 27–136 cases per matrix (ranges 0.53–1.23, placement-dominated), for both `sort_by_key` and `sort`, in the default build and with `target-cpu=native` and fat LTO. Cases outside the control range were within 3% of the prototype forced onto cached bucket IDs (`record128` zipf 1.3 n = 128: 1.168 against 1.030), the cost of the caching policy the port adopts on purpose ([record handling](engine.md#record-handling)); replacing it on 8-byte rows was [rejected](#recomputed-tile-buckets-rejected). The harness is Apache-2.0 code and stays outside the repository.
+
+## Stable category partition baseline
+
+A bounded complete-call screen compared the unreleased binary and finite-category operations with standard stable sorting, Glidesort and Radsort compositions that sort by the same deterministic category and construct the returned boundaries. Categories were encoded keys modulo R; these are sorting-based references, not dedicated buffered partition algorithms. The public classifier contract is stronger than those deterministic compositions: it requires one evaluation per record in input order. The comparison includes all classification, scratch allocation and output construction, not just scatter.
+
+Coverage was u64 keys, 16-byte rows and 128-byte records. Binary and seven-category runs each covered random, 16-value and constant inputs at 4,096 and 65,536 records; 257 categories covered random and 16-value inputs at 65,536. The host was an i7-10875H pinned to one logical CPU, Rust 1.99.1/LLVM 23.1.3, with the existing powersave governor, SMT and turbo unchanged. Three paired blocks used a 5 ms target, repeated Tessera A/A, independent record/boundary verification and separate verified memory measurements.
+
+| Workload | Opponent/input pairs | Tessera faster | Tessera slower |
+|---|---:|---:|---:|
+| Binary partition | 54 | 49 | 5 |
+| Seven categories | 54 | 50 | 4 |
+| 257 categories | 18 | 18 | 0 |
+
+All nine losses were constant-category 128-byte records. The following percentages are extra Tessera time over the named reference, from inverted median paired reference/Tessera ratios, not quotients of marginal times. They exceed the observed A/A window on those cases (at most ±0.46%); they are not confidence bounds.
+
+| Operation | Records | Reference | Extra Tessera time |
+|---|---:|---|---:|
+| Binary | 4,096 | Standard stable category sort | +30.4% |
+| Binary | 4,096 | Glidesort category sort | +30.7% |
+| Binary | 65,536 | Standard stable category sort | +35.4% |
+| Binary | 65,536 | Glidesort category sort | +37.5% |
+| Binary | 65,536 | Radsort category sort | +1.5% |
+| Seven categories | 4,096 | Standard stable category sort | +25.2% |
+| Seven categories | 4,096 | Glidesort category sort | +22.0% |
+| Seven categories | 65,536 | Standard stable category sort | +7.5% |
+| Seven categories | 65,536 | Glidesort category sort | +5.7% |
+
+For nontrivial inputs the category implementation completes distribution even when every record receives one category; sorting references can recognize ordered input without moving those records. This is a concrete work difference to investigate, not an isolated measurement of its contribution. Any replacement must preserve the classifier-evaluation contract and retain known category/range facts; a width/distribution-specific switch is not a general solution.
+
+Category count matters to space in practice, not only asymptotically. At 257 categories and 65,536 random u64 records, measured peak extra heap was 1,177,656 bytes, exceeding the 524,288-byte input. Internal fan-out padding and the [block floors](../explain/block-partition.md#choosing-the-block-size) remain charged. O(√(nR) + R) does not promise less space than a linear buffer at every n and R. Returned offsets were included in each peak and retained before reference sorting, so peak minus output is a coexisting workspace measurement; fixed stack tables were not measured.
+
+A follow-up timed Tessera's own `sort_by_key` with the same category as key, building the same boundaries ([operation comparisons](../development/benchmarking.md#serial-operation-comparisons)); binary references use the same literal two-way classifier as the predicate entry. General sorting was slower on all 36 nonconstant inputs. The difference follows from information, not from an isolated defect: the category entry knows the bucket width from its count, while sorting has no range, so it probes order, attempts insertion and scans for varying bits before partitioning. A category in a wide key type never varies in its upper bits, so that scan always reads every record. For binary categories the sample's mode also selects an equality partition. Optimizing those probes is general sorting work; it cannot remove the scan without range information. The [release surface](algorithm-extensions-proposal.md#release-surface-alignment) therefore carries the range in the key type through `sort_by_cached_key` rather than as a public count.
+
+**Disposition:** retain the functional serial operations with performance acceptance open. This screen supports usefulness against the named sorting compositions, not superiority to a dedicated buffered partition or a source-change speedup. Two other wide-record cases had A/A windows of about ±12.0% and ±9.9%; only three blocks, one host and one placement were sampled. Dedicated buffered baselines, larger inputs, other classifier costs and controlled follow-up remain necessary; no full-sort foundation timing debt is resolved by these results.
+
+## Cached-key category grouping
+
+Two `sort_by_cached_key` implementations were screened against the count-taking category movement on the workloads above. The cached-key route, since then the `tessera` route of `partition-buckets`, sorts by the category as the narrowest unsigned key (`u8` up to 256 categories, `u16` beyond) and then builds the same boundaries, which evaluates the category a second time; the movement returns its boundaries without that pass. Coverage was u64 keys, 16-byte rows and 128-byte records, random, 16-value and constant inputs, 4,096 and 65,536 records, for two, seven and 257 categories: 18 inputs each. The host was a Xeon Gold 6140 with SMT off, pinned to one CPU, Rust 1.99.1, three paired blocks of 5 ms samples. Ratios below are cached-key time over category-movement time.
+
+| Route | Two categories | Seven categories | 257 categories | Peak heap at 65,536 records |
+|---|---|---|---|---|
+| By key type: 256-way distribution for `u8`, (key, index) pairs for `u16` | 0.48–1.56; faster only on tile-sized u64 and 16-byte rows | 1.17–2.79 | 1.40–3.26 | `u8`: 0.60–2.25 MB against 27–211 KB; `u16`: 0.53–0.74 MB against 1.18–4.40 MB |
+| By the cached keys' varying bits: one distribution when they fit one | 0.84–2.23 on nonconstant inputs; constant inputs 0.47–0.87 | 1.41–2.10 | 1.36–2.12 | The movement's peak plus one cached key per record; below the movement's peak where few categories occur |
+
+Routing by type pays for the type's range rather than the data's. Every `u8` key distributes into 256 buckets, whose block floors dominate wide records, and every `u16` key takes the pair sort, whatever the actual category count. Routing by the cached keys moves with the data's own width, so its space follows the categories that occur, and ordered or constant inputs return after the caching pass. Its remaining cost is structural: one classifier evaluation per record, with no range known in advance, either commits the movement to the key type's whole range before the first record is classified, or caches the keys and moves in a second pass. The count-taking movement avoids both, because the caller supplies the fan-out. An unmaintained probe without boundary construction put the second pass near 1.4 times the movement on 65,536 u64 records, so the reference's second classification accounts for part of the measured ratio. A caller who groups by a computed category pays that second evaluation too, unless the records carry the category.
+
+**Disposition:** keep the range-routed implementation. Removing the count-taking entry trades these individually listed losses for an interface without a category limit, as the [release surface](algorithm-extensions-proposal.md#release-surface-alignment) decided. The binary `partition` keeps the one-pass movement. The ratios come from one host and three blocks; several 4,096-record intervals were wide.
+
+## Unstable node-partition feasibility
+
+A retired serial feasibility study against `0499d35` shared root preparation, key encoding and half-key dispatch, node planning, candidate-bit progress, child routing and stable tile finishing. Only node movement changed: a histogram defined final bucket bands, then bounded cursors placed records with safe in-slice swaps instead of stable block chains and ledger completion. Classification could panic without leaving a hole; a changed key targeting a full band stopped that partition, while candidate-bit consumption still bounded recursion. Ordered reversal stayed stable. This is a research prototype, not a supported release API or a production-ready kernel.
+
+The maintained comparison pipeline linked two independently named placements per implementation, repeated the prototype for A/A, verified every output under the appropriate stability contract, and measured heap allocations separately. Temporary adapters selected the two contracts without changing inputs, sampling or statistics. Coverage comprised 54 inputs across u32, u64, f64, 16-byte rows, 128-byte records and owned records; a focused nine-block repeat covered the following 1M-record cases on an i7-10875H, Rust 1.99.1, one pinned logical CPU. Times are median milliseconds per sort; ratios are medians of paired stable/prototype comparisons inverted to prototype/stable, not quotients of the displayed marginal medians.
+
+| Records | Distribution | Stable ms | Prototype ms | Prototype / stable |
+|---|---|---:|---:|---:|
+| u64 | random | 8.80 | 15.33 | 1.740 |
+| u64 | 16 values | 2.06 | 2.06 | 1.000 |
+| u64 | Zipf 2 | 6.50 | 15.22 | 2.346 |
+| 16-byte row | random | 12.19 | 24.17 | 1.978 |
+| 16-byte row | 16 values | 4.67 | 9.62 | 2.066 |
+| 16-byte row | Zipf 2 | 9.47 | 18.53 | 1.978 |
+| 128-byte record | random | 68.26 | 72.95 | 1.069 |
+| 128-byte record | 16 values | 33.01 | 23.86 | 0.723 |
+| 128-byte record | Zipf 2 | 61.37 | 42.10 | 0.687 |
+
+Both stable placements reproduced the non-neutral results, and the prototype copy tracked the primary within about 2%. Symbol and disassembly inspection confirmed distinct node-execution bodies for the wide-record placements. Focused A/A ranges were within ±4.4% except wide-record Zipf 2 (±7.3%); the broader run reached ±28.6%, so it does not establish small improvements. Short tiles, ordered, nearly ordered and constant inputs retained their existing mechanisms; small timing differences there are not evidence of a stability saving. Peak extra heap for the wide-record random / 16-value / Zipf cases fell from 8,101,648 / 1,969,648 / 34,627,076 bytes to 41,600 / 4,096 / 94,560 bytes; stack storage is excluded.
+
+The prototype trades streaming movement and one classification per stable block pass for a histogram plus dependent record swaps and reclassification. Its measured benefit is limited to wide records with repeated keys, not a general unstable speedup or an upper bound on better kernels. Standard unstable comparison sorting was another viable low-code option: in the focused Zipf cases it used about 0.58 / 0.57 / 0.41 of stable Tessera's time for u64 / rows / wide records, but lost on their random inputs and severely on nearly ordered inputs in the broader run. These opponent results do not isolate stability from algorithm choice.
+
+**Design conclusion:** keep one recursive engine if an unstable kernel is pursued. A private compile-time choice at the complete node-partition operation can hide movement, scratch and recovery while sharing its classifier, boundaries and child completion. Do not build a strategy-trait hierarchy or duplicate planning and recursion. Stable tile leaves remain reusable: LSD depends on stable digit passes even under an unstable public contract, and counting direct keys is already permitted by their bitwise identity. The current planner's legality is reusable, but its fan-out is tuned for stable movement; a new primitive does not inherit that tuning's performance validity. Retain the stable kernel as the default rather than promote this swap primitive or add distribution-specific dispatch. Reusing it behind a weaker unstable contract is correct but has no intrinsic speed benefit; delegating to standard unstable sort is simpler than a new kernel but loses Tessera's fixed-key-width linear-time algorithm.
+
+Serial and Rayon suites, doctests, Clippy and a focused borrowed-record panic/changing-key test passed for the prototype; benchmark verification also covered owned payloads. Miri was unavailable. A subsequent complete Top-k screen rejected automatic use of the swap kernel: small-key and row workloads paid repeated classification and dependent swaps despite requiring only a prefix. The prototype and its temporary linked adapters remain recoverable in Git; raw measurements and executables stay outside Git.
+
+The follow-up reused stable block movement and limited unstable finishing to the existing small-leaf threshold, delegating directly to the standard library on encoded keys. Freezing callback keys and sorting source indices was rejected: that added setup and a permutation protocol solely to prevent a non-total-comparator panic, which the key-extraction contract permits. This does not justify removing cached bucket IDs from raw counting scatter, where consistent destinations are a memory-safety requirement. Individually sorting every small bucket after an MSD pass was also rejected: the whole tile already has no cross-bucket inversions, so a bucket walk adds overhead without reducing insertion shifts; the focused screen reproduced short/medium-key and row losses around 18–31%.
+
+The complete-call follow-up covered u64 keys, 16-byte rows and 128-byte records over random, 16-value and Zipf-2 inputs. In the 54-case full-sort screen, 18 of the 19 favorable cases had 16 or 48 records; the other was u64/Zipf-2/49. It also flagged losses of 0.65% on record128/16-values/65,536 and 3.79% on u64/16-values/49. Across five rank operations and 90 cases at 65,536 and one million records, every unstable/stable ratio remained within the stable A/A range and peak extra heap was identical. These algorithm screens lack independent placements and do not establish source attribution or exclude other workloads' benefits.
+
+**Disposition:** retire the unstable APIs, execution mode and dedicated benchmark adapter. The measured small-input benefit does not justify maintaining a second contract across the library and tooling, and aliasing stable execution supplies no intrinsic saving. Stable full-sort and rank APIs retain the shared refinement engine; standard-library weak selection baselines remain available. Reopen unstable implementation only with a generally applicable primitive and complete-operation timing or memory evidence broad enough to justify its maintenance cost, not width/skew-specific dispatch. Parallel unstable execution, expensive extractors and other hosts were not evaluated.
 
 ## Rejected or on hold
 
-- **Moving insertion-key cache, on hold.** Reusing the moving record’s encoded key across adjacent swaps improved local keyed-row screens, but the first hosted [PR #210](https://github.com/Yikai-Liao/tessera-order/pull/210) head measured `row_u32/random/49` +79.1%, with no improvement alert elsewhere. Linked local measurements did not reproduce the loss; source versus placement remains unresolved. The cache was withdrawn rather than spending a regression budget. Reopen only with consistent cross-placement and hosted evidence for the insertion/tile boundary.
+- **Moving insertion-key cache, on hold.** Reusing the moving record’s encoded key across adjacent swaps improved local keyed-row screens, but the first hosted [PR #210](https://github.com/Yikai-Liao/tessera-order/pull/210) head measured `row_u32/random/49` +79.1%, with no improvement alert elsewhere. Linked local measurements did not reproduce the loss; source versus placement remains unresolved. The cache was withdrawn rather than spending a regression budget. Reopen only with consistent cross-placement and hosted evidence for the insertion/tile boundary. The same case is a hosted outlier without the cache: merging `main` into the algorithm experiment ([#224](https://github.com/Yikai-Liao/tessera-order/pull/224)) measured it +63.9% on the hosted runner and 0.879 (99% interval 0.838–0.922) in a local paired run, and a hosted rerun of the same source measured it −15.1% (0.849). Treat a hosted alert on this case alone as run-to-run hosted variance until a rerun or a second placement reproduces it.
 - **Precomputed insertion point plus rotation, rejected.** Computing the position before moving preserved panic safety without a hole guard and helped wide records, but slowed small direct-key insertion substantially. The extra search and rotation are not a general replacement for adjacent swaps. Reopen only with a construction that keeps the small-record cost.
 - <span id="recomputed-tile-buckets-rejected">**Recomputed tile buckets, rejected.**</span> Since inconsistent keys may make the sort panic, a tile scatter could call the key function again and panic on a bucket overflow instead of reading cached `u16` bucket IDs. A local prototype removed 30 net production lines and about 20% of the whole-tile heap scratch for 8-byte rows, but needed a stack bucket-bound table of up to 32 KiB, and several 8-byte row groups ran 8–10% slower, one owned-`String` group about 5%. The cache is bounded by the tile, not by n, so it does not affect the O(√n) bound. Reopen only with a construction that keeps the cache's speed.
 - **Job-local finisher scratch (C), rejected.** Replacing the engine-local pool with a factory/mutable-visitor protocol spread initialization and lifetime obligations through the block entry points without simplifying the complete interface ([PR #181](https://github.com/Yikai-Liao/tessera-order/pull/181)). Reopen only for a required job-local mutable consumer or measured pool-lock cost.
@@ -131,6 +210,66 @@ Bounded staging against materialization (block permutation plus compaction) at e
 
 Only the `u32` direction passed the control rule in both copies, so no single record width selects the better strategy. The materialized path ends with a sequential compaction chain (7.4 ms at eight workers) that concurrent leaf jobs overlap but cannot remove; bounded gather, leaf sorting and protected writes overlap across workers (wall unions 7.6, 8.5 and 7.3 ms, not additive). Every length above lay inside the [then-current bounded-staging window](https://github.com/Yikai-Liao/tessera-order/blob/76a985fd47275ef60b024d7b0b20c237a1069efb/docs/design/engine.md#bounded-staging); no measurement covers a uniform root above it, where materialization is the only route. New completion research should start from these complete-path controls before adding ownership complexity.
 
+## Algorithm-extension foundations
+
+Moving scalar order primitives below recursive execution removes the extractor and SIMD backend's upward dependency on `engine.rs`, without changing insertion, scans or routing. A bounded linked-revision screen with direct and keyed u64, ordered/random inputs and insertion/tile boundaries found placement-sensitive short-input differences: independent copies disagreed on some directions, while ordered u64 immediately above the insertion boundary remained slower in the current placements. This does not establish a source-causal loss or performance equivalence. Keep Foundation A performance acceptance open and investigate the individual short-input differences under the [placement controls](../development/benchmarking.md#additional-source-attribution-controls); do not tune source order to the favorable copy. Broader key-width, near-order, platform and parallel timing coverage remains outstanding.
+
+Foundation B moves complete tile leaf planning, scratch and restoration outside recursive execution without changing the leaf rules or counting loops. Its bounded linked screen against A likewise leaves timing acceptance open. On keyed u64 sorted inputs at 48 and 49 records, the current same-source copy is about as fast as both prior-revision placements while the primary current placement is slower; this prevents attributing that large gap to the source change. On random inputs, 48-record keyed u64 and direct u64 disagree between prior-revision placements, while both prior placements are faster on 49-record keyed u64 and the current copy also improves its primary placement. Keep those cases unresolved individually; neither the larger-input controls nor identical-source differences prove harmlessness or authorize a timing waiver.
+
+Foundation C publishes final ranges directly from the existing ledger start and length; it adds no range table or movement phase. A bounded linked screen on direct/keyed u64 at short, tile-edge and node sizes leaves performance acceptance open: both prior placements are faster on 49-record direct random inputs, and the primary prior placement is faster on keyed random inputs of that length. For direct sorted inputs at 49 records, the current same-source copy is as fast as both prior placements while the primary current placement is slower. Larger controls do not resolve these individual short cases or the earlier foundations' coverage gaps.
+
+### Refinement tile-budget ownership
+
+The production refinement entry now chooses the default tile budget; adapters no longer pass it. The private explicit-budget execution body remains shared with small-input ownership tests and is unchanged. This removes a caller obligation, not a sorting pass, allocation or recovery mechanism.
+
+A linked full-sort screen compared the refactor with its preceding revision on u64, 16-byte keyed records and 128-byte records, using random, d16 and sorted inputs at 48, 4,096 and 65,536 records. Three 1 ms paired blocks were followed by nine 5 ms blocks with a byte-identical timing executable, two named copies per revision and repeated-current A/A. The i7-10875H host ran Rust 1.99.1/LLVM 23.1.3 pinned to one logical CPU, with powersave, turbo and SMT unchanged. Verification passed; all four Tessera placements had identical measured peak extra heap for each of the 27 inputs in both runs.
+
+The table retains every input where either baseline was classified faster in either run. Each ratio is the reciprocal of the median baseline / paired-current-mean ratio, not a quotient of marginal times. The paired-current mean is the mean of `tessera` and `tessera-aa` in that block. Above one favors the baseline; A/A spans both repeated-current samples normalized by their block mean and is an observed range, not a confidence interval.
+
+| Input | 3-block current / baseline A, B | A/A | 9-block current / baseline A, B | A/A |
+|---|---:|---:|---:|---:|
+| record128 / d16 / 4,096 | 1.017, 1.015 | ±1.13% | 0.995, 1.002 | ±4.75% |
+| record128 / d16 / 48 | 1.159, 1.002 | ±0.16% | 1.157, 1.012 | ±9.37% |
+| record128 / random / 4,096 | 1.011, 0.998 | ±0.49% | 1.005, 1.020 | ±2.31% |
+| record128 / random / 48 | 1.162, 1.002 | ±3.87% | 1.153, 1.011 | ±17.12% |
+| row_u64 / d16 / 48 | 1.031, 1.033 | ±0.97% | 0.994, 0.996 | ±2.50% |
+| row_u64 / random / 48 | 1.013, 0.992 | ±0.29% | 1.010, 1.001 | ±0.36% |
+| row_u64 / sorted / 48 | 1.006, 0.996 | ±0.96% | 1.178, 1.152 | ±13.00% |
+| u64 / d16 / 65,536 | 1.003, 1.003 | ±0.19% | 1.009, 0.990 | ±2.02% |
+| u64 / sorted / 4,096 | 1.019, 1.019 | ±0.70% | 1.004, 1.014 | ±6.75% |
+
+The repeat does not erase the initial losses: several directions or control windows changed, and the wide-record d16 loss persists against baseline A but not B. The same-source current-copy / paired-current-mean median ratio was 1.186 on 48-record keyed d16 input in the first screen. Symbol and disassembly inspection found distinct current root bodies, so those copies do not isolate address placement alone. These controls establish neither zero cost nor a source-causal penalty.
+
+**Disposition:** retain the internal simplification with timing acceptance open. Keep the individual differences above unresolved rather than tune source layout to a favorable copy. Partial-operation, segmented and Rayon timing, broader key widths and platforms remain uncovered; this screen closes none of the earlier foundation timing debt.
+
+## Serial slice-operation baseline
+
+The first serial extensions keep one rank-requirement authority and one refinement executor. Argsort changes the payload to indices; segmented sorting reuses invocation workspace across complete refinements. Top-k, prefixes and selected ranks do not introduce a second mover, recovery protocol or tile engine. This is a small shared implementation, not evidence that every workload is fastest.
+
+A bounded Rust comparison covered direct u64, 16-byte keyed records and 128-byte records on random, d16 and zipf2 inputs at 65,536 and 262,144 records. Nine paired blocks included full-call allocation, exact result checking and separate argsort output/workspace accounting. Random partial workloads saved substantial descendant work relative to full-sort references. This is a workload comparison, not source attribution or a new complexity bound. The host retained powersave, turbo and SMT; the observed block ranges are not confidence intervals.
+
+Native standard-library scalar selection was faster for every measured Top-k and prefix case, and most single-rank cases. Stable payload membership is a different contract: weaker unstable record selection was omitted, not counted as a win. Complete stable sorting, Glidesort and Radsort are explicit full-sort references for partial workloads. The d16 cohort often leaves little additional work for partial execution to avoid; a marginal full-sort advantage for the u64 rank interval remains a local loss rather than a reason for a distribution-specific exception.
+
+Stable-opponent losses in this bounded comparison are listed individually below. Ratios are opponent time divided by the paired Tessera mean; below one favors the opponent. A near-boundary directional verdict is not a portable guarantee.
+
+| Operation | Input | Records | Opponent | Ratio |
+|---|---|---:|---|---:|
+| Multiple selection | u64 / zipf2 | 65,536 | slice stable sort | 0.7948 |
+| Argsort | u64 / zipf2 | 65,536 | slice stable sort | 0.8725 |
+| Argsort | u64 / zipf2 | 262,144 | slice stable sort | 0.8262 |
+| Argsort | keyed u64 / zipf2 | 65,536 | slice stable sort | 0.9936 |
+| Argsort | keyed u64 / zipf2 | 262,144 | slice stable sort | 0.9082 |
+| Argsort | 128-byte records / zipf2 | 262,144 | slice stable sort | 0.9195 |
+| Segments | u64 / zipf2 | 65,536 | slice stable sort | 0.8639 |
+| Segments | u64 / zipf2 | 262,144 | slice stable sort | 0.8580 |
+| Segments | 128-byte records / d16 | 65,536 | Radsort | 0.9848 |
+| Segments | 128-byte records / d16 | 262,144 | Radsort | 0.8965 |
+| Segments | 128-byte records / zipf2 | 262,144 | Radsort | 0.9383 |
+
+The partial parameters were Top-k/prefix length 1,024, single rank 32,768, interval [16,384, 32,768), and three distinct multiple-selection ranks 16,384/32,768/49,152 with a duplicate request. Segments contained 256 records. These integer ranks are not the same quantile fractions at both input lengths. Zipf2 losses and scalar selection limits remain reasons to measure a real workload before adding a partial-tile specialization, not permission to duplicate the engine preemptively.
+
+A separate historical full-sort build and linked-placement screen against Foundation D succeeded with the new-operation benchmark adapters disabled. Small timing differences also appeared between identical-source copies, including u64 random at 65,536 records and several 1,000-record cases. It establishes build compatibility, not regression freedom, and does not close the [foundation acceptance gaps](#algorithm-extension-foundations). Full-sort figure cohorts are unchanged; non-sort results remain tables and JSON.
+
 ## Structure analysis
 
 Compare constructions by their rules, states and invariants, not source length. A replacement must meet [semantics](../../conformance/semantics.md) and the [per-case acceptance rule](../../ROADMAP.md#simplification-candidates); showing each mechanism useful alone does not prove minimality. The maintainer-approved study ceiling is O(P^{3/2}√n), with fixed root fan-out R; an n-record buffer is excluded. The public [O(P√n) bound](../../conformance/semantics.md#rust-rayon-entry-points) changes only if an accepted design needs it.
@@ -142,7 +281,7 @@ The code-and-contract audit found concentrated ownership, not proven minimality.
 | Change | Authority, consumers and invariant | Coordinated documentation/model edits |
 |---|---|---|
 | Sampling | `engine/plan.rs::KeySample` feeds equality/occupancy; samples certify neither ownership nor progress. `engine.rs::probe_order` samples adjacent order, a different fact. | `explain/routing.md`; `.vitepress/theme/sim/digits.ts::sampleKeys` and its sampling tests. |
-| Tile capacity | `engine/tile.rs::capacity` converts byte/cursor limits for both entries and `plan_tile`. Layout changes follow `Cursor`, derived tables, `lib.rs::thresholds` and scratch reservation; `finishing_capacity` owns the byte- and cursor-bounded whole-child allowance. | `explain/tiles.md`, `sim/digits.ts`. |
+| Tile capacity | `tile.rs::capacity` converts byte/cursor limits for both entries and `plan_tile`. Layout changes follow `Cursor`, derived tables, `lib.rs::thresholds` and scratch reservation; `finishing_capacity` owns the byte- and cursor-bounded whole-child allowance. | `explain/tiles.md`, `sim/digits.ts`. |
 | Partition selection | `plan_node` feeds `execute_node` and parallel `sort_root`. Both executors classify digits with `key::KeyDigit` and equality with `key::Rank` (rank plus top varying bit), both `block::Classify` bucket indices, and build the equality `Split` through `Split::equality`. Preserve bucket meaning and the removal of the top varying bit from every unfinished child. | `explain/routing.md`; recovery/inconsistent-key tests. |
 | Block layout | `block.rs` owns storage, bucket chains, block sizing and scatter recovery; `block/finish.rs` owns per-block metadata costs and builds one source ledger from the shard chains for serial and parallel completion. Follow chain construction, partials, protection, relocation and restoration. Reserves are 2R blocks per shard; the block size balances all shards' scratch against the per-block metadata. | `explain/block-partition.md`; its figure replays the engine through `trace.rs` events, so event meaning changes with the hooks. |
 | Task size | `engine/parallel.rs` owns cutoff, shard quota and scratch pooling; block code clamps shards and schedules bucket movement with immediate finishing. Preserve retired exclusive borrows and joins. Reentrant callbacks invalidate one-live-buffer-per-worker assumptions. | `design/engine.md`; bucket-borrow, parallel and memory tests. |

@@ -4,15 +4,28 @@
 
 use super::InputCase;
 use crate::case::{Key, Row, generate};
+use crate::plan::Operation;
 use std::{
     cmp::{Ordering, Reverse},
     rc::Rc,
 };
 
+use tessera_order::RadixKey;
+
+/// Reproducible finite categories, with no sorting-specific interpretation.
+fn category<K: RadixKey>(key: K, bucket_count: usize) -> usize
+where
+    K::Encoded: Into<u128>,
+{
+    (key.encode().into() % bucket_count as u128) as usize
+}
+
 /// Ordering and payload identity for one benchmark record representation.
 pub trait BenchmarkRecord: Clone + Send + Sync + 'static {
     /// Whether tie order and payload identity are observable.
     const HAS_PAYLOAD: bool = false;
+    /// Encoded-key category shared by every partition adapter and its reference.
+    fn category(&self, bucket_count: usize) -> usize;
     /// Compares sorting keys in the shared total order.
     fn order(&self, other: &Self) -> Ordering;
     /// Compares every observable bit of two records.
@@ -30,6 +43,9 @@ pub trait BenchmarkRecord: Clone + Send + Sync + 'static {
 macro_rules! key_element {
     ($t:ty) => {
         impl BenchmarkRecord for $t {
+            fn category(&self, bucket_count: usize) -> usize {
+                category(*self, bucket_count)
+            }
             fn order(&self, o: &Self) -> Ordering {
                 Key::order(self, o)
             }
@@ -44,7 +60,13 @@ key_element!(u64);
 key_element!(u128);
 key_element!(f64);
 
-impl<K: Key + Send + Sync + 'static> BenchmarkRecord for Reverse<K> {
+impl<K: Key + Send + Sync + 'static> BenchmarkRecord for Reverse<K>
+where
+    K::Encoded: Into<u128>,
+{
+    fn category(&self, bucket_count: usize) -> usize {
+        category(*self, bucket_count)
+    }
     fn order(&self, other: &Self) -> Ordering {
         other.0.order(&self.0)
     }
@@ -66,6 +88,9 @@ macro_rules! record_element {
     ($t:ty, $index:expr, $same:expr) => {
         impl BenchmarkRecord for $t {
             const HAS_PAYLOAD: bool = true;
+            fn category(&self, bucket_count: usize) -> usize {
+                category(self.key, bucket_count)
+            }
             fn order(&self, o: &Self) -> Ordering {
                 self.key.cmp(&o.key)
             }
@@ -95,6 +120,9 @@ record_element!(
 );
 impl BenchmarkRecord for OwnedRecord {
     const HAS_PAYLOAD: bool = true;
+    fn category(&self, bucket_count: usize) -> usize {
+        category(self.key, bucket_count)
+    }
     fn order(&self, other: &Self) -> Ordering {
         self.key.cmp(&other.key)
     }
@@ -121,6 +149,7 @@ impl<K: Key> PartialOrd for Row<K> {
 }
 /// Immutable original records and their stable reference shared by all adapters.
 pub struct PreparedRecords<T> {
+    operation: Operation,
     original: Vec<T>,
     reference: Vec<T>,
     buffer_bytes: usize,
@@ -128,15 +157,41 @@ pub struct PreparedRecords<T> {
 impl<T: BenchmarkRecord> PreparedRecords<T> {
     /// Prepares one immutable input, its reference order and buffer footprint.
     pub fn new(original: Vec<T>) -> Rc<Self> {
+        Self::prepare(original, Operation::Sort {})
+    }
+
+    fn prepare(original: Vec<T>, operation: Operation) -> Rc<Self> {
         let mut reference = original.clone();
-        reference.sort_by(T::order);
+        if let Some(bucket_count) = operation.bucket_count() {
+            reference.sort_by_key(|record| record.category(bucket_count));
+        } else if let Some(offsets) = operation.offsets(reference.len()) {
+            for ends in offsets.windows(2) {
+                reference[ends[0]..ends[1]].sort_by(T::order);
+            }
+        } else {
+            reference.sort_by(T::order);
+        }
         let buffer_bytes =
             original.len() * size_of::<T>() + original.iter().map(T::extra_bytes).sum::<usize>();
         Rc::new(Self {
+            operation,
             original,
             reference,
             buffer_bytes,
         })
+    }
+
+    /// Prepares a validated workload without retaining per-call workspace.
+    fn for_case(case: &InputCase, original: Vec<T>) -> Rc<Self> {
+        case.operation
+            .validate(original.len())
+            .expect("validated operation");
+        Self::prepare(original, case.operation.clone())
+    }
+
+    /// Returns the result contract for this immutable input.
+    pub(super) fn operation(&self) -> &Operation {
+        &self.operation
     }
 
     /// Returns the original vector for `Vec::clone`/`clone_from` batch restoration.
@@ -172,45 +227,49 @@ impl CaseInput {
     /// Generates and prepares the concrete record representation of a suite case.
     pub fn new(c: &InputCase) -> Self {
         match c.ty.as_str() {
-            "u32" => Self::U32(PreparedRecords::new(generate::<u32>(
-                &c.distribution,
-                c.len,
-            ))),
-            "u64" => Self::U64(PreparedRecords::new(generate::<u64>(
-                &c.distribution,
-                c.len,
-            ))),
-            "u128" => Self::U128(PreparedRecords::new(generate::<u128>(
-                &c.distribution,
-                c.len,
-            ))),
-            "f64" => Self::F64(PreparedRecords::new(generate::<f64>(
-                &c.distribution,
-                c.len,
-            ))),
+            "u32" => Self::U32(PreparedRecords::for_case(
+                c,
+                generate::<u32>(&c.distribution, c.len),
+            )),
+            "u64" => Self::U64(PreparedRecords::for_case(
+                c,
+                generate::<u64>(&c.distribution, c.len),
+            )),
+            "u128" => Self::U128(PreparedRecords::for_case(
+                c,
+                generate::<u128>(&c.distribution, c.len),
+            )),
+            "f64" => Self::F64(PreparedRecords::for_case(
+                c,
+                generate::<f64>(&c.distribution, c.len),
+            )),
             // Complementing integers and flipping float signs complements their
             // encoded keys. Reverse complements them again, preserving the base
             // generator's encoded-order geometry, including sorted inputs.
-            "reverse_u64" => Self::ReverseU64(PreparedRecords::new(
+            "reverse_u64" => Self::ReverseU64(PreparedRecords::for_case(
+                c,
                 generate::<u64>(&c.distribution, c.len)
                     .into_iter()
                     .map(|key| Reverse(!key))
                     .collect(),
             )),
-            "reverse_f64" => Self::ReverseF64(PreparedRecords::new(
+            "reverse_f64" => Self::ReverseF64(PreparedRecords::for_case(
+                c,
                 generate::<f64>(&c.distribution, c.len)
                     .into_iter()
                     .map(|key| Reverse(-key))
                     .collect(),
             )),
-            "row_u32" => Self::Row32(PreparedRecords::new(
+            "row_u32" => Self::Row32(PreparedRecords::for_case(
+                c,
                 generate::<u32>(&c.distribution, c.len)
                     .into_iter()
                     .enumerate()
                     .map(|(i, key)| Row { key, row: i as u32 })
                     .collect(),
             )),
-            "row_u64" => Self::Row64(PreparedRecords::new(
+            "row_u64" => Self::Row64(PreparedRecords::for_case(
+                c,
                 generate::<u64>(&c.distribution, c.len)
                     .into_iter()
                     .enumerate()
@@ -218,14 +277,16 @@ impl CaseInput {
                     .collect(),
             )),
             // These are distinct inputs, not harness-specific representations.
-            "rec128_u64" => Self::WideRecord(PreparedRecords::new(
+            "rec128_u64" => Self::WideRecord(PreparedRecords::for_case(
+                c,
                 generate::<u64>(&c.distribution, c.len)
                     .into_iter()
                     .enumerate()
                     .map(|(index, key)| WideRecord::new(key, index))
                     .collect(),
             )),
-            "record128" => Self::WideRecord(PreparedRecords::new(
+            "record128" => Self::WideRecord(PreparedRecords::for_case(
+                c,
                 generate::<u64>(&c.distribution, c.len)
                     .into_iter()
                     .enumerate()
@@ -239,7 +300,8 @@ impl CaseInput {
                     })
                     .collect(),
             )),
-            "owned" => Self::OwnedRecord(PreparedRecords::new(
+            "owned" => Self::OwnedRecord(PreparedRecords::for_case(
+                c,
                 generate::<u64>(&c.distribution, c.len)
                     .into_iter()
                     .enumerate()
@@ -250,6 +312,22 @@ impl CaseInput {
                     .collect(),
             )),
             _ => unreachable!("suite contains an unknown type"),
+        }
+    }
+
+    /// Result contract shared by every typed representation.
+    pub(super) fn operation(&self) -> &Operation {
+        match self {
+            Self::U32(v) => v.operation(),
+            Self::U64(v) => v.operation(),
+            Self::U128(v) => v.operation(),
+            Self::F64(v) => v.operation(),
+            Self::ReverseU64(v) => v.operation(),
+            Self::ReverseF64(v) => v.operation(),
+            Self::Row32(v) => v.operation(),
+            Self::Row64(v) => v.operation(),
+            Self::WideRecord(v) => v.operation(),
+            Self::OwnedRecord(v) => v.operation(),
         }
     }
 }
@@ -276,6 +354,7 @@ mod tests {
                     ty: ty.into(),
                     distribution: distribution.into(),
                     len: 1000,
+                    operation: Operation::Sort {},
                 };
                 match CaseInput::new(&case) {
                     CaseInput::ReverseU64(input) => {

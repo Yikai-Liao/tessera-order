@@ -2,14 +2,17 @@
 
 //! Bounded tile finishing owns scratch layout, cached classification and restoration.
 //! Callers supply records, remaining variation and an extractor; raw pass pointers
-//! and the live-copy guard never cross this boundary.
+//! and the live-copy guard never cross this boundary. The private leaf planner
+//! consumes this module's cursor limits without depending on node execution.
 
-use super::plan::{Digit, TilePlan, plan_tile};
-use super::scan_varying_bits;
-use crate::key::{self, Extract, Unsigned};
+mod plan;
+
+use crate::key::{self, Digit, Extract, Unsigned};
+use crate::order::scan_varying_bits;
 use crate::thresholds::{INSERTION_MAX, MAX_CURSOR_BYTES, MAX_TILE_RECORDS};
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
+use plan::{TilePlan, plan_tile};
 
 /// Positions and cached bucket IDs used by tile passes.
 pub(crate) type Cursor = u16;
@@ -131,8 +134,7 @@ impl<T> Scratch<T> {
         Self(Vec::new())
     }
 
-    /// Stably finishes a cursor-bounded slice by insertion, MSD or LSD passes,
-    /// restoring its complete record set on key panic.
+    /// Stably sorts a cursor-bounded slice, restoring its records on key panic.
     pub(super) fn sort<E: Extract<T>>(
         &mut self,
         records: &mut [T],
@@ -146,7 +148,9 @@ impl<T> Scratch<T> {
         }
         match plan_tile::<T>(len, varying) {
             TilePlan::Insertion => extractor.finish_insertion(records),
-            TilePlan::Msd(digit) => self.partition_tile(records, digit, varying, extractor),
+            TilePlan::Msd(digit) => {
+                self.partition_tile::<_>(records, digit, varying, extractor);
+            }
             TilePlan::Lsd { digits, passes } => {
                 // A terminal digit can count interchangeable keys without scratch.
                 let digit = digits[0];
@@ -157,6 +161,34 @@ impl<T> Scratch<T> {
                 self.counting_passes(records, &digits[..passes], &mut counts, extractor);
             }
         }
+    }
+
+    /// Distributes a tile by a validated category extractor in one cached pass.
+    /// No order/variation probe or recursive finishing evaluates it again.
+    /// Returns cumulative ends for all represented categories, including empty ones.
+    pub(super) fn distribute<E: Extract<T>>(
+        &mut self,
+        records: &mut [T],
+        radix: usize,
+        extractor: &mut E,
+    ) -> Vec<usize> {
+        assert!((1..=MAX_DIGIT_BUCKETS.ilog2() as usize).contains(&radix));
+        debug_assert!(records.len() <= MAX_TILE_RECORDS);
+        let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
+        self.counting_passes(
+            records,
+            &[Digit {
+                shift: 0,
+                width: radix,
+            }],
+            &mut counts,
+            extractor,
+        );
+        // SAFETY: the completed pass initialized this prefix and restored all
+        // records. Its cursor values are the cumulative category ends.
+        let ends =
+            unsafe { core::slice::from_raw_parts(counts.as_ptr().cast::<Cursor>(), 1 << radix) };
+        ends.iter().map(|&end| end as usize).collect()
     }
 
     /// Finishes a cursor-bounded child within `candidate`. Insertion-sized
@@ -173,7 +205,7 @@ impl<T> Scratch<T> {
         }
         if records.len() > INSERTION_MAX {
             let varying = scan_varying_bits(records, candidate, extractor);
-            self.sort(records, varying, extractor);
+            self.sort::<_>(records, varying, extractor);
         } else {
             extractor.finish_insertion(records);
         }
@@ -297,7 +329,7 @@ impl<T> Scratch<T> {
         for &end in ends {
             let end = end as usize;
             debug_assert!(start <= end && end <= len);
-            self.finish_child(&mut records[start..end], candidate, extractor);
+            self.finish_child::<_>(&mut records[start..end], candidate, extractor);
             start = end;
         }
     }
@@ -399,7 +431,7 @@ mod tests {
                 u64::MAX
             }
         });
-        scratch.sort(&mut records, u64::MAX as u128, &mut extractor);
+        scratch.sort::<_>(&mut records, u64::MAX as u128, &mut extractor);
         assert!(changed, "fixture never supplied a varying key");
         records.sort_unstable();
         assert_eq!(records, (0..len).collect::<Vec<_>>());
@@ -417,7 +449,7 @@ mod tests {
                 calls << SHIFT
             });
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                Scratch::new().partition_tile(
+                Scratch::new().partition_tile::<_>(
                     &mut records,
                     Digit { shift: 0, width: 6 },
                     63,
@@ -461,7 +493,7 @@ mod tests {
         expected.sort_by_key(|x| u16::from_le_bytes([x.0[0], x.0[1]]));
         let mut scratch = Scratch::new();
         let mut key = ByKey(|x: &Odd| u16::from_le_bytes([x.0[0], x.0[1]]));
-        scratch.partition_tile(
+        scratch.partition_tile::<_>(
             &mut records,
             Digit { shift: 0, width },
             u128::from(mask),

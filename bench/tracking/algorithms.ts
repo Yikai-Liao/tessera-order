@@ -4,13 +4,12 @@ import { appendFile } from "node:fs/promises";
 import { catalog } from "../catalog.ts";
 import { TRACKING_SPEC } from "./result.ts";
 
-/**
- * Production adapters are the tracking inventory; revision placements are controls, not
- * algorithms. A parallel variant needs exactly its thread count in allowed CPUs, so variants
- * wider than the tracking hardware remain local comparisons only.
- */
+/** Track production sort adapters that fit the tracking hardware, not revision or operation controls. */
 export const trackingAlgorithms = catalog.algorithms.filter(
-  (entry) => entry.adapter !== "revision" && (entry.threads ?? 1) <= TRACKING_SPEC.cpus,
+  (entry) =>
+    entry.adapter !== "revision" &&
+    entry.adapter !== "reference" &&
+    (entry.threads ?? 1) <= TRACKING_SPEC.cpus,
 );
 
 /** Resolve a catalog ID before it enters a command, data directory or Cloud branch. */

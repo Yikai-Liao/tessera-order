@@ -120,6 +120,9 @@ impl Options {
         {
             return Err("paired algorithm runs require tessera and std-stable controls".into());
         }
+        if !options.plan.operation().is_sort() && !cfg!(feature = "operations") {
+            return Err("non-sort workloads require the operations benchmark feature; the library APIs are always available".into());
+        }
         let available = variant::list_variants();
         for id in &options.plan.algorithms {
             if BUILD == "default"
@@ -212,24 +215,37 @@ fn create_manifest(options: &Options, cases: &[InputCase]) -> Value {
         )
     ));
     provenance["suite"] = json!(options.suite);
-    provenance["suite_version"] = json!(1);
+    provenance["suite_version"] = json!(if options.plan.operation().is_sort() {
+        1
+    } else {
+        2
+    });
+    if !options.plan.operation().is_sort() {
+        provenance["index_bytes"] = json!(size_of::<usize>());
+    }
     provenance["plan"] = json!(options.plan);
     provenance["cases"] = json!(
         cases
             .iter()
             .map(|case| {
-                let probe = InputCase {
-                    len: 32,
-                    distribution: "random".into(),
-                    ..case.clone()
-                };
+                let probe = case.probe();
                 let input = record::CaseInput::new(&probe);
                 let supported: Vec<_> = options.variants()
                     .iter()
                     .filter(|v| v.supports(&input))
                     .map(|v| v.name)
                     .collect();
-                let entry = json!({"ty":case.ty,"distribution":case.distribution,"len":case.len,"variants":supported});
+                let mut entry = json!(case);
+                entry["variants"] = json!(supported);
+                if !case.operation.is_sort() {
+                    entry["implementations"] = json!(options.variants().iter()
+                        .filter_map(|v| v.prepare(&input, 0).map(|k| (v.name, k.description())))
+                        .collect::<std::collections::BTreeMap<_, _>>());
+                    entry["omitted"] = json!(options.variants().iter()
+                        .filter(|v| !supported.contains(&v.name))
+                        .map(|v| json!({"variant":v.name,"reason":"unsupported operation/input combination"}))
+                        .collect::<Vec<_>>());
+                }
                 #[cfg(tessera_bench_revisions)]
                 let entry = {
                     let mut entry = entry;
@@ -493,6 +509,11 @@ pub fn main(memory: bool) -> Result<()> {
         return Ok(());
     }
     let cases = options.cases(options.group.as_deref())?;
+    if options.command == "run" {
+        // The manifest includes every case, even for a restricted group. Keep
+        // required-control admission with native capabilities, not a TS limit.
+        run::validate_controls(&options.cases(None)?, &options.variants())?;
+    }
     match options.command.as_str() {
         "list" => {
             for v in variant::list_variants() {
@@ -505,6 +526,7 @@ pub fn main(memory: bool) -> Result<()> {
                             ty: (*ty).into(),
                             distribution: "random".into(),
                             len: 32,
+                            operation: options.plan.operation().probe(),
                         }))
                     })
                     .collect();
@@ -553,7 +575,8 @@ fn measure_memory(options: &Options, cases: &[InputCase]) -> Result<()> {
         );
         let input = record::CaseInput::new(case);
         for v in options.variants() {
-            if case.input_bytes() > OPPONENT_MEMORY_INPUT_BYTES
+            if case.operation.is_sort()
+                && case.input_bytes() > OPPONENT_MEMORY_INPUT_BYTES
                 && v.name != "tessera"
                 && v.adapter != "tessera-par"
             {
@@ -573,7 +596,10 @@ fn measure_memory(options: &Options, cases: &[InputCase]) -> Result<()> {
                 k.check()
                     .map_err(|e| format!("{} {}: {e}", case.id(), v.name))?;
                 host::check_threads(k.worker_threads())?;
-                let row = json!({"case_id":case.id(),"variant":v.name,"build":BUILD,"peak_extra_bytes":peak,"verified":true});
+                let mut row = json!({"case_id":case.id(),"variant":v.name,"build":BUILD,"peak_extra_bytes":peak,"verified":true});
+                if !case.operation.is_sort() {
+                    row["output_bytes"] = json!(k.output_bytes());
+                }
                 append_record(&mut file, &row)?;
                 rows.push(row);
             }

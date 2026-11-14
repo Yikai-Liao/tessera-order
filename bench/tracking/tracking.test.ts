@@ -9,7 +9,7 @@ import { parseHTML } from "linkedom/worker";
 import { z } from "zod";
 import { catalog } from "../catalog.ts";
 import type { RowChart } from "../plot/rows.ts";
-import { trackingAlgorithms } from "./algorithms.ts";
+import { trackingAlgorithm, trackingAlgorithms, trackingBranch } from "./algorithms.ts";
 import { trackingMemory } from "./build.ts";
 import {
   comparisonData,
@@ -76,6 +76,17 @@ const run: TrackingRun = {
   image: "registry.bencher.dev/example@sha256:" + "b".repeat(64),
   workflow: "https://github.com/test/repo/actions/runs/1",
 };
+
+test("tracking excludes revision controls and operation-only references", () => {
+  assert.ok(trackingAlgorithms.some((entry) => entry.id === "tessera"));
+  assert.ok(
+    trackingAlgorithms.every((entry) => !["revision", "reference"].includes(entry.adapter)),
+  );
+  for (const id of ["tessera-full", "tessera-copy", "tessera-baseline"]) {
+    assert.throws(() => trackingAlgorithm(id), /Unknown tracking algorithm/);
+    assert.throws(() => trackingBranch(id), /Unknown tracking algorithm/);
+  }
+});
 
 test("each algorithm's reports must come from its own Cloud branch", () => {
   const raw = report();

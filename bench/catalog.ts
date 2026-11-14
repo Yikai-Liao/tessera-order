@@ -116,20 +116,132 @@ export function modeOrder(id: string) {
   return order < 0 ? catalog.modes.length : order;
 }
 
+/** Versioned public-operation parameters, separate from implementation identity. */
+const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+export const operationSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("sort") }),
+  z.strictObject({ kind: z.literal("argsort") }),
+  z.strictObject({ kind: z.literal("partition") }),
+  z.strictObject({ kind: z.literal("partition-buckets"), bucket_count: count.min(1) }),
+  z.strictObject({ kind: z.literal("segments"), segment_len: count.min(1) }),
+  z.strictObject({ kind: z.literal("top-k"), k: count }),
+  z.strictObject({ kind: z.literal("prefix"), prefix_len: count }),
+  z.strictObject({ kind: z.literal("select"), index: count }),
+  z
+    .strictObject({ kind: z.literal("rank-range"), start: count, end: count })
+    .refine((range) => range.start <= range.end, "reversed rank range"),
+  z.strictObject({ kind: z.literal("select-many"), indices: z.array(count) }),
+]);
+export type Operation = z.infer<typeof operationSchema>;
+/** CLI choices derive from the operation schema, never a second registry. */
+export const operationKinds = operationSchema.options.map((schema) => schema.shape.kind.value);
+
+/** Validate parameters against a resolved count before building or allocating inputs. */
+export function validateOperation(operation: Operation, len: number) {
+  const valid =
+    operation.kind === "top-k"
+      ? operation.k <= len
+      : operation.kind === "prefix"
+        ? operation.prefix_len <= len
+        : operation.kind === "select"
+          ? operation.index < len
+          : operation.kind === "rank-range"
+            ? operation.end <= len
+            : operation.kind === "select-many"
+              ? operation.indices.every((i) => i < len)
+              : true;
+  if (!valid) throw new Error(`Operation parameters exceed input length ${len}`);
+}
+
+/** Decode an exact half-open rank range; empty ranges are no-op requests. */
+export function parseRankRange(value: string) {
+  const match = /^(0|[1-9]\d*):(0|[1-9]\d*)$/.exec(value);
+  if (!match) throw new Error("expected start:end with nonnegative integer ranks");
+  const parsed = operationSchema.parse({
+    kind: "rank-range",
+    start: Number(match[1]),
+    end: Number(match[2]),
+  });
+  if (parsed.kind !== "rank-range") throw new Error("invalid rank range");
+  return { start: parsed.start, end: parsed.end };
+}
+
+/** Extra identity components; complete sorting retains historical IDs. */
+export function operationSuffix(operation?: Operation): string {
+  switch (operation?.kind) {
+    case undefined:
+    case "sort":
+      return "";
+    case "argsort":
+      return "/argsort";
+    case "partition":
+      return "/partition";
+    case "partition-buckets":
+      return `/partition-buckets/${operation.bucket_count}`;
+    case "segments":
+      return `/segments/${operation.segment_len}`;
+    case "top-k":
+      return `/top-k/${operation.k}`;
+    case "prefix":
+      return `/prefix/${operation.prefix_len}`;
+    case "select":
+      return `/select/${operation.index}`;
+    case "rank-range":
+      return `/rank-range/${operation.start}-${operation.end}`;
+    case "select-many":
+      return `/select-many/${operation.indices.join(",") || "none"}`;
+  }
+}
+
+/** Short report label; exact parameters remain in the case identity and manifest. */
+export function operationLabel(operation?: Operation) {
+  switch (operation?.kind) {
+    case undefined:
+    case "sort":
+      return "Full sort";
+    case "argsort":
+      return "Stable argsort";
+    case "partition":
+      return "Stable binary partition";
+    case "partition-buckets":
+      return `Stable partition · ${operation.bucket_count} categories`;
+    case "segments":
+      return `Stable segments · ${operation.segment_len} records each`;
+    case "top-k":
+      return `Stable-membership top-k · ${operation.k} unordered records`;
+    case "prefix":
+      return `Stable prefix · ${operation.prefix_len} records`;
+    case "select":
+      return `Stable selection · rank ${operation.index}`;
+    case "rank-range":
+      return `Stable ranks [${operation.start}, ${operation.end})`;
+    case "select-many":
+      return `Stable multiple selection · ${operation.indices.length} requests`;
+  }
+}
+
 /** Identity fields shared by input manifests and the two benchmark ID grammars. */
 export interface CaseIdentity {
   ty: string;
   distribution: string;
   len: number;
+  operation?: Operation;
 }
 
 /** Format the comparison harness's seed-one input identity. */
 export function comparisonId(input: CaseIdentity) {
-  return `${input.ty}/${input.distribution}/${input.len}/s1`;
+  return `${input.ty}/${input.distribution}/${input.len}/s1${operationSuffix(input.operation)}`;
+}
+
+/** Keep resumable groups separate for different result contracts. */
+export function comparisonGroup(input: CaseIdentity) {
+  return `${input.ty}/${input.distribution}${operationSuffix(input.operation)}`;
 }
 
 /** Format a Criterion timed identity; catalog membership is checked by its consumer. */
 export function criterionId(input: CaseIdentity, mode: string) {
+  if (input.operation && input.operation.kind !== "sort")
+    throw new Error("Criterion tracking supports full sorting only");
   return `rust/${comparisonId(input)}/${mode}`;
 }
 
@@ -143,7 +255,7 @@ export function parseComparisonId(id: string) {
   const parts = id.split("/");
   const [ty, distribution, length, seed] = parts;
   if (
-    parts.length !== 4 ||
+    ![4, 5, 6].includes(parts.length) ||
     !ty ||
     !distribution ||
     !/^[1-9]\d*$/.test(length) ||
@@ -151,7 +263,52 @@ export function parseComparisonId(id: string) {
     !/^s[1-9]\d*$/.test(seed)
   )
     throw new Error(`Invalid comparison benchmark ID: ${id}`);
-  return { ty, distribution, len: Number(length), seed };
+  let operation: Operation | undefined;
+  if (parts.length > 4) {
+    const [kind, parameter] = parts.slice(4);
+    const integer = (value: string) => {
+      if (!/^(0|[1-9]\d*)$/.test(value)) throw new Error(`Invalid operation parameter: ${id}`);
+      return Number(value);
+    };
+    let candidate: unknown;
+    switch (kind) {
+      case "partition-buckets":
+        candidate = { kind, bucket_count: integer(parameter ?? "") };
+        break;
+      case "partition":
+      case "argsort":
+        candidate = { kind };
+        break;
+      case "segments":
+        candidate = { kind, segment_len: integer(parameter ?? "") };
+        break;
+      case "top-k":
+        candidate = { kind, k: integer(parameter ?? "") };
+        break;
+      case "prefix":
+        candidate = { kind, prefix_len: integer(parameter ?? "") };
+        break;
+      case "select":
+        candidate = { kind, index: integer(parameter ?? "") };
+        break;
+      case "rank-range":
+        candidate = { kind, ...parseRankRange((parameter ?? "").replaceAll("-", ":")) };
+        break;
+      case "select-many":
+        candidate = {
+          kind,
+          indices: parameter === "none" ? [] : (parameter ?? "").split(",").map(integer),
+        };
+        break;
+      default:
+        throw new Error(`Invalid operation identity: ${id}`);
+    }
+    operation = operationSchema.parse(candidate);
+    validateOperation(operation, Number(length));
+    if (operationSuffix(operation) !== `/${parts.slice(4).join("/")}`)
+      throw new Error(`Noncanonical comparison benchmark ID: ${id}`);
+  }
+  return { ty, distribution, len: Number(length), seed, ...(operation ? { operation } : {}) };
 }
 
 /** Strictly decode Criterion IDs with known catalog fields, not display fallbacks. */

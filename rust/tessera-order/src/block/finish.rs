@@ -103,7 +103,7 @@ impl<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec<usize>>> Drop
 {
     fn drop(&mut self) {
         for bucket in &mut self.buckets {
-            bucket.finish(&self.storage, None::<fn(usize, &mut [T])>);
+            bucket.finish(&self.storage, None::<fn(usize, Range<usize>, &mut [T])>);
         }
     }
 }
@@ -331,7 +331,7 @@ impl Bucket {
     ) where
         Owner: MetadataCell<usize>,
         Free: MetadataCell<Vec<usize>>,
-        Visit: FnOnce(usize, &'records mut [T]),
+        Visit: FnOnce(usize, Range<usize>, &'records mut [T]),
     {
         if self.pending_sources.is_empty() {
             return;
@@ -361,7 +361,7 @@ impl Bucket {
             // disjoint bands, even if they share a physical block fragment.
             let band =
                 unsafe { core::slice::from_raw_parts_mut(storage.input.add(self.start), self.len) };
-            visit(self.cache, band);
+            visit(self.cache, self.start..self.start + self.len, band);
         }
     }
 }
@@ -617,26 +617,54 @@ mod tests {
                 block_size: Some(block_size),
                 parallel: !cfg!(miri),
             },
-            Some(&|_, band| finish(band)),
+            Some(&|_, _, band| finish(band)),
         );
     }
 
     #[test]
     fn sparse_buckets_keep_directory_ends() {
-        for shards in [2, 5] {
+        for shards in [1, 2, 5] {
             let mut records: Vec<_> = (0..97u32)
                 .map(|id| (32 + (id % 2) * 128 + id % 16, id.to_string()))
                 .collect();
             let mut expected = records.clone();
             expected.sort_by_key(|record| record.0);
-            // Only buckets 1 and 5 are populated: empty leading, interior and
-            // trailing buckets must not change the next bucket's source range.
-            finish_records(
+            // Only buckets 1 and 5 are populated. Derive the expected ranges
+            // independently of ledger construction and callback arrival order.
+            let mut ends = Vec::new();
+            let mut end = 0;
+            for bucket in 0..8 {
+                end += records
+                    .iter()
+                    .filter(|record| record.0 >> 5 == bucket)
+                    .count();
+                ends.push(end);
+            }
+            let seen = Mutex::new([false; 8]);
+            let actual_ends = partition_impl_with_visit(
                 &mut records,
-                ByKey(|record: &(u32, String)| record.0),
-                5,
-                shards,
-                &|records| records.sort_by_key(|record| record.0),
+                3,
+                KeyDigit::new(ByKey(|record: &(u32, String)| record.0), 5),
+                &mut Buffers::new(),
+                Config {
+                    shards,
+                    block_size: Some(5),
+                    parallel: !cfg!(miri),
+                },
+                Some(&|bucket, range, band| {
+                    let start = if bucket == 0 { 0 } else { ends[bucket - 1] };
+                    assert_eq!(range, start..ends[bucket]);
+                    assert_eq!(range.len(), band.len());
+                    assert!(!band.is_empty());
+                    assert!(!core::mem::replace(&mut lock(&seen)[bucket], true));
+                    band.sort_by_key(|record| record.0);
+                    assert_eq!(band, &expected[range]);
+                }),
+            );
+            assert_eq!(actual_ends, ends);
+            assert_eq!(
+                *lock(&seen),
+                [false, true, false, false, false, true, false, false]
             );
             assert_eq!(records, expected);
         }
@@ -717,7 +745,7 @@ mod tests {
             5,
             3,
             &|records| {
-                crate::stable_sort_by_key(records, |record| {
+                crate::sort_by_key(records, |record| {
                     (calls.fetch_add(1, Ordering::Relaxed) ^ record.0) as u32
                 });
             },
@@ -777,7 +805,17 @@ mod tests {
         std::thread::scope(|scope| {
             for bucket in &mut buckets {
                 let storage = &storage;
-                scope.spawn(move || bucket.finish(storage, None::<fn(usize, &mut [_])>));
+                scope.spawn(move || {
+                    bucket.finish(
+                        storage,
+                        Some(
+                            |bucket, range: Range<usize>, band: &mut [BorrowedRecord<'_>]| {
+                                assert_eq!(range, 1 - bucket..2 - bucket);
+                                assert_eq!(band.len(), range.len());
+                            },
+                        ),
+                    );
+                });
             }
         });
         drop(storage);
@@ -854,7 +892,7 @@ mod tests {
         // Transfer recovery responsibility to this controlled state-machine
         // fixture; all records are plain Copy values and are restored below.
         for helper in [0, 2, 4, 6] {
-            buckets[helper].finish(storage, None::<fn(usize, &mut [_])>);
+            buckets[helper].finish(storage, None::<fn(usize, Range<usize>, &mut [_])>);
         }
         // Concentrate unused candidates in a completed helper's registered
         // cache, forcing subsequent work to discover a suspended peer's blocks.
@@ -865,7 +903,7 @@ mod tests {
         let held = lock(&storage.free[0]).len();
         let result = unwind::catch(|| {
             for victim in [8, 10, 12, 14] {
-                buckets[victim].finish(storage, None::<fn(usize, &mut [_])>);
+                buckets[victim].finish(storage, None::<fn(usize, Range<usize>, &mut [_])>);
             }
         });
         assert!(
@@ -875,7 +913,7 @@ mod tests {
         // Helpers stay paused. Their registered caches must support victims
         // before any helper returns to publish or release its allocation.
         for bucket in buckets {
-            bucket.finish(storage, None::<fn(usize, &mut [_])>);
+            bucket.finish(storage, None::<fn(usize, Range<usize>, &mut [_])>);
         }
         drop(completion);
         drop(shards);
@@ -909,12 +947,12 @@ mod tests {
                             block_size: Some(block_size),
                             parallel: !cfg!(miri),
                         },
-                        Some(&|_, band| {
+                        Some(&|_, _, band| {
                             if !cfg!(miri) {
                                 let (a, b) = rayon::join(|| 13 * 7, || 13 * 7);
                                 assert_eq!(a, b);
                             }
-                            crate::stable_sort_by_key(band, |record| {
+                            crate::sort_by_key(band, |record| {
                                 assert_ne!(Some(record.1), fail, "streamed callback panic");
                                 record.0
                             });

@@ -5,7 +5,7 @@
 //! the standard library's stable sort.
 
 use std::cmp::Reverse;
-use tessera_order::{stable_sort, stable_sort_by_key};
+use tessera_order::{sort, sort_by_key};
 
 fn next(state: &mut u64) -> u64 {
     *state = state.wrapping_add(0x9e3779b97f4a7c15);
@@ -33,7 +33,7 @@ fn insertion_budget_handles_large_input() {
         .collect();
     let mut expected = records.clone();
     expected.sort();
-    stable_sort(&mut records);
+    sort(&mut records);
     assert_eq!(records, expected);
 }
 
@@ -47,10 +47,10 @@ fn integer_encodings() {
             values.extend([<$ty>::MIN, 0, <$ty>::MAX]);
             let mut expected = values.clone();
             expected.sort();
-            stable_sort(&mut values);
+            sort(&mut values);
             assert_eq!(values, expected);
             let mut descending: Vec<_> = values.into_iter().map(Reverse).collect();
-            stable_sort(&mut descending);
+            sort(&mut descending);
             expected.reverse();
             assert_eq!(descending.into_iter().map(|x| x.0).collect::<Vec<_>>(), expected);
         )*};
@@ -71,7 +71,7 @@ fn float_total_order() {
             values.extend($special.into_iter().map(<$f>::from_bits));
             let mut expected = values.clone();
             expected.sort_by(<$f>::total_cmp);
-            stable_sort(&mut values);
+            sort(&mut values);
             assert_eq!(
                 values.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
                 expected.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
@@ -79,7 +79,7 @@ fn float_total_order() {
             let mut rows: Vec<_> = values.into_iter().enumerate().collect();
             let mut expected = rows.clone();
             expected.sort_by(|a, b| b.1.total_cmp(&a.1));
-            stable_sort_by_key(&mut rows, |x| Reverse(x.1));
+            sort_by_key(&mut rows, |x| Reverse(x.1));
             assert_eq!(
                 rows.iter()
                     .map(|x| (x.0, x.1.to_bits()))
@@ -135,7 +135,7 @@ fn descending_ties_stay_stable() {
                 }
                 let mut expected = records.clone();
                 expected.sort_by_key(|record| record.0);
-                stable_sort_by_key(&mut records, |record| record.0);
+                sort_by_key(&mut records, |record| record.0);
                 assert_eq!(
                     records, expected,
                     "len={len} start={start} run_len={run_len}"
@@ -183,7 +183,7 @@ fn record_shapes_and_thresholds() {
             .collect();
         let mut expected = values.clone();
         expected.sort_by_key(|x| x.0);
-        stable_sort_by_key(&mut values, |x| x.0);
+        sort_by_key(&mut values, |x| x.0);
         assert_eq!(values, expected, "len={len} shape={shape}");
     }
 }
@@ -209,7 +209,7 @@ fn narrow_direct_ranges() {
             let mut values: Vec<f64> = (0..len).map(|id| f64::from_bits(draw(id))).collect();
             let mut expected = values.clone();
             expected.sort_by(f64::total_cmp);
-            stable_sort(&mut values);
+            sort(&mut values);
             let sorted: Vec<u64> = values.iter().map(|x| x.to_bits()).collect();
             let wanted: Vec<u64> = expected.iter().map(|x| x.to_bits()).collect();
             assert_eq!(sorted, wanted, "f64 len={len} low={low} width={width}");
@@ -218,7 +218,7 @@ fn narrow_direct_ranges() {
             let mut values: Vec<u128> = (0..len).map(|id| u128::from(draw(id)) << 64).collect();
             let mut expected = values.clone();
             expected.sort();
-            stable_sort(&mut values);
+            sort(&mut values);
             assert_eq!(values, expected, "u128 len={len} low={low} width={width}");
         }
     }
@@ -242,7 +242,7 @@ fn unusual_record_layouts() {
         .collect();
     let mut expected: Vec<_> = input.iter().map(|x| (x.key, x.id)).collect();
     expected.sort_by_key(|x| x.0);
-    stable_sort_by_key(&mut input, |x| x.key);
+    sort_by_key(&mut input, |x| x.key);
     assert_eq!(
         input.iter().map(|x| (x.key, x.id)).collect::<Vec<_>>(),
         expected
@@ -251,5 +251,34 @@ fn unusual_record_layouts() {
         assert_eq!(x.payload, [x.id as u8; 257]);
     }
     let mut empty = [(); 100];
-    stable_sort_by_key(&mut empty, |_| 0u8);
+    sort_by_key(&mut empty, |_| 0u8);
+}
+
+#[test]
+#[allow(deprecated)]
+fn deprecated_stable_names_forward_to_the_new_names() {
+    let input: Vec<(u8, u32)> = (0..200).map(|i| ((i * 7 % 13) as u8, i)).collect();
+    let mut expected = input.clone();
+    sort_by_key(&mut expected, |x| x.0);
+    let mut actual = input.clone();
+    tessera_order::stable_sort_by_key(&mut actual, |x| x.0);
+    assert_eq!(actual, expected);
+    let mut keys: Vec<u32> = input.iter().map(|x| x.1 * 31 % 17).collect();
+    let mut expected = keys.clone();
+    sort(&mut expected);
+    tessera_order::stable_sort(&mut keys);
+    assert_eq!(keys, expected);
+    #[cfg(feature = "rayon")]
+    {
+        let mut actual = input.clone();
+        tessera_order::par_stable_sort_by_key(&mut actual, |x| x.0);
+        let mut expected = input.clone();
+        sort_by_key(&mut expected, |x| x.0);
+        assert_eq!(actual, expected);
+        let mut keys: Vec<u32> = input.iter().map(|x| x.1 * 31 % 17).collect();
+        let mut expected = keys.clone();
+        sort(&mut expected);
+        tessera_order::par_stable_sort(&mut keys);
+        assert_eq!(keys, expected);
+    }
 }

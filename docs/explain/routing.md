@@ -1,6 +1,6 @@
 # 3. Routing an input
 
-Before any radix pass, Tessera checks whether the input needs one. Many real inputs are already sorted, nearly sorted, reversed, constant, or dominated by one key, and a radix sort that ignores this does full passes for nothing. This page follows `sort_with_tile_bytes` and `Sorter::sort_node` in [`engine.rs`](../../rust/tessera-order/src/engine.rs) in order.
+Before any radix pass, Tessera checks whether the input needs one. Many real inputs are already sorted, nearly sorted, reversed, constant, or dominated by one key, and a radix sort that ignores this does full passes for nothing. This page follows `engine::refine` and `Sorter::sort_node` in [`engine.rs`](../../rust/tessera-order/src/engine.rs) in order.
 
 ## Order probe
 
@@ -20,7 +20,7 @@ The sample rejects most unsorted inputs within a few pairs, so the full scan run
 
 ## Budgeted insertion
 
-An unsorted input no longer than the [insertion leaf's threshold](tiles.md#three-leaves) goes straight to an unbudgeted insertion sort: a budget and a varying-bit scan would only lead back to the same leaf. `insertion_probe` owns this check, the probe window and the budget.
+An unsorted input no longer than the [small-leaf threshold](tiles.md#three-leaves) goes straight to stable insertion: a budget and a varying-bit scan would only lead back to the same leaf. `insertion_probe` owns this check, the probe window and the budget.
 
 A larger unsorted input may still be *nearly* sorted: a sorted log with a few late entries, for example. Insertion sort finishes such an input in linear time, but on a random input it is quadratic. Tessera therefore gives it a **swap budget** and abandons it when the budget runs out.
 
@@ -41,7 +41,9 @@ Only now is tile and block scratch allocated. Budgeted insertion on a larger uns
 
 ## Nodes and tiles
 
-From here on, the engine works on slices of the input and sorts each one in place:
+From here on, the engine works on subproblems and refines the requested ordered ranks. Public full sorting requests every rank; private partial requests use the same routing. A partition always completes stable movement for every band, but an unrequested band receives no further key analysis. The [engine reference](../design/engine.md#ordered-rank-requirements) owns projection and workspace invariants.
+
+Requested subproblems continue in place:
 
 - a **tile** is a slice that fits the cache-resident tile budget, the [size defined on the tiles page](tiles.md). It is finished in a scratch buffer of the same size;
 - a **node** is anything larger. It is split by a stable partition into children, and each child is routed again.
@@ -52,9 +54,9 @@ A partition child larger than a tile, and every child of a parallel root, enters
 
 ### Counted window
 
-A record sorted by its own key is interchangeable with every record of the same key: equal encoded keys are equal bit patterns. For those inputs — `stable_sort`, not `stable_sort_by_key` — the engine counts the records of each value in the window and fills each run with the key decoded from that value and the bits all keys share outside the window. The runs come out in key order, with no block partition and no record moves.
+A record sorted by its own key is interchangeable with every record of the same key: equal encoded keys are equal bit patterns. For those inputs — `sort`, not `sort_by_key` — the engine counts the records of each value in the window and fills each run with the key decoded from that value and the bits all keys share outside the window. The runs come out in key order, with no block partition and no record moves.
 
-Records sorted by a key function keep their payloads: two records with key 7 may hold different data and in a fixed order between them. Counting would drop that, so `stable_sort_by_key` takes the [block partition](block-partition.md) below instead.
+Records sorted by a key function keep their payloads: two records with key 7 may hold different data and in a fixed order between them. Counting would drop that, so `sort_by_key` takes the [block partition](block-partition.md) below instead.
 
 ### Block partition of the window
 
@@ -81,7 +83,7 @@ Otherwise the node is split on the digit under its highest varying bit, with the
 
 Serial and parallel roots share this decision. A parallel root shards equality and digit partitions across threads and executes an existing-run split serially, without resampling.
 
-While the block partition completes, each child that fits a tile is finished **at once**, while its records are still in cache. Larger children are routed again after the partition.
+While the block partition completes, each requested child that fits a tile is finished **at once**, while its records are still in cache. Larger requested children are routed again after the partition. A requested tile may be fully sorted even when only some of its ranks are needed; the existing leaf mechanisms stay unchanged.
 
 ## Summary
 

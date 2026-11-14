@@ -52,6 +52,29 @@ pub(super) fn shuffle_variants(n: usize, block: usize, c: &InputCase) -> Vec<usi
     order
 }
 
+/// Rejects unsupported required controls before journals or memory measurement.
+/// Capability probes retain the operation but never generate the full input.
+pub(super) fn validate_controls(
+    cases: &[InputCase],
+    variants: &[super::variant::Variant],
+) -> super::Result<()> {
+    for case in cases {
+        let input = super::record::CaseInput::new(&case.probe());
+        for name in ["tessera", "std-stable"] {
+            let control = variants
+                .iter()
+                .find(|v| v.name == name)
+                .ok_or_else(|| format!("missing required control: {name}"))?;
+            if !control.supports(&input) {
+                return Err(
+                    format!("required control {name} does not support {}", case.id()).into(),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Publishes the requested shuffled blocks with a separate Tessera A/A sample.
 pub(super) fn measure_case(
     case: &InputCase,
@@ -62,12 +85,17 @@ pub(super) fn measure_case(
     mut publish: impl FnMut(Sample) -> super::Result<()>,
 ) -> super::Result<()> {
     let input = super::record::CaseInput::new(case);
-    let active: Vec<_> = variants
+    let mut active: Vec<_> = variants
         .iter()
         .filter(|v| v.supports(&input))
         .copied()
-        .chain(std::iter::once(variants[0]))
         .collect();
+    let control = active
+        .iter()
+        .find(|v| v.name == "tessera")
+        .copied()
+        .ok_or_else(|| format!("required control tessera does not support {}", case.id()))?;
+    active.push(control);
     for block in 0..sampling.blocks {
         for (slot, index) in shuffle_variants(active.len(), block, case)
             .into_iter()

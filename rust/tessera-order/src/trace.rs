@@ -134,7 +134,7 @@ pub fn partition(
         block_size,
         ByFn(bucket),
         &mut buffers,
-        &mut |_, _, _| {},
+        &mut |_, _, _, _| {},
     );
     EVENTS.with(|events| events.borrow_mut().take().unwrap_or_default())
 }

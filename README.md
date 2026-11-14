@@ -45,23 +45,40 @@ SIMD is always enabled; there is no `portable-simd` or `std` feature. Disabling 
 use std::cmp::Reverse;
 
 let mut values: Vec<u64> = vec![42, 7, 19, 7, 3];
-tessera_order::stable_sort(&mut values);
+tessera_order::sort(&mut values);
 assert_eq!(values, [3, 7, 7, 19, 42]);
 
 // Sort records by a key; equal keys keep their input order.
 let mut rows = vec![(2u32, "first"), (1, "middle"), (2, "last")];
-tessera_order::stable_sort_by_key(&mut rows, |row| Reverse(row.0));
+tessera_order::sort_by_key(&mut rows, |row| Reverse(row.0));
 assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 ```
 
+These examples use the unreleased 0.2 names. The published 0.1 package calls the two sorts `stable_sort` and `stable_sort_by_key`; 0.2 keeps them as deprecated aliases.
+
 | API | Use |
 |---|---|
-| `stable_sort(&mut [K])` | Sort keys themselves |
-| `stable_sort_by_key(&mut [T], F)` | Sort any records by a key computed by `F` |
+| `sort(&mut [K])` | Sort keys themselves |
+| `sort_by_key(&mut [T], F)` | Sort any records by a key computed by `F` |
+| `sort_by_cached_key(&mut [T], F)` | Sort by a key evaluated exactly once per record |
+
+The following additions are new in 0.2 and **unreleased**. They require a development checkout as described in the [slice-operation guide](docs/guide/getting-started.md#partial-sorting-and-selected-ranks). Each is the standard operation of the same name, with equal keys resolved as the stable sort resolves them.
+
+| Development API | Use |
+|---|---|
+| `partial_sort` / `_by_key` | Sort one rank range, partitioning the rest around it |
+| `k_smallest`, `k_largest` / `_by_key` | Move the k smallest or largest records to the front, sorted |
+| `select_nth` / `_by_key` | Place one ranked record and partition around it |
+| `select_nth_many` / `_by_key` | Place several ranked records and partition between them |
+| `sort_chunks` / `_by_key` | Sort every fixed-length chunk independently |
+| `argsort` / `_by_key` | Return sorted indices without moving source records |
+| `partition` | Place predicate matches before nonmatches, keeping input order in both |
+
+The [slice-operation guide](docs/guide/getting-started.md#partial-sorting-and-selected-ranks) and [partition guide](docs/guide/getting-started.md#partitions-and-groups) give examples. [Semantics](conformance/semantics.md#serial-slice-operations) distinguishes mandatory output and request metadata from sorting scratch.
 
 Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 
-The optional `rayon` feature adds `par_stable_sort` and `par_stable_sort_by_key`, requiring `Send` records and a shared `Fn + Sync` key function. Large inputs scatter disjoint root shards in the caller's Rayon pool. Buckets transfer directly into exclusive final bands through a shared source ledger, then sort in their movement tasks. Small inputs and one-thread pools use the serial engine. See [parallel usage](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#parallel-sorting) and the [parallel contract](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#rust-rayon-entry-points).
+The optional `rayon` feature adds `par_sort` and `par_sort_by_key` (0.1: `par_stable_sort` and `par_stable_sort_by_key`), requiring `Send` records and a shared `Fn + Sync` key function. Large inputs scatter disjoint root shards in the caller's Rayon pool. Buckets transfer directly into exclusive final bands through a shared source ledger, then sort in their movement tasks. Small inputs and one-thread pools use the serial engine. See [parallel usage](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/guide/getting-started.md#parallel-sorting) and the [parallel contract](https://github.com/Yikai-Liao/tessera-order/blob/main/conformance/semantics.md#rust-rayon-entry-points).
 
 ## Performance
 

@@ -2,7 +2,7 @@
 
 This page owns the engine's code boundaries and invariants in `rust/tessera-order`. Routing rules, thresholds and their reasons live on the [explanation pages](../explain/index.md); [engine evidence](evidence.md) keeps failed experiments and open measured losses.
 
-The experimental serial entries share these decisions and stable tile leaves but use bounded in-slice swapping for node movement; the [feasibility study](evidence.md#unstable-node-partition-feasibility) owns their status and measured limits. The stable and Rayon contracts below are unchanged.
+The unstable full-sort and rank entries share these decisions, rank projection, workspace and stable tile leaves but use bounded in-slice swapping for node movement; the [feasibility study](evidence.md#unstable-node-partition-feasibility) owns their status and measured limits. The stable and Rayon contracts below are unchanged.
 
 ## Vocabulary
 
@@ -71,9 +71,11 @@ A stage's rule changes on its page, in the code and in the page's model together
 
 ## Ordered rank requirements
 
-Full sorting and the serial [slice operations](../../conformance/semantics.md#serial-slice-operations) use the common `engine::refine` entry. Full sorting requests All ranks. Partial requests borrow sorted, nonempty, separated intervals in root coordinates. Root validation precedes mutation and key calls; an empty requirement returns before preparation. A full interval becomes the All representation, including the empty full input. A prefix and rank range borrow one interval without allocation; multiple selection validates and normalizes indices once in `rank.rs`. Top-k isolates the first excluded rank, then returns the two regions without requiring internal order; empty and full-set requests return before refinement.
+Full sorting and the stable serial [slice operations](../../conformance/semantics.md#serial-slice-operations) use the common `engine::refine` entry. Full sorting requests All ranks. Partial requests borrow sorted, nonempty, separated intervals in root coordinates. Root validation precedes mutation and key calls; an empty requirement returns before preparation. A full interval becomes the All representation, including the empty full input. A prefix and rank range borrow one interval without allocation; multiple selection validates and normalizes indices once in `rank.rs`. Top-k isolates the first excluded rank, then returns the two regions without requiring internal order; empty and full-set requests return before refinement.
 
 `Requirement::project` intersects a final parent-relative band with the borrowed intervals and translates its origin without allocation. Covered children become All; absent intersections skip further analysis. Binary searches are independent of callback order, so serial and concurrent completion use one authority. Equality bands are already complete; their stable movement establishes ranked identity even when requests cut through equal keys. Existing-run ranges are projected after rotation.
+
+The unstable rank adapters pass the same requirements through `refine_mode`, without promising stable membership. Stability is fixed by the entry, not inferred from rank density or record type; neither rank projection nor scheduling chooses a mover.
 
 Every partition completes movement for every band. Only further analysis and finishing may be skipped. Requested tiles may be completely sorted; this preserves insertion, counting and LSD/MSD leaves rather than adding a partial tile engine. Root preparation, narrowed key facts and child candidate masks pass directly to execution. A serial invocation reuses one workspace; segmented sorting lends that invocation’s workspace successively to complete segment refinements. Argsort creates the index output and sorts it with `ByKey` source extraction: numeric indices are payloads, never direct keys eligible for count/refill. Parallel tasks borrow workspace capacity from their invocation-owned pool.
 

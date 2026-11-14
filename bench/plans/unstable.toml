@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Experimental serial comparison; default presets and stable controls are unchanged.
 schema = 1
-algorithms = ["tessera", "tessera-unstable-prototype", "std-stable", "std-unstable", "rdst"]
+algorithms = ["tessera", "tessera-unstable", "std-stable", "std-unstable", "rdst"]
 
 [[include]]
 types = ["u64", "row_u64", "record128"]

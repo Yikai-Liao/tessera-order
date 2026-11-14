@@ -170,6 +170,39 @@ pub(super) fn prepare<T: TesseraAdapter>(
             ),
             _ => return None,
         },
+        "tessera-unstable" => match operation {
+            Operation::TopK { k } => prepare_call(
+                input,
+                false,
+                move |v| T::top_k_unstable(v, k),
+                "public unordered top-k; arbitrary equal-key members",
+            ),
+            Operation::Prefix { prefix_len } => prepare_call(
+                input,
+                false,
+                move |v| T::prefix_unstable(v, prefix_len),
+                "public sorted prefix; arbitrary ties",
+            ),
+            Operation::Select { index } => prepare_call(
+                input,
+                false,
+                move |v| T::select_unstable(v, index),
+                "public single selection; arbitrary ties",
+            ),
+            Operation::RankRange { start, end } => prepare_call(
+                input,
+                false,
+                move |v| T::range_unstable(v, start..end),
+                "public sorted rank range; arbitrary ties",
+            ),
+            Operation::SelectMany { indices } => prepare_call(
+                input,
+                false,
+                move |v| T::many_unstable(v, &indices),
+                "public multiple selection including normalization; arbitrary ties",
+            ),
+            _ => return None,
+        },
         "tessera-full" if operation.required_ranges().is_some() => reference(input, T::tessera),
         "std-stable" => reference(input, |v| v.sort_by(T::order)),
         "glidesort" => reference(input, glidesort::<T>),
@@ -294,7 +327,9 @@ mod tests {
                         // including no silent full-sort substitution.
                         let expected = match variant.name {
                             "tessera" | "std-stable" | "glidesort" => true,
-                            "tessera-full" => operation.required_ranges().is_some(),
+                            "tessera-full" | "tessera-unstable" => {
+                                operation.required_ranges().is_some()
+                            }
                             "radsort" => !ty.starts_with("reverse_"),
                             "std-unstable" => {
                                 matches!(operation, Operation::Argsort {})

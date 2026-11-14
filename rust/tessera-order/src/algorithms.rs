@@ -113,7 +113,7 @@ pub fn stable_sort_segments_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
 /// assert!(remaining.iter().all(|v| *v >= 7));
 /// ```
 pub fn stable_top_k<K: RadixKey>(values: &mut [K], k: usize) -> (&mut [K], &mut [K]) {
-    top_k(values, k, Direct)
+    top_k::<_, _, false>(values, k, Direct)
 }
 
 /// Partitions the smallest `k` records by key, with stable boundary membership.
@@ -130,7 +130,7 @@ pub fn stable_top_k_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
     k: usize,
     key: F,
 ) -> (&mut [T], &mut [T]) {
-    top_k(values, k, ByKey(key))
+    top_k::<_, _, false>(values, k, ByKey(key))
 }
 
 /// Makes the first `prefix_len` records equal a complete stable sort's prefix.
@@ -150,7 +150,7 @@ pub fn stable_top_k_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
 /// assert_eq!(&values[..3], &[1, 2, 3]);
 /// ```
 pub fn stable_sort_prefix<K: RadixKey>(values: &mut [K], prefix_len: usize) {
-    refine_range(values, 0..prefix_len, Direct);
+    refine_range::<_, _, false>(values, 0..prefix_len, Direct);
 }
 
 /// Produces the exact stable sorted prefix by key.
@@ -167,7 +167,7 @@ pub fn stable_sort_prefix_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
     prefix_len: usize,
     key: F,
 ) {
-    refine_range(values, 0..prefix_len, ByKey(key));
+    refine_range::<_, _, false>(values, 0..prefix_len, ByKey(key));
 }
 
 /// Places the exact record at `index` from a complete stable sort.
@@ -194,7 +194,7 @@ pub fn stable_select_nth<K: RadixKey>(
     values: &mut [K],
     index: usize,
 ) -> (&mut [K], &mut K, &mut [K]) {
-    select_nth(values, index, Direct)
+    select_nth::<_, _, false>(values, index, Direct)
 }
 
 /// Selects the exact stable ranked record by key.
@@ -210,7 +210,7 @@ pub fn stable_select_nth_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
     index: usize,
     key: F,
 ) -> (&mut [T], &mut T, &mut [T]) {
-    select_nth(values, index, ByKey(key))
+    select_nth::<_, _, false>(values, index, ByKey(key))
 }
 
 /// Sorts the requested ranks exactly as a complete stable sort would.
@@ -231,7 +231,7 @@ pub fn stable_select_nth_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
 /// assert_eq!(&values[1..4], &[2, 3, 7]);
 /// ```
 pub fn stable_sort_rank_range<K: RadixKey>(values: &mut [K], ranks: Range<usize>) {
-    refine_range(values, ranks, Direct);
+    refine_range::<_, _, false>(values, ranks, Direct);
 }
 
 /// Produces an exact stable sorted rank interval by key.
@@ -248,7 +248,7 @@ pub fn stable_sort_rank_range_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
     ranks: Range<usize>,
     key: F,
 ) {
-    refine_range(values, ranks, ByKey(key));
+    refine_range::<_, _, false>(values, ranks, ByKey(key));
 }
 
 /// Places each requested position's exact record from a complete stable sort.
@@ -269,7 +269,7 @@ pub fn stable_sort_rank_range_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
 /// assert_eq!(values[3], 7);
 /// ```
 pub fn stable_select_nth_many<K: RadixKey>(values: &mut [K], indices: &[usize]) {
-    select_many(values, indices, Direct);
+    select_many::<_, _, false>(values, indices, Direct);
 }
 
 /// Selects several exact stable ranked members by key.
@@ -286,10 +286,14 @@ pub fn stable_select_nth_many_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
     indices: &[usize],
     key: F,
 ) {
-    select_many(values, indices, ByKey(key));
+    select_many::<_, _, false>(values, indices, ByKey(key));
 }
 
-fn refine_range<T, E: Extract<T>>(values: &mut [T], ranks: Range<usize>, extractor: E) {
+pub(super) fn refine_range<T, E: Extract<T>, const UNSTABLE: bool>(
+    values: &mut [T],
+    ranks: Range<usize>,
+    extractor: E,
+) {
     assert!(
         ranks.start <= ranks.end && ranks.end <= values.len(),
         "rank range out of bounds"
@@ -300,35 +304,43 @@ fn refine_range<T, E: Extract<T>>(values: &mut [T], ranks: Range<usize>, extract
         core::slice::from_ref(&ranks)
     };
     let required = Requirement::new(values.len(), ranges);
-    engine::refine(values, extractor, required, None, TILE_BYTES);
+    engine::refine_mode::<_, _, UNSTABLE>(values, extractor, required, None, TILE_BYTES);
 }
 
-fn top_k<T, E: Extract<T>>(values: &mut [T], k: usize, extractor: E) -> (&mut [T], &mut [T]) {
+pub(super) fn top_k<T, E: Extract<T>, const UNSTABLE: bool>(
+    values: &mut [T],
+    k: usize,
+    extractor: E,
+) -> (&mut [T], &mut [T]) {
     assert!(k <= values.len(), "top-k count out of bounds");
     if k > 0 && k < values.len() {
         // Isolating the first excluded rank establishes both memberships.
         // Reuse selection's request, not a second cut interpretation in engine.
-        refine_range(values, k..k + 1, extractor);
+        refine_range::<_, _, UNSTABLE>(values, k..k + 1, extractor);
     }
     values.split_at_mut(k)
 }
 
-fn select_nth<T, E: Extract<T>>(
+pub(super) fn select_nth<T, E: Extract<T>, const UNSTABLE: bool>(
     values: &mut [T],
     index: usize,
     extractor: E,
 ) -> (&mut [T], &mut T, &mut [T]) {
     assert!(index < values.len(), "selection index out of bounds");
-    refine_range(values, index..index + 1, extractor);
+    refine_range::<_, _, UNSTABLE>(values, index..index + 1, extractor);
     let (before, rest) = values.split_at_mut(index);
     let (selected, after) = rest.split_first_mut().unwrap();
     (before, selected, after)
 }
 
-fn select_many<T, E: Extract<T>>(values: &mut [T], indices: &[usize], extractor: E) {
+pub(super) fn select_many<T, E: Extract<T>, const UNSTABLE: bool>(
+    values: &mut [T],
+    indices: &[usize],
+    extractor: E,
+) {
     let ranges = rank::normalize_indices(values.len(), indices);
     let required = Requirement::new(values.len(), &ranges);
-    engine::refine(values, extractor, required, None, TILE_BYTES);
+    engine::refine_mode::<_, _, UNSTABLE>(values, extractor, required, None, TILE_BYTES);
 }
 
 fn segments<T, E: Extract<T>>(values: &mut [T], offsets: &[usize], mut extractor: E) {

@@ -9,7 +9,7 @@ Status: implemented by the unreleased Rust crate; the planned C++ implementation
 | Stable | The output is ordered by key, and records with equal keys appear in their input order. |
 | Unstable | The output is ordered by key. The order of records with equal keys is unspecified. |
 
-Release 0.1 provides the stable contract only. This experimental branch exposes doc-hidden `prototype_unstable_sort` and `prototype_unstable_sort_by_key` entries with the unstable contract and the same key-encoding, extraction and permutation guarantees below. They are not a supported release API; their scope and memory evidence are in the [feasibility study](../docs/design/evidence.md#unstable-node-partition-feasibility). Parallel unstable sorting is not implemented.
+Release 0.1 is planned around the stable contract. This experimental branch also implements `unstable_sort`, `unstable_sort_by_key` and the unstable rank operations below as ordinary functions, not feature-gated or doc-hidden prototype entries. Their release and performance acceptance remains separate from implementation; parallel unstable sorting is not implemented.
 
 Both contracts output a permutation of the input: no record is lost, duplicated or modified, whatever the key function returns.
 
@@ -68,6 +68,10 @@ Let `S` be a conceptual complete stable sort of the original records. Identity m
 Stable Top-k and selection mean stable membership and ranked identity: when a boundary cuts an equal-key run, earlier input members are chosen first. They do not promise input order across different keys. For largest-k results, reverse the key; do not reverse a stable result. Statistical quantile definitions and interpolation remain caller choices; multiple selection accepts exact integer ranks.
 
 In-place rank operations retain the full sort's [workspace bound](#space), not O(k) or O(requested output length). All scratch and request metadata are invocation-owned and released on return or unwind. Only argsort returns an allocated output. No public workspace, resumable session, category partition or parallel extension API is implied.
+
+### Unstable rank operations
+
+The `unstable_top_k`, `unstable_sort_prefix`, `unstable_select_nth`, `unstable_sort_rank_range` and `unstable_select_nth_many` functions and their `_by_key` forms have the same argument validation, return shapes, no-op behavior, extraction, panic and workspace bounds as their stable counterparts. Their results agree with a complete sort only in keys: any equal-key record may occupy a boundary or requested rank, and ties need not preserve input order. Every gap still contains exactly its corresponding ranked keys, and the complete output is an unmodified permutation of the input. Empty rank ranges establish no boundary. A stronger stable result is permitted but not promised. Argsort and segments retain their stable interfaces in this experiment.
 
 ## Rust Rayon entry points
 

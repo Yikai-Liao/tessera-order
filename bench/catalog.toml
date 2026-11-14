@@ -13,7 +13,7 @@ revisionSampling = [
 algorithms = [
   { id = "tessera", label = "Tessera", stable = true, family = "radix", adapter = "common" },
   { id = "tessera-full", label = "Tessera full-sort reference", stable = true, family = "radix", adapter = "reference", detail = "complete stable sorting", description = "full-sort reference for the same required-rank result" },
-  { id = "tessera-unstable-prototype", label = "Tessera unstable prototype", stable = false, family = "radix", adapter = "unstable" },
+  { id = "tessera-unstable", label = "Tessera unstable", stable = false, family = "radix", adapter = "unstable" },
   { id = "tessera-baseline", label = "Tessera baseline A", stable = true, family = "radix", adapter = "revision" },
   { id = "tessera-baseline-copy", label = "Tessera baseline B", stable = true, family = "radix", adapter = "revision" },
   { id = "tessera-copy", label = "Tessera current B", stable = true, family = "radix", adapter = "revision" },

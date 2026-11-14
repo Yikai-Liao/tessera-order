@@ -65,7 +65,7 @@ Smaller candidates remain available; none waits for P1's acceptance:
 
 ### Unstable sorting
 
-The [node-partition feasibility study](docs/design/evidence.md#unstable-node-partition-feasibility) found a wide-record memory/performance niche, not a general speedup. A dedicated kernel remains post-0.1 research. Reopen for a concrete workload; acceptance requires shared planning and recursion without a second engine, measured timing and memory against stable Tessera and standard unstable sort, individually accounted regressions, and ownership/panic/changing-key validation including Miri. Validate primitive-specific tuning rather than add distribution-specific dispatch; parallel support needs its own evidence.
+The [node-partition feasibility study](docs/design/evidence.md#unstable-node-partition-feasibility) found a wide-record memory/performance niche, not a general speedup. The integrated experiment implements ordinary unstable full-sort and rank APIs over shared refinement. Release acceptance remains post-0.1 research; acceptance requires shared planning and recursion without a second engine or distribution-specific routing, measured timing and memory against stable Tessera and standard unstable sort, individually accounted regressions, and ownership/panic/changing-key validation including Miri. Prefer one generally applicable primitive and small-sort rule over width/skew dispatch; parallel support needs its own evidence.
 
 ### Rayon
 

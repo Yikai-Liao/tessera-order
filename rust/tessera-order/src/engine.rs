@@ -193,7 +193,7 @@ pub(crate) fn sort_unstable<T, E: Extract<T>>(records: &mut [T], extractor: E) {
     refine_mode::<T, E, true>(records, extractor, required, None, TILE_BYTES);
 }
 
-fn refine_mode<T, E: Extract<T>, const UNSTABLE: bool>(
+pub(crate) fn refine_mode<T, E: Extract<T>, const UNSTABLE: bool>(
     records: &mut [T],
     mut extractor: E,
     required: Requirement<'_>,

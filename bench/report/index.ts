@@ -119,7 +119,7 @@ function renderCapabilities(dataset: Dataset) {
       "Unstable sorts on records are listed as a separate task: their permutation check allows equal keys to change order. A dash means the adapter does not support the task.\n\n"
     );
   out +=
-    "Every admitted implementation satisfies this workload’s stable result contract. The catalog’s sort contract does not override it: unstable scalar selection is admitted only when equal keys are bitwise indistinguishable, and unstable argsort explicitly breaks ties by original index.\n\n";
+    "Stable routes require exact stable ranked membership. Explicit unstable Tessera routes instead require the same ranked keys with arbitrary equal-key members; these are weaker-contract tasks, not equivalent stable selectors. Standard unstable selection remains scalar-only here, and standard unstable argsort explicitly breaks ties by original index. Each route is retained below.\n\n";
   const routes = new Map<string, string[]>();
   for (const c of manifest.cases) {
     for (const [name, route] of Object.entries(c.implementations ?? {}))
@@ -180,7 +180,7 @@ export async function writeReport(directories: string[], partial = false) {
   const operation = dataset.manifest.cases[0].operation;
   let markdown = `# ${operation ? operationLabel(operation) : "Sorting comparison"}\n\n${partial ? "Partial suite; only completed groups are shown." : `${dataset.manifest.suite} suite, version ${dataset.manifest.suite_version}.`} Every value is regenerated from the accompanying manifests, host fingerprint, blocks and memory samples.\n\n`;
   if (operation)
-    markdown += `Operation: \`${JSON.stringify(operation)}\`. Times are complete-call latency divided by input length, not by requested ranks or output count. Full-sort reference rows perform more work but satisfy the identical result contract; they are not native partial selectors.\n\n`;
+    markdown += `Operation: \`${JSON.stringify(operation)}\`. Times are complete-call latency divided by input length, not by requested ranks or output count. Stable full-sort reference rows perform more work and satisfy both stable and weaker key-ranked results; they are not native partial selectors. Ratios between stable and arbitrary-tie routes compare different guarantees, not the isolated cost of stability.\n\n`;
   markdown +=
     "All blocks reuse each case's seed-one input. Their range measures execution variability on that input; it does not measure variability across random inputs. Calibration can choose different batch sizes for different variants, changing the prepared-buffer working set and cache behavior.\n\n";
   markdown += "## Measurement budget\n\n";

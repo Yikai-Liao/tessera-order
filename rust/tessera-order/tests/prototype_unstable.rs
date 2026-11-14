@@ -3,7 +3,7 @@
 //! Temporary research coverage for the unstable movement boundary.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use tessera_order::prototype_unstable_sort_by_key as sort;
+use tessera_order::unstable_sort_by_key as sort;
 
 #[test]
 fn unstable_keeps_borrowed_records_on_changing_keys_and_panics() {

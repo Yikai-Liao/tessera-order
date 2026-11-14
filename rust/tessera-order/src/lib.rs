@@ -8,6 +8,10 @@
 //! input order, and needs no `Copy`, `Clone`, `Default` or `Ord` on the
 //! records it moves.
 //!
+//! Stable rank operations provide the same members as a complete stable sort.
+//! Their `unstable_*` counterparts require only ranked keys and may choose or
+//! reorder equal-key members. Both families preserve every original record.
+//!
 //! # Examples
 //!
 //! ```
@@ -75,6 +79,7 @@ mod portable_simd;
 mod rank;
 mod tile;
 mod trace;
+mod unstable;
 #[cfg(test)]
 mod unwind;
 mod workspace;
@@ -88,6 +93,12 @@ pub use algorithms::{
 pub use key::RadixKey;
 #[cfg(feature = "rayon")]
 pub use parallel::{par_stable_sort, par_stable_sort_by_key};
+pub use unstable::{
+    unstable_select_nth, unstable_select_nth_by_key, unstable_select_nth_many,
+    unstable_select_nth_many_by_key, unstable_sort_prefix, unstable_sort_prefix_by_key,
+    unstable_sort_rank_range, unstable_sort_rank_range_by_key, unstable_top_k,
+    unstable_top_k_by_key,
+};
 
 /// Sorts keys in ascending order, keeping equal keys in input order.
 ///
@@ -158,15 +169,44 @@ pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], k
     engine::sort::<T, _>(values, key::ByKey(key));
 }
 
-/// Research-only unstable entry; shares encoding, routing and tile leaves.
-#[doc(hidden)]
-pub fn prototype_unstable_sort<K: RadixKey>(values: &mut [K]) {
+/// Sorts keys without promising the order of equal-key records.
+///
+/// Encoding follows [`RadixKey`], including float total order and `Reverse`.
+/// Workspace has the bound of [`stable_sort`] and is released on return.
+/// Ordered and constant inputs allocate nothing.
+///
+/// # Examples
+/// ```
+/// let mut values = [3u64, 1, 3, 2];
+/// tessera_order::unstable_sort(&mut values);
+/// assert_eq!(values, [1, 2, 3, 3]);
+/// ```
+pub fn unstable_sort<K: RadixKey>(values: &mut [K]) {
     engine::sort_unstable(values, key::Direct);
 }
 
-/// Research-only unstable entry with the stable API's key and panic contracts.
-#[doc(hidden)]
-pub fn prototype_unstable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
+/// Sorts records by key, without preserving equal-key input order.
+///
+/// # Key function
+/// Evaluation follows [`stable_sort_by_key`]: `FnMut` may run repeatedly in any
+/// order. Inconsistent keys give unspecified ordering, but every record is
+/// preserved and recursion remains bounded. No `Clone`, `Send` or `Sync` is
+/// required on records. Callback side effects are not rolled back.
+///
+/// # Panics
+/// A key panic propagates after every record is restored to `values`, in
+/// unspecified order. Records are never lost, duplicated or modified.
+///
+/// # Memory
+/// As [`unstable_sort`], plus cached tile bucket IDs for user keys.
+///
+/// # Examples
+/// ```
+/// let mut rows = [(2u64, "first"), (1, "middle"), (2, "last")];
+/// tessera_order::unstable_sort_by_key(&mut rows, |r| r.0);
+/// assert_eq!(rows.map(|r| r.0), [1, 2, 2]);
+/// ```
+pub fn unstable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
     engine::sort_unstable(values, key::ByKey(key));
 }
 

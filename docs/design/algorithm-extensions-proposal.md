@@ -26,7 +26,7 @@ Incremental completion remains a proposed borrowing object, not a record-removin
 
 ## Release surface alignment
 
-Status: proposed, awaiting the operator's decision. It decides how the unreleased operations are published, and proposes renaming the released 0.1 entry points once, in 0.2, so that every Rust name follows one convention. The operator has decided that the Python binding follows NumPy names.
+Status: accepted by the operator, not implemented. It decides how the unreleased operations are published, and renames the released 0.1 entry points once, in 0.2, so that every Rust name follows one convention. The Python binding follows NumPy names. When implemented, the contracts move to [semantics](../../conformance/semantics.md) and this section shrinks to the remaining proposals.
 
 ### Rules
 
@@ -44,16 +44,16 @@ The user-visible value is consistency with the complete stable sort. Pages or ba
 
 ### Released entry points
 
-In 0.2, rename `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key` to `sort`, `sort_by_key`, `par_sort` and `par_sort_by_key`, with unchanged contracts. The old names remain as `#[deprecated]` forwarding functions for the 0.2 series and are removed in a later breaking release. The rename is cheapest now, while 0.1 has just been published; the cost is one breaking minor release and updates to the guide, site, benchmark labels and semantics. If the operator keeps the 0.1 names, the new operations instead use `stable_` plus the standard name (`stable_select_nth`, `stable_partial_sort`), as on the branch today.
+In 0.2, rename `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key` to `sort`, `sort_by_key`, `par_sort` and `par_sort_by_key`, with unchanged contracts. The old names remain as `#[deprecated]` forwarding functions for the 0.2 series and are removed in a later breaking release. The rename is cheapest now, while 0.1 has just been published; the cost is one breaking minor release and updates to the guide, site, benchmark labels and semantics.
 
 ### Decisions
 
-| Current functions | Mature precedent | Proposal (names under rule 5) |
+| Current functions | Mature precedent | Decision (names under rule 5) |
 |---|---|---|
 | `stable_select_nth`, `stable_select_nth_by_key` | `slice::select_nth_unstable(_by_key)` | Release as `select_nth` and `select_nth_by_key`, with unchanged arguments and borrows. |
 | `stable_select_nth_many*` | NumPy `partition(kth=[...])` and `argpartition` | Release as `select_nth_many` and `select_nth_many_by_key`. Repeated single selections cannot replace it: after the first, each outer region holds the right members in unspecified order, so a later selection inside it no longer sees equal keys in input order. It is also the kernel of the binding's `partition` and `argpartition`, and of quantile-style requests. |
 | `stable_sort_prefix*`, `stable_sort_rank_range*` | `slice::partial_sort_unstable(_by_key)` (nightly feature `slice_partial_sort_unstable`); C++ `std::partial_sort` | Replace both with `partial_sort(values, range)` and `partial_sort_by_key(values, range, key)`, where `range: impl RangeBounds<usize>`. Adopt the standard empty-range meaning: `k..k` with `0 < k < len` partitions at `k`, which `stable_sort_rank_range` currently treats as a no-op. If the standard method changes this meaning before stabilization, follow it before releasing the name. |
-| `stable_top_k*` | itertools `k_smallest`, pandas `nsmallest`, JAX `lax.top_k` and PyTorch `topk` (default) return the selected records sorted; Polars `bottom_k` leaves them unordered | Release as `k_smallest(values, k)` and `k_smallest_by_key`, returning `(&mut [T], &mut [T])` with the first region sorted ascending, as most precedents do; `Reverse` selects the largest. This is `partial_sort(values, ..k)` behind the interface users look for, including `k == 0` and `k == len`. Callers who need membership only use the documented `partial_sort(values, k..k)`. |
+| `stable_top_k*` (and the new `k_largest*`) | itertools `k_smallest`, pandas `nsmallest`, JAX `lax.top_k` and PyTorch `topk` (default) return the selected records sorted; Polars `bottom_k` leaves them unordered | Release as `k_smallest(values, k)` and `k_smallest_by_key`, returning `(&mut [T], &mut [T])` with the first region sorted ascending, as most precedents do; `k_largest` and `k_largest_by_key` are the same call with a `Reverse` key, returning the largest records sorted descending as itertools `k_largest` does; equal keys still keep input order. Both are `partial_sort(values, ..k)` behind the interface users look for, including `k == 0` and `k == len`. Callers who need membership only use the documented `partial_sort(values, k..k)`. |
 | `stable_partition` | C++ `std::stable_partition`; the count return matches `partition_point` | Release as `partition`. Its contract of one predicate call per record, in input order, remains. |
 | `stable_partition_by_bucket`, `MAX_PARTITION_BUCKETS` | Stable multiway distribution, a counting sort by category | Release as `partition_by_category` with `MAX_PARTITION_CATEGORIES`. Sorting by a category key cannot replace it: it may call the classifier several times per record and returns no group boundaries. Before release, fix the public capacity as a literal promise of 4096 that a compile-time assertion checks against block and tile limits, so tuning cannot shrink the accepted range, and use category as the only public term. |
 | `stable_sort_segments*` | Rust `slice::chunks_mut`; CUB and rocPRIM segmented sort | Replace with `sort_chunks(values, chunk_len)` and `sort_chunks_by_key`, equivalent to sorting each `values.chunks_mut(chunk_len)` and panicking on a zero length like `chunks_mut`. One invocation reuses its workspace across chunks. Its concrete consumer is the binding's `axis=-1` sort of C-contiguous rows, which all have one length. Variable-length CSR offsets wait for a consumer that needs them. |
@@ -64,15 +64,10 @@ The Python binding follows NumPy names instead ([binding design](python-binding.
 
 ### Implementation consequences
 
-- `partial_sort` and `k_smallest` reuse the one rank requirement. A nonempty range is requested as today; an empty `k..k` inside the input maps to the singleton `k..k+1` that Top-k uses now; `0..0` and `len..len` are no-ops without key calls or allocation. No cut list or second request type is added.
+- `partial_sort`, `k_smallest` and `k_largest` reuse the one rank requirement. A nonempty range is requested as today; an empty `k..k` inside the input maps to the singleton `k..k+1` that Top-k uses now; `0..0` and `len..len` are no-ops without key calls or allocation. No cut list or second request type is added.
 - Range-bound conversion rejects inverted, out-of-bounds and overflowing bounds such as `Excluded(usize::MAX)` before mutation or key calls.
 - Each released function's rustdoc opens with its delta from the standard operation; the semantics rows become those deltas. The crate documentation gains an operation overview and the membership-only `partial_sort(values, k..k)` recipe.
 - Tests, doctests and the operation benchmark workload names follow the renamed functions; `sort_chunks` replaces offset validation with the `chunks_mut` rule. The change is confined to adapters, documentation and tests; the engine, movement and recovery are unchanged.
-
-### Open decisions
-
-1. Released names: adopt rule 5 and rename the 0.1 entry points in 0.2 (proposed), or keep the 0.1 names and prefix every new operation with `stable_`.
-2. Whether to add `k_largest` beside `k_smallest`, or leave the largest records to `Reverse`.
 
 ## Derive the architecture from all known consumers
 

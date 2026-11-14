@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { checkDco } from "./check-dco.ts";
-import { changedPaths, changesTrustedFiles, marker, select } from "./ci_changes.ts";
+import { changedPaths, changesTrustedFiles, findMarker, marker, select } from "./ci_changes.ts";
 import {
   BOT_EMAIL,
   isDependabotUpdate,
@@ -177,6 +177,25 @@ test("reuse markers follow lane inputs and trusted files block reuse", async () 
       marker("benchmark", at(base)),
       marker("benchmark", { ...at(base), baseline: workflow }),
     );
+    // A marker counts only from a run on the PR's own commits; any failure finds none.
+    const github = { repository: "owner/repo", token: "" };
+    const respond = (artifacts: unknown) => async () => Response.json({ artifacts });
+    const run = (head_sha: string) => ({ expired: false, workflow_run: { id: 7, head_sha } });
+    const original = globalThis.fetch;
+    try {
+      const found = async (reply: () => Promise<Response>) => {
+        globalThis.fetch = reply as typeof fetch;
+        return findMarker("m", { head: workflow, baseline: base }, github);
+      };
+      assert.deepEqual(await found(respond([run(docs)])), { id: 7, head_sha: docs });
+      assert.equal(await found(respond([])), undefined);
+      assert.equal(await found(respond([run(base)])), undefined);
+      assert.equal(await found(respond([{ ...run(docs), expired: true }])), undefined);
+      assert.equal(await found(async () => new Response("", { status: 403 })), undefined);
+      assert.equal(await found(() => Promise.reject(new Error("offline"))), undefined);
+    } finally {
+      globalThis.fetch = original;
+    }
     assert.equal(changesTrustedFiles(base, docs), false);
     assert.equal(changesTrustedFiles(base, workflow), true);
   } finally {

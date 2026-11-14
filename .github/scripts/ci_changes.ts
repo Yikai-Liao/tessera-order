@@ -101,11 +101,21 @@ export function changedPaths(base: string | undefined, head: string): string[] |
   }
 }
 
-/** List the tracked entries, with mode and blob ID, whose route includes the lane. */
+/**
+ * Tooling that can change a lane's result or verdict without scheduling the
+ * lane, such as report classification. A row says when a change alone needs a
+ * lane; reuse needs every input of the result.
+ */
+const TOOLING = /^(bench|tools)\//;
+
+/** List the tracked entries, with mode and blob ID, that a lane's result depends on. */
 function inputs(revision: string, lane: Lane) {
   return git("ls-tree", "-r", "-z", revision)
     .split("\0")
-    .filter((entry) => entry && lanesOf(entry.slice(entry.indexOf("\t") + 1)).includes(lane))
+    .filter((entry) => {
+      const path = entry.slice(entry.indexOf("\t") + 1);
+      return entry && (TOOLING.test(path) || lanesOf(path).includes(lane));
+    })
     .join("\0");
 }
 
@@ -142,40 +152,57 @@ interface Artifact {
   workflow_run: { id: number; head_sha: string };
 }
 
+/** Find a marker uploaded by a run on this PR's own commits; any failure finds none. */
+export async function findMarker(
+  name: string,
+  revisions: { head: string; baseline: string },
+  github: { repository: string; token: string },
+) {
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${github.repository}/actions/artifacts?name=${name}`,
+      {
+        headers: { authorization: `Bearer ${github.token}`, accept: "application/vnd.github+json" },
+      },
+    );
+    if (!response.ok) return undefined;
+    const { artifacts } = (await response.json()) as { artifacts: Artifact[] };
+    return artifacts.find(
+      ({ expired, workflow_run: { head_sha } }) =>
+        !expired &&
+        isAncestor(head_sha, revisions.head) &&
+        !isAncestor(head_sha, revisions.baseline),
+    )?.workflow_run;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Skip selected lanes that an earlier run of this PR passed with identical
  * inputs. A marker is an artifact, so it names the run that uploaded it; only
  * runs on this PR's own commits count, and only while none of them changed a
- * trusted file. Any lookup failure runs the lane.
+ * trusted file. Measurement is reused only where its check was published, so
+ * a later head can carry it; elsewhere it runs again.
  */
 async function reuse(
   selected: ReturnType<typeof select>,
   revisions: { base: string; head: string; tested: string },
-  github: { repository: string; server: string; token: string },
+  github: { repository: string; server: string; token: string; published: boolean },
 ) {
   const baseline = git("merge-base", revisions.base, revisions.head).trim();
-  const markers = LANES.filter((lane) => selected[lane]).map((lane) => ({
+  const lanes = LANES.filter(
+    (lane) => selected[lane] && (lane !== "benchmark" || github.published),
+  );
+  const markers = lanes.map((lane) => ({
     lane,
     name: marker(lane, { ...revisions, baseline }),
   }));
   const reused: Partial<Record<Lane, Artifact["workflow_run"]>> = {};
   if (!changesTrustedFiles(baseline, revisions.head))
     for (const { lane, name } of markers) {
-      const response = await fetch(
-        `https://api.github.com/repos/${github.repository}/actions/artifacts?name=${name}`,
-        {
-          headers: {
-            authorization: `Bearer ${github.token}`,
-            accept: "application/vnd.github+json",
-          },
-        },
-      );
-      if (!response.ok) continue;
-      const { artifacts } = (await response.json()) as { artifacts: Artifact[] };
-      reused[lane] = artifacts.find(
-        ({ expired, workflow_run: { head_sha } }) =>
-          !expired && isAncestor(head_sha, revisions.head) && !isAncestor(head_sha, baseline),
-      )?.workflow_run;
+      const run = await findMarker(name, { head: revisions.head, baseline }, github);
+      if (run) reused[lane] = run;
     }
   const summary = Object.entries(reused)
     .map(
@@ -186,7 +213,8 @@ async function reuse(
   return {
     lanes: Object.fromEntries(LANES.map((lane) => [lane, selected[lane] && !reused[lane]])),
     record: JSON.stringify(markers.map(({ name }) => name)),
-    benchmark_reused: reused.benchmark?.head_sha ?? "",
+    // The check to carry is the one the marker's run published or carried.
+    benchmark_reused: reused.benchmark ? `${reused.benchmark.head_sha}:${reused.benchmark.id}` : "",
     summary,
   };
 }
@@ -200,7 +228,13 @@ export async function routeChanges(
   base: string | undefined,
   head = "HEAD",
   out?: string,
-  reuseFrom?: { tested: string; repository: string; server: string; token: string },
+  reuseFrom?: {
+    tested: string;
+    repository: string;
+    server: string;
+    token: string;
+    published: boolean;
+  },
 ) {
   const paths = changedPaths(base, head);
   const present = async (path: string) => {
@@ -249,6 +283,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     repository: process.env.GITHUB_REPOSITORY ?? "",
     server: process.env.GITHUB_SERVER_URL ?? "https://github.com",
     token: process.env.GITHUB_TOKEN ?? "",
+    // Whether this run's report publishes its benchmark check (`PUBLISH` in ci.yml).
+    published: process.env.PUBLISH === "true",
   };
   const reuseFrom = values.reuse ? { tested: values.reuse, ...github } : undefined;
   console.log(JSON.stringify(await routeChanges(values.base, values.head, values.out, reuseFrom)));

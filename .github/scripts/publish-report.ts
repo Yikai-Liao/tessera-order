@@ -15,11 +15,13 @@ function required(name: string) {
 
 const reusedFrom = process.env.REUSED_FROM;
 if (reusedFrom) {
+  const [from, run] = reusedFrom.split(":");
   await reuseReport({
     github: getOctokit(required("GITHUB_TOKEN")),
     context,
     hash: required("HASH"),
-    from: reusedFrom,
+    from,
+    run,
   });
   process.exit(0);
 }

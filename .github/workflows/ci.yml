@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Whether the benchmark report publishes its check; reuse of measurement depends on it.
+  PUBLISH: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -305,8 +309,6 @@ jobs:
     runs-on: ubuntu-24.04
     environment: benchmark
     timeout-minutes: 10
-    env:
-      PUBLISH: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
     permissions:
       contents: write
       checks: write
@@ -374,7 +376,7 @@ jobs:
   # Identical measured inputs keep the earlier verdict; carry its check to this head.
   reuse-report:
     needs: changes
-    if: needs.changes.outputs.benchmark_reused != '' && github.event.pull_request.head.repo.full_name == github.repository
+    if: needs.changes.outputs.benchmark_reused != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read

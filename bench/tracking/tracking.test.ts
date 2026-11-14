@@ -82,7 +82,7 @@ test("tracking excludes revision controls and operation-only references", () => 
   assert.ok(
     trackingAlgorithms.every((entry) => !["revision", "reference"].includes(entry.adapter)),
   );
-  for (const id of ["tessera-full", "tessera-copy", "tessera-baseline"]) {
+  for (const id of ["tessera-full", "tessera-cached", "tessera-copy", "tessera-baseline"]) {
     assert.throws(() => trackingAlgorithm(id), /Unknown tracking algorithm/);
     assert.throws(() => trackingBranch(id), /Unknown tracking algorithm/);
   }

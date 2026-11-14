@@ -181,6 +181,7 @@ pub(super) fn categories<T: BenchmarkRecord>(
             "public one-shot stable category partition including boundary output"
         }
         "tessera-full" => "Tessera by-key category sorting plus boundary construction",
+        "tessera-cached" => "Tessera cached-key category sorting plus boundary construction",
         "std-stable" => "standard stable category sorting plus boundary construction",
         "glidesort" => "glidesort stable category sorting plus boundary construction",
         "radsort" => "radsort stable category sorting plus boundary construction",
@@ -214,9 +215,9 @@ pub(super) fn categories<T: BenchmarkRecord>(
                 // The predicate entry also supplies a literal two. Keep the
                 // same classifier specialization rather than charging only
                 // sorting references for a runtime category-count division.
-                sort_by_category(name, values, |r| r.category(2));
+                sort_by_category(name, values, 2, |r| r.category(2));
             } else {
-                sort_by_category(name, values, |r| r.category(bucket_count));
+                sort_by_category(name, values, bucket_count, |r| r.category(bucket_count));
             }
             output.count(values);
             output
@@ -225,14 +226,24 @@ pub(super) fn categories<T: BenchmarkRecord>(
 }
 
 /// Sorts by the supplied category, sharing its literal or runtime fan-out
-/// specialization across all sorting references.
+/// specialization across all sorting references. The cached-key route takes
+/// the narrowest unsigned key holding `bucket_count` categories, as a caller
+/// would write it, since that type sets the size of its key cache.
 fn sort_by_category<T: BenchmarkRecord>(
     name: &str,
     values: &mut [T],
+    bucket_count: usize,
     category: impl Fn(&T) -> usize,
 ) {
     match name {
         "tessera-full" => tessera_order::stable_sort_by_key(values, category),
+        "tessera-cached" if bucket_count <= 1 << u8::BITS => {
+            tessera_order::sort_by_cached_key(values, |r| category(r) as u8);
+        }
+        "tessera-cached" if bucket_count <= 1 << u16::BITS => {
+            tessera_order::sort_by_cached_key(values, |r| category(r) as u16);
+        }
+        "tessera-cached" => tessera_order::sort_by_cached_key(values, |r| category(r) as u32),
         "std-stable" => values.sort_by_key(category),
         "glidesort" => glidesort::sort_by(values, |a, b| category(a).cmp(&category(b))),
         "radsort" => radsort::sort_by_key(values, category),
@@ -478,6 +489,7 @@ mod tests {
                                 operation.required_ranges().is_some()
                                     || operation.bucket_count().is_some()
                             }
+                            "tessera-cached" => operation.bucket_count().is_some(),
                             "radsort" => {
                                 operation.bucket_count().is_some() || !ty.starts_with("reverse_")
                             }

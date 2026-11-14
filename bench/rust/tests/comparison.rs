@@ -6,44 +6,13 @@ use std::{fs, process::Command};
 
 #[cfg(feature = "operations")]
 #[test]
-fn unsupported_control_fails_before_measurement_artifacts() {
-    let directory = std::env::temp_dir().join(format!(
-        "tessera-unsupported-control-{}",
-        std::process::id()
-    ));
-    fs::create_dir_all(&directory).unwrap();
-    let plan = directory.join("plan.json");
-    let output = directory.join("results");
-    fs::write(&plan, serde_json::to_vec(&serde_json::json!({
-        "schema": 2, "algorithms": ["tessera", "std-stable"],
-        "operation": { "kind": "partition-buckets", "bucket_count": tessera_order::MAX_PARTITION_BUCKETS + 1 },
-        "include": [{ "types": ["u32"], "distributions": ["random"], "lengths": [1_000_000] }]
-    })).unwrap()).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_compare"))
-        .args(["run", "--plan"])
-        .arg(plan)
-        .arg("--out")
-        .arg(&output)
-        .output()
-        .unwrap();
-    assert!(!result.status.success());
-    assert!(
-        String::from_utf8_lossy(&result.stderr)
-            .contains("required control tessera does not support")
-    );
-    assert!(!output.exists());
-    fs::remove_dir_all(directory).unwrap();
-}
-
-#[cfg(feature = "operations")]
-#[test]
 fn category_batches_budget_and_measure_retained_offsets() {
     let directory =
         std::env::temp_dir().join(format!("tessera-category-batch-{}", std::process::id()));
     fs::create_dir_all(&directory).unwrap();
     let plan = directory.join("plan.json");
     let output = directory.join("results");
-    let bucket_count = tessera_order::MAX_PARTITION_BUCKETS;
+    let bucket_count = 70_000;
     fs::write(
         &plan,
         serde_json::to_vec(&serde_json::json!({

@@ -598,7 +598,7 @@ mod tests {
         // At 8192 records the strided gate checks odd pair offsets. Miri
         // exercises the confirmation directly on a shorter vector scan.
         assert!(confirm_order(&values, &mut Direct) == Order::Unsorted);
-        crate::stable_sort(&mut values);
+        crate::sort(&mut values);
         assert_eq!(values, (0..len as u64).collect::<Vec<_>>());
     }
 
@@ -800,7 +800,7 @@ mod tests {
                 assert_eq!(record.key.get(), (id as u16 % 2) << 8);
             }
             // The owned records remain usable through another public key width.
-            crate::stable_sort_by_key(&mut records, |record| (record.id as u128) << 64);
+            crate::sort_by_key(&mut records, |record| (record.id as u128) << 64);
             assert!(
                 records
                     .iter()

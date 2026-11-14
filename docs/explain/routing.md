@@ -52,9 +52,9 @@ A partition child larger than a tile, and every child of a parallel root, enters
 
 ### Counted window
 
-A record sorted by its own key is interchangeable with every record of the same key: equal encoded keys are equal bit patterns. For those inputs — `stable_sort`, not `stable_sort_by_key` — the engine counts the records of each value in the window and fills each run with the key decoded from that value and the bits all keys share outside the window. The runs come out in key order, with no block partition and no record moves.
+A record sorted by its own key is interchangeable with every record of the same key: equal encoded keys are equal bit patterns. For those inputs — `sort`, not `sort_by_key` — the engine counts the records of each value in the window and fills each run with the key decoded from that value and the bits all keys share outside the window. The runs come out in key order, with no block partition and no record moves.
 
-Records sorted by a key function keep their payloads: two records with key 7 may hold different data and in a fixed order between them. Counting would drop that, so `stable_sort_by_key` takes the [block partition](block-partition.md) below instead.
+Records sorted by a key function keep their payloads: two records with key 7 may hold different data and in a fixed order between them. Counting would drop that, so `sort_by_key` takes the [block partition](block-partition.md) below instead.
 
 ### Block partition of the window
 

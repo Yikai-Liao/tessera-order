@@ -94,7 +94,11 @@ impl Operation {
     /// unlike a selected rank it must not require a particular pivot record.
     pub(crate) fn required_ranges(&self) -> Option<Vec<Range<usize>>> {
         let ranges = match self {
+            // An empty range is a cut: `partial_sort(k..k)` partitions at k.
             Self::TopK { k } => return Some(std::iter::once(*k..*k).collect()),
+            Self::RankRange { start, end } if start == end => {
+                return Some(std::iter::once(*start..*start).collect());
+            }
             Self::Prefix { prefix_len } => 0..*prefix_len,
             Self::Select { index } => *index..index + 1,
             Self::RankRange { start, end } => *start..*end,
@@ -150,7 +154,7 @@ impl Operation {
     pub(crate) fn is_noop(&self, len: usize) -> bool {
         matches!(self, Self::TopK { k } if *k == 0 || *k == len)
             || matches!(self, Self::Prefix { prefix_len: 0 })
-            || matches!(self, Self::RankRange { start, end } if start == end)
+            || matches!(self, Self::RankRange { start, end } if start == end && (*start == 0 || *start == len))
             || matches!(self, Self::SelectMany { indices } if indices.is_empty())
     }
 

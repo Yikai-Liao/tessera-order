@@ -745,7 +745,7 @@ mod tests {
             5,
             3,
             &|records| {
-                crate::stable_sort_by_key(records, |record| {
+                crate::sort_by_key(records, |record| {
                     (calls.fetch_add(1, Ordering::Relaxed) ^ record.0) as u32
                 });
             },
@@ -952,7 +952,7 @@ mod tests {
                                 let (a, b) = rayon::join(|| 13 * 7, || 13 * 7);
                                 assert_eq!(a, b);
                             }
-                            crate::stable_sort_by_key(band, |record| {
+                            crate::sort_by_key(band, |record| {
                                 assert_ne!(Some(record.1), fail, "streamed callback panic");
                                 record.0
                             });

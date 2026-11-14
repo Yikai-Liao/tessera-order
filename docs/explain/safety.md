@@ -17,9 +17,9 @@ The key function only ever borrows a live record.
 
 A counting pass reads each key twice: once for the histogram and once for the scatter. If the key function returns a different digit the second time, the histogram's bucket sizes no longer match the records sent to each bucket. Two records could then be written to the same slot, and one slot would never be written.
 
-`stable_sort_by_key` therefore **caches bucket IDs**: during the histogram it stores each record's bucket as a `u16`, and the scatter reads that value instead of calling the key function again. The bucket ranges are disjoint and their sizes match the stored IDs, so every output slot is written exactly once, whatever the key function does. The block partition calls the key function once per record and pass, so it has nothing to cache.
+`sort_by_key` therefore **caches bucket IDs**: during the histogram it stores each record's bucket as a `u16`, and the scatter reads that value instead of calling the key function again. The bucket ranges are disjoint and their sizes match the stored IDs, so every output slot is written exactly once, whatever the key function does. The block partition calls the key function once per record and pass, so it has nothing to cache.
 
-`stable_sort` sorts the keys themselves with Tessera's own encoders, which are deterministic and cannot panic, so it recomputes keys and stores nothing ([engine reference](../design/engine.md#record-handling)).
+`sort` sorts the keys themselves with Tessera's own encoders, which are deterministic and cannot panic, so it recomputes keys and stores nothing ([engine reference](../design/engine.md#record-handling)).
 
 An inconsistent key function can therefore produce an unsorted result, but never a lost, duplicated or uninitialized record. The contract also lets the sort panic in that case, as Rust's standard sorts may; the records are then restored as after a [panicking key function](#panicking-key-functions).
 

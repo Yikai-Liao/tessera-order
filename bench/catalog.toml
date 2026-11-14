@@ -13,7 +13,6 @@ revisionSampling = [
 algorithms = [
   { id = "tessera", label = "Tessera", stable = true, family = "radix", adapter = "common" },
   { id = "tessera-full", label = "Tessera full-sort reference", stable = true, family = "radix", adapter = "reference", detail = "complete stable sorting", description = "full-sort reference for required ranks or stable category grouping" },
-  { id = "tessera-cached", label = "Tessera cached-key sort", stable = true, family = "radix", adapter = "reference", detail = "sort_by_cached_key", description = "cached-key stable sorting on the narrowest category key, for stable category grouping" },
   { id = "tessera-baseline", label = "Tessera baseline A", stable = true, family = "radix", adapter = "revision" },
   { id = "tessera-baseline-copy", label = "Tessera baseline B", stable = true, family = "radix", adapter = "revision" },
   { id = "tessera-copy", label = "Tessera current B", stable = true, family = "radix", adapter = "revision" },

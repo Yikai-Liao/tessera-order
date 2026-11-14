@@ -99,6 +99,72 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # Extra memory across lengths for every algorithm, in one native build. Peak allocation counts
+  # do not depend on the host, so this runs on Actions alone and publishes without Bencher.
+  growth:
+    needs: changes
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.benchmark == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      CC: clang
+      CXX: clang++
+      TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/main-growth
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/cache@v6
+        with:
+          path: bench/vendor
+          key: native-sources-${{ runner.os }}-${{ hashFiles('bench/rust/native/sources.toml') }}
+      - name: Install native benchmark tools
+        timeout-minutes: 5
+        run: bash .github/scripts/install_native_tools.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target/main-growth"
+          shared-key: main-growth
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Measure extra memory across lengths
+        run: bun bench/tracking/growth.ts
+      - name: Publish the sweep with ordinary Git
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          git init -q bench/results/history
+          cd bench/results/history
+          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          for attempt in 1 2 3; do
+            git fetch origin benchmark-data
+            git checkout -B benchmark-data FETCH_HEAD
+            bun "$GITHUB_WORKSPACE/bench/tracking/publish.ts" growth ../growth/growth.json
+            git add -- growth.json comparison.json
+            git diff --cached --quiet && break
+            git commit -s -m "chore(bench): record memory growth ${GITHUB_SHA:0:7}" -m 'Assisted-by: Claude'
+            git push origin HEAD:refs/heads/benchmark-data && break
+            [ "$attempt" != 3 ] || exit 1
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: memory-growth
+          path: |
+            bench/results/growth/growth.json
+            bench/results/growth.log
+          retention-days: 14
+          if-no-files-found: ignore
+
   # Measurement waits for every build, then runs one algorithm at a time: Bencher has a single
   # remote slot, and Actions concurrency groups would cancel queued jobs rather than hold them.
   # An algorithm whose build failed fails here when its artifact is missing; the others continue.

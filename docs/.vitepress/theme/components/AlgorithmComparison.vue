@@ -2,7 +2,8 @@
 <script setup lang="ts">
 import { withBase } from "vitepress";
 import { computed, onMounted, shallowRef, useId } from "vue";
-import { renderRows } from "../../../../bench/plot/rows.ts";
+import { type CurveChart, renderCurves } from "../../../../bench/plot/curves.ts";
+import { type RowChart, renderRows } from "../../../../bench/plot/rows.ts";
 import { type ComparisonData, comparisonSchema } from "../../../../bench/tracking/result.ts";
 
 // `overview` shows the headline ranking with a link to the full page; `all` shows every figure.
@@ -49,7 +50,10 @@ const figures = computed(() => {
     name: figure.name,
     subject: figure.subject,
     summary: figure.summary,
-    svg: renderRows({ ...figure.chart, id: `${id}-${figure.name}` }),
+    svg:
+      figure.kind === "curves"
+        ? renderCurves({ ...(figure.chart as CurveChart), id: `${id}-${figure.name}` })
+        : renderRows({ ...(figure.chart as RowChart), id: `${id}-${figure.name}` }),
     table: cells(figure.table),
   }));
 });

@@ -12,10 +12,11 @@ import {
   modeOrder,
 } from "../catalog.ts";
 import { trackingAlgorithm } from "./algorithms.ts";
-import { writeComparison } from "./comparison.ts";
+import { GROWTH_FILE, writeComparison } from "./comparison.ts";
 import { renderMainOverview } from "./history.ts";
 import {
   type Facet,
+  growthSchema,
   indexSchema,
   parseRuns,
   runSchema,
@@ -95,12 +96,18 @@ export async function appendRun(directory: string, input: TrackingRun) {
   await writeFile(join(directory, "preview.svg"), renderMainOverview(runs, index.cases));
 }
 
-// Usage: publish.ts ALGORITHM JOURNAL, run from the data checkout's root; also regenerates
-// `comparison.json` from every algorithm present.
+// Usage: publish.ts ALGORITHM JOURNAL, or publish.ts growth FILE, run from the data checkout's
+// root; both regenerate `comparison.json` from every algorithm present and the growth sweep.
 if (import.meta.main) {
-  const [algorithm, journal] = process.argv.slice(2);
-  const runs = parseRuns(await readFile(journal, "utf8"));
-  if (runs.length !== 1) throw new Error("Expected exactly one complete run");
-  await appendRun(trackingAlgorithm(algorithm).id, runs[0]);
+  const [algorithm, input] = process.argv.slice(2);
+  if (algorithm === "growth") {
+    // The latest sweep replaces the previous one; Git keeps the history.
+    const growth = growthSchema.parse(JSON.parse(await readFile(input, "utf8")));
+    await writeFile(GROWTH_FILE, `${JSON.stringify(growth)}\n`);
+  } else {
+    const runs = parseRuns(await readFile(input, "utf8"));
+    if (runs.length !== 1) throw new Error("Expected exactly one complete run");
+    await appendRun(trackingAlgorithm(algorithm).id, runs[0]);
+  }
   await writeComparison(".");
 }

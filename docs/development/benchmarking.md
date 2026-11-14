@@ -265,7 +265,7 @@ Payloads encode the original index and fill every remaining byte deterministical
 | `sparse_digits`, `bimodal` | Sparse digit occupancy; two distant high-cardinality clusters | `u64`, `row_u64`, `record128`, `owned` | 65,536; 1M |
 | `finite_signed` | Finite signed floats with bounded magnitudes | `f64` | 1,000; 65,536; 1M; 10M |
 
-All nine added integer distributions also run on `u64` at 10M. Type restrictions keep each generator meaningful (narrowing `bimodal` to `u32` would discard its cluster bit). Memory is measured for every supported variant through 1M and every `u64` case at 10M; serial Tessera's peak is also measured on larger cases to size `glidesort-sqrt`, and selected `tessera-par-*` adapters on every selected case.
+All nine added integer distributions also run on `u64` at 10M. Type restrictions keep each generator meaningful (narrowing `bimodal` to `u32` would discard its cluster bit). Memory is measured for every supported variant on inputs up to 128 MiB of records, which includes `u64` at 10M; serial Tessera's peak is also measured on larger inputs to size `glidesort-sqrt`, and selected `tessera-par-*` adapters on every selected case.
 
 ### Input generation
 

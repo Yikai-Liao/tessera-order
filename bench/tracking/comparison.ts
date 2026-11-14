@@ -7,11 +7,19 @@ import {
   type Cohort,
   comparisonFigures,
   type Field,
+  type Growth,
   renderParallel,
   type Scaling,
 } from "../report/charts.ts";
 import { trackingAlgorithms } from "./algorithms.ts";
-import { type ComparisonData, comparisonSchema, parseRuns, type TrackingRun } from "./result.ts";
+import {
+  type ComparisonData,
+  comparisonSchema,
+  type GrowthRecord,
+  growthSchema,
+  parseRuns,
+  type TrackingRun,
+} from "./result.ts";
 
 // Opponents run only the serial entry point, so the comparison reads serial cases.
 const SERIAL = "api";
@@ -70,8 +78,7 @@ const RANKING_TYPE = "row_u32";
 /**
  * The cohort follows the continuous plan instead of fixed lengths. The ranking and the
  * u64 input-pattern figures each use their type's length with the most input patterns that
- * both Tessera and slice::sort measured, the longest on a tie; memory uses the longest u64
- * length with a random input.
+ * both Tessera and slice::sort measured, the longest on a tie.
  */
 export function trackingCohort(field: Field): Cohort | null {
   const measured = (id: string) =>
@@ -105,9 +112,6 @@ export function trackingCohort(field: Field): Cohort | null {
   const typeShapes = shapes.filter((shape) =>
     [...types.values()].every((cases) => cases.some((entry) => entry.distribution === shape)),
   );
-  const memoryN = Math.max(
-    ...u64.cases.filter((entry) => entry.distribution === "random").map((entry) => entry.len),
-  );
   return {
     ranking: {
       ty: ranking.ty,
@@ -120,7 +124,6 @@ export function trackingCohort(field: Field): Cohort | null {
     shapes,
     typeShapes,
     typeShapesLabel: over(typeShapes, "input patterns every type has"),
-    memoryN: Number.isFinite(memoryN) ? memoryN : n,
   };
 }
 
@@ -172,12 +175,28 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
   };
 }
 
+/** The growth sweep in the figures' terms: serial tracking algorithms, in catalog order. */
+export function trackingGrowth(record: GrowthRecord): Growth {
+  return {
+    ty: record.type,
+    distribution: record.distribution,
+    lengths: record.lengths,
+    peaks: trackingAlgorithms
+      .filter((entry) => entry.threads === undefined && entry.id in record.peaks)
+      .map((entry) => ({ name: entry.id, values: record.peaks[entry.id] })),
+    source: `Tessera at ${record.hash.slice(0, 7)}`,
+  };
+}
+
 /**
- * Build the published comparison from every algorithm's journals. Without a cohort, such as
+ * Build the published comparison from every algorithm's journals and the growth sweep. Without a cohort, such as
  * before `slice::sort` has a run on Tessera's latest hardware, it has no figures, so the site
  * never shows an earlier comparison as the latest one.
  */
-export function comparisonData(runs: Map<string, TrackingRun[]>): ComparisonData {
+export function comparisonData(
+  runs: Map<string, TrackingRun[]>,
+  growth?: GrowthRecord,
+): ComparisonData {
   const latest = latestRuns(runs);
   const field = trackingField(latest?.runs ?? new Map());
   const cohort = trackingCohort(field);
@@ -185,14 +204,17 @@ export function comparisonData(runs: Map<string, TrackingRun[]>): ComparisonData
   const scaling = latest && cohort ? trackingScaling(latest.runs) : null;
   const parallel = scaling ? renderParallel(scaling) : null;
   // Parallel sorting follows the serial figures and precedes memory.
-  const all = cohort ? comparisonFigures(field, cohort, undefined, true) : [];
+  const all = cohort
+    ? comparisonFigures(field, cohort, undefined, true, growth && trackingGrowth(growth))
+    : [];
   const memory = all.findIndex((figure) => figure.name === "memory");
   if (parallel) all.splice(memory < 0 ? all.length : memory, 0, parallel);
-  const figures = all.map(({ name, subject, summary, title, chart, table }) => ({
+  const figures = all.map(({ name, subject, summary, title, kind, chart, table }) => ({
     name,
     subject,
     summary,
     title,
+    ...(kind ? { kind } : {}),
     chart,
     table,
   }));
@@ -213,6 +235,9 @@ export function comparisonData(runs: Map<string, TrackingRun[]>): ComparisonData
   });
 }
 
+/** The growth sweep's file at the data root, written by `publish.ts growth`. */
+export const GROWTH_FILE = "growth.json";
+
 /** Regenerate `comparison.json` at the data root from every algorithm directory present. */
 export async function writeComparison(root: string) {
   const present = new Set(await readdir(root));
@@ -227,7 +252,10 @@ export async function writeComparison(root: string) {
     ).flat();
     if (list.length) runs.set(id, list);
   }
-  const data = comparisonData(runs);
+  const growth = present.has(GROWTH_FILE)
+    ? growthSchema.parse(JSON.parse(await readFile(join(root, GROWTH_FILE), "utf8")))
+    : undefined;
+  const data = comparisonData(runs, growth);
   await writeFile(join(root, "comparison.json"), `${JSON.stringify(data)}\n`);
   return data;
 }

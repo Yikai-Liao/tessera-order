@@ -189,6 +189,30 @@ Foundation B moves complete tile leaf planning, scratch and restoration outside 
 
 Foundation C publishes final ranges directly from the existing ledger start and length; it adds no range table or movement phase. A bounded linked screen on direct/keyed u64 at short, tile-edge and node sizes leaves performance acceptance open: both prior placements are faster on 49-record direct random inputs, and the primary prior placement is faster on keyed random inputs of that length. For direct sorted inputs at 49 records, the current same-source copy is as fast as both prior placements while the primary current placement is slower. Larger controls do not resolve these individual short cases or the earlier foundations' coverage gaps.
 
+### Refinement tile-budget ownership
+
+The production refinement entry now chooses the default tile budget; adapters no longer pass it. The private explicit-budget execution body remains shared with small-input ownership tests and is unchanged. This removes a caller obligation, not a sorting pass, allocation or recovery mechanism.
+
+A linked full-sort screen compared the refactor with its preceding revision on u64, 16-byte keyed records and 128-byte records, using random, d16 and sorted inputs at 48, 4,096 and 65,536 records. Three 1 ms paired blocks were followed by nine 5 ms blocks with a byte-identical timing executable, two named copies per revision and repeated-current A/A. The i7-10875H host ran Rust 1.99.1/LLVM 23.1.3 pinned to one logical CPU, with powersave, turbo and SMT unchanged. Verification passed; all four Tessera placements had identical measured peak extra heap for each of the 27 inputs in both runs.
+
+The table retains every input where either baseline was classified faster in either run. Each ratio is the reciprocal of the median baseline / paired-current-mean ratio, not a quotient of marginal times. The paired-current mean is the mean of `tessera` and `tessera-aa` in that block. Above one favors the baseline; A/A spans both repeated-current samples normalized by their block mean and is an observed range, not a confidence interval.
+
+| Input | 3-block current / baseline A, B | A/A | 9-block current / baseline A, B | A/A |
+|---|---:|---:|---:|---:|
+| record128 / d16 / 4,096 | 1.017, 1.015 | ±1.13% | 0.995, 1.002 | ±4.75% |
+| record128 / d16 / 48 | 1.159, 1.002 | ±0.16% | 1.157, 1.012 | ±9.37% |
+| record128 / random / 4,096 | 1.011, 0.998 | ±0.49% | 1.005, 1.020 | ±2.31% |
+| record128 / random / 48 | 1.162, 1.002 | ±3.87% | 1.153, 1.011 | ±17.12% |
+| row_u64 / d16 / 48 | 1.031, 1.033 | ±0.97% | 0.994, 0.996 | ±2.50% |
+| row_u64 / random / 48 | 1.013, 0.992 | ±0.29% | 1.010, 1.001 | ±0.36% |
+| row_u64 / sorted / 48 | 1.006, 0.996 | ±0.96% | 1.178, 1.152 | ±13.00% |
+| u64 / d16 / 65,536 | 1.003, 1.003 | ±0.19% | 1.009, 0.990 | ±2.02% |
+| u64 / sorted / 4,096 | 1.019, 1.019 | ±0.70% | 1.004, 1.014 | ±6.75% |
+
+The repeat does not erase the initial losses: several directions or control windows changed, and the wide-record d16 loss persists against baseline A but not B. The same-source current-copy / paired-current-mean median ratio was 1.186 on 48-record keyed d16 input in the first screen. Symbol and disassembly inspection found distinct current root bodies, so those copies do not isolate address placement alone. These controls establish neither zero cost nor a source-causal penalty.
+
+**Disposition:** retain the internal simplification on the experimental branch with timing acceptance open. Keep the individual differences above unresolved rather than tune source layout to a favorable copy. Partial-operation, segmented and Rayon timing, broader key widths and platforms remain uncovered; this screen closes none of the earlier foundation timing debt.
+
 ## Serial slice-operation baseline
 
 The first serial extensions keep one rank-requirement authority and one refinement executor. Argsort changes the payload to indices; segmented sorting reuses invocation workspace across complete refinements. Top-k, prefixes and selected ranks do not introduce a second mover, recovery protocol or tile engine. This is a small shared implementation, not evidence that every workload is fastest.

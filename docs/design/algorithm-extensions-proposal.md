@@ -16,11 +16,65 @@ Argsort, segmented sorting, stable-membership Top-k, sorted prefixes, single and
 
 Stable binary and bounded multiway partitions are implemented. Their current contract belongs to [category semantics](../../conformance/semantics.md#stable-category-partitions), signatures and examples to [public Rust docs](../../rust/tessera-order/src/partition.rs), and the complete-operation boundary to the [engine reference](engine.md#category-distribution). Incremental prefix completion remains the next proposed algorithm with persistent state.
 
+None of these operations is released. [Release surface alignment](#release-surface-alignment) proposes which of them to publish, under which names and with which contract changes.
+
 ### Composition and persistent use
 
 [Multi-field and grouping examples](../guide/getting-started.md#multi-field-sorting-and-groups) use ordinary stable sorting and slice composition, not new frameworks. Tuple keys and variable-width encodings are not implied by `RadixKey`. Consuming callbacks, reductions and deduplication retain their own destructor and panic contracts, separate from sorting's permutation guarantee. Exact statistical ranks remain caller choices rather than quantile policies in the engine.
 
 Incremental completion remains a proposed borrowing object, not a record-removing iterator: `PrefixSorter::by_key(&mut values, key)` followed by `ensure_prefix(prefix_len) -> &[T]`. Smaller requests may reuse completed work; extension needs an exclusive borrow. Names and generics remain provisional. Keys must stay consistent throughout the session; a panic invalidates further session use while restoring all records. No live record or half-finished movement may remain in scratch between calls.
+
+## Release surface alignment
+
+Status: proposed, awaiting the operator's decision. It decides which unreleased operations to publish, and proposes renaming the released 0.1 entry points once, in 0.2, so that every Rust name follows one convention.
+
+### Rules
+
+1. **State each operation as a delta from a mature one.** A public operation's result is a legal output of a named mature operation. Tessera adds only two differences: keys follow the [`RadixKey` encoding](../../conformance/semantics.md#key-encoding) total order instead of `Ord`, and wherever record identity is observable, equal keys resolve as the complete stable sort `S` resolves them. Rustdoc and semantics express each contract as that delta, not as an independent definition.
+2. **Promise stability only where it is observable.** Equal encoded direct keys are bitwise identical, so a direct-key result cannot be distinguished from a legal output of the unstable standard operation; the engine already counts and refills such keys for that reason. Stability is a contract for records moved by a key function and for returned indices.
+3. **Copy the Rust shape from a Rust precedent.** Arguments, returned borrows and panic conditions follow the corresponding standard-library method. A precedent outside Rust (NumPy, CUB, pandas) supports the semantics, but the Rust signature it implies is still our own design and needs a concrete use case before release.
+4. **Publish only what composition cannot replace.** An operation that published functions express in a few clear lines becomes a documented example. Adding a function later is compatible; removing a released one is not.
+5. **Use the Rust naming convention.** In Rust an unsuffixed name is stable and the cheaper weaker variant carries `_unstable`: `slice::sort` and `sort_unstable`, Rayon `par_sort` and `par_sort_unstable`, and the stable sorting crates `radsort` and `glidesort`, whose free functions are `sort` and `sort_by_key`. Tessera's operations are all stable, so they take the standard method name without its `_unstable` suffix, `_by_key` as in the standard library, and `par_` for Rayon entry points; `_unstable` stays reserved for a future weaker variant. The 0.1 `stable_` prefix follows C++ (`std::stable_sort`) instead, and keeping it would make every later name a hybrid of the two conventions. There are no `_by` comparator variants, because the radix engine needs encoded keys; the crate documentation states this once. Language bindings follow their host's convention.
+
+### Why tie identity is worth promising
+
+Low-level in-place selection is unstable across ecosystems (`slice::select_nth_unstable`, C++ `std::nth_element`, `numpy.partition`) because comparison-based stable selection needs an O(n) buffer, index decoration or O(n log n) in-place partitioning. Libraries that return selected results do define ties: pandas `nsmallest` defaults to `keep="first"`, JAX `lax.top_k` defaults to `is_stable=True`, and NumPy and PyTorch offer stable argsort. Tessera moves records with a stable block partition, and an unstable node kernel showed no intrinsic speed benefit ([feasibility study](evidence.md#unstable-node-partition-feasibility)), so the cost that made low-level selection unstable does not apply here.
+
+The user-visible value is consistency with the complete stable sort. Pages or batches cut by partial sorting match the full order, results are reproducible across versions and platforms, equal priorities are served in arrival order, and a stable pass on a secondary key composes with a later rank operation on the primary key. The caller's alternative, an original-index tiebreaker, is nearly free for a comparison sort but widens a radix key and adds digit passes. The promise only excludes faster unstable kernels under these names; `*_unstable` names stay available.
+
+### Released entry points
+
+In 0.2, rename `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key` to `sort`, `sort_by_key`, `par_sort` and `par_sort_by_key`, with unchanged contracts. The old names remain as `#[deprecated]` forwarding functions for the 0.2 series and are removed in a later breaking release. The rename is cheapest now, while 0.1 has just been published; the cost is one breaking minor release and updates to the guide, site, benchmark labels and semantics. If the operator keeps the 0.1 names, the new operations instead use `stable_` plus the standard name (`stable_select_nth`, `stable_partial_sort`), as on the branch today.
+
+### Decisions
+
+| Current functions | Mature precedent | Proposal (names under rule 5) |
+|---|---|---|
+| `stable_select_nth`, `stable_select_nth_by_key` | `slice::select_nth_unstable(_by_key)` | Release as `select_nth` and `select_nth_by_key`, with unchanged arguments and borrows. |
+| `stable_sort_prefix*`, `stable_sort_rank_range*` | `slice::partial_sort_unstable(_by_key)` (nightly feature `slice_partial_sort_unstable`); C++ `std::partial_sort` | Replace both with `partial_sort(values, range)` and `partial_sort_by_key(values, range, key)`, where `range: impl RangeBounds<usize>`. Adopt the standard empty-range meaning: `k..k` with `0 < k < len` partitions at `k`, which `stable_sort_rank_range` currently treats as a no-op. If the standard method changes this meaning before stabilization, follow it before releasing the name. |
+| `stable_top_k*` | No Rust slice operation. `top_k` means the largest records in Polars and PyTorch, and itertools `k_smallest` returns sorted output | Remove. Document `partial_sort(values, k..k)` followed by `split_at_mut(k)`, with `Reverse` for the largest records. |
+| `stable_partition` | C++ `std::stable_partition`; the count return matches `partition_point` | Release as `partition`. Its contract of one predicate call per record, in input order, remains. |
+| `stable_argsort`, `stable_argsort_by_key` | NumPy `argsort(kind="stable")`, `torch.sort(stable=True)` | Release as `argsort` and `argsort_by_key`. This is the form in which numeric libraries need stability. The output type is an open decision below. |
+| `stable_select_nth_many*` | NumPy `partition(kth=[...])` | Hold. The Rust shape is our own design, and the saving over repeated single selections is unmeasured. |
+| `stable_sort_segments*` | CUB and rocPRIM segmented radix sort, with `segments + 1` offsets | Hold until it measurably beats one complete sort call per segment; settle the name then. |
+| `stable_partition_by_bucket`, `MAX_PARTITION_BUCKETS` | No direct precedent | Hold. A once-only classifier, offsets output and a capacity limit together form a new contract. Release only with a use case that a complete sort by a `u16` category key cannot serve, a fixed public capacity that does not follow block or tile parameters, and one public term: category, with bucket kept internal. |
+| `PrefixSorter` (proposed above) | None | Remains a proposal. With no precedent to constrain it, it needs the strongest use-case evidence. |
+
+Held functions move from the crate root into a `#[doc(hidden)] pub mod experimental`, outside semantic versioning like `thresholds`, so the maintained operation benchmarks and contract tests keep calling the complete public implementation. Semantics lists them as experimental rather than released.
+
+### Implementation consequences
+
+- `partial_sort` reuses the one rank requirement. A nonempty range is requested as today; an empty `k..k` inside the input maps to the singleton `k..k+1` that Top-k uses now; `0..0` and `len..len` are no-ops without key calls or allocation. No cut list or second request type is added.
+- Range-bound conversion rejects inverted, out-of-bounds and overflowing bounds such as `Excluded(usize::MAX)` before mutation or key calls.
+- Each released function's rustdoc opens with its delta from the standard operation; the semantics rows become those deltas. The crate documentation gains an operation overview and the recipes that replace removed functions.
+- Tests, doctests and the operation benchmark workload names follow the renamed and held functions. The change is confined to adapters, documentation and tests; the engine, movement and recovery are unchanged.
+
+### Open decisions
+
+1. Released names: adopt rule 5 and rename the 0.1 entry points in 0.2 (proposed), or keep the 0.1 names and prefix every new operation with `stable_`.
+2. Argsort output: `Vec<usize>` indexes slices directly and is the proposed default; `u32` halves the output for large inputs but needs a length limit; writing into a caller buffer adds a second shape.
+3. Whether held operations stay in `experimental` or are removed until a user requests them.
+4. The release evidence for each held operation, as listed in its row.
 
 ## Derive the architecture from all known consumers
 

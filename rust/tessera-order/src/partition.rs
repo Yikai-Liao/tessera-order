@@ -13,7 +13,8 @@ use crate::{
 use alloc::{vec, vec::Vec};
 
 /// Widest category ID one stable distribution assigns, limited by block
-/// fan-out and tile cursor tables. Keys this narrow sort in one distribution.
+/// fan-out and tile cursor tables. Cached keys whose varying bits fit this
+/// width sort in one distribution.
 pub(crate) const MAX_DISTRIBUTION_BITS: usize = {
     let tile_bits = tile::MAX_DIGIT_BUCKETS.ilog2() as usize;
     if block::MAX_RADIX_BITS < tile_bits {

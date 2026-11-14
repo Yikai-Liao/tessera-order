@@ -107,10 +107,11 @@ if (import.meta.main) {
         await copyFile(built.executable, join(context, "benchmark"));
         await command("strip", ["--strip-debug", join(context, "benchmark")]);
         // Tessera's history keeps both continuous modes; an opponent replaces the algorithm selection.
-        const plan = await loadPlan(
-          "continuous",
-          algorithm.id === "tessera" ? {} : { algorithms: [algorithm.id] },
-        );
+        // Absolute tracking records full sorting, so the PR suite's operation rules stay out.
+        const plan = await loadPlan("continuous", {
+          operation: "sort",
+          ...(algorithm.id === "tessera" ? {} : { algorithms: [algorithm.id] }),
+        });
         await writeFile(join(context, "plan.json"), JSON.stringify(plan));
         // Peak extra allocation per case, measured by the same instrumented worker as local
         // comparisons. Counts do not depend on the host, so Actions measures them once per build.

@@ -66,6 +66,10 @@ test("strict identities reject unknown fields without tightening historical labe
   });
   assert.deepEqual(rawCaseParts("old/id"), { input: "id", sub: "" });
   assert.equal(caseParts("not-an-id").input, "not-an-id");
+  assert.notEqual(
+    caseParts("rust/u64/random/65536/s1/argsort/api").input,
+    caseParts("rust/u64/random/65536/s1/api").input,
+  );
 });
 
 test("operation identities and parameter admission match the shared language fixture", () => {
@@ -93,7 +97,10 @@ test("operation identities and parameter admission match the shared language fix
     assert.equal(comparisonId({ ...input, operation }), entry.comparison);
     assert.equal(comparisonGroup({ ...input, operation }), entry.group);
     assert.deepEqual(parseComparisonId(entry.comparison), { ...input, seed: "s1", operation });
-    assert.throws(() => criterionId({ ...input, operation }, "api"), /full sorting only/);
+    const criterion = criterionId({ ...input, operation }, "api");
+    assert.equal(criterion, `rust/${entry.comparison}/api`);
+    assert.deepEqual(parseCriterionId(criterion), { ...input, seed: "s1", operation, mode: "api" });
+    assert.throws(() => parseCriterionId(`rust/${entry.comparison}/par-4`));
   }
   for (const invalid of [
     "u64/random/1000/s1/top-k/1001",

@@ -21,6 +21,8 @@ const rule = z.strictObject({
       z.enum(["insertion-max", "insertion-next", "tile-next"]),
     ]),
   ).optional(),
+  // Include rules of a sorting plan may measure an operation instead (revision suites).
+  operation: operationSchema.optional(),
 });
 const schema = z
   .strictObject({
@@ -42,13 +44,21 @@ const schema = z
         code: "custom",
         message: "schema 2 requires an explicit operation; schema 1 is sorting only",
       });
+    if (
+      [...plan.exclude, ...(plan.parallel ?? [])].some((r) => r.operation) ||
+      (plan.operation && plan.include.some((r) => r.operation))
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "rule operations belong to include rules of a sorting plan",
+      });
   });
 
 /** A product of optional axes; omitted axes match every supported value. */
 export type CaseRule = z.infer<typeof rule>;
 /** A validated experiment selection, independent of its measurement protocol. */
 export type Plan = z.infer<typeof schema>;
-export type SelectionOptions = CaseRule & {
+export type SelectionOptions = Omit<CaseRule, "operation"> & {
   algorithms?: string[];
   operation?: Operation["kind"];
   prefixLen?: number;
@@ -63,29 +73,36 @@ export type SelectionOptions = CaseRule & {
 /** Validate selections without choosing a measurement protocol or adding algorithms. */
 export function parsePlan(value: unknown): Plan {
   const plan = schema.parse(value);
-  if (plan.operation && plan.operation.kind !== "sort") {
-    // New operations use exact parameters and literal counts in this first slice.
-    // Engine-relative boundaries remain resolved by Rust for sorting plans.
-    const rules = [...plan.include, ...plan.exclude, ...(plan.parallel ?? [])];
-    if (rules.some((r) => r.lengths?.some((n) => typeof n !== "number")))
-      throw new Error("Non-sort plans require literal record counts");
-    for (const rule of plan.include.concat(plan.parallel ?? [])) {
-      for (const len of rule.lengths ?? catalog.inputs.lengths) {
-        const includedTypes = rule.types ?? catalog.types.map((t) => t.id);
-        const includedShapes = rule.distributions ?? catalog.distributions.map((d) => d.id);
-        const survives = includedTypes.some((ty) =>
-          includedShapes.some(
-            (distribution) =>
-              !plan.exclude.some(
-                (r) =>
-                  (!r.types || r.types.includes(ty)) &&
-                  (!r.distributions || r.distributions.includes(distribution)) &&
-                  (!r.lengths || r.lengths.includes(len)),
-              ),
-          ),
-        );
-        if (survives) validateOperation(plan.operation, len as number);
-      }
+  // New operations use exact parameters and literal counts in this first slice.
+  // Engine-relative boundaries remain resolved by Rust for sorting plans.
+  const effective = (rule: CaseRule) => rule.operation ?? plan.operation;
+  const isOperation = (rule: CaseRule) => {
+    const operation = effective(rule);
+    return operation !== undefined && operation.kind !== "sort";
+  };
+  const checked =
+    plan.operation && plan.operation.kind !== "sort"
+      ? [...plan.include, ...plan.exclude, ...(plan.parallel ?? [])]
+      : plan.include.filter(isOperation);
+  if (checked.some((r) => r.lengths?.some((n) => typeof n !== "number")))
+    throw new Error("Non-sort plans require literal record counts");
+  for (const rule of [...plan.include, ...(plan.parallel ?? [])].filter(isOperation)) {
+    const operation = effective(rule)!;
+    for (const len of rule.lengths ?? catalog.inputs.lengths) {
+      const includedTypes = rule.types ?? catalog.types.map((t) => t.id);
+      const includedShapes = rule.distributions ?? catalog.distributions.map((d) => d.id);
+      const survives = includedTypes.some((ty) =>
+        includedShapes.some(
+          (distribution) =>
+            !plan.exclude.some(
+              (r) =>
+                (!r.types || r.types.includes(ty)) &&
+                (!r.distributions || r.distributions.includes(distribution)) &&
+                (!r.lengths || r.lengths.includes(len)),
+            ),
+        ),
+      );
+      if (survives) validateOperation(operation, len as number);
     }
   }
   return plan;
@@ -126,16 +143,19 @@ export async function loadPlan(name: string, options: SelectionOptions = {}): Pr
     if (!kind) throw new Error("Operation parameters require --operation");
     const previous = plan.operation?.kind === kind ? plan.operation : { kind };
     const requested = operationSchema.parse({ ...previous, ...parameters });
+    // The requested operation is the plan's only one, replacing any include-rule operations.
     const { operation: _previous, ...rest } = plan;
+    const include = plan.include.filter((rule) => !rule.operation);
+    if (!include.length) throw new Error("The plan has no inputs outside its operation rules");
     selected =
       requested.kind === "sort"
-        ? { ...rest, schema: 1 }
-        : { ...rest, schema: 2, operation: requested };
+        ? { ...rest, schema: 1, include }
+        : { ...rest, schema: 2, operation: requested, include };
   }
   return parsePlan({
     ...selected,
     algorithms: algorithms ?? plan.algorithms,
-    include: plan.include.map((entry) => ({ ...entry, ...axes })),
+    include: selected.include.map((entry) => ({ ...entry, ...axes })),
     ...(plan.parallel ? { parallel: plan.parallel.map((entry) => ({ ...entry, ...axes })) } : {}),
   });
 }

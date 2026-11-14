@@ -29,6 +29,7 @@ import {
   validateLayoutBuilds,
 } from "./layout.ts";
 import {
+  isOperation,
   type LocalRun,
   type PreparedPair,
   type RevisionPair,
@@ -432,7 +433,7 @@ export async function compareLocal(options: LocalOptions) {
         root,
         workspace,
         baseline,
-        parallel ? ["rayon"] : [],
+        [...(parallel ? ["rayon"] : []), ...(isOperation(options.plan) ? ["operations"] : [])],
         seed === undefined ? undefined : { baselineSeed: seed, currentSeed: seed, out },
         options.layoutControl,
       );

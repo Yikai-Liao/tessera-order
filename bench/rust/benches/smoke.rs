@@ -8,10 +8,7 @@ use std::hint::black_box;
 use std::{collections::BTreeMap, time::Duration};
 use tessera_bench::{
     CaseInput, Kernel, list_variants,
-    plan::{
-        InputCase, Plan, criterion_batch_iterations, criterion_group, criterion_id,
-        revision_sampling,
-    },
+    plan::{InputCase, Plan, criterion_batch_iterations, criterion_id, revision_sampling},
 };
 
 /// All protocols consume the same restorable kernel; only their scheduling differs.
@@ -26,7 +23,7 @@ fn measure(criterion: &mut Criterion, case: &InputCase, mode: &str, kernel: &mut
     kernel.restore(1);
     kernel.run_batch();
     kernel.check().expect("verified output");
-    let group_id = criterion_group!("{}", case.ty; &case.distribution, case.len);
+    let group_id = case.criterion_group();
     let id = criterion_id!(&group_id, mode);
     #[cfg(feature = "layout-study")]
     if let Ok(count) = std::env::var("TESSERA_BENCH_FIXED_SORTS") {
@@ -90,10 +87,6 @@ fn main() {
         |path| std::fs::read_to_string(path).expect("read benchmark plan"),
     );
     let plan = Plan::parse(&text).expect("valid benchmark plan");
-    assert!(
-        plan.operation().is_sort(),
-        "Criterion/tracking currently supports full sorting only; use tools compare algorithms for internal refinement"
-    );
     let available = list_variants();
     assert!(
         plan.algorithms().iter().all(|id| available
@@ -129,14 +122,8 @@ fn main() {
             cases = plan.inputs().unwrap();
         }
         for case in cases {
-            let id = criterion_id!(
-                criterion_group!("{}", case.ty; &case.distribution, case.len),
-                &mode
-            );
-            if variant.supports(&CaseInput::new(&InputCase {
-                len: 32,
-                ..case.clone()
-            })) {
+            let id = criterion_id!(case.criterion_group(), &mode);
+            if variant.supports(&CaseInput::new(&case.probe())) {
                 supported.push((variant, case, mode.clone(), id));
             }
         }

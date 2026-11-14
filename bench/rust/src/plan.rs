@@ -142,6 +142,10 @@ struct Rule {
     distributions: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     lengths: Option<Vec<Length>>,
+    /// An operation for this include rule's cases in a sorting plan, so one
+    /// revision suite measures sorting and selected operations together.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operation: Option<Operation>,
 }
 impl Rule {
     /// Matches all specified axes, resolving code-relative counts for this type.
@@ -195,6 +199,10 @@ impl InputCase {
             self.operation.suffix()
         )
     }
+    /// Names the Criterion group of this case; timed IDs append the API mode.
+    pub fn criterion_group(&self) -> String {
+        format!("rust/{}", self.id())
+    }
     /// Bytes of the input records, excluding owned payloads.
     pub fn input_bytes(&self) -> usize {
         self.len * record_bytes(&self.ty)
@@ -210,7 +218,7 @@ impl InputCase {
     }
 
     /// Small valid input for typed capability checks, never for measurement.
-    pub(crate) fn probe(&self) -> Self {
+    pub fn probe(&self) -> Self {
         Self {
             len: 32,
             distribution: "random".into(),
@@ -303,22 +311,38 @@ impl Plan {
                 return Err("length selectors must be unique, nonempty and positive".into());
             }
         }
+        if plan
+            .exclude
+            .iter()
+            .chain(&plan.parallel)
+            .any(|r| r.operation.is_some())
+            || (plan.operation.is_some() && plan.include.iter().any(|r| r.operation.is_some()))
+        {
+            return Err("rule operations belong to include rules of a sorting plan".into());
+        }
+        let literal = |r: &Rule| {
+            r.lengths
+                .as_ref()
+                .is_none_or(|values| values.iter().all(|n| !matches!(n, Length::Boundary(_))))
+        };
+        let operation_rules = |r: &&Rule| r.operation.as_ref().is_some_and(|o| !o.is_sort());
         if !plan.operation().is_sort() {
-            if plan
+            if !plan
                 .include
                 .iter()
                 .chain(&plan.exclude)
                 .chain(&plan.parallel)
-                .any(|r| {
-                    r.lengths.as_ref().is_some_and(|values| {
-                        values.iter().any(|n| matches!(n, Length::Boundary(_)))
-                    })
-                })
+                .all(literal)
             {
                 return Err("non-sort plans require literal record counts".into());
             }
             plan.inputs()?;
             plan.parallel_inputs()?;
+        } else if plan.include.iter().any(|r| operation_rules(&r)) {
+            if !plan.include.iter().filter(operation_rules).all(literal) {
+                return Err("non-sort plans require literal record counts".into());
+            }
+            plan.inputs()?;
         }
         Ok(plan)
     }
@@ -326,6 +350,13 @@ impl Plan {
     /// Returns the requested result contract; old plans remain full sorting.
     pub fn operation(&self) -> Operation {
         self.operation.clone().unwrap_or_default()
+    }
+
+    /// Whether include rules add operations to a sorting plan. Revision
+    /// suites measure those per case; algorithm comparisons take one
+    /// plan-level operation.
+    pub fn has_rule_operations(&self) -> bool {
+        self.include.iter().any(|rule| rule.operation.is_some())
     }
 
     /// Returns exactly the algorithms selected in this plan.
@@ -392,7 +423,8 @@ impl Plan {
                             .iter()
                             .any(|rule| rule.matches(ty, distribution, len))
                         {
-                            let operation = self.operation();
+                            let operation =
+                                rule.operation.clone().unwrap_or_else(|| self.operation());
                             operation.validate(len)?;
                             cases.insert(InputCase {
                                 ty: ty.clone(),
@@ -412,32 +444,6 @@ impl Plan {
     }
 }
 
-/// Formats a seed-one Criterion group from a typed representation's format.
-///
-/// The representation format stays literal, so row prefixes and constant names
-/// use one allocation, without intermediate strings or formatting calls.
-/// Identity validation belongs to the plan, not this formatter.
-///
-/// ```
-/// assert_eq!(tessera_bench::plan::criterion_group!("{}", "u64"; "random", 1000),
-///            "rust/u64/random/1000/s1");
-/// assert_eq!(tessera_bench::plan::criterion_group!("row_{}", "u64"; "random", 1000),
-///            "rust/row_u64/random/1000/s1");
-/// assert_eq!(tessera_bench::plan::criterion_group!("rec128_u64"; "random", 1000),
-///            "rust/rec128_u64/random/1000/s1");
-/// ```
-#[macro_export]
-macro_rules! criterion_group {
-    ($ty:literal $(, $argument:expr)*; $distribution:expr, $len:expr) => {
-        ::std::format!(
-            ::std::concat!("rust/", $ty, "/{distribution}/{len}/s1"),
-            $($argument,)*
-            distribution = $distribution,
-            len = $len,
-        )
-    };
-}
-
 /// Joins a Criterion group and API mode for exact timed-ID selection.
 ///
 /// This matches Criterion's identity without parsing or validating its fields.
@@ -454,7 +460,7 @@ macro_rules! criterion_id {
 }
 
 /// Criterion formatters share this owner with comparison input identities.
-pub use crate::{criterion_group, criterion_id};
+pub use crate::criterion_id;
 
 #[cfg(test)]
 mod tests {
@@ -490,7 +496,7 @@ mod tests {
                 len: entry["length"].as_u64().unwrap() as usize,
                 operation: Operation::Sort {},
             };
-            let group = criterion_group!("{}", &case.ty; &case.distribution, case.len);
+            let group = case.criterion_group();
             assert_eq!(group, entry["criterion_group"].as_str().unwrap());
             assert_eq!(
                 criterion_id!(&group, entry["mode"].as_str().unwrap()),
@@ -525,7 +531,7 @@ mod tests {
     #[test]
     fn presets_preserve_coverage() {
         for (text, expected) in [
-            (include_str!("../../plans/continuous.toml"), 62),
+            (include_str!("../../plans/continuous.toml"), 80),
             (include_str!("../../plans/smoke.toml"), 125),
             (include_str!("../../plans/release.toml"), 381),
             (include_str!("../../plans/parallel.toml"), 16),
@@ -681,6 +687,38 @@ mod tests {
         ] {
             require(&parallel, ty, distribution, 1_000_000);
         }
+    }
+
+    #[test]
+    fn include_rules_carry_revision_operations() {
+        let rule = r#"{"types":["u64"],"distributions":["random"],"lengths":[1000]}"#;
+        let top = r#"{"types":["u64"],"distributions":["random"],"lengths":[1000],
+            "operation":{"kind":"top-k","k":10}}"#;
+        let plan = Plan::parse(&format!(
+            r#"{{"schema":1,"algorithms":["tessera"],"include":[{rule},{top}]}}"#
+        ))
+        .unwrap();
+        assert!(plan.has_rule_operations());
+        let ids: Vec<_> = plan.inputs().unwrap().iter().map(InputCase::id).collect();
+        assert_eq!(ids, ["u64/random/1000/s1", "u64/random/1000/s1/top-k/10"]);
+        for invalid in [
+            format!(
+                r#"{{"schema":1,"algorithms":["tessera"],"include":[{rule}],"exclude":[{top}]}}"#
+            ),
+            format!(
+                r#"{{"schema":1,"algorithms":["tessera"],"include":[{rule}],"parallel":[{top}]}}"#
+            ),
+            format!(
+                r#"{{"schema":2,"algorithms":["tessera"],"operation":{{"kind":"argsort"}},"include":[{top}]}}"#
+            ),
+        ] {
+            assert!(Plan::parse(&invalid).is_err(), "{invalid}");
+        }
+        let short = top.replace("1000", "5");
+        let plan = Plan::parse(&format!(
+            r#"{{"schema":1,"algorithms":["tessera"],"include":[{short}]}}"#
+        ));
+        assert!(plan.is_err() || plan.unwrap().inputs().is_err());
     }
 
     #[test]

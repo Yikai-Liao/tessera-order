@@ -86,6 +86,8 @@ The chart uses d for 64-bit targets. At small n the 1,024-byte floor decides b a
 | scatters every digit | the engine has already removed [constant bits](keys.md#varying-bits) |
 | no unwinding | on a key-function panic, scatter appends the unread suffix to bucket 0 without calling the key function again, the ledger completes every band, and the panic resumes ([ownership and panics](safety.md)) |
 
+The paper's future work (Section 7) reports that an MSD use of the scheme runs into partial blocks: each recursion level consumes one partial block but can produce up to R new ones, so the overhead grows. It proposes compacting the partial blocks into dense ones after each level. Tessera instead completes every partition before its buckets go further: the ledger copies each bucket into a contiguous band of the input, so no partial block outlives its pass.
+
 ## Invariants
 
 Debug builds check the first two in `Partition::validate` after scatter; the model checks every frame.

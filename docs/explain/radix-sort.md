@@ -26,7 +26,7 @@ A key has several digits. A 32-bit key read 8 bits at a time has four.
 
 **MSD (most significant digit first)** splits on the highest digit first, then sorts each bucket on its own by the next digit, recursively. It can stop early: a bucket with one record, or a bucket that fits a cheap insertion sort, needs no more digits. The textbook in-place version, **American flag sort**, permutes records inside the array with swap cycles. It needs only a counter per bucket. A swap moves a record past others that have not been examined yet, so equal keys can change order: **in-place MSD is not stable**. A stable MSD sort scatters into a buffer instead, which costs an n-record buffer again.
 
-**Block LSD**, by Clausecker and Schintke, is an LSD sort without the n-record buffer. Each pass fills buckets block by block and reuses input blocks it has finished reading as output blocks. A small table records the logical order of the blocks. The extra memory is O(√n), and the records are written back into the input once, at the end. Tessera's [block partition](block-partition.md) adapts this scheme to one digit at a time, linking each bucket's blocks into a chain instead of a table.
+**Block LSD**, by Clausecker and Schintke (called Radsort in [their paper](https://arxiv.org/abs/2607.05302); these pages name it after its technique, to keep it apart from the unrelated Rust crate `radsort` in the [algorithm comparison](../benchmarks/algorithms.md)), is an LSD sort without the n-record buffer. Each pass fills buckets block by block and reuses input blocks it has finished reading as output blocks. A small table records the logical order of the blocks. The extra memory is O(√n), and the records are written back into the input once, at the end. Tessera's [block partition](block-partition.md) runs this scheme one digit at a time, linking each bucket's blocks into a chain instead of a table. The paper's future work already considers such an MSD use and names its obstacle, partial blocks that pile up across recursion levels; the block partition page explains [how Tessera avoids it](block-partition.md#what-the-port-adds-to-the-c-reference).
 
 ## Side by side
 
@@ -51,7 +51,7 @@ What the figure shows:
 | Adapts to data | no | stops on small buckets | stops on small buckets | no | probes root and child order, drops constant bits, partitions repeated keys, picks a leaf per tile |
 | Cache behaviour on large n | each pass streams through n records twice | good once buckets are small | random swaps over the whole array | each pass streams through n records | one streaming split, then cache-resident tiles |
 
-Tessera takes **stability and O(√n) memory** from Block LSD, the **top-digit-first split** and early stop from MSD, and uses **LSD counting passes** only inside tiles, where the second buffer is one tile.
+Tessera takes **stability and O(√n) memory** from Block LSD, the **top-digit-first split** and early stop from MSD, and uses **LSD counting passes** only inside tiles, where the second buffer is one tile. The combination is the one Clausecker and Schintke suggest for parallel sorting (Section 4.3 of the paper): an initial pass on the most significant digit splits the input into buckets, and each bucket's remaining digits are then sorted least significant first, in a working set that fits in cache.
 
 ## How much memory O(√n) is
 

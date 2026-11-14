@@ -33,7 +33,7 @@ fn check_keys<K: RadixKey>(keys: &[K]) {
     let mut workspace = Workspace::new();
     let mut check = |intervals: &[Range<usize>]| {
         let mut records: Vec<_> = keys.iter().copied().zip(0..len).collect();
-        refine(
+        refine_with_tile_bytes(
             &mut records,
             ByKey(|record: &(K, usize)| record.0),
             Requirement::new(len, intervals),
@@ -132,7 +132,6 @@ fn empty_requirement_does_not_evaluate_keys() {
         ByKey(|_: &u64| -> u64 { panic!("empty request evaluated a key") }),
         Requirement::new(3, &[]),
         None,
-        128,
     );
     assert_eq!(records, [3, 1, 2]);
 }
@@ -356,7 +355,7 @@ fn partial_child_failure_restores_records_and_releases_workspace() {
                 .collect();
             expected.sort_by_key(|record| record.0);
             let all = 0..len;
-            refine(
+            refine_with_tile_bytes(
                 &mut records,
                 ByKey(|record: &Owned| record.key),
                 Requirement::new(len, core::slice::from_ref(&all)),

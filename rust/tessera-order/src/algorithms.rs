@@ -8,7 +8,6 @@ use crate::{
     engine,
     key::{ByKey, Direct, Extract, RadixKey},
     rank::{self, Requirement},
-    thresholds::TILE_BYTES,
     workspace::Workspace,
 };
 use alloc::vec::Vec;
@@ -300,7 +299,7 @@ fn refine_range<T, E: Extract<T>>(values: &mut [T], ranks: Range<usize>, extract
         core::slice::from_ref(&ranks)
     };
     let required = Requirement::new(values.len(), ranges);
-    engine::refine(values, extractor, required, None, TILE_BYTES);
+    engine::refine(values, extractor, required, None);
 }
 
 fn top_k<T, E: Extract<T>>(values: &mut [T], k: usize, extractor: E) -> (&mut [T], &mut [T]) {
@@ -328,7 +327,7 @@ fn select_nth<T, E: Extract<T>>(
 fn select_many<T, E: Extract<T>>(values: &mut [T], indices: &[usize], extractor: E) {
     let ranges = rank::normalize_indices(values.len(), indices);
     let required = Requirement::new(values.len(), &ranges);
-    engine::refine(values, extractor, required, None, TILE_BYTES);
+    engine::refine(values, extractor, required, None);
 }
 
 fn segments<T, E: Extract<T>>(values: &mut [T], offsets: &[usize], mut extractor: E) {
@@ -343,12 +342,6 @@ fn segments<T, E: Extract<T>>(values: &mut [T], offsets: &[usize], mut extractor
         let segment = &mut values[ends[0]..ends[1]];
         let ranks = 0..segment.len();
         let required = Requirement::new(segment.len(), core::slice::from_ref(&ranks));
-        engine::refine(
-            segment,
-            &mut extractor,
-            required,
-            Some(&mut workspace),
-            TILE_BYTES,
-        );
+        engine::refine(segment, &mut extractor, required, Some(&mut workspace));
     }
 }

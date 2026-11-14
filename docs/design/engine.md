@@ -23,7 +23,7 @@ Full-sort and rank entries share node decisions, rank projection, workspace and 
 |---|---|---|
 | `algorithms.rs` | Complete serial argsort, segmented sorting, Top-k, prefix and selection calls; validate public arguments and shape outputs | Shared rank requirements and complete refinement, not movement state or planner details |
 | `partition.rs` | Complete stable binary and finite-category distribution, including validation, storage lifetime and boundary output | Complete tile or block distribution, not order analysis or rank refinement |
-| `engine.rs` | Root preparation, candidate-bit progress and ordered refinement. Serial and parallel entries preserve actual variation and narrow a 128-bit key through one `KeyHalf` (`key.rs`) | Required rank views and complete partition and finishing operations |
+| `engine.rs` | Root preparation, default tile budget, candidate-bit progress and ordered refinement. Serial and parallel entries preserve actual variation and narrow a 128-bit key through one `KeyHalf` (`key.rs`) | Required rank views and complete partition and finishing operations |
 | `rank.rs` | Validate normalized required intervals once and project immutable borrowed views into final bands | Parent-relative final ranges, not keys, classifications or callback order |
 | `workspace.rs` | Invocation-owned reusable tile and block capacity, lent through complete operations | Capacity is reusable after restoration; no live movement state survives an operation |
 | `order.rs` | Scalar order and candidate-masked variation scans, stable insertion loops, independent of recursive execution | Extractors supply keys; direct-key callers supply a scan in their selected SIMD context |

@@ -111,7 +111,7 @@ struct Sorter<'a, T, E> {
 pub(crate) fn sort<T, E: Extract<T>>(records: &mut [T], extractor: E) {
     let ranks = 0..records.len();
     let required = Requirement::new(records.len(), core::slice::from_ref(&ranks));
-    refine(records, extractor, required, None, TILE_BYTES);
+    refine(records, extractor, required, None);
 }
 
 /// Refines requested ranks with invocation-owned reusable capacity.
@@ -119,10 +119,21 @@ pub(crate) fn sort<T, E: Extract<T>>(records: &mut [T], extractor: E) {
 /// Root preparation and half-key narrowing are performed once here, not in
 /// algorithm adapters. Empty requirements do no key work. A borrowed workspace
 /// retains capacity for the owning invocation; otherwise fresh storage is
-/// constructed only after preparation. The internal tile budget lets ownership
-/// tests reach node routes with small inputs. Ordered and constant roots do not
-/// allocate or initialize unused movement storage.
+/// constructed only after preparation. The engine chooses its default tile
+/// budget; ordered and constant roots do not allocate or initialize unused
+/// movement storage.
 pub(crate) fn refine<T, E: Extract<T>>(
+    records: &mut [T],
+    extractor: E,
+    required: Requirement<'_>,
+    workspace: Option<&mut Workspace<T>>,
+) {
+    refine_with_tile_bytes(records, extractor, required, workspace, TILE_BYTES);
+}
+
+/// Executes refinement with an explicit budget, shared by the production entry
+/// and ownership tests that need node routes with small inputs.
+fn refine_with_tile_bytes<T, E: Extract<T>>(
     records: &mut [T],
     mut extractor: E,
     required: Requirement<'_>,
@@ -180,7 +191,7 @@ pub(crate) fn refine<T, E: Extract<T>>(
 fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], extractor: E, tile_bytes: usize) {
     let ranks = 0..records.len();
     let required = Requirement::new(records.len(), core::slice::from_ref(&ranks));
-    refine(records, extractor, required, None, tile_bytes);
+    refine_with_tile_bytes(records, extractor, required, None, tile_bytes);
 }
 
 /// Finishes ordered or small roots, otherwise returns their varying bits.

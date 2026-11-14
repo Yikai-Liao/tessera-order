@@ -210,21 +210,34 @@ pub(super) fn categories<T: BenchmarkRecord>(
             // as in the public partition. Peak minus output then measures
             // workspace rather than subtracting a later, disjoint allocation.
             let mut output = Boundaries::new(&operation);
-            match name {
-                "tessera-full" => {
-                    tessera_order::stable_sort_by_key(values, |r| r.category(bucket_count));
-                }
-                "std-stable" => values.sort_by_key(|r| r.category(bucket_count)),
-                "glidesort" => glidesort::sort_by(values, |a, b| {
-                    a.category(bucket_count).cmp(&b.category(bucket_count))
-                }),
-                "radsort" => radsort::sort_by_key(values, |r| r.category(bucket_count)),
-                _ => unreachable!(),
+            if matches!(operation, Operation::Partition {}) {
+                // The predicate entry also supplies a literal two. Keep the
+                // same classifier specialization rather than charging only
+                // sorting references for a runtime category-count division.
+                sort_by_category(name, values, |r| r.category(2));
+            } else {
+                sort_by_category(name, values, |r| r.category(bucket_count));
             }
             output.count(values);
             output
         },
     }))
+}
+
+/// Sorts by the supplied category, sharing its literal or runtime fan-out
+/// specialization across all sorting references.
+fn sort_by_category<T: BenchmarkRecord>(
+    name: &str,
+    values: &mut [T],
+    category: impl Fn(&T) -> usize,
+) {
+    match name {
+        "tessera-full" => tessera_order::stable_sort_by_key(values, category),
+        "std-stable" => values.sort_by_key(category),
+        "glidesort" => glidesort::sort_by(values, |a, b| category(a).cmp(&category(b))),
+        "radsort" => radsort::sort_by_key(values, category),
+        _ => unreachable!(),
+    }
 }
 
 /// Gives a complete stable sorter the requested operation's complete contract.

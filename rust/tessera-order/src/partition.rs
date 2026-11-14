@@ -6,25 +6,34 @@
 
 use crate::{
     block,
-    key::{ByKey, KeyDigit},
+    key::{ByKey, Extract, KeyDigit},
     thresholds::TILE_BYTES,
     tile,
 };
 use alloc::{vec, vec::Vec};
 
+/// Widest category ID one stable distribution assigns, limited by block
+/// fan-out and tile cursor tables. Keys this narrow sort in one distribution.
+pub(crate) const MAX_DISTRIBUTION_BITS: usize = {
+    let tile_bits = tile::MAX_DIGIT_BUCKETS.ilog2() as usize;
+    if block::MAX_RADIX_BITS < tile_bits {
+        block::MAX_RADIX_BITS
+    } else {
+        tile_bits
+    }
+};
+
 /// Largest category count accepted by [`stable_partition_by_bucket`].
 ///
-/// Derived from block fan-out, tile table capacity and category-ID storage.
-/// Counts need not be powers of two; padding adds no public categories.
+/// Derived from the widest distribution and category-ID storage. Counts need
+/// not be powers of two; padding adds no public categories.
 pub const MAX_PARTITION_BUCKETS: usize = {
-    let mut limit = 1usize << u16::BITS;
-    if 1usize << block::MAX_RADIX_BITS < limit {
-        limit = 1usize << block::MAX_RADIX_BITS;
+    let limit = 1usize << MAX_DISTRIBUTION_BITS;
+    if limit < 1 << u16::BITS {
+        limit
+    } else {
+        1 << u16::BITS
     }
-    if tile::MAX_DIGIT_BUCKETS < limit {
-        limit = tile::MAX_DIGIT_BUCKETS;
-    }
-    limit
 };
 
 /// Stably places matching records before nonmatching records.
@@ -110,8 +119,27 @@ pub fn stable_partition_by_bucket<T, F: FnMut(&T) -> usize>(
         return offsets;
     }
     let radix = bucket_count.next_power_of_two().trailing_zeros() as usize;
-    let mut extractor = ByKey(category);
-    let ends = if values.len() <= tile::capacity::<T>(TILE_BYTES) {
+    let ends = distribute(values, radix, ByKey(category));
+    // Validation ran before masking, so padded buckets are empty. Both complete
+    // movement operations return cumulative ends, including empty categories.
+    offsets[1..].copy_from_slice(&ends[..bucket_count]);
+    offsets
+}
+
+/// Stably moves at least two sized records into the `2^radix` categories that
+/// `extractor` assigns, evaluating it exactly once per record, in input order.
+///
+/// Returns the cumulative end of every category, including empty ones. Keys
+/// must be below `2^radix`. An extractor panic propagates after every record
+/// is restored to `values`, in unspecified order.
+pub(crate) fn distribute<T, E: Extract<T>>(
+    values: &mut [T],
+    radix: usize,
+    mut extractor: E,
+) -> Vec<usize> {
+    debug_assert!(values.len() >= 2 && size_of::<T>() != 0);
+    debug_assert!((1..=MAX_DISTRIBUTION_BITS).contains(&radix));
+    if values.len() <= tile::capacity::<T>(TILE_BYTES) {
         tile::Scratch::new().distribute(values, radix, &mut extractor)
     } else {
         block::partition(
@@ -121,9 +149,5 @@ pub fn stable_partition_by_bucket<T, F: FnMut(&T) -> usize>(
             &mut block::Buffers::new(),
             &mut |_, _, _, _| {},
         )
-    };
-    // Validation ran before masking, so padded buckets are empty. Both complete
-    // movement operations return cumulative ends, including empty categories.
-    offsets[1..].copy_from_slice(&ends[..bucket_count]);
-    offsets
+    }
 }

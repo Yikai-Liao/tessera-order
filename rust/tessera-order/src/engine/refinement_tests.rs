@@ -282,6 +282,14 @@ fn rotated_runs_project_post_rotation_coordinates() {
 
 #[test]
 fn partial_child_failure_restores_records_and_releases_workspace() {
+    check_partial_child_failure::<false>(if cfg!(miri) { 97 } else { 193 });
+    // The first band has 33 records, so the larger tile capacity lends it
+    // directly to standard small sorting while the second band is unpublished.
+    // Keep the same block-callback boundary under Miri.
+    check_partial_child_failure::<true>(97);
+}
+
+fn check_partial_child_failure<const UNSTABLE: bool>(len: usize) {
     use std::rc::Rc;
     struct Owned {
         key: u64,
@@ -296,7 +304,6 @@ fn partial_child_failure_restores_records_and_releases_workspace() {
             self.drops[self.id].set(self.drops[self.id].get() + 1);
         }
     }
-    let len = if cfg!(miri) { 97 } else { 193 };
     for tile_len in [2, len / 3 * 2] {
         for changing in [false, true] {
             let drops = Rc::new((0..len).map(|_| Cell::new(0)).collect::<Vec<_>>());
@@ -326,7 +333,7 @@ fn partial_child_failure_restores_records_and_releases_workspace() {
                     }
                     record.key
                 });
-                Sorter::<_, _> {
+                Sorter::<_, _, UNSTABLE> {
                     scratch: &mut workspace,
                     extractor: &mut extractor,
                     tile_len,
@@ -342,7 +349,9 @@ fn partial_child_failure_restores_records_and_releases_workspace() {
                 );
             });
             assert!(entered.get(), "fixture never reached child analysis");
-            assert_eq!(outcome.is_err(), !changing);
+            if !UNSTABLE || !changing {
+                assert_eq!(outcome.is_err(), !changing);
+            }
             assert!(drops.iter().all(|count| count.get() == 0));
             let mut ids: Vec<_> = records.iter().map(|record| record.id).collect();
             ids.sort_unstable();

@@ -77,7 +77,7 @@ const BLOCK_BYTES_FLOOR: usize = 1024;
 /// The balanced size minimises memory, not time: compaction reads a block at a
 /// random address, and that read does not get cheaper with a smaller block. A
 /// multiple amortises it, at a multiple of the minimum memory to match.
-const BLOCK_SCALE: usize = 4;
+const BLOCK_SCALE: usize = 2;
 
 /// Smallest block, counted in records.
 ///

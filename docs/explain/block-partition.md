@@ -64,7 +64,7 @@ $$
 b^{*} = \sqrt{\frac{d\, n}{2 R s}}, \qquad \text{memory}(b^{*}) = 2\sqrt{2 d\, R\, s\, n} = O(\sqrt{n}).
 $$
 
-With b = c·b\*, the total is (c + 1/c)/2 times the minimum. Minimum memory is not minimum time: every block costs an ownership check and a copy at a scattered address, whatever its size. `default_block_size` therefore takes **4·b\*** (rounded up), at 2.1 times the minimum memory, with two floors:
+With b = c·b\*, the total is (c + 1/c)/2 times the minimum. Minimum memory is not minimum time: every block costs an ownership check and a copy at a scattered address, whatever its size. `default_block_size` therefore takes **2·b\*** (rounded up), at 1.25 times the minimum memory, with two floors:
 
 - at least **1,024 bytes** of records per block, so one copy is worth its overhead;
 - at least **32 records** per block, because a block's bookkeeping costs the same whatever the record width.

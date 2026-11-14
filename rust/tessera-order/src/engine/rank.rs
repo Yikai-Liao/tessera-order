@@ -42,6 +42,13 @@ pub(crate) struct Requirement<'a> {
 }
 
 impl<'a> Requirement<'a> {
+    /// Whether every position in the current subproblem needs ordering.
+    /// Projection canonicalizes covered bands, so consumers need no range math.
+    #[inline]
+    pub(super) fn is_all(self) -> bool {
+        self.intervals.is_none()
+    }
+
     /// Borrows sorted, separated intervals and cuts bounded by `len`.
     /// Adjacent intervals must already be merged. Validation happens once at
     /// the root; a full interval becomes All, including the empty full input.

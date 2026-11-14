@@ -10,7 +10,7 @@
 //!
 //! The same generic code serves every key width and every backend.
 
-use crate::RadixKey;
+use super::key::RadixKey;
 use crate::engine::key::Direct;
 use fearless_simd::prelude::*;
 use fearless_simd::{Level, Simd, dispatch, u8x16, u16x8};

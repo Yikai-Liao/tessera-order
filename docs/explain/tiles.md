@@ -21,6 +21,12 @@ A complete child of a parallel root may use a larger tile: up to 1 MiB of record
 Below 48 records, the work of clearing and scanning bucket tables costs more than insertion's shifts. The threshold is `INSERTION_MAX` in `engine/thresholds.rs`.
 
 
+## Partial rank requirements
+
+Tiles consume the same borrowed requirement as nodes. A partial requirement above the insertion leaf uses a top-digit MSD pass until each requested child is either fully covered or needs no more key bits. Once the pass restores every record to its final band, `Requirement::project` decides which children need work. A cut exactly at a band boundary is finished; an unrequested band receives no child scan or insertion pass.
+
+A digit covering all remaining variation still finishes in one pass, and fully covered children retain the complete planner's short LSD plans and whole-tile insertion shortcut. Small insertion leaves and the root's existing order/insertion preparation may finish more than requested. Low-digit LSD intermediates are not global rank bands, so partial requirements cannot prune them. This shares the tile's storage and recovery operation without building another selection engine. The planner model below defaults to a complete requirement.
+
 ## Digit planning
 
 The width of a counting digit is limited by its cursor table, one `u16` per bucket. `tile_digit_bits` picks the widest table that
@@ -60,4 +66,4 @@ Tile passes are the classic [counting pass](radix-sort.md#the-counting-pass) wit
 
 Before recursing, each child is scanned for varying bits only within the parent's remaining candidate mask. Already partitioned digits cannot reappear, even if a user key function changes its answers, so each recursive level removes key bits.
 
-An MSD tile pass reads its bucket boundaries from the finished cursor table instead of recomputing them from keys. Recomputing measured 48% slower when there was about one bucket per record. If every bucket is small enough for insertion, one insertion sort over the whole tile does the same work without walking the boundaries.
+An MSD tile pass reads its bucket boundaries from the finished cursor table instead of recomputing them from keys. Recomputing measured 48% slower when there was about one bucket per record. For a complete requirement, if every bucket is small enough for insertion, one insertion sort over the whole tile does the same work without walking the boundaries.

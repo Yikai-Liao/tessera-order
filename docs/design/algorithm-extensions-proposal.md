@@ -1,6 +1,6 @@
 # Algorithm extensions proposal
 
-Status: the shared foundations and first serial one-shot operations are implemented on the experimental branch. This page owns remaining candidate interfaces and migration choices, not current API contracts. Implemented boundaries belong in the [engine reference](engine.md); the [roadmap](../../ROADMAP.md#algorithm-extension-experiment) tracks acceptance. Current guarantees belong in [semantics](../../conformance/semantics.md#serial-slice-operations). Unimplemented interfaces stay in this document, not as exported stubs or `todo!()` functions.
+Status: the shared foundations and first serial one-shot operations are implemented. This page owns remaining candidate interfaces and migration choices, not current API contracts. Implemented boundaries belong in the [engine reference](engine.md); the [roadmap](../../ROADMAP.md#algorithm-extension-experiment) tracks acceptance. Current guarantees belong in [semantics](../../conformance/semantics.md#serial-slice-operations). Unimplemented interfaces stay in this document, not as exported stubs or `todo!()` functions.
 
 ## Scope and direction
 
@@ -22,7 +22,7 @@ Incremental completion remains a proposed borrowing object, not a record-removin
 
 ## Release surface alignment
 
-Status: accepted by the operator and implemented on the experimental branch for 0.2. Contracts now belong to [semantics](../../conformance/semantics.md#serial-slice-operations). This section keeps the rules and decisions that later additions follow, such as a future `_unstable` variant.
+Status: accepted by the operator and implemented for 0.2. Contracts now belong to [semantics](../../conformance/semantics.md#serial-slice-operations). This section keeps the rules and decisions that later additions follow, such as a future `_unstable` variant.
 
 ### Rules
 
@@ -209,6 +209,6 @@ Measure structural stages against their immediate baseline with the maintained [
 
 New-operation measurements must verify equivalent outputs and include prefix/rank density, duplicates at boundaries, record width, extractor cost and peak allocation as appropriate. An unstable selection is not an equivalent stable-member baseline without tie handling. Use complete stable sorting as a semantic reference; report cheaper non-equivalent baselines explicitly.
 
-Do not assume the current benchmark CLI measures unimplemented operations. Add only bounded support to the maintained pipeline when a stage needs it; keep verification, provenance, allocation accounting and reporting shared. A larger benchmark redesign needs a separate scope decision. Raw measurements, commands and experiment chronology stay outside Git. Functional implementation may be retained on the experimental branch with explicitly pending performance acceptance, but it supplies no performance claim.
+Do not assume the current benchmark CLI measures unimplemented operations. Add only bounded support to the maintained pipeline when a stage needs it; keep verification, provenance, allocation accounting and reporting shared. A larger benchmark redesign needs a separate scope decision. Raw measurements, commands and experiment chronology stay outside Git. Functional implementation may be retained with explicitly pending performance acceptance, but it supplies no performance claim.
 
 The proposal itself has no runtime or performance evidence. Upon implementation, public guarantees move to [semantics](../../conformance/semantics.md), boundaries and recovery to the [engine reference](engine.md), routing to the [explanation](../explain/routing.md), and rejected constructions or accepted losses to [engine evidence](evidence.md).

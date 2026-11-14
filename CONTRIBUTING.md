@@ -1,6 +1,6 @@
 # Contributing to Tessera
 
-Tessera is pre-release. Bug reports, real-workload experience and measurements on other machines are especially useful. Follow the [code of conduct](CODE_OF_CONDUCT.md); agree the scope of larger changes with the maintainer in an issue or development request.
+Tessera is at 0.x. Bug reports, real-workload experience and measurements on other machines are especially useful. Follow the [code of conduct](CODE_OF_CONDUCT.md); agree the scope of larger changes with the maintainer in an issue or development request.
 
 ## Development
 
@@ -80,7 +80,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/): `typ
 | `build` | Toolchain, dependencies or configuration |
 | `chore`, `revert` | Other maintenance or a revert |
 
-Scope is optional: `engine`, `block`, `key`, `simd`, `site`, `bench`, `fuzz` or `deps`; new language packages add their name. Use one type per PR. The imperative English title starts lowercase unless it starts with a name, has no final period, and is at most 64 characters. Breaking changes add `!` and a `BREAKING CHANGE:` paragraph describing migration. Type/scope changes update both these rules and [the checker](.github/scripts/check_pr_title.ts).
+Scope is optional: one lowercase word naming the area, such as `engine`, `block`, `key`, `simd`, `site`, `bench`, `fuzz`, `deps` or a language package. CI checks only its form, since nothing consumes scopes. Use one type per PR. The imperative English title starts lowercase unless it starts with a name, has no final period, and is at most 64 characters. Breaking changes add `!` and a `BREAKING CHANGE:` paragraph describing migration. Type changes update both these rules and [the checker](.github/scripts/check_pr_title.ts).
 
 Branches need not be up to date with `main`; rebase only for conflicts. Describe user-visible changes in the PR: [release notes](RELEASING.md#release-checklist) are written from merged PRs, without a shared changelog.
 

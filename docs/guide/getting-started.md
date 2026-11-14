@@ -2,8 +2,8 @@
 
 Tessera sorts slices by a primitive key: an integer up to 128 bits, an `f32` or `f64`, or `Reverse` of one of these. It is stable, runs in linear time for a fixed key width, and moves records of any type.
 
-> [!IMPORTANT]
-> Tessera is in pre-release, and nothing is on crates.io yet. The examples use the implemented 0.1 API. See the [roadmap](../../ROADMAP.md).
+> [!NOTE]
+> Full-sort examples use the published 0.1 API. [Top-k, selection](#top-k-and-selected-ranks), [argsort and segmented sorting](#index-output-and-independent-segments) are unreleased and require a development checkout. 0.x minor releases may still change the API; see the [roadmap](../../ROADMAP.md).
 
 ## Install
 
@@ -44,7 +44,7 @@ let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
 assert_eq!(names, ["a", "c", "d"]);
 ```
 
-The key function may be called several times per record, in any order. It should return the same key for a record throughout one call. If it does not, the order is unspecified, but every record is still in the slice exactly once.
+The key function may be called several times per record, in any order. It should return the same key for a record throughout one call. If it does not, the operation may panic or return with unspecified ordering, but every record is still in the slice exactly once.
 
 ## Descending order
 
@@ -78,6 +78,15 @@ assert!(values[4].is_nan());
 [Keys as unsigned integers](../explain/keys.md) shows how each key type is encoded.
 
 ## Top-k and selected ranks
+
+**Unreleased:** these operations and the argsort/segment operations below are not in the published 0.1 package. Use a local checkout containing the additions instead of the crates.io dependency:
+
+```toml
+[dependencies]
+tessera-order = { path = "../tessera-order/rust/tessera-order" }
+```
+
+Adjust the path to your checkout. These are ordinary serial functions, without an experimental feature flag.
 
 Use `stable_top_k_by_key` for an unordered minimum-k set. Its boundary uses stable membership, even though the two regions need not be sorted:
 

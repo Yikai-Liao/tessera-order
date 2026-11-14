@@ -2,7 +2,8 @@
 <script setup lang="ts">
 import { withBase } from "vitepress";
 import { computed, onMounted, shallowRef, useId } from "vue";
-import { renderRows } from "../../../../bench/plot/rows.ts";
+import { type CurveChart, renderCurves } from "../../../../bench/plot/curves.ts";
+import { type RowChart, renderRows } from "../../../../bench/plot/rows.ts";
 import { type ComparisonData, comparisonSchema } from "../../../../bench/tracking/result.ts";
 
 // `overview` shows the headline ranking with a link to the full page; `all` shows every figure.
@@ -47,7 +48,12 @@ const figures = computed(() => {
     : [];
   return list.map((figure) => ({
     name: figure.name,
-    svg: renderRows({ ...figure.chart, id: `${id}-${figure.name}` }),
+    subject: figure.subject,
+    summary: figure.summary,
+    svg:
+      figure.kind === "curves"
+        ? renderCurves({ ...(figure.chart as CurveChart), id: `${id}-${figure.name}` })
+        : renderRows({ ...(figure.chart as RowChart), id: `${id}-${figure.name}` }),
     table: cells(figure.table),
   }));
 });
@@ -73,7 +79,7 @@ const tessera = computed(() => {
     link: `https://github.com/Yikai-Liao/tessera-order/commit/${run.hash}`,
   };
 });
-const summary = computed(() => {
+const provenance = computed(() => {
   const days = (data.value?.runs ?? []).map((run) => run.time.slice(0, 10)).toSorted();
   const span = days[0] === days.at(-1) ? days[0] : `${days[0]} to ${days.at(-1)}`;
   return `Latest run of each sort on Bencher Intel v1 bare metal, ${span}${tessera.value ? "; Tessera at" : ""}`;
@@ -89,11 +95,23 @@ const unmeasured = computed(() =>
     <p v-else-if="!data" class="notice" role="status">Loading the latest measurements…</p>
     <p v-else-if="!figures.length" class="notice">No cross-algorithm figure is published yet.</p>
     <template v-else>
-      <figure v-for="figure in figures" :key="figure.name" class="figure">
+      <p v-if="view === 'all'" class="provenance">
+        {{ provenance }}
+        <a v-if="tessera" :href="tessera.link">{{ tessera.short }}</a
+        >.<template v-if="unmeasured.length">
+          Memory not yet recorded for {{ unmeasured.join(", ") }}.</template
+        >
+      </p>
+      <section v-for="figure in figures" :key="figure.name" class="figure">
+        <!-- The full page sections each figure under the subject it compares. -->
+        <h2 v-if="view === 'all' && figure.subject" :id="figure.name" class="subject">
+          {{ figure.subject }}
+        </h2>
+        <p v-if="figure.summary" class="lead">{{ figure.summary }}</p>
         <!-- The shared renderer escapes labels through DOM text nodes. -->
         <div v-html="figure.svg" />
         <details v-if="figure.table.body.length" class="data">
-          <summary>Data</summary>
+          <summary>Values as a table</summary>
           <table>
             <thead>
               <tr>
@@ -107,9 +125,9 @@ const unmeasured = computed(() =>
             </tbody>
           </table>
         </details>
-      </figure>
-      <p class="provenance">
-        {{ summary }}
+      </section>
+      <p v-if="view === 'overview'" class="provenance">
+        {{ provenance }}
         <a v-if="tessera" :href="tessera.link">{{ tessera.short }}</a
         >.<template v-if="unmeasured.length">
           Memory not yet recorded for {{ unmeasured.join(", ") }}.</template
@@ -128,7 +146,20 @@ const unmeasured = computed(() =>
   margin: 24px 0;
 }
 .figure {
-  margin: 0 0 24px;
+  margin: 0 0 40px;
+}
+.subject {
+  margin: 48px 0 8px;
+  padding-top: 24px;
+  border-top: 1px solid var(--vp-c-divider);
+  font-size: 22px;
+  line-height: 1.3;
+  font-weight: 600;
+}
+.lead {
+  margin: 0 0 16px;
+  color: var(--vp-c-text-2);
+  line-height: 1.6;
 }
 .figure :deep(svg) {
   display: block;

@@ -1,6 +1,6 @@
 # Ordering semantics
 
-Status: implemented by the unreleased Rust crate; the planned C++ implementation follows the same rules. Cross-language golden vectors in `conformance/vectors/` are planned with the C++ runner on the [roadmap](../ROADMAP.md); until then the Rust tests generate their own inputs.
+Status: full-sort contracts are implemented by the Rust crate since 0.1; the serial slice operations below are unreleased development additions. The planned C++ implementation follows the same rules. Cross-language golden vectors in `conformance/vectors/` are planned with the C++ runner on the [roadmap](../ROADMAP.md); until then the Rust tests generate their own inputs.
 
 ## Sort contracts
 
@@ -18,7 +18,7 @@ Stability applies to every equal-key run, including one at the start of an other
 ## Key extraction
 
 - The key function may be called any number of times per record, in any order.
-- During one sort, it should return the same key for the same record. If it does not, the operation may panic or return with unspecified ordering. In either case every record is preserved and no undefined behavior occurs. Changing keys do not cause unbounded partition recursion.
+- During one sort, it should return the same key for the same record. If it does not, the sort may panic (Rust) or throw (C++), or return with the result in unspecified order, as Rust's standard sorts may for an inconsistent order. Either way the slice holds every record exactly once, no undefined behavior occurs, and changing keys do not cause unbounded partition recursion.
 - If the key function panics (Rust) or throws (C++), the error propagates to the caller. The slice then holds every record exactly once, in an unspecified order. No particular panic strategy is required of the final binary.
 
 ## Key encoding

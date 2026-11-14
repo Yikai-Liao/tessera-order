@@ -64,12 +64,14 @@ $$
 b^{*} = \sqrt{\frac{d\, n}{2 R s}}, \qquad \text{memory}(b^{*}) = 2\sqrt{2 d\, R\, s\, n} = O(\sqrt{n}).
 $$
 
-With b = c·b\*, the total is (c + 1/c)/2 times the minimum. Minimum memory is not minimum time: every block costs an ownership check and a copy at a scattered address, whatever its size. `default_block_size` therefore takes **4·b\*** (rounded up), at 2.1 times the minimum memory, with two floors:
+With b = c·b\*, the total is (c + 1/c)/2 times the minimum. Minimum memory is not minimum time: every block costs an ownership check and a copy at a scattered address, whatever its size. `default_block_size` therefore takes **2·b\*** (rounded up), at 1.25 times the minimum memory, with two floors. The multiple was 4 (2.1 times the minimum) until [#202](https://github.com/Yikai-Liao/tessera-order/pull/202) halved it to cut scratch by about 40% at a million records and more: the PR benchmark measured up to 8.8% more time for `{u64, u32}` records at 65,536 and 1,000,000, and 2–5% on most large random inputs. The cost was accepted for memory closer to the original Block LSD's.
+
+The floors:
 
 - at least **1,024 bytes** of records per block, so one copy is worth its overhead;
 - at least **32 records** per block, because a block's bookkeeping costs the same whatever the record width.
 
-Neither floor depends on n, so the bound stays O(√n). A parallel root balances the same metadata against the scratch of all shards, b\* = √(dn / (2qRs)) for q shards, with the same scale and floors.
+Neither floor depends on n, so the bound stays O(√n). The floors' scratch grows with R instead: 2R·max(1024, 32s) bytes, so a 12-bit digit reserves 8 MiB at any n. [Routing](routing.md) therefore widens a digit only over bits some key varies in. A parallel root balances the same metadata against the scratch of all shards, b\* = √(dn / (2qRs)) for q shards, with the same scale and floors.
 
 <BlockSizeChart />
 
@@ -83,6 +85,8 @@ The chart uses d for 64-bit targets. At small n the 1,024-byte floor decides b a
 | all digits, LSD | one pass per node, on the top digit or an equality classification, with a callback for each finished band |
 | scatters every digit | the engine has already removed [constant bits](keys.md#varying-bits) |
 | no unwinding | on a key-function panic, scatter appends the unread suffix to bucket 0 without calling the key function again, the ledger completes every band, and the panic resumes ([ownership and panics](safety.md)) |
+
+The paper's future work (Section 7) reports that an MSD use of the scheme runs into partial blocks: each recursion level consumes one partial block but can produce up to R new ones, so the overhead grows. It proposes compacting the partial blocks into dense ones after each level. Tessera instead completes every partition before its buckets go further: the ledger copies each bucket into a contiguous band of the input, so no partial block outlives its pass.
 
 ## Invariants
 

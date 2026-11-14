@@ -550,6 +550,11 @@ pub fn main(memory: bool) -> Result<()> {
     }
 }
 /// Measures one isolated sort allocation peak per supported case and adapter.
+/// Largest input whose opponents' memory is measured. Linear-memory opponents need
+/// as much again, so the 10M-record 32- and 128-byte release inputs are measured for
+/// Tessera only, which sizes glidesort-sqrt; 10M u64 keys and 16M 8-byte rows fit.
+const OPPONENT_MEMORY_INPUT_BYTES: usize = 128 << 20;
+
 fn measure_memory(options: &Options, cases: &[InputCase]) -> Result<()> {
     prepare_output(options)?;
     let path = options.output_dir.join("memory.jsonl");
@@ -566,8 +571,7 @@ fn measure_memory(options: &Options, cases: &[InputCase]) -> Result<()> {
         let input = record::CaseInput::new(case);
         for v in options.variants() {
             if case.operation.is_sort()
-                && case.len > 1_000_000
-                && case.ty != "u64"
+                && case.input_bytes() > OPPONENT_MEMORY_INPUT_BYTES
                 && v.name != "tessera"
                 && v.adapter != "tessera-par"
             {

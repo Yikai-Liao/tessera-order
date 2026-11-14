@@ -8,7 +8,7 @@ Extend Tessera through complete operations for stable distribution and ordered r
 
 Design the target architecture as if the known sorting, selection, partitioning, batch and incremental consumers were required from day zero. Their result contracts, ownership and resource lifetimes determine the boundaries; the current `Sorter` and the first feature do not. Settle that target before migrating the implementation, then deliver independently verifiable slices from simple compositions to stateful algorithms. External sorting and Wavelet matrix construction receive neither an interface nor an implementation in this experiment. Their known roles remain compatible with the boundary: run generation consumes complete sorting, while Wavelet construction needs controlled stable passes, not rank refinement. A priority queue is outside this proposal.
 
-The implemented first slice covers argsort, standard-library compositions for multiple fields and groups, segmented sorting, unordered Top-k, sorted prefixes, rank selection and sorted rank ranges. Stable binary and bounded multiway partitioning remain later stages. Incremental prefix completion follows only after the one-shot operations work. This is an experiment, not a commitment to include every interface in Rust 0.1.
+The implemented first slice covers argsort, standard-library compositions for multiple fields and groups, segmented sorting, unordered Top-k, sorted prefixes, rank selection and sorted rank ranges. Stable binary and bounded multiway partitioning remain later stages. Incremental prefix completion follows only after the one-shot operations work. These are unreleased additions after Rust 0.1, not changes to the published release.
 
 ## Public surface and remaining proposals
 

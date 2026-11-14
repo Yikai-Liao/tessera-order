@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { z } from "zod";
+import type { CurveChart } from "../plot/curves.ts";
 import type { RowChart } from "../plot/rows.ts";
 
 /** The Bencher hardware every tracking job runs on; the site reads this module, so it stays browser-safe. */
@@ -75,6 +76,33 @@ export const runSchema = z
     "Memory must cover exactly the timed cases",
   );
 export type TrackingRun = z.infer<typeof runSchema>;
+
+/**
+ * Peak extra heap bytes of every algorithm on one input pattern across lengths, measured on
+ * Actions in one build (`growth.ts`). Counts do not depend on the host, so no Bencher run is
+ * involved. A null peak is a length the algorithm does not support.
+ */
+export const growthSchema = z
+  .object({
+    time: z.iso.datetime(),
+    hash: z.string().regex(/^[a-f0-9]{40}$/),
+    workflow: runSchema.shape.workflow,
+    rustc: z.string(),
+    native: z.object({ cc: z.string(), cxx: z.string(), build: z.json() }),
+    type: z.string().min(1),
+    distribution: z.string().min(1),
+    lengths: z
+      .array(z.number().int().positive())
+      .min(2)
+      .refine((values) => values.every((n, index) => index === 0 || n > values[index - 1])),
+    peaks: z.record(z.string().min(1), z.array(z.number().int().nonnegative().nullable())),
+  })
+  .refine(
+    (growth) =>
+      Object.values(growth.peaks).every((values) => values.length === growth.lengths.length),
+    "Every algorithm needs one peak entry per length",
+  );
+export type GrowthRecord = z.infer<typeof growthSchema>;
 /** A case's catalog presentation; the browser cannot read the catalog, so publication supplies it. */
 export const caseSchema = z.object({
   id: z.string().min(1),
@@ -153,9 +181,14 @@ export function parseRuns(text: string): TrackingRun[] {
 
 const figureSchema = z.object({
   name: z.string().min(1),
+  // Optional while comparisons published before section headings remain the latest.
+  subject: z.string().min(1).optional(),
+  summary: z.string().min(1).optional(),
   title: z.string().min(1),
-  // Built and validated by the shared row template at publication; the page only renders it.
-  chart: z.custom<RowChart>((value) => typeof value === "object" && value !== null),
+  // Built and validated by the shared template at publication; the page only renders it.
+  chart: z.custom<RowChart | CurveChart>((value) => typeof value === "object" && value !== null),
+  /** The template that draws `chart`; absent means rows. */
+  kind: z.literal("curves").optional(),
   /** Markdown table of every plotted value, naming each sort, including values beyond the axis. */
   table: z.string(),
 });

@@ -13,12 +13,13 @@
   <a href="https://github.com/Yikai-Liao/tessera-order/actions/workflows/ci.yml"><img src="https://github.com/Yikai-Liao/tessera-order/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/Yikai-Liao/tessera-order/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-BSD--2--Clause-blue.svg" alt="License: BSD-2-Clause"></a>
   <img src="https://img.shields.io/badge/MSRV-1.89-orange.svg" alt="MSRV 1.89">
-  <img src="https://img.shields.io/badge/status-pre--release-lightgrey.svg" alt="Status: pre-release">
+  <a href="https://crates.io/crates/tessera-order"><img src="https://img.shields.io/crates/v/tessera-order.svg" alt="crates.io"></a>
+  <a href="https://docs.rs/tessera-order"><img src="https://img.shields.io/docsrs/tessera-order" alt="docs.rs"></a>
   <a href="https://yikai-liao.github.io/tessera-order/"><img src="https://img.shields.io/badge/docs-online-8b5cf6.svg" alt="Documentation"></a>
 </p>
 
-> [!IMPORTANT]
-> Tessera is in pre-release. The Rust engine has been ported to Stable Rust and checked against the research prototype. Nothing is on crates.io yet; see the [roadmap](https://github.com/Yikai-Liao/tessera-order/blob/main/ROADMAP.md).
+> [!NOTE]
+> 0.1 is the first release: the stable sort only, with the API still allowed to change in 0.x minor releases. See the [roadmap](https://github.com/Yikai-Liao/tessera-order/blob/main/ROADMAP.md) for what comes next.
 
 ## Why Tessera
 
@@ -32,8 +33,6 @@ An LSD radix sort is stable and runs in linear time, but it needs a second buffe
 - **One portable backend.** Uses `fearless_simd` for vector scans and prefix sums, selecting supported instructions automatically. Requires `std` and Rust 1.89; Rayon is optional.
 
 ## Quick start
-
-> The crate is not published yet. The example uses the implemented 0.1 API.
 
 ```toml
 [dependencies]
@@ -59,6 +58,11 @@ assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 |---|---|
 | `stable_sort(&mut [K])` | Sort keys themselves |
 | `stable_sort_by_key(&mut [T], F)` | Sort any records by a key computed by `F` |
+
+The following additions are **unreleased**, not part of the published 0.1 package. They require a development checkout as described in the [slice-operation guide](docs/guide/getting-started.md#top-k-and-selected-ranks).
+
+| Development API | Use |
+|---|---|
 | `stable_argsort` / `_by_key` | Return sorted indices without moving source records |
 | `stable_sort_segments` / `_by_key` | Sort independent segments with invocation workspace reuse |
 | `stable_top_k` / `_by_key` | Partition an unordered minimum-k set with stable boundary membership |
@@ -77,8 +81,7 @@ The optional `rayon` feature adds `par_stable_sort` and `par_stable_sort_by_key`
 
 Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). These continuous measurements flag changes to investigate; use the [benchmark protocol](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/development/benchmarking.md#command-capabilities) for paired algorithm comparisons and source-change attribution.
 
-> [!NOTE]
-> The first complete release comparison remains on the [roadmap](https://github.com/Yikai-Liao/tessera-order/blob/main/ROADMAP.md). The preview below tracks Tessera on main, not an algorithm ranking.
+The [algorithm comparison](https://yikai-liao.github.io/tessera-order/benchmarks/algorithms.html) ranks Tessera among other sorts by speed and extra memory. The preview below tracks Tessera alone on main.
 
 Main trend: the geometric mean of each mode's run-time change since the first run on the current runner specification; lower is faster. The [interactive page](https://yikai-liao.github.io/tessera-order/benchmarks/) filters cases by type, distribution, length and mode, compares cases over any time range and lists absolute times.
 
@@ -92,9 +95,9 @@ Main trend: the geometric mean of each mode's run-time change since the first ru
 
 ## Status by language
 
-Each language package is versioned and released separately ([`RELEASING.md`](https://github.com/Yikai-Liao/tessera-order/blob/main/RELEASING.md)). No package has been released yet.
+Each language package is versioned and released separately ([`RELEASING.md`](https://github.com/Yikai-Liao/tessera-order/blob/main/RELEASING.md)).
 
-| Capability | Rust (unreleased) | C++ |
+| Capability | Rust 0.1 | C++ |
 |---|---|---|
 | Stable sort | Implemented | Planned |
 | Unstable sort | Not in 0.1 | Planned |
@@ -119,7 +122,7 @@ Bug reports, benchmark results from other machines, and integration reports are 
 
 ## Acknowledgements
 
-The stable block partition is adapted from Robert Clausecker's [`radixsort_permuted.c`](https://github.com/clausecker/radsort/blob/f69e816c3cd79d312cd67aea5b9cf1c338c1b371/radixsort_permuted.c), described in [*Parallel O(√n) Overhead LSD Radix Sort*](https://arxiv.org/abs/2607.05302) by Robert Clausecker and Florian Schintke.
+The stable block partition is adapted from Robert Clausecker's [`radixsort_permuted.c`](https://github.com/clausecker/radsort/blob/f69e816c3cd79d312cd67aea5b9cf1c338c1b371/radixsort_permuted.c), described in [*Parallel O(√n) Overhead LSD Radix Sort*](https://arxiv.org/abs/2607.05302) by Robert Clausecker and Florian Schintke. The paper also suggests the hybrid Tessera builds on: splitting on the most significant digit first, then sorting each bucket's remaining digits least significant first.
 
 Tessera was developed and measured with Lukas Bergdoll's [sort-research-rs](https://github.com/Voultapher/sort-research-rs) benchmark harness.
 

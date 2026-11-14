@@ -3,7 +3,7 @@
 import { computed, ref } from "vue";
 
 // `default_block_size` in block.rs: scratch 2·R·b·s bytes plus d·n/b bytes
-// of ledger metadata, balanced at b* = ceil(sqrt(dn / (2Rs))), scaled by 4, then
+// of ledger metadata, balanced at b* = ceil(sqrt(dn / (2Rs))), scaled by 2, then
 // floored at max(1024 / s, 32) records. d is `finish::serial_descriptor_bytes`
 // on a 64-bit target: a chain link, a block address, an owner cell, a source
 // and a free-cache slot.
@@ -23,7 +23,7 @@ const total = (b: number) => scratch(b) + tables(b);
 const balancedSize = (records: number, buckets: number, bytes: number) =>
   Math.ceil(Math.sqrt((DESCRIPTOR_BYTES * records) / (2 * buckets * bytes)));
 const chosenSize = (records: number, buckets: number, bytes: number) =>
-  Math.max(1, 4 * balancedSize(records, buckets, bytes), Math.floor(1024 / bytes), 32);
+  Math.max(1, 2 * balancedSize(records, buckets, bytes), Math.floor(1024 / bytes), 32);
 const balanced = computed(() => balancedSize(n.value, R.value, recordBytes.value));
 const chosen = computed(() => chosenSize(n.value, R.value, recordBytes.value));
 const lsdBuffer = computed(() => n.value * recordBytes.value);

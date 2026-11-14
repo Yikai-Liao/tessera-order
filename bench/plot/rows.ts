@@ -23,7 +23,7 @@ export interface PlotRow {
   /** The last cell states a lead, such as a first rank, and takes Tessera's colour. */
   lead?: boolean;
 }
-export type Swatch = Tone | "alternate" | "hollow" | "reference";
+export type Swatch = Tone | "alternate" | "hollow" | "reference" | "edge";
 export interface RowChart {
   id?: string;
   title: string;
@@ -58,8 +58,9 @@ export function renderRows(spec: RowChart) {
     !(spec.scale.low > 0 && spec.scale.high > spec.scale.low)
   )
     throw new Error("A row chart requires a positive, increasing scale");
-  const edge = (mark: Mark) =>
-    spec.scale.clamp && (mark.value < spec.scale.low || mark.value > spec.scale.high);
+  const outside = (value: number) =>
+    spec.scale.clamp && (value < spec.scale.low || value > spec.scale.high);
+  const edge = (mark: Mark) => outside(mark.value);
   const groups = spec.groups.filter((group) => group.rows.length);
   const rows = groups.flatMap((group) => group.rows);
   if (!rows.length || !spec.columns.length)
@@ -220,21 +221,16 @@ export function renderRows(spec: RowChart) {
               strokeLinecap: "round",
             }),
             // A range can cross an axis limit while its median stays inside.
-            Plot.dot(
-              row.span.filter(
-                (value) => spec.scale.clamp && (value < spec.scale.low || value > spec.scale.high),
-              ),
-              {
-                x: (value: number) => value,
-                y: cy,
-                symbol: "triangle",
-                rotate: (value: number) => (value < spec.scale.low ? 270 : 90),
-                r: 4.5,
-                fill: ink[row.marks[0].tone],
-                stroke: ink.panel,
-                strokeWidth: 2,
-              },
-            ),
+            Plot.dot(row.span.filter(outside), {
+              x: (value: number) => value,
+              y: cy,
+              symbol: "triangle",
+              rotate: (value: number) => (value < spec.scale.low ? 270 : 90),
+              r: 4.5,
+              fill: ink[row.marks[0].tone],
+              stroke: ink.panel,
+              strokeWidth: 2,
+            }),
           ],
         });
       }
@@ -302,25 +298,39 @@ export function renderRows(spec: RowChart) {
       }
     }
   }
+  // An off-scale mark is a triangle at the axis end, so a chart that draws one explains it.
+  const clipped = rows.some(
+    (row) => row.marks.some((mark) => outside(mark.value)) || (row.span ?? []).some(outside),
+  );
   if (Array.isArray(spec.legend)) {
+    const legend: [Swatch[], string][] = clipped
+      ? [...spec.legend, [["edge"], "off-scale, value in table"]]
+      : spec.legend;
     let left = pad;
-    for (const [swatches, text] of spec.legend) {
+    for (const [swatches, text] of legend) {
       for (const swatch of swatches) {
         annotations.push(
-          swatch === "reference"
-            ? Plot.ruleX([left + 4], {
-                y1: legendY - 11,
-                y2: legendY + 3,
-                stroke: ink.axis,
-                strokeDasharray: "3 3",
+          swatch === "edge"
+            ? Plot.dot([[left + 4, legendY - 4]], {
+                symbol: "triangle",
+                rotate: 90,
+                r: 4.5,
+                fill: ink.muted,
               })
-            : Plot.dot([[left + 4, legendY - 4]], {
-                r: swatch === "alternate" || swatch === "hollow" ? 3.5 : 4,
-                fill: swatch === "alternate" || swatch === "hollow" ? ink.panel : ink[swatch],
-                stroke:
-                  swatch === "alternate" ? ink.primary : swatch === "hollow" ? ink.axis : "none",
-                strokeWidth: 1.5,
-              }),
+            : swatch === "reference"
+              ? Plot.ruleX([left + 4], {
+                  y1: legendY - 11,
+                  y2: legendY + 3,
+                  stroke: ink.axis,
+                  strokeDasharray: "3 3",
+                })
+              : Plot.dot([[left + 4, legendY - 4]], {
+                  r: swatch === "alternate" || swatch === "hollow" ? 3.5 : 4,
+                  fill: swatch === "alternate" || swatch === "hollow" ? ink.panel : ink[swatch],
+                  stroke:
+                    swatch === "alternate" ? ink.primary : swatch === "hollow" ? ink.axis : "none",
+                  strokeWidth: 1.5,
+                }),
         );
         left += 10;
       }

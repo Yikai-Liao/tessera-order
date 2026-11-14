@@ -16,9 +16,10 @@ jobs:
   rust:
     if: startsWith(github.ref_name, 'rust/v')
     uses: ./.github/workflows/rust-release.yml
-    secrets: inherit
+    # crates.io trusted publishing matches this caller workflow (release.yml), not the callee.
     permissions:
       contents: write
+      id-token: write
 
   cpp:
     if: startsWith(github.ref_name, 'cpp/v')

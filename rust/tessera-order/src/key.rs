@@ -180,16 +180,13 @@ pub(crate) unsafe trait Extract<T> {
         crate::order::finish_insertion(records, self, crate::order::by_key);
     }
 
-    /// Sorts `records` stably by insertion within `budget` swaps.
-    ///
-    /// Returns the number of swaps, or `None` once the budget runs out; the
-    /// records are then a stable permutation of their input. Direct extraction
-    /// selects its scan once for the whole pass.
-    fn insertion_sort(&mut self, records: &mut [T], budget: usize) -> Option<usize>
+    /// Tries the complete budgeted insertion pass, leaving a stable permutation
+    /// if it cannot finish. Direct extraction selects its scan once per pass.
+    fn try_insertion(&mut self, records: &mut [T], tile_len: usize) -> bool
     where
         Self: Sized,
     {
-        crate::order::insertion_loop(records, budget, self, crate::order::by_key)
+        crate::order::try_insertion(records, tile_len, self, crate::order::by_key)
     }
 }
 
@@ -216,8 +213,8 @@ unsafe impl<T, E: Extract<T>> Extract<T> for &mut E {
     }
 
     #[inline]
-    fn insertion_sort(&mut self, records: &mut [T], budget: usize) -> Option<usize> {
-        (**self).insertion_sort(records, budget)
+    fn try_insertion(&mut self, records: &mut [T], tile_len: usize) -> bool {
+        (**self).try_insertion(records, tile_len)
     }
 }
 
@@ -361,8 +358,8 @@ unsafe impl<K: RadixKey> Extract<K> for Direct {
     }
 
     #[inline]
-    fn insertion_sort(&mut self, records: &mut [K], budget: usize) -> Option<usize> {
-        crate::portable_simd::insertion_sort(records, budget)
+    fn try_insertion(&mut self, records: &mut [K], tile_len: usize) -> bool {
+        crate::portable_simd::try_insertion(records, tile_len)
     }
 }
 

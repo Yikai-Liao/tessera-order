@@ -3,7 +3,7 @@
 //! Exercise scoped bucket handoff through the real partition callback.
 
 use super::*;
-use crate::key::ByKey;
+use crate::key::{ByKey, Direct};
 use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

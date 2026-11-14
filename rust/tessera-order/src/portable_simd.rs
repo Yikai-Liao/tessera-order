@@ -58,15 +58,12 @@ pub(crate) fn finish_insertion<K: RadixKey>(keys: &mut [K]) {
     dispatch!(Level::new(), simd => crate::order::finish_insertion(keys, &mut Direct, |values, _| first_inversion_with(simd, values)));
 }
 
-/// Sorts `keys` stably by insertion within `budget` swaps, dispatched once.
-///
-/// Returns the number of swaps, or `None` when the budget is exhausted; in
-/// that case `keys` is a stable permutation of its input.
-pub(crate) fn insertion_sort<K: RadixKey>(keys: &mut [K], budget: usize) -> Option<usize> {
+/// Tries budgeted insertion, selecting the scan once for the complete pass.
+pub(crate) fn try_insertion<K: RadixKey>(keys: &mut [K], tile_len: usize) -> bool {
     if keys.len() < SIMD_MIN {
-        return crate::order::insertion_loop(keys, budget, &mut Direct, crate::order::by_key);
+        return crate::order::try_insertion(keys, tile_len, &mut Direct, crate::order::by_key);
     }
-    dispatch!(Level::new(), simd => crate::order::insertion_loop(keys, budget, &mut Direct, |values, _| first_inversion_with(simd, values)))
+    dispatch!(Level::new(), simd => crate::order::try_insertion(keys, tile_len, &mut Direct, |values, _| first_inversion_with(simd, values)))
 }
 
 /// Converts per-bucket counts to per-bucket starts, in place.
@@ -458,12 +455,12 @@ mod tests {
             K::Encoded: core::fmt::Debug,
         {
             let encoded = |keys: &[K]| keys.iter().copied().map(K::encode).collect::<Vec<_>>();
-            for budget in [0, 10, usize::MAX] {
+            for tile_len in [2, 16, 64, keys.len()] {
                 let mut direct = keys.clone();
                 let mut scalar = keys.clone();
                 assert_eq!(
-                    insertion_sort(&mut direct, budget),
-                    ByKey(|key: &K| *key).insertion_sort(&mut scalar, budget),
+                    try_insertion(&mut direct, tile_len),
+                    ByKey(|key: &K| *key).try_insertion(&mut scalar, tile_len),
                 );
                 assert_eq!(encoded(&direct), encoded(&scalar));
             }
@@ -508,13 +505,12 @@ mod tests {
             finish_insertion(&mut keys);
             assert_eq!(keys, expected);
 
-            for budget in [0, 10, usize::MAX] {
+            for tile_len in [2, 16, 64, length as usize] {
                 let mut keys: Vec<_> = (0..length).rev().collect();
-                let swaps = length as usize * length.saturating_sub(1) as usize / 2;
-                assert_eq!(
-                    insertion_sort(&mut keys, budget),
-                    (swaps <= budget).then_some(swaps),
-                );
+                let finished = try_insertion(&mut keys, tile_len);
+                if finished {
+                    assert_eq!(keys, (0..length).collect::<Vec<_>>());
+                }
                 keys.sort_unstable();
                 assert_eq!(keys, (0..length).collect::<Vec<_>>());
             }

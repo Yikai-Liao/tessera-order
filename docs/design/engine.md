@@ -26,7 +26,7 @@ Full-sort and rank entries share node decisions, rank projection, workspace and 
 | `engine.rs` | Root preparation, default tile budget, candidate-bit progress and ordered refinement. Serial and parallel entries preserve actual variation and narrow a 128-bit key through one `KeyHalf` (`key.rs`) | Required rank views and complete partition and finishing operations |
 | `rank.rs` | Validate normalized required intervals once and project immutable borrowed views into final bands | Parent-relative final ranges, not keys, classifications or callback order |
 | `workspace.rs` | Invocation-owned reusable tile and block capacity, lent through complete operations | Capacity is reusable after restoration; no live movement state survives an operation |
-| `order.rs` | Scalar order and candidate-masked variation scans, stable insertion loops, independent of recursive execution | Extractors supply keys; direct-key callers supply a scan in their selected SIMD context |
+| `order.rs` | Scalar order and candidate-masked variation scans; stable insertion, its probe window and budget, independent of recursive execution | Extractors supply keys; direct-key callers supply a scan in their selected SIMD context |
 | `engine/plan.rs` | Bounded sampling and executable node partition decisions | Records, candidate variation and tile capacity go in; a node decision comes out |
 | `tile.rs`, `tile/plan.rs` | Capacity, complete leaf planning, scratch allocation, cached classification, counting passes and restoration | Finish a cursor-bounded slice; no raw pointer, cursor layout or guard crosses the boundary |
 | `block.rs`, `block/` | Physical block storage, stable bucket chains, ledger costs, completion and recovery | A `Classify` bucket per record goes in; bucket boundaries and completed bands come out |
@@ -69,7 +69,7 @@ Node samples choose partitions; they never certify ownership, equality of actual
 
 A stage's rule changes on its page, in the code and in the page's model together. Structural facts across stages:
 
-- `prepare` is shared by the serial and parallel entries. `insertion_probe` owns insertion eligibility, its window and budget, including contract-appropriate finishing for small inputs.
+- `prepare` is shared by the serial and parallel entries. `insertion_probe` owns insertion eligibility and contract-appropriate finishing for small inputs; `order::try_insertion` owns the probe window, budget and continuation.
 - `finish_ordered` owns ascending completion and strict or stable descending reversal, for the root probe, deferred flat confirmation and partition children.
 - Root, node-child and tile-child variation share `order::scan_varying_bits`; key digit windows have one representation in `key::Digit`.
 - Serial and parallel execution consume one `NodePlan` decision once. Parallel roots shard equality and digit partitions; an existing-run split runs serially without resampling.
@@ -127,7 +127,7 @@ When the root digit covers all remaining variation in at most eight bits, direct
 
 ## Insertion and scans
 
-Every insertion pass, a budgeted probe or the finish of a tile or bucket, runs `order::insertion_loop`: find the first descending adjacent pair, move the later record left, resume after it. A probe returns its swap count and may stop at its budget. `finish_insertion` has no budget and returns `()`, so no unused count crosses a target-feature boundary. The loop receives an inversion scan alongside the extractor: user-key scans use the same mutable extractor, direct-key passes capture the backend selected before entering the loop. No insertion-only extractor carries a SIMD token.
+Every insertion pass, a budgeted probe or the finish of a tile or bucket, runs `order::insertion_loop`: find the first descending adjacent pair, move the later record left, resume after it. A probe can extend the same loop from a sorted prefix to the full input, retaining its swap count and budget; a failed pass leaves a stable permutation. `finish_insertion` has no budget and returns `()`, so no unused count crosses a target-feature boundary. The loop receives an inversion scan alongside the extractor: user-key scans use the same mutable extractor, direct-key passes capture the backend selected before entering the loop. No insertion-only extractor carries a SIMD token.
 
 | Pass | Implementation |
 |---|---|

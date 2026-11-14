@@ -114,12 +114,28 @@ fn bucket_ordered_input_keeps_scratch_in_one_tile() {
         above.iter().chain(&body).copied().collect::<Vec<_>>(),
     ] {
         let mut keys = keys;
-        let ((allocations, net), peak) = measure_peak(|| sort(&mut keys));
+        let ((_, net), peak) = measure_peak(|| sort(&mut keys));
         assert!(keys.is_sorted());
-        assert!(allocations > 0);
         assert_eq!(net, 0);
         assert!(peak <= 128 * 1024, "peak scratch {peak}");
     }
+}
+
+#[test]
+fn successful_insertion_probe_does_not_allocate() {
+    let len = 65_536u64;
+    let mut keys: Vec<_> = (0..len).collect();
+    for index in (0..keys.len() - 1).step_by(64) {
+        keys.swap(index, index + 1);
+    }
+    let mut records: Vec<_> = keys.iter().copied().enumerate().collect();
+    assert_eq!(measure(|| sort(&mut keys)), (0, 0));
+    assert!(keys.is_sorted());
+    assert_eq!(
+        measure(|| sort_by_key(&mut records, |record| record.1)),
+        (0, 0)
+    );
+    assert!(records.is_sorted_by_key(|record| record.1));
 }
 
 #[test]

@@ -20,12 +20,12 @@ The sample rejects most unsorted inputs within a few pairs, so the full scan run
 
 ## Budgeted insertion
 
-An unsorted input no longer than the [small-leaf threshold](tiles.md#three-leaves) goes straight to stable insertion: a budget and a varying-bit scan would only lead back to the same leaf. `insertion_probe` owns this check, the probe window and the budget.
+An unsorted input no longer than the [small-leaf threshold](tiles.md#three-leaves) goes straight to stable insertion: a budget and a varying-bit scan would only lead back to the same leaf. `insertion_probe` owns this check; the shared insertion operation owns the probe window and budget.
 
 A larger unsorted input may still be *nearly* sorted: a sorted log with a few late entries, for example. Insertion sort finishes such an input in linear time, but on a random input it is quadratic. Tessera therefore gives it a **swap budget** and abandons it when the budget runs out.
 
 - If the input fits in one tile, insertion runs on the records with a budget of `floor(n / 4)` swaps.
-- Otherwise, the keys of a probe window (one tile's worth of records) are copied into a buffer and insertion-sorted there first, with a budget of `floor(window / 4)`. The number of swaps on the window predicts the number on the whole input: the budget for the records is `floor(swaps × n / window)`. The product is computed in a wider integer type, so it cannot overflow before division on a 32-bit target; the resulting budget is at most `floor(n / 4)`. A window that needed no swaps proves nothing, because the inversions are elsewhere, so the radix path continues.
+- Otherwise, insertion starts on a probe window of one tile of records, with a budget of `floor(window / 4)` swaps. If the window sorts with a nonzero number of swaps, the pass continues from its boundary, with a total budget of `floor(swaps × n / window)`, including the swaps already made. The product is computed in a wider integer type, so it cannot overflow before division on a 32-bit target; the resulting budget is at most `floor(n / 4)`. A window that needed no swaps proves nothing about the rest, so the radix path continues. The pass uses the records directly: no probe-key buffer or second pass over the sorted prefix is needed.
 
 The quarter-record allowance limits wasted exchanges before a failed probe falls back to radix sorting. It is an empirical work budget, not a test for any distribution: inputs with more inversions may leave insertion earlier, while insertion-sized leaves still finish without a budget.
 
@@ -37,7 +37,7 @@ Next, one scan computes the [varying bits](keys.md#varying-bits). If no bit vari
 
 128-bit keys whose variation fits in the low or high 64 bits continue as 64-bit keys.
 
-Only now is tile and block scratch allocated. Budgeted insertion on a larger unsorted input may already have allocated its probe-key buffer; confirmed ordered and constant inputs never allocate.
+Only now is tile and block scratch allocated. Budgeted insertion uses no scratch; confirmed ordered and constant inputs never allocate.
 
 ## Nodes and tiles
 

@@ -33,7 +33,7 @@ use alloc::vec::Vec;
 
 use crate::block;
 use crate::block::Classify;
-use crate::key::{self, Digit, Direct, Extract, KeyDigit, KeyHalf, Rank, Unsigned, bit_len};
+use crate::key::{self, Digit, Extract, KeyDigit, KeyHalf, Rank, Unsigned, bit_len};
 
 type KeyValue<T, E> = <E as Extract<T>>::Value;
 
@@ -225,13 +225,9 @@ fn prepare<T, E: Extract<T>>(
 /// Tries to finish `records` with a budgeted insertion pass and returns whether it
 /// did.
 ///
-/// A small tile finishes by stable insertion; another tile gets one
-/// swap per four records. A longer input first insertion-sorts one tile of keys in a
-/// local buffer, and scales that window's swap count to the whole input as the
-/// budget for the records.
-/// A window that needs no swaps says nothing about the rest, so the records are
-/// not touched. A pass that runs out of budget leaves `records` a stable
-/// permutation of its input.
+/// A small tile finishes by stable insertion. For larger inputs, the shared
+/// insertion operation owns the probe window and swap budget; a failed pass
+/// leaves a stable permutation of its input.
 fn insertion_probe<T, E: Extract<T>>(
     records: &mut [T],
     extractor: &mut E,
@@ -244,25 +240,7 @@ fn insertion_probe<T, E: Extract<T>>(
         extractor.finish_insertion(records);
         return true;
     }
-    let probe_len = tile_len.max(2).min(records.len());
-    // Bound failed probes without changing the unlimited insertion leaf.
-    let probe_budget = probe_len / 4;
-    if probe_len == records.len() {
-        return extractor.insertion_sort(records, probe_budget).is_some();
-    }
-    let mut keys: Vec<_> = records[..probe_len]
-        .iter()
-        .map(|record| extractor.key(record))
-        .collect();
-    match Direct.insertion_sort(&mut keys, probe_budget) {
-        Some(0) | None => false,
-        Some(swaps) => {
-            // The successful probe bounds swaps by probe_len, so the quotient
-            // fits usize even when the intermediate product does not.
-            let budget = (swaps as u128 * records.len() as u128 / probe_len as u128) as usize;
-            extractor.insertion_sort(records, budget).is_some()
-        }
-    }
+    extractor.try_insertion(records, tile_len)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -562,7 +540,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::key::ByKey;
+    use crate::key::{ByKey, Direct};
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     #[test]

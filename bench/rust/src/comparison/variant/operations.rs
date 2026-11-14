@@ -180,6 +180,7 @@ pub(super) fn categories<T: BenchmarkRecord>(
         "tessera" if bucket_count <= tessera_order::MAX_PARTITION_BUCKETS => {
             "public one-shot stable category partition including boundary output"
         }
+        "tessera-full" => "Tessera by-key category sorting plus boundary construction",
         "std-stable" => "standard stable category sorting plus boundary construction",
         "glidesort" => "glidesort stable category sorting plus boundary construction",
         "radsort" => "radsort stable category sorting plus boundary construction",
@@ -210,6 +211,9 @@ pub(super) fn categories<T: BenchmarkRecord>(
             // workspace rather than subtracting a later, disjoint allocation.
             let mut output = Boundaries::new(&operation);
             match name {
+                "tessera-full" => {
+                    tessera_order::stable_sort_by_key(values, |r| r.category(bucket_count));
+                }
                 "std-stable" => values.sort_by_key(|r| r.category(bucket_count)),
                 "glidesort" => glidesort::sort_by(values, |a, b| {
                     a.category(bucket_count).cmp(&b.category(bucket_count))
@@ -457,7 +461,10 @@ mod tests {
                         // including no silent full-sort substitution.
                         let expected = match variant.name {
                             "tessera" | "std-stable" | "glidesort" => true,
-                            "tessera-full" => operation.required_ranges().is_some(),
+                            "tessera-full" => {
+                                operation.required_ranges().is_some()
+                                    || operation.bucket_count().is_some()
+                            }
                             "radsort" => {
                                 operation.bucket_count().is_some() || !ty.starts_with("reverse_")
                             }

@@ -1,6 +1,6 @@
 # CI and benchmark scaling proposal
 
-Status: proposed, not implemented. Current behavior belongs to [CI](../development/ci.md) and [continuous benchmarks](../development/continuous-benchmarks.md); this page owns the planned changes and their reasons until they land.
+Status: steps 1 and 2 implemented; steps 3 and 4 proposed. Current behavior belongs to [CI](../development/ci.md) and [continuous benchmarks](../development/continuous-benchmarks.md); this page owns the planned changes and their reasons until they land.
 
 ## Problems
 
@@ -10,13 +10,14 @@ Status: proposed, not implemented. Current behavior belongs to [CI](../developme
 
 ## Reuse verified results by input fingerprint
 
+Implemented as [lane reuse](../development/ci.md#reuse-of-verified-lanes). The implementation differs from this plan in four ways. Markers are artifacts rather than cache entries, because only an artifact names the run that wrote it. Only runs on the PR's own commits count. A PR that changes the files deciding reuse reuses nothing. A reused measurement copies its check to the new head, so `tools status` needs no change. The reasoning below is kept for later steps.
+
 A lane runs when its inputs differ from inputs that already passed, not when the PR's cumulative diff touches them.
 
 - **Inputs come from the router.** A lane's inputs are the tracked files whose first `ROUTES` row selects that lane, plus files no row names, which select every lane today. The fingerprint hashes the sorted `(path, blob ID)` list from `git ls-tree` at the head. The routing table stays the only owner of which file affects which lane.
 - **Success leaves a marker.** A lane that passes saves a small Actions cache entry keyed by lane and fingerprint. Before scheduling, `changes` looks the markers up without downloading anything. A hit skips the lane and links the run that produced the marker in the summary; `ci-ok` treats a reused lane as passed.
 - **Why not diff against the previous push.** The previous head may have been cancelled or failed, force pushes and reverts break commit ancestry, and a diff cannot tell whether the earlier run passed. A fingerprint skips only work that verifiably passed for identical inputs. Cache scoping also lets a PR reuse a marker from its base branch or `main` when its lane inputs equal theirs.
 - **Measurement compares two revisions.** Its fingerprint also covers the baseline library tree, because retargeting or merging a new base changes the result without changing the head's files.
-- **Status follows reuse.** `tools status` accepts a reused benchmark verdict when the report check on the new head names the measured run and its fingerprint equals the head's. "Match the exact head" becomes "match the head or an identical-input reuse".
 
 A docs-only commit inside a verified PR then runs formatting, lints and Docs only. The remaining risk is a lane input that `ROUTES` does not name; that risk exists today, and unrouted paths still fingerprint into every lane.
 

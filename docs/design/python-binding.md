@@ -2,21 +2,31 @@
 
 Status: accepted, not started. This page records the decisions to implement; when the binding exists, its code and tests replace the sections they make true.
 
-The binding wraps the Rust crate and does not wait for the C++ implementation. It has its own package version and `python/vX.Y.Z` tags; its stable and unstable functions share that version.
+The binding wraps the Rust crate and does not wait for the C++ implementation. It has its own package version and `python/vX.Y.Z` tags.
 
 ## First release
 
-Support `list`, standard-library `array.array`, and one-dimensional numeric `numpy.ndarray`. Provide six functions:
+Support `list`, standard-library `array.array`, and one-dimensional numeric `numpy.ndarray`. The API follows NumPy's function names and keywords, so a NumPy caller switches by changing the module; NumPy's `sort` and `argsort` keywords also match the [Python array API standard](https://data-apis.org/array-api/latest/). The first release provides two functions:
 
-| Operation | Stable | Unstable | Result |
-|---|---|---|---|
-| Modify input | `stable_sort` | `unstable_sort` | `None` |
-| Preserve input, return sorted copy | `stable_sorted` | `unstable_sorted` | New container |
-| Preserve input, return indices | `stable_argsort` | `unstable_argsort` | Index sequence |
+| Function | NumPy counterpart | Result |
+|---|---|---|
+| `sort(a, axis=-1, kind=None, order=None, *, stable=None, descending=False, key=None, out=None)` | `numpy.sort` | A sorted copy; with `out=a`, `a` sorted in place |
+| `argsort(a, axis=-1, kind=None, order=None, *, stable=None, descending=False, key=None)` | `numpy.argsort` | An index sequence |
 
-Each function accepts `values, *, key=None, reverse=False`. These return and mutation rules are identical for all supported container families.
+Keywords keep their NumPy meaning, and every NumPy-accepted value is honored because a stable result is a legal result for each of them:
 
-| Input | `*_sorted` output | `*_argsort` output |
+- `stable=True` guarantees that equal keys keep their input order; `None` and `False` leave it unspecified, as in NumPy 2.0. Every call runs the stable Rust kernel, and `stable=False` claims no speed advantage. The keyword replaces separate stable and unstable functions.
+- `descending=True` sorts in descending order with NaN last, as in NumPy 2.5. It changes the key encoding and never reverses an ascending result.
+- `kind` accepts NumPy's values and selects no other kernel; `"stable"` and `"mergesort"` imply `stable=True`.
+- `order` must be `None`, because structured dtypes are deferred. `axis` accepts only values that address the single dimension.
+- `key` is Tessera's extension for lists, following Python's `sorted`; NumPy has no counterpart.
+- `out` follows NumPy's general output-array convention, because NumPy sorts in place only through the `ndarray.sort` method, which a binding cannot add. `out=a` sorts the input in place with the core's memory bound; another writable container of the same type, length and element type receives the result.
+
+`partition(a, kth, ...)` and `argpartition(a, kth, ...)` follow after the first release with NumPy's signatures, including an integer or a sequence of integers for `kth`. They map to the Rust multiple-selection operation; equal keys resolve as in a stable argsort, which is observable only in `argpartition` indices.
+
+These return and mutation rules are identical for all supported container families.
+
+| Input | `sort` output | `argsort` output |
 |---|---|---|
 | `list` | `list`, retaining original objects | `list[int]` |
 | `array.array` | `array.array` with the same typecode | `list[int]` |
@@ -24,7 +34,7 @@ Each function accepts `values, *, key=None, reverse=False`. These return and mut
 
 NumPy is optional. Importing the package and using lists or `array.array` must work without NumPy installed. No comparator fallback is provided. Unsupported keys, dtypes and layouts raise explicit exceptions.
 
-The first Python release may implement `unstable_*` by calling the stable Rust kernel. Its equal-key order remains unspecified by contract, and it makes no speed advantage claim. Document and benchmark the actual kernel. This does not add unstable interfaces to Rust 0.1, whose scope remains stable sorting only.
+Document and benchmark the actual kernel. The `stable` keyword adds no unstable interface to the Rust crate.
 
 ## Container adapters
 
@@ -50,7 +60,7 @@ Start with one-dimensional `int8/16/32/64`, `uint8/16/32/64`, and `float32/64`.
 | Noncontiguous one-dimensional view, including negative stride | Reject | Read in logical view order |
 | Read-only numeric array | Reject | Supported |
 | Unaligned or non-native-endian numeric array | Reject | Convert into owned aligned/native working storage; preserve output dtype |
-| Multidimensional array | Deferred pending an `axis` contract | Deferred |
+| Multidimensional array | Deferred pending an `axis` contract; `axis=-1` on C-contiguous rows is planned to map to the Rust fixed-length [chunk sort](algorithm-extensions-proposal.md#release-surface-alignment) | Deferred |
 | Object, string, complex or structured dtype | No direct sort | Extract a supported numeric key array, then argsort it |
 
 Indices for a view are relative to that view, not its backing array. Sorted copies preserve dtype, including byte order; any working-storage conversion and its cost are included in the interface's space and timing measurements. No noncontiguous input is silently treated as a contiguous slice.
@@ -71,7 +81,7 @@ Python floating-point ordering is an adapter contract, distinct from the Rust AP
 | NaNs, zeros and other equal keys in stable operations | Preserve input order |
 | Original values | Preserve bits, including NaN payloads |
 
-Normalize only sorting keys; move the original values or object references. A float buffer can use the Rust by-key API with a library-owned unsigned key encoder, so no Python callback enters the radix loop and no full key copy is required just to normalize float order. `reverse=True` changes key encoding; it must not reverse the sorted result. The NaN sentinel remains last in both directions. This policy is Tessera's Python contract, not a claim that every NumPy descending idiom has identical behavior.
+Normalize only sorting keys; move the original values or object references. A float buffer can use the Rust by-key API with a library-owned unsigned key encoder, so no Python callback enters the radix loop and no full key copy is required just to normalize float order. `descending=True` changes key encoding; it must not reverse the sorted result. The NaN sentinel remains last in both directions. These rules match `numpy.sort` with `stable=True`, including `descending` as defined in NumPy 2.5.
 
 ## Binding and buffer safety
 
@@ -95,4 +105,4 @@ Measure the entire public call (extraction, allocation, conversion, sort, writeb
 
 The binding lives in `python/` (maturin project, unpublished PyO3 crate, `tessera_order` package with stubs and `py.typed`, tests) with benchmarks in `bench/python/`. The CI router treats Python independently of Rust and C++ and enables its checks only once the project manifests exist; Rust core changes then select Python validation without releasing it, and Python tags build only Python with the embedded core. Use a maturin wheel matrix for mainstream Linux, macOS and Windows, with NumPy present and absent. Wheel records name the package version, actual core version, source commit, ABI, Python version, toolchain and flags, and release verifies which core dependency source the wheels used (published versions for releases, the local core in development). Design the trusted publisher and install tests with the implementation.
 
-Order of work: specify and test numeric encodings, return types and exceptions while auditing buffer exclusivity; implement `array.array` and NumPy numeric paths with argsort; implement list key extraction, identity-preserving writeback and the six functions; validate identity and repeated references, key-call counts, extraction failure and callback mutation, integer bounds, mixed-key rejection, float bits, stable reverse order, read-only and noncontiguous views, dtype errors and NumPy-free imports; then measure, build wheels and publish independently. Multidimensional `axis` and structured-dtype or multicolumn sorting stay deferred until real use cases appear, and internal tile, digit and insertion parameters are not Python API.
+Order of work: specify and test numeric encodings, return types and exceptions while auditing buffer exclusivity; implement `array.array` and NumPy numeric paths with argsort; implement list key extraction, identity-preserving writeback, `out=` handling and both functions; validate identity and repeated references, key-call counts, extraction failure and callback mutation, integer bounds, mixed-key rejection, float bits, stable descending order, NumPy keyword compatibility, read-only and noncontiguous views, dtype errors and NumPy-free imports; then measure, build wheels and publish independently. Multidimensional `axis` and structured-dtype or multicolumn sorting stay deferred until real use cases appear, and internal tile, digit and insertion parameters are not Python API.

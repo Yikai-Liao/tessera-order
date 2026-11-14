@@ -178,6 +178,10 @@ These changes are in the engine; each measured loss below stays open and no dist
 
 Neutral or already accepted without a recorded loss: strictly descending reversal (1.24–1.56× on reverse inputs), direct finishing of insertion-sized roots (random `u64` 0.889, rows 0.943), the active block directory (0.998–1.001) and terminal parallel completion (0.9965). Parallel adoption latency was not measured.
 
+## Full-sort comparison with 0.1.0
+
+One hosted paired run measured `main` at [`d44bf77`](https://github.com/Yikai-Liao/tessera-order/commit/d44bf770aedd144b075a92ffc316afa101fa101b), the algorithm-extension landing, against the published `rust/v0.1.0` over the 98 continuous sorting cases ([#227](https://github.com/Yikai-Liao/tessera-order/pull/227)). Sixteen cases were faster, among them `row_u64/random/1000` −29.5%, four-thread `u64/d4096/1M` −27.2%, `sorted_tail` at 1M −17% to −21% and most short random inputs −7% to −14%. One case was slower: `u64/equal/48` +12.7% (interval 1.116–1.133), an all-equal input at the insertion limit. It stays open individually. This is one placement, so it measures the release difference, not source attribution; the slice operations have no 0.1 counterpart and are not part of it.
+
 ## Repeated-key root sharing
 
 PR #78 remains unaccepted. Its [pre-simplification paired screen](https://github.com/Yikai-Liao/tessera-order/actions/runs/43033277279) (`c2c84d5` against `c168df3`) found serial `u64/random/49` and `u64/random/1000` 15.2% and 12.7% slower despite unchanged serial source; layout is a hypothesis, not an established cause. The smaller closure-based candidate requires fresh exact-head feedback and source-attribution controls. Historical dual-build and 10M gains remain in the [PR evidence](https://github.com/Yikai-Liao/tessera-order/pull/78#issuecomment-6755255766), not current acceptance. The earlier cache-lock batching candidate was rejected.

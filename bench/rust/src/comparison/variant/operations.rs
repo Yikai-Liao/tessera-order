@@ -206,11 +206,11 @@ pub(super) fn prepare<T: TesseraAdapter>(
         "tessera-full" if operation.required_ranges().is_some() => reference(input, T::tessera),
         "std-stable" => reference(input, |v| v.sort_by(T::order)),
         "glidesort" => reference(input, glidesort::<T>),
-        "std-unstable" if !T::HAS_PAYLOAD => {
+        "std-unstable" if !T::HAS_PAYLOAD || !matches!(operation, Operation::Segments { .. }) => {
             let offsets = operation.offsets(input.original().len());
             prepare_call(
                 input,
-                true,
+                false,
                 move |values| {
                     if let Some(offsets) = &offsets {
                         for ends in offsets.windows(2) {
@@ -220,14 +220,14 @@ pub(super) fn prepare<T: TesseraAdapter>(
                         partial_unstable(values, &operation);
                     }
                 },
-                "slice unstable selection/sorting; equal scalar keys are bitwise indistinguishable",
+                "slice unstable selection/sorting; arbitrary equal-key members",
             )
         }
         _ => return None,
     })
 }
 
-/// Comparison-based partial operations are equivalent only for scalar inputs.
+/// Complete comparison-based partial operations under the weak tie contract.
 fn partial_unstable<T: BenchmarkRecord>(values: &mut [T], operation: &Operation) {
     match operation {
         Operation::TopK { k } => {
@@ -332,7 +332,7 @@ mod tests {
                             }
                             "radsort" => !ty.starts_with("reverse_"),
                             "std-unstable" => {
-                                matches!(operation, Operation::Argsort {})
+                                !matches!(operation, Operation::Segments { .. })
                                     || matches!(
                                         ty,
                                         "u32"

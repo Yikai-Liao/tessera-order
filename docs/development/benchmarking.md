@@ -1,6 +1,6 @@
 # Benchmarking
 
-The comparison runner in `bench/rust` measures sorting algorithms on one machine: Tessera against the standard stable sort, other stable sorts, unstable sorts where equal keys are indistinguishable, and the extra memory of each. [Continuous benchmarks](continuous-benchmarks.md) track PR regressions; release comparisons use the paired measurements described here.
+The comparison runner in `bench/rust` measures sorting algorithms on one machine: Tessera against the standard stable sort, other stable sorts, unstable sorts under their weaker tie contract, and the extra memory of each. [Continuous benchmarks](continuous-benchmarks.md) track PR regressions; release comparisons use the paired measurements described here.
 
 ## Command capabilities
 
@@ -203,13 +203,13 @@ bun run --silent tools plan --schema > benchmark-plan.schema.json               
 |---|---|---|
 | `argsort` | None | Index construction plus stable index sorting; `std-unstable` breaks ties by original index. |
 | `segments` | `--segment-len N` | Sort every consecutive segment independently, with a final shorter segment if needed. |
-| `top-k` | `--k K` | Unordered minimum-k membership; standard unstable selection is equivalent for scalar keys only. |
-| `prefix` | `--prefix-len K` | Ordered minimum-k prefix; standard selection plus prefix sorting for scalar keys. |
-| `select` | `--index I` | One exact stable ranked member; standard unstable selection for scalar keys. |
-| `rank-range` | `--rank-range START:END` | Sorted global rank interval; two boundary selections plus interval sorting for scalar keys. |
-| `select-many` | `--indices I,J,...` or `none` | Exact requested positions; recursive median-target standard selection for scalar keys. Raw order and duplicates remain part of the request. |
+| `top-k` | `--k K` | Unordered minimum-k membership; standard unstable selection under the weak tie contract. |
+| `prefix` | `--prefix-len K` | Ordered minimum-k prefix; standard selection plus prefix sorting under the weak tie contract. |
+| `select` | `--index I` | One ranked member; standard unstable selection under the weak tie contract. |
+| `rank-range` | `--rank-range START:END` | Sorted global rank interval; two boundary selections plus interval sorting under the weak tie contract. |
+| `select-many` | `--indices I,J,...` or `none` | Requested positions; recursive median-target standard selection under the weak tie contract. Raw order and duplicates remain part of the request. |
 
-For partial results, `std-stable`, Glidesort and Radsort explicitly sort the complete input as semantic references. Select `tessera-full` to compare with Tessera's complete sorting as well. These are not native partial algorithms. Unstable selection on payload records is omitted because it cannot guarantee stable boundary membership without additional identity handling. All admitted results satisfy the operation's actual contract; no weaker-contract result enters its ratio table. Typed Rust preparation owns capabilities; manifests record implementation routes and omissions rather than relying on algorithm names to imply them.
+For partial results, `std-stable`, Glidesort and Radsort explicitly sort the complete input as semantic references. Select `tessera-full` to compare with Tessera's complete sorting as well. These are not native partial algorithms. Stable routes require exact stable boundary membership; unstable routes permit arbitrary equal-key members and are marked separately in the report. Scalar equal keys are bitwise indistinguishable, so either route satisfies the stable result as well. Typed Rust preparation owns capabilities; manifests record implementation routes and omissions rather than relying on algorithm names to imply them.
 
 ```sh
 bun run --silent tools plan smoke --operation top-k --k 1024 \
@@ -228,7 +228,7 @@ Comparison IDs append the operation and parameters to the historical seed-one ID
 
 Timing includes each complete public call, its normalization, scratch allocation and mandatory output construction. Argsort retains its newly allocated output through checking; discarding the previous result and restoring inputs stay outside the clock. Other operations restore independent record buffers. The same paired blocks, A/A statistic, process-isolated allocation counter and journals apply. Independent checkers verify exact indices, each segment, or required ranked keys and every intervening region’s membership; stable routes additionally require exact original ranked identities. Unordered Top-k verifies membership only, not an incidental pivot position. Unstable payload checking also verifies the complete original record permutation. Times are divided by input records, not requested ranks or output count.
 
-The opt-in `tessera-unstable` adapter measures the public unstable rank functions on keys and payload records. Equal-key members may differ from a stable reference; reports mark these weaker-contract tasks separately. Their ratios to stable operations do not isolate the cost of stability. Standard unstable payload selection remains omitted; standard scalar selection and index-decorated argsort retain their existing admission. Default plans and stable controls are unchanged.
+The opt-in `tessera-unstable` adapter measures the public unstable rank functions on keys and payload records. The `std-unstable` partial adapters accept the same weak tie contract, including payload records; compare these routes directly for tasks without stable-membership requirements. Ratios to stable operations do not isolate the cost of stability. Index-decorated argsort remains stable, and standard unstable segmented sorting remains restricted to scalars because the segment task still requires stability. Default plans and stable controls are unchanged.
 
 Operation memory rows retain peak extra heap and mandatory output bytes separately. Argsort's O(n) index result is included in that peak; workspace peak is peak minus the retained output allocation, which is created before index sorting. In-place operations have zero output bytes. Every admitted operation/input/variant has a verified memory row. These reports contain tables and JSON only: no new operation figures are generated, and full-sort figures keep their existing cohorts and meaning.
 

@@ -50,7 +50,7 @@ pub fn par_stable_sort<K: RadixKey + Send>(values: &mut [K]) {
 /// `key` must implement `Fn + Sync` so Rayon jobs can borrow it concurrently.
 /// It does not need `Send` or `Clone`. It may be called several times per
 /// record, in any order, and should return the same key for a record throughout
-/// the call. Inconsistent keys leave the result's
+/// the call. Inconsistent keys may make the sort panic or leave the result's
 /// order unspecified, with every record still present exactly once.
 ///
 /// # Panics

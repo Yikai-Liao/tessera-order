@@ -149,9 +149,11 @@ fn changing_keys_borrowed_records() {
                 if panic && at <= total {
                     assert_eq!(*result.unwrap_err().downcast::<u32>().unwrap(), 0x72);
                     assert_eq!(calls, at, "called key after it panicked");
-                } else {
+                } else if at > total {
+                    // Keys never changed, so the sort must return normally.
                     assert!(result.is_ok(), "unexpected sort panic");
                 }
+                // Changed keys may make the sort panic or return.
                 let mut ids: Vec<_> = records.iter().map(|x| x.id).collect();
                 ids.sort_unstable();
                 assert_eq!(ids, (0..len).collect::<Vec<_>>());

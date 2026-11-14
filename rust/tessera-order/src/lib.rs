@@ -113,8 +113,8 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 ///
 /// `key` may be called several times for each record, in any order. It should
 /// return the same key for a record throughout one call. If it does not, the
-/// order of the result is unspecified, but the slice still holds every record
-/// exactly once.
+/// sort may panic or return with the result in unspecified order; either way
+/// the slice still holds every record exactly once.
 ///
 /// # Panics
 ///

@@ -319,16 +319,21 @@ fn changing_repeated_keys_keep_records() {
         .num_threads(4)
         .build()
         .unwrap();
-    pool.install(|| {
-        par_stable_sort_by_key(&mut records, |_| {
-            let call = calls.fetch_add(1, Ordering::Relaxed);
-            assert!(
-                call < 100 * len,
-                "changing equality keys did not make progress"
-            );
-            if call.is_multiple_of(16) { u64::MAX } else { 0 }
+    let limit = 100 * len;
+    // Changing keys may make the sort panic or return; neither may lose a record.
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        pool.install(|| {
+            par_stable_sort_by_key(&mut records, |_| {
+                let call = calls.fetch_add(1, Ordering::Relaxed);
+                assert!(call < limit, "stop a sort that makes no progress");
+                if call.is_multiple_of(16) { u64::MAX } else { 0 }
+            });
         });
-    });
+    }));
+    assert!(
+        calls.load(Ordering::Relaxed) <= limit,
+        "changing equality keys did not make progress"
+    );
     let mut ids: Vec<_> = records.into_iter().map(|record| *record).collect();
     ids.sort_unstable();
     assert_eq!(ids, (0..len).collect::<Vec<_>>());
@@ -365,9 +370,12 @@ fn sparse_root_keeps_stability() {
 fn changing_keys_keep_records() {
     let mut records: Vec<_> = (0..16_384u32).map(Box::new).collect();
     let calls = AtomicUsize::new(0);
-    par_stable_sort_by_key(&mut records, |_| {
-        calls.fetch_add(7919, Ordering::Relaxed) as u32
-    });
+    // Changing keys may make the sort panic or return; neither may lose a record.
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        par_stable_sort_by_key(&mut records, |_| {
+            calls.fetch_add(7919, Ordering::Relaxed) as u32
+        });
+    }));
     let mut recovered: Vec<_> = records.into_iter().map(|record| *record).collect();
     recovered.sort();
     assert_eq!(recovered, (0..16_384).collect::<Vec<_>>());

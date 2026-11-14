@@ -21,7 +21,7 @@ A counting pass reads each key twice: once for the histogram and once for the sc
 
 `stable_sort` sorts the keys themselves with Tessera's own encoders, which are deterministic and cannot panic, so it recomputes keys and stores nothing ([engine reference](../design/engine.md#record-handling)).
 
-An inconsistent key function can therefore produce an unsorted result, but never a lost, duplicated or uninitialized record.
+An inconsistent key function can therefore produce an unsorted result, but never a lost, duplicated or uninitialized record. The contract also lets the sort panic in that case, as Rust's standard sorts may; the records are then restored as after a [panicking key function](#panicking-key-functions).
 
 ## Panicking key functions
 

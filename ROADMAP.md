@@ -12,7 +12,6 @@ The first crates.io release: stable sort only.
 
 After 0.1:
 
-- **Cost of cached bucket IDs on 8-byte rows.** Read `{u32 key, u32 row}` against Block LSD* in the algorithm comparison. If the cost is large, consider an `unsafe` entry point that skips the cache ([rationale](docs/design/engine.md#record-handling)); a new entry point is a minor release.
 - **Local session defaults.** Fix the sample duration and prepared-memory cap of local paired sessions from the test machine's memory and the time a 10M-record case takes.
 
 ## Engine

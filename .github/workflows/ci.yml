@@ -124,6 +124,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target/comparison"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           # Keep the native objects in tessera-bench's build-script output.
           cache-workspace-crates: true
           shared-key: comparison-native-${{ hashFiles('bench/rust/native/**', '!bench/rust/native/**/*.test.ts') }}
@@ -189,6 +190,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target/benchmark"
+          # Main tracking saves this key from main; save here only while it is off.
+          save-if: ${{ vars.MAIN_BENCHMARKS_ENABLED != 'true' }}
           # Include virtual-root profiles and builder-owned flags in both workflows.
           shared-key: benchmark-static-${{ hashFiles('Cargo.toml', 'bench/workspace.ts') }}
       - uses: oven-sh/setup-bun@v2

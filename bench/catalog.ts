@@ -354,14 +354,14 @@ export function caseParts(id: string) {
   const { ty, seed, operation } = parsed;
   const record = recordType(ty),
     shape = distribution(parsed.distribution);
-  const extra = [
-    operation ? operationLabel(operation) : "",
-    seed === "s1" ? "" : `seed ${seed.slice(1)}`,
-    mode === "api" ? "" : mode,
-  ].filter(Boolean);
+  const extra = [seed === "s1" ? "" : `seed ${seed.slice(1)}`, mode === "api" ? "" : mode].filter(
+    Boolean,
+  );
+  const input = shape.compact ?? shape.label;
   return {
     type: record.compact ?? record.label,
-    input: shape.compact ?? shape.label,
+    // Operation cases share inputs with sorting cases; every table and figure row names the operation.
+    input: operation ? `${input} · ${operationLabel(operation)}` : input,
     n: parsed.len.toLocaleString("en-US"),
     extra: extra.join(", "),
     seed,

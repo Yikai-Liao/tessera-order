@@ -66,6 +66,10 @@ test("strict identities reject unknown fields without tightening historical labe
   });
   assert.deepEqual(rawCaseParts("old/id"), { input: "id", sub: "" });
   assert.equal(caseParts("not-an-id").input, "not-an-id");
+  assert.notEqual(
+    caseParts("rust/u64/random/65536/s1/argsort/api").input,
+    caseParts("rust/u64/random/65536/s1/api").input,
+  );
 });
 
 test("operation identities and parameter admission match the shared language fixture", () => {

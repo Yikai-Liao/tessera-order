@@ -16,11 +16,6 @@ A complete child of a parallel root may use a larger tile: up to 1 MiB of record
 
 Below 48 records, the work of clearing and scanning bucket tables costs more than insertion's shifts. The threshold is `thresholds::INSERTION_MAX` in `lib.rs`.
 
-## Unstable small leaves
-
-The same small-leaf threshold also bounds comparison finishing for an unstable call. Both direct and callback keys use the standard library's `sort_unstable_by_key` on encoded keys. The standard sorter owns its algorithm and panic recovery; Tessera adds no key cache, index permutation, record guard or threshold. If a callback changes its answer, comparisons may no longer form a total order and the standard sorter may panic. The [key-extraction contract](../../conformance/semantics.md#key-extraction) permits that outcome while requiring every original record to remain in the slice.
-
-Only terminal small finishing changes. Budgeted insertion still exploits nearly ordered inputs; LSD digit passes remain stable; and a tile whose MSD buckets are all insertion-sized still uses one whole-tile insertion pass to avoid walking its bucket table. Finishing every such bucket with a separate small sort added table-walk work and was rejected in the [evidence](../design/evidence.md#unstable-node-partition-feasibility). Figures on this page continue to model stable leaves.
 
 ## Digit planning
 

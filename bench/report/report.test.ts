@@ -252,12 +252,16 @@ test("optimization and debug settings must agree across timing and memory", asyn
 /** Small boundary fixture, derived from the existing paired-run fixture. */
 function operationFixture(operation: Operation) {
   const dataset = createFixture(3);
+  const payloadRanks = operation.kind !== "argsort" && operation.kind !== "segments";
+  const ty = payloadRanks ? "row_u64" : "u64";
   const source = dataset.manifest.cases.find(
-    (c) => c.ty === "u64" && c.distribution === "random" && c.len === 1000,
+    (c) => c.ty === ty && c.distribution === "random" && c.len === 1000,
   )!;
   const oldId = comparisonId(source),
     oldGroup = comparisonGroup(source);
-  const variants = ["tessera", "std-stable"];
+  const variants = payloadRanks
+    ? ["tessera", "std-stable", "std-unstable"]
+    : ["tessera", "std-stable"];
   const c = {
     ...source,
     operation,
@@ -325,6 +329,11 @@ test("operation reports retain exact parameters and output-aware memory without 
     await writeReport([directory]);
     const report = await readFile(join(directory, "report/index.md"), "utf8");
     assert.match(report, /synthetic complete operation/);
+    if (dataset.manifest.cases[0].ty === "row_u64") {
+      assert.ok(report.includes("| row_u64 | std-unstable | synthetic complete operation |"));
+      assert.match(report, /partial routes.*payload records/);
+      assert.doesNotMatch(report, /selection remains scalar-only/);
+    }
     assert.ok(report.includes(JSON.stringify(operation)));
     assert.ok((await readdir(join(directory, "report"))).every((name) => !name.endsWith(".svg")));
     assert.equal(

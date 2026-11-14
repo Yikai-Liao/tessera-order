@@ -9,7 +9,6 @@ export const trackingAlgorithms = catalog.algorithms.filter(
   (entry) =>
     entry.adapter !== "revision" &&
     entry.adapter !== "reference" &&
-    entry.adapter !== "unstable" &&
     (entry.threads ?? 1) <= TRACKING_SPEC.cpus,
 );
 

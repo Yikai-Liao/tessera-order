@@ -37,19 +37,7 @@ pub(super) trait TesseraAdapter: BenchmarkRecord {
     fn rank_range(records: &mut [Self], ranks: std::ops::Range<usize>);
     #[cfg(feature = "operations")]
     fn select_many(records: &mut [Self], indices: &[usize]);
-    #[cfg(feature = "operations")]
-    fn prefix_unstable(records: &mut [Self], len: usize);
-    #[cfg(feature = "operations")]
-    fn top_k_unstable(records: &mut [Self], k: usize);
-    #[cfg(feature = "operations")]
-    fn select_unstable(records: &mut [Self], index: usize);
-    #[cfg(feature = "operations")]
-    fn range_unstable(records: &mut [Self], ranks: std::ops::Range<usize>);
-    #[cfg(feature = "operations")]
-    fn many_unstable(records: &mut [Self], indices: &[usize]);
-    /// Calls the complete serial API under the weak tie contract.
-    #[cfg(feature = "operations")]
-    fn tessera_unstable(records: &mut [Self]);
+
     /// Sorts through the independently named baseline crate.
     #[cfg(tessera_bench_revisions)]
     fn baseline(records: &mut [Self]);
@@ -116,22 +104,6 @@ macro_rules! slice_operations {
     };
 }
 
-/// Supplies direct/by-key API pairs without owning algorithm decisions.
-macro_rules! unstable_rank_operations {
-    ($prefix:ident, $top_k:ident, $select:ident, $range:ident, $many:ident $(, $key:expr)?) => {
-        #[cfg(feature = "operations")]
-        fn prefix_unstable(records: &mut [Self], len: usize) { tessera_order::$prefix(records, len $(, $key)?); }
-        #[cfg(feature = "operations")]
-        fn top_k_unstable(records: &mut [Self], k: usize) { tessera_order::$top_k(records, k $(, $key)?); }
-        #[cfg(feature = "operations")]
-        fn select_unstable(records: &mut [Self], index: usize) { tessera_order::$select(records, index $(, $key)?); }
-        #[cfg(feature = "operations")]
-        fn range_unstable(records: &mut [Self], ranks: std::ops::Range<usize>) { tessera_order::$range(records, ranks $(, $key)?); }
-        #[cfg(feature = "operations")]
-        fn many_unstable(records: &mut [Self], indices: &[usize]) { tessera_order::$many(records, indices $(, $key)?); }
-    };
-}
-
 /// Keeps scalar adapters on Tessera's direct-key entry points.
 macro_rules! tessera_keys {
     ($($t:ty),+ $(,)?) => {$(
@@ -140,12 +112,9 @@ macro_rules! tessera_keys {
             fn tessera(records: &mut [Self]) {
                 tessera_order::stable_sort(records);
             }
-            #[cfg(feature = "operations")]
-            fn tessera_unstable(records: &mut [Self]) {
-                tessera_order::unstable_sort(records);
-            }
+
             slice_operations!(stable_argsort, stable_sort_segments, stable_sort_prefix, stable_top_k, stable_select_nth, stable_sort_rank_range, stable_select_nth_many);
-            unstable_rank_operations!(unstable_sort_prefix, unstable_top_k, unstable_select_nth, unstable_sort_rank_range, unstable_select_nth_many);
+
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort);
             #[cfg(feature = "rayon")]
@@ -165,12 +134,9 @@ macro_rules! tessera_records {
             fn tessera(records: &mut [Self]) {
                 tessera_order::stable_sort_by_key(records, |r| r.key);
             }
-            #[cfg(feature = "operations")]
-            fn tessera_unstable(records: &mut [Self]) {
-                tessera_order::unstable_sort_by_key(records, |r| r.key);
-            }
+
             slice_operations!(stable_argsort_by_key, stable_sort_segments_by_key, stable_sort_prefix_by_key, stable_top_k_by_key, stable_select_nth_by_key, stable_sort_rank_range_by_key, stable_select_nth_many_by_key, |r| r.key);
-            unstable_rank_operations!(unstable_sort_prefix_by_key, unstable_top_k_by_key, unstable_select_nth_by_key, unstable_sort_rank_range_by_key, unstable_select_nth_many_by_key, |r| r.key);
+
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort_by_key, |r| r.key);
             #[cfg(feature = "rayon")]
@@ -366,8 +332,7 @@ pub fn list_variants() -> Vec<Variant> {
         .iter()
         .filter(|algorithm| {
             algorithm.adapter == "common"
-                || (matches!(algorithm.adapter.as_str(), "reference" | "unstable")
-                    && cfg!(feature = "operations"))
+                || (algorithm.adapter == "reference" && cfg!(feature = "operations"))
                 || (cfg!(feature = "rayon") && algorithm.threads.is_some())
                 || (algorithm.adapter == "revision" && cfg!(tessera_bench_revisions))
                 || algorithm.adapter == "rust"
@@ -399,8 +364,7 @@ fn try_prepare_common<T: TesseraAdapter>(
     }
     Some(match v.name {
         "tessera" => prepare_kernel(input, true, T::tessera),
-        #[cfg(feature = "operations")]
-        "tessera-unstable" => prepare_kernel(input, false, T::tessera_unstable),
+
         #[cfg(tessera_bench_revisions)]
         "tessera-baseline" => prepare_kernel(input, true, T::baseline),
         #[cfg(tessera_bench_revisions)]
@@ -449,7 +413,6 @@ impl Variant {
                 self.name,
                 "tessera"
                     | "tessera-full"
-                    | "tessera-unstable"
                     | "std-stable"
                     | "std-unstable"
                     | "glidesort"
@@ -596,13 +559,8 @@ mod tests {
                     for variant in list_variants().into_iter().filter(|v| v.threads.is_none()) {
                         let kernel = variant.prepare(&input, 32768);
                         let supported = ["common", "revision"].contains(&variant.adapter)
-                            || [
-                                "glidesort",
-                                "glidesort-sqrt",
-                                "std-unstable",
-                                "tessera-unstable",
-                            ]
-                            .contains(&variant.name);
+                            || ["glidesort", "glidesort-sqrt", "std-unstable"]
+                                .contains(&variant.name);
                         assert_eq!(kernel.is_some(), supported, "{ty}/{}", variant.name);
                         if let Some(mut kernel) = kernel {
                             kernel.restore(2);

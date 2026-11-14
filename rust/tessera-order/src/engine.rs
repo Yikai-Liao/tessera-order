@@ -70,7 +70,7 @@ impl Split {
     /// Partitions all records and finishes requested tile-sized children
     /// while they are cache-hot, using the extractor `lend` returns for child
     /// work. Returns each bucket's end; larger children remain.
-    fn partition<T, E: Extract<T>, C: Classify<T>, const UNSTABLE: bool>(
+    fn partition<T, E: Extract<T>, C: Classify<T>>(
         self,
         records: &mut [T],
         classifier: C,
@@ -86,7 +86,7 @@ impl Split {
                     && self.finished != Some(bucket)
                     && required.project(range).is_some()
                 {
-                    tile.finish_child::<_, UNSTABLE>(child, self.candidate, lend(classifier));
+                    tile.finish_child::<_>(child, self.candidate, lend(classifier));
                 }
             };
         block::partition(
@@ -101,7 +101,7 @@ impl Split {
 
 /// Refines requested ranks through shared node and tile decisions.
 /// Unrequested bands have completed movement but receive no further key work.
-struct Sorter<'a, T, E, const UNSTABLE: bool = false> {
+struct Sorter<'a, T, E> {
     scratch: &'a mut Workspace<T>,
     extractor: &'a mut E,
     tile_len: usize,
@@ -124,23 +124,6 @@ pub(crate) fn sort<T, E: Extract<T>>(records: &mut [T], extractor: E) {
 /// allocate or initialize unused movement storage.
 pub(crate) fn refine<T, E: Extract<T>>(
     records: &mut [T],
-    extractor: E,
-    required: Requirement<'_>,
-    workspace: Option<&mut Workspace<T>>,
-    tile_bytes: usize,
-) {
-    refine_mode::<T, E, false>(records, extractor, required, workspace, tile_bytes);
-}
-
-/// Requests every rank under the weak tie contract through shared refinement.
-pub(crate) fn sort_unstable<T, E: Extract<T>>(records: &mut [T], extractor: E) {
-    let ranks = 0..records.len();
-    let required = Requirement::new(records.len(), core::slice::from_ref(&ranks));
-    refine_mode::<T, E, true>(records, extractor, required, None, TILE_BYTES);
-}
-
-pub(crate) fn refine_mode<T, E: Extract<T>, const UNSTABLE: bool>(
-    records: &mut [T],
     mut extractor: E,
     required: Requirement<'_>,
     workspace: Option<&mut Workspace<T>>,
@@ -154,7 +137,7 @@ pub(crate) fn refine_mode<T, E: Extract<T>, const UNSTABLE: bool>(
         return;
     };
     let tile_len = tile_capacity::<T>(tile_bytes);
-    let Some(varying) = prepare::<_, _, UNSTABLE>(records, &mut extractor, tile_len) else {
+    let Some(varying) = prepare::<_, _>(records, &mut extractor, tile_len) else {
         return;
     };
     let mut local;
@@ -167,7 +150,7 @@ pub(crate) fn refine_mode<T, E: Extract<T>, const UNSTABLE: bool>(
     };
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
-            Sorter::<T, _, UNSTABLE> {
+            Sorter::<T, _> {
                 scratch: workspace,
                 extractor: &mut KeyHalf::<_, 0>(extractor),
                 tile_len,
@@ -176,7 +159,7 @@ pub(crate) fn refine_mode<T, E: Extract<T>, const UNSTABLE: bool>(
             return;
         }
         if varying & ((1u128 << 64) - 1) == 0 {
-            Sorter::<T, _, UNSTABLE> {
+            Sorter::<T, _> {
                 scratch: workspace,
                 extractor: &mut KeyHalf::<_, 64>(extractor),
                 tile_len,
@@ -185,7 +168,7 @@ pub(crate) fn refine_mode<T, E: Extract<T>, const UNSTABLE: bool>(
             return;
         }
     }
-    Sorter::<T, E, UNSTABLE> {
+    Sorter::<T, E> {
         scratch: workspace,
         extractor: &mut extractor,
         tile_len,
@@ -202,7 +185,7 @@ fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], extractor: E, tile_
 
 /// Finishes ordered or small roots, otherwise returns their varying bits.
 /// Shared by serial and parallel entries before either allocates partition scratch.
-fn prepare<T, E: Extract<T>, const UNSTABLE: bool>(
+fn prepare<T, E: Extract<T>>(
     records: &mut [T],
     extractor: &mut E,
     tile_len: usize,
@@ -211,8 +194,7 @@ fn prepare<T, E: Extract<T>, const UNSTABLE: bool>(
     if finish_ordered(records, sampled, extractor) {
         return None;
     }
-    if sampled == Order::Unsorted && insertion_probe::<_, _, UNSTABLE>(records, extractor, tile_len)
-    {
+    if sampled == Order::Unsorted && insertion_probe::<_, _>(records, extractor, tile_len) {
         return None;
     }
     let candidate = u128::MAX >> (128 - E::Value::BITS);
@@ -232,14 +214,14 @@ fn prepare<T, E: Extract<T>, const UNSTABLE: bool>(
 /// Tries to finish `records` with a budgeted insertion pass and returns whether it
 /// did.
 ///
-/// A small tile finishes under the tie contract; another tile gets one
+/// A small tile finishes by stable insertion; another tile gets one
 /// swap per record. A longer input first insertion-sorts one tile of keys in a
 /// local buffer, and scales that window's swap count to the whole input as the
 /// budget for the records.
 /// A window that needs no swaps says nothing about the rest, so the records are
 /// not touched. A pass that runs out of budget leaves `records` a stable
 /// permutation of its input.
-fn insertion_probe<T, E: Extract<T>, const UNSTABLE: bool>(
+fn insertion_probe<T, E: Extract<T>>(
     records: &mut [T],
     extractor: &mut E,
     tile_len: usize,
@@ -248,7 +230,7 @@ fn insertion_probe<T, E: Extract<T>, const UNSTABLE: bool>(
     // select comparison finishing again. Keep its result unit-returning, so
     // stable direct insertion discards the unused count inside SIMD dispatch.
     if records.len() <= INSERTION_MAX && records.len() <= tile_len {
-        tile::finish_small::<_, _, UNSTABLE>(records, extractor);
+        extractor.finish_insertion(records);
         return true;
     }
     let probe_len = tile_len.max(2).min(records.len());
@@ -401,7 +383,7 @@ fn reverse_stably<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
     }
 }
 
-impl<T, E: Extract<T>, const UNSTABLE: bool> Sorter<'_, T, E, UNSTABLE> {
+impl<T, E: Extract<T>> Sorter<'_, T, E> {
     /// Consumes an ordered-run decision without probing or partitioning again.
     fn split_ordered(
         &mut self,
@@ -456,7 +438,7 @@ impl<T, E: Extract<T>, const UNSTABLE: bool> Sorter<'_, T, E, UNSTABLE> {
         if len <= self.tile_len {
             self.scratch
                 .tile
-                .sort::<E, UNSTABLE>(records, varying, self.extractor);
+                .sort::<E>(records, varying, self.extractor);
             return;
         }
         let plan = plan_node(records, varying, self.tile_len, self.extractor);
@@ -501,7 +483,7 @@ impl<T, E: Extract<T>, const UNSTABLE: bool> Sorter<'_, T, E, UNSTABLE> {
             candidate,
             finished: None,
         };
-        let ends = split.partition::<_, _, _, UNSTABLE>(
+        let ends = split.partition::<_, _, _>(
             records,
             KeyDigit::new(&mut *self.extractor, digit.shift),
             |digit| &mut *digit.extractor,
@@ -523,7 +505,7 @@ impl<T, E: Extract<T>, const UNSTABLE: bool> Sorter<'_, T, E, UNSTABLE> {
     ) {
         let rank = Rank::new(&mut *self.extractor, equal, varying);
         let split = Split::equality(&rank, varying);
-        let ends = split.partition::<_, _, _, UNSTABLE>(
+        let ends = split.partition::<_, _, _>(
             records,
             rank,
             |rank| &mut *rank.extractor,

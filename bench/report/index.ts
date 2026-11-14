@@ -119,7 +119,7 @@ function renderCapabilities(dataset: Dataset) {
       "Unstable sorts on records are listed as a separate task: their permutation check allows equal keys to change order. A dash means the adapter does not support the task.\n\n"
     );
   out +=
-    "Stable routes require exact stable ranked membership. Explicit unstable Tessera routes instead require the same ranked keys with arbitrary equal-key members; these are weaker-contract tasks, not equivalent stable selectors. Standard unstable selection remains scalar-only here, and standard unstable argsort explicitly breaks ties by original index. Each route is retained below.\n\n";
+    "Stable routes require exact stable ranked membership. Standard-library unstable partial routes instead require the same ranked keys with arbitrary equal-key members, including on payload records; these are weaker-contract tasks, not equivalent stable selectors. Standard unstable segmented sorting remains scalar-only, and standard unstable argsort explicitly breaks ties by original index. Each admitted route or omission is retained below.\n\n";
   const routes = new Map<string, string[]>();
   for (const c of manifest.cases) {
     for (const [name, route] of Object.entries(c.implementations ?? {}))

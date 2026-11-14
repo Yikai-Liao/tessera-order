@@ -20,7 +20,7 @@ The sample rejects most unsorted inputs within a few pairs, so the full scan run
 
 ## Budgeted insertion
 
-An unsorted input no longer than the [small-leaf threshold](tiles.md#three-leaves) goes straight to comparison finishing: a budget and a varying-bit scan would only lead back to the same leaf. Stable calls use insertion; [unstable calls](tiles.md#unstable-small-leaves) delegate the small sort to the standard library. `insertion_probe` owns this check, the probe window and the budget.
+An unsorted input no longer than the [small-leaf threshold](tiles.md#three-leaves) goes straight to stable insertion: a budget and a varying-bit scan would only lead back to the same leaf. `insertion_probe` owns this check, the probe window and the budget.
 
 A larger unsorted input may still be *nearly* sorted: a sorted log with a few late entries, for example. Insertion sort finishes such an input in linear time, but on a random input it is quadratic. Tessera therefore gives it a **swap budget** and abandons it when the budget runs out.
 

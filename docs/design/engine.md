@@ -2,7 +2,7 @@
 
 This page owns the engine's code boundaries and invariants in `rust/tessera-order`. Routing rules, thresholds and their reasons live on the [explanation pages](../explain/index.md); [engine evidence](evidence.md) keeps failed experiments and open measured losses.
 
-Stable and unstable full-sort and rank entries share node decisions, rank projection, workspace and stable block movement. Only terminal small finishing may use an unstable algorithm; the [tile explanation](../explain/tiles.md#unstable-small-leaves) owns that rule and the [feasibility study](evidence.md#unstable-node-partition-feasibility) records why the earlier swap mover was not promoted. Stable and Rayon contracts are unchanged.
+Full-sort and rank entries share node decisions, rank projection, workspace and stable block movement. Requested ranks determine which completed children need further refinement.
 
 ## Vocabulary
 
@@ -21,7 +21,7 @@ Stable and unstable full-sort and rank entries share node decisions, rank projec
 
 | Owner | Complete responsibility | Consumers need to know |
 |---|---|---|
-| `algorithms.rs`, `unstable.rs` | Complete serial argsort, segmented sorting, Top-k, prefix and selection calls; validate public arguments and shape outputs | Shared rank requirements and complete refinement, not movement state or planner details |
+| `algorithms.rs` | Complete serial argsort, segmented sorting, Top-k, prefix and selection calls; validate public arguments and shape outputs | Shared rank requirements and complete refinement, not movement state or planner details |
 | `engine.rs` | Root preparation, candidate-bit progress and ordered refinement. Serial and parallel entries preserve actual variation and narrow a 128-bit key through one `KeyHalf` (`key.rs`) | Required rank views and complete partition and finishing operations |
 | `rank.rs` | Validate normalized required intervals once and project immutable borrowed views into final bands | Parent-relative final ranges, not keys, classifications or callback order |
 | `workspace.rs` | Invocation-owned reusable tile and block capacity, lent through complete operations | Capacity is reusable after restoration; no live movement state survives an operation |
@@ -74,8 +74,6 @@ A stage's rule changes on its page, in the code and in the page's model together
 Full sorting and the stable serial [slice operations](../../conformance/semantics.md#serial-slice-operations) use the common `engine::refine` entry. Full sorting requests All ranks. Partial requests borrow sorted, nonempty, separated intervals in root coordinates. Root validation precedes mutation and key calls; an empty requirement returns before preparation. A full interval becomes the All representation, including the empty full input. A prefix and rank range borrow one interval without allocation; multiple selection validates and normalizes indices once in `rank.rs`. Top-k isolates the first excluded rank, then returns the two regions without requiring internal order; empty and full-set requests return before refinement.
 
 `Requirement::project` intersects a final parent-relative band with the borrowed intervals and translates its origin without allocation. Covered children become All; absent intersections skip further analysis. Binary searches are independent of callback order, so serial and concurrent completion use one authority. Equality bands are already complete; their stable movement establishes ranked identity even when requests cut through equal keys. Existing-run ranges are projected after rotation.
-
-The unstable rank adapters pass the same requirements through `refine_mode`, without promising stable membership. The entry fixes the tie requirement, not a particular movement algorithm: both contracts use the same node partition. Small finishing consumes that requirement and uses the same encoded-key extractor for direct and callback keys; neither rank projection nor scheduling reconstructs those rules.
 
 Every partition completes movement for every band. Only further analysis and finishing may be skipped. Requested tiles may be completely sorted; this preserves insertion, counting and LSD/MSD leaves rather than adding a partial tile engine. Root preparation, narrowed key facts and child candidate masks pass directly to execution. A serial invocation reuses one workspace; segmented sorting lends that invocation’s workspace successively to complete segment refinements. Argsort creates the index output and sorts it with `ByKey` source extraction: numeric indices are payloads, never direct keys eligible for count/refill. Parallel tasks borrow workspace capacity from their invocation-owned pool.
 

@@ -63,9 +63,6 @@ Smaller candidates remain available; none waits for P1's acceptance:
 | P2 | Residual partition configuration | One description consumed by the block layer | `BucketFinish` and `BoundedFinish` are gone; reassess `Config` only if it duplicates policy rather than owning test geometry and execution controls |
 | P3 | `tile::Scratch`, `block::Buffers`, job `Pool` | A shared scratch lifecycle | `engine::Scratch` now pairs the first two per sort; preserve nested/reentrant lifetimes and allocation reuse rather than assume one buffer per worker |
 
-### Unstable sorting
-
-The [node-partition feasibility study](docs/design/evidence.md#unstable-node-partition-feasibility) found a wide-record memory/performance niche, not a general speedup. The integrated experiment implements ordinary unstable full-sort and rank APIs over shared refinement, stable block movement and a common bounded small-leaf rule. The swap kernel is retired from the integrated runtime, with its wide-record memory/performance advantage retained as an explicit trade-off in the evidence. Release acceptance remains post-0.1 research; acceptance requires shared planning and recursion without a second engine or distribution-specific routing, measured timing and memory against stable Tessera and standard unstable sort, individually accounted regressions, and ownership/panic/changing-key validation including Miri. Prefer one generally applicable primitive and small-sort rule over width/skew dispatch; parallel support needs its own evidence.
 
 ### Rayon
 

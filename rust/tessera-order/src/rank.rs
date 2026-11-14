@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Required ordered positions, independent of keys, movement and scheduling.
+//! Required ordered positions and cuts, independent of keys, movement and scheduling.
 //! A root borrows normalized disjoint intervals; child projection borrows a
 //! smaller view and translates its origin, without allocation or normalization.
 
@@ -28,11 +28,13 @@ pub(crate) fn normalize_indices(len: usize, indices: &[usize]) -> Vec<Range<usiz
     ranges
 }
 
-/// Positions that still need ordered refinement within one subproblem.
+/// Positions and membership boundaries still needed within one subproblem.
 ///
 /// `None` intervals means All. Otherwise intervals use root coordinates and
 /// `base` is this subproblem's root-relative start. Empty views need no work.
 /// Only this module constructs views, keeping bounds and endpoint meaning here.
+/// A nonempty interval orders its positions and establishes both memberships;
+/// a degenerate `k..k` establishes only the membership boundary at `k`.
 #[derive(Clone, Copy)]
 pub(crate) struct Requirement<'a> {
     intervals: Option<&'a [Range<usize>]>,
@@ -40,7 +42,7 @@ pub(crate) struct Requirement<'a> {
 }
 
 impl<'a> Requirement<'a> {
-    /// Borrows nonempty, sorted, separated intervals bounded by `len`.
+    /// Borrows sorted, separated intervals and cuts bounded by `len`.
     /// Adjacent intervals must already be merged. Validation happens once at
     /// the root; a full interval becomes All, including the empty full input.
     /// Invalid intervals panic before execution can mutate any records.
@@ -60,7 +62,7 @@ impl<'a> Requirement<'a> {
         let mut previous = None;
         for range in intervals {
             assert!(
-                range.start < range.end && range.end <= len,
+                range.start <= range.end && range.end <= len,
                 "invalid required ranks"
             );
             assert!(
@@ -80,7 +82,8 @@ impl<'a> Requirement<'a> {
     ///
     /// No overlap means no further work. A covered band becomes All. Other
     /// bands retain borrowed intersections in root coordinates, including
-    /// endpoint cuts. Two binary searches cost O(log m) for m parent intervals,
+    /// endpoint cuts. A cut survives only strictly inside a band: a boundary
+    /// between final bands already satisfies it. Two searches cost O(log m),
     /// independently of callback order; no mutable traversal cursor is shared.
     #[inline]
     pub(crate) fn project(self, band: Range<usize>) -> Option<Self> {
@@ -115,6 +118,23 @@ impl<'a> Requirement<'a> {
 mod tests {
     use super::*;
     use alloc::vec::Vec;
+
+    #[test]
+    fn cuts_survive_only_inside_final_bands() {
+        let intervals = [0..0, 2..2, 4..6, 8..8];
+        let required = Requirement::new(8, &intervals);
+        assert!(required.project(0..2).is_none());
+        assert!(required.project(2..4).is_none());
+        assert!(required.project(6..8).is_none());
+        let child = required.project(1..4).unwrap();
+        assert!(child.project(0..1).is_none());
+        assert!(child.project(1..3).is_none());
+        assert!(child.project(0..2).is_some());
+        let child = required.project(3..7).unwrap();
+        assert!(child.project(0..1).is_none());
+        assert!(child.project(1..3).is_some());
+        assert!(child.project(3..4).is_none());
+    }
 
     // The exhaustive coordinate oracle has no unsafe ownership to interpret.
     #[test]

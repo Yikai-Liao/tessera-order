@@ -56,9 +56,17 @@ fn check_keys<K: RadixKey>(keys: &[K]) {
         0..len / 3,
         len / 3..2 * len / 3,
         len / 2..len / 2 + 1,
+        0..0,
+        len / 2..len / 2,
+        len..len,
     ] {
         check(core::slice::from_ref(&range));
     }
+    check(&[
+        len / 4..len / 4,
+        len / 2..len / 2 + 1,
+        3 * len / 4..3 * len / 4,
+    ]);
     for count in [7, 31] {
         let intervals: Vec<_> = (1..=count)
             .map(|i| {

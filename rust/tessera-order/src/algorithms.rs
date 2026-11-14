@@ -288,14 +288,8 @@ fn ranks(range: impl RangeBounds<usize>, len: usize) -> Range<usize> {
     }
 }
 
-/// Orders `ranks` in place. An empty interior range isolates its first
-/// excluded rank, which establishes both memberships through the same request.
+/// Requests ordered positions or an empty range's membership boundary.
 fn partial<T, E: Extract<T>>(values: &mut [T], ranks: Range<usize>, extractor: E) {
-    let ranks = match ranks {
-        Range { start, end } if start < end => start..end,
-        Range { start, .. } if 0 < start && start < values.len() => start..start + 1,
-        _ => return,
-    };
     let required = Requirement::new(values.len(), core::slice::from_ref(&ranks));
     engine::refine(values, extractor, required, None);
 }

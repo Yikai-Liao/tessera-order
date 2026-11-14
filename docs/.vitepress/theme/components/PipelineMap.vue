@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { useRouter, withBase } from "vitepress";
 
-// The route an input takes through `engine.rs`. Every box links to the page
+// The route an input takes through `engine/refine.rs`. Every box links to the page
 // that explains it. Boxes navigate with the router instead of SVG `<a>`
 // elements, whose `href` VitePress's link prefetcher cannot read.
 interface Box {

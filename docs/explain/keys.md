@@ -41,6 +41,6 @@ The result, `varying`, is used everywhere later:
 - If `varying` is 0, every key is equal and the input is already sorted.
 - Every digit is placed over varying bits only. A digit never spends a pass on constant bits ([digit planning](tiles.md#digit-planning)).
 - For 128-bit keys whose variation fits in one 64-bit half, the engine sorts by that half as a `u64` (`KeyHalf` in `key.rs`), which halves the work per key.
-- After a partition on a digit, that digit is constant inside each child, so the child's scan excludes it and stops once every remaining candidate bit has been seen in both states (`scan_varying_bits` in `engine.rs`).
+- After a partition on a digit, that digit is constant inside each child, so the child's scan excludes it and stops once every remaining candidate bit has been seen in both states (`scan_varying_bits` in `engine/order.rs`).
 
 The scan reads a 1,025-record prefix first. If every bit already varies there, as with random wide keys, it stops early.

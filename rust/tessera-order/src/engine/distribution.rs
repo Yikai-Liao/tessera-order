@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 //! Complete stable category distribution for algorithm adapters.
-//! Classification, movement and boundary output complete within one invocation; sorting's order probes, rank requirements
-//! and recursive finishing are not involved.
+//! Classification, movement and boundary output complete within one
+//! invocation; sorting's order probes, rank requirements and recursive
+//! finishing are not involved.
 
 use super::{
     block,

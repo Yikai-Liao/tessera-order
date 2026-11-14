@@ -24,33 +24,41 @@ pub(crate) fn sort<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], mut key:
     if values.len() < 2 || size_of::<T>() == 0 {
         return;
     }
-    // A key panic propagates here, before any record has moved.
-    let keys: Vec<K::Encoded> = values.iter().map(|record| key(record).encode()).collect();
-    let first = keys[0].to_u128();
+    // A key panic propagates here, before any record has moved. The same pass
+    // records which bits differ from the first key and whether keys ascend.
+    let mut keys: Vec<K::Encoded> = Vec::with_capacity(values.len());
+    let first = key(&values[0]).encode();
+    keys.push(first);
+    let mut previous = first;
     let mut varying = 0;
     let mut ordered = true;
-    for pair in keys.windows(2) {
-        varying |= pair[1].to_u128() ^ first;
-        ordered &= pair[0] <= pair[1];
+    for record in &values[1..] {
+        let current = key(record).encode();
+        keys.push(current);
+        varying |= current.to_u128() ^ first.to_u128();
+        ordered &= previous <= current;
+        previous = current;
     }
     if ordered {
         return;
     }
     // Bits outside the window are equal in every key, so the window alone
     // orders the records.
-    let shift = varying.trailing_zeros() as usize;
-    let width = bit_len(varying) - shift;
+    let low = varying.trailing_zeros() as usize;
+    let width = bit_len(varying) - low;
     if width <= MAX_DISTRIBUTION_BITS {
-        let mask = (1 << width) - 1;
+        let shift = <K::Encoded as Unsigned>::from_usize(low);
+        let mask = <K::Encoded as Unsigned>::from_usize((1 << width) - 1);
         // The distribution classifies each record exactly once, in input
         // order, so its `n`th call belongs to the `n`th cached key.
-        let mut replay = keys.iter();
+        let mut next = 0;
         partition::distribute(
             values,
             width,
             ByKey(|_: &T| {
-                let key = replay.next().expect("one classification per record");
-                (key.to_u128() >> shift) as u16 & mask
+                let digit = (keys[next] >> shift) & mask;
+                next += 1;
+                digit
             }),
         );
     } else if values.len() <= u32::MAX as usize {

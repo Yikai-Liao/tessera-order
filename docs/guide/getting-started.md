@@ -189,3 +189,4 @@ Records need `Send`; the by-key callback needs `Fn + Sync` because calls may ove
 - **No allocator**: Tessera needs O(√n) scratch memory, so it needs `alloc`.
 
 The exact guarantees are in the [ordering semantics](../../conformance/semantics.md).
+

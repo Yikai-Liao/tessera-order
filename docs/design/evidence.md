@@ -19,6 +19,38 @@ Branch alignment is not a free speedup: it changed the prototype's own time by �
 
 The engine is a Stable Rust port of the research prototype in `sort-research-rs` at `6c0877f0491dc3b8fc052aa529bce44bf8a53fa8`. Measured inside one Nightly binary of the prototype's harness (fixed seed, one pinned core, rotated order, every output checked), the median per-case ratio `port / prototype` was 0.984–1.004 over 27–136 cases per matrix (ranges 0.53–1.23, placement-dominated), for both `stable_sort_by_key` and `stable_sort`, in the default build and with `target-cpu=native` and fat LTO. Cases outside the control range were within 3% of the prototype forced onto cached bucket IDs (`record128` zipf 1.3 n = 128: 1.168 against 1.030), the cost of the caching policy the port adopts on purpose ([record handling](engine.md#record-handling)); replacing it on 8-byte rows was [rejected](#recomputed-tile-buckets-rejected). The harness is Apache-2.0 code and stays outside the repository.
 
+## Stable category partition baseline
+
+A bounded complete-call screen compared the unreleased binary and finite-category operations with standard stable sorting, Glidesort and Radsort compositions that sort by the same deterministic category and construct the returned boundaries. Categories were encoded keys modulo R; these are sorting-based references, not dedicated buffered partition algorithms. The public classifier contract is stronger than those deterministic compositions: it requires one evaluation per record in input order. The comparison includes all classification, scratch allocation and output construction, not just scatter.
+
+Coverage was u64 keys, 16-byte rows and 128-byte records. Binary and seven-category runs each covered random, 16-value and constant inputs at 4,096 and 65,536 records; 257 categories covered random and 16-value inputs at 65,536. The host was an i7-10875H pinned to one logical CPU, Rust 1.99.1/LLVM 23.1.3, with the existing powersave governor, SMT and turbo unchanged. Three paired blocks used a 5 ms target, repeated Tessera A/A, independent record/boundary verification and separate verified memory measurements.
+
+| Workload | Opponent/input pairs | Tessera faster | Tessera slower |
+|---|---:|---:|---:|
+| Binary partition | 54 | 49 | 5 |
+| Seven categories | 54 | 50 | 4 |
+| 257 categories | 18 | 18 | 0 |
+
+All nine losses were constant-category 128-byte records. The following percentages are extra Tessera time over the named reference, from inverted median paired reference/Tessera ratios, not quotients of marginal times. They exceed the observed A/A window on those cases (at most ±0.46%); they are not confidence bounds.
+
+| Operation | Records | Reference | Extra Tessera time |
+|---|---:|---|---:|
+| Binary | 4,096 | Standard stable category sort | +30.4% |
+| Binary | 4,096 | Glidesort category sort | +30.7% |
+| Binary | 65,536 | Standard stable category sort | +35.4% |
+| Binary | 65,536 | Glidesort category sort | +37.5% |
+| Binary | 65,536 | Radsort category sort | +1.5% |
+| Seven categories | 4,096 | Standard stable category sort | +25.2% |
+| Seven categories | 4,096 | Glidesort category sort | +22.0% |
+| Seven categories | 65,536 | Standard stable category sort | +7.5% |
+| Seven categories | 65,536 | Glidesort category sort | +5.7% |
+
+For nontrivial inputs the category implementation completes distribution even when every record receives one category; sorting references can recognize ordered input without moving those records. This is a concrete work difference to investigate, not an isolated measurement of its contribution. Any replacement must preserve the classifier-evaluation contract and retain known category/range facts; a width/distribution-specific switch is not a general solution.
+
+Category count matters to space in practice, not only asymptotically. At 257 categories and 65,536 random u64 records, measured peak extra heap was 1,177,656 bytes, exceeding the 524,288-byte input. Internal fan-out padding and the [block floors](../explain/block-partition.md#choosing-the-block-size) remain charged. O(√(nR) + R) does not promise less space than a linear buffer at every n and R. Returned offsets were included in each peak and retained before reference sorting, so peak minus output is a coexisting workspace measurement; fixed stack tables were not measured.
+
+**Disposition:** retain the functional serial operations on the experimental branch with performance acceptance open. This screen supports usefulness against the named sorting compositions, not superiority to a dedicated buffered partition or a source-change speedup. Two other wide-record cases had A/A windows of about ±12.0% and ±9.9%; only three blocks, one host and one placement were sampled. Dedicated buffered baselines, larger inputs, other classifier costs and controlled follow-up remain necessary; no full-sort foundation timing debt is resolved by these results.
+
 ## Unstable node-partition feasibility
 
 A retired serial feasibility study against `0499d35` shared root preparation, key encoding and half-key dispatch, node planning, candidate-bit progress, child routing and stable tile finishing. Only node movement changed: a histogram defined final bucket bands, then bounded cursors placed records with safe in-slice swaps instead of stable block chains and ledger completion. Classification could panic without leaving a hole; a changed key targeting a full band stopped that partition, while candidate-bit consumption still bounded recursion. Ordered reversal stayed stable. This is a research prototype, not a supported release API or a production-ready kernel.

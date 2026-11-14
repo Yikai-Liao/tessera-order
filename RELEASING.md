@@ -1,6 +1,6 @@
 # Versions and releases
 
-Each language package is versioned and released independently so fixes need not wait for other implementations. No package has been released yet; the versions below are examples.
+Each language package is versioned and released independently so fixes need not wait for other implementations. The versions below are examples.
 
 | Object | Identifier | Identifies |
 |---|---|---|

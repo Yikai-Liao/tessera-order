@@ -1,6 +1,6 @@
 # Ordering semantics
 
-Status: implemented by the unreleased Rust crate; the planned C++ implementation follows the same rules. Cross-language golden vectors in `conformance/vectors/` are planned with the C++ runner on the [roadmap](../ROADMAP.md); until then the Rust tests generate their own inputs.
+Status: implemented by the Rust crate since 0.1; the planned C++ implementation follows the same rules. Cross-language golden vectors in `conformance/vectors/` are planned with the C++ runner on the [roadmap](../ROADMAP.md); until then the Rust tests generate their own inputs.
 
 ## Sort contracts
 

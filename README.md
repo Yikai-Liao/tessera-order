@@ -13,12 +13,13 @@
   <a href="https://github.com/Yikai-Liao/tessera-order/actions/workflows/ci.yml"><img src="https://github.com/Yikai-Liao/tessera-order/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/Yikai-Liao/tessera-order/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-BSD--2--Clause-blue.svg" alt="License: BSD-2-Clause"></a>
   <img src="https://img.shields.io/badge/MSRV-1.89-orange.svg" alt="MSRV 1.89">
-  <img src="https://img.shields.io/badge/status-pre--release-lightgrey.svg" alt="Status: pre-release">
+  <a href="https://crates.io/crates/tessera-order"><img src="https://img.shields.io/crates/v/tessera-order.svg" alt="crates.io"></a>
+  <a href="https://docs.rs/tessera-order"><img src="https://img.shields.io/docsrs/tessera-order" alt="docs.rs"></a>
   <a href="https://yikai-liao.github.io/tessera-order/"><img src="https://img.shields.io/badge/docs-online-8b5cf6.svg" alt="Documentation"></a>
 </p>
 
-> [!IMPORTANT]
-> Tessera is in pre-release. The Rust engine has been ported to Stable Rust and checked against the research prototype. Nothing is on crates.io yet; see the [roadmap](https://github.com/Yikai-Liao/tessera-order/blob/main/ROADMAP.md).
+> [!NOTE]
+> 0.1 is the first release: the stable sort only, with the API still allowed to change in 0.x minor releases. See the [roadmap](https://github.com/Yikai-Liao/tessera-order/blob/main/ROADMAP.md) for what comes next.
 
 ## Why Tessera
 
@@ -32,8 +33,6 @@ An LSD radix sort is stable and runs in linear time, but it needs a second buffe
 - **One portable backend.** Uses `fearless_simd` for vector scans and prefix sums, selecting supported instructions automatically. Requires `std` and Rust 1.89; Rayon is optional.
 
 ## Quick start
-
-> The crate is not published yet. The example uses the implemented 0.1 API.
 
 ```toml
 [dependencies]
@@ -82,9 +81,9 @@ Main trend: the geometric mean of each mode's run-time change since the first ru
 
 ## Status by language
 
-Each language package is versioned and released separately ([`RELEASING.md`](https://github.com/Yikai-Liao/tessera-order/blob/main/RELEASING.md)). No package has been released yet.
+Each language package is versioned and released separately ([`RELEASING.md`](https://github.com/Yikai-Liao/tessera-order/blob/main/RELEASING.md)).
 
-| Capability | Rust (unreleased) | C++ |
+| Capability | Rust 0.1 | C++ |
 |---|---|---|
 | Stable sort | Implemented | Planned |
 | Unstable sort | Not in 0.1 | Planned |

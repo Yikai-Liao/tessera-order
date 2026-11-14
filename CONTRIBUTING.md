@@ -1,6 +1,6 @@
 # Contributing to Tessera
 
-Tessera is pre-release. Bug reports, real-workload experience and measurements on other machines are especially useful. Follow the [code of conduct](CODE_OF_CONDUCT.md); agree the scope of larger changes with the maintainer in an issue or development request.
+Tessera is at 0.x. Bug reports, real-workload experience and measurements on other machines are especially useful. Follow the [code of conduct](CODE_OF_CONDUCT.md); agree the scope of larger changes with the maintainer in an issue or development request.
 
 ## Development
 

@@ -46,6 +46,8 @@ This simpler routing may choose MSD where a longer LSD plan would be faster. [En
 
 ## Inside a pass
 
+A single-digit LSD plan first tries the same [counted window](routing.md#counted-window) as a terminal node. Eligible direct keys are counted and decoded into their final runs without allocating tile scratch, scattering records or copying them back. The shared key operation owns the window limit and full-encoding rules; payload records and wider windows keep the ordinary passes. Insertion leaves are unchanged.
+
 Tile passes are the classic [counting pass](radix-sort.md#the-counting-pass) with two details:
 
 - **Bucket IDs are cached** when the key comes from a user function: the histogram stores each record's bucket as a `u16`, and the scatter reads it back instead of calling the key function again. The IDs go after the records in the scratch allocation. [Ownership and panics](safety.md) explains why.

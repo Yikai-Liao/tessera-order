@@ -46,6 +46,10 @@ The engine is a Stable Rust port of the research prototype in `sort-research-rs`
   - A sixteen-lane prefix sum lost to eight lanes (cross-lane swizzle).
   - Stable three-way compress scatter of 64K `u32` took 460 µs against 147 µs for scalar cursor writes, and AVX-512CD conflict detection would double the 32 KiB cursor table.
 
+## Counted terminal tiles
+
+[Single-digit tiles](../explain/tiles.md#inside-a-pass) reuse the node counting operation to avoid scatter scratch and copy-back for eligible direct keys. This removes record movement, not all finishing work: the full-record histogram and decoding each nonempty run can cost more than a scratch pass on a short wide-key tile. A linked nine-block comparison with independent copies measures `u128/d256/1000` 12.3–14.0% slower, outside its A/A range of 0.989–1.011; this is an explicit local trade-off, not dismissed as placement noise. The same screen measures `u128/zipf2/1000` about 16.6% faster, while linked 32-/64-bit screens improve short narrow-key tiles more strongly. These observations do not establish equivalence for other widths or placements. No type or input-distribution exception is added; the shared counted-window eligibility and insertion leaves remain unchanged.
+
 ## Child order before variation
 
 [PR #211](https://github.com/Yikai-Liao/tessera-order/pull/211) reuses the existing root order probe for partition children before scanning their remaining variation. Confirmed ordered children skip that full scan; flat samples still need variation and, when nonconstant, full confirmation. No new detector, threshold or scratch is introduced. The first hosted screen improves four `sorted_tail` cases by 8.1–19.0% with no slowdown alert over the continuous inventory. This is a saving for ordered children exposed by any partition, not a tail classifier.

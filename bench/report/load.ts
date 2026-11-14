@@ -235,7 +235,12 @@ export function validateRun(dataset: Dataset): void {
       throw new Error(`invalid or duplicate memory sample ${id}`);
     if (m.suite_version === 2) {
       assertInteger(r.output_bytes);
-      const expected = c.operation?.kind === "argsort" ? c.len * m.index_bytes! : 0;
+      const expected =
+        c.operation?.kind === "argsort"
+          ? c.len * m.index_bytes!
+          : c.operation?.kind === "partition-buckets"
+            ? (c.operation.bucket_count + 1) * m.index_bytes!
+            : 0;
       if (r.output_bytes !== expected || r.peak_extra_bytes < r.output_bytes)
         throw new Error(
           "mandatory output allocation differs from the operation or exceeds its peak",

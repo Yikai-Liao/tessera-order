@@ -509,6 +509,11 @@ pub fn main(memory: bool) -> Result<()> {
         return Ok(());
     }
     let cases = options.cases(options.group.as_deref())?;
+    if options.command == "run" {
+        // The manifest includes every case, even for a restricted group. Keep
+        // required-control admission with native capabilities, not a TS limit.
+        run::validate_controls(&options.cases(None)?, &options.variants())?;
+    }
     match options.command.as_str() {
         "list" => {
             for v in variant::list_variants() {

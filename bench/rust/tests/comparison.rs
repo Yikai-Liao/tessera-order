@@ -4,6 +4,98 @@
 
 use std::{fs, process::Command};
 
+#[cfg(feature = "operations")]
+#[test]
+fn unsupported_control_fails_before_measurement_artifacts() {
+    let directory = std::env::temp_dir().join(format!(
+        "tessera-unsupported-control-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&directory).unwrap();
+    let plan = directory.join("plan.json");
+    let output = directory.join("results");
+    fs::write(&plan, serde_json::to_vec(&serde_json::json!({
+        "schema": 2, "algorithms": ["tessera", "std-stable"],
+        "operation": { "kind": "partition-buckets", "bucket_count": tessera_order::MAX_PARTITION_BUCKETS + 1 },
+        "include": [{ "types": ["u32"], "distributions": ["random"], "lengths": [1_000_000] }]
+    })).unwrap()).unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_compare"))
+        .args(["run", "--plan"])
+        .arg(plan)
+        .arg("--out")
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(
+        String::from_utf8_lossy(&result.stderr)
+            .contains("required control tessera does not support")
+    );
+    assert!(!output.exists());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(feature = "operations")]
+#[test]
+fn category_batches_budget_and_measure_retained_offsets() {
+    let directory =
+        std::env::temp_dir().join(format!("tessera-category-batch-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    let plan = directory.join("plan.json");
+    let output = directory.join("results");
+    let bucket_count = tessera_order::MAX_PARTITION_BUCKETS;
+    fs::write(
+        &plan,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": 2, "algorithms": ["tessera", "std-stable"],
+            "operation": { "kind": "partition-buckets", "bucket_count": bucket_count },
+            "include": [{ "types": ["u32"], "distributions": ["random"], "lengths": [1] }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_compare"))
+        .args(["run", "--plan"])
+        .arg(plan)
+        .arg("--out")
+        .arg(&output)
+        .args(["--blocks", "3", "--sample-ms", "50", "--memory-mib", "1"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let retained = (bucket_count + 1) * size_of::<usize>();
+    let max_batch = (1 << 20) / (size_of::<u32>() + retained);
+    let records = |file| {
+        fs::read_to_string(output.join(file))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>()
+    };
+    let samples = records("blocks.jsonl")
+        .into_iter()
+        .filter(|row| row["kind"] == "sample")
+        .collect::<Vec<_>>();
+    assert_eq!(samples.len(), 9);
+    assert!(
+        samples
+            .iter()
+            .all(|row| row["batch"].as_u64().unwrap() as usize <= max_batch)
+    );
+    let memory = records("memory.jsonl");
+    assert_eq!(memory.len(), 2);
+    assert!(
+        memory
+            .iter()
+            .all(|row| row["verified"] == true && row["output_bytes"] == retained)
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
 #[test]
 fn memory_resumes_missing_adapters() {
     let directory =

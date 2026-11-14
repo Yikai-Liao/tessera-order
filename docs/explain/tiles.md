@@ -2,6 +2,10 @@
 
 A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so that one `u16` can hold any position in it. Its scratch buffer is the same size and stays in the L2 cache. Inside a tile a second buffer is cheap, so Tessera uses ordinary counting passes; the questions are which digits to use and whether to finish with MSD or LSD. [`tile/plan.rs`](../../rust/tessera-order/src/tile/plan.rs) selects the leaf; [`tile.rs`](../../rust/tessera-order/src/tile.rs) executes it and owns its scratch and panic recovery.
 
+## One-shot category distribution
+
+The unreleased [category APIs](../../conformance/semantics.md#stable-category-partitions) reuse this storage for one stable counting pass, without selecting a sorting leaf. Cached IDs let the classifier run only during the forward histogram; completed cursors supply the boundaries. Larger inputs use the [block partition](block-partition.md) without recursively sorting its buckets. Empty padded buckets remain internal, so callers receive exactly their requested categories.
+
 ## Parallel child allowance
 
 A complete child of a parallel root may use a larger tile: up to 1 MiB of records, within the same cursor limit. `finishing_capacity` owns this allowance. It applies only when the whole child fits; a larger child keeps the ordinary capacity for its descendants. The budget is empirical, not a cache-size claim. Child variation and order confirmation still run first.

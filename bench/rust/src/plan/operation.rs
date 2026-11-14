@@ -15,6 +15,13 @@ pub enum Operation {
     Sort {},
     /// Stable sorted indices, including creation of the returned vector.
     Argsort {},
+    /// Stable predicate split, returning the matching count.
+    Partition {},
+    /// Stable finite-category distribution, including returned empty boundaries.
+    PartitionBuckets {
+        /// Classifications are encoded key bits modulo this count.
+        bucket_count: usize,
+    },
     /// Stable independent segments, with a final shorter segment when needed.
     Segments {
         /// Requested records per segment.
@@ -64,7 +71,8 @@ impl Operation {
     /// Validates all parameters against the concrete input before generation.
     pub fn validate(&self, len: usize) -> Result<(), String> {
         let valid = match self {
-            Self::Sort {} | Self::Argsort {} => true,
+            Self::Sort {} | Self::Argsort {} | Self::Partition {} => true,
+            Self::PartitionBuckets { bucket_count } => *bucket_count > 0,
             Self::Segments { segment_len } => *segment_len > 0,
             Self::TopK { k } => *k <= len,
             Self::Prefix { prefix_len } => *prefix_len <= len,
@@ -115,6 +123,15 @@ impl Operation {
         })
     }
 
+    /// Category workload identity; concrete fan-out support belongs to adapters.
+    pub(crate) fn bucket_count(&self) -> Option<usize> {
+        match self {
+            Self::Partition {} => Some(2),
+            Self::PartitionBuckets { bucket_count } => Some(*bucket_count),
+            _ => None,
+        }
+    }
+
     /// Resolves the reproducible segment specification once for a prepared kernel.
     pub(crate) fn offsets(&self, len: usize) -> Option<Vec<usize>> {
         if let Self::Segments { segment_len } = self {
@@ -142,6 +159,8 @@ impl Operation {
         match self {
             Self::Sort {} => String::new(),
             Self::Argsort {} => "/argsort".into(),
+            Self::Partition {} => "/partition".into(),
+            Self::PartitionBuckets { bucket_count } => format!("/partition-buckets/{bucket_count}"),
             Self::Segments { segment_len } => format!("/segments/{segment_len}"),
             Self::TopK { k } => format!("/top-k/{k}"),
             Self::Prefix { prefix_len } => format!("/prefix/{prefix_len}"),

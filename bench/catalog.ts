@@ -121,6 +121,8 @@ const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 export const operationSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("sort") }),
   z.strictObject({ kind: z.literal("argsort") }),
+  z.strictObject({ kind: z.literal("partition") }),
+  z.strictObject({ kind: z.literal("partition-buckets"), bucket_count: count.min(1) }),
   z.strictObject({ kind: z.literal("segments"), segment_len: count.min(1) }),
   z.strictObject({ kind: z.literal("top-k"), k: count }),
   z.strictObject({ kind: z.literal("prefix"), prefix_len: count }),
@@ -172,6 +174,10 @@ export function operationSuffix(operation?: Operation): string {
       return "";
     case "argsort":
       return "/argsort";
+    case "partition":
+      return "/partition";
+    case "partition-buckets":
+      return `/partition-buckets/${operation.bucket_count}`;
     case "segments":
       return `/segments/${operation.segment_len}`;
     case "top-k":
@@ -195,6 +201,10 @@ export function operationLabel(operation?: Operation) {
       return "Full sort";
     case "argsort":
       return "Stable argsort";
+    case "partition":
+      return "Stable binary partition";
+    case "partition-buckets":
+      return `Stable partition · ${operation.bucket_count} categories`;
     case "segments":
       return `Stable segments · ${operation.segment_len} records each`;
     case "top-k":
@@ -262,6 +272,10 @@ export function parseComparisonId(id: string) {
     };
     let candidate: unknown;
     switch (kind) {
+      case "partition-buckets":
+        candidate = { kind, bucket_count: integer(parameter ?? "") };
+        break;
+      case "partition":
       case "argsort":
         candidate = { kind };
         break;

@@ -111,6 +111,16 @@ comparison = "u64/random/1000/s1/argsort"
 group = "u64/random/argsort"
 
 [[operations]]
+operation = { kind = "partition" }
+comparison = "u64/random/1000/s1/partition"
+group = "u64/random/partition"
+
+[[operations]]
+operation = { kind = "partition-buckets", bucket_count = 7 }
+comparison = "u64/random/1000/s1/partition-buckets/7"
+group = "u64/random/partition-buckets/7"
+
+[[operations]]
 operation = { kind = "segments", segment_len = 73 }
 comparison = "u64/random/1000/s1/segments/73"
 group = "u64/random/segments/73"
@@ -146,6 +156,10 @@ comparison = "u64/random/1000/s1/select-many/none"
 group = "u64/random/select-many/none"
 
 # No comparison field means the plan must be rejected before generation.
+[[operations]]
+operation = { kind = "partition-buckets", bucket_count = 0 }
+[[operations]]
+operation = { kind = "partition", bucket_count = 2 }
 [[operations]]
 operation = { kind = "segments", segment_len = 0 }
 [[operations]]

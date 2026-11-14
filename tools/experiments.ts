@@ -81,6 +81,11 @@ function addSelectionOptions(command: Command, presets: string) {
     .addOption(
       new Option("--operation <kind>", "result contract (default: sort)").choices(operationKinds),
     )
+    .option(
+      "--bucket-count <count>",
+      "finite categories for partition-buckets",
+      parsePositiveInteger,
+    )
     .option("--k <count>", "number of smallest records for unordered top-k", parseCount)
     .option("--prefix-len <count>", "required sorted prefix length", parseCount)
     .option("--index <rank>", "zero-based selection rank", parseCount)
@@ -115,6 +120,7 @@ function selectAxes(options: MeasurementOptions): SelectionOptions {
       "indices",
       "rankRange",
       "segmentLen",
+      "bucketCount",
     ]
       .filter((key) => options[key as keyof MeasurementOptions] !== undefined)
       .map((key) => [key, options[key as keyof MeasurementOptions]]),

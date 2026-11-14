@@ -119,7 +119,7 @@ function renderCapabilities(dataset: Dataset) {
       "Unstable sorts on records are listed as a separate task: their permutation check allows equal keys to change order. A dash means the adapter does not support the task.\n\n"
     );
   out +=
-    "Stable routes require exact stable ranked membership. Standard-library unstable partial routes instead require the same ranked keys with arbitrary equal-key members, including on payload records; these are weaker-contract tasks, not equivalent stable selectors. Standard unstable segmented sorting remains scalar-only, and standard unstable argsort explicitly breaks ties by original index. Each admitted route or omission is retained below.\n\n";
+    "Category routes require exact stable category order and every returned boundary; sorting references order by category, not the complete original key. Ranked stable routes require exact stable ranked membership. Standard-library unstable partial routes instead require the same ranked keys with arbitrary equal-key members, including on payload records; these are weaker-contract tasks, not equivalent stable selectors. Standard unstable segmented sorting remains scalar-only, and standard unstable argsort explicitly breaks ties by original index. Each admitted route or omission is retained below.\n\n";
   const routes = new Map<string, string[]>();
   for (const c of manifest.cases) {
     for (const [name, route] of Object.entries(c.implementations ?? {}))
@@ -214,7 +214,7 @@ export async function writeReport(directories: string[], partial = false) {
     "## Memory accounting\n\nThe memory executable measures one complete call after preparing its input and verification reference. Rust-only builds count requested allocation sizes. Native builds count allocator usable sizes at the wrapped C allocation functions and C++ new/delete; allocator rounding is included. Fixed stack storage is unmeasured. Input buffers and owned payloads are excluded.\n";
   if (operation)
     markdown +=
-      "Mandatory output is allocated inside the measured call and included in peak extra heap bytes. Workspace peak is the recorded peak minus retained output bytes; argsort constructs its index result before sorting, so both coexist. In-place operations have zero output bytes. Multiple-selection normalization is inside the measured call. No sorting figures are generated for these result shapes.\n";
+      "Mandatory output is allocated inside the measured call and included in peak extra heap bytes. Workspace peak is the recorded peak minus retained output bytes; argsort constructs its index result before sorting, so both coexist. Multiway category offsets are O(R) output; binary partition returns a scalar. Operations without a heap-allocated result have zero output bytes. Multiple-selection normalization is inside the measured call. No sorting figures are generated for these result shapes.\n";
   await writeFile(join(out, "index.md"), markdown);
   await writeFile(
     join(out, "summaries.json"),

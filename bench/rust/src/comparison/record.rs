@@ -10,10 +10,22 @@ use std::{
     rc::Rc,
 };
 
+use tessera_order::RadixKey;
+
+/// Reproducible finite categories, with no sorting-specific interpretation.
+fn category<K: RadixKey>(key: K, bucket_count: usize) -> usize
+where
+    K::Encoded: Into<u128>,
+{
+    (key.encode().into() % bucket_count as u128) as usize
+}
+
 /// Ordering and payload identity for one benchmark record representation.
 pub trait BenchmarkRecord: Clone + Send + Sync + 'static {
     /// Whether tie order and payload identity are observable.
     const HAS_PAYLOAD: bool = false;
+    /// Encoded-key category shared by every partition adapter and its reference.
+    fn category(&self, bucket_count: usize) -> usize;
     /// Compares sorting keys in the shared total order.
     fn order(&self, other: &Self) -> Ordering;
     /// Compares every observable bit of two records.
@@ -31,6 +43,9 @@ pub trait BenchmarkRecord: Clone + Send + Sync + 'static {
 macro_rules! key_element {
     ($t:ty) => {
         impl BenchmarkRecord for $t {
+            fn category(&self, bucket_count: usize) -> usize {
+                category(*self, bucket_count)
+            }
             fn order(&self, o: &Self) -> Ordering {
                 Key::order(self, o)
             }
@@ -45,7 +60,13 @@ key_element!(u64);
 key_element!(u128);
 key_element!(f64);
 
-impl<K: Key + Send + Sync + 'static> BenchmarkRecord for Reverse<K> {
+impl<K: Key + Send + Sync + 'static> BenchmarkRecord for Reverse<K>
+where
+    K::Encoded: Into<u128>,
+{
+    fn category(&self, bucket_count: usize) -> usize {
+        category(*self, bucket_count)
+    }
     fn order(&self, other: &Self) -> Ordering {
         other.0.order(&self.0)
     }
@@ -67,6 +88,9 @@ macro_rules! record_element {
     ($t:ty, $index:expr, $same:expr) => {
         impl BenchmarkRecord for $t {
             const HAS_PAYLOAD: bool = true;
+            fn category(&self, bucket_count: usize) -> usize {
+                category(self.key, bucket_count)
+            }
             fn order(&self, o: &Self) -> Ordering {
                 self.key.cmp(&o.key)
             }
@@ -96,6 +120,9 @@ record_element!(
 );
 impl BenchmarkRecord for OwnedRecord {
     const HAS_PAYLOAD: bool = true;
+    fn category(&self, bucket_count: usize) -> usize {
+        category(self.key, bucket_count)
+    }
     fn order(&self, other: &Self) -> Ordering {
         self.key.cmp(&other.key)
     }
@@ -135,7 +162,9 @@ impl<T: BenchmarkRecord> PreparedRecords<T> {
 
     fn prepare(original: Vec<T>, operation: Operation) -> Rc<Self> {
         let mut reference = original.clone();
-        if let Some(offsets) = operation.offsets(reference.len()) {
+        if let Some(bucket_count) = operation.bucket_count() {
+            reference.sort_by_key(|record| record.category(bucket_count));
+        } else if let Some(offsets) = operation.offsets(reference.len()) {
             for ends in offsets.windows(2) {
                 reference[ends[0]..ends[1]].sort_by(T::order);
             }

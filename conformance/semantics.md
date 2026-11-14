@@ -1,6 +1,6 @@
 # Ordering semantics
 
-Status: full-sort contracts are implemented by the Rust crate since 0.1; the serial slice operations below are unreleased development additions. The planned C++ implementation follows the same rules. Cross-language golden vectors in `conformance/vectors/` are planned with the C++ runner on the [roadmap](../ROADMAP.md); until then the Rust tests generate their own inputs.
+Status: full-sort contracts are implemented by the Rust crate since 0.1; the serial slice and category operations below are unreleased development additions. The planned C++ implementation follows the same rules. Cross-language golden vectors in `conformance/vectors/` are planned with the C++ runner on the [roadmap](../ROADMAP.md); until then the Rust tests generate their own inputs.
 
 ## Sort contracts
 
@@ -67,7 +67,20 @@ Let `S` be a conceptual complete stable sort of the original records. Identity m
 
 Stable Top-k and selection mean stable membership and ranked identity: when a boundary cuts an equal-key run, earlier input members are chosen first. They do not promise input order across different keys. For largest-k results, reverse the key; do not reverse a stable result. Statistical quantile definitions and interpolation remain caller choices; multiple selection accepts exact integer ranks.
 
-In-place rank operations retain the full sort's [workspace bound](#space), not O(k) or O(requested output length). All scratch and request metadata are invocation-owned and released on return or unwind. Only argsort returns an allocated output. No public workspace, resumable session, category partition or parallel extension API is implied.
+In-place rank operations retain the full sort's [workspace bound](#space), not O(k) or O(requested output length). All scratch and request metadata are invocation-owned and released on return or unwind. Only argsort in this section returns an allocated output. No public workspace, resumable session or parallel extension API is implied.
+
+## Stable category partitions
+
+These serial operations group arbitrary records by supplied categories, not by global key rank. No feature gate or `Clone`, `Send` or `Sync` record bound is required.
+
+| Entry | Successful result | Bounds and output |
+|---|---|---|
+| `stable_partition` | Matching records precede nonmatching records, with original order preserved in each group. Return the matching count. | A scalar result; no retained heap output. |
+| `stable_partition_by_bucket` | Categories `0..bucket_count` occur in ascending category order, each in original input order. | Return `bucket_count + 1` offsets, from zero to the input length, including repeated offsets for empty categories. Require `1..=MAX_PARTITION_BUCKETS`; the [public constant](../rust/tessera-order/src/partition.rs) derives the maximum from the supported movement representations. |
+
+On success the predicate or classifier runs exactly once per record, in original input order, including zero-sized records, singleton inputs and a single category. Empty input makes no calls. Positive category counts need not be powers of two. Invalid counts panic before allocation, mutation or classifier calls. An out-of-range classification is rejected before internal digit masking, under the same restoration protection as a classifier panic. Every original record is back in the input before unwinding reaches the caller, in unspecified order; callback side effects are not rolled back. Recovery does not call the classifier.
+
+For R categories and a fixed record size, auxiliary space is O(√(nR) + R), plus bounded tile storage. Multiway offsets are additional O(R) output. The fixed-R bound is O(√n), not a category-independent space promise. All storage except returned offsets is released before return or unwind. These operations retain no unfinished movement or session state.
 
 ## Rust Rayon entry points
 

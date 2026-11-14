@@ -68,6 +68,161 @@ pub(super) fn indices<T: BenchmarkRecord>(
     })
 }
 
+/// Outputs with different allocation contracts; the binary cut is a scalar.
+#[derive(Debug, PartialEq, Eq)]
+enum Boundaries {
+    Cut(usize),
+    Offsets(Vec<usize>),
+}
+impl Boundaries {
+    fn new(operation: &Operation) -> Self {
+        match operation {
+            Operation::Partition {} => Self::Cut(0),
+            Operation::PartitionBuckets { bucket_count } => {
+                Self::Offsets(vec![0; bucket_count + 1])
+            }
+            _ => unreachable!("category operation"),
+        }
+    }
+    /// Fills the fresh result from `new`; each offsets table is initialized once.
+    fn count<T: BenchmarkRecord>(&mut self, values: &[T]) {
+        match self {
+            Self::Cut(count) => *count = values.iter().filter(|r| r.category(2) == 0).count(),
+            Self::Offsets(offsets) => {
+                let bucket_count = offsets.len() - 1;
+                for record in values {
+                    offsets[record.category(bucket_count) + 1] += 1;
+                }
+                for bucket in 0..bucket_count {
+                    offsets[bucket + 1] += offsets[bucket];
+                }
+            }
+        }
+    }
+    fn heap_bytes(&self) -> usize {
+        match self {
+            Self::Cut(_) => 0,
+            Self::Offsets(offsets) => offsets.capacity() * size_of::<usize>(),
+        }
+    }
+}
+
+/// Independent histogram output, also used after sorting-based references.
+fn boundaries<T: BenchmarkRecord>(values: &[T], operation: &Operation) -> Boundaries {
+    let mut output = Boundaries::new(operation);
+    output.count(values);
+    output
+}
+
+/// Category calls mutate records and return boundaries. Output must survive
+/// until checking, but must not become reusable workspace for the next call.
+struct CategoryKernel<T, F> {
+    input: Rc<PreparedRecords<T>>,
+    buffers: Vec<Vec<T>>,
+    outputs: Vec<Boundaries>,
+    expected: Boundaries,
+    call: F,
+    description: &'static str,
+}
+impl<T: BenchmarkRecord, F: FnMut(&mut [T]) -> Boundaries> Kernel for CategoryKernel<T, F> {
+    fn restore(&mut self, batch: usize) {
+        self.outputs.clear();
+        self.outputs.resize_with(batch, || Boundaries::Cut(0));
+        self.buffers
+            .resize_with(batch, || self.input.original().clone());
+        for values in &mut self.buffers {
+            values.clone_from(self.input.original());
+        }
+    }
+    fn run_batch(&mut self) {
+        for (values, output) in self.buffers.iter_mut().zip(&mut self.outputs) {
+            *output = (self.call)(black_box(values));
+        }
+    }
+    fn check(&self) -> Result<(), String> {
+        for (values, output) in self.buffers.iter().zip(&self.outputs) {
+            super::super::check::check(
+                values,
+                self.input.original(),
+                self.input.reference(),
+                true,
+            )?;
+            if *output != self.expected {
+                return Err("category boundaries differ from the independent histogram".into());
+            }
+        }
+        Ok(())
+    }
+    fn buffer_bytes(&self) -> usize {
+        self.input.buffer_bytes() + self.expected.heap_bytes()
+    }
+    fn worker_threads(&self) -> usize {
+        0
+    }
+    fn output_bytes(&self) -> usize {
+        self.outputs.first().map_or(0, Boundaries::heap_bytes)
+    }
+    fn description(&self) -> &'static str {
+        self.description
+    }
+}
+
+/// Complete category routes. Sorting references order by category, never by
+/// the original key; they include boundary construction and are labelled as
+/// compositions, not direct output-buffer partition algorithms.
+pub(super) fn categories<T: BenchmarkRecord>(
+    name: &'static str,
+    input: Rc<PreparedRecords<T>>,
+) -> Option<Box<dyn Kernel>> {
+    let operation = input.operation().clone();
+    let bucket_count = operation.bucket_count()?;
+    let description = match name {
+        "tessera" if bucket_count <= tessera_order::MAX_PARTITION_BUCKETS => {
+            "public one-shot stable category partition including boundary output"
+        }
+        "std-stable" => "standard stable category sorting plus boundary construction",
+        "glidesort" => "glidesort stable category sorting plus boundary construction",
+        "radsort" => "radsort stable category sorting plus boundary construction",
+        _ => return None,
+    };
+    Some(Box::new(CategoryKernel {
+        expected: boundaries(input.original(), &operation),
+        input,
+        buffers: Vec::new(),
+        outputs: Vec::new(),
+        description,
+        call: move |values: &mut [T]| {
+            if name == "tessera" {
+                return if matches!(operation, Operation::Partition {}) {
+                    Boundaries::Cut(tessera_order::stable_partition(values, |r| {
+                        r.category(2) == 0
+                    }))
+                } else {
+                    Boundaries::Offsets(tessera_order::stable_partition_by_bucket(
+                        values,
+                        bucket_count,
+                        |r| r.category(bucket_count),
+                    ))
+                };
+            }
+            // Keep mandatory output live while sorting scratch is live too,
+            // as in the public partition. Peak minus output then measures
+            // workspace rather than subtracting a later, disjoint allocation.
+            let mut output = Boundaries::new(&operation);
+            match name {
+                "std-stable" => values.sort_by_key(|r| r.category(bucket_count)),
+                "glidesort" => glidesort::sort_by(values, |a, b| {
+                    a.category(bucket_count).cmp(&b.category(bucket_count))
+                }),
+                "radsort" => radsort::sort_by_key(values, |r| r.category(bucket_count)),
+                _ => unreachable!(),
+            }
+            output.count(values);
+            output
+        },
+    }))
+}
+
 /// Gives a complete stable sorter the requested operation's complete contract.
 /// These are explicit reference compositions, not missing-API fallbacks.
 pub(super) fn reference<T: BenchmarkRecord>(
@@ -109,6 +264,9 @@ pub(super) fn prepare<T: TesseraAdapter>(
     input: Rc<PreparedRecords<T>>,
 ) -> Option<Box<dyn Kernel>> {
     let operation = input.operation().clone();
+    if operation.bucket_count().is_some() {
+        return categories(v.name, input);
+    }
     if matches!(operation, Operation::Argsort {}) {
         return Some(match v.name {
             "tessera" => indices(input, T::argsort),
@@ -263,6 +421,10 @@ mod tests {
         let len = 4097;
         let operations = [
             Operation::Argsort {},
+            Operation::Partition {},
+            Operation::PartitionBuckets { bucket_count: 1 },
+            Operation::PartitionBuckets { bucket_count: 3 },
+            Operation::PartitionBuckets { bucket_count: 16 },
             Operation::TopK { k: 0 },
             Operation::TopK { k: 513 },
             Operation::TopK { k: len },
@@ -296,18 +458,21 @@ mod tests {
                         let expected = match variant.name {
                             "tessera" | "std-stable" | "glidesort" => true,
                             "tessera-full" => operation.required_ranges().is_some(),
-                            "radsort" => !ty.starts_with("reverse_"),
+                            "radsort" => {
+                                operation.bucket_count().is_some() || !ty.starts_with("reverse_")
+                            }
                             "std-unstable" => {
-                                !matches!(operation, Operation::Segments { .. })
-                                    || matches!(
-                                        ty,
-                                        "u32"
-                                            | "u64"
-                                            | "u128"
-                                            | "f64"
-                                            | "reverse_u64"
-                                            | "reverse_f64"
-                                    )
+                                operation.bucket_count().is_none()
+                                    && (!matches!(operation, Operation::Segments { .. })
+                                        || matches!(
+                                            ty,
+                                            "u32"
+                                                | "u64"
+                                                | "u128"
+                                                | "f64"
+                                                | "reverse_u64"
+                                                | "reverse_f64"
+                                        ))
                             }
                             _ => false,
                         };
@@ -330,10 +495,11 @@ mod tests {
                                 });
                                 assert_eq!(
                                     kernel.output_bytes(),
-                                    if matches!(operation, Operation::Argsort {}) {
-                                        len * size_of::<usize>()
-                                    } else {
-                                        0
+                                    match operation {
+                                        Operation::Argsort {} => len * size_of::<usize>(),
+                                        Operation::PartitionBuckets { bucket_count } =>
+                                            (bucket_count + 1) * size_of::<usize>(),
+                                        _ => 0,
                                     }
                                 );
                             }
@@ -341,6 +507,66 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn category_output_counts_toward_the_prepared_memory_cap() {
+        let CaseInput::U32(input) = CaseInput::new(&InputCase {
+            ty: "u32".into(),
+            distribution: "random".into(),
+            len: 1,
+            operation: Operation::PartitionBuckets {
+                bucket_count: tessera_order::MAX_PARTITION_BUCKETS,
+            },
+        }) else {
+            unreachable!()
+        };
+        let retained = (tessera_order::MAX_PARTITION_BUCKETS + 1) * size_of::<usize>();
+        let mut kernel = categories("tessera", input).unwrap();
+        assert_eq!(kernel.buffer_bytes(), size_of::<u32>() + retained);
+        kernel.restore(3);
+        kernel.run_batch();
+        kernel.check().unwrap();
+        assert_eq!(kernel.output_bytes(), retained);
+    }
+
+    #[test]
+    fn category_checker_rejects_key_sorting_and_corrupt_boundaries() {
+        let CaseInput::U64(input) = CaseInput::new(&InputCase {
+            ty: "u64".into(),
+            distribution: "random".into(),
+            len: 128,
+            operation: Operation::PartitionBuckets { bucket_count: 7 },
+        }) else {
+            unreachable!()
+        };
+        for corrupt_boundary in [false, true] {
+            let operation = input.operation().clone();
+            let mut wrong = CategoryKernel {
+                expected: boundaries(input.original(), &operation),
+                input: input.clone(),
+                buffers: Vec::new(),
+                outputs: Vec::new(),
+                description: "intentionally wrong partition",
+                call: move |values: &mut [u64]| {
+                    if corrupt_boundary {
+                        values.sort_by_key(|r| r.category(7));
+                    } else {
+                        values.sort();
+                    }
+                    let Boundaries::Offsets(mut offsets) = boundaries(values, &operation) else {
+                        unreachable!()
+                    };
+                    if corrupt_boundary {
+                        offsets[1] += 1;
+                    }
+                    Boundaries::Offsets(offsets)
+                },
+            };
+            wrong.restore(2);
+            wrong.run_batch();
+            assert!(wrong.check().is_err());
         }
     }
 

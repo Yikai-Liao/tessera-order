@@ -200,7 +200,8 @@ pub trait Kernel {
         super::host::check_threads(self.worker_threads())?;
         Ok(elapsed)
     }
-    /// Returns the record and owned-payload bytes in one batch buffer.
+    /// Per-call retained batch bytes: mutable records/payloads and mandatory
+    /// output. Shared originals/references and transient workspace are separate.
     fn buffer_bytes(&self) -> usize;
     /// Returns the number of persistent workers owned by this adapter.
     fn worker_threads(&self) -> usize;
@@ -301,6 +302,9 @@ fn prepare_radsort<T: BenchmarkRecord, K: radsort::Key>(
 ) -> Box<dyn Kernel> {
     #[cfg(feature = "operations")]
     if !input.operation().is_sort() {
+        if input.operation().bucket_count().is_some() {
+            return operations::categories("radsort", input).expect("category sorting supported");
+        }
         if matches!(input.operation(), Operation::Argsort {}) {
             return operations::indices(input, move |source| {
                 let mut indices: Vec<_> = (0..source.len()).collect();

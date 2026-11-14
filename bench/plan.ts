@@ -57,6 +57,7 @@ export type SelectionOptions = CaseRule & {
   rankRange?: { start: number; end: number };
   indices?: number[];
   segmentLen?: number;
+  bucketCount?: number;
 };
 
 /** Validate selections without choosing a measurement protocol or adding algorithms. */
@@ -96,8 +97,18 @@ export async function loadPlan(name: string, options: SelectionOptions = {}): Pr
     ? fileURLToPath(new URL(`./plans/${name}.toml`, import.meta.url))
     : name;
   const plan = schema.parse(decodeConfig(await readFile(path, "utf8"), path));
-  const { algorithms, operation, prefixLen, k, index, rankRange, indices, segmentLen, ...axes } =
-    options;
+  const {
+    algorithms,
+    operation,
+    prefixLen,
+    k,
+    index,
+    rankRange,
+    indices,
+    segmentLen,
+    bucketCount,
+    ...axes
+  } = options;
   const parameters = Object.fromEntries(
     Object.entries({
       prefix_len: prefixLen,
@@ -106,6 +117,7 @@ export async function loadPlan(name: string, options: SelectionOptions = {}): Pr
       ...rankRange,
       indices,
       segment_len: segmentLen,
+      bucket_count: bucketCount,
     }).filter(([, value]) => value !== undefined),
   );
   let selected = plan;

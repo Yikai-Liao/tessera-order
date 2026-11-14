@@ -81,6 +81,12 @@ test("operation overrides retain exact raw requests and reject unrelated flags",
     { prefixLen: 5 },
   ])
     await assert.rejects(loadPlan("local", invalid));
+  assert.deepEqual(
+    (await loadPlan("local", { operation: "partition-buckets", bucketCount: 7 })).operation,
+    { kind: "partition-buckets", bucket_count: 7 },
+  );
+  await assert.rejects(loadPlan("local", { operation: "partition-buckets", bucketCount: 0 }));
+  await assert.rejects(loadPlan("local", { operation: "partition", bucketCount: 2 }));
   const result = spawnSync(
     process.execPath,
     [
@@ -88,16 +94,19 @@ test("operation overrides retain exact raw requests and reject unrelated flags",
       "plan",
       "local",
       "--operation",
-      "top-k",
-      "--k",
-      "10",
+      "partition-buckets",
+      "--bucket-count",
+      "7",
       "--lengths",
       "100",
     ],
     { encoding: "utf8" },
   );
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(parsePlan(JSON.parse(result.stdout)).operation, { kind: "top-k", k: 10 });
+  assert.deepEqual(parsePlan(JSON.parse(result.stdout)).operation, {
+    kind: "partition-buckets",
+    bucket_count: 7,
+  });
 });
 
 test("plan CLI defaults to JSON and retains explicit TOML export", async () => {

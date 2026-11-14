@@ -65,13 +65,15 @@ The following additions are **unreleased**, not part of the published 0.1 packag
 |---|---|
 | `stable_argsort` / `_by_key` | Return sorted indices without moving source records |
 | `stable_sort_segments` / `_by_key` | Sort independent segments with invocation workspace reuse |
+| `stable_partition` | Stably place predicate matches before nonmatches |
+| `stable_partition_by_bucket` | Stably group finite categories and return every category boundary |
 | `stable_top_k` / `_by_key` | Partition an unordered minimum-k set with stable boundary membership |
 | `stable_sort_prefix` / `_by_key` | Produce an ordered minimum-k prefix |
 | `stable_select_nth` / `_by_key` | Select one exact stable ranked member |
 | `stable_sort_rank_range` / `_by_key` | Sort one global rank interval |
 | `stable_select_nth_many` / `_by_key` | Select several exact stable ranked members |
 
-The [slice-operation guide](docs/guide/getting-started.md#top-k-and-selected-ranks) gives examples; [semantics](conformance/semantics.md#serial-slice-operations) distinguishes mandatory output and request metadata from sorting scratch.
+The [slice-operation guide](docs/guide/getting-started.md#top-k-and-selected-ranks) and [category guide](docs/guide/getting-started.md#stable-category-partitions) give examples. [Semantics](conformance/semantics.md#serial-slice-operations) distinguishes mandatory output and request metadata from sorting scratch; [category semantics](conformance/semantics.md#stable-category-partitions) accounts for category-dependent space.
 
 Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 

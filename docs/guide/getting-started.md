@@ -79,7 +79,7 @@ assert!(values[4].is_nan());
 
 ## Top-k and selected ranks
 
-**Unreleased:** these operations and the argsort/segment operations below are not in the published 0.1 package. Use a local checkout containing the additions instead of the crates.io dependency:
+**Unreleased:** these operations and the argsort, segment and category operations below are not in the published 0.1 package. Use a local checkout containing the additions instead of the crates.io dependency:
 
 ```toml
 [dependencies]
@@ -124,6 +124,23 @@ let mut values = [3u64, 1, 9, 7, 8];
 tessera_order::stable_sort_segments(&mut values, &[0, 2, 5]);
 assert_eq!(values, [1, 3, 7, 8, 9]);
 ```
+
+## Stable category partitions
+
+These functions are also unreleased. When categories are already known, group records without sorting inside each category:
+
+```rust
+let mut events = [(false, "a"), (true, "b"), (true, "c"), (false, "d")];
+let ready = tessera_order::stable_partition(&mut events, |event| event.0);
+assert_eq!(ready, 2);
+assert_eq!(events, [(true, "b"), (true, "c"), (false, "a"), (false, "d")]);
+let mut jobs = [(2, "a"), (0, "b"), (2, "c"), (0, "d")];
+let offsets = tessera_order::stable_partition_by_bucket(&mut jobs, 3, |job| job.0);
+assert_eq!(offsets, [0, 2, 2, 4]);
+assert_eq!(jobs, [(0, "b"), (0, "d"), (2, "a"), (2, "c")]);
+```
+
+See [category semantics](../../conformance/semantics.md#stable-category-partitions) for classifier evaluation, supported counts, panic recovery and category-dependent memory. Categories need not correspond to key bits or ordered ranks.
 
 ## Multi-field sorting and groups
 

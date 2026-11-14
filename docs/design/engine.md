@@ -22,6 +22,7 @@ Full-sort and rank entries share node decisions, rank projection, workspace and 
 | Owner | Complete responsibility | Consumers need to know |
 |---|---|---|
 | `algorithms.rs` | Complete serial argsort, segmented sorting, Top-k, prefix and selection calls; validate public arguments and shape outputs | Shared rank requirements and complete refinement, not movement state or planner details |
+| `partition.rs` | Complete stable binary and finite-category distribution, including validation, storage lifetime and boundary output | Complete tile or block distribution, not order analysis or rank refinement |
 | `engine.rs` | Root preparation, candidate-bit progress and ordered refinement. Serial and parallel entries preserve actual variation and narrow a 128-bit key through one `KeyHalf` (`key.rs`) | Required rank views and complete partition and finishing operations |
 | `rank.rs` | Validate normalized required intervals once and project immutable borrowed views into final bands | Parent-relative final ranges, not keys, classifications or callback order |
 | `workspace.rs` | Invocation-owned reusable tile and block capacity, lent through complete operations | Capacity is reusable after restoration; no live movement state survives an operation |
@@ -32,6 +33,12 @@ Full-sort and rank entries share node decisions, rank projection, workspace and 
 | `engine/parallel.rs` | Shard count, task scheduling and scratch pooling for the shared decisions | Exclusive bucket borrows and the planner's decision, not a second cost model |
 
 A change to sampled occupancy or a leaf estimate stays in planning and does not touch record movement. A change to tile scratch layout stays with its counting and recovery operation. Tile cursor size, record capacity, alignment padding and table capacity derive from the cursor type and the shared byte budget, and planning consumes those facts. Block metadata costs are derived beside the physical representation (`finish::serial_descriptor_bytes`), not copied into the strategy model.
+
+## Category distribution
+
+Arbitrary classifiers are not sorting keys: an order probe or comparison-based leaf could reevaluate them or change their evaluation order. `partition.rs` therefore bypasses ordered refinement. It validates category IDs before converting them to an encoded digit, pads only the private fan-out, and removes padding from the returned offsets. Trivial physical-movement cases still owe the classifier calls in the [category contract](../../conformance/semantics.md#stable-category-partitions).
+
+A bounded tile uses `Scratch::distribute`: one counting pass, the existing cached-ID storage and restoration guard, and completed cursor ends. A larger input uses `block::partition` with no child finishing; it returns only after every band retires. Neither route retains live ownership state, nor reconstructs boundaries by calling user code again. Binary partition composes this operation with two categories. Sorting by category is a simpler reference composition, but cannot supply the classifier-evaluation contract and is not used as the public implementation.
 
 ## Cost model
 

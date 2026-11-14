@@ -252,7 +252,9 @@ test("optimization and debug settings must agree across timing and memory", asyn
 /** Small boundary fixture, derived from the existing paired-run fixture. */
 function operationFixture(operation: Operation) {
   const dataset = createFixture(3);
-  const payloadRanks = operation.kind !== "argsort" && operation.kind !== "segments";
+  const payloadRanks = !["argsort", "segments", "partition", "partition-buckets"].includes(
+    operation.kind,
+  );
   const ty = payloadRanks ? "row_u64" : "u64";
   const source = dataset.manifest.cases.find(
     (c) => c.ty === ty && c.distribution === "random" && c.len === 1000,
@@ -299,7 +301,12 @@ function operationFixture(operation: Operation) {
   dataset.observations = dataset.observations
     .filter((o) => o.group === oldGroup)
     .map((o) => ({ ...o, group }));
-  const output = operation.kind === "argsort" ? c.len * 8 : 0;
+  const output =
+    operation.kind === "argsort"
+      ? c.len * 8
+      : operation.kind === "partition-buckets"
+        ? (operation.bucket_count + 1) * 8
+        : 0;
   dataset.memory = dataset.memory
     .filter((m) => m.case_id === oldId && variants.includes(m.variant))
     .map((m) => ({
@@ -314,6 +321,8 @@ function operationFixture(operation: Operation) {
 test("operation reports retain exact parameters and output-aware memory without sorting figures", async (t) => {
   for (const operation of [
     { kind: "argsort" },
+    { kind: "partition" },
+    { kind: "partition-buckets", bucket_count: 7 },
     { kind: "segments", segment_len: 73 },
     { kind: "top-k", k: 99 },
     { kind: "prefix", prefix_len: 99 },
@@ -338,10 +347,14 @@ test("operation reports retain exact parameters and output-aware memory without 
     assert.ok((await readdir(join(directory, "report"))).every((name) => !name.endsWith(".svg")));
     assert.equal(
       (await loadRun([directory])).memory[0].output_bytes,
-      operation.kind === "argsort" ? 8000 : 0,
+      operation.kind === "argsort"
+        ? 8000
+        : operation.kind === "partition-buckets"
+          ? (operation.bucket_count + 1) * 8
+          : 0,
     );
     const invalid = structuredClone(dataset);
-    invalid.memory[0].output_bytes = operation.kind === "argsort" ? 0 : 1;
+    invalid.memory[0].output_bytes = (invalid.memory[0].output_bytes ?? 0) + 1;
     assert.throws(() => validateRun(invalid), /output allocation/);
     const memoryPath = join(directory, "memory-manifest-default.json");
     await writeFile(memoryPath, JSON.stringify({ ...dataset.manifest, index_bytes: 4 }));

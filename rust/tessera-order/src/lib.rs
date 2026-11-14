@@ -74,6 +74,7 @@ mod key;
 mod order;
 #[cfg(feature = "rayon")]
 mod parallel;
+mod partition;
 mod portable_simd;
 mod rank;
 mod tile;
@@ -92,6 +93,7 @@ pub use algorithms::{
 pub use key::RadixKey;
 #[cfg(feature = "rayon")]
 pub use parallel::{par_stable_sort, par_stable_sort_by_key};
+pub use partition::{MAX_PARTITION_BUCKETS, stable_partition, stable_partition_by_bucket};
 
 /// Sorts keys in ascending order, keeping equal keys in input order.
 ///

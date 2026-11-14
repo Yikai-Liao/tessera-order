@@ -8,24 +8,13 @@ Extend Tessera through complete operations for stable distribution and ordered r
 
 Design the target architecture as if the known sorting, selection, partitioning, batch and incremental consumers were required from day zero. Their result contracts, ownership and resource lifetimes determine the boundaries; the current `Sorter` and the first feature do not. Settle that target before migrating the implementation, then deliver independently verifiable slices from simple compositions to stateful algorithms. External sorting and Wavelet matrix construction receive neither an interface nor an implementation in this experiment. Their known roles remain compatible with the boundary: run generation consumes complete sorting, while Wavelet construction needs controlled stable passes, not rank refinement. A priority queue is outside this proposal.
 
-The implemented first slice covers argsort, standard-library compositions for multiple fields and groups, segmented sorting, unordered Top-k, sorted prefixes, rank selection and sorted rank ranges. Stable binary and bounded multiway partitioning remain later stages. Incremental prefix completion follows only after the one-shot operations work. These are unreleased additions after Rust 0.1, not changes to the published release.
+The implemented first slice covers argsort, standard-library compositions for multiple fields and groups, segmented sorting, unordered Top-k, sorted prefixes, rank selection and sorted rank ranges. Stable binary and bounded multiway partitioning are now implemented as complete one-shot distribution calls. Incremental prefix completion follows only after the one-shot operations work. These are unreleased additions after Rust 0.1, not changes to the published release.
 
 ## Public surface and remaining proposals
 
 Argsort, segmented sorting, stable-membership Top-k, sorted prefixes, single and multiple selection, and sorted rank ranges are implemented. Their one contract owner is [serial slice semantics](../../conformance/semantics.md#serial-slice-operations); [public Rust docs](../../rust/tessera-order/src/algorithms.rs) provide signatures and examples. These are normal serial functions, not research features or stubs. The existing full-sort and Rayon interfaces are unchanged.
 
-The remaining one-shot proposals are stable category partitions:
-
-```rust
-pub fn stable_partition<T, F: FnMut(&T) -> bool>(values: &mut [T], predicate: F) -> usize;
-pub fn stable_partition_by_bucket<T, F: FnMut(&T) -> usize>(
-    values: &mut [T], bucket_count: usize, classify: F,
-) -> Vec<usize>;
-```
-
-Binary partition returns the matching count, placing matching before nonmatching records, stable within each group. Multiway partition groups categories `0..bucket_count` in ascending category order, stable within each category, returning `bucket_count + 1` offsets including empty categories. Its O(R) output and category-dependent scratch are separate from sorting's fixed-radix bound.
-
-The category functions would evaluate the classifier once per record on success, in input order, including zero-sized records. Invalid bucket counts panic before mutation; an out-of-range classification is detected under movement recovery, without a preliminary classification pass. A single category still evaluates the classifier. Positive category counts need not be powers of two; internal padding must not mask invalid IDs or expose extra categories. Document a representation-derived supported maximum before exporting either function. The existing callback-panic and record-restoration rules apply, without rolling back user side effects.
+Stable binary and bounded multiway partitions are implemented. Their current contract belongs to [category semantics](../../conformance/semantics.md#stable-category-partitions), signatures and examples to [public Rust docs](../../rust/tessera-order/src/partition.rs), and the complete-operation boundary to the [engine reference](engine.md#category-distribution). Incremental prefix completion remains the next proposed algorithm with persistent state.
 
 ### Composition and persistent use
 
@@ -109,7 +98,7 @@ This is a responsibility graph, not a claim that all Rust modules form a strict 
 | Existing node planner in `engine/plan.rs` | Provide the same executable node decisions to all ordered operations; consume tile-owned capacity facts rather than owning its leaf policy. | Node sampling and partition thresholds; no second selection planner. |
 | Bounded tile subsystem, moved out of `engine/` | Own complete tile finishing together with its existing leaf planner, cursor-derived capacities and restoration. Later supply complete bounded category distribution to the partition adapter through the same storage owner. | Short LSD plans, tile MSD and insertion rules, cursors, cached IDs, alternating live buffers and the guard. No import of recursive node execution, and no raw counting-pass assembly outside the subsystem. |
 | `engine/parallel.rs` | Migrate the existing callback and primitive dependencies without changing full-sort scheduling. | Task admission, scratch pooling and suspended-allocation accounting. |
-| Future public partition implementation | Own validation, small/large execution choice, scratch lifetime and boundary output as one operation, rather than merely forwarding `block::partition`. | No public block or classifier trait, and no sorting preparation for arbitrary categories. |
+| `partition.rs` ([implemented boundary](engine.md#category-distribution)) | Own validation, small/large execution choice, scratch lifetime and boundary output as one operation, rather than merely forwarding `block::partition`. | No public block or classifier trait, and no sorting preparation for arbitrary categories. |
 
 Evolve existing owners rather than adding a second planner, allocator or pool. A rank-requirement owner and an operation/session workspace are justified by several concrete consumers above, not speculative extensibility. Move the existing leaf decisions with tile ownership, not into a duplicate planner or a generic storage interface. Node and tile analysis deliberately remain different complete operations: large children benefit from order confirmation; insertion-sized tile children skip scans. Preserve the [N5 boundary and LSD savings](evidence.md#n5-shared-node-and-tile-recursion), rather than imposing one recursion protocol.
 
@@ -165,7 +154,7 @@ The sequence is an implementation order, not permission to postpone the target d
 
 The first one-shot operations use the maintained [operation comparison contract](../development/benchmarking.md#serial-operation-comparisons) and [shared kernel boundary](benchmark-tooling.md#operation-workloads). Public algorithms, not private study entries, are timed end to end. Current contracts belong there; no second command family or experimental library feature is needed.
 
-Future category partitions need deterministic classifiers and category counts, complete boundary and stable-member verification, and explicit distinction between output-buffer and sorting-based references. A future incremental session needs a recorded request sequence and verification of each published prefix, reporting both whole-session cost and extension latency without replacing the persistent workload with independent Top-k calls. Admit those shapes through the same capabilities, provenance, allocation and recovery boundaries before measuring them. Keep new figures deferred unless separately requested; preserve the existing full-sort figures.
+Category workloads use deterministic encoded-key categories, complete boundary and stable-member verification, and explicitly labelled sorting-based references in the maintained operation pipeline. A sorting composition is not a direct output-buffer partition baseline. A future incremental session needs a recorded request sequence and verification of each published prefix, reporting both whole-session cost and extension latency without replacing the persistent workload with independent Top-k calls. Admit those shapes through the same capabilities, provenance, allocation and recovery boundaries before measuring them. Keep new figures deferred unless separately requested; preserve the existing full-sort figures.
 
 ## Validation and evidence
 

@@ -158,6 +158,34 @@ impl<T> Scratch<T> {
         }
     }
 
+    /// Distributes a tile by a validated category extractor in one cached pass.
+    /// No order/variation probe or recursive finishing evaluates it again.
+    /// Returns cumulative ends for all represented categories, including empty ones.
+    pub(super) fn distribute<E: Extract<T>>(
+        &mut self,
+        records: &mut [T],
+        radix: usize,
+        extractor: &mut E,
+    ) -> Vec<usize> {
+        assert!((1..=MAX_DIGIT_BUCKETS.ilog2() as usize).contains(&radix));
+        debug_assert!(records.len() <= MAX_TILE_RECORDS);
+        let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
+        self.counting_passes(
+            records,
+            &[Digit {
+                shift: 0,
+                width: radix,
+            }],
+            &mut counts,
+            extractor,
+        );
+        // SAFETY: the completed pass initialized this prefix and restored all
+        // records. Its cursor values are the cumulative category ends.
+        let ends =
+            unsafe { core::slice::from_raw_parts(counts.as_ptr().cast::<Cursor>(), 1 << radix) };
+        ends.iter().map(|&end| end as usize).collect()
+    }
+
     /// Finishes a cursor-bounded child within `candidate`. Insertion-sized
     /// children skip the variation scan; node and tile partitions share this rule.
     pub(super) fn finish_child<E: Extract<T>>(

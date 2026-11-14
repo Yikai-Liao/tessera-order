@@ -18,6 +18,9 @@ jobs:
   # could run in parallel with them belongs here.
   changes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       rust: ${{ steps.changes.outputs.rust }}
       cpp: ${{ steps.changes.outputs.cpp }}
@@ -25,6 +28,8 @@ jobs:
       comparison: ${{ steps.changes.outputs.comparison }}
       benchmark: ${{ steps.changes.outputs.benchmark }}
       docs: ${{ steps.changes.outputs.docs }}
+      record: ${{ steps.changes.outputs.record }}
+      benchmark_reused: ${{ steps.changes.outputs.benchmark_reused }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -36,7 +41,12 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: bun .github/scripts/ci_changes.ts --base "$BASE" --head "$HEAD" --out "$GITHUB_OUTPUT"
+          # A PR run tests its merge commit and may reuse lanes verified on identical inputs.
+          TESTED: ${{ github.event_name == 'pull_request' && github.sha || '' }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          bun .github/scripts/ci_changes.ts --base "$BASE" --head "$HEAD" --out "$GITHUB_OUTPUT" \
+            ${TESTED:+--reuse "$TESTED"}
       - name: Explain deferred C++ checks
         if: steps.changes.outputs.cpp == 'true' && steps.changes.outputs.cpp_present != 'true'
         run: echo 'C++ is planned; checks activate when cpp/CMakeLists.txt is added.' >> "$GITHUB_STEP_SUMMARY"
@@ -82,12 +92,31 @@ jobs:
   # on any failure or cancellation.
   ci-ok:
     if: always()
-    needs: [changes, lint, rust, cpp, docs, comparison, registry-msvc, prepare, measure, report]
+    needs: [changes, lint, rust, cpp, docs, comparison, registry-msvc, prepare, measure, report, reuse-report]
     runs-on: ubuntu-latest
     steps:
       - env:
           NEEDS: ${{ toJSON(needs) }}
         run: jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<< "$NEEDS"
+
+  # A passing PR run records each lane it verified, or reused, as an artifact
+  # named by the lane's input fingerprint. Artifacts name their run, which is
+  # what lets a later push trust them.
+  record:
+    needs: [changes, ci-ok]
+    if: needs.changes.outputs.record != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        name: ${{ fromJSON(needs.changes.outputs.record) }}
+    steps:
+      - run: echo "$GITHUB_SHA" > "$RUNNER_TEMP/marker"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ runner.temp }}/marker
+          retention-days: 30
+          overwrite: true
 
   registry-msvc:
     name: Native registry (MSVC)
@@ -340,3 +369,26 @@ jobs:
       - name: Preserve Cloud archival failure
         if: always() && steps.upload.outcome == 'failure'
         run: exit 1
+
+  # Identical measured inputs keep the earlier verdict; carry its check to this head.
+  reuse-report:
+    needs: changes
+    if: needs.changes.outputs.benchmark_reused != '' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun .github/scripts/publish-report.ts
+        env:
+          HASH: ${{ github.event.pull_request.head.sha }}
+          REUSED_FROM: ${{ needs.changes.outputs.benchmark_reused }}
+          GITHUB_TOKEN: ${{ github.token }}

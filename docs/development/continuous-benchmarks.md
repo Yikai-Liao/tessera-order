@@ -11,7 +11,7 @@ bun run --silent tools status main
 bun run --silent tools status --pr 123 [--details]
 ```
 
-1. Match `target.head` to the requested commit. Feedback for another head is not current evidence.
+1. Match `target.head` to the requested commit. Feedback for another head is not current evidence. A head whose measured inputs equal an earlier head's carries that head's check, marked as reused ([reuse](ci.md#reuse-of-verified-lanes)).
 2. Read `Benchmarks (rust)` in `benchmark`. Missing or incomplete measurements cannot pass. Benchmark verdicts (`Measurement failed`, `no comparable baseline`, a slowdown alert) are independent of workflow success.
 3. Read `workflows[].state`. The `CI` run builds, measures, attempts Cloud archival and publishes the report. A failed upload fails CI; the report keeps its own verdict.
 4. Use `--details` for the exact baseline and affected cases. Negative changes mean less time. Stacked PRs compare with their parent branch, not with main.

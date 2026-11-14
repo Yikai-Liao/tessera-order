@@ -2,12 +2,12 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { checkDco } from "./check-dco.ts";
-import { changedPaths, select } from "./ci_changes.ts";
+import { changedPaths, changesTrustedFiles, marker, select } from "./ci_changes.ts";
 import {
   BOT_EMAIL,
   isDependabotUpdate,
@@ -145,6 +145,44 @@ test("routing keeps library, comparison and revision checks with their owners", 
   });
   assert.equal(changedPaths(undefined, "HEAD"), null);
   assert.equal(changedPaths("missing-base-ref", "HEAD"), null);
+});
+
+test("reuse markers follow lane inputs and trusted files block reuse", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tessera-reuse-"));
+  const previous = process.cwd();
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+      cwd: root,
+      encoding: "utf8",
+    }).trim();
+  const commit = async (path: string, text: string) => {
+    await mkdir(join(root, path, ".."), { recursive: true });
+    await writeFile(join(root, path), text);
+    git("add", "-A");
+    git("commit", "-qm", path);
+    return git("rev-parse", "HEAD");
+  };
+  try {
+    git("init", "-q");
+    await commit("rust/tessera-order/src/lib.rs", "a");
+    const base = await commit("docs/guide.md", "a");
+    const docs = await commit("docs/guide.md", "b");
+    const workflow = await commit(".github/workflows/ci.yml", "b");
+    process.chdir(root);
+    const at = (tested: string) => ({ tested, head: tested, baseline: base });
+    assert.equal(marker("rust", at(base)), marker("rust", at(docs)));
+    assert.notEqual(marker("docs", at(base)), marker("docs", at(docs)));
+    // Measurement also depends on the baseline it compares against.
+    assert.notEqual(
+      marker("benchmark", at(base)),
+      marker("benchmark", { ...at(base), baseline: workflow }),
+    );
+    assert.equal(changesTrustedFiles(base, docs), false);
+    assert.equal(changesTrustedFiles(base, workflow), true);
+  } finally {
+    process.chdir(previous);
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Dependabot provenance requires every event and identity field", () => {

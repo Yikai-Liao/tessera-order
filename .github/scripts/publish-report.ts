@@ -3,6 +3,7 @@
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { context, getOctokit } from "@actions/github";
+import { reuseReport } from "../../bench/continuous/github.ts";
 import { publishReport } from "../../bench/continuous/index.ts";
 
 /** Adapt Actions environment and summary output to the shared publication operation. */
@@ -12,6 +13,16 @@ function required(name: string) {
   return value;
 }
 
+const reusedFrom = process.env.REUSED_FROM;
+if (reusedFrom) {
+  await reuseReport({
+    github: getOctokit(required("GITHUB_TOKEN")),
+    context,
+    hash: required("HASH"),
+    from: reusedFrom,
+  });
+  process.exit(0);
+}
 const publish = process.env.PUBLISH === "true";
 const temporary = required("RUNNER_TEMP");
 const summary = required("GITHUB_STEP_SUMMARY");

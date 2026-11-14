@@ -18,6 +18,12 @@ An engine-only PR fetches no native sources, installs no TBB and skips the algor
 
 Issue and PR templates, Dependabot configuration, `fuzz/`, manual diagnostics and the separate title, DCO and release workflows select no extra lane. A path no row names, an unavailable base and manual dispatch select all lanes, so a new kind of file needs a row. The opt-in [main performance workflow](continuous-benchmarks.md#main-long-term-tracking) is independent of these lanes and `ci-ok`. PR updates cancel obsolete runs; each main push has its own concurrency group, so a later non-docs push cannot cancel a pending site deployment.
 
+### Reuse of verified lanes
+
+A PR push skips a selected lane when an earlier run of the same PR passed that lane with identical inputs, so a documentation-only push after a verified engine change runs formatting, lints and Docs only. The router fingerprints each lane's inputs: the mode and blob ID of every tracked file whose `ROUTES` row selects the lane, including unrouted files. Checks fingerprint the tested merge commit. Measurement fingerprints the PR head together with its merge base, because a new base changes the comparison without changing the head.
+
+When `ci-ok` passes, the `record` job uploads one artifact per selected or reused lane, named by lane and fingerprint. The next push looks those names up. It accepts an artifact only if the artifact's run tested a commit of this PR after the merge base, and only if no commit in that range changed `.github/`, `.env*`, `package.json`, `bunfig.toml` or `tsconfig.json`. These are the files that decide reuse, and a run whose deciding code was altered could record a fingerprint it did not verify. Artifacts, unlike cache entries, name the run that uploaded them. A failed lookup runs the lane. A reused measurement carries its `Benchmarks (rust)` check to the new head (`reuse-report`), and the `changes` job summary links the run each reused lane came from. Pushes to `main` never reuse.
+
 ## Lanes
 
 Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, checks, other PRs and other repositories, with no priority or preemption. Continuous measurement builds once and takes its matrix width from [`CONTINUOUS_SHARDS`](../../bench/continuous/paired.ts); no test waits for it ([capacity](continuous-benchmarks.md#capacity-and-recovery)).

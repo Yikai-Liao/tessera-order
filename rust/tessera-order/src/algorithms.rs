@@ -11,41 +11,38 @@ use crate::{
     workspace::Workspace,
 };
 use alloc::vec::Vec;
-use core::ops::Range;
+use core::{
+    cmp::Reverse,
+    ops::{Bound, Range, RangeBounds},
+};
 
-/// Returns the indices of a stable sort, without modifying the source.
+/// Returns the indices that would sort `values`, without moving them.
 ///
-/// Ordering follows [`crate::stable_sort`], including float total order and
-/// `Reverse`. Equal keys keep their original index order. The O(n) index result
-/// is output space; sorting it uses the ordinary sorting workspace in addition.
+/// `numpy.argsort(kind="stable")`: `values[result[i]]` is the `i`th key of
+/// [`crate::sort`], and equal keys keep ascending index order. The O(n) index
+/// result is output space; sorting it uses the sorting workspace in addition.
 ///
 /// # Examples
 /// ```
 /// let values = [3u64, 1, 3, 2];
-/// assert_eq!(tessera_order::stable_argsort(&values), [1, 3, 0, 2]);
-/// assert_eq!(values, [3, 1, 3, 2]);
+/// assert_eq!(tessera_order::argsort(&values), [1, 3, 0, 2]);
 /// ```
-pub fn stable_argsort<K: RadixKey>(values: &[K]) -> Vec<usize> {
-    stable_argsort_by_key(values, |key| *key)
+pub fn argsort<K: RadixKey>(values: &[K]) -> Vec<usize> {
+    argsort_by_key(values, |key| *key)
 }
 
-/// Returns stable sorted indices using a key function, leaving the source intact.
+/// Returns the indices that would sort `values` by a key function.
 ///
-/// Key evaluation follows [`crate::stable_sort_by_key`]: repeated `FnMut` calls
-/// are allowed and consistent keys are required for ordering. A key panic drops
-/// the partial index output and propagates. Source records are never moved;
-/// side effects performed by the callback are not rolled back.
-/// Memory is the O(n) index result plus the workspace for sorting indices.
+/// Result and memory follow [`argsort`]; key calls follow
+/// [`crate::sort_by_key`]. A key panic drops the partial index output and
+/// propagates; `values` is never moved.
 ///
 /// # Examples
 /// ```
 /// let rows = [(2u32, "first"), (1, "middle"), (2, "last")];
-/// assert_eq!(tessera_order::stable_argsort_by_key(&rows, |r| r.0), [1, 0, 2]);
+/// assert_eq!(tessera_order::argsort_by_key(&rows, |r| r.0), [1, 0, 2]);
 /// ```
-pub fn stable_argsort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
-    values: &[T],
-    mut key: F,
-) -> Vec<usize> {
+pub fn argsort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &[T], mut key: F) -> Vec<usize> {
     let mut indices: Vec<_> = (0..values.len()).collect();
     // Indices are payloads, not direct keys: counting/refilling indices would
     // destroy their identity when source keys repeat.
@@ -53,272 +50,269 @@ pub fn stable_argsort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
     indices
 }
 
-/// Stably sorts each segment described by consecutive offsets.
+/// Sorts each chunk of `chunk_len` records, as [`crate::sort`] on every
+/// `values.chunks_mut(chunk_len)`; the last chunk may be shorter.
 ///
-/// Offsets must start at zero, end at `values.len()` and be nondecreasing.
-/// Repeated offsets permit empty segments; an empty input accepts `[0]`.
-/// One invocation reuses private workspace across segments and releases it on
-/// return. Its bound is the sorting workspace of the largest segment.
+/// One call reuses its workspace across chunks and releases it on return; its
+/// bound is the sorting workspace of one chunk.
 ///
 /// # Panics
-/// Invalid offsets panic before any record is changed.
+/// Panics if `chunk_len` is zero, before any record is changed.
 ///
 /// # Examples
 /// ```
 /// let mut values = [3u64, 1, 2, 9, 7];
-/// tessera_order::stable_sort_segments(&mut values, &[0, 3, 3, 5]);
+/// tessera_order::sort_chunks(&mut values, 3);
 /// assert_eq!(values, [1, 2, 3, 7, 9]);
 /// ```
-pub fn stable_sort_segments<K: RadixKey>(values: &mut [K], offsets: &[usize]) {
-    segments(values, offsets, Direct);
+pub fn sort_chunks<K: RadixKey>(values: &mut [K], chunk_len: usize) {
+    chunks(values, chunk_len, Direct);
 }
 
-/// Stably sorts segments by key, reusing one invocation's private workspace.
+/// Sorts each chunk of `chunk_len` records by a key function.
 ///
-/// Boundaries and memory follow [`stable_sort_segments`]. Key evaluation follows
-/// [`crate::stable_sort_by_key`]; the same `FnMut` is used across all segments.
+/// Chunks and memory follow [`sort_chunks`]; key calls follow
+/// [`crate::sort_by_key`], with one `FnMut` across all chunks.
 ///
 /// # Panics
-/// Invalid offsets panic before mutation or key calls. A key panic restores
-/// every record in its current segment before unwinding; prior segments may
-/// already be sorted and later segments have not been visited.
-pub fn stable_sort_segments_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
+/// Panics if `chunk_len` is zero, before any key call. A key panic restores
+/// every record of the current chunk before propagating; earlier chunks are
+/// sorted and later chunks unvisited.
+pub fn sort_chunks_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
     values: &mut [T],
-    offsets: &[usize],
+    chunk_len: usize,
     key: F,
 ) {
-    segments(values, offsets, ByKey(key));
+    chunks(values, chunk_len, ByKey(key));
 }
 
-/// Partitions the smallest `k` records into a prefix, without sorting them.
+/// Sorts the records that [`crate::sort`] would place in `range`, and only
+/// partitions the rest around them.
 ///
-/// Returns disjoint borrows of that prefix and the remaining records. Each
-/// region contains exactly the corresponding members of a complete stable
-/// sort, in unspecified internal order. Equal-key boundary members are chosen
-/// in original input order. Zero and the full input length are no-ops without
-/// key calls or allocation. For an ordered result use [`stable_sort_prefix`].
-/// Workspace follows [`crate::stable_sort`], not O(k).
+/// The nightly `slice::partial_sort_unstable`, with equal keys resolved as the
+/// stable sort resolves them: `values[range]` equals that interval of the
+/// sorted slice, and the records before and after it are exactly the sorted
+/// slice's records there, in unspecified order. An empty range `k..k` with
+/// `0 < k < len` partitions at `k`; at either end it changes nothing. The
+/// workspace bound is that of [`crate::sort`], independent of the range length.
 ///
 /// # Panics
-/// Panics before mutation if `k > values.len()`.
+/// Panics if `range` is out of bounds, as slice indexing does, before any
+/// record is changed.
 ///
 /// # Examples
-/// ```rust
-/// let mut values = [9u64, 3, 1, 7, 2];
-/// let (smallest, remaining) = tessera_order::stable_top_k(&mut values, 3);
-/// let mut members = smallest.to_vec();
-/// members.sort();
-/// assert_eq!(members, [1, 2, 3]);
-/// assert!(remaining.iter().all(|v| *v >= 7));
 /// ```
-pub fn stable_top_k<K: RadixKey>(values: &mut [K], k: usize) -> (&mut [K], &mut [K]) {
-    top_k::<_, _>(values, k, Direct)
+/// let mut values = [9u64, 3, 1, 7, 2];
+/// tessera_order::partial_sort(&mut values, ..3);
+/// assert_eq!(&values[..3], &[1, 2, 3]);
+/// tessera_order::partial_sort(&mut values, 1..4);
+/// assert_eq!(&values[1..4], &[2, 3, 7]);
+/// ```
+pub fn partial_sort<K: RadixKey>(values: &mut [K], range: impl RangeBounds<usize>) {
+    partial(values, ranks(range, values.len()), Direct);
 }
 
-/// Partitions the smallest `k` records by key, with stable boundary membership.
+/// Sorts the records that [`crate::sort_by_key`] would place in `range`.
 ///
-/// Result, bounds and memory follow [`stable_top_k`]; key evaluation and panic
-/// restoration follow [`crate::stable_sort_by_key`]. Neither output region is
-/// required to be sorted. A zero or full-length request evaluates no keys.
+/// Result, bounds and memory follow [`partial_sort`]; key calls and panic
+/// restoration follow [`crate::sort_by_key`]. A range that changes nothing
+/// makes no key calls and allocates nothing.
 ///
 /// # Panics
-/// An invalid count panics before mutation or key calls. An extractor panic
-/// restores all records before unwinding, in unspecified order.
-pub fn stable_top_k_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
+/// An out-of-bounds range panics before any key call. A key panic restores
+/// every record before propagating, in unspecified order.
+pub fn partial_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
+    values: &mut [T],
+    range: impl RangeBounds<usize>,
+    key: F,
+) {
+    partial(values, ranks(range, values.len()), ByKey(key));
+}
+
+/// Moves the `k` smallest records to the front in sorted order and returns
+/// them with the remaining records, in unspecified order.
+///
+/// itertools `k_smallest`, in place: `partial_sort(values, ..k)` followed by
+/// `split_at_mut(k)`. Equal keys keep input order, including at the boundary.
+/// For membership without ordering, use `partial_sort(values, k..k)`.
+///
+/// # Panics
+/// Panics if `k > values.len()`, before any record is changed.
+///
+/// # Examples
+/// ```
+/// let mut values = [9u64, 3, 1, 7, 2];
+/// let (smallest, rest) = tessera_order::k_smallest(&mut values, 3);
+/// assert_eq!(smallest, [1, 2, 3]);
+/// assert!(rest.iter().all(|v| *v >= 7));
+/// ```
+pub fn k_smallest<K: RadixKey>(values: &mut [K], k: usize) -> (&mut [K], &mut [K]) {
+    smallest(values, k, Direct)
+}
+
+/// Moves the `k` records with the smallest keys to the front, sorted.
+///
+/// Result and bounds follow [`k_smallest`]; key calls and panic restoration
+/// follow [`crate::sort_by_key`].
+pub fn k_smallest_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
     values: &mut [T],
     k: usize,
     key: F,
 ) -> (&mut [T], &mut [T]) {
-    top_k::<_, _>(values, k, ByKey(key))
+    smallest(values, k, ByKey(key))
 }
 
-/// Makes the first `prefix_len` records equal a complete stable sort's prefix.
+/// Moves the `k` largest records to the front in descending order and returns
+/// them with the remaining records, in unspecified order.
 ///
-/// The suffix contains exactly the remaining records, in unspecified order.
-/// Equal-key members at the boundary are chosen in original input order.
-/// Zero is a no-op; `prefix_len == values.len()` is a complete stable sort.
-/// Workspace has the bound of [`crate::stable_sort`], not `O(prefix_len)`.
+/// itertools `k_largest`, in place: [`k_smallest`] with a
+/// [`Reverse`](core::cmp::Reverse) key, so equal keys keep input order.
 ///
 /// # Panics
-/// Panics before mutation if `prefix_len > values.len()`.
+/// Panics if `k > values.len()`, before any record is changed.
 ///
 /// # Examples
 /// ```
 /// let mut values = [9u64, 3, 1, 7, 2];
-/// tessera_order::stable_sort_prefix(&mut values, 3);
-/// assert_eq!(&values[..3], &[1, 2, 3]);
+/// let (largest, _) = tessera_order::k_largest(&mut values, 2);
+/// assert_eq!(largest, [9, 7]);
 /// ```
-pub fn stable_sort_prefix<K: RadixKey>(values: &mut [K], prefix_len: usize) {
-    refine_range::<_, _>(values, 0..prefix_len, Direct);
+pub fn k_largest<K: RadixKey>(values: &mut [K], k: usize) -> (&mut [K], &mut [K]) {
+    smallest(values, k, ByKey(|value: &K| Reverse(*value)))
 }
 
-/// Produces the exact stable sorted prefix by key.
+/// Moves the `k` records with the largest keys to the front, descending.
 ///
-/// Result and memory follow [`stable_sort_prefix`]; key evaluation and panic
-/// restoration follow [`crate::stable_sort_by_key`]. A zero prefix makes no key
-/// calls and allocates nothing.
-///
-/// # Panics
-/// Invalid length panics before mutation or key calls. A key panic restores
-/// every record before propagating, without promising a valid partial result.
-pub fn stable_sort_prefix_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
+/// Result and bounds follow [`k_largest`]; key calls and panic restoration
+/// follow [`crate::sort_by_key`].
+pub fn k_largest_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
     values: &mut [T],
-    prefix_len: usize,
-    key: F,
-) {
-    refine_range::<_, _>(values, 0..prefix_len, ByKey(key));
+    k: usize,
+    mut key: F,
+) -> (&mut [T], &mut [T]) {
+    smallest(values, k, ByKey(|record: &T| Reverse(key(record))))
 }
 
-/// Places the exact record at `index` from a complete stable sort.
+/// Places the record that [`crate::sort`] would place at `index`, and
+/// partitions the rest around it.
 ///
-/// Returns disjoint borrows of the preceding records, selected record and
-/// following records, as slice `select_nth_unstable` does. The two outer regions
-/// contain exactly their corresponding stable ranked members, without internal
-/// order guarantees. Stability determines which equal-key member is selected;
-/// it does not preserve input order across different keys. Workspace follows
-/// [`crate::stable_sort`].
+/// `slice::select_nth_unstable`, with equal keys resolved as the stable sort
+/// resolves them: the selected record is that sort's record at `index`, and the
+/// two outer regions are exactly its records before and after, in unspecified
+/// order. The workspace bound is that of [`crate::sort`].
 ///
 /// # Panics
-/// Panics before mutation if `index >= values.len()`.
+/// Panics if `index >= values.len()`, before any record is changed.
 ///
 /// # Examples
 /// ```
 /// let mut values = [9u64, 3, 1, 7, 2];
-/// let (before, selected, after) = tessera_order::stable_select_nth(&mut values, 2);
+/// let (before, selected, after) = tessera_order::select_nth(&mut values, 2);
 /// assert_eq!(*selected, 3);
 /// assert!(before.iter().all(|v| *v < 3));
 /// assert!(after.iter().all(|v| *v > 3));
 /// ```
-pub fn stable_select_nth<K: RadixKey>(
-    values: &mut [K],
-    index: usize,
-) -> (&mut [K], &mut K, &mut [K]) {
-    select_nth::<_, _>(values, index, Direct)
+pub fn select_nth<K: RadixKey>(values: &mut [K], index: usize) -> (&mut [K], &mut K, &mut [K]) {
+    select(values, index, Direct)
 }
 
-/// Selects the exact stable ranked record by key.
+/// Places the record that [`crate::sort_by_key`] would place at `index`.
 ///
-/// Result and memory follow [`stable_select_nth`]; key evaluation follows
-/// [`crate::stable_sort_by_key`]. No index decoration of records is required.
+/// Result and memory follow [`select_nth`]; key calls and panic restoration
+/// follow [`crate::sort_by_key`].
 ///
 /// # Panics
-/// An invalid index panics before mutation or key calls. A key panic restores
-/// every record before unwinding, in unspecified order.
-pub fn stable_select_nth_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
+/// An invalid index panics before any key call. A key panic restores every
+/// record before propagating, in unspecified order.
+pub fn select_nth_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
     values: &mut [T],
     index: usize,
     key: F,
 ) -> (&mut [T], &mut T, &mut [T]) {
-    select_nth::<_, _>(values, index, ByKey(key))
+    select(values, index, ByKey(key))
 }
 
-/// Sorts the requested ranks exactly as a complete stable sort would.
+/// Places the records that [`crate::sort`] would place at each of `indices`,
+/// and partitions the rest between them.
 ///
-/// `values[ranks.clone()]` equals the same interval in a complete stable sort.
-/// Prefix and suffix contain exactly their corresponding stable ranked members,
-/// in unspecified order. An empty range is a no-op and establishes no outer
-/// boundary. Workspace follows [`crate::stable_sort`]. These are global ranks,
-/// not the original positions of a physical subslice.
+/// `numpy.partition(kth=indices)`, with equal keys resolved as the stable sort
+/// resolves them: every gap between selected positions holds exactly that
+/// sort's records there, in unspecified order. Indices may be unordered and
+/// repeated. Memory is the sorting workspace plus O(m) for m indices.
 ///
 /// # Panics
-/// Panics before mutation if `start > end` or `end > values.len()`.
+/// Panics if any index is out of bounds, before any record is changed.
 ///
 /// # Examples
 /// ```
 /// let mut values = [9u64, 3, 1, 7, 2];
-/// tessera_order::stable_sort_rank_range(&mut values, 1..4);
-/// assert_eq!(&values[1..4], &[2, 3, 7]);
-/// ```
-pub fn stable_sort_rank_range<K: RadixKey>(values: &mut [K], ranks: Range<usize>) {
-    refine_range::<_, _>(values, ranks, Direct);
-}
-
-/// Produces an exact stable sorted rank interval by key.
-///
-/// Result, bounds and memory follow [`stable_sort_rank_range`]. Key evaluation
-/// and panic restoration follow [`crate::stable_sort_by_key`]. Empty ranges make
-/// no key calls and allocate nothing.
-///
-/// # Panics
-/// Invalid ranks panic before mutation or key calls. A key panic restores all
-/// records before propagating, without promising a valid partial result.
-pub fn stable_sort_rank_range_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
-    values: &mut [T],
-    ranks: Range<usize>,
-    key: F,
-) {
-    refine_range::<_, _>(values, ranks, ByKey(key));
-}
-
-/// Places each requested position's exact record from a complete stable sort.
-///
-/// Every gap contains exactly its corresponding stable ranked members, without
-/// internal order guarantees. Indices may be unordered and repeated; they are
-/// validated and normalized once. An empty request is a no-op. Memory is the
-/// sorting workspace plus O(m) request metadata for m supplied indices.
-///
-/// # Panics
-/// Panics before mutation if any index is outside the input.
-///
-/// # Examples
-/// ```
-/// let mut values = [9u64, 3, 1, 7, 2];
-/// tessera_order::stable_select_nth_many(&mut values, &[3, 1, 3]);
+/// tessera_order::select_nth_many(&mut values, &[3, 1, 3]);
 /// assert_eq!(values[1], 2);
 /// assert_eq!(values[3], 7);
 /// ```
-pub fn stable_select_nth_many<K: RadixKey>(values: &mut [K], indices: &[usize]) {
-    select_many::<_, _>(values, indices, Direct);
+pub fn select_nth_many<K: RadixKey>(values: &mut [K], indices: &[usize]) {
+    select_many(values, indices, Direct);
 }
 
-/// Selects several exact stable ranked members by key.
+/// Places the records that [`crate::sort_by_key`] would place at each index.
 ///
-/// Result, normalization and memory follow [`stable_select_nth_many`]. Key
-/// evaluation and panic restoration follow [`crate::stable_sort_by_key`]. An
-/// empty request makes no key calls and allocates nothing.
+/// Result and memory follow [`select_nth_many`]; key calls and panic
+/// restoration follow [`crate::sort_by_key`]. No indices make no key calls.
 ///
 /// # Panics
-/// All indices are validated before mutation or key calls. An extractor panic
-/// restores all records before unwinding, in unspecified order.
-pub fn stable_select_nth_many_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
+/// All indices are validated before any key call. A key panic restores every
+/// record before propagating, in unspecified order.
+pub fn select_nth_many_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(
     values: &mut [T],
     indices: &[usize],
     key: F,
 ) {
-    select_many::<_, _>(values, indices, ByKey(key));
+    select_many(values, indices, ByKey(key));
 }
 
-fn refine_range<T, E: Extract<T>>(values: &mut [T], ranks: Range<usize>, extractor: E) {
-    assert!(
-        ranks.start <= ranks.end && ranks.end <= values.len(),
-        "rank range out of bounds"
-    );
-    let ranges = if ranks.is_empty() {
-        &[][..]
-    } else {
-        core::slice::from_ref(&ranks)
+/// Resolves `range` against `len` with slice-indexing bounds.
+fn ranks(range: impl RangeBounds<usize>, len: usize) -> Range<usize> {
+    let start = match range.start_bound() {
+        Bound::Included(&start) => Some(start),
+        Bound::Excluded(&start) => start.checked_add(1),
+        Bound::Unbounded => Some(0),
     };
-    let required = Requirement::new(values.len(), ranges);
+    let end = match range.end_bound() {
+        Bound::Included(&end) => end.checked_add(1),
+        Bound::Excluded(&end) => Some(end),
+        Bound::Unbounded => Some(len),
+    };
+    match (start, end) {
+        (Some(start), Some(end)) if start <= end && end <= len => start..end,
+        _ => panic!("rank range out of bounds"),
+    }
+}
+
+/// Orders `ranks` in place. An empty interior range isolates its first
+/// excluded rank, which establishes both memberships through the same request.
+fn partial<T, E: Extract<T>>(values: &mut [T], ranks: Range<usize>, extractor: E) {
+    let ranks = match ranks {
+        Range { start, end } if start < end => start..end,
+        Range { start, .. } if 0 < start && start < values.len() => start..start + 1,
+        _ => return,
+    };
+    let required = Requirement::new(values.len(), core::slice::from_ref(&ranks));
     engine::refine(values, extractor, required, None);
 }
 
-fn top_k<T, E: Extract<T>>(values: &mut [T], k: usize, extractor: E) -> (&mut [T], &mut [T]) {
-    assert!(k <= values.len(), "top-k count out of bounds");
-    if k > 0 && k < values.len() {
-        // Isolating the first excluded rank establishes both memberships.
-        // Reuse selection's request, not a second cut interpretation in engine.
-        refine_range::<_, _>(values, k..k + 1, extractor);
-    }
+fn smallest<T, E: Extract<T>>(values: &mut [T], k: usize, extractor: E) -> (&mut [T], &mut [T]) {
+    assert!(k <= values.len(), "k out of bounds");
+    partial(values, 0..k, extractor);
     values.split_at_mut(k)
 }
 
-fn select_nth<T, E: Extract<T>>(
+fn select<T, E: Extract<T>>(
     values: &mut [T],
     index: usize,
     extractor: E,
 ) -> (&mut [T], &mut T, &mut [T]) {
     assert!(index < values.len(), "selection index out of bounds");
-    refine_range::<_, _>(values, index..index + 1, extractor);
+    partial(values, index..index + 1, extractor);
     let (before, rest) = values.split_at_mut(index);
     let (selected, after) = rest.split_first_mut().unwrap();
     (before, selected, after)
@@ -330,18 +324,12 @@ fn select_many<T, E: Extract<T>>(values: &mut [T], indices: &[usize], extractor:
     engine::refine(values, extractor, required, None);
 }
 
-fn segments<T, E: Extract<T>>(values: &mut [T], offsets: &[usize], mut extractor: E) {
-    assert!(
-        offsets.first() == Some(&0)
-            && offsets.last() == Some(&values.len())
-            && offsets.windows(2).all(|w| w[0] <= w[1]),
-        "invalid segment offsets"
-    );
+fn chunks<T, E: Extract<T>>(values: &mut [T], chunk_len: usize, mut extractor: E) {
+    assert!(chunk_len != 0, "chunk size must be non-zero");
     let mut workspace = Workspace::new();
-    for ends in offsets.windows(2) {
-        let segment = &mut values[ends[0]..ends[1]];
-        let ranks = 0..segment.len();
-        let required = Requirement::new(segment.len(), core::slice::from_ref(&ranks));
-        engine::refine(segment, &mut extractor, required, Some(&mut workspace));
+    for chunk in values.chunks_mut(chunk_len) {
+        let ranks = 0..chunk.len();
+        let required = Requirement::new(chunk.len(), core::slice::from_ref(&ranks));
+        engine::refine(chunk, &mut extractor, required, Some(&mut workspace));
     }
 }

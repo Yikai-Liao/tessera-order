@@ -5,10 +5,13 @@
 use std::{
     cell::Cell,
     cmp::Reverse,
+    ops::{Bound, Range},
     panic::{AssertUnwindSafe, catch_unwind},
     rc::Rc,
 };
 use tessera_order::*;
+
+type Bounds = (Bound<usize>, Bound<usize>);
 
 fn ranked(values: &[(u64, usize)], original: &[(u64, usize)], ranges: &[std::ops::Range<usize>]) {
     let mut reference = original.to_vec();
@@ -32,26 +35,32 @@ fn partial_calls_preserve_stable_members_across_node_and_tile_boundaries() {
     let original: Vec<_> = (0..len)
         .map(|i| (((i * 7919 + 17) % 31) as u64, i))
         .collect();
+    let mut sorted = original.clone();
+    sorted.sort_by_key(|r| r.0);
     for k in [0, 1, len / 3, len] {
         let mut values = original.clone();
-        let (selected, remaining) = stable_top_k_by_key(&mut values, k, |r| r.0);
+        let (selected, remaining) = k_smallest_by_key(&mut values, k, |r| r.0);
         assert_eq!((selected.len(), remaining.len()), (k, len - k));
+        assert_eq!(*selected, sorted[..k]);
         ranked(&values, &original, std::slice::from_ref(&(k..k)));
-    }
-    for prefix in [0, 1, len / 3, len] {
+        // Membership without order is an empty interior range.
         let mut values = original.clone();
-        stable_sort_prefix_by_key(&mut values, prefix, |r| r.0);
-        let ranks = 0..prefix;
-        let ranges = if prefix == 0 {
-            &[][..]
-        } else {
-            std::slice::from_ref(&ranks)
-        };
-        ranked(&values, &original, ranges);
+        partial_sort_by_key(&mut values, k..k, |r| r.0);
+        ranked(&values, &original, std::slice::from_ref(&(k..k)));
+        let mut values = original.clone();
+        partial_sort_by_key(&mut values, ..k, |r| r.0);
+        ranked(&values, &original, std::slice::from_ref(&(0..k)));
+        // Largest first, with equal keys in input order.
+        let mut expected = original.clone();
+        expected.sort_by_key(|r| Reverse(r.0));
+        let mut values = original.clone();
+        let (selected, remaining) = k_largest_by_key(&mut values, k, |r| r.0);
+        assert_eq!((selected.len(), remaining.len()), (k, len - k));
+        assert_eq!(*selected, expected[..k]);
     }
     let mut values = original.clone();
     let index = len / 2;
-    let (before, selected, after) = stable_select_nth_by_key(&mut values, index, |r| r.0);
+    let (before, selected, after) = select_nth_by_key(&mut values, index, |r| r.0);
     assert_eq!((before.len(), after.len()), (index, len - index - 1));
     let _ = selected;
     ranked(
@@ -60,13 +69,43 @@ fn partial_calls_preserve_stable_members_across_node_and_tile_boundaries() {
         std::slice::from_ref(&(index..index + 1)),
     );
     let ranks = len / 5..len * 4 / 5;
-    stable_sort_rank_range_by_key(&mut values, ranks.clone(), |r| r.0);
+    partial_sort_by_key(&mut values, ranks.clone(), |r| r.0);
     ranked(&values, &original, &[ranks]);
     // Unordered duplicates and adjacent indices exercise one-time normalization.
     let indices = [len - 1, 1, index, 0, index + 1, 1, index];
     let mut values = original.clone();
-    stable_select_nth_many_by_key(&mut values, &indices, |r| r.0);
+    select_nth_many_by_key(&mut values, &indices, |r| r.0);
     ranked(&values, &original, &[0..2, index..index + 2, len - 1..len]);
+}
+
+#[test]
+fn partial_sort_accepts_every_range_form() {
+    let original: Vec<_> = (0..64usize).map(|i| (((i * 37) % 11) as u64, i)).collect();
+    let (a, b, k) = (10usize, 40usize, 25usize);
+    let forms: [(Range<usize>, Bounds); 5] = [
+        (0..k, (Bound::Unbounded, Bound::Excluded(k))),
+        (a..b + 1, (Bound::Included(a), Bound::Included(b))),
+        (a..64, (Bound::Included(a), Bound::Unbounded)),
+        (0..64, (Bound::Unbounded, Bound::Unbounded)),
+        (a + 1..b, (Bound::Excluded(a), Bound::Excluded(b))),
+    ];
+    for (ranks, bounds) in forms {
+        let mut values = original.clone();
+        partial_sort_by_key(&mut values, bounds, |r| r.0);
+        ranked(&values, &original, &[ranks]);
+    }
+    // An empty range changes nothing at either end and partitions inside.
+    for k in [0, 64] {
+        let mut values = original.clone();
+        partial_sort_by_key(&mut values, k..k, |_| -> u64 {
+            panic!("no-op evaluated a key")
+        });
+        assert_eq!(values, original);
+    }
+    let mut values = original.clone();
+    partial_sort_by_key(&mut values, k..k, |r| r.0);
+    assert_ne!(values, original);
+    ranked(&values, &original, std::slice::from_ref(&(k..k)));
 }
 
 #[test]
@@ -76,7 +115,7 @@ fn argsort_keeps_source_and_float_bits() {
         (1, String::from("middle")),
         (2, String::from("last")),
     ];
-    let indices = stable_argsort_by_key(&source, |r| r.0);
+    let indices = argsort_by_key(&source, |r| r.0);
     assert_eq!(indices, [1, 0, 2]);
     assert_eq!(source[0].1, "first");
     let bits = [
@@ -89,11 +128,11 @@ fn argsort_keeps_source_and_float_bits() {
     let floats = bits.map(f64::from_bits);
     let mut expected: Vec<_> = (0..bits.len()).collect();
     expected.sort_by(|&a, &b| floats[b].total_cmp(&floats[a]));
-    assert_eq!(stable_argsort(&floats.map(Reverse)), expected);
+    assert_eq!(argsort(&floats.map(Reverse)), expected);
     assert_eq!(floats.map(f64::to_bits), bits);
-    assert!(stable_argsort::<u64>(&[]).is_empty());
+    assert!(argsort::<u64>(&[]).is_empty());
     let failed = catch_unwind(AssertUnwindSafe(|| {
-        stable_argsort_by_key(&source, |_| -> u64 {
+        argsort_by_key(&source, |_| -> u64 {
             panic!("key");
         })
     }));
@@ -102,30 +141,33 @@ fn argsort_keeps_source_and_float_bits() {
 }
 
 #[test]
-fn segments_keep_boundaries_empty_segments_and_fnmut() {
-    let mut values: Vec<_> = (0..1000).map(|i| (((i * 137) % 19) as u64, i)).collect();
-    let mut expected = values.clone();
-    let offsets = [0, 0, 49, 49, 600, 1000];
-    for ends in offsets.windows(2) {
-        expected[ends[0]..ends[1]].sort_by_key(|r| r.0);
+fn chunks_keep_boundaries_and_fnmut() {
+    let original: Vec<_> = (0..1000).map(|i| (((i * 137) % 19) as u64, i)).collect();
+    // Length 1, a length that does not divide 1000, and lengths covering the slice.
+    for chunk_len in [1, 7, 333, 1000, 5000] {
+        let mut values = original.clone();
+        let mut expected = original.clone();
+        expected
+            .chunks_mut(chunk_len)
+            .for_each(|chunk| chunk.sort_by_key(|r| r.0));
+        let calls = Rc::new(Cell::new(0)); // Serial extensions must not require Send or Sync.
+        sort_chunks_by_key(&mut values, chunk_len, |r| {
+            calls.set(calls.get() + 1);
+            r.0
+        });
+        assert_eq!(values, expected);
+        assert_eq!(calls.get() > 0, chunk_len > 1);
     }
-    let calls = Rc::new(Cell::new(0)); // Serial extensions must not require Send or Sync.
-    stable_sort_segments_by_key(&mut values, &offsets, |r| {
-        calls.set(calls.get() + 1);
-        r.0
-    });
-    assert_eq!(values, expected);
-    assert!(calls.get() > 0);
-    stable_sort_segments::<u64>(&mut [], &[0]);
+    sort_chunks::<u64>(&mut [], 3);
     let mut direct = [3u64, 1, 9, 7, 8];
-    stable_sort_segments(&mut direct, &[0, 2, 5]);
-    assert_eq!(direct, [1, 3, 7, 8, 9]);
+    sort_chunks(&mut direct, 2);
+    assert_eq!(direct, [1, 3, 7, 9, 8]);
 }
 
 #[test]
 fn invalid_arguments_and_empty_requests_do_not_evaluate_keys_or_mutate() {
     let original = [4u64, 1, 3, 2];
-    for operation in 0..7 {
+    for operation in 0..10 {
         let mut values = original;
         let calls = Cell::new(0);
         let mut key = |r: &u64| {
@@ -133,21 +175,26 @@ fn invalid_arguments_and_empty_requests_do_not_evaluate_keys_or_mutate() {
             *r
         };
         let result = catch_unwind(AssertUnwindSafe(|| match operation {
-            0 => stable_sort_prefix_by_key(&mut values, 5, &mut key),
-            1 => stable_sort_rank_range_by_key(&mut values, 5..5, &mut key),
-            2 => stable_sort_rank_range_by_key(
+            0 => partial_sort_by_key(&mut values, ..5, &mut key),
+            1 => partial_sort_by_key(&mut values, 5..5, &mut key),
+            2 => partial_sort_by_key(&mut values, Range { start: 3, end: 2 }, &mut key),
+            3 => {
+                select_nth_by_key(&mut values, 4, &mut key);
+            }
+            4 => select_nth_many_by_key(&mut values, &[0, 4, 1], &mut key),
+            5 => {
+                k_smallest_by_key(&mut values, 5, &mut key);
+            }
+            6 => sort_chunks_by_key(&mut values, 0, &mut key),
+            7 => {
+                k_largest_by_key(&mut values, 5, &mut key);
+            }
+            8 => partial_sort_by_key(&mut values, 0..5, &mut key),
+            _ => partial_sort_by_key(
                 &mut values,
-                std::ops::Range { start: 3, end: 2 },
+                (Bound::Excluded(usize::MAX), Bound::Unbounded),
                 &mut key,
             ),
-            3 => {
-                stable_select_nth_by_key(&mut values, 4, &mut key);
-            }
-            4 => stable_select_nth_many_by_key(&mut values, &[0, 4, 1], &mut key),
-            5 => {
-                stable_top_k_by_key(&mut values, 5, &mut key);
-            }
-            _ => stable_sort_segments_by_key(&mut values, &[0, 3, 2, 4], &mut key),
         }));
         assert!(result.is_err());
         assert_eq!(calls.get(), 0);
@@ -155,29 +202,30 @@ fn invalid_arguments_and_empty_requests_do_not_evaluate_keys_or_mutate() {
     }
     let mut values = original;
     let key = |_: &u64| -> u64 { panic!("empty request evaluated a key") };
-    stable_top_k_by_key(&mut values, 0, key);
-    stable_top_k_by_key(&mut values, original.len(), key);
-    stable_sort_prefix_by_key(&mut values, 0, key);
-    stable_sort_rank_range_by_key(&mut values, 2..2, key);
-    stable_select_nth_many_by_key(&mut values, &[], key);
+    k_smallest_by_key(&mut values, 0, key);
+    k_largest_by_key(&mut values, 0, key);
+    partial_sort_by_key(&mut values, ..0, key);
+    partial_sort_by_key(&mut values, 0..0, key);
+    partial_sort_by_key(&mut values, 4..4, key);
+    select_nth_many_by_key(&mut values, &[], key);
     assert_eq!(values, original);
 }
 
 #[test]
-fn borrowed_records_and_segment_panics_retain_every_owner() {
+fn borrowed_records_and_chunk_panics_retain_every_owner() {
     let mut source: Vec<_> = (0..97)
         .map(|i| (((i * 29) % 11) as u64, Box::new(i)))
         .collect();
     let mut records: Vec<_> = source.iter_mut().collect();
-    stable_select_nth_many_by_key(&mut records, &[70, 10, 50], |r| r.0);
+    select_nth_many_by_key(&mut records, &[70, 10, 50], |r| r.0);
     let mut ids: Vec<_> = records.iter().map(|r| *r.1).collect();
     ids.sort_unstable();
     assert_eq!(ids, (0..97).collect::<Vec<_>>());
     drop(records);
     let failed = catch_unwind(AssertUnwindSafe(|| {
-        stable_sort_segments_by_key(&mut source, &[0, 31, 65, 97], |r| {
+        sort_chunks_by_key(&mut source, 32, |r| {
             if *r.1 == 80 {
-                panic!("later segment");
+                panic!("later chunk");
             }
             r.0
         });
@@ -186,7 +234,7 @@ fn borrowed_records_and_segment_panics_retain_every_owner() {
     let mut ids: Vec<_> = source.iter().map(|r| *r.1).collect();
     ids.sort_unstable();
     assert_eq!(ids, (0..97).collect::<Vec<_>>());
-    assert!(source[..31].windows(2).all(|w| w[0].0 <= w[1].0));
+    assert!(source[..32].windows(2).all(|w| w[0].0 <= w[1].0));
 }
 
 #[test]
@@ -195,16 +243,21 @@ fn direct_entries_follow_encoded_rank_order() {
     let mut sorted = original;
     sorted.sort();
     let mut values = original;
-    let (smallest, _) = stable_top_k(&mut values, 3);
-    smallest.sort();
+    let (smallest, _) = k_smallest(&mut values, 3);
     assert_eq!(smallest, &sorted[..3]);
     let mut values = original;
-    stable_sort_prefix(&mut values, 3);
+    let (largest, _) = k_largest(&mut values, 3);
+    assert_eq!(largest, [u128::MAX, (1 << 100) + 1, 1 << 100]);
+    let mut values = original;
+    partial_sort(&mut values, 3..3);
+    values[..3].sort();
     assert_eq!(values[..3], sorted[..3]);
-    stable_sort_rank_range(&mut values, 2..5);
+    partial_sort(&mut values, ..3);
+    assert_eq!(values[..3], sorted[..3]);
+    partial_sort(&mut values, 2..5);
     assert_eq!(values[2..5], sorted[2..5]);
-    assert_eq!(*stable_select_nth(&mut values, 4).1, sorted[4]);
-    stable_select_nth_many(&mut values, &[0, 2, 5]);
+    assert_eq!(*select_nth(&mut values, 4).1, sorted[4]);
+    select_nth_many(&mut values, &[0, 2, 5]);
     for index in [0, 2, 5] {
         assert_eq!(values[index], sorted[index]);
     }

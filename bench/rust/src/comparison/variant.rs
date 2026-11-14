@@ -26,7 +26,7 @@ pub(super) trait TesseraAdapter: BenchmarkRecord {
     #[cfg(feature = "operations")]
     fn argsort(records: &[Self]) -> Vec<usize>;
     #[cfg(feature = "operations")]
-    fn segments(records: &mut [Self], offsets: &[usize]);
+    fn segments(records: &mut [Self], segment_len: usize);
     #[cfg(feature = "operations")]
     fn prefix(records: &mut [Self], len: usize);
     #[cfg(feature = "operations")]
@@ -71,14 +71,19 @@ pub(super) trait TesseraAdapter: BenchmarkRecord {
 }
 
 /// Calls the same public API with identical record and key types in every copy.
+/// Baseline revisions before 0.2 have only the `stable_` names; switch to `sort`
+/// once every compared baseline has it.
 #[cfg(tessera_bench_revisions)]
 macro_rules! revision_sorts {
     ($api:ident $(, $key:expr)?) => {
         #[inline(never)]
+        #[allow(deprecated)]
         fn baseline(records: &mut [Self]) { revision_baseline::$api(records $(, $key)?); }
         #[inline(never)]
+        #[allow(deprecated)]
         fn baseline_copy(records: &mut [Self]) { revision_baseline_copy::$api(records $(, $key)?); }
         #[inline(never)]
+        #[allow(deprecated)]
         fn current_copy(records: &mut [Self]) { revision_current_copy::$api(records $(, $key)?); }
     };
 }
@@ -90,11 +95,11 @@ macro_rules! slice_operations {
         #[cfg(feature = "operations")]
         fn argsort(records: &[Self]) -> Vec<usize> { tessera_order::$argsort(records $(, $key)?) }
         #[cfg(feature = "operations")]
-        fn segments(records: &mut [Self], offsets: &[usize]) { tessera_order::$segments(records, offsets $(, $key)?); }
+        fn segments(records: &mut [Self], segment_len: usize) { tessera_order::$segments(records, segment_len $(, $key)?); }
         #[cfg(feature = "operations")]
-        fn prefix(records: &mut [Self], len: usize) { tessera_order::$prefix(records, len $(, $key)?); }
+        fn prefix(records: &mut [Self], len: usize) { tessera_order::$prefix(records, ..len $(, $key)?); }
         #[cfg(feature = "operations")]
-        fn top_k(records: &mut [Self], k: usize) { tessera_order::$top_k(records, k $(, $key)?); }
+        fn top_k(records: &mut [Self], k: usize) { tessera_order::$top_k(records, k..k $(, $key)?); }
         #[cfg(feature = "operations")]
         fn select(records: &mut [Self], index: usize) { tessera_order::$select(records, index $(, $key)?); }
         #[cfg(feature = "operations")]
@@ -110,16 +115,16 @@ macro_rules! tessera_keys {
         impl TesseraAdapter for $t {
             #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
-                tessera_order::stable_sort(records);
+                tessera_order::sort(records);
             }
 
-            slice_operations!(stable_argsort, stable_sort_segments, stable_sort_prefix, stable_top_k, stable_select_nth, stable_sort_rank_range, stable_select_nth_many);
+            slice_operations!(argsort, sort_chunks, partial_sort, partial_sort, select_nth, partial_sort, select_nth_many);
 
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort);
             #[cfg(feature = "rayon")]
             fn tessera_parallel(records: &mut [Self]) {
-                tessera_order::par_stable_sort(records);
+                tessera_order::par_sort(records);
             }
         }
     )+};
@@ -132,16 +137,16 @@ macro_rules! tessera_records {
         impl TesseraAdapter for $t {
             #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
-                tessera_order::stable_sort_by_key(records, |r| r.key);
+                tessera_order::sort_by_key(records, |r| r.key);
             }
 
-            slice_operations!(stable_argsort_by_key, stable_sort_segments_by_key, stable_sort_prefix_by_key, stable_top_k_by_key, stable_select_nth_by_key, stable_sort_rank_range_by_key, stable_select_nth_many_by_key, |r| r.key);
+            slice_operations!(argsort_by_key, sort_chunks_by_key, partial_sort_by_key, partial_sort_by_key, select_nth_by_key, partial_sort_by_key, select_nth_many_by_key, |r| r.key);
 
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort_by_key, |r| r.key);
             #[cfg(feature = "rayon")]
             fn tessera_parallel(records: &mut [Self]) {
-                tessera_order::par_stable_sort_by_key(records, |r| r.key);
+                tessera_order::par_sort_by_key(records, |r| r.key);
             }
         }
     )+};
@@ -417,7 +422,6 @@ impl Variant {
                 self.name,
                 "tessera"
                     | "tessera-full"
-                    | "tessera-cached"
                     | "std-stable"
                     | "std-unstable"
                     | "glidesort"

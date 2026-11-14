@@ -4,7 +4,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use std::cmp::Reverse;
-use tessera_order::{stable_sort, stable_sort_by_key};
+use tessera_order::{sort, sort_by_key};
 
 fuzz_target!(|data: &[u8]| check(data));
 
@@ -32,7 +32,7 @@ fn check(data: &[u8]) {
     expected.sort_by_key(|record| record.0);
 
     let mut actual = input.clone();
-    stable_sort_by_key(&mut actual, |record| record.0);
+    sort_by_key(&mut actual, |record| record.0);
     // Stable sorting must preserve every record and the order of equal keys.
     // mutant: ext/tessera-order-sort/src/rust/tessera-order/src/lib.rs:150 `values` -> `&mut []`
     // input: unsorted
@@ -40,7 +40,7 @@ fn check(data: &[u8]) {
 
     expected.sort_by_key(|record| Reverse(record.0));
     actual = input.clone();
-    stable_sort_by_key(&mut actual, |record| Reverse(record.0));
+    sort_by_key(&mut actual, |record| Reverse(record.0));
     // Descending order must retain the original order of equal keys.
     // mutant: ext/tessera-order-sort/src/rust/tessera-order/src/key.rs:198 `!self.0.encode()` -> `self.0.encode()`
     // input: unsorted
@@ -49,14 +49,14 @@ fn check(data: &[u8]) {
     let mut expected_keys: Vec<i8> = input.iter().map(|record| record.0).collect();
     expected_keys.sort();
     let mut keys: Vec<i8> = input.iter().map(|record| record.0).collect();
-    stable_sort(&mut keys);
+    sort(&mut keys);
     // Sorting keys directly must produce the same values as a reference sort.
     // mutant: ext/tessera-order-sort/src/rust/tessera-order/src/lib.rs:104 `values` -> `&mut []`
     // input: unsorted
     assert_eq!(keys, expected_keys);
     let mut calls = 0u8;
     actual = input.clone();
-    stable_sort_by_key(&mut actual, |record| {
+    sort_by_key(&mut actual, |record| {
         calls = calls.wrapping_add(1);
         record.0.wrapping_add(calls as i8)
     });
@@ -75,7 +75,7 @@ fn check(data: &[u8]) {
     let mut wide_expected = wide_input.clone();
     wide_expected.sort_by_key(|record| record.0);
     let mut wide_actual = wide_input;
-    stable_sort_by_key(&mut wide_actual, |record| record.0);
+    sort_by_key(&mut wide_actual, |record| record.0);
     // Wide signed keys must have stable numerical ordering.
     // mutant: ext/tessera-order-sort/src/fuzz/fuzz_targets/sort.rs:93 `record.0` -> `Reverse(record.0)`
     // input: unsorted
@@ -90,7 +90,7 @@ fn check(data: &[u8]) {
     let mut float_expected = float_input.clone();
     float_expected.sort_by(f64::total_cmp);
     let mut float_actual = float_input;
-    stable_sort(&mut float_actual);
+    sort(&mut float_actual);
     // Float ordering follows total_cmp and preserves each value's bits.
     // mutant: ext/tessera-order-sort/src/rust/tessera-order/src/key.rs:181 `!bits` -> `bits`
     // input: float-special

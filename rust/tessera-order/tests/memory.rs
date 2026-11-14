@@ -7,7 +7,7 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
-use tessera_order::{stable_sort, stable_sort_by_key};
+use tessera_order::{sort, sort_by_key};
 
 thread_local! {
     static ENABLED: Cell<bool> = const { Cell::new(false) };
@@ -84,7 +84,7 @@ fn scratch_released_after_sort() {
     let mut input: Vec<_> = (0..20000u64)
         .map(|id| (id.wrapping_mul(0x9e3779b97f4a7c15), id))
         .collect();
-    let (allocations, bytes) = measure(|| stable_sort_by_key(&mut input, |x| x.0));
+    let (allocations, bytes) = measure(|| sort_by_key(&mut input, |x| x.0));
     assert!(allocations > 0);
     assert_eq!(bytes, 0);
     assert!(input.is_sorted_by_key(|x| x.0));
@@ -92,7 +92,7 @@ fn scratch_released_after_sort() {
     let mut keys: Vec<_> = (0..20000u64)
         .map(|id| id.wrapping_mul(0x9e3779b97f4a7c15))
         .collect();
-    let (allocations, bytes) = measure(|| stable_sort(&mut keys));
+    let (allocations, bytes) = measure(|| sort(&mut keys));
     assert!(allocations > 0);
     assert_eq!(bytes, 0);
     assert!(keys.is_sorted());
@@ -114,7 +114,7 @@ fn bucket_ordered_input_keeps_scratch_in_one_tile() {
         above.iter().chain(&body).copied().collect::<Vec<_>>(),
     ] {
         let mut keys = keys;
-        let ((allocations, net), peak) = measure_peak(|| stable_sort(&mut keys));
+        let ((allocations, net), peak) = measure_peak(|| sort(&mut keys));
         assert!(keys.is_sorted());
         assert!(allocations > 0);
         assert_eq!(net, 0);
@@ -129,12 +129,9 @@ fn ordered_inputs_do_not_allocate() {
             let mut keys: Vec<_> = (0..len as u64)
                 .map(|id| if constant { 7 } else { id })
                 .collect();
-            assert_eq!(measure(|| stable_sort(&mut keys)), (0, 0));
+            assert_eq!(measure(|| sort(&mut keys)), (0, 0));
             let mut records: Vec<_> = keys.iter().copied().enumerate().collect();
-            assert_eq!(
-                measure(|| stable_sort_by_key(&mut records, |x| x.1)),
-                (0, 0)
-            );
+            assert_eq!(measure(|| sort_by_key(&mut records, |x| x.1)), (0, 0));
         }
     }
 }

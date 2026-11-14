@@ -11,8 +11,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 #[cfg(not(miri))]
-use tessera_order::par_stable_sort;
-use tessera_order::par_stable_sort_by_key;
+use tessera_order::par_sort;
+use tessera_order::par_sort_by_key;
 
 #[test]
 #[cfg(not(miri))]
@@ -29,7 +29,7 @@ fn counted_keys_keep_bits() {
                 .collect();
             let mut expected = keys.clone();
             expected.sort();
-            par_stable_sort(&mut keys);
+            par_sort(&mut keys);
             assert_eq!(keys, expected);
         }
         let mut keys: Vec<_> = (0..len)
@@ -37,7 +37,7 @@ fn counted_keys_keep_bits() {
             .collect();
         let mut expected = keys.clone();
         expected.sort();
-        par_stable_sort(&mut keys);
+        par_sort(&mut keys);
         assert_eq!(keys, expected);
 
         // Distinct NaN payloads, for both signs, must survive run filling.
@@ -48,7 +48,7 @@ fn counted_keys_keep_bits() {
             let mut reverse: Vec<_> = keys.iter().copied().map(Reverse).collect();
             let mut reversed_expected = reverse.clone();
             reversed_expected.sort_by(|a, b| b.0.total_cmp(&a.0));
-            par_stable_sort(&mut reverse);
+            par_sort(&mut reverse);
             assert!(
                 reverse
                     .iter()
@@ -57,7 +57,7 @@ fn counted_keys_keep_bits() {
             );
             let mut expected = keys.clone();
             expected.sort_by(f64::total_cmp);
-            par_stable_sort(&mut keys);
+            par_sort(&mut keys);
             assert!(
                 keys.iter()
                     .zip(&expected)
@@ -78,7 +78,7 @@ fn covering_digit_keeps_payload_order() {
     let mut rows: Vec<_> = (0..1usize << 17)
         .map(|id| (((id * 7919) & 255) as u64, Cell::new(id)))
         .collect();
-    pool.install(|| par_stable_sort_by_key(&mut rows, |row| row.0));
+    pool.install(|| par_sort_by_key(&mut rows, |row| row.0));
     assert!(rows.windows(2).all(|pair| pair[0].0 < pair[1].0
         || (pair[0].0 == pair[1].0 && pair[0].1.get() < pair[1].1.get())));
     for row in &rows {
@@ -105,8 +105,8 @@ fn separated_runs_match_serial() {
         let mut expected = rows.clone();
         expected.sort_by_key(|row| row.0);
         let mut serial = rows.clone();
-        tessera_order::stable_sort_by_key(&mut serial, |row| row.0);
-        pool.install(|| par_stable_sort_by_key(&mut rows, |row| row.0));
+        tessera_order::sort_by_key(&mut serial, |row| row.0);
+        pool.install(|| par_sort_by_key(&mut rows, |row| row.0));
         assert_eq!(serial, expected);
         assert_eq!(rows, expected);
     }
@@ -124,7 +124,7 @@ fn send_only_records_sort() {
         (Cell::new(1), String::from("middle")),
         (Cell::new(2), String::from("last")),
     ];
-    par_stable_sort_by_key(&mut rows, key);
+    par_sort_by_key(&mut rows, key);
     let names = rows.each_ref().map(|row| row.1.as_str());
     assert_eq!(names, ["first", "last", "middle"]);
 }
@@ -152,7 +152,7 @@ fn materialized_tile_callback_can_reenter() {
     pool.install(|| {
         let guard = offset.lock().unwrap();
         let entered = &entered;
-        par_stable_sort_by_key(&mut rows, move |row| {
+        par_sort_by_key(&mut rows, move |row| {
             let address = core::ptr::from_ref(row) as usize;
             if !(begin..end).contains(&address)
                 && row.1.get() < len as u32 - 1024
@@ -196,7 +196,7 @@ fn large_sort_uses_workers_and_recovers_task_panics() {
     let calls = AtomicUsize::new(0);
     let workers = Mutex::new(HashSet::new());
     pool.install(|| {
-        par_stable_sort_by_key(&mut rows, |row| {
+        par_sort_by_key(&mut rows, |row| {
             if calls.fetch_add(1, Ordering::Relaxed).is_multiple_of(4096) {
                 workers
                     .lock()
@@ -218,7 +218,7 @@ fn large_sort_uses_workers_and_recovers_task_panics() {
     let panicked = AtomicBool::new(false);
     let panic = catch_unwind(AssertUnwindSafe(|| {
         pool.install(|| {
-            par_stable_sort_by_key(&mut rows, |row| {
+            par_sort_by_key(&mut rows, |row| {
                 let call = calls.fetch_add(1, Ordering::Relaxed);
                 let current = std::thread::current().id();
                 if call == 0 {
@@ -269,7 +269,7 @@ fn repeated_root_uses_workers_and_recovers_owned_records() {
         .build()
         .unwrap();
     pool.install(|| {
-        par_stable_sort_by_key(&mut records, |row| {
+        par_sort_by_key(&mut records, |row| {
             if calls.fetch_add(1, Ordering::Relaxed).is_multiple_of(1024) {
                 let mut seen = workers.lock().unwrap();
                 seen.insert(rayon::current_thread_index().unwrap());
@@ -296,7 +296,7 @@ fn repeated_root_uses_workers_and_recovers_owned_records() {
         pool.install(|| {
             // The guard makes this callback Sync but not Send.
             let guard = offset.lock().unwrap();
-            par_stable_sort_by_key(&mut records, move |row| {
+            par_sort_by_key(&mut records, move |row| {
                 // Sampling misses the tail; 0 and MAX complete variation in
                 // the prefix. Fail in partition regardless of shard scheduling.
                 assert_ne!(*row.1, len - 1, "repeated-root partition key panic");
@@ -323,7 +323,7 @@ fn changing_repeated_keys_keep_records() {
     // Changing keys may make the sort panic or return; neither may lose a record.
     let _ = catch_unwind(AssertUnwindSafe(|| {
         pool.install(|| {
-            par_stable_sort_by_key(&mut records, |_| {
+            par_sort_by_key(&mut records, |_| {
                 let call = calls.fetch_add(1, Ordering::Relaxed);
                 assert!(call < limit, "stop a sort that makes no progress");
                 if call.is_multiple_of(16) { u64::MAX } else { 0 }
@@ -361,7 +361,7 @@ fn sparse_root_keeps_stability() {
         .build()
         .unwrap();
 
-    pool.install(|| par_stable_sort_by_key(&mut rows, |row| row.0));
+    pool.install(|| par_sort_by_key(&mut rows, |row| row.0));
 
     assert_eq!(rows, expected);
 }
@@ -372,7 +372,7 @@ fn changing_keys_keep_records() {
     let calls = AtomicUsize::new(0);
     // Changing keys may make the sort panic or return; neither may lose a record.
     let _ = catch_unwind(AssertUnwindSafe(|| {
-        par_stable_sort_by_key(&mut records, |_| {
+        par_sort_by_key(&mut records, |_| {
             calls.fetch_add(7919, Ordering::Relaxed) as u32
         });
     }));
@@ -387,7 +387,7 @@ fn panic_keeps_borrowed_records() {
     let mut records: Vec<_> = values.iter_mut().collect();
     let calls = AtomicUsize::new(0);
     let panic = catch_unwind(AssertUnwindSafe(|| {
-        par_stable_sort_by_key(&mut records, |record| {
+        par_sort_by_key(&mut records, |record| {
             assert_ne!(calls.fetch_add(1, Ordering::Relaxed), 41, "key panic");
             Reverse(**record)
         });

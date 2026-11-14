@@ -83,9 +83,7 @@ fn insertion_loop<T, E: Extract<T>>(
             if swaps == 0 {
                 return None;
             }
-            // The successful probe bounds swaps by scan_end, so the quotient
-            // fits usize even when the intermediate product does not.
-            budget = (swaps as u128 * records.len() as u128 / scan_end as u128) as usize;
+            budget = scaled_probe_budget(swaps, records.len(), scan_end);
             start = scan_end - 1;
             scan_end = records.len();
             continue;
@@ -112,6 +110,17 @@ fn insertion_loop<T, E: Extract<T>>(
         }
         start = index;
     }
+}
+
+/// Computes the full-input budget once after a successful prefix probe.
+///
+/// Keep the wider multiplication outside the insertion loop: otherwise LLVM
+/// can hoist it into every scan, even when the probe never reaches this point.
+#[inline(never)]
+fn scaled_probe_budget(swaps: usize, records_len: usize, probe_len: usize) -> usize {
+    // The successful probe bounds swaps by probe_len, so the quotient fits
+    // usize even when the intermediate product does not.
+    (swaps as u128 * records_len as u128 / probe_len as u128) as usize
 }
 
 /// Tries a bounded insertion pass, scaling a nonzero probe to the full input.

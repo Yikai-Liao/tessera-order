@@ -4,18 +4,15 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const types = ["feat", "fix", "perf", "refactor", "docs", "test", "ci", "build", "chore", "revert"];
-const scopes = ["engine", "block", "key", "simd", "site", "bench", "fuzz", "deps"];
 
 /** Check the title that becomes the squash commit, leaving space for its PR number. */
 export function titleErrors(title: string): string[] {
-  const match = /^([a-z]+)(?:\(([a-z]+)\))?!?: (\S[^\r\n]*)$/.exec(title);
+  const match = /^([a-z]+)(?:\(([a-z][a-z0-9-]*)\))?!?: (\S[^\r\n]*)$/.exec(title);
   if (!match || match[0] !== title)
-    return ["expected `type(scope)!: summary`, with the scope and `!` optional"];
+    return ["expected `type(scope)!: summary`, with a lowercase scope and `!` optional"];
   const errors: string[] = [];
   if (!types.includes(match[1]))
     errors.push(`type \`${match[1]}\` is not one of ${types.join(", ")}`);
-  if (match[2] && !scopes.includes(match[2]))
-    errors.push(`scope \`${match[2]}\` is not one of ${scopes.join(", ")}`);
   if (title.endsWith(".")) errors.push("the summary ends with a period");
   const len = [...title].length;
   if (len > 64) errors.push(`${len} characters, over 64`);

@@ -169,6 +169,8 @@ jobs:
     timeout-minutes: 10
     env:
       TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/continuous
+      # Both revisions keep bench optimization without generating full DWARF.
+      CARGO_PROFILE_BENCH_DEBUG: "0"
     outputs:
       matrix: ${{ steps.matrix.outputs.value }}
       baseline: ${{ steps.build.outputs.baseline }}

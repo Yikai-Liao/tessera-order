@@ -69,6 +69,7 @@ extern crate alloc;
 
 mod algorithms;
 mod block;
+mod cached;
 mod engine;
 mod key;
 mod order;
@@ -162,6 +163,47 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 /// ```
 pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
     engine::sort::<T, _>(values, key::ByKey(key));
+}
+
+/// Sorts records by a key, evaluating the key function at most once per record
+/// and keeping records with equal keys in input order.
+///
+/// Use this instead of [`stable_sort_by_key`] when `key` is expensive or must
+/// not run twice for a record, as with [`slice::sort_by_cached_key`]. Records
+/// of any type are moved, never cloned or dropped.
+///
+/// # Key function
+///
+/// `key` is called exactly once per record, in input order, when `values` holds
+/// at least two records that are not zero-sized; otherwise it is not called.
+///
+/// # Panics
+///
+/// If `key` panics, the panic propagates to the caller with every record still
+/// in `values`, in an unspecified order. No record is dropped or duplicated.
+///
+/// # Memory
+///
+/// Depends on the key type. A key whose encoding has at most eight bits, such
+/// as `u8`, `i8` or [`Reverse<u8>`](core::cmp::Reverse), needs the memory of
+/// [`stable_sort_by_key`]. Wider keys allocate one (encoded key, record index)
+/// pair per record, plus [`stable_sort`] scratch for the pairs, and free it
+/// before returning.
+///
+/// # Examples
+///
+/// ```
+/// let mut words = ["delta", "Alpha", "charlie", "Bravo"];
+/// let mut calls = 0;
+/// tessera_order::sort_by_cached_key(&mut words, |word| {
+///     calls += 1;
+///     word.to_lowercase().as_bytes()[0]
+/// });
+/// assert_eq!(words, ["Alpha", "Bravo", "charlie", "delta"]);
+/// assert_eq!(calls, 4);
+/// ```
+pub fn sort_by_cached_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
+    cached::sort(values, key);
 }
 
 /// Internal thresholds, exported for benchmarks that probe boundary sizes.

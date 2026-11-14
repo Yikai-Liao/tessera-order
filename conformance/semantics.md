@@ -41,6 +41,10 @@ Applications that need all NaNs to compare equal, or `-0.0` equal to `+0.0`, sho
 
 ### Descending order
 
+### Cached keys
+
+`sort_by_cached_key` follows the stable contract with a stronger extraction rule, as [`slice::sort_by_cached_key`](https://doc.rust-lang.org/std/primitive.slice.html#method.sort_by_cached_key) does. Its key function runs exactly once per record, in input order, when the input has at least two records that are not zero-sized; otherwise it runs not at all. Key consistency is therefore not a caller obligation. A key panic propagates with every record still in the slice, in unspecified order; recovery does not call the key function. Callback side effects are not rolled back.
+
 Descending order is expressed by reversing the key, not by reversing an ascending result. Reversing the result would also reverse the order of equal keys and break stability.
 
 ## Space
@@ -48,6 +52,8 @@ Descending order is expressed by reversing the key, not by reversing an ascendin
 Implementations document the scratch memory one call needs and fixed-size storage on the stack separately. Each Rust call owns its scratch and releases it before returning, including when a key function unwinds. Complete in-place sorting of already ordered or constant inputs does not allocate. The serial extensions below distinguish mandatory output and request metadata from sorting workspace.
 
 The Rust implementation requires `std` and allocates heap scratch through the global allocator. One call needs O(√n) block scratch for a fixed record size and key width, plus storage whose size does not depend on `n`: a tile of records (at least one record), up to two bytes of cached bucket ID per tile record, a probe-key buffer of at most one tile of encoded keys, and cursor tables on the stack, one per tile-local MSD level, with depth bounded by the key width. Node partitions also nest at most once per key bit, whatever the key distribution. [Finishing tiles](../docs/explain/tiles.md) defines the tile and cursor-table sizes.
+
+`sort_by_cached_key` keeps that bound when one stable distribution covers the encoded key width (`u8`, `i8` and their `Reverse`): each key is its own category, and the distribution caches only the tile bucket IDs above. Wider keys cache one (encoded key, record index) pair per record, O(n) like the standard library's cached-key sort, plus the sort scratch for those pairs.
 
 ## Serial slice operations
 

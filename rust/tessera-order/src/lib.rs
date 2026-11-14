@@ -134,8 +134,8 @@ pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
 ///
 /// `key` may be called several times for each record, in any order. It should
 /// return the same key for a record throughout one call. If it does not, the
-/// order of the result is unspecified, but the slice still holds every record
-/// exactly once.
+/// operation may panic or return with unspecified ordering. In either case
+/// the slice still holds every record exactly once.
 ///
 /// # Panics
 ///
@@ -189,13 +189,13 @@ pub fn unstable_sort<K: RadixKey>(values: &mut [K]) {
 ///
 /// # Key function
 /// Evaluation follows [`stable_sort_by_key`]: `FnMut` may run repeatedly in any
-/// order. Inconsistent keys give unspecified ordering, but every record is
-/// preserved and recursion remains bounded. No `Clone`, `Send` or `Sync` is
-/// required on records. Callback side effects are not rolled back.
+/// order. Inconsistent keys may cause a panic or unspecified ordering, but
+/// every record is preserved and recursion remains bounded. No `Clone`, `Send`
+/// or `Sync` is required on records. Callback side effects are not rolled back.
 ///
 /// # Panics
-/// A key panic propagates after every record is restored to `values`, in
-/// unspecified order. Records are never lost, duplicated or modified.
+/// A key panic, or a comparison panic caused by inconsistent keys, propagates
+/// after every record is restored to `values`, in unspecified order. Records are never lost, duplicated or modified.
 ///
 /// # Memory
 /// As [`unstable_sort`], plus cached tile bucket IDs for user keys.
@@ -215,7 +215,7 @@ pub fn unstable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T],
 /// Not part of the public API: the values may change in any release.
 #[doc(hidden)]
 pub mod thresholds {
-    /// Largest tile or bucket that is finished by insertion sort.
+    /// Largest comparison-only leaf: stable insertion or unstable small sorting.
     pub const INSERTION_MAX: usize = 48;
     /// Default tile budget, in bytes of records.
     pub const TILE_BYTES: usize = 64 * 1024;

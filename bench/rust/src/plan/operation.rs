@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 
-/// Result contract of one workload, independent of its implementation.
+/// Workload parameters; admitted routes define stable or arbitrary tie membership.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Operation {
@@ -20,29 +20,29 @@ pub enum Operation {
         /// Requested records per segment.
         segment_len: usize,
     },
-    /// Smallest k records, with stable membership and no internal order.
+    /// Smallest k keys, without internal ordering; tie membership is route-specific.
     TopK {
         /// Number of retained records.
         k: usize,
     },
-    /// Exact stable sorted prefix.
+    /// Sorted prefix; equal-key record identities are route-specific.
     Prefix {
         /// Number of required records.
         prefix_len: usize,
     },
-    /// Exact stable ranked member and outer memberships.
+    /// One ranked key and outer memberships; tie identities are route-specific.
     Select {
         /// Zero-based target rank.
         index: usize,
     },
-    /// Exact stable sorted rank interval and outer memberships.
+    /// Sorted rank interval and outer memberships; tie identities are route-specific.
     RankRange {
         /// Inclusive first rank.
         start: usize,
         /// Exclusive last rank.
         end: usize,
     },
-    /// Exact stable ranked members; raw request order and duplicates are retained.
+    /// Ranked keys; raw request order and duplicates are retained.
     SelectMany {
         /// Exact requested indices, normalized inside the public call.
         indices: Vec<usize>,

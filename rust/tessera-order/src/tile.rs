@@ -44,6 +44,23 @@ pub(super) fn finishing_capacity<T>(len: usize, ordinary: usize) -> usize {
     }
 }
 
+/// Finishes a small leaf under the call's tie contract without allocating.
+/// Weak calls reuse the standard sorter and its record/panic guard; stable
+/// calls retain insertion. Inconsistent callbacks may make the standard sorter
+/// panic, but cannot lose records. LSD passes and budgeted nearly-ordered probes
+/// stay stable under either contract.
+pub(super) fn finish_small<T, E: Extract<T>, const UNSTABLE: bool>(
+    records: &mut [T],
+    extractor: &mut E,
+) {
+    debug_assert!(records.len() <= INSERTION_MAX);
+    if UNSTABLE {
+        records.sort_unstable_by_key(|record| extractor.key(record));
+    } else {
+        extractor.finish_insertion(records);
+    }
+}
+
 /// Reusable record scratch; each sort restores its complete record set before return.
 pub(super) struct Scratch<T>(Vec<MaybeUninit<T>>);
 
@@ -134,9 +151,9 @@ impl<T> Scratch<T> {
         Self(Vec::new())
     }
 
-    /// Stably finishes a cursor-bounded slice by insertion, MSD or LSD passes,
+    /// Finishes a cursor-bounded slice under the call's tie contract,
     /// restoring its complete record set on key panic.
-    pub(super) fn sort<E: Extract<T>>(
+    pub(super) fn sort<E: Extract<T>, const UNSTABLE: bool>(
         &mut self,
         records: &mut [T],
         varying: u128,
@@ -148,8 +165,10 @@ impl<T> Scratch<T> {
             return;
         }
         match plan_tile::<T>(len, varying) {
-            TilePlan::Insertion => extractor.finish_insertion(records),
-            TilePlan::Msd(digit) => self.partition_tile(records, digit, varying, extractor),
+            TilePlan::Insertion => finish_small::<_, _, UNSTABLE>(records, extractor),
+            TilePlan::Msd(digit) => {
+                self.partition_tile::<_, UNSTABLE>(records, digit, varying, extractor);
+            }
             TilePlan::Lsd { digits, passes } => {
                 let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
                 self.counting_passes(records, &digits[..passes], &mut counts, extractor);
@@ -159,7 +178,7 @@ impl<T> Scratch<T> {
 
     /// Finishes a cursor-bounded child within `candidate`. Insertion-sized
     /// children skip the variation scan; node and tile partitions share this rule.
-    pub(super) fn finish_child<E: Extract<T>>(
+    pub(super) fn finish_child<E: Extract<T>, const UNSTABLE: bool>(
         &mut self,
         records: &mut [T],
         candidate: u128,
@@ -171,9 +190,9 @@ impl<T> Scratch<T> {
         }
         if records.len() > INSERTION_MAX {
             let varying = scan_varying_bits(records, candidate, extractor);
-            self.sort(records, varying, extractor);
+            self.sort::<_, UNSTABLE>(records, varying, extractor);
         } else {
-            extractor.finish_insertion(records);
+            finish_small::<_, _, UNSTABLE>(records, extractor);
         }
     }
 
@@ -268,7 +287,7 @@ impl<T> Scratch<T> {
     }
 
     /// Partitions a tile through scratch, then finishes each bucket.
-    fn partition_tile<E: Extract<T>>(
+    fn partition_tile<E: Extract<T>, const UNSTABLE: bool>(
         &mut self,
         records: &mut [T],
         digit: Digit,
@@ -279,7 +298,9 @@ impl<T> Scratch<T> {
         let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
         let largest = self.counting_passes(records, &[digit], &mut counts, extractor);
         // With insertion-sized buckets, whole-tile insertion has the same inversion
-        // count as separate bucket sorts and skips the boundary walk.
+        // count as separate bucket sorts and skips the boundary walk. Keep this
+        // nearly-ordered operation even under a weak contract: replacing it
+        // with individual small sorts adds table walks without reducing shifts.
         if largest as usize <= INSERTION_MAX {
             extractor.finish_insertion(records);
             return;
@@ -295,7 +316,7 @@ impl<T> Scratch<T> {
         for &end in ends {
             let end = end as usize;
             debug_assert!(start <= end && end <= len);
-            self.finish_child(&mut records[start..end], candidate, extractor);
+            self.finish_child::<_, UNSTABLE>(&mut records[start..end], candidate, extractor);
             start = end;
         }
     }
@@ -348,6 +369,75 @@ mod tests {
     }
 
     #[test]
+    fn weak_small_finish_preserves_owned_records_on_panic_or_changing_keys() {
+        use std::{
+            cell::Cell,
+            panic::{AssertUnwindSafe, catch_unwind},
+            rc::Rc,
+        };
+        struct Owned {
+            payload: Box<usize>,
+            drops: Rc<Cell<usize>>,
+        }
+        impl Drop for Owned {
+            fn drop(&mut self) {
+                self.drops.set(self.drops.get() + 1);
+            }
+        }
+        let drops = Rc::new(Cell::new(0));
+        let make = || {
+            (0..INSERTION_MAX)
+                .map(|id| Owned {
+                    payload: Box::new(id),
+                    drops: drops.clone(),
+                })
+                .collect::<Vec<_>>()
+        };
+        let key = |r: &Owned| (*r.payload as u64).wrapping_mul(0x9e3779b97f4a7c15);
+        let mut records = make();
+        let mut total = 0;
+        finish_small::<_, _, true>(
+            &mut records,
+            &mut ByKey(|r: &Owned| {
+                total += 1;
+                key(r)
+            }),
+        );
+        assert!(records.windows(2).all(|p| key(&p[0]) <= key(&p[1])));
+        drop(records);
+        for changing in [false, true] {
+            for at in [1, total / 2, total] {
+                drops.set(0);
+                let mut records = make();
+                let mut calls = 0;
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    finish_small::<_, _, true>(
+                        &mut records,
+                        &mut ByKey(|r: &Owned| {
+                            calls += 1;
+                            if calls >= at {
+                                if changing {
+                                    return calls as u64 % 3;
+                                }
+                                panic!("key failed");
+                            }
+                            key(r)
+                        }),
+                    );
+                }));
+                if !changing {
+                    assert!(result.is_err());
+                }
+                assert_eq!(drops.get(), 0);
+                records.sort_unstable_by_key(|r| *r.payload);
+                assert!(records.iter().enumerate().all(|(id, r)| *r.payload == id));
+                drop(records);
+                assert_eq!(drops.get(), INSERTION_MAX);
+            }
+        }
+    }
+
+    #[test]
     fn changing_keys_finish_tile() {
         // Keep a late varying witness after 128 constant child-scan keys.
         // Miri must retain that suffix, not just exceed the insertion leaf.
@@ -371,7 +461,7 @@ mod tests {
                 u64::MAX
             }
         });
-        scratch.sort(&mut records, u64::MAX as u128, &mut extractor);
+        scratch.sort::<_, false>(&mut records, u64::MAX as u128, &mut extractor);
         assert!(changed, "fixture never supplied a varying key");
         records.sort_unstable();
         assert_eq!(records, (0..len).collect::<Vec<_>>());
@@ -389,7 +479,7 @@ mod tests {
                 calls << SHIFT
             });
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                Scratch::new().partition_tile(
+                Scratch::new().partition_tile::<_, false>(
                     &mut records,
                     Digit { shift: 0, width: 6 },
                     63,
@@ -433,7 +523,7 @@ mod tests {
         expected.sort_by_key(|x| u16::from_le_bytes([x.0[0], x.0[1]]));
         let mut scratch = Scratch::new();
         let mut key = ByKey(|x: &Odd| u16::from_le_bytes([x.0[0], x.0[1]]));
-        scratch.partition_tile(
+        scratch.partition_tile::<_, false>(
             &mut records,
             Digit { shift: 0, width },
             u128::from(mask),

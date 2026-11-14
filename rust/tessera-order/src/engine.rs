@@ -43,44 +43,6 @@ fn without_top_bit(varying: u128) -> u128 {
     varying & !(1 << (bit_len(varying) - 1))
 }
 
-/// Partitions in place using histogram-sized bands and bounded swap cursors.
-/// No record leaves the slice, including if classification panics. A changed
-/// classification that targets a full band stops the pass; callers still
-/// consume candidate bits, so inconsistent keys cannot prevent progress.
-fn partition_unstable<T, C: Classify<T>>(
-    records: &mut [T],
-    radix: usize,
-    classifier: &mut C,
-) -> Vec<usize> {
-    let buckets = 1usize << radix;
-    let mut ends = alloc::vec![0; buckets];
-    for record in records.iter() {
-        ends[classifier.bucket(record) & (buckets - 1)] += 1;
-    }
-    let mut next = alloc::vec![0; buckets];
-    let mut total = 0;
-    for bucket in 0..buckets {
-        next[bucket] = total;
-        total += ends[bucket];
-        ends[bucket] = total;
-    }
-    for bucket in 0..buckets {
-        while next[bucket] < ends[bucket] {
-            let target = classifier.bucket(&records[next[bucket]]) & (buckets - 1);
-            if target == bucket {
-                next[bucket] += 1;
-            } else {
-                if next[target] == ends[target] {
-                    return ends;
-                }
-                records.swap(next[bucket], next[target]);
-                next[target] += 1;
-            }
-        }
-    }
-    ends
-}
-
 /// How a node partition leaves its children.
 #[derive(Clone, Copy)]
 struct Split {
@@ -111,7 +73,7 @@ impl Split {
     fn partition<T, E: Extract<T>, C: Classify<T>, const UNSTABLE: bool>(
         self,
         records: &mut [T],
-        mut classifier: C,
+        classifier: C,
         lend: fn(&mut C) -> &mut E,
         scratch: &mut Workspace<T>,
         tile_len: usize,
@@ -124,25 +86,9 @@ impl Split {
                     && self.finished != Some(bucket)
                     && required.project(range).is_some()
                 {
-                    tile.finish_child(child, self.candidate, lend(classifier));
+                    tile.finish_child::<_, UNSTABLE>(child, self.candidate, lend(classifier));
                 }
             };
-        if UNSTABLE {
-            let ends = partition_unstable(records, self.radix, &mut classifier);
-            let mut start = 0;
-            for (bucket, &end) in ends.iter().enumerate() {
-                if start < end {
-                    visit(
-                        bucket,
-                        start..end,
-                        &mut records[start..end],
-                        &mut classifier,
-                    );
-                }
-                start = end;
-            }
-            return ends;
-        }
         block::partition(
             records,
             self.radix,
@@ -186,7 +132,7 @@ pub(crate) fn refine<T, E: Extract<T>>(
     refine_mode::<T, E, false>(records, extractor, required, workspace, tile_bytes);
 }
 
-/// Research entry sharing complete refinement, not a second root pipeline.
+/// Requests every rank under the weak tie contract through shared refinement.
 pub(crate) fn sort_unstable<T, E: Extract<T>>(records: &mut [T], extractor: E) {
     let ranks = 0..records.len();
     let required = Requirement::new(records.len(), core::slice::from_ref(&ranks));
@@ -208,7 +154,7 @@ pub(crate) fn refine_mode<T, E: Extract<T>, const UNSTABLE: bool>(
         return;
     };
     let tile_len = tile_capacity::<T>(tile_bytes);
-    let Some(varying) = prepare(records, &mut extractor, tile_len) else {
+    let Some(varying) = prepare::<_, _, UNSTABLE>(records, &mut extractor, tile_len) else {
         return;
     };
     let mut local;
@@ -254,9 +200,9 @@ fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], extractor: E, tile_
     refine(records, extractor, required, None, tile_bytes);
 }
 
-/// Finishes ordered or insertion-friendly roots, otherwise returns their varying bits.
+/// Finishes ordered or small roots, otherwise returns their varying bits.
 /// Shared by serial and parallel entries before either allocates partition scratch.
-fn prepare<T, E: Extract<T>>(
+fn prepare<T, E: Extract<T>, const UNSTABLE: bool>(
     records: &mut [T],
     extractor: &mut E,
     tile_len: usize,
@@ -265,7 +211,8 @@ fn prepare<T, E: Extract<T>>(
     if finish_ordered(records, sampled, extractor) {
         return None;
     }
-    if sampled == Order::Unsorted && insertion_probe(records, extractor, tile_len) {
+    if sampled == Order::Unsorted && insertion_probe::<_, _, UNSTABLE>(records, extractor, tile_len)
+    {
         return None;
     }
     let candidate = u128::MAX >> (128 - E::Value::BITS);
@@ -285,23 +232,23 @@ fn prepare<T, E: Extract<T>>(
 /// Tries to finish `records` with a budgeted insertion pass and returns whether it
 /// did.
 ///
-/// An insertion-sized tile gets an unlimited budget; another tile gets one
+/// A small tile finishes under the tie contract; another tile gets one
 /// swap per record. A longer input first insertion-sorts one tile of keys in a
 /// local buffer, and scales that window's swap count to the whole input as the
 /// budget for the records.
 /// A window that needs no swaps says nothing about the rest, so the records are
 /// not touched. A pass that runs out of budget leaves `records` a stable
 /// permutation of its input.
-fn insertion_probe<T, E: Extract<T>>(
+fn insertion_probe<T, E: Extract<T>, const UNSTABLE: bool>(
     records: &mut [T],
     extractor: &mut E,
     tile_len: usize,
 ) -> bool {
-    // A failed limited pass on an insertion leaf would scan varying bits
-    // only to select insertion again. The finishing entry also avoids carrying
-    // an unused swap count across the direct extractor's dispatch boundary.
+    // A failed limited pass on a small leaf would scan varying bits only to
+    // select comparison finishing again. Keep its result unit-returning, so
+    // stable direct insertion discards the unused count inside SIMD dispatch.
     if records.len() <= INSERTION_MAX && records.len() <= tile_len {
-        extractor.finish_insertion(records);
+        tile::finish_small::<_, _, UNSTABLE>(records, extractor);
         return true;
     }
     let probe_len = tile_len.max(2).min(records.len());
@@ -509,7 +456,7 @@ impl<T, E: Extract<T>, const UNSTABLE: bool> Sorter<'_, T, E, UNSTABLE> {
         if len <= self.tile_len {
             self.scratch
                 .tile
-                .sort::<E>(records, varying, self.extractor);
+                .sort::<E, UNSTABLE>(records, varying, self.extractor);
             return;
         }
         let plan = plan_node(records, varying, self.tile_len, self.extractor);

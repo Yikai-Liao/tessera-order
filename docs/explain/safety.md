@@ -21,7 +21,7 @@ A counting pass reads each key twice: once for the histogram and once for the sc
 
 `stable_sort` sorts the keys themselves with Tessera's own encoders, which are deterministic and cannot panic, so it recomputes keys and stores nothing ([engine reference](../design/engine.md#record-handling)).
 
-An inconsistent key function can therefore produce an unsorted result, but never a lost, duplicated or uninitialized record.
+An inconsistent key function can produce an unsorted result or cause a comparison-based small leaf to panic, but never a lost, duplicated or uninitialized record. Unstable small leaves delegate sorting and unwind restoration to the standard library; they do not cache keys merely to prevent a comparator-consistency panic.
 
 ## Panicking key functions
 

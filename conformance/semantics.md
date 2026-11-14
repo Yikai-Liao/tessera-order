@@ -18,7 +18,7 @@ Stability applies to every equal-key run, including one at the start of an other
 ## Key extraction
 
 - The key function may be called any number of times per record, in any order.
-- During one sort, it should return the same key for the same record. If it does not, the order of the result is unspecified, but the output is still a permutation of the input and no undefined behavior occurs. Changing keys do not cause unbounded partition recursion.
+- During one sort, it should return the same key for the same record. If it does not, the operation may panic or return with unspecified ordering. In either case every record is preserved and no undefined behavior occurs. Changing keys do not cause unbounded partition recursion.
 - If the key function panics (Rust) or throws (C++), the error propagates to the caller. The slice then holds every record exactly once, in an unspecified order. No particular panic strategy is required of the final binary.
 
 ## Key encoding

@@ -47,7 +47,7 @@ pub(super) trait TesseraAdapter: BenchmarkRecord {
     fn range_unstable(records: &mut [Self], ranks: std::ops::Range<usize>);
     #[cfg(feature = "operations")]
     fn many_unstable(records: &mut [Self], indices: &[usize]);
-    /// Calls the experimental serial node-partition kernel.
+    /// Calls the complete serial API under the weak tie contract.
     #[cfg(feature = "operations")]
     fn tessera_unstable(records: &mut [Self]);
     /// Sorts through the independently named baseline crate.

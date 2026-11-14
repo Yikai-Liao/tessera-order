@@ -29,7 +29,7 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
     let mut scratch = Workspace::new();
     let ranks = 0..records.len();
     let required = Requirement::new(records.len(), core::slice::from_ref(&ranks));
-    let Some(varying) = prepare(records, &mut extractor, tile_len) else {
+    let Some(varying) = prepare::<_, _, false>(records, &mut extractor, tile_len) else {
         return;
     };
 

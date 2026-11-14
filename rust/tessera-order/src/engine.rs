@@ -59,8 +59,10 @@ pub(crate) fn insertion_loop<T, E: Extract<T>>(
         if swaps > budget {
             return None;
         }
+        // This record keeps its key while adjacent swaps move it left.
+        let key = extractor.key(current);
         for before in prefix.iter_mut().rev() {
-            if extractor.key(before) <= extractor.key(current) {
+            if extractor.key(before) <= key {
                 break;
             }
             core::mem::swap(before, current);

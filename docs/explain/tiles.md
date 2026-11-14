@@ -1,6 +1,6 @@
 # 5. Finishing tiles
 
-A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so that one `u16` can hold any position in it. Its scratch buffer is the same size and stays in the L2 cache. Inside a tile a second buffer is cheap, so Tessera uses ordinary counting passes; the questions are which digits to use and whether to finish with MSD or LSD. [`tile/plan.rs`](../../rust/tessera-order/src/tile/plan.rs) selects the leaf; [`tile.rs`](../../rust/tessera-order/src/tile.rs) executes it and owns its scratch and panic recovery.
+A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so that one `u16` can hold any position in it. Its scratch buffer is the same size and stays in the L2 cache. Inside a tile a second buffer is cheap, so Tessera uses ordinary counting passes; the questions are which digits to use and whether to finish with MSD or LSD. [`tile/plan.rs`](../../rust/tessera-order/src/engine/tile/plan.rs) selects the leaf; [`tile.rs`](../../rust/tessera-order/src/engine/tile.rs) executes it and owns its scratch and panic recovery.
 
 ## One-shot category distribution
 
@@ -18,7 +18,7 @@ A complete child of a parallel root may use a larger tile: up to 1 MiB of record
 | <span id="tile-msd">**Tile MSD**</span> | more than two width-bounded passes would be needed to finish flat | one counting pass on the top digit through scratch, then each bucket is finished on its own: insertion for buckets of at most 48 records, another tile leaf for larger ones |
 | <span id="tile-lsd">**Tile LSD**</span> | otherwise | one counting pass per planned digit, from the lowest digit up, alternating between the tile and scratch |
 
-Below 48 records, the work of clearing and scanning bucket tables costs more than insertion's shifts. The threshold is `thresholds::INSERTION_MAX` in `lib.rs`.
+Below 48 records, the work of clearing and scanning bucket tables costs more than insertion's shifts. The threshold is `INSERTION_MAX` in `engine/thresholds.rs`.
 
 
 ## Digit planning

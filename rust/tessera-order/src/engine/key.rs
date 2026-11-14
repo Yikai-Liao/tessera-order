@@ -7,7 +7,7 @@
 //! user key function ([`ByKey`]) or from the record itself ([`Direct`]), and
 //! selects the scan an insertion pass uses.
 
-use crate::block::Classify;
+use crate::engine::block::Classify;
 use core::cmp::Reverse;
 use core::ops::{BitAnd, BitOrAssign, Not, Shl, Shr};
 
@@ -27,7 +27,7 @@ use core::ops::{BitAnd, BitOrAssign, Not, Shl, Shr};
 /// | Signed integers | Sign bit flipped |
 /// | `f32`, `f64` | All bits inverted if the sign bit is set, otherwise the sign bit flipped; this matches `total_cmp` |
 /// | `Reverse<K>` | All bits of the encoding of `K` inverted |
-pub trait RadixKey: crate::portable_simd::SimdKey + Copy + Send + Sync {
+pub trait RadixKey: crate::engine::portable_simd::SimdKey + Copy + Send + Sync {
     #[doc(hidden)]
     type Encoded: Unsigned;
     #[doc(hidden)]
@@ -167,7 +167,7 @@ pub(crate) unsafe trait Extract<T> {
     where
         Self: Sized,
     {
-        crate::order::confirm_ascending(records, self, previous)
+        crate::engine::order::confirm_ascending(records, self, previous)
     }
 
     /// Sorts `records` stably by insertion, without a swap limit.
@@ -177,7 +177,7 @@ pub(crate) unsafe trait Extract<T> {
     where
         Self: Sized,
     {
-        crate::order::finish_insertion(records, self, crate::order::by_key);
+        crate::engine::order::finish_insertion(records, self, crate::engine::order::by_key);
     }
 
     /// Sorts `records` stably by insertion within `budget` swaps.
@@ -189,7 +189,7 @@ pub(crate) unsafe trait Extract<T> {
     where
         Self: Sized,
     {
-        crate::order::insertion_loop(records, budget, self, crate::order::by_key)
+        crate::engine::order::insertion_loop(records, budget, self, crate::engine::order::by_key)
     }
 }
 
@@ -347,7 +347,7 @@ unsafe impl<K: RadixKey> Extract<K> for Direct {
 
     #[inline]
     fn confirm_ascending(&mut self, records: &[K], previous: Self::Value) -> bool {
-        crate::portable_simd::confirm_ascending(records, previous)
+        crate::engine::portable_simd::confirm_ascending(records, previous)
     }
 
     #[inline]
@@ -357,12 +357,12 @@ unsafe impl<K: RadixKey> Extract<K> for Direct {
 
     #[inline]
     fn finish_insertion(&mut self, records: &mut [K]) {
-        crate::portable_simd::finish_insertion(records);
+        crate::engine::portable_simd::finish_insertion(records);
     }
 
     #[inline]
     fn insertion_sort(&mut self, records: &mut [K], budget: usize) -> Option<usize> {
-        crate::portable_simd::insertion_sort(records, budget)
+        crate::engine::portable_simd::insertion_sort(records, budget)
     }
 }
 
@@ -706,7 +706,11 @@ mod tests {
             let agrees = |records: &[K]| {
                 assert_eq!(
                     Direct.confirm_ascending(records, previous),
-                    crate::order::confirm_ascending(records, &mut ByKey(|key: &K| *key), previous,),
+                    crate::engine::order::confirm_ascending(
+                        records,
+                        &mut ByKey(|key: &K| *key),
+                        previous,
+                    ),
                 );
             };
             agrees(&keys);

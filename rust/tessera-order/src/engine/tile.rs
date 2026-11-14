@@ -7,8 +7,8 @@
 
 mod plan;
 
-use crate::key::{self, Digit, Extract, Unsigned};
-use crate::order::scan_varying_bits;
+use crate::engine::key::{self, Digit, Extract, Unsigned};
+use crate::engine::order::scan_varying_bits;
 use crate::thresholds::{INSERTION_MAX, MAX_CURSOR_BYTES, MAX_TILE_RECORDS};
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
@@ -101,7 +101,7 @@ unsafe fn counting_pass<T, E: Extract<T>>(
         }
         // SAFETY: the caller guarantees `buckets` writable cursor slots.
         let starts = core::slice::from_raw_parts_mut(cursor, buckets);
-        crate::portable_simd::prefix_sum(starts);
+        crate::engine::portable_simd::prefix_sum(starts);
         for index in 0..len {
             let record = source.add(index);
             let bucket = if E::DIRECT.is_some() {
@@ -361,7 +361,7 @@ impl<T> Drop for RestoreTile<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::key::ByKey;
+    use crate::engine::key::ByKey;
     #[test]
     #[cfg(feature = "rayon")]
     fn finishing_capacity_bounds_the_whole_child() {
@@ -453,7 +453,7 @@ mod tests {
                     &mut records,
                     Digit { shift: 0, width: 6 },
                     63,
-                    &mut crate::key::KeyHalf::<_, SHIFT>(key),
+                    &mut crate::engine::key::KeyHalf::<_, SHIFT>(key),
                 );
             }));
             assert_eq!(result.is_err(), panic_at.is_some());

@@ -19,24 +19,29 @@ Full-sort and rank entries share node decisions, rank projection, workspace and 
 
 ## Knowledge boundaries
 
+The private `engine/` module exposes complete refinement and stable distribution, sealed key extraction, immutable rank requirements and an opaque reusable workspace. `lib.rs`, `algorithms.rs`, `cached.rs`, `partition.rs` and the public Rayon adapters choose output semantics and compose these operations. They cannot name the engine's movement modules or access workspace storage. `engine/mod.rs` reexports existing operations rather than adding forwarding calls or a policy trait; all paths below are relative to `src/engine/` unless marked as adapters.
+
+Keeping every module at crate root allowed an adapter to depend on a block directory or a tile guard. The module boundary removes that dependency possibility without changing execution. A separate public engine crate would force lifetime, extractor and allocation contracts to stabilize before the current consumers have established them; that remains deferred.
+
 | Owner | Complete responsibility | Consumers need to know |
 |---|---|---|
-| `algorithms.rs` | Complete serial argsort, segmented sorting, Top-k, prefix and selection calls; validate public arguments and shape outputs | Shared rank requirements and complete refinement, not movement state or planner details |
-| `partition.rs` | Complete stable binary and finite-category distribution, including validation, storage lifetime and boundary output | Complete tile or block distribution, not order analysis or rank refinement |
-| `engine.rs` | Root preparation, default tile budget, candidate-bit progress and ordered refinement. Serial and parallel entries preserve actual variation and narrow a 128-bit key through one `KeyHalf` (`key.rs`) | Required rank views and complete partition and finishing operations |
+| `../algorithms.rs` | Complete serial argsort, segmented sorting, Top-k, prefix and selection calls; validate public arguments and shape outputs | Shared rank requirements and complete refinement, not movement state or planner details |
+| `../partition.rs` | Binary predicate adaptation and trivial-input call semantics | Complete stable category distribution |
+| `distribution.rs` | Finite-category distribution, storage lifetime and boundary output | Category keys and cumulative ends, not block or tile ownership |
+| `refine.rs` | Root preparation, default tile budget, candidate-bit progress and ordered refinement. Serial and parallel entries preserve actual variation and narrow a 128-bit key through one `KeyHalf` (`key.rs`) | Required rank views and complete partition and finishing operations |
 | `rank.rs` | Validate normalized required intervals once and project immutable borrowed views into final bands | Parent-relative final ranges, not keys, classifications or callback order |
 | `workspace.rs` | Invocation-owned reusable tile and block capacity, lent through complete operations | Capacity is reusable after restoration; no live movement state survives an operation |
 | `order.rs` | Scalar order and candidate-masked variation scans, stable insertion loops, independent of recursive execution | Extractors supply keys; direct-key callers supply a scan in their selected SIMD context |
-| `engine/plan.rs` | Bounded sampling and executable node partition decisions | Records, candidate variation and tile capacity go in; a node decision comes out |
+| `refine/plan.rs` | Bounded sampling and executable node partition decisions | Records, candidate variation and tile capacity go in; a node decision comes out |
 | `tile.rs`, `tile/plan.rs` | Capacity, complete leaf planning, scratch allocation, cached classification, counting passes and restoration | Finish a cursor-bounded slice; no raw pointer, cursor layout or guard crosses the boundary |
 | `block.rs`, `block/` | Physical block storage, stable bucket chains, ledger costs, completion and recovery | A `Classify` bucket per record goes in; bucket boundaries and completed bands come out |
-| `engine/parallel.rs` | Shard count, task scheduling and scratch pooling for the shared decisions | Exclusive bucket borrows and the planner's decision, not a second cost model |
+| `refine/parallel.rs` | Shard count, task scheduling and scratch pooling for the shared decisions | Exclusive bucket borrows and the planner's decision, not a second cost model |
 
 A change to sampled occupancy or a leaf estimate stays in planning and does not touch record movement. A change to tile scratch layout stays with its counting and recovery operation. Tile cursor size, record capacity, alignment padding and table capacity derive from the cursor type and the shared byte budget, and planning consumes those facts. Block metadata costs are derived beside the physical representation (`finish::serial_descriptor_bytes`), not copied into the strategy model.
 
 ## Category distribution
 
-Arbitrary classifiers are not sorting keys: an order probe or comparison-based leaf could reevaluate them or change their evaluation order. `partition::distribute` therefore bypasses ordered refinement and calls its classifier exactly once per record, in input order. It has two callers: binary [`partition`](../../conformance/semantics.md#binary-partition), whose trivial cases (fewer than two records, zero-sized records) still owe every predicate call and do not move, and `sort_by_cached_key`, which replays [cached keys](../../conformance/semantics.md#cached-keys) by call count when they vary only within one distribution's bit window.
+Arbitrary classifiers are not sorting keys: an order probe or comparison-based leaf could reevaluate them or change their evaluation order. `engine::distribute` therefore bypasses ordered refinement and calls its classifier exactly once per record, in input order. It has two callers: binary [`partition`](../../conformance/semantics.md#binary-partition), whose trivial cases (fewer than two records, zero-sized records) still owe every predicate call and do not move, and `sort_by_cached_key`, which replays [cached keys](../../conformance/semantics.md#cached-keys) by call count when they vary only within one distribution's bit window.
 
 A bounded tile uses `Scratch::distribute`: one counting pass, the existing cached-ID storage and restoration guard, and completed cursor ends. A larger input uses `block::partition` with no child finishing; it returns only after every band retires. Neither route retains live ownership state, nor reconstructs boundaries by calling user code again. Sorting by category is a simpler reference composition, but cannot supply the classifier-evaluation contract and is not used for either caller.
 
@@ -61,8 +66,8 @@ Node samples choose partitions; they never certify ownership, equality of actual
 
 | Stage | Rule and rationale | Code owner |
 |---|---|---|
-| Order probe, budgeted insertion, varying bits, constant and flat inputs | [Routing an input](../explain/routing.md) | `engine.rs` |
-| Child order, equality, run and top-digit partitions, counted window | [Nodes and tiles](../explain/routing.md#nodes-and-tiles) | `engine.rs`, `engine/plan.rs` |
+| Order probe, budgeted insertion, varying bits, constant and flat inputs | [Routing an input](../explain/routing.md) | `refine.rs` |
+| Child order, equality, run and top-digit partitions, counted window | [Nodes and tiles](../explain/routing.md#nodes-and-tiles) | `refine.rs`, `refine/plan.rs` |
 | Stable block partition, completion ledger, block size | [The block partition](../explain/block-partition.md) | `block.rs`, `block/` |
 | Tile leaves, digit planning, cached bucket IDs | [Finishing tiles](../explain/tiles.md) | `tile.rs`, `tile/plan.rs` |
 | Key encoding and digit meaning; varying-bit scans | [Keys as unsigned integers](../explain/keys.md) | `key.rs`; `order.rs` |

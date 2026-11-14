@@ -4,12 +4,7 @@
 //! and normalization precede execution; no adapter owns partition decisions,
 //! live scratch records or a separate selection engine.
 
-use crate::{
-    engine,
-    key::{ByKey, Direct, Extract, RadixKey},
-    rank::{self, Requirement},
-    workspace::Workspace,
-};
+use crate::engine::{self, ByKey, Direct, Extract, RadixKey, Requirement, Workspace};
 use alloc::vec::Vec;
 use core::{
     cmp::Reverse,
@@ -313,7 +308,7 @@ fn select<T, E: Extract<T>>(
 }
 
 fn select_many<T, E: Extract<T>>(values: &mut [T], indices: &[usize], extractor: E) {
-    let ranges = rank::normalize_indices(values.len(), indices);
+    let ranges = engine::normalize_indices(values.len(), indices);
     let required = Requirement::new(values.len(), &ranges);
     engine::refine(values, extractor, required, None);
 }

@@ -3,7 +3,7 @@
 //! Complete tile decisions derived from remaining bits and tile-owned cursor limits.
 
 use super::{Cursor, MAX_DIGIT_BUCKETS};
-use crate::key::Digit;
+use crate::engine::key::Digit;
 use crate::thresholds::INSERTION_MAX;
 
 /// Widest digit supported by the tile cursor representation and budget.
@@ -92,7 +92,7 @@ pub(super) fn plan_tile<T>(len: usize, varying: u128) -> TilePlan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::key::bit_len;
+    use crate::engine::key::bit_len;
 
     /// Exhaustively enumerates window partitions independently of the planner.
     fn optimal_digit_cost(bits: u128, width: usize) -> (usize, usize) {

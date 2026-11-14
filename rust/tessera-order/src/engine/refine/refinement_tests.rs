@@ -3,7 +3,7 @@
 //! Private rank consumers exercise the production executor before public APIs.
 
 use super::*;
-use crate::key::{ByKey, RadixKey};
+use crate::engine::key::{ByKey, RadixKey};
 use core::cell::Cell;
 use core::ops::Range;
 

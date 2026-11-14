@@ -20,20 +20,22 @@ mod plan;
 #[cfg(test)]
 mod refinement_tests;
 
-use crate::tile;
+use crate::engine::tile;
 
-use crate::order::scan_varying_bits;
-use crate::rank::Requirement;
+use crate::engine::order::scan_varying_bits;
+use crate::engine::rank::Requirement;
+use crate::engine::workspace::Workspace;
 use crate::thresholds::{INSERTION_MAX, TILE_BYTES};
-use crate::workspace::Workspace;
 use plan::{NodePlan, plan_node};
 use tile::capacity as tile_capacity;
 
 use alloc::vec::Vec;
 
-use crate::block;
-use crate::block::Classify;
-use crate::key::{self, Digit, Direct, Extract, KeyDigit, KeyHalf, Rank, Unsigned, bit_len};
+use crate::engine::block;
+use crate::engine::block::Classify;
+use crate::engine::key::{
+    self, Digit, Direct, Extract, KeyDigit, KeyHalf, Rank, Unsigned, bit_len,
+};
 
 type KeyValue<T, E> = <E as Extract<T>>::Value;
 
@@ -562,7 +564,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::key::ByKey;
+    use crate::engine::key::ByKey;
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     #[test]

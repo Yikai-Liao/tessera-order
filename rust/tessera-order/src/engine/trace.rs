@@ -101,7 +101,7 @@ pub(crate) fn emit(event: impl FnOnce() -> Event) {
 struct ByFn<F>(F);
 
 #[cfg(feature = "trace")]
-impl<F: FnMut(&u32) -> usize> crate::block::Classify<u32> for ByFn<F> {
+impl<F: FnMut(&u32) -> usize> crate::engine::block::Classify<u32> for ByFn<F> {
     fn bucket(&mut self, record: &u32) -> usize {
         (self.0)(record)
     }
@@ -127,8 +127,8 @@ pub fn partition(
     assert!(keys.len() >= 2, "a partition needs two keys");
     assert!(block_size > 0, "blocks hold at least one key");
     EVENTS.with(|events| *events.borrow_mut() = Some(alloc::vec::Vec::new()));
-    let mut buffers = crate::block::Buffers::new();
-    crate::block::partition_in_blocks(
+    let mut buffers = crate::engine::block::Buffers::new();
+    crate::engine::block::partition_in_blocks(
         keys,
         radix,
         block_size,

@@ -7,8 +7,7 @@
 //! bucket directly into its exclusive final band and finish it in that task.
 //! Small inputs and one-thread pools use the serial engine.
 
-use crate::key::{ByKey, Direct};
-use crate::{RadixKey, engine};
+use crate::engine::{self, ByKey, Direct, RadixKey};
 
 /// Sorts keys stably through the Rayon entry point.
 ///
@@ -35,7 +34,7 @@ use crate::{RadixKey, engine};
 /// assert_eq!(keys, [3, 7, 7, 19, 42]);
 /// ```
 pub fn par_sort<K: RadixKey + Send>(values: &mut [K]) {
-    engine::parallel::sort::<K, _>(values, Direct);
+    engine::par_sort::<K, _>(values, Direct);
 }
 
 /// Sorts records stably by a key through the Rayon entry point.
@@ -82,7 +81,7 @@ where
     K: RadixKey,
     F: Fn(&T) -> K + Sync,
 {
-    engine::parallel::sort::<T, _>(values, ByKey(&key));
+    engine::par_sort::<T, _>(values, ByKey(&key));
 }
 
 /// Renamed to [`par_sort`]; the contract is unchanged.

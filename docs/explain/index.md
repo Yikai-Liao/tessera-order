@@ -1,6 +1,6 @@
 # How Tessera works
 
-Tessera sorts stably, in linear time, with O(√n) extra memory. Below, its core step runs in the engine itself, compiled to WebAssembly.
+Tessera's engine sorts stably, in linear time, with O(√n) extra memory. Every operation runs on it; these pages follow the full sort, the complete request. Below, its core step runs in the engine itself, compiled to WebAssembly.
 
 ## Tessera: a stable split without a second buffer
 

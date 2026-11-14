@@ -5,8 +5,8 @@
 <h1 align="center">Tessera</h1>
 
 <p align="center">
-  <strong>Stable radix sort with O(√n) auxiliary memory.</strong><br>
-  Linear time, adaptive to real data, and safe for records that own resources.
+  <strong>Stable radix ordering with O(√n) auxiliary memory.</strong><br>
+  One linear-time engine behind sorting and the standard ordering operations, safe for records that own resources.
 </p>
 
 <p align="center">
@@ -19,11 +19,13 @@
 </p>
 
 > [!NOTE]
-> 0.1 is the first release: the stable sort only, with the API still allowed to change in 0.x minor releases. See the [roadmap](https://github.com/Yikai-Liao/tessera-order/blob/main/ROADMAP.md) for what comes next.
+> 0.1 is the first release and provides the full sort. `main` adds the operations listed below as development API for 0.2; they are unreleased and under API review. 0.x minor releases may change the API; see the [roadmap](https://github.com/Yikai-Liao/tessera-order/blob/main/ROADMAP.md).
 
 ## Why Tessera
 
 An LSD radix sort is stable and runs in linear time, but it needs a second buffer as large as the input. Comparison sorts avoid that buffer and pay O(n log n) comparisons instead. Tessera keeps the radix sort's linear time and stability and bounds the extra memory to O(√n).
+
+Sorting is the foundation, not the only product. Every operation is one request to the same engine. Rank operations (`partial_sort`, `select_nth`, `select_nth_many`, `k_smallest`, `k_largest`) name the ranks of the stably sorted order that the result needs, and the engine stops refining where no requested rank remains. `argsort` and `sort_chunks` run complete sorts on index payloads or chunks. `partition` and `sort_by_cached_key` reuse the engine's stable distribution. No operation brings its own kernel, so an engine improvement reaches all of them, and the full sort, the complete request, is measured first.
 
 - **Stable**, also for descending keys.
 - **O(√n) auxiliary memory**, through a stable in-place block partition and a bounded tile buffer.

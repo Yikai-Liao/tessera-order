@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: Tessera
-  text: Stable radix sort with O(√n) auxiliary memory
-  tagline: Linear time, adaptive to real data, and safe for records that own resources.
+  text: Stable radix ordering with O(√n) auxiliary memory
+  tagline: One linear-time engine behind sorting and the standard ordering operations, safe for records that own resources.
   image:
     src: /logo.svg
     alt: Tessera logo, a mosaic rosette
@@ -20,6 +20,9 @@ hero:
       link: https://github.com/Yikai-Liao/tessera-order
 
 features:
+  - title: One engine, standard operations
+    details: Sorting, partial sorting, selection, argsort and partitioning share one engine; rank operations refine only the ranks they need. The 0.2 operations are development API on main.
+    link: /guide/getting-started#partial-sorting-and-selected-ranks
   - title: Stable, without a second buffer
     details: A block partition recycles consumed input blocks as output blocks, so a split needs O(√n) memory instead of an n-record buffer.
     link: /explain/block-partition

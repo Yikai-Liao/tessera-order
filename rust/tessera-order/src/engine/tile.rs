@@ -62,16 +62,18 @@ pub(super) struct Scratch<T>(Vec<MaybeUninit<T>>);
 /// - `cursor` has `MAX_DIGIT_BUCKETS` writable `Cursor` slots.
 /// - Without `E::DIRECT`, `bucket_ids` has `len` aligned `Cursor` slots
 ///   disjoint from both record buffers and the cursor table.
+/// - `classified_prefix` has nondecreasing ends within `len` and bucket IDs
+///   below `2^digit.width`. It is empty when `E::DIRECT` is present.
 /// - If `key` panics, `destination` holds a partial copy that must be neither
 ///   read nor dropped.
 #[inline]
 unsafe fn counting_pass<T, E: Extract<T>>(
-    source: *const T,
-    destination: *mut T,
+    (source, destination): (*const T, *mut T),
     len: usize,
     digit: Digit,
     cursor: *mut Cursor,
     bucket_ids: *mut Cursor,
+    classified_prefix: &[(usize, usize)],
     extractor: &mut E,
 ) -> Cursor {
     // SAFETY: the caller supplies initialized source records, disjoint writable
@@ -85,7 +87,19 @@ unsafe fn counting_pass<T, E: Extract<T>>(
             *cursor.add(slot) = 0;
         }
         let mut largest = 0 as Cursor;
-        for index in 0..len {
+        let mut first = 0;
+        assert!(classified_prefix.is_empty() || E::DIRECT.is_none());
+        for &(end, bucket) in classified_prefix {
+            // SAFETY: distribution validates the contiguous prefix and bucket
+            // bounds. Cached IDs have len slots; no user code runs here.
+            core::slice::from_raw_parts_mut(bucket_ids.add(first), end - first)
+                .fill(bucket as Cursor);
+            let count = *cursor.add(bucket) + (end - first) as Cursor;
+            *cursor.add(bucket) = count;
+            largest = largest.max(count);
+            first = end;
+        }
+        for index in first..len {
             // SAFETY: the caller guarantees `len` initialized records.
             let key = extractor.key(&*source.add(index));
             let bucket = ((key & mask) >> shift).to_usize();
@@ -158,18 +172,19 @@ impl<T> Scratch<T> {
                     return;
                 }
                 let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
-                self.counting_passes(records, &digits[..passes], &mut counts, extractor);
+                self.counting_passes(records, &digits[..passes], &mut counts, &[], extractor);
             }
         }
     }
 
-    /// Distributes a tile by a validated category extractor in one cached pass.
-    /// No order/variation probe or recursive finishing evaluates it again.
+    /// Distributes a tile using validated prefix runs and one cached pass over
+    /// the unclassified suffix. No probe or recursive finishing reevaluates it.
     /// Returns cumulative ends for all represented categories, including empty ones.
     pub(super) fn distribute<E: Extract<T>>(
         &mut self,
         records: &mut [T],
         radix: usize,
+        classified_prefix: &[(usize, usize)],
         extractor: &mut E,
     ) -> Vec<usize> {
         assert!((1..=MAX_DIGIT_BUCKETS.ilog2() as usize).contains(&radix));
@@ -182,6 +197,7 @@ impl<T> Scratch<T> {
                 width: radix,
             }],
             &mut counts,
+            classified_prefix,
             extractor,
         );
         // SAFETY: the completed pass initialized this prefix and restored all
@@ -265,10 +281,12 @@ impl<T> Scratch<T> {
         records: &mut [T],
         digits: &[Digit],
         cursor: &mut MaybeUninit<[Cursor; MAX_DIGIT_BUCKETS]>,
+        classified_prefix: &[(usize, usize)],
         extractor: &mut E,
     ) -> Cursor {
         let len = records.len();
         debug_assert!(len <= MAX_TILE_RECORDS);
+        debug_assert!(classified_prefix.is_empty() || digits.len() == 1);
         let (scratch, bucket_ids) = self.reserve_scratch::<E>(len);
         let cursor = cursor.as_mut_ptr().cast::<Cursor>();
         let tile = records.as_mut_ptr();
@@ -286,12 +304,12 @@ impl<T> Scratch<T> {
             // re-evaluation whenever classification caching is disabled.
             largest = unsafe {
                 counting_pass::<T, E>(
-                    guard.source,
-                    destination,
+                    (guard.source, destination),
                     len,
                     digit,
                     cursor,
                     bucket_ids,
+                    classified_prefix,
                     extractor,
                 )
             };
@@ -311,7 +329,7 @@ impl<T> Scratch<T> {
     ) {
         let len = records.len();
         let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
-        let largest = self.counting_passes(records, &[digit], &mut counts, extractor);
+        let largest = self.counting_passes(records, &[digit], &mut counts, &[], extractor);
         // With insertion-sized buckets, whole-tile insertion has the same inversion
         // count as separate bucket sorts and skips the boundary walk.
         if largest as usize <= INSERTION_MAX {

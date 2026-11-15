@@ -184,6 +184,12 @@ type ClassifierVisit<'callback, 'records, T, C> =
 pub(crate) trait Classify<T> {
     /// Returns the bucket of `record`.
     fn bucket(&mut self, record: &T) -> usize;
+
+    /// Already classified contiguous runs: (exclusive end, bucket).
+    /// The scatter consumes these facts before calling `bucket` on the suffix.
+    fn classified_prefix(&self) -> &[(usize, usize)] {
+        &[]
+    }
 }
 
 /// Lets tests classify with a closure.
@@ -423,7 +429,18 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         self.owns_recovery = true;
         // Owning the classifier keeps its constants in the scatter's register
         // allocation instead of accessing them through a borrowed extractor.
-        let classifier = self.scatter(0, classifier, C::bucket);
+        let mut first = 0;
+        for &(end, bucket) in classifier.classified_prefix() {
+            assert!(first <= end && end <= self.input_len);
+            self.scatter(first % self.block_size, end, bucket, |bucket, _| *bucket);
+            first = end;
+        }
+        let classifier = self.scatter(
+            first % self.block_size,
+            self.input_len,
+            classifier,
+            C::bucket,
+        );
         #[cfg(debug_assertions)]
         self.validate();
         classifier
@@ -477,11 +494,11 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
     fn scatter<C, F: FnMut(&mut C, &T) -> usize>(
         &mut self,
         first_offset: usize,
+        input_len: usize,
         mut state: C,
         mut classify: F,
     ) -> C {
         let input_ptr = self.input;
-        let input_len = self.input_len;
         let block_size = self.block_size;
         let scratch_blocks = self.scratch_blocks;
         let full_blocks = self.block_count - scratch_blocks;
@@ -561,6 +578,11 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             for offset in complete..length {
                 write(offset);
             }
+            // A preclassified run can end inside an input block. Its unread
+            // suffix remains in place and the next run resumes at that offset.
+            if length < block_size && begin_record + length < self.input_len {
+                break;
+            }
             position.input += 1;
             begin = 0;
         }
@@ -587,7 +609,7 @@ impl<T> Drop for Partition<'_, '_, T> {
                 // Input consumption is contiguous. Append only the unread
                 // suffix, without the failed classifier. Writers and block
                 // progress survive unwinding; no per-record counter is needed.
-                self.scatter(offset, (), |_, _| 0);
+                self.scatter(offset, self.input_len, (), |_, _| 0);
                 #[cfg(debug_assertions)]
                 self.validate();
             }

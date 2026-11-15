@@ -33,5 +33,10 @@ pub fn partition<T, F: FnMut(&T) -> bool>(values: &mut [T], mut predicate: F) ->
         // No movement is needed, but every predicate call is still owed.
         return values.iter().filter(|record| predicate(record)).count();
     }
-    distribute(values, 1, ByKey(|record: &T| u8::from(!predicate(record))))[0]
+    distribute(
+        values,
+        1,
+        &[],
+        ByKey(|record: &T| u8::from(!predicate(record))),
+    )[0]
 }

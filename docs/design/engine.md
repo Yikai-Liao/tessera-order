@@ -41,9 +41,11 @@ A change to sampled occupancy or a leaf estimate stays in planning and does not 
 
 ## Category distribution
 
-Arbitrary classifiers are not sorting keys: an order probe or comparison-based leaf could reevaluate them or change their evaluation order. `engine::distribute` therefore bypasses ordered refinement and calls its classifier exactly once per record, in input order. It has two callers: binary [`partition`](../../conformance/semantics.md#binary-partition), whose trivial cases (fewer than two records, zero-sized records) still owe every predicate call and do not move, and `sort_by_cached_key`, which replays [cached keys](../../conformance/semantics.md#cached-keys) by call count when they vary only within one distribution's bit window.
+Arbitrary classifiers are not sorting keys: an order probe or comparison-based leaf could reevaluate them or change their evaluation order. `engine::distribute` therefore bypasses ordered refinement. It accepts an already classified prefix as cumulative run ends and bucket IDs, then calls its classifier once per remaining record, in input order. An empty prefix preserves the whole-input forward-call contract. It has two callers: binary [`partition`](../../conformance/semantics.md#binary-partition), whose trivial cases (fewer than two records, zero-sized records) still owe every predicate call and do not move, and `sort_by_cached_key`, which replays [cached keys](../../conformance/semantics.md#cached-keys) by call count when they vary only within one distribution's bit window.
 
 A bounded tile uses `Scratch::distribute`: one counting pass, the existing cached-ID storage and restoration guard, and completed cursor ends. A larger input uses `block::partition` with no child finishing; it returns only after every band retires. Neither route retains live ownership state, nor reconstructs boundaries by calling user code again. Sorting by category is a simpler reference composition, but cannot supply the classifier-evaluation contract and is not used for either caller.
+
+A classified prefix stays borrowed for the complete operation. Tile histogramming fills its counts and cached IDs directly; block scatter consumes whole prefix runs before invoking the ordinary suffix classifier. A run may end inside an input block: that block remains an unread source until its suffix is consumed, and unwind recovery resumes from the writers' total progress. Sorting classifiers supply no prefix, so their consumers retain the same complete partition interface.
 
 ## Cost model
 

@@ -39,7 +39,7 @@ When two windows cannot finish the tile, one MSD pass consumes the highest digit
 
 ## Actual children instead of predicted work
 
-An MSD partition preserves the savings a cost estimate would predict. An insertion-sized child needs no variation scan. A larger child scans its remaining bits and is done if they are constant. Node partitions finish their tile-sized children by the same rule (`finish_child`). A child that still has many varying bits can partition again; each partition removes its digit from the candidate mask. Concentrated distributions therefore keep recursive finishing without a recursive cost estimate.
+An MSD partition preserves the savings a cost estimate would predict. For a partial-rank request, the completed cursors locate the enclosing requested buckets by binary search; only intersecting children receive further refinement. The shared rank requirement still owns interval gaps and membership cuts, including cuts already satisfied between buckets. An insertion-sized child needs no variation scan. A larger child scans its remaining bits and is done if they are constant. Node partitions finish their tile-sized children by the same rule (`finish_child`). A child that still has many varying bits can partition again; each partition removes its digit from the candidate mask. Concentrated distributions therefore keep recursive finishing without a recursive cost estimate.
 
 This simpler routing may choose MSD where a longer LSD plan would be faster. [Engine evidence](../design/evidence.md#landed-with-open-losses) lists the measured trade-offs; removing an estimate is not proof that its choices never helped.
 
@@ -60,4 +60,4 @@ Tile passes are the classic [counting pass](radix-sort.md#the-counting-pass) wit
 
 Before recursing, each child is scanned for varying bits only within the parent's remaining candidate mask. Already partitioned digits cannot reappear, even if a user key function changes its answers, so each recursive level removes key bits.
 
-An MSD tile pass reads its bucket boundaries from the finished cursor table instead of recomputing them from keys. Recomputing measured 48% slower when there was about one bucket per record. If every bucket is small enough for insertion, one insertion sort over the whole tile does the same work without walking the boundaries.
+An MSD tile pass reads its bucket boundaries from the finished cursor table instead of recomputing them from keys. Recomputing measured 48% slower when there was about one bucket per record. If every bucket is small enough for insertion, one insertion sort over the enclosing requested span does the same inversion work as separate bucket sorts without walking the boundaries. For a full request this is the whole tile. A partial request includes complete boundary buckets and may finish intervening unrequested buckets, preserving the cheap contiguous finish for dense requests.

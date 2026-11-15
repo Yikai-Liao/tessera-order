@@ -16,7 +16,7 @@ The [release surface](docs/design/algorithm-extensions-proposal.md#release-surfa
 
 ### Engine and algorithm boundary
 
-The private `engine/` boundary and opaque workspace separate output adapters from movement and recovery. Degenerate requirements express membership cuts directly. Requested tiles are still fully sorted; a [tile-local selection policy](docs/design/algorithm-extensions-proposal.md#ordered-refinement-without-a-general-policy-framework) remains open after its first attempt measured slower. Correctness and ownership validation accompany the implementation. Performance acceptance is explicitly deferred until the architecture is complete: measure cut-at-band boundaries, sparse/dense ranks, full sorting, short inputs and parallel large-child completion against the preceding stages, with A/A and placement controls where supported. No speedup or regression acceptance is established by the structural change.
+The private `engine/` boundary and opaque workspace separate output adapters from movement and recovery. Degenerate requirements express membership cuts directly. Tile MSD now retains rank requests while preserving existing leaf choices and the contiguous small-bucket finish. Binary distribution retains classified prefix runs without replay branches in the suffix classifier. The [fact-preservation assessment](docs/design/evidence.md#preserving-classification-and-rank-facts) records the rejected constructions and local evidence. Finish exact-head CI performance, Miri and Wasm validation, including cut-at-band boundaries, sparse/dense ranks, full sorting, short inputs and parallel large-child completion. Linked argsort and fixed-call operation counters are available; wider linked rank support and causal timing acceptance remain open. Earlier foundation timing debt remains separate.
 
 Next capabilities follow the [engine capability design](docs/design/algorithm-extensions-proposal.md#further-engine-capabilities), each with a concrete consumer and independent acceptance:
 
@@ -78,6 +78,8 @@ An independent track binding the Rust crate; see the [design](docs/design/python
 2. **C++17 header-only implementation** for trivially copyable records, with CMake install and a consumer test. Done when it passes the shared vectors and has a direct comparison with Rust.
 
 ## Benchmark tooling and investigations
+
+- Update the core source-size selection for the current private engine boundaries: moved tile, rank, distribution and workspace owners are omitted by the historical path expression. Preserve comparisons across the old layout before using that metric as a complete engine-size check.
 
 - Finish the [CI scaling proposal](docs/design/ci-scaling-proposal.md). Cache hygiene, lane reuse and continuous operation cases are implemented. Next come per-operation cross-algorithm plans.
 

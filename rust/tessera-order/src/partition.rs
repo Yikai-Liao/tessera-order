@@ -19,7 +19,8 @@ use crate::engine::{ByKey, distribute};
 ///
 /// # Memory
 /// O(√n) auxiliary space for a fixed record size, plus bounded tile storage.
-/// All private storage is released on return or unwind.
+/// Already partitioned inputs do not allocate. All private storage is released
+/// on return or unwind.
 ///
 /// # Examples
 /// ```
@@ -33,10 +34,23 @@ pub fn partition<T, F: FnMut(&T) -> bool>(values: &mut [T], mut predicate: F) ->
         // No movement is needed, but every predicate call is still owed.
         return values.iter().filter(|record| predicate(record)).count();
     }
-    distribute(
-        values,
-        1,
-        &[],
-        ByKey(|record: &T| u8::from(!predicate(record))),
-    )[0]
+    // A true run followed by a false run is already the complete result.
+    // Stop at the first inversion; its prefix has just two known boundaries,
+    // so distribution can replay it without evaluating the predicate again.
+    let Some(first_false) = values.iter().position(|record| !predicate(record)) else {
+        return values.len();
+    };
+    let Some(offset) = values[first_false + 1..].iter().position(&mut predicate) else {
+        return first_false;
+    };
+    // The leading matching records are already final. Only the remaining
+    // false run and its first matching record need their classifications replayed.
+    let classified_prefix = [(offset + 1, 1), (offset + 2, 0)];
+    first_false
+        + distribute(
+            &mut values[first_false..],
+            1,
+            &classified_prefix,
+            ByKey(|record: &T| u8::from(!predicate(record))),
+        )[0]
 }

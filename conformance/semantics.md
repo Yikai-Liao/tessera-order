@@ -77,7 +77,7 @@ In-place rank operations retain the full sort's [workspace bound](#space), not O
 
 ## Binary partition
 
-`partition`, the C++ `std::stable_partition`, moves the records matching a predicate before the others, keeping original order in both groups, and returns the matching count. The predicate runs exactly once per record, in original input order, including zero-sized records and singleton inputs; empty input makes no calls. A predicate panic propagates after every record is back in the input, in unspecified order; recovery does not call the predicate, and callback side effects are not rolled back. Auxiliary space is O(√n) for a fixed record size, plus bounded tile storage, all released before return or unwind. No `Clone`, `Send` or `Sync` record bound is required.
+`partition`, the C++ `std::stable_partition`, moves the records matching a predicate before the others, keeping original order in both groups, and returns the matching count. The predicate runs exactly once per record, in original input order, including zero-sized records and singleton inputs; empty input makes no calls. A predicate panic propagates after every record is back in the input, in unspecified order; recovery does not call the predicate, and callback side effects are not rolled back. Already partitioned inputs are scanned without moving records or allocating scratch. Otherwise auxiliary space is O(√n) for a fixed record size, plus bounded tile storage, all released before return or unwind. No `Clone`, `Send` or `Sync` record bound is required.
 
 No entry takes a category count. Grouping by more categories uses `sort_by_cached_key` or `sort_by_key`, followed by `slice::chunk_by`.
 

@@ -77,6 +77,26 @@ impl<'a> Requirement<'a> {
         }
     }
 
+    /// Whether every position in this subproblem needs ordering.
+    #[inline]
+    pub(crate) fn is_all(self) -> bool {
+        self.intervals.is_none()
+    }
+
+    /// Encloses a projected requirement in local coordinates, including cuts.
+    /// A cut can have equal endpoints; projection decides whether a band that
+    /// touches it still needs work. Gaps between intervals remain unrequested.
+    pub(crate) fn bounds(self, len: usize) -> Range<usize> {
+        let Some(intervals) = self.intervals else {
+            return 0..len;
+        };
+        intervals[0].start.saturating_sub(self.base)
+            ..intervals[intervals.len() - 1]
+                .end
+                .saturating_sub(self.base)
+                .min(len)
+    }
+
     /// Projects a final band in this subproblem's coordinates. The caller
     /// supplies a valid slice extent from a ledger or an ordered-run split.
     ///

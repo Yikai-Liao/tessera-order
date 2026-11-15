@@ -432,15 +432,15 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
         let mut first = 0;
         for &(end, bucket) in classifier.classified_prefix() {
             assert!(first <= end && end <= self.input_len);
-            self.scatter(first % self.block_size, end, bucket, |bucket, _| *bucket);
+            self.scatter(
+                first % self.block_size,
+                (end, bucket),
+                |run, _| run.1,
+                |run, _| run.0,
+            );
             first = end;
         }
-        let classifier = self.scatter(
-            first % self.block_size,
-            self.input_len,
-            classifier,
-            C::bucket,
-        );
+        let classifier = self.scatter(first % self.block_size, classifier, C::bucket, |_, len| len);
         #[cfg(debug_assertions)]
         self.validate();
         classifier
@@ -489,17 +489,22 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
 
     // Pass setup and completion need state that scatter does not.
     // Keep their optimization regions separate so that state does not force
-    // digit masks and bucket cursors out of registers in the hot loop.
+    // digit masks and bucket cursors out of registers in the hot loop. Select
+    // the limit from owned state: a separate scalar limit added classifier
+    // loads per record in argsort. Evidence:
+    // docs/design/evidence.md#preserving-classification-and-rank-facts.
     #[inline(never)]
     fn scatter<C, F: FnMut(&mut C, &T) -> usize>(
         &mut self,
         first_offset: usize,
-        input_len: usize,
         mut state: C,
         mut classify: F,
+        limit: impl FnOnce(&C, usize) -> usize,
     ) -> C {
         let input_ptr = self.input;
+        let input_len = limit(&state, self.input_len);
         let block_size = self.block_size;
+        let partial_block = input_len < self.input_len && !input_len.is_multiple_of(block_size);
         let scratch_blocks = self.scratch_blocks;
         let full_blocks = self.block_count - scratch_blocks;
         let position = &mut self.position;
@@ -578,13 +583,14 @@ impl<'a, 'w, T> Partition<'a, 'w, T> {
             for offset in complete..length {
                 write(offset);
             }
-            // A preclassified run can end inside an input block. Its unread
-            // suffix remains in place and the next run resumes at that offset.
-            if length < block_size && begin_record + length < self.input_len {
-                break;
-            }
             position.input += 1;
             begin = 0;
+        }
+        // A bounded run may leave its last input block partly unread. No
+        // callback or fallible work follows the last increment, so restore its
+        // cursor here rather than checking the bound in every input block.
+        if partial_block {
+            position.input -= 1;
         }
         state
     }
@@ -609,7 +615,7 @@ impl<T> Drop for Partition<'_, '_, T> {
                 // Input consumption is contiguous. Append only the unread
                 // suffix, without the failed classifier. Writers and block
                 // progress survive unwinding; no per-record counter is needed.
-                self.scatter(offset, self.input_len, (), |_, _| 0);
+                self.scatter(offset, (), |_, _| 0, |_, len| len);
                 #[cfg(debug_assertions)]
                 self.validate();
             }

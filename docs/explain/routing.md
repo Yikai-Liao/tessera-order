@@ -83,7 +83,7 @@ Otherwise the node is split on the digit under its highest varying bit, with the
 
 Serial and parallel roots share this decision. A parallel root shards equality and digit partitions across threads and executes an existing-run split serially, without resampling.
 
-While the block partition completes, each requested child that fits a tile is finished **at once**, while its records are still in cache. Larger requested children are routed again after the partition. A requested tile may be fully sorted even when only some of its ranks are needed; the existing leaf mechanisms stay unchanged.
+While the block partition completes, each requested child that fits a tile is finished **at once**, while its records are still in cache. Larger requested children are routed again after the partition. Tile MSD passes retain the rank requirement and skip unrelated children. Insertion and LSD leaves may finish more than requested; the existing leaf choices stay unchanged.
 
 ## Summary
 

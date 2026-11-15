@@ -17,12 +17,15 @@ fn binary_partition_keeps_both_input_orders_and_returns_the_cut() {
         &[0, 1, 2, 49, 8193, 10000]
     };
     for &len in lengths {
-        for mode in 0..3 {
+        for mode in 0..6 {
             let input: Vec<_> = (0..len).map(|id| (id, Box::new(id))).collect();
             let matching = |id: usize| match mode {
                 0 => false,
                 1 => true,
-                _ => !id.is_multiple_of(3),
+                2 => !id.is_multiple_of(3),
+                3 => id < len / 2,
+                4 => id + 1 == len,
+                _ => id != len / 2,
             };
             let mut expected = input.clone();
             expected.sort_by_key(|record| !matching(record.0));
@@ -72,32 +75,40 @@ fn tile_and_block_failures_restore_owned_and_borrowed_records() {
     // 65 records fit a tile; 129 exceed its byte capacity and scatter through
     // blocks. Both retain failures before/after a block boundary under Miri.
     for len in [65, 129] {
-        for failure in [1, 32, 33, len / 2, len] {
-            let drops = Rc::new((0..len).map(|_| Cell::new(0)).collect::<Vec<_>>());
-            let mut records: Vec<_> = (0..len)
-                .map(|id| Owned {
-                    id,
-                    text: id.to_string(),
-                    padding: [id as u8; 512],
-                    drops: drops.clone(),
-                })
-                .collect();
-            let mut calls = 0;
-            let outcome = catch_unwind(AssertUnwindSafe(|| {
-                partition(&mut records, |r| {
-                    assert_eq!(r.id, calls);
-                    calls += 1;
-                    assert_ne!(calls, failure, "predicate failed");
-                    r.id % 3 == 0
-                })
-            }));
-            assert!(outcome.is_err());
-            assert_eq!(calls, failure, "classifier ran during recovery");
-            assert!(drops.iter().all(|drop| drop.get() == 0));
-            records.sort_by_key(|r| r.id);
-            assert!(records.iter().enumerate().all(|(id, r)| id == r.id));
-            drop(records);
-            assert!(drops.iter().all(|drop| drop.get() == 1));
+        for late_prefix in [false, true] {
+            for failure in [1, 32, 33, len / 2, len / 2 + 2, len] {
+                let drops = Rc::new((0..len).map(|_| Cell::new(0)).collect::<Vec<_>>());
+                let mut records: Vec<_> = (0..len)
+                    .map(|id| Owned {
+                        id,
+                        text: id.to_string(),
+                        padding: [id as u8; 512],
+                        drops: drops.clone(),
+                    })
+                    .collect();
+                let mut calls = 0;
+                let outcome = catch_unwind(AssertUnwindSafe(|| {
+                    partition(&mut records, |r| {
+                        assert_eq!(r.id, calls);
+                        calls += 1;
+                        assert_ne!(calls, failure, "predicate failed");
+                        // A late true run crosses full prefix blocks, then fails
+                        // on its first unclassified record at len / 2 + 2.
+                        if late_prefix {
+                            r.id >= len / 2
+                        } else {
+                            r.id % 3 == 0
+                        }
+                    })
+                }));
+                assert!(outcome.is_err());
+                assert_eq!(calls, failure, "classifier ran during recovery");
+                assert!(drops.iter().all(|drop| drop.get() == 0));
+                records.sort_by_key(|r| r.id);
+                assert!(records.iter().enumerate().all(|(id, r)| id == r.id));
+                drop(records);
+                assert!(drops.iter().all(|drop| drop.get() == 1));
+            }
         }
     }
     let mut values: Vec<_> = (0..129).collect();

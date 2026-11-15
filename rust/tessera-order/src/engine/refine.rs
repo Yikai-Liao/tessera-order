@@ -86,9 +86,9 @@ impl Split {
             |bucket: usize, range: core::ops::Range<usize>, child: &mut [T], classifier: &mut C| {
                 if child.len() <= tile_len
                     && self.finished != Some(bucket)
-                    && required.project(range).is_some()
+                    && let Some(required) = required.project(range)
                 {
-                    tile.finish_child::<_>(child, self.candidate, lend(classifier));
+                    tile.finish_child::<_>(child, self.candidate, required, lend(classifier));
                 }
             };
         block::partition(
@@ -102,7 +102,8 @@ impl Split {
 }
 
 /// Refines requested ranks through shared node and tile decisions.
-/// Unrequested bands have completed movement but receive no further key work.
+/// Unrequested node bands complete movement without child analysis; tile
+/// leaves may finish an enclosing span.
 struct Sorter<'a, T, E> {
     scratch: &'a mut Workspace<T>,
     extractor: &'a mut E,
@@ -459,7 +460,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         if len <= self.tile_len {
             self.scratch
                 .tile
-                .sort::<E>(records, varying, self.extractor);
+                .sort::<E>(records, varying, required, self.extractor);
             return;
         }
         let plan = plan_node(records, varying, self.tile_len, self.extractor);

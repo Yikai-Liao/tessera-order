@@ -7,7 +7,7 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
-use tessera_order::{sort, sort_by_key};
+use tessera_order::{partition, sort, sort_by_key};
 
 thread_local! {
     static ENABLED: Cell<bool> = const { Cell::new(false) };
@@ -130,6 +130,12 @@ fn ordered_inputs_do_not_allocate() {
                 .map(|id| if constant { 7 } else { id })
                 .collect();
             assert_eq!(measure(|| sort(&mut keys)), (0, 0));
+            assert_eq!(
+                measure(|| {
+                    partition(&mut keys, |key| *key < len as u64 / 3);
+                }),
+                (0, 0)
+            );
             let mut records: Vec<_> = keys.iter().copied().enumerate().collect();
             assert_eq!(measure(|| sort_by_key(&mut records, |x| x.1)), (0, 0));
         }

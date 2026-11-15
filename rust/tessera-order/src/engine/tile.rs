@@ -9,6 +9,7 @@ mod plan;
 
 use crate::engine::key::{self, Digit, Extract, Unsigned};
 use crate::engine::order::scan_varying_bits;
+use crate::engine::rank::Requirement;
 use crate::engine::thresholds::{INSERTION_MAX, MAX_CURSOR_BYTES, MAX_TILE_RECORDS};
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
@@ -148,11 +149,13 @@ impl<T> Scratch<T> {
         Self(Vec::new())
     }
 
-    /// Stably sorts a cursor-bounded slice, restoring its records on key panic.
+    /// Stably refines requested ranks in a cursor-bounded slice, restoring
+    /// every record on return or key panic.
     pub(super) fn sort<E: Extract<T>>(
         &mut self,
         records: &mut [T],
         varying: u128,
+        required: Requirement<'_>,
         extractor: &mut E,
     ) {
         let len = records.len();
@@ -163,7 +166,7 @@ impl<T> Scratch<T> {
         match plan_tile::<T>(len, varying) {
             TilePlan::Insertion => extractor.finish_insertion(records),
             TilePlan::Msd(digit) => {
-                self.partition_tile::<_>(records, digit, varying, extractor);
+                self.partition_tile::<_>(records, digit, varying, required, extractor);
             }
             TilePlan::Lsd { digits, passes } => {
                 // A terminal digit can count interchangeable keys without scratch.
@@ -207,12 +210,13 @@ impl<T> Scratch<T> {
         ends.iter().map(|&end| end as usize).collect()
     }
 
-    /// Finishes a cursor-bounded child within `candidate`. Insertion-sized
+    /// Refines a cursor-bounded child within `candidate`. Insertion-sized
     /// children skip the variation scan; node and tile partitions share this rule.
     pub(super) fn finish_child<E: Extract<T>>(
         &mut self,
         records: &mut [T],
         candidate: u128,
+        required: Requirement<'_>,
         extractor: &mut E,
     ) {
         debug_assert!(records.len() <= MAX_TILE_RECORDS);
@@ -221,7 +225,7 @@ impl<T> Scratch<T> {
         }
         if records.len() > INSERTION_MAX {
             let varying = scan_varying_bits(records, candidate, extractor);
-            self.sort::<_>(records, varying, extractor);
+            self.sort::<_>(records, varying, required, extractor);
         } else {
             extractor.finish_insertion(records);
         }
@@ -319,20 +323,20 @@ impl<T> Scratch<T> {
         largest
     }
 
-    /// Partitions a tile through scratch, then finishes each bucket.
+    /// Partitions every record through scratch, then refines requested bands.
     fn partition_tile<E: Extract<T>>(
         &mut self,
         records: &mut [T],
         digit: Digit,
         varying: u128,
+        required: Requirement<'_>,
         extractor: &mut E,
     ) {
         let len = records.len();
         let mut counts = MaybeUninit::<[Cursor; MAX_DIGIT_BUCKETS]>::uninit();
         let largest = self.counting_passes(records, &[digit], &mut counts, &[], extractor);
-        // With insertion-sized buckets, whole-tile insertion has the same inversion
-        // count as separate bucket sorts and skips the boundary walk.
-        if largest as usize <= INSERTION_MAX {
+        // A full small-bucket finish needs no cursor bounds or child analysis.
+        if largest as usize <= INSERTION_MAX && required.is_all() {
             extractor.finish_insertion(records);
             return;
         }
@@ -343,11 +347,41 @@ impl<T> Scratch<T> {
         let ends = unsafe {
             core::slice::from_raw_parts(counts.as_ptr().cast::<Cursor>(), 1usize << digit.width)
         };
-        let mut start = 0;
-        for &end in ends {
+        // Locate the enclosing bands in the completed cursors instead of
+        // walking a wide table for one selected rank. Projection still owns
+        // gaps and cuts, including cuts already satisfied by a bucket boundary.
+        let (first, last) = if required.is_all() {
+            (0, ends.len())
+        } else {
+            let bounds = required.bounds(len);
+            let first = ends.partition_point(|&end| end as usize <= bounds.start);
+            let last = (ends.partition_point(|&end| (end as usize) < bounds.end) + 1)
+                .min(ends.len())
+                .max(first);
+            (first, last)
+        };
+        if first == last {
+            return;
+        }
+        let mut start = if first == 0 {
+            0
+        } else {
+            ends[first - 1] as usize
+        };
+        // Insertion across consecutive small buckets has exactly their own
+        // inversions: the partition already orders records between buckets.
+        // Keep that saving for the enclosing requested span, including dense
+        // partial requests, instead of visiting each small bucket separately.
+        if largest as usize <= INSERTION_MAX {
+            extractor.finish_insertion(&mut records[start..ends[last - 1] as usize]);
+            return;
+        }
+        for &end in &ends[first..last] {
             let end = end as usize;
             debug_assert!(start <= end && end <= len);
-            self.finish_child::<_>(&mut records[start..end], candidate, extractor);
+            if let Some(child) = required.project(start..end) {
+                self.finish_child::<_>(&mut records[start..end], candidate, child, extractor);
+            }
             start = end;
         }
     }
@@ -413,6 +447,7 @@ mod tests {
             scratch.sort(
                 &mut records,
                 255,
+                Requirement::new(129, core::slice::from_ref(&(0..129))),
                 &mut key::KeyHalf::<_, SHIFT>(key::Direct),
             );
             assert_eq!(records, expected);
@@ -423,6 +458,51 @@ mod tests {
         }
         check::<0>();
         check::<64>();
+    }
+
+    #[test]
+    fn partial_tiles_do_not_analyze_unrequested_bands() {
+        use core::cell::Cell;
+
+        // Exercise both the contiguous small-bucket finish and recursive children.
+        for len in [129usize, 257] {
+            for ranks in [2..9, 17..17, len.div_ceil(4)..len.div_ceil(4)] {
+                let mut records: Vec<_> = (0..len)
+                    .map(|id| {
+                        let low = (id as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 2;
+                        (low | ((id as u64 % 4) << 62), id, Cell::new(false))
+                    })
+                    .collect();
+                let mut expected: Vec<_> = records.iter().map(|r| (r.0, r.1)).collect();
+                expected.sort_by_key(|r| r.0);
+                let mut extractor = ByKey(|r: &(u64, usize, Cell<bool>)| {
+                    assert!(
+                        !r.2.replace(true) || r.0 >> 62 == 0,
+                        "unrequested tile band was analyzed"
+                    );
+                    r.0
+                });
+                Scratch::new().partition_tile(
+                    &mut records,
+                    Digit {
+                        shift: 62,
+                        width: 2,
+                    },
+                    u64::MAX as u128,
+                    Requirement::new(len, core::slice::from_ref(&ranks)),
+                    &mut extractor,
+                );
+                let actual: Vec<_> = records.iter().map(|r| (r.0, r.1)).collect();
+                assert_eq!(actual[ranks.clone()], expected[ranks.clone()]);
+                for range in [0..ranks.start, ranks.end..len] {
+                    let mut members = actual[range.clone()].to_vec();
+                    let mut reference = expected[range].to_vec();
+                    members.sort_unstable();
+                    reference.sort_unstable();
+                    assert_eq!(members, reference);
+                }
+            }
+        }
     }
 
     #[test]
@@ -449,7 +529,12 @@ mod tests {
                 u64::MAX
             }
         });
-        scratch.sort::<_>(&mut records, u64::MAX as u128, &mut extractor);
+        scratch.sort::<_>(
+            &mut records,
+            u64::MAX as u128,
+            Requirement::new(len as usize, core::slice::from_ref(&(0..len as usize))),
+            &mut extractor,
+        );
         assert!(changed, "fixture never supplied a varying key");
         records.sort_unstable();
         assert_eq!(records, (0..len).collect::<Vec<_>>());
@@ -471,6 +556,7 @@ mod tests {
                     &mut records,
                     Digit { shift: 0, width: 6 },
                     63,
+                    Requirement::new(65, core::slice::from_ref(&(0..65))),
                     &mut crate::engine::key::KeyHalf::<_, SHIFT>(key),
                 );
             }));
@@ -515,6 +601,7 @@ mod tests {
             &mut records,
             Digit { shift: 0, width },
             u128::from(mask),
+            Requirement::new(65, core::slice::from_ref(&(0..65))),
             &mut key,
         );
         assert_eq!(records, expected);

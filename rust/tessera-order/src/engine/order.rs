@@ -119,7 +119,8 @@ pub(crate) fn confirm_ascending<T, E: Extract<T>>(
     extractor: &mut E,
     mut previous: E::Value,
 ) -> bool {
-    // One rejection branch per group lets independent comparisons overlap.
+    // Combine each group's ordering results before the rejection decision;
+    // independent comparisons can overlap without promising branchless code.
     // Keys still run once, in order; an inversion may read the rest of its group.
     let (chunks, tail) = records.as_chunks::<4>();
     for chunk in chunks {

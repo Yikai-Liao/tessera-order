@@ -288,6 +288,12 @@ pub(super) fn prepare<T: TesseraAdapter>(
     if matches!(operation, Operation::Argsort {}) {
         return Some(match v.name {
             "tessera" => indices(input, T::argsort),
+            #[cfg(tessera_bench_revisions)]
+            "tessera-baseline" => indices(input, T::baseline_argsort),
+            #[cfg(tessera_bench_revisions)]
+            "tessera-baseline-copy" => indices(input, T::baseline_copy_argsort),
+            #[cfg(tessera_bench_revisions)]
+            "tessera-copy" => indices(input, T::current_copy_argsort),
             "std-stable" | "glidesort" | "std-unstable" => indices(input, move |source| {
                 let mut indices: Vec<_> = (0..source.len()).collect();
                 let order = |a: &usize, b: &usize| source[*a].order(&source[*b]);
@@ -476,6 +482,10 @@ mod tests {
                         // including no silent full-sort substitution.
                         let expected = match variant.name {
                             "tessera" | "std-stable" | "glidesort" => true,
+                            #[cfg(tessera_bench_revisions)]
+                            "tessera-baseline" | "tessera-baseline-copy" | "tessera-copy" => {
+                                matches!(operation, Operation::Argsort {})
+                            }
                             "tessera-full" => {
                                 operation.required_ranges().is_some()
                                     || operation.bucket_count().is_some()

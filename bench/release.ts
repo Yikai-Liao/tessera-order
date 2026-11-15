@@ -145,9 +145,9 @@ export interface ReleaseOptions {
 /** Retain the executable pair, then measure verified batches and report one experiment. */
 export async function compareAlgorithms(options: ReleaseOptions) {
   pairedBudget(options.blocks);
-  if (options.revisions && options.plan.operation)
+  if (options.revisions && options.plan.operation && options.plan.operation.kind !== "argsort")
     throw new Error(
-      "Linked revisions support full sorting only; use compare algorithms for other operations",
+      "Linked revisions support full sorting and argsort; use compare algorithms for other operations",
     );
   await mkdir(options.out, { recursive: false });
   return withSessionLock(options.out, async () => {

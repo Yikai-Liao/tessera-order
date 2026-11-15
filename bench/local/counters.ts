@@ -8,7 +8,7 @@ import { CommandCancelledError, command, diagnostic } from "../../tools/process.
 import { parseCriterionId } from "../catalog.ts";
 import type { Plan } from "../plan.ts";
 import { resolveCommit, withWorkspace, workingTreeDirty } from "../workspace.ts";
-import { revisionThreads } from "./model.ts";
+import { isOperation, revisionThreads } from "./model.ts";
 import { assertWorkerEnvironment, buildRevisions, selectedCases } from "./runner.ts";
 
 /** Own a Docker process through failure/cancellation, including daemon-side cleanup. */
@@ -81,7 +81,7 @@ export async function reportCounters(out: string, run?: CounterRun) {
   const lines = [
     "# Fixed-work instruction and simulated-event comparison",
     "",
-    `Baseline: ${run.baseline}. Current head: ${run.head} (${run.dirty === undefined ? "working-tree state unrecorded" : run.dirty ? "modified working tree" : "clean working tree"}). Sorts per process: ${run.sorts}.`,
+    `Baseline: ${run.baseline}. Current head: ${run.head} (${run.dirty === undefined ? "working-tree state unrecorded" : run.dirty ? "modified working tree" : "clean working tree"}). Calls per process: ${run.sorts}.`,
     "",
     "Collection covers one prepared batch, its loop and dynamic call overhead. Input generation, restoration, warm-up and output verification are excluded. Cache and branch events are simulator results and can depend on addresses. Equal instruction counts do not establish a layout cause or exclude a real latency regression.",
     "",
@@ -116,7 +116,7 @@ export async function reportCounters(out: string, run?: CounterRun) {
   await writeFile(join(out, "index.md"), lines.join("\n"));
 }
 
-/** Build shared-harness revisions and collect verified, fixed-size serial sort batches. */
+/** Build shared-harness revisions and collect verified, fixed-size serial call batches. */
 export async function compareCounters(options: {
   root: string;
   out: string;
@@ -150,7 +150,10 @@ export async function compareCounters(options: {
   const planPath = join(out, "plan.json");
   await writeFile(planPath, `${JSON.stringify(options.plan, null, 2)}\n`);
   await withWorkspace(root, async (workspace) => {
-    const built = await buildRevisions(root, workspace, baseline, ["layout-study"]);
+    const built = await buildRevisions(root, workspace, baseline, [
+      "layout-study",
+      ...(isOperation(options.plan) ? ["operations"] : []),
+    ]);
     const selected = await selectedCases(built.binaries, planPath, undefined, workspace.tree);
     if (selected.some((id) => parseCriterionId(id).mode !== "api"))
       throw new Error("Counter comparisons support serial API cases only");

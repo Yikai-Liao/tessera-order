@@ -12,7 +12,7 @@ use super::{
     record::{BenchmarkRecord, CaseInput, OwnedRecord, PreparedRecords, WideRecord},
 };
 use crate::case::Row;
-#[cfg(any(test, feature = "operations"))]
+#[cfg(any(test, feature = "operations", tessera_bench_revisions))]
 use crate::plan::Operation;
 use rdst::RadixSort;
 use std::{cmp::Reverse, hint::black_box, mem::MaybeUninit, rc::Rc};
@@ -47,15 +47,31 @@ pub(super) trait TesseraAdapter: BenchmarkRecord {
     /// Sorts through the second current placement.
     #[cfg(tessera_bench_revisions)]
     fn current_copy(records: &mut [Self]);
+    #[cfg(all(tessera_bench_revisions, feature = "operations"))]
+    fn baseline_argsort(records: &[Self]) -> Vec<usize>;
+    #[cfg(all(tessera_bench_revisions, feature = "operations"))]
+    fn baseline_copy_argsort(records: &[Self]) -> Vec<usize>;
+    #[cfg(all(tessera_bench_revisions, feature = "operations"))]
+    fn current_copy_argsort(records: &[Self]) -> Vec<usize>;
+
     /// Reports distinct relative adapter addresses, independent of process ASLR.
     #[cfg(tessera_bench_revisions)]
-    fn revision_entries() -> Vec<String> {
-        let entries = [
-            Self::tessera as *const () as usize,
-            Self::baseline as *const () as usize,
-            Self::baseline_copy as *const () as usize,
-            Self::current_copy as *const () as usize,
-        ];
+    fn revision_entries(operation: &Operation) -> Vec<String> {
+        let entries = match operation {
+            #[cfg(feature = "operations")]
+            Operation::Argsort {} => [
+                Self::argsort as *const () as usize,
+                Self::baseline_argsort as *const () as usize,
+                Self::baseline_copy_argsort as *const () as usize,
+                Self::current_copy_argsort as *const () as usize,
+            ],
+            _ => [
+                Self::tessera as *const () as usize,
+                Self::baseline as *const () as usize,
+                Self::baseline_copy as *const () as usize,
+                Self::current_copy as *const () as usize,
+            ],
+        };
         assert!(
             (0..entries.len()).all(|i| !entries[..i].contains(&entries[i])),
             "revision adapters were folded together"
@@ -73,13 +89,22 @@ pub(super) trait TesseraAdapter: BenchmarkRecord {
 /// Calls the same public API with identical record and key types in every copy.
 #[cfg(tessera_bench_revisions)]
 macro_rules! revision_sorts {
-    ($api:ident $(, $key:expr)?) => {
+    ($api:ident, $argsort:ident $(, $key:expr)?) => {
         #[inline(never)]
         fn baseline(records: &mut [Self]) { revision_baseline::$api(records $(, $key)?); }
         #[inline(never)]
         fn baseline_copy(records: &mut [Self]) { revision_baseline_copy::$api(records $(, $key)?); }
         #[inline(never)]
         fn current_copy(records: &mut [Self]) { revision_current_copy::$api(records $(, $key)?); }
+        #[cfg(feature = "operations")]
+        #[inline(never)]
+        fn baseline_argsort(records: &[Self]) -> Vec<usize> { revision_baseline::$argsort(records $(, $key)?) }
+        #[cfg(feature = "operations")]
+        #[inline(never)]
+        fn baseline_copy_argsort(records: &[Self]) -> Vec<usize> { revision_baseline_copy::$argsort(records $(, $key)?) }
+        #[cfg(feature = "operations")]
+        #[inline(never)]
+        fn current_copy_argsort(records: &[Self]) -> Vec<usize> { revision_current_copy::$argsort(records $(, $key)?) }
     };
 }
 
@@ -88,6 +113,7 @@ macro_rules! revision_sorts {
 macro_rules! slice_operations {
     ($argsort:ident, $chunks:ident, $partial:ident, $select:ident, $many:ident $(, $key:expr)?) => {
         #[cfg(feature = "operations")]
+        #[cfg_attr(tessera_bench_revisions, inline(never))]
         fn argsort(records: &[Self]) -> Vec<usize> { tessera_order::$argsort(records $(, $key)?) }
         #[cfg(feature = "operations")]
         fn segments(records: &mut [Self], segment_len: usize) { tessera_order::$chunks(records, segment_len $(, $key)?); }
@@ -121,7 +147,7 @@ macro_rules! tessera_keys {
             slice_operations!(argsort, sort_chunks, partial_sort, select_nth, select_nth_many);
 
             #[cfg(tessera_bench_revisions)]
-            revision_sorts!(stable_sort);
+            revision_sorts!(stable_sort, argsort);
             #[cfg(feature = "rayon")]
             fn tessera_parallel(records: &mut [Self]) {
                 tessera_order::par_stable_sort(records);
@@ -145,7 +171,7 @@ macro_rules! tessera_records {
             slice_operations!(argsort_by_key, sort_chunks_by_key, partial_sort_by_key, select_nth_by_key, select_nth_many_by_key, |r| r.key);
 
             #[cfg(tessera_bench_revisions)]
-            revision_sorts!(stable_sort_by_key, |r| r.key);
+            revision_sorts!(stable_sort_by_key, argsort_by_key, |r| r.key);
             #[cfg(feature = "rayon")]
             fn tessera_parallel(records: &mut [Self]) {
                 tessera_order::par_stable_sort_by_key(records, |r| r.key);
@@ -420,15 +446,16 @@ impl Variant {
                 return None;
             }
         } else if !cfg!(feature = "operations")
-            || !matches!(
-                self.name,
-                "tessera"
-                    | "tessera-full"
-                    | "std-stable"
-                    | "std-unstable"
-                    | "glidesort"
-                    | "radsort"
-            )
+            || (self.adapter != "revision"
+                && !matches!(
+                    self.name,
+                    "tessera"
+                        | "tessera-full"
+                        | "std-stable"
+                        | "std-unstable"
+                        | "glidesort"
+                        | "radsort"
+                ))
         {
             return None;
         }
@@ -470,22 +497,22 @@ impl Variant {
     }
 }
 
-/// Adapter placement belongs to the sorting boundary, not record semantics.
+/// Adapter placement belongs to the measured public operation, not record semantics.
 #[cfg(tessera_bench_revisions)]
 impl CaseInput {
     /// Records offsets for current, baseline A, baseline B and current B in order.
     pub(super) fn revision_entries(&self) -> Vec<String> {
         match self {
-            Self::U32(_) => u32::revision_entries(),
-            Self::U64(_) => u64::revision_entries(),
-            Self::U128(_) => u128::revision_entries(),
-            Self::F64(_) => f64::revision_entries(),
-            Self::ReverseU64(_) => Reverse::<u64>::revision_entries(),
-            Self::ReverseF64(_) => Reverse::<f64>::revision_entries(),
-            Self::Row32(_) => Row::<u32>::revision_entries(),
-            Self::Row64(_) => Row::<u64>::revision_entries(),
-            Self::WideRecord(_) => WideRecord::revision_entries(),
-            Self::OwnedRecord(_) => OwnedRecord::revision_entries(),
+            Self::U32(input) => u32::revision_entries(input.operation()),
+            Self::U64(input) => u64::revision_entries(input.operation()),
+            Self::U128(input) => u128::revision_entries(input.operation()),
+            Self::F64(input) => f64::revision_entries(input.operation()),
+            Self::ReverseU64(input) => Reverse::<u64>::revision_entries(input.operation()),
+            Self::ReverseF64(input) => Reverse::<f64>::revision_entries(input.operation()),
+            Self::Row32(input) => Row::<u32>::revision_entries(input.operation()),
+            Self::Row64(input) => Row::<u64>::revision_entries(input.operation()),
+            Self::WideRecord(input) => WideRecord::revision_entries(input.operation()),
+            Self::OwnedRecord(input) => OwnedRecord::revision_entries(input.operation()),
         }
     }
 }
@@ -499,23 +526,28 @@ mod tests {
     fn revisions_preserve_records() {
         for ty in crate::plan::catalog().types.iter().map(|ty| &ty.id) {
             for distribution in ["random", "equal", "reverse", "d16"] {
-                let input = CaseInput::new(&InputCase {
-                    ty: ty.clone(),
-                    distribution: distribution.into(),
-                    len: 1000,
-                    operation: Operation::Sort {},
-                });
-                assert_eq!(input.revision_entries().len(), 4);
-                for variant in list_variants()
-                    .into_iter()
-                    .filter(|v| v.name == "tessera" || v.adapter == "revision")
-                {
-                    let mut kernel = variant.prepare(&input, 0).unwrap();
-                    kernel.restore(2);
-                    kernel.run_batch();
-                    kernel.check().unwrap_or_else(|error| {
-                        panic!("{ty}/{distribution}/{}: {error}", variant.name)
+                for operation in [Operation::Sort {}, Operation::Argsort {}] {
+                    if !operation.is_sort() && !cfg!(feature = "operations") {
+                        continue;
+                    }
+                    let input = CaseInput::new(&InputCase {
+                        ty: ty.clone(),
+                        distribution: distribution.into(),
+                        len: 1000,
+                        operation,
                     });
+                    assert_eq!(input.revision_entries().len(), 4);
+                    for variant in list_variants()
+                        .into_iter()
+                        .filter(|v| v.name == "tessera" || v.adapter == "revision")
+                    {
+                        let mut kernel = variant.prepare(&input, 0).unwrap();
+                        kernel.restore(2);
+                        kernel.run_batch();
+                        kernel.check().unwrap_or_else(|error| {
+                            panic!("{ty}/{distribution}/{}: {error}", variant.name)
+                        });
+                    }
                 }
             }
         }

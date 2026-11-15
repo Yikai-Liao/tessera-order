@@ -53,7 +53,7 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
     throw new Error("Native linkage checks require Linux and ldd");
   await mkdir(out, { recursive: false });
   await withComparisonWorkspace(root, native, async ({ tree, target }) => {
-    const features = ["rayon", ...(native ? ["compare-native"] : [])];
+    const features = ["operations", "rayon", ...(native ? ["compare-native"] : [])];
     await prepareRevisions(root, tree, { baseline: "HEAD" }, features);
     await withBuildCache(target, async () => {
       const env = await benchmarkEnvironment(tree);
@@ -99,7 +99,8 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
     const available = await command(executable, ["list"], { cwd: tree, capture: true });
     for (const line of available.split("\n").filter(Boolean)) {
       const id = line.split("\t")[0];
-      if (catalog.algorithms.find((entry) => entry.id === id)?.adapter === "revision") continue;
+      const adapter = catalog.algorithms.find((entry) => entry.id === id)?.adapter;
+      if (adapter === "revision" || adapter === "reference") continue;
       await writeFile(planPath, JSON.stringify({ ...plan, algorithms: [id] }));
       const env: NodeJS.ProcessEnv = { TESSERA_BENCH_PLAN: planPath };
       const listed = await command(worker.executable, [], {

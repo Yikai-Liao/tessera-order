@@ -9,12 +9,29 @@ import {
   parseCriterionId,
   revisionSampling,
 } from "../catalog.ts";
-import { type LocalRun, readPrepared, shardCases, summarizeLocal } from "../local/model.ts";
+import {
+  type LocalRun,
+  pairedCaseBudgetMs,
+  readPrepared,
+  revisionFeatures,
+  shardCases,
+  summarizeLocal,
+} from "../local/model.ts";
 import { parsePlan } from "../plan.ts";
 import { type BencherReport, type Row, summarizeRows } from "./report.ts";
 
-/** Hosted matrix width; workflows obtain their matrix from this owner. */
-export const CONTINUOUS_SHARDS = 6;
+/** Hosted capacity ceiling; small selections need fewer runners. */
+const MAX_SHARDS = 6;
+// Target half the four-minute end-to-end budget for nominal measurement
+// per runner; startup, checking and scheduling add to this, so it is not an SLA.
+const SHARD_BUDGET_MS = 120_000;
+
+/** Derive the hosted matrix from the frozen inventory without reducing samples. */
+export function continuousShards(cases: string[]) {
+  if (!cases.length) throw new Error("No continuous cases selected");
+  const budget = cases.reduce((sum, id) => sum + pairedCaseBudgetMs(id), 0);
+  return Math.min(MAX_SHARDS, cases.length, Math.ceil(budget / SHARD_BUDGET_MS));
+}
 
 /** Exact source identity captured by this CI run. */
 export interface PairedSource {
@@ -58,7 +75,7 @@ export async function readPaired(directory: string, source: PairedSource, prepar
   }
   if (!runs.length) throw new Error("No completed measurement shards");
   const count = runs[0].shard?.count;
-  if (count !== CONTINUOUS_SHARDS || count !== runs.length)
+  if (count !== continuousShards(expectedCases) || count !== runs.length)
     throw new Error("Missing measurement shards");
   const indexes = new Set<number>();
   for (const run of runs) {
@@ -92,7 +109,7 @@ export async function readPaired(directory: string, source: PairedSource, prepar
       ].every((value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)) ||
       JSON.stringify(settings(run).baseline) !== JSON.stringify(settings(run).current) ||
       run.builds.current.features.join(",") !==
-        continuous.features
+        revisionFeatures(reference.plan)
           .map((feature) => `CARGO_FEATURE_${feature.toUpperCase().replaceAll("-", "_")}`)
           .toSorted()
           .join(",")

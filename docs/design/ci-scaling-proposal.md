@@ -1,6 +1,6 @@
 # CI and benchmark scaling proposal
 
-Status: steps 1 to 3 implemented, step 3 without entry-ownership selection; step 4 proposed. Current behavior belongs to [CI](../development/ci.md) and [continuous benchmarks](../development/continuous-benchmarks.md); this page owns the planned changes and their reasons until they land.
+Status: steps 1 to 3 implemented; step 4 proposed. Current behavior belongs to [CI](../development/ci.md) and [continuous benchmarks](../development/continuous-benchmarks.md); this page owns the planned changes and their reasons until they land.
 
 ## Problems
 
@@ -23,13 +23,9 @@ A docs-only commit inside a verified PR then runs formatting, lints and Docs onl
 
 ## Measure operations by entry ownership
 
-Implemented as [operation cases](../development/continuous-benchmarks.md#cases) in the continuous plan, with two differences. Each operation has two random 65,536-record cases instead of a group at 1M: they detect entry and finishing regressions, while the sorting cases already cover the shared engine. The operation cases run on every measured PR instead of being selected by entry ownership. Selection would save little: the operation cases are a small part of the measurement budget, and most library changes touch shared engine code, which selects everything anyway. An entry-only change could skip the sorting cases, but only through a second ownership table beside `ROUTES`, one more rule to keep correct. Revisit selection if operation coverage grows to a size that dominates the shards. The plan as proposed:
+Implemented as [operation cases](../development/continuous-benchmarks.md#cases) and [entry-owned selection](../development/ci.md#selecting-benchmark-workloads). Small representative groups guard operation entry and finishing work; sorting cases cover the shared engine. Entry scopes extend the existing path router instead of introducing a second ownership table. Shared and unknown dependencies select complete measurement. The frozen selection determines the hosted matrix, avoiding a fixed runner count for tiny groups.
 
-
-- **Operation groups.** The continuous plan gains small groups beside sorting: rank operations (`partial_sort`, `select_nth`, `select_nth_many`, `k_smallest`), argsort, chunk sorting, binary partition and cached-key sorting. Each group has two to four representative cases (for example random u64, 16-byte rows and one repeated-key input at 1M) rather than the sorting plan's coverage.
-- **Selection.** A library source file is either the entry module of specific groups (`algorithms.rs` for rank operations, argsort and chunk sorting; `partition.rs` for partition; `cached.rs` for cached keys; `parallel.rs` for the four-thread cases) or shared engine code. A shared change selects every group; an entry-only change selects its groups only. The table lives in the router beside `ROUTES`, and an unnamed library file counts as shared.
-- **Per-group reuse.** Fingerprint reuse applies per group, so a later push re-measures only groups whose head or baseline inputs changed.
-- **Budget.** Sorting-only changes keep today's shards. Selected groups add cases to the same shards and stay within the 4-minute target. Larger operation coverage belongs to explicit plans, not to every PR.
+Reuse remains per lane. Per-group reuse would need independent dependency fingerprints and report composition across runs; it is deferred because selecting entry groups already avoids unrelated measurements without adding historical state. Broader operation coverage and cross-algorithm references belong to step 4.
 
 ## Keep cross-algorithm comparisons out of PR timing
 
@@ -45,7 +41,7 @@ Comparisons with other algorithms answer "how does Tessera compare", not "did th
 
 1. Cache hygiene: workflow-only and immediately measurable on preparation time.
 2. Fingerprint reuse for the existing lanes.
-3. Operation cases in the continuous plan (implemented; entry-ownership selection deferred).
+3. Operation cases in the continuous plan (implemented; entry-ownership selection implemented).
 4. Per-operation cross-algorithm plans and their release coverage.
 
 Each step records its measured critical path and runner-minutes in its PR. The [roadmap](../../ROADMAP.md) tracks the steps.

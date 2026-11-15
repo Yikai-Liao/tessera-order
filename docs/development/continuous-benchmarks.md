@@ -26,10 +26,10 @@ Paired measurement runs on PRs only. Main runs the correctness and site checks i
 
 ## Pipeline
 
-The [CI workflow](../../.github/workflows/ci.yml) runs `prepare → measure → report` with the PR branch's code when the [diff router](ci.md) selects measurement (engine, harness, plan or execution-tooling changes).
+The [CI workflow](../../.github/workflows/ci.yml) runs `prepare → measure → report` with the PR branch's code when the [diff router](ci.md#selecting-benchmark-workloads) selects measurement (engine, harness, plan or execution-tooling changes).
 
-- **Prepare** runs `continuous prepare` once. Both revisions use the PR's harness, lockfile and toolchain; the baseline library comes from the merge base with the event's target SHA. It uploads the plan, resolved inventory, provenance, hashes and executables as an attempt-named `prepared-revisions-*` artifact and publishes its immutable ID. `preparation.log` keeps build diagnostics, also on failure.
-- **Measure** runs the complete-case shards that [`CONTINUOUS_SHARDS`](../../bench/continuous/paired.ts) defines. Each downloads that exact artifact and runs `continuous measure --shard INDEX/COUNT` without compiling, after checking hashes, harness/catalog compatibility and both inventories. Fourteen-day `paired-*` artifacts keep JSON, reports and logs, named with the preparation ID, so a partial rerun cannot mix builds. A shard's `local.json` paths locate its binaries inside the prepared artifact.
+- **Prepare** runs `continuous prepare --groups GROUPS` once for the router-selected workload groups. Both revisions use the PR's harness, lockfile and toolchain; the baseline library comes from the merge base with the event's target SHA. It uploads the plan, resolved inventory, provenance, hashes and executables as an attempt-named `prepared-revisions-*` artifact and publishes its immutable ID. `preparation.log` keeps build diagnostics, also on failure.
+- **Measure** derives complete-case shards from the prepared inventory through [`continuousShards`](../../bench/continuous/paired.ts), using fewer runners for small selections. Each downloads that exact artifact and runs `continuous measure --shard INDEX/COUNT` without compiling, after checking hashes, harness/catalog compatibility and both inventories. Fourteen-day `paired-*` artifacts keep JSON, reports and logs, named with the preparation ID, so a partial rerun cannot mix builds. A shard's `local.json` paths locate its binaries inside the prepared artifact.
 - **Report** reads this run's prepared plan and inventory, verifies complete disjoint shards with matching identity, and recomputes verdicts from raw samples without running binaries. Cloud submission comes first so the report carries links; its failure leaves verdict, figures and summary intact.
 - Same-repository PRs report through the `benchmark` environment and publish checks and Cloud ratios. Forks and Dependabot get artifacts and summaries without Cloud publication; a regression still fails their report job.
 
@@ -47,7 +47,7 @@ Rerun failed jobs in their original run. Missing or expired artifacts need a new
 
 ## Within-job scheduling
 
-The partitioner balances complete cases by nominal sampling budget without shrinking coverage. A job measures one case at a time, pinning serial cases to one allowed CPU and parallel cases to exactly four (fewer fail before building). Each sample pair uses two fresh processes, one per revision, each with its own input and warmed pool. The coordinator alternates AB/BA order, lets only one process prepare, verify or sort at a time, and keeps identical executable basenames so launch arguments match. Fresh workers vary process-specific state across samples instead of trusting one process pair. Cancellation kills and reaps workers; EOF or a malformed response fails the comparison.
+The partitioner balances complete cases by nominal sampling budget without shrinking selected coverage. The hosted matrix targets 120 seconds of nominal paired warm-up and sampling per runner, up to six runners and at most one runner per case. This is a scheduling target: process startup, input preparation and checking add to it. The matrix is generated after preparation from its exact inventory, and publication requires that same shard count. A job measures one case at a time, pinning serial cases to one allowed CPU and parallel cases to exactly four (fewer fail before building). Each sample pair uses two fresh processes, one per revision, each with its own input and warmed pool. The coordinator alternates AB/BA order, lets only one process prepare, verify or sort at a time, and keeps identical executable basenames so launch arguments match. Fresh workers vary process-specific state across samples instead of trusting one process pair. Cancellation kills and reaps workers; EOF or a malformed response fails the comparison.
 
 Each sample restores bounded batches (at most 2^18 elements, at least one complete input), times only the sort calls and checks outputs against the stable reference. Copies, validation and IPC are outside the clock; per-sort scratch allocation and entry into the pool are inside. Nanoseconds per sort divide timed duration by executed sorts. This is not Criterion's calibration.
 
@@ -61,7 +61,7 @@ The [continuous plan](../../bench/plans/continuous.toml) caps inputs at 1,000,00
 - `u128/sparse8`, `f64/finite_signed` and `rec128_u64/sparse_digits` at 1M.
 - Random 65,536-record `u32`, `u64`, `row_u32` and `row_u64`, for entry overhead and the serial fallback below the byte threshold.
 
-Each serial [operation](../../conformance/semantics.md#serial-slice-operations) has random 65,536-record `u64` and `row_u64` cases, through include-rule `operation` fields ([plan grammar](benchmarking.md#serial-operation-comparisons)). They guard each operation's entry and finishing work, not its coverage across inputs; the sorting cases cover the shared engine. Both executables compile the harness's operation adapters, so a PR that renames or removes an operation keeps the old entry until that change reaches the baseline. The case IDs follow the [comparison grammar](benchmarking.md#serial-operation-comparisons) with the `api` mode. Main tracking records full sorting only.
+Each serial [operation](../../conformance/semantics.md#serial-slice-operations) has random 65,536-record `u64` and `row_u64` cases, through include-rule `operation` fields ([plan grammar](benchmarking.md#serial-operation-comparisons)). Entry-owned changes select their groups under the [routing contract](ci.md#selecting-benchmark-workloads); shared changes select the complete suite. These cases guard each operation's entry and finishing work, not its coverage across inputs; the sorting cases cover the shared engine. Argsort and rank operations also have a repeated-key row case for stable tie membership. Cached-key category sorting includes narrow fan-out and a high-cardinality index-permutation fallback. Both executables compile the harness's operation adapters, so a PR that renames or removes an operation keeps the old entry until that change reaches the baseline. The case IDs follow the [comparison grammar](benchmarking.md#serial-operation-comparisons) with the `api` mode. Main tracking records full sorting only.
 
 Larger lengths are explicit local plan overrides; historical reports keep their original inventories. The [catalog](../../bench/catalog.toml) owns per-revision budgets, divided across fresh workers; startup, input preparation and at least one complete batch add to them.
 
@@ -99,7 +99,8 @@ Keep `BENCHER_PROJECT`, `BENCHER_API_KEY` and the `benchmark` environment, whose
 ```sh
 # Build once; every result directory must be new. Use --plan local for a tiny selection.
 bun run tools continuous prepare main --out bench/results/prepared
-bun run tools continuous measure bench/results/prepared --shard 1/4 --out bench/results/paired-1
+bun run tools continuous matrix bench/results/prepared   # use the returned shard count
+bun run tools continuous measure bench/results/prepared --shard 1/COUNT --out bench/results/paired-1
 bun run tools report bench/results/paired-1    # regenerate offline
 ```
 

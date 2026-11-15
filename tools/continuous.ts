@@ -2,8 +2,10 @@
 
 import { resolve } from "node:path";
 import type { Command } from "commander";
-import { CONTINUOUS_SHARDS } from "../bench/continuous/paired.ts";
+import { continuousShards } from "../bench/continuous/paired.ts";
 import { type SubmissionOptions, submitContinuous } from "../bench/continuous/runner.ts";
+import { selectContinuous } from "../bench/continuous/selection.ts";
+import { readPrepared } from "../bench/local/model.ts";
 import { compareLocal, comparePrepared } from "../bench/local/runner.ts";
 import { loadPlan } from "../bench/plan.ts";
 import { parseLogicalCpu, parseShard } from "./options.ts";
@@ -15,31 +17,38 @@ export function continuousCommands(program: Command) {
     .command("continuous")
     .description("Prepare, measure and submit continuous revision comparisons");
   continuous
-    .command("matrix")
-    .description("Print the hosted measurement matrix without building or timing")
-    .action(() =>
+    .command("matrix <directory>")
+    .description("Print the hosted measurement matrix for a frozen preparation")
+    .action(async (directory: string) => {
+      const count = continuousShards((await readPrepared(resolve(directory))).cases);
       console.log(
         JSON.stringify({
-          include: Array.from({ length: CONTINUOUS_SHARDS }, (_, index) => ({
-            shard: `${index + 1}/${CONTINUOUS_SHARDS}`,
+          include: Array.from({ length: count }, (_, index) => ({
+            shard: `${index + 1}/${count}`,
             artifact: `paired-${index + 1}`,
           })),
         }),
-      ),
-    );
+      );
+    });
   continuous
     .command("prepare [revision]")
     .description("Freeze a revision pair without timing (baseline: HEAD; plan: continuous)")
     .option("--plan <name-or-file>", "JSON/TOML selection or local/continuous preset", "continuous")
+    .option("--groups <names>", "comma-separated operation kinds, sort, parallel, or all", "all")
     .option("--out <directory>", "new prepared directory (default: bench/results/<timestamp>)")
-    .action(async (baseline: string | undefined, options: { plan: string; out?: string }) => {
-      const plan = await loadPlan(options.plan);
-      const root = await repositoryRoot();
-      const out = resultDirectory(root, options.out);
-      await runTask(out, Boolean(program.opts().verbose), () =>
-        compareLocal({ root, baseline: baseline ?? "HEAD", plan, out, prepareOnly: true }),
-      );
-    });
+    .action(
+      async (
+        baseline: string | undefined,
+        options: { plan: string; groups: string; out?: string },
+      ) => {
+        const plan = selectContinuous(await loadPlan(options.plan), options.groups);
+        const root = await repositoryRoot();
+        const out = resultDirectory(root, options.out);
+        await runTask(out, Boolean(program.opts().verbose), () =>
+          compareLocal({ root, baseline: baseline ?? "HEAD", plan, out, prepareOnly: true }),
+        );
+      },
+    );
   continuous
     .command("measure <directory>")
     .description("Measure and report a frozen revision pair without compiling")

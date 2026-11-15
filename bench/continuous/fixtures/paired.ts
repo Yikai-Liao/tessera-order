@@ -2,18 +2,35 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { continuous, parseCriterionId, revisionSampling } from "../../catalog.ts";
-import { type LocalRun, type PreparedPair, shardCases } from "../../local/model.ts";
-import { loadPlan } from "../../plan.ts";
-import { CONTINUOUS_SHARDS } from "../paired.ts";
+import { parseCriterionId, revisionSampling } from "../../catalog.ts";
+import {
+  type LocalRun,
+  type PreparedPair,
+  revisionFeatures,
+  shardCases,
+} from "../../local/model.ts";
+import { loadPlan, type Plan } from "../../plan.ts";
+import { continuousShards } from "../paired.ts";
 import { baseHash, hash } from "./report.ts";
 
+const allCases = [48, 49, 1000, 65536, 1000000]
+  .flatMap((len) =>
+    ["u32", "u64", "row_u64"].flatMap((ty) =>
+      ["api", "par-4"].map((mode) => `rust/${ty}/random/${len}/s1/${mode}`),
+    ),
+  )
+  .sort();
+export const PAIRED_SHARDS = continuousShards(allCases);
+
 /** Synthetic blocks exercise protocol validation, not measured performance. */
-export function pairedRun(index = 1, ratio = 1.2): LocalRun {
-  const allCases = [48, 49, 1000, 65536, 1000000]
-    .flatMap((len) => ["api", "par-4"].map((mode) => `rust/u64/random/${len}/s1/${mode}`))
-    .sort();
-  const cases = shardCases(allCases, index, CONTINUOUS_SHARDS);
+export function pairedRun(
+  index = 1,
+  ratio = 1.2,
+  inventory = allCases,
+  features = ["operations", "rayon"],
+): LocalRun {
+  const count = continuousShards(inventory);
+  const cases = shardCases(inventory, index, count);
   const build = {
     rustc: "rustc fixture",
     target: "x86_64-unknown-linux-gnu",
@@ -21,7 +38,7 @@ export function pairedRun(index = 1, ratio = 1.2): LocalRun {
     opt_level: "3",
     debug: "false",
     cargo_encoded_rustflags: "fixture",
-    features: continuous.features
+    features: features
       .map((feature) => `CARGO_FEATURE_${feature.toUpperCase().replaceAll("-", "_")}`)
       .sort(),
   };
@@ -52,7 +69,7 @@ export function pairedRun(index = 1, ratio = 1.2): LocalRun {
       aslr: "disabled",
     },
     cases,
-    shard: { index, count: CONTINUOUS_SHARDS, allCases },
+    shard: { index, count, allCases: inventory },
     sampleCounts: Object.fromEntries(
       cases.map((id) => [id, revisionSampling(parseCriterionId(id).len).samples]),
     ),
@@ -69,14 +86,20 @@ export function pairedRun(index = 1, ratio = 1.2): LocalRun {
 }
 
 /** Write the exact directory layout produced by download-artifact. */
-export async function writePaired(directory: string, ratio = 1.2) {
+export async function writePaired(
+  directory: string,
+  ratio = 1.2,
+  selection?: Plan,
+  inventory = allCases,
+) {
+  const plan = selection ?? (await loadPlan("continuous"));
   const runs: LocalRun[] = [];
-  for (let index = 1; index <= CONTINUOUS_SHARDS; index++) {
+  for (let index = 1; index <= continuousShards(inventory); index++) {
     const out = join(directory, `paired-${index}`);
     await mkdir(out, { recursive: true });
-    const run = pairedRun(index, ratio);
+    const run = pairedRun(index, ratio, inventory, revisionFeatures(plan));
     await writeFile(join(out, "local.json"), JSON.stringify(run));
-    await writeFile(join(out, "plan.json"), JSON.stringify(await loadPlan("continuous")));
+    await writeFile(join(out, "plan.json"), JSON.stringify(plan));
     runs.push(run);
   }
   const { shard, samples: _samples, sampleCounts: _counts, host: _host, ...pair } = runs[0];
@@ -84,7 +107,7 @@ export async function writePaired(directory: string, ratio = 1.2) {
     ...pair,
     cases: shard!.allCases,
     kind: "prepared-revisions",
-    plan: await loadPlan("continuous"),
+    plan,
   };
   await mkdir(join(directory, "prepared"), { recursive: true });
   await writeFile(join(directory, "prepared", "prepared.json"), JSON.stringify(prepared));

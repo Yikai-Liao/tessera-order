@@ -51,7 +51,7 @@ export const catalog = z
       }),
     ),
     modes: z.array(identity),
-    continuous: z.object({ testbed: z.string(), features: z.array(z.string()) }),
+    continuous: z.object({ testbed: z.string() }),
     inputs: inputDefaults,
     comparison: z.object({
       types: z.array(z.string()),
@@ -76,7 +76,7 @@ export function revisionSampling(len: number) {
   return settings;
 }
 
-/** The one hosted build: its Cloud Testbed and required Cargo features. */
+/** Cloud identity; build features follow the frozen revision plan. */
 export const continuous = catalog.continuous;
 
 function index<T extends { id: string }>(entries: T[]) {

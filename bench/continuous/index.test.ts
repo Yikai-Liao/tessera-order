@@ -107,7 +107,7 @@ test("a precise sub-threshold change is no alert, not statistical equivalence", 
   );
   assert.match(action.summaries[0], /!\[Changes against main\]/);
   assert.match(action.summaries[0], /!\[PR benchmark history\]/);
-  assert.match(action.summaries[0], /All 10 cases/);
+  assert.match(action.summaries[0], /All 30 cases/);
   assert.match(action.summaries[0], /\| `engine.rs` \| 90 \| 84 \| 4 \| 10 \| −6 \|/);
   assert.doesNotMatch(action.summaries[0], /\| `block.rs` \|/);
   assert.match(action.summaries[0], /`ci`/);
@@ -128,7 +128,7 @@ test("improvements publish successful configured checks", async (t) => {
   assert.doesNotMatch(action.summaries[0], /No regression or improvement alerts/);
   assert.match(action.summaries[0], /\[Report\]\(/);
   assert.match(action.summaries[0], /\[JSON\]\(/);
-  assert.match(action.summaries[0], /<details><summary>10 changed cases/);
+  assert.match(action.summaries[0], /<details><summary>30 changed cases/);
 });
 
 test("raw paired samples drive configured checks and the existing shared chart", async (t) => {

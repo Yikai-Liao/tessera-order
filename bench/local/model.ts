@@ -30,6 +30,20 @@ export function isOperation(plan: Plan) {
   );
 }
 
+/** Harness features follow the frozen selection, for builds and validation alike. */
+export function revisionFeatures(plan: Plan): string[] {
+  return [
+    ...(isOperation(plan) ? ["operations"] : []),
+    ...(revisionThreads(plan) === 4 ? ["rayon"] : []),
+  ];
+}
+
+/** Nominal warm-up and sampling wall budget for both revisions of a case. */
+export function pairedCaseBudgetMs(id: string) {
+  const settings = revisionSampling(parseCriterionId(id).len);
+  return 2 * (settings.warm_ms + settings.window_ms);
+}
+
 /** One deterministic partition of a complete timed-ID listing. */
 export interface Shard {
   index: number;
@@ -51,10 +65,7 @@ export function shardCases(cases: string[], index: number, count: number) {
     throw new Error("Invalid benchmark shard");
   const lanes: string[][] = Array.from({ length: count }, () => []);
   const weights = lanes.map(() => 0);
-  const weight = (id: string) => {
-    const settings = revisionSampling(parseCriterionId(id).len);
-    return settings.warm_ms + settings.window_ms;
-  };
+  const weight = pairedCaseBudgetMs;
   for (const id of cases.toSorted((a, b) => weight(b) - weight(a) || a.localeCompare(b))) {
     const lane = weights.indexOf(Math.min(...weights));
     lanes[lane].push(id);

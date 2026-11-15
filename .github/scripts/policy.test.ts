@@ -7,7 +7,14 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { checkDco } from "./check-dco.ts";
-import { changedPaths, changesTrustedFiles, findMarker, marker, select } from "./ci_changes.ts";
+import {
+  benchmarkGroups,
+  changedPaths,
+  changesTrustedFiles,
+  findMarker,
+  marker,
+  select,
+} from "./ci_changes.ts";
 import {
   BOT_EMAIL,
   isDependabotUpdate,
@@ -34,6 +41,29 @@ const event = {
   repository: { id: 42, full_name: "owner/repo" },
   pull_request: { user: bot, head: { sha, repo: { id: 42 } }, base: { repo: { id: 42 } } },
 };
+
+test("benchmark scope unions entry owners and falls back for shared or moved code", () => {
+  const source = "rust/tessera-order/src/";
+  assert.deepEqual(benchmarkGroups([source + "cached.rs", "docs/guide.md"]), ["partition-buckets"]);
+  assert.deepEqual(benchmarkGroups([source + "partition.rs", source + "parallel.rs"]), [
+    "parallel",
+    "partition",
+  ]);
+  assert.deepEqual(benchmarkGroups([source + "algorithms.rs"]), [
+    "argsort",
+    "prefix",
+    "rank-range",
+    "segments",
+    "select",
+    "select-many",
+    "top-k",
+  ]);
+  for (const path of ["engine/rank.rs", "engine/refine.rs", "lib.rs", "moved/argsort.rs"])
+    assert.equal(benchmarkGroups([source + "cached.rs", source + path]), "all", path);
+  for (const path of ["Cargo.lock", "bench/plan.ts", "bench/plans/continuous.toml", "unknown"])
+    assert.equal(benchmarkGroups([path]), "all", path);
+  assert.deepEqual(benchmarkGroups(["docs/guide.md"]), []);
+});
 
 /** Replace one nested field without mutating the shared authenticated fixtures. */
 function replace(value: object, path: string[], replacement: unknown) {
@@ -168,10 +198,17 @@ test("reuse markers follow lane inputs and trusted files block reuse", async () 
     const base = await commit("docs/guide.md", "a");
     const docs = await commit("docs/guide.md", "b");
     const workflow = await commit(".github/workflows/ci.yml", "b");
+    const routing = await commit(".github/scripts/ci_changes.ts", "new scope policy");
     process.chdir(root);
     const at = (tested: string) => ({ tested, head: tested, baseline: base });
     assert.equal(marker("rust", at(base)), marker("rust", at(docs)));
     assert.notEqual(marker("docs", at(base)), marker("docs", at(docs)));
+    // The tested router may change on main without changing either measured
+    // library. An earlier partial report must not satisfy a widened scope.
+    assert.notEqual(
+      marker("benchmark", { ...at(docs), tested: workflow }),
+      marker("benchmark", { ...at(docs), tested: routing }),
+    );
     // Measurement also depends on the baseline it compares against.
     assert.notEqual(
       marker("benchmark", at(base)),

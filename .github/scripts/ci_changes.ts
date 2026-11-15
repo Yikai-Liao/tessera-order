@@ -6,17 +6,22 @@ import { access, appendFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import type { Operation } from "../../bench/catalog.ts";
 
 const LANES = ["rust", "cpp", "comparison", "benchmark", "docs"] as const;
 type Lane = (typeof LANES)[number];
+export type BenchmarkGroup = Operation["kind"] | "parallel";
 
 /**
  * One row per owner of a path: the lanes whose result that path can change. The
  * first matching row decides, so specific rows precede their directory. A path
  * that no row names selects every lane, and so does an unavailable base, because
  * an unclassified file is not known to be harmless.
+ * The optional third column asserts that an entry affects only those workload
+ * groups. Update it when moving code or adding consumers; omit it for shared
+ * code. See docs/development/ci.md#maintaining-routing-and-coverage.
  */
-const ROUTES: [RegExp, Lane[]][] = [
+const ROUTES: [RegExp, Lane[], BenchmarkGroup[]?][] = [
   // Repository metadata that no automatic lane reads. `fuzz/` is outside the Cargo workspace.
   [/^(\.github\/(ISSUE_TEMPLATE\/|pull_request_template\.md$|dependabot\.yml$)|fuzz\/)/, []],
   // Prose, including the shared contract; a lane needs a row here once an executable consumer exists.
@@ -33,6 +38,16 @@ const ROUTES: [RegExp, Lane[]][] = [
   ],
   // The figures replay the library through this WebAssembly crate.
   [/^rust\/tessera-trace\//, ["docs"]],
+  // Entry modules cannot reach one another through the private engine. Shared
+  // engine code and unclassified library files retain the complete suite.
+  [
+    /^rust\/tessera-order\/src\/algorithms\.rs$/,
+    ["rust", "benchmark", "docs"],
+    ["argsort", "segments", "top-k", "prefix", "select", "rank-range", "select-many"],
+  ],
+  [/^rust\/tessera-order\/src\/cached\.rs$/, ["rust", "benchmark", "docs"], ["partition-buckets"]],
+  [/^rust\/tessera-order\/src\/partition\.rs$/, ["rust", "benchmark", "docs"], ["partition"]],
+  [/^rust\/tessera-order\/src\/parallel\.rs$/, ["rust", "benchmark", "docs"], ["parallel"]],
   [/^rust\/tessera-order\/(src\/|Cargo\.toml$)/, ["rust", "benchmark", "docs"]],
   [/^rust\//, ["rust", "benchmark"]],
   [
@@ -77,6 +92,21 @@ const ROUTES: [RegExp, Lane[]][] = [
 const TRUSTED = /^(\.github\/|\.env|package\.json$|bunfig\.toml$|tsconfig\.json$)/;
 
 const lanesOf = (path: string) => ROUTES.find(([pattern]) => pattern.test(path))?.[1] ?? LANES;
+
+/** Benchmark entries affected by the cumulative PR diff. An unscoped benchmark
+ * dependency selects everything; non-measurement paths contribute no groups.
+ * Keep entry ownership in ROUTES so scheduling and selection cannot disagree. */
+export function benchmarkGroups(paths: string[]): "all" | BenchmarkGroup[] {
+  const groups = new Set<BenchmarkGroup>();
+  for (const path of paths) {
+    const route = ROUTES.find(([pattern]) => pattern.test(path));
+    if (!route) return "all";
+    if (!route[1].includes("benchmark")) continue;
+    if (!route[2]) return "all";
+    for (const group of route[2]) groups.add(group);
+  }
+  return [...groups].sort();
+}
 
 /** Select automatic checks once; paths no row names select every lane. */
 export function select(paths: string[]) {
@@ -126,7 +156,7 @@ function inputs(revision: string, lane: Lane) {
 export function marker(lane: Lane, revisions: { tested: string; head: string; baseline: string }) {
   const text =
     lane === "benchmark"
-      ? `${inputs(revisions.head, lane)}\0\0${inputs(revisions.baseline, lane)}`
+      ? `${inputs(revisions.head, lane)}\0\0${inputs(revisions.baseline, lane)}\0\0${git("ls-tree", revisions.tested, "--", ".github/scripts/ci_changes.ts")}`
       : inputs(revisions.tested, lane);
   return `ci-pass-${lane}-${createHash("sha256").update(text).digest("hex").slice(0, 40)}`;
 }
@@ -246,6 +276,7 @@ export async function routeChanges(
     }
   };
   const selected = paths === null ? select(["unknown"]) : select(paths);
+  const groups = benchmarkGroups(paths ?? ["unknown"]);
   const reused =
     reuseFrom && base && paths !== null
       ? await reuse(selected, { base, head, tested: reuseFrom.tested }, reuseFrom)
@@ -256,6 +287,7 @@ export async function routeChanges(
     cpp_present: await present("cpp/CMakeLists.txt"),
     record: reused?.record ?? "[]",
     benchmark_reused: reused?.benchmark_reused ?? "",
+    benchmark_groups: groups === "all" ? groups : groups.join(","),
   };
   if (out)
     await appendFile(
@@ -266,6 +298,11 @@ export async function routeChanges(
     );
   if (reused?.summary && process.env.GITHUB_STEP_SUMMARY)
     await appendFile(process.env.GITHUB_STEP_SUMMARY, reused.summary);
+  if (selected.benchmark && process.env.GITHUB_STEP_SUMMARY)
+    await appendFile(
+      process.env.GITHUB_STEP_SUMMARY,
+      `- Benchmark scope: ${groups === "all" ? "complete continuous suite (shared or unknown inputs)" : groups.join(", ")}\n`,
+    );
   return result;
 }
 

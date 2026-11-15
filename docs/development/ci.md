@@ -18,15 +18,36 @@ An engine-only PR fetches no native sources, installs no TBB and skips the algor
 
 Issue and PR templates, Dependabot configuration, `fuzz/`, manual diagnostics and the separate title, DCO and release workflows select no extra lane. A path no row names, an unavailable base and manual dispatch select all lanes, so a new kind of file needs a row. The opt-in [main performance workflow](continuous-benchmarks.md#main-long-term-tracking) is independent of these lanes and `ci-ok`. PR updates cancel obsolete runs; each main push has its own concurrency group, so a later non-docs push cannot cancel a pending site deployment.
 
+### Selecting benchmark workloads
+
+The `ROUTES` table in [`ci_changes.ts`](../../.github/scripts/ci_changes.ts) owns both lane routing and the optional workload groups for an entry module. The cumulative diff from the merge base selects their union. `algorithms.rs` selects argsort, segments and the rank operations; `cached.rs` selects `partition-buckets`; `partition.rs` selects binary partition; `parallel.rs` selects parallel sorting. Shared engine code, library manifests, shared build/harness inputs and unknown paths select the complete continuous suite. Moving a file therefore falls back to complete measurement until its ownership is classified. Lane reuse still requires identical inputs for the whole lane; a scope change never reuses a partial report as complete evidence.
+
+The router passes this scope to `continuous prepare --groups`. [`selection.ts`](../../bench/continuous/selection.ts) selects whole include rules from the continuous plan and fails on unknown or absent groups. Preparation freezes the resulting plan and executable inventory; measurement and publication consume that inventory. The report's case count describes the selected scope, not coverage of every library operation. Opponent timing remains an explicit algorithm experiment; the comparison CI lane runs functional adapter checks.
+
+#### Maintaining routing and coverage
+
+When adding an operation or reorganizing source files, follow its actual consumers before narrowing measurement:
+
+| Change | Update and verify |
+|---|---|
+| New public operation | Add its typed adapter, independent output checker and operation identity/parameters through the [benchmark tooling owners](../design/benchmark-tooling.md#operation-workloads). Add a small representative group to `bench/plans/continuous.toml`, then assign the owning entry path in `ROUTES`. Missing group coverage must fail selection, rather than silently skip the operation. |
+| Move or split an entry module | Update its `ROUTES` row and routing tests in the same PR. Keep a narrow scope only if the module cannot affect other entries. Deletions and additions both participate in the diff. |
+| Move shared code into an entry module, or add another caller | Widen or remove the row's group restriction to cover every consumer. The routing rule is a maintained dependency assertion; directory names alone do not prove isolation. Shared engine files retain complete measurement. |
+| Add a case or tune operation parameters | Edit the owning include rule in `continuous.toml`. Selection preserves every rule and parameter in the group; shard count and build features derive from the frozen selection. Do not add workflow-specific case lists. |
+| Add an external competitor | Follow the [algorithm adapter contract](../design/benchmark-tooling.md#common-changes). Keep cross-algorithm timing manual; CI exercises adapter correctness through `tools ci check`, including the `operations` feature. |
+| Change execution, budgets or report validation | Update the corresponding owner in [benchmark tooling](../design/benchmark-tooling.md#ownership), its boundary tests and the [continuous protocol](continuous-benchmarks.md). Workflows pass selections and artifacts; they do not duplicate routing or sampling rules. |
+
+Run `bun run --silent tools ci changes --base BASE --head HEAD` to inspect `benchmark_groups` before pushing. Verify an entry-only change, a mixed-entry change and a shared/unknown path with `.github/scripts/policy.test.ts`; `bench/continuous/runner.test.ts` connects selection to matrix generation and complete-shard validation. Run tooling tests and type checks after changes. New operation cases should distinguish its own work: indirect index access for argsort, workspace reuse for segments, category fan-out for cached keys, and rank density or tie membership for selection. Keep broader cross-algorithm and release coverage in explicit plans, with unfinished acceptance in the roadmap.
+
 ### Reuse of verified lanes
 
-A PR push skips a selected lane when an earlier run of the same PR passed that lane with identical inputs, so a documentation-only push after a verified engine change runs formatting, lints and Docs only. The router fingerprints each lane's inputs: the mode and blob ID of every tracked file whose `ROUTES` row selects the lane, including unrouted files, plus all of `bench/` and `tools/`. A row says when a change alone needs the lane. Tooling such as report classification can still change a lane's result or verdict without scheduling the lane. Checks fingerprint the tested merge commit. Measurement fingerprints the PR head together with its merge base, because a new base changes the comparison without changing the head.
+A PR push skips a selected lane when an earlier run of the same PR passed that lane with identical inputs, so a documentation-only push after a verified engine change runs formatting, lints and Docs only. The router fingerprints each lane's inputs: the mode and blob ID of every tracked file whose `ROUTES` row selects the lane, including unrouted files, plus all of `bench/` and `tools/`. A row says when a change alone needs the lane. Tooling such as report classification can still change a lane's result or verdict without scheduling the lane. Checks fingerprint the tested merge commit. Measurement fingerprints the PR head together with its merge base and the tested router, because a new base or widened workload policy changes the required comparison without changing the head.
 
 When `ci-ok` passes, the `record` job uploads one artifact per selected or reused lane, named by lane and fingerprint. The next push looks those names up. It accepts an artifact only if the artifact's run tested a commit of this PR after the merge base, and only if no commit in that range changed `.github/`, `.env*`, `package.json`, `bunfig.toml` or `tsconfig.json`. These are the files that decide reuse, and a run whose deciding code was altered could record a fingerprint it did not verify. Artifacts, unlike cache entries, name the run that uploaded them. A failed lookup runs the lane. A reused measurement carries to the new head the `Benchmarks (rust)` check that the marker's run published or carried (`reuse-report`). Measurement is reused only where reports publish checks, so Dependabot and fork PRs measure every time, and the `changes` job summary links the run each reused lane came from. Pushes to `main` never reuse.
 
 ## Lanes
 
-Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, checks, other PRs and other repositories, with no priority or preemption. Continuous measurement builds once and takes its matrix width from [`CONTINUOUS_SHARDS`](../../bench/continuous/paired.ts); no test waits for it ([capacity](continuous-benchmarks.md#capacity-and-recovery)).
+Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, checks, other PRs and other repositories, with no priority or preemption. Continuous measurement builds once and derives its matrix width from the frozen inventory through [`continuousShards`](../../bench/continuous/paired.ts); no test waits for it ([capacity](continuous-benchmarks.md#capacity-and-recovery)).
 
 | Check | Pull request | `main` |
 |---|---|---|
@@ -88,7 +109,7 @@ Run the [commands in `AGENTS.md`](../../AGENTS.md#commands) before pushing; a pu
 | Reproduce change routing | `bun run --silent tools ci changes --base main --head HEAD` |
 | Validate a PR title | `bun run --silent tools ci title 'fix(bench): validate source snapshots'` |
 | Check every commit's DCO sign-off | `bun run --silent tools ci dco main HEAD` |
-| Preview hosted benchmark jobs | `bun run --silent tools continuous matrix` |
+| Preview hosted benchmark jobs | `bun run --silent tools continuous matrix PREPARED` |
 | Reproduce the comparison checks | `bun run --silent tools ci check --native` |
 | Fetch and verify pinned native sources | `bun run --silent tools native fetch` |
 | Validate a release tag | `bun run --silent tools release verify --tag rust/v0.1.0` |

@@ -31,6 +31,7 @@ jobs:
       cpp_present: ${{ steps.changes.outputs.cpp_present }}
       comparison: ${{ steps.changes.outputs.comparison }}
       benchmark: ${{ steps.changes.outputs.benchmark }}
+      benchmark_groups: ${{ steps.changes.outputs.benchmark_groups }}
       docs: ${{ steps.changes.outputs.docs }}
       record: ${{ steps.changes.outputs.record }}
       benchmark_reused: ${{ steps.changes.outputs.benchmark_reused }}
@@ -232,17 +233,18 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile --ignore-scripts
-      - id: matrix
-        run: echo "value=$(bun run --silent tools continuous matrix)" >> "$GITHUB_OUTPUT"
       - name: Build both revisions once
         id: build
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
+          BENCHMARK_GROUPS: ${{ needs.changes.outputs.benchmark_groups }}
         run: |
           baseline=$(git merge-base "$PR_BASE" HEAD)
           echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
           bun run tools continuous prepare "$baseline" \
-            --out bench/results/prepared
+            --groups "$BENCHMARK_GROUPS" --out bench/results/prepared
+      - id: matrix
+        run: echo "value=$(bun run --silent tools continuous matrix bench/results/prepared)" >> "$GITHUB_OUTPUT"
       - name: Retain preparation log
         if: always()
         run: |

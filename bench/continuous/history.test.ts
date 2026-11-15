@@ -3,13 +3,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { continuous } from "../catalog.ts";
-import { pairedRun } from "./fixtures/paired.ts";
+import { PAIRED_SHARDS, pairedRun } from "./fixtures/paired.ts";
 import { fixture } from "./fixtures/report.ts";
 import { summarizePairedTrend } from "./history.ts";
-import { CONTINUOUS_SHARDS, pairedBmf, pairedSummary } from "./paired.ts";
+import { pairedBmf, pairedSummary } from "./paired.ts";
 
 function measured(ratio: number, uuid: string, time: string, head = "same-baseline") {
-  const runs = Array.from({ length: CONTINUOUS_SHARDS }, (_, index) => pairedRun(index + 1, ratio));
+  const runs = Array.from({ length: PAIRED_SHARDS }, (_, index) => pairedRun(index + 1, ratio));
   const report = fixture();
   report.uuid = uuid;
   report.start_time = time;

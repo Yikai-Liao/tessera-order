@@ -51,16 +51,30 @@ pub(crate) fn distribute<T, E: Extract<T>>(
     if values.len() <= tile::capacity::<T>(TILE_BYTES) {
         tile::Scratch::new().distribute(values, radix, classified_prefix, &mut extractor)
     } else {
-        block::partition(
-            values,
-            radix,
-            Classified {
-                classifier: KeyDigit::new(&mut extractor, 0),
-                prefix: classified_prefix,
-            },
-            &mut block::Buffers::new(),
-            &mut |_, _, _, _| {},
-        )
+        let classifier = KeyDigit::new(&mut extractor, 0);
+        let mut buffers = block::Buffers::new();
+        // An empty prefix needs no owner. Keep unused run metadata out of
+        // the ordinary classifier's scatter call and returned state.
+        if classified_prefix.is_empty() {
+            block::partition(
+                values,
+                radix,
+                classifier,
+                &mut buffers,
+                &mut |_, _, _, _| {},
+            )
+        } else {
+            block::partition(
+                values,
+                radix,
+                Classified {
+                    classifier,
+                    prefix: classified_prefix,
+                },
+                &mut buffers,
+                &mut |_, _, _, _| {},
+            )
+        }
     }
 }
 

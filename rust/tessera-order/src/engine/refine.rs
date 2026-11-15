@@ -297,9 +297,14 @@ fn finish_ordered<T, E: Extract<T>>(records: &mut [T], order: Order, extractor: 
     }
 }
 
-/// Target pair count used to choose the order gate's stride.
-const ORDER_SAMPLES: usize = 512;
-/// Short inputs confirm directly; sampling would repeat their scan work.
+/// Pair count at which the order sample stops growing. Disorder confined to a
+/// fraction `f` of a large input still meets about `f * ORDER_SAMPLES` pairs.
+const ORDER_SAMPLES: usize = 4096;
+/// Minimum stride: the sample reads at most two keys per this many records,
+/// bounding its cost on ordered inputs, which also pay the confirming scan.
+const ORDER_SAMPLE_MIN_STRIDE: usize = 128;
+/// Short inputs confirm directly: their sample would hold fewer than 64 pairs
+/// and could save at most part of one short scan.
 const ORDER_SAMPLE_MIN_LEN: usize = 8192;
 
 /// Confirms short inputs directly; larger inputs sample adjacent pairs before
@@ -309,7 +314,7 @@ fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     if records.len() < ORDER_SAMPLE_MIN_LEN {
         return confirm_order(records, extractor);
     }
-    let stride = (records.len() / ORDER_SAMPLES).max(1);
+    let stride = (records.len() / ORDER_SAMPLES).max(ORDER_SAMPLE_MIN_STRIDE);
     let mut ascending = true;
     let mut descending = true;
     for index in (stride..records.len()).step_by(stride) {

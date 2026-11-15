@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { caseName, modeName, modeOrder } from "../catalog.ts";
+import { caseName, caseSection, modeName, modeOrder } from "../catalog.ts";
 import { renderTrends, type TrendChart } from "../plot/trends.ts";
 import { MIN_SWING, type TrendSummary } from "./history.ts";
 import { BUILD, caseParts, formatChange, MAJOR, short } from "./report.ts";
@@ -27,7 +27,11 @@ export function trendSvg(trend: TrendSummary, base = "main") {
     (a, b) => modeOrder(a) - modeOrder(b) || a.localeCompare(b),
   );
   const aggregate = (mode: string) => {
-    const inMode = trend.series.filter((entry) => caseParts(entry.name).mode === mode);
+    // Operations have their own sections, so a mode's aggregate covers full sorting only.
+    const inMode = trend.series.filter((entry) => {
+      const parts = caseParts(entry.name);
+      return parts.mode === mode && !parts.operation;
+    });
     if (!inMode.length) return undefined;
     return trend.runs.map(
       (_, i) =>
@@ -36,26 +40,37 @@ export function trendSvg(trend: TrendSummary, base = "main") {
         ) - 1,
     );
   };
-  const groups: TrendChart["groups"] = apiModes.map((mode) => ({
-    title: modeName(mode).toUpperCase(),
-    rows: [
-      {
-        name: { input: "Overall", tag: "", sub: "geometric mean", strong: true },
-        aggregate: true,
-        cells: [cell(aggregate(mode))],
-      },
-      ...selected
-        .filter((name) => caseParts(name).mode === mode)
-        .map((name) => {
-          const changes = series.get(name)!.changes;
-          return {
-            name: { ...caseName(name), strong: Math.abs(changes.at(-1)!) >= MAJOR },
-            aggregate: false,
-            cells: [cell(changes)],
-          };
-        }),
-    ],
-  }));
+  const row = (name: string) => {
+    const changes = series.get(name)!.changes;
+    return {
+      name: { ...caseName(name), strong: Math.abs(changes.at(-1)!) >= MAJOR },
+      aggregate: false,
+      cells: [cell(changes)],
+    };
+  };
+  const sorting = (name: string) => !caseParts(name).operation;
+  const groups: TrendChart["groups"] = [
+    ...apiModes.map((mode) => ({
+      title: modeName(mode).toUpperCase(),
+      rows: [
+        {
+          name: { input: "Overall", tag: "", sub: "geometric mean", strong: true },
+          aggregate: true,
+          cells: [cell(aggregate(mode))],
+        },
+        ...selected.filter((name) => sorting(name) && caseParts(name).mode === mode).map(row),
+      ],
+    })),
+    // Each operation keeps its focused cases under its own heading, after the sorting modes.
+    ...[
+      ...Map.groupBy(
+        selected
+          .filter((name) => !sorting(name))
+          .sort((a, b) => caseSection(a).order - caseSection(b).order),
+        (name) => caseSection(name).title,
+      ),
+    ].map(([title, names]) => ({ title, rows: names.map(row) })),
+  ];
   const progress = (1 + trend.overall.at(-1)!) / (1 + trend.overall[0]) - 1;
   return renderTrends({
     title: { input: "Run time during this PR", sub: "first to latest run", tag: "", strong: true },

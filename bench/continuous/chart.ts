@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { caseName, modeName, modeOrder } from "../catalog.ts";
+import { caseName, caseSection, modeName } from "../catalog.ts";
 import { type ChangeChart, renderChanges } from "../plot/changes.ts";
 import type { NameCell } from "../plot/layout.ts";
 import {
@@ -25,23 +25,19 @@ function nameCell(row: ComparedRow, strong: boolean): NameCell {
 /** Select alerted cases and present their authoritative verdicts to the plot. */
 export function chartSvg(summary: ReportSummary, base = "main") {
   if (!summary.rows.length) return null;
-  // Rows arrive worst slowdown first, then best speedup; a stable sort by mode
-  // keeps that order within each mode.
+  // Rows arrive worst slowdown first, then best speedup; a stable sort by
+  // section keeps that order within each mode or operation.
   const changed = summary.rows
     .filter(
       (row): row is ComparedRow => row.verdict === "regression" || row.verdict === "improvement",
     )
-    .sort(
-      (a, b) =>
-        modeOrder(a.parts.mode) - modeOrder(b.parts.mode) ||
-        a.parts.mode.localeCompare(b.parts.mode),
-    );
+    .sort((a, b) => caseSection(a.name).order - caseSection(b.name).order);
   const small = (row: ComparedRow) =>
     row.verdict === "improvement" && -row.change < FOLD_FASTER_BELOW;
   const shown = changed.some((row) => !small(row)) ? changed.filter((row) => !small(row)) : changed;
   const folded = changed.length - shown.length;
   const groups: ChangeChart["groups"] = [
-    ...Map.groupBy(shown, (row) => modeName(row.parts.mode).toUpperCase()),
+    ...Map.groupBy(shown, (row) => caseSection(row.name).title),
   ].map(([title, rows]) => ({
     title,
     rows: rows.map((row) => ({

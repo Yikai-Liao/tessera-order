@@ -220,6 +220,34 @@ export function operationLabel(operation?: Operation) {
   }
 }
 
+const counted = (value: number) => value.toLocaleString("en-US");
+
+/** Name an operation in figure sections and table cells, where the full label is too long. */
+export function operationTitle(operation: Operation) {
+  switch (operation.kind) {
+    case "sort":
+      return "sort";
+    case "argsort":
+      return "argsort";
+    case "partition":
+      return "binary partition";
+    case "partition-buckets":
+      return `categories · ${counted(operation.bucket_count)}`;
+    case "segments":
+      return `chunks · ${counted(operation.segment_len)}`;
+    case "top-k":
+      return `top-k · ${counted(operation.k)}`;
+    case "prefix":
+      return `prefix · ${counted(operation.prefix_len)}`;
+    case "select":
+      return `select · rank ${counted(operation.index)}`;
+    case "rank-range":
+      return `ranks · ${counted(operation.start)}–${counted(operation.end)}`;
+    case "select-many":
+      return `select-many · ${counted(operation.indices.length)} ranks`;
+  }
+}
+
 /** Identity fields shared by input manifests and the two benchmark ID grammars. */
 export interface CaseIdentity {
   ty: string;
@@ -349,7 +377,7 @@ export function caseParts(id: string) {
     if (parts[0] !== "rust" || parts.length < 6) throw new Error();
     parsed = parseComparisonId(parts.slice(1, -1).join("/"));
   } catch {
-    return { type: "", input: id, n: "", extra: "", seed: "", mode: "" };
+    return { type: "", input: id, operation: "", kind: "", n: "", extra: "", seed: "", mode: "" };
   }
   const { ty, seed, operation } = parsed;
   const record = recordType(ty),
@@ -357,11 +385,12 @@ export function caseParts(id: string) {
   const extra = [seed === "s1" ? "" : `seed ${seed.slice(1)}`, mode === "api" ? "" : mode].filter(
     Boolean,
   );
-  const input = shape.compact ?? shape.label;
   return {
     type: record.compact ?? record.label,
-    // Operation cases share inputs with sorting cases; every table and figure row names the operation.
-    input: operation ? `${input} · ${operationLabel(operation)}` : input,
+    input: shape.compact ?? shape.label,
+    // Operation cases share inputs with sorting cases; figures group them by this name.
+    operation: operation ? operationTitle(operation) : "",
+    kind: operation?.kind ?? "",
     n: parsed.len.toLocaleString("en-US"),
     extra: extra.join(", "),
     seed,
@@ -382,7 +411,8 @@ export function caseName(id: string) {
 /** Order case IDs for reading: mode, length, record type, input, then seed; unknown entries last. */
 export function compareCases(a: string, b: string) {
   const key = (id: string) => {
-    const [, ty = "", shape = "", length = "", seed = "", mode = ""] = id.split("/");
+    const [, ty = "", shape = "", length = "", seed = ""] = id.split("/");
+    const mode = id.split("/").at(-1) ?? "";
     const rank = (list: { id: string }[], value: string) => {
       const found = list.findIndex((entry) => entry.id === value);
       return found < 0 ? list.length : found;
@@ -399,11 +429,23 @@ export function compareCases(a: string, b: string) {
   return x.reduce((order, value, i) => order || value - y[i], 0) || a.localeCompare(b);
 }
 
+/** Name a case's figure section: its API mode for full sorting, otherwise its operation.
+ * Sorting sections come first in mode order, then operations in catalog order. */
+export function caseSection(id: string) {
+  const parts = caseParts(id);
+  return parts.operation
+    ? {
+        title: parts.operation.toUpperCase(),
+        order: catalog.modes.length + 1 + operationKinds.indexOf(parts.kind as Operation["kind"]),
+      }
+    : { title: modeName(parts.mode).toUpperCase(), order: modeOrder(parts.mode) };
+}
+
 /** Format a case's readable label while preserving unknown identifiers. */
 export function caseLabel(id: string) {
   const parts = caseParts(id);
   return (
-    [parts.type, parts.input, parts.n].filter(Boolean).join(" · ") +
+    [parts.type, parts.input, parts.operation, parts.n].filter(Boolean).join(" · ") +
     (parts.extra ? `, ${parts.extra}` : "")
   );
 }

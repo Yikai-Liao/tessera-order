@@ -298,16 +298,18 @@ fn finish_ordered<T, E: Extract<T>>(records: &mut [T], order: Order, extractor: 
 }
 
 /// Target pair count used to choose the order gate's stride.
-const ORDER_SAMPLES: usize = 4096;
+const ORDER_SAMPLES: usize = 512;
+/// Short inputs confirm directly; sampling would repeat their scan work.
+const ORDER_SAMPLE_MIN_LEN: usize = 8192;
 
-/// Classifies adjacent keys directly at unit stride, otherwise samples pairs
-/// before confirming candidate order with a full scan.
+/// Confirms short inputs directly; larger inputs sample adjacent pairs before
+/// confirming candidate order with a full scan.
 #[inline(never)]
 fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
-    let stride = (records.len() / ORDER_SAMPLES).max(1);
-    if stride == 1 {
+    if records.len() < ORDER_SAMPLE_MIN_LEN {
         return confirm_order(records, extractor);
     }
+    let stride = (records.len() / ORDER_SAMPLES).max(1);
     let mut ascending = true;
     let mut descending = true;
     for index in (stride..records.len()).step_by(stride) {
@@ -615,8 +617,8 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore = "sampling adds no distinct ownership boundary")]
     fn child_flat_sample_does_not_certify_order() {
-        let mut records = alloc::vec![0u64; 3 * ORDER_SAMPLES];
-        // At stride three, index four belongs to neither sampled pair.
+        let mut records = alloc::vec![0u64; 3 * ORDER_SAMPLE_MIN_LEN];
+        // Index four belongs to neither sampled pair at this stride.
         records[4] = 1;
         let mut expected = records.clone();
         expected.sort();

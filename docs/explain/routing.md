@@ -4,9 +4,9 @@ Before any radix pass, Tessera checks whether the input needs one. Many real inp
 
 ## Order probe
 
-`probe_order` samples adjacent pairs at a stride of `max(1, floor(n / 4,096))`. At stride 1 (fewer than 8,192 records) it goes straight to the full scan, `confirm_order`, since sampling every pair first would repeat its work. That scan reads each key once. Its first three keys can already show both a rising and a falling pair, which returns unsorted at once. Otherwise it skips leading equal keys, fixes the direction at the first unequal key, and checks only that direction from there. It returns ascending (sorted or constant keys), strictly descending, descending with ties, or unsorted.
+`probe_order` goes straight to the full scan, `confirm_order`, for fewer than 8,192 records. Larger inputs sample adjacent pairs at a stride of `max(1, floor(n / 512))`. The direct-confirmation gate and sample budget serve different purposes: short inputs avoid a repeated scan, while larger ordered inputs pay for a bounded rejection sample before confirmation. The [shared-order assessment](../design/evidence.md#shared-order-confirmation-for-serial-operations) records the trade-off. Confirmation reads each key once. Its first three keys can already show both a rising and a falling pair, which returns unsorted at once. Otherwise it skips leading equal keys, fixes the direction at the first unequal key, and checks only that direction from there. It returns ascending (sorted or constant keys), strictly descending, descending with ties, or unsorted.
 
-At larger strides, the sample classifies the input:
+For larger inputs, the sample classifies the input:
 
 | Sampled pairs | Class | What happens |
 |---|---|---|
@@ -16,7 +16,7 @@ At larger strides, the sample classifies the input:
 
 A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. Any leading equal keys skipped while finding the direction rule out strict descent. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
 
-The sample rejects most unsorted inputs within a few pairs, so the full scan runs only on inputs that look ordered. Its ascending continuation is the vector scan budgeted insertion uses for direct primitive keys, with a scalar fallback for other keys and short slices; its descending continuation also records whether any adjacent pair ties.
+The sample rejects most unsorted inputs within a few pairs, so the full scan runs only on inputs that look ordered. Its ascending continuation is the vector scan budgeted insertion uses for direct primitive keys, with a scalar fallback for other keys and short slices. The scalar continuation extracts four successive keys and combines their ordering results before deciding whether to continue, allowing independent comparisons to overlap; an inversion may therefore evaluate the remaining keys in its group before returning. The final short tail still checks one pair at a time. Its descending continuation also records whether any adjacent pair ties.
 
 ## Budgeted insertion
 
@@ -91,7 +91,7 @@ While the block partition completes, each requested child that fits a tile is fi
 |---|---|---|
 | sorted | probe + one confirming scan | ~1 read pass, no allocation |
 | reversed | probe + scan + stable reversal | ~2 passes, no allocation |
-| all keys equal | confirmation at unit stride; otherwise flat sample + varying-bit scan | ~1 read pass, no allocation |
+| all keys equal | direct confirmation on short inputs; otherwise flat sample + varying-bit scan | ~1 read pass, no allocation |
 | unsorted tile, insertion-sized | insertion finish | bounded quadratic leaf, no allocation |
 | larger nearly sorted input | budgeted insertion | linear in n plus inversions |
 | one dominant key | equality partition | one partition, the equal band is done |

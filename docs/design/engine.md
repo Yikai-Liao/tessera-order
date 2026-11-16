@@ -23,6 +23,8 @@ The private `engine/` module exposes complete refinement and stable distribution
 
 Keeping every module at crate root allowed an adapter to depend on a block directory or a tile guard. The module boundary removes that dependency possibility without changing execution. A separate public engine crate would force lifetime, extractor and allocation contracts to stabilize before the current consumers have established them; that remains deferred.
 
+The [architecture policies](../development/ci.md#architecture-policies) guard this boundary against reverse dependencies, widened visibility and storage re-exports. Rust privacy remains the authority for which items callers can access.
+
 | Owner | Complete responsibility | Consumers need to know |
 |---|---|---|
 | `../algorithms.rs` | Complete serial argsort, segmented sorting, Top-k, prefix and selection calls; validate public arguments and shape outputs | Shared rank requirements and complete refinement, not movement state or planner details |

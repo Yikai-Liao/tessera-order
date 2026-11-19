@@ -11,6 +11,7 @@ import {
   comparisonId,
   criterionGroup,
   criterionId,
+  operationKinds,
   operationSchema,
   parseComparisonId,
   parseCriterionId,
@@ -98,7 +99,8 @@ test("operation identities and parameter admission match the shared language fix
       continue;
     }
     const operation = operationSchema.parse(entry.operation);
-    parsePlan(plan);
+    if (operationKinds.some((kind) => kind === operation.kind)) parsePlan(plan);
+    else assert.throws(() => parsePlan(plan));
     assert.equal(comparisonId({ ...input, operation }), entry.comparison);
     assert.equal(comparisonGroup({ ...input, operation }), entry.group);
     assert.deepEqual(parseComparisonId(entry.comparison), { ...input, seed: "s1", operation });

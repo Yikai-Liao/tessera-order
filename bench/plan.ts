@@ -3,7 +3,13 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { catalog, type Operation, operationSchema, validateOperation } from "./catalog.ts";
+import {
+  catalog,
+  liveOperationSchema,
+  type Operation,
+  operationSchema,
+  validateOperation,
+} from "./catalog.ts";
 import { decodeConfig } from "./config.ts";
 
 const ids = (entries: { id: string }[]) => z.enum(entries.map((entry) => entry.id));
@@ -12,7 +18,7 @@ const choices = <T extends z.ZodType>(schema: T) =>
     .array(schema)
     .min(1)
     .refine((values) => new Set(values).size === values.length, "duplicate choices");
-const rule = z.strictObject({
+const axesSchema = z.strictObject({
   types: choices(ids(catalog.types)).optional(),
   distributions: choices(ids(catalog.distributions)).optional(),
   lengths: choices(
@@ -21,62 +27,78 @@ const rule = z.strictObject({
       z.enum(["insertion-max", "insertion-next", "tile-next"]),
     ]),
   ).optional(),
-  // Include rules of a sorting plan may measure an operation instead (revision suites).
-  operation: operationSchema.optional(),
 });
-const schema = z
-  .strictObject({
-    $comment: z.string().optional(),
-    schema: z.union([z.literal(1), z.literal(2)]),
-    operation: operationSchema.optional(),
-    algorithms: choices(ids(catalog.algorithms)),
-    include: z.array(rule).min(1),
-    exclude: z.array(rule).default([]),
-    parallel: z.array(rule).optional(),
-  })
-  .superRefine((plan, ctx) => {
-    if (
-      plan.schema === 1
-        ? plan.operation !== undefined
-        : !plan.operation || plan.operation.kind === "sort"
-    )
-      ctx.addIssue({
-        code: "custom",
-        message: "schema 2 requires an explicit operation; schema 1 is sorting only",
-      });
-    if (
-      [...plan.exclude, ...(plan.parallel ?? [])].some((r) => r.operation) ||
-      (plan.operation && plan.include.some((r) => r.operation))
-    )
-      ctx.addIssue({
-        code: "custom",
-        message: "rule operations belong to include rules of a sorting plan",
-      });
-  });
+
+function selectionSchema<T extends z.ZodType<Operation>>(operation: T) {
+  // Include rules of a sorting plan may measure an operation instead (revision suites).
+  const rule = axesSchema.extend({ operation: operation.optional() });
+  return z
+    .strictObject({
+      $comment: z.string().optional(),
+      schema: z.union([z.literal(1), z.literal(2)]),
+      operation: operation.optional(),
+      algorithms: choices(ids(catalog.algorithms)),
+      include: z.array(rule).min(1),
+      exclude: z.array(rule).default([]),
+      parallel: z.array(rule).optional(),
+    })
+    .superRefine((plan, ctx) => {
+      if (
+        plan.schema === 1
+          ? plan.operation !== undefined
+          : !plan.operation || plan.operation.kind === "sort"
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: "schema 2 requires an explicit non-sort plan operation",
+        });
+      if (
+        [...plan.exclude, ...(plan.parallel ?? [])].some((r) => r.operation) ||
+        (plan.operation && plan.include.some((r) => r.operation))
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: "rule operations belong to include rules of a sorting plan",
+        });
+    });
+}
+
+const schema = selectionSchema(liveOperationSchema);
+const retainedSchema = selectionSchema(operationSchema);
 
 /** A product of optional axes; omitted axes match every supported value. */
-export type CaseRule = z.infer<typeof rule>;
+type Axes = z.infer<typeof axesSchema>;
 /** A validated experiment selection, independent of its measurement protocol. */
 export type Plan = z.infer<typeof schema>;
-export type SelectionOptions = Omit<CaseRule, "operation"> & {
+/** A frozen plan may describe a workload that is no longer executable. */
+export type RetainedPlan = z.infer<typeof retainedSchema>;
+export type SelectionOptions = Axes & {
   algorithms?: string[];
-  operation?: Operation["kind"];
-  prefixLen?: number;
-  k?: number;
+  operation?: z.infer<typeof liveOperationSchema>["kind"];
   index?: number;
-  rankRange?: { start: number; end: number };
-  indices?: number[];
-  segmentLen?: number;
   bucketCount?: number;
 };
 
-/** Validate selections without choosing a measurement protocol or adding algorithms. */
+/** Validate a new selection without choosing a measurement protocol or adding algorithms. */
 export function parsePlan(value: unknown): Plan {
   const plan = schema.parse(value);
-  // New operations use exact parameters and literal counts in this first slice.
+  validateLengths(plan);
+  return plan;
+}
+
+/** Validate a frozen result's plan, including operations no longer admitted for new runs. */
+export function parseRetainedPlan(value: unknown): RetainedPlan {
+  const plan = retainedSchema.parse(value);
+  validateLengths(plan);
+  return plan;
+}
+
+function validateLengths(plan: RetainedPlan) {
+  // Operation parameters are checked against literal counts.
   // Engine-relative boundaries remain resolved by Rust for sorting plans.
-  const effective = (rule: CaseRule) => rule.operation ?? plan.operation;
-  const isOperation = (rule: CaseRule) => {
+  type Rule = (typeof plan.include)[number];
+  const effective = (rule: Rule) => rule.operation ?? plan.operation;
+  const isOperation = (rule: Rule) => {
     const operation = effective(rule);
     return operation !== undefined && operation.kind !== "sort";
   };
@@ -105,7 +127,6 @@ export function parsePlan(value: unknown): Plan {
       if (survives) validateOperation(operation, len as number);
     }
   }
-  return plan;
 }
 
 /** Load a TOML preset or a JSON/TOML file, then apply explicit axis overrides. */
@@ -114,35 +135,17 @@ export async function loadPlan(name: string, options: SelectionOptions = {}): Pr
     ? fileURLToPath(new URL(`./plans/${name}.toml`, import.meta.url))
     : name;
   const plan = schema.parse(decodeConfig(await readFile(path, "utf8"), path));
-  const {
-    algorithms,
-    operation,
-    prefixLen,
-    k,
-    index,
-    rankRange,
-    indices,
-    segmentLen,
-    bucketCount,
-    ...axes
-  } = options;
-  const parameters = Object.fromEntries(
-    Object.entries({
-      prefix_len: prefixLen,
-      k,
-      index,
-      ...rankRange,
-      indices,
-      segment_len: segmentLen,
-      bucket_count: bucketCount,
-    }).filter(([, value]) => value !== undefined),
-  );
+  const { algorithms, operation, index, bucketCount, ...axes } = options;
+  const parameters = {
+    ...(index === undefined ? {} : { index }),
+    ...(bucketCount === undefined ? {} : { bucket_count: bucketCount }),
+  };
   let selected = plan;
   if (operation !== undefined || Object.keys(parameters).length) {
     const kind = operation ?? plan.operation?.kind;
     if (!kind) throw new Error("Operation parameters require --operation");
     const previous = plan.operation?.kind === kind ? plan.operation : { kind };
-    const requested = operationSchema.parse({ ...previous, ...parameters });
+    const requested = liveOperationSchema.parse({ ...previous, ...parameters });
     // The requested operation is the plan's only one, replacing any include-rule operations.
     const { operation: _previous, ...rest } = plan;
     const include = plan.include.filter((rule) => !rule.operation);

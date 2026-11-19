@@ -75,6 +75,25 @@ test("resume rejects incomplete or altered experiments before execution", async 
   }
 });
 
+test("resume rejects even an unchanged frozen plan for a retired workload", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-retired-session-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const session = await prepared(directory);
+  const path = join(directory, "plan.json");
+  await writeFile(
+    path,
+    JSON.stringify({
+      schema: 2,
+      operation: { kind: "top-k", k: 10 },
+      algorithms: ["tessera", "std-stable"],
+      include: [{ lengths: [1000] }],
+    }),
+  );
+  session.planSha256 = await fileHash(path);
+  await writeFile(join(directory, "session.json"), JSON.stringify(session));
+  await assert.rejects(loadSession(directory), /No matching discriminator/);
+});
+
 test("session writes are exclusive and failures release the lock", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-session-lock-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

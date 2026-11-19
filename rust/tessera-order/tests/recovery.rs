@@ -11,7 +11,7 @@ use tessera_order::sort_by_key;
 struct Owned {
     id: usize,
     text: String,
-    edited: Cell<bool>,
+    edits: Cell<usize>,
     drops: Rc<RefCell<Vec<usize>>>,
 }
 impl Drop for Owned {
@@ -27,7 +27,7 @@ fn exercise(len: usize, changing: bool) {
             .map(|id| Owned {
                 id,
                 text: format!("record {id}"),
-                edited: Cell::new(false),
+                edits: Cell::new(0),
                 drops: drops.clone(),
             })
             .collect::<Vec<_>>()
@@ -46,10 +46,12 @@ fn exercise(len: usize, changing: bool) {
         let mut input = build();
         let at = 1 + step * total / steps;
         let mut calls = 0;
+        let mut edits = vec![0; len];
         let result = catch_unwind(AssertUnwindSafe(|| {
             sort_by_key(&mut input, |x| {
                 calls += 1;
-                x.edited.set(true);
+                edits[x.id] += 1;
+                x.edits.set(x.edits.get() + 1);
                 if !changing && calls == at {
                     std::panic::panic_any(0x71u32);
                 }
@@ -63,13 +65,13 @@ fn exercise(len: usize, changing: bool) {
         if !changing {
             assert_eq!(*result.unwrap_err().downcast::<u32>().unwrap(), 0x71);
             assert_eq!(calls, at, "called key after it panicked");
-            assert!(input.iter().any(|x| x.edited.get()));
         }
         assert!(drops.borrow().is_empty());
         input.sort_by_key(|x| x.id);
         for (id, x) in input.iter().enumerate() {
             assert_eq!(x.id, id);
             assert_eq!(x.text, format!("record {id}"));
+            assert_eq!(x.edits.get(), edits[id], "record {id} lost a callback edit");
         }
         // Recovered records remain usable with a different key width.
         sort_by_key(&mut input, |x| (x.id as u128) << 64);
@@ -77,6 +79,47 @@ fn exercise(len: usize, changing: bool) {
         drop(input);
         drops.borrow_mut().sort_unstable();
         assert_eq!(*drops.borrow(), (0..len).collect::<Vec<_>>());
+    }
+}
+
+#[test]
+#[cfg(feature = "rayon")]
+#[cfg_attr(miri, ignore = "the public worker path needs a megabyte-sized input")]
+fn worker_unwind_preserves_interior_edits() {
+    use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+
+    let len = 65_536;
+    let edits: Vec<_> = (0..len).map(|_| AtomicUsize::new(0)).collect();
+    let mut values: Vec<_> = (0..len)
+        .map(|id| {
+            let key = (id as u64).wrapping_mul(0x9e3779b97f4a7c15);
+            (id, key, Cell::new(0))
+        })
+        .collect();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .unwrap();
+    let panic = catch_unwind(AssertUnwindSafe(|| {
+        pool.install(|| {
+            let caller = rayon::current_thread_index();
+            tessera_order::par_sort_by_key(&mut values, |(id, key, touched)| {
+                edits[*id].fetch_add(1, Relaxed);
+                touched.set(touched.get() + 1);
+                if rayon::current_thread_index() != caller {
+                    std::panic::panic_any(*id);
+                }
+                *key
+            });
+        });
+    }))
+    .unwrap_err();
+    let panicking_id = *panic.downcast::<usize>().unwrap();
+    assert!(edits[panicking_id].load(Relaxed) > 0);
+    values.sort_unstable_by_key(|r| r.0);
+    for (id, record) in values.iter().enumerate() {
+        assert_eq!(record.0, id);
+        assert_eq!(record.2.get(), edits[id].load(Relaxed), "record {id}");
     }
 }
 

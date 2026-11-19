@@ -116,25 +116,42 @@ export function modeOrder(id: string) {
   return order < 0 ? catalog.modes.length : order;
 }
 
-/** Versioned public-operation parameters, separate from implementation identity. */
 const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const sort = z.strictObject({ kind: z.literal("sort") });
+const argsort = z.strictObject({ kind: z.literal("argsort") });
+const select = z.strictObject({ kind: z.literal("select"), index: count });
+const partitionBuckets = z.strictObject({
+  kind: z.literal("partition-buckets"),
+  bucket_count: count.min(1),
+});
+
+/** Operations that new benchmark plans may request. */
+export const liveOperationSchema = z.discriminatedUnion("kind", [
+  sort,
+  argsort,
+  select,
+  partitionBuckets,
+]);
+
+/** Persisted operation parameters, in their original report section order. */
 export const operationSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("sort") }),
-  z.strictObject({ kind: z.literal("argsort") }),
+  sort,
+  argsort,
   z.strictObject({ kind: z.literal("partition") }),
-  z.strictObject({ kind: z.literal("partition-buckets"), bucket_count: count.min(1) }),
+  partitionBuckets,
   z.strictObject({ kind: z.literal("segments"), segment_len: count.min(1) }),
   z.strictObject({ kind: z.literal("top-k"), k: count }),
   z.strictObject({ kind: z.literal("prefix"), prefix_len: count }),
-  z.strictObject({ kind: z.literal("select"), index: count }),
+  select,
   z
     .strictObject({ kind: z.literal("rank-range"), start: count, end: count })
     .refine((range) => range.start <= range.end, "reversed rank range"),
   z.strictObject({ kind: z.literal("select-many"), indices: z.array(count) }),
 ]);
 export type Operation = z.infer<typeof operationSchema>;
-/** CLI choices derive from the operation schema, never a second registry. */
-export const operationKinds = operationSchema.options.map((schema) => schema.shape.kind.value);
+/** CLI choices follow current plan admission, not report compatibility. */
+export const operationKinds = liveOperationSchema.options.map((schema) => schema.shape.kind.value);
+const reportOperationOrder = operationSchema.options.map((schema) => schema.shape.kind.value);
 
 /** Validate parameters against a resolved count before building or allocating inputs. */
 export function validateOperation(operation: Operation, len: number) {
@@ -151,19 +168,6 @@ export function validateOperation(operation: Operation, len: number) {
               ? operation.indices.every((i) => i < len)
               : true;
   if (!valid) throw new Error(`Operation parameters exceed input length ${len}`);
-}
-
-/** Decode an exact half-open rank range; empty ranges are no-op requests. */
-export function parseRankRange(value: string) {
-  const match = /^(0|[1-9]\d*):(0|[1-9]\d*)$/.exec(value);
-  if (!match) throw new Error("expected start:end with nonnegative integer ranks");
-  const parsed = operationSchema.parse({
-    kind: "rank-range",
-    start: Number(match[1]),
-    end: Number(match[2]),
-  });
-  if (parsed.kind !== "rank-range") throw new Error("invalid rank range");
-  return { start: parsed.start, end: parsed.end };
 }
 
 /** Extra identity components; complete sorting retains historical IDs. */
@@ -317,9 +321,11 @@ export function parseComparisonId(id: string) {
       case "select":
         candidate = { kind, index: integer(parameter ?? "") };
         break;
-      case "rank-range":
-        candidate = { kind, ...parseRankRange((parameter ?? "").replaceAll("-", ":")) };
+      case "rank-range": {
+        const [start, end] = (parameter ?? "").split("-");
+        candidate = { kind, start: integer(start), end: integer(end ?? "") };
         break;
+      }
       case "select-many":
         candidate = {
           kind,
@@ -436,7 +442,8 @@ export function caseSection(id: string) {
   return parts.operation
     ? {
         title: parts.operation.toUpperCase(),
-        order: catalog.modes.length + 1 + operationKinds.indexOf(parts.kind as Operation["kind"]),
+        order:
+          catalog.modes.length + 1 + reportOperationOrder.indexOf(parts.kind as Operation["kind"]),
       }
     : { title: modeName(parts.mode).toUpperCase(), order: modeOrder(parts.mode) };
 }

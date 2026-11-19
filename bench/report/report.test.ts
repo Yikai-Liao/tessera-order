@@ -318,7 +318,7 @@ function operationFixture(operation: Operation) {
   return dataset;
 }
 
-test("operation reports retain exact parameters and output-aware memory without sorting figures", async (t) => {
+test("live and retired operation runs regenerate with exact IDs and output-aware memory", async (t) => {
   for (const operation of [
     { kind: "argsort" },
     { kind: "partition" },
@@ -345,8 +345,10 @@ test("operation reports retain exact parameters and output-aware memory without 
     }
     assert.ok(report.includes(JSON.stringify(operation)));
     assert.ok((await readdir(join(directory, "report"))).every((name) => !name.endsWith(".svg")));
+    const regenerated = await loadRun([directory]);
+    assert.equal(regenerated.samples[0].case_id, comparisonId(dataset.manifest.cases[0]));
     assert.equal(
-      (await loadRun([directory])).memory[0].output_bytes,
+      regenerated.memory[0].output_bytes,
       operation.kind === "argsort"
         ? 8000
         : operation.kind === "partition-buckets"

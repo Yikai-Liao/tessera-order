@@ -118,8 +118,24 @@ function renderCapabilities(dataset: Dataset) {
       out +
       "Unstable sorts on records are listed as a separate task: their permutation check allows equal keys to change order. A dash means the adapter does not support the task.\n\n"
     );
-  out +=
-    "Category routes require exact stable category order and every returned boundary; sorting references order by category, not the complete original key. Ranked stable routes require exact stable ranked membership. Standard-library unstable partial routes instead require the same ranked keys with arbitrary equal-key members, including on payload records; these are weaker-contract tasks, not equivalent stable selectors. Standard unstable segmented sorting remains scalar-only, and standard unstable argsort explicitly breaks ties by original index. Each admitted route or omission is retained below.\n\n";
+  switch (manifest.cases[0].operation?.kind) {
+    case "argsort":
+      out +=
+        "Every route must return the exact stable index permutation. Standard unstable argsort explicitly breaks ties by original index. ";
+      break;
+    case "partition":
+    case "partition-buckets":
+      out +=
+        "Category routes require exact stable category order and every returned boundary. Sorting references order by category, not the complete original key. ";
+      break;
+    case "segments":
+      out += "Standard unstable segmented sorting is scalar-only. ";
+      break;
+    default:
+      out +=
+        "Ranked stable routes require exact stable ranked membership. Standard-library unstable partial routes instead require the same ranked keys with arbitrary equal-key members, including on payload records. Full-sort references do more work than selection; ratios to arbitrary-tie routes compare different guarantees, not the isolated cost of stability. ";
+  }
+  out += "Each admitted route or omission is retained below.\n\n";
   const routes = new Map<string, string[]>();
   for (const c of manifest.cases) {
     for (const [name, route] of Object.entries(c.implementations ?? {}))
@@ -180,7 +196,7 @@ export async function writeReport(directories: string[], partial = false) {
   const operation = dataset.manifest.cases[0].operation;
   let markdown = `# ${operation ? operationLabel(operation) : "Sorting comparison"}\n\n${partial ? "Partial suite; only completed groups are shown." : `${dataset.manifest.suite} suite, version ${dataset.manifest.suite_version}.`} Every value is regenerated from the accompanying manifests, host fingerprint, blocks and memory samples.\n\n`;
   if (operation)
-    markdown += `Operation: \`${JSON.stringify(operation)}\`. Times are complete-call latency divided by input length, not by requested ranks or output count. Stable full-sort reference rows perform more work and satisfy both stable and weaker key-ranked results; they are not native partial selectors. Ratios between stable and arbitrary-tie routes compare different guarantees, not the isolated cost of stability.\n\n`;
+    markdown += `Operation: \`${JSON.stringify(operation)}\`. Times are complete-call latency divided by input length, not by output count.\n\n`;
   markdown +=
     "All blocks reuse each case's seed-one input. Their range measures execution variability on that input; it does not measure variability across random inputs. Calibration can choose different batch sizes for different variants, changing the prepared-buffer working set and cache behavior.\n\n";
   markdown += "## Measurement budget\n\n";
@@ -214,7 +230,7 @@ export async function writeReport(directories: string[], partial = false) {
     "## Memory accounting\n\nThe memory executable measures one complete call after preparing its input and verification reference. Rust-only builds count requested allocation sizes. Native builds count allocator usable sizes at the wrapped C allocation functions and C++ new/delete; allocator rounding is included. Fixed stack storage is unmeasured. Input buffers and owned payloads are excluded.\n";
   if (operation)
     markdown +=
-      "Mandatory output is allocated inside the measured call and included in peak extra heap bytes. Workspace peak is the recorded peak minus retained output bytes; argsort constructs its index result before sorting, so both coexist. Multiway category offsets are O(R) output; binary partition returns a scalar. Operations without a heap-allocated result have zero output bytes. Multiple-selection normalization is inside the measured call. No sorting figures are generated for these result shapes.\n";
+      "Mandatory heap output is allocated inside the measured call and included in peak extra heap bytes. Estimated workspace is the recorded peak minus retained output bytes. Calls without a heap-allocated result have zero output bytes. No sorting figures are generated for these result shapes.\n";
   await writeFile(join(out, "index.md"), markdown);
   await writeFile(
     join(out, "summaries.json"),

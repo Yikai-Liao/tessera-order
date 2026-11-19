@@ -4,7 +4,7 @@ A tile is a slice of at most 64 KiB of records, and at most 65,535 records, so t
 
 ## One-shot category distribution
 
-The unreleased [binary partition](../../conformance/semantics.md#binary-partition) and [cached-key sort](../../conformance/semantics.md#cached-keys) reuse this storage for one stable counting pass, without selecting a sorting leaf. Cached IDs let the classifier run only during the forward histogram; completed cursors supply the boundaries. Larger inputs use the [block partition](block-partition.md) without recursively sorting its buckets.
+When [cached-key sorting](../design/engine.md#category-distribution) can finish with one stable distribution, a tile reuses this storage for a single counting pass without selecting a sorting leaf. Cached IDs let the classifier run only during the forward histogram; the cursors are internal to the pass and no boundaries are returned. Larger inputs use the [block partition](block-partition.md) without recursively sorting its buckets.
 
 ## Parallel child allowance
 

@@ -162,12 +162,8 @@ impl<T: BenchmarkRecord> PreparedRecords<T> {
 
     fn prepare(original: Vec<T>, operation: Operation) -> Rc<Self> {
         let mut reference = original.clone();
-        if let Some(bucket_count) = operation.bucket_count() {
+        if let Operation::PartitionBuckets { bucket_count } = operation {
             reference.sort_by_key(|record| record.category(bucket_count));
-        } else if let Some(offsets) = operation.offsets(reference.len()) {
-            for ends in offsets.windows(2) {
-                reference[ends[0]..ends[1]].sort_by(T::order);
-            }
         } else {
             reference.sort_by(T::order);
         }

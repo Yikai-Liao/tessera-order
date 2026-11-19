@@ -10,7 +10,7 @@ import {
   revisionSampling,
 } from "../catalog.ts";
 import { type LocalRun, readPrepared, shardCases, summarizeLocal } from "../local/model.ts";
-import { parsePlan } from "../plan.ts";
+import { parseRetainedPlan } from "../plan.ts";
 import { type BencherReport, type Row, summarizeRows } from "./report.ts";
 
 /** Hosted matrix width; workflows obtain their matrix from this owner. */
@@ -51,7 +51,9 @@ export async function readPaired(directory: string, source: PairedSource, prepar
     throw new Error("Expected this run’s unmeasured prepared pair");
   for (const name of await readdir(directory)) {
     if (!name.startsWith("paired-")) continue;
-    const plan = parsePlan(JSON.parse(await readFile(join(directory, name, "plan.json"), "utf8")));
+    const plan = parseRetainedPlan(
+      JSON.parse(await readFile(join(directory, name, "plan.json"), "utf8")),
+    );
     if (JSON.stringify(plan) !== expectedPlan) throw new Error("Unexpected continuous plan");
     const run = JSON.parse(await readFile(join(directory, name, "local.json"), "utf8")) as LocalRun;
     runs.push(run);

@@ -9,14 +9,10 @@
 //! input order, and needs no `Copy`, `Clone`, `Default` or `Ord` on the
 //! records it moves.
 //!
-//! The other operations are the standard ones they are named after:
-//! [`partial_sort`], [`k_smallest`], [`k_largest`], [`select_nth`],
-//! [`select_nth_many`], [`sort_chunks`], [`argsort`] and [`partition`]. Each
-//! returns a result that its standard counterpart may return, with equal keys
-//! resolved as the stable [`sort`] resolves them. Every operation is stable, so
-//! names carry no `stable_` prefix; an `_unstable` suffix stays reserved for a
-//! cheaper variant. There are no `_by` comparator variants, because the radix
-//! engine needs keys, not comparisons.
+//! [`argsort`] returns indices in stable sorted order. [`select_nth`] places
+//! the same record as a stable sort would at a given position and leaves the
+//! order within either outer region unspecified. There are no `_by`
+//! comparator variants, because the radix engine needs keys, not comparisons.
 //!
 //! # Examples
 //!
@@ -43,6 +39,15 @@
 //! `Reverse` rather than reversing an ascending result, which would also
 //! reverse the order of equal keys.
 //!
+//! # Panics and unwinding
+//!
+//! Like Rust's [`slice::sort_by_key`], in-place operations keep every original
+//! record exactly once if the key function unwinds, including changes made
+//! through interior mutability. Recovery itself does not call the key
+//! function or roll back its side effects. Neither input order nor a valid
+//! partial result is guaranteed.
+//! [`argsort_by_key`] never moves the source records, even on unwind.
+//!
 //! # Memory
 //!
 //! Inputs larger than one 64 KiB tile are split by a stable block partition
@@ -52,7 +57,7 @@
 //! [`sort_by_key`]. Each tile-local MSD level also keeps a cursor table
 //! of up to 32 KiB on the stack, with at most 22 levels for 128-bit keys.
 //!
-//! Each call allocates scratch as needed and frees it before returning.
+//! Each call allocates scratch as needed and frees it on return or unwind.
 //!
 //! # Backend and Cargo features
 //!
@@ -78,21 +83,15 @@ mod cached;
 mod engine;
 #[cfg(feature = "rayon")]
 mod parallel;
-mod partition;
 
 #[cfg(test)]
 mod unwind;
 
-pub use algorithms::{
-    argsort, argsort_by_key, k_largest, k_largest_by_key, k_smallest, k_smallest_by_key,
-    partial_sort, partial_sort_by_key, select_nth, select_nth_by_key, select_nth_many,
-    select_nth_many_by_key, sort_chunks, sort_chunks_by_key,
-};
+pub use algorithms::{argsort, argsort_by_key, select_nth, select_nth_by_key};
 pub use engine::RadixKey;
 #[cfg(feature = "rayon")]
 #[allow(deprecated)]
 pub use parallel::{par_sort, par_sort_by_key, par_stable_sort, par_stable_sort_by_key};
-pub use partition::partition;
 
 /// Sorts keys in ascending order, keeping equal keys in input order.
 ///
@@ -126,16 +125,17 @@ pub fn sort<K: RadixKey>(values: &mut [K]) {
 ///
 /// # Key function
 ///
-/// `key` may be called several times for each record, in any order. It should
-/// return the same key for a record throughout one call. If it does not, the
-/// sort may panic or return with the result in unspecified order; either way
-/// the slice still holds every record exactly once.
+/// `key` may be called any number of times per record, in any order. It must
+/// return the same key for a record throughout the call to obtain a stable
+/// sorted result. Inconsistent keys may cause a panic or a return with the
+/// result in unspecified order; either way every record remains in the slice.
 ///
 /// # Panics
 ///
-/// If `key` panics, the panic propagates to the caller after every record has
-/// been moved back into `values`, in an unspecified order. No record is
-/// dropped or duplicated.
+/// If `key` unwinds, the panic propagates after `values` again holds every
+/// original record exactly once, in an unspecified order. Changes made
+/// through interior mutability remain visible; side effects are not rolled
+/// back. Recovery does not call `key`.
 ///
 /// # Memory
 ///
@@ -184,13 +184,17 @@ pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], k
 ///
 /// # Key function
 ///
-/// `key` is called exactly once per record, in input order, when `values` holds
-/// at least two records that are not zero-sized; otherwise it is not called.
+/// On success, `key` is called exactly once per record, in input order, unless
+/// `values` has fewer than two records or `T` is zero-sized, in which case it
+/// is not called. The returned key for each record is used as-is; `key` need
+/// not be repeatable.
 ///
 /// # Panics
 ///
-/// If `key` panics, the panic propagates to the caller with every record still
-/// in `values`, in an unspecified order. No record is dropped or duplicated.
+/// If `key` unwinds, the panic propagates with every original record still in
+/// `values` exactly once, in an unspecified order. Changes made through
+/// interior mutability remain visible; side effects are not rolled back.
+/// Recovery does not call `key`.
 ///
 /// # Memory
 ///

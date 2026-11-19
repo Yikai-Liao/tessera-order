@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Complete stable category distribution for algorithm adapters.
-//! Classification, movement and boundary output complete within one
-//! invocation; sorting's order probes, rank requirements and recursive
-//! finishing are not involved.
+//! A single stable distribution for cached-key sorting. No order probe or
+//! recursive finishing may interrupt the forward replay of cached digits.
 
 use super::{
     block,
-    key::{Extract, KeyDigit},
+    key::{ByKey, KeyDigit, RadixKey},
     thresholds::TILE_BYTES,
     tile,
 };
-use alloc::vec::Vec;
+#[cfg(test)]
+mod tests;
 
 /// Largest category count one distribution moves, derived from block fan-out,
 /// tile table capacity and category-ID storage.
@@ -27,17 +26,18 @@ pub(crate) const MAX_PARTITION_BUCKETS: usize = {
 };
 
 /// Stably moves at least two sized records into the `2^radix` categories that
-/// `extractor` assigns, evaluating it exactly once per record, in input order.
+/// `category` assigns, evaluating it exactly once per record, in input order.
 /// Cached-key sorting relies on that order to replay keys by call count.
 ///
-/// Returns the cumulative end of every category, including empty ones. Keys
-/// must be below `2^radix`. An extractor panic propagates after every record
+/// Keys must be below `2^radix`. An extractor panic propagates after every record
 /// is restored to `values`, in unspecified order.
-pub(crate) fn distribute<T, E: Extract<T>>(
+pub(crate) fn distribute<T, K: RadixKey>(
     values: &mut [T],
     radix: usize,
-    mut extractor: E,
-) -> Vec<usize> {
+    category: impl FnMut(&T) -> K,
+) {
+    // ByKey retains category IDs; direct-key scatter may evaluate the key again.
+    let mut extractor = ByKey(category);
     debug_assert!(values.len() >= 2 && size_of::<T>() != 0);
     debug_assert!(1 << radix <= MAX_PARTITION_BUCKETS);
     if values.len() <= tile::capacity::<T>(TILE_BYTES) {
@@ -49,6 +49,6 @@ pub(crate) fn distribute<T, E: Extract<T>>(
             KeyDigit::new(&mut extractor, 0),
             &mut block::Buffers::new(),
             &mut |_, _, _, _| {},
-        )
+        );
     }
 }

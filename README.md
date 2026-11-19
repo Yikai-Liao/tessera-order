@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Stable radix ordering with O(√n) auxiliary memory.</strong><br>
-  One linear-time engine behind sorting and the standard ordering operations, safe for records that own resources.
+  One linear-time engine for stable sorting, argsort and single-rank selection, safe for records that own resources.
 </p>
 
 <p align="center">
@@ -25,10 +25,10 @@
 
 An LSD radix sort is stable and runs in linear time, but it needs a second buffer as large as the input. Comparison sorts avoid that buffer and pay O(n log n) comparisons instead. Tessera keeps the radix sort's linear time and stability and bounds the extra memory to O(√n).
 
-Sorting is the foundation, not the only product. Every operation is one request to the same engine. Rank operations (`partial_sort`, `select_nth`, `select_nth_many`, `k_smallest`, `k_largest`) name the ranks of the stably sorted order that the result needs, and the engine stops refining where no requested rank remains. `argsort` and `sort_chunks` run complete sorts on index payloads or chunks. `partition` and `sort_by_cached_key` reuse the engine's stable distribution. No operation brings its own kernel, so an engine improvement reaches all of them, and the full sort, the complete request, is measured first.
+The same engine sorts records, sorts index payloads for `argsort`, and can skip further work on bands that do not contain the rank requested by `select_nth`. Cached-key sorting can reuse the engine's stable distribution when the keys differ only in a narrow bit window.
 
 - **Stable**, also for descending keys.
-- **O(√n) auxiliary memory**, through a stable in-place block partition and a bounded tile buffer.
+- **O(√n) sorting scratch**, through a stable in-place block partition and a bounded tile buffer. Cached keys and argsort's index output use O(n) space; parallel sorting uses O(P√n) scratch for P participating threads.
 - **Adaptive.** Sorted, reverse-sorted, nearly sorted and heavily repeated inputs take shortcuts, and constant key bits are skipped.
 - **Any record type.** No `Copy`, `Clone`, `Default` or `Ord` needed. Records are moved, never duplicated, even if the key function misbehaves or panics.
 - **Wide keys.** Integers up to 128 bits, `f32` and `f64` in `total_cmp` order, and `Reverse<K>`.
@@ -62,21 +62,16 @@ These examples use the unreleased 0.2 names. The published 0.1 package calls the
 |---|---|
 | `sort(&mut [K])` | Sort keys themselves |
 | `sort_by_key(&mut [T], F)` | Sort any records by a key computed by `F` |
-| `sort_by_cached_key(&mut [T], F)` | Sort by a key evaluated exactly once per record |
 
-The following additions are new in 0.2 and **unreleased**. They require a development checkout as described in the [slice-operation guide](docs/guide/getting-started.md#partial-sorting-and-selected-ranks). Each is the standard operation of the same name, with equal keys resolved as the stable sort resolves them.
+The following additions are new in 0.2 and **unreleased**. They require a [development checkout](docs/guide/getting-started.md#try-the-development-api). All resolve equal keys as a full stable sort would.
 
 | Development API | Use |
 |---|---|
-| `partial_sort` / `_by_key` | Sort one rank range, partitioning the rest around it |
-| `k_smallest`, `k_largest` / `_by_key` | Move the k smallest or largest records to the front, sorted |
+| `sort_by_cached_key(&mut [T], F)` | Sort by a key computed once per record on nontrivial inputs |
 | `select_nth` / `_by_key` | Place one ranked record and partition around it |
-| `select_nth_many` / `_by_key` | Place several ranked records and partition between them |
-| `sort_chunks` / `_by_key` | Sort every fixed-length chunk independently |
 | `argsort` / `_by_key` | Return sorted indices without moving source records |
-| `partition` | Place predicate matches before nonmatches, keeping input order in both |
 
-The [slice-operation guide](docs/guide/getting-started.md#partial-sorting-and-selected-ranks) and [partition guide](docs/guide/getting-started.md#partitions-and-groups) give examples. [Semantics](conformance/semantics.md#serial-slice-operations) distinguishes mandatory output and request metadata from sorting scratch.
+See the [guide](docs/guide/getting-started.md#select-one-rank) for examples and [migration from earlier development snapshots](docs/guide/getting-started.md#migrate-from-earlier-development-snapshots).
 
 Tessera does not take a comparator: an arbitrary `Ordering` cannot be turned into radix digits.
 

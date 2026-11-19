@@ -48,15 +48,11 @@ pub(crate) fn sort<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], mut key:
         // The distribution classifies each record exactly once, in input
         // order, so its `n`th call belongs to the `n`th cached key.
         let mut next = 0;
-        engine::distribute(
-            values,
-            width,
-            ByKey(|_: &T| {
-                let digit = (keys[next] >> shift) & mask;
-                next += 1;
-                digit
-            }),
-        );
+        engine::distribute(values, width, |_: &T| {
+            let digit = (keys[next] >> shift) & mask;
+            next += 1;
+            digit
+        });
     } else {
         sort_by_index(values, keys);
     }

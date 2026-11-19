@@ -23,13 +23,7 @@ A docs-only commit inside a verified PR then runs formatting, lints and Docs onl
 
 ## Measure operations by entry ownership
 
-Implemented as [operation cases](../development/continuous-benchmarks.md#cases) in the continuous plan, with two differences. Each operation has two random 65,536-record cases instead of a group at 1M: they detect entry and finishing regressions, while the sorting cases already cover the shared engine. The operation cases run on every measured PR instead of being selected by entry ownership. Selection would save little: the operation cases are a small part of the measurement budget, and most library changes touch shared engine code, which selects everything anyway. An entry-only change could skip the sorting cases, but only through a second ownership table beside `ROUTES`, one more rule to keep correct. Revisit selection if operation coverage grows to a size that dominates the shards. The plan as proposed:
-
-
-- **Operation groups.** The continuous plan gains small groups beside sorting: rank operations (`partial_sort`, `select_nth`, `select_nth_many`, `k_smallest`), argsort, chunk sorting, binary partition and cached-key sorting. Each group has two to four representative cases (for example random u64, 16-byte rows and one repeated-key input at 1M) rather than the sorting plan's coverage.
-- **Selection.** A library source file is either the entry module of specific groups (`algorithms.rs` for rank operations, argsort and chunk sorting; `partition.rs` for partition; `cached.rs` for cached keys; `parallel.rs` for the four-thread cases) or shared engine code. A shared change selects every group; an entry-only change selects its groups only. The table lives in the router beside `ROUTES`, and an unnamed library file counts as shared.
-- **Per-group reuse.** Fingerprint reuse applies per group, so a later push re-measures only groups whose head or baseline inputs changed.
-- **Budget.** Sorting-only changes keep today's shards. Selected groups add cases to the same shards and stay within the 4-minute target. Larger operation coverage belongs to explicit plans, not to every PR.
+The [continuous plan](../development/continuous-benchmarks.md#cases) uses a small set of operation cases to detect entry and finishing regressions; the sorting cases already cover the shared engine. Operation cases run on every measured PR rather than being selected by entry ownership. That selection would save little: most library changes touch shared engine code and would select every group. An entry-only change could skip some cases, but only through a second ownership table beside `ROUTES`. Revisit that trade-off if operation coverage grows to dominate the shards; keep broader operation comparisons in explicit plans.
 
 ## Keep cross-algorithm comparisons out of PR timing
 

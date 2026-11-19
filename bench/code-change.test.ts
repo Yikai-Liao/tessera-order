@@ -90,6 +90,29 @@ test("shared code statistics exclude comments and tests and support commits and 
   const moved = await codeChange("HEAD", undefined, root);
   assert.equal(moved.current, 9);
   assert.ok(moved.files.some((file) => file.path === "engine/refine.rs" && file.current === 5));
+
+  // Follow the test-only declaration across the move without excluding older
+  // revisions where this file was part of production.
+  await write("lib.rs", "mod engine;\n#[cfg(test)] mod unwind;\n");
+  git("add", ".");
+  git("commit", "-qm", "make unwind test-only at the crate root");
+  const testOnly = await codeChange("HEAD^", "HEAD", root);
+  assert.deepEqual(
+    testOnly.files.find((file) => file.path === "unwind.rs"),
+    {
+      path: "unwind.rs",
+      baseline: 1,
+      current: 0,
+      added: 0,
+      removed: 1,
+    },
+  );
+  await write("lib.rs", "mod engine;\n");
+  await write("engine/mod.rs", "mod refine;\n#[cfg(test)] mod unwind;\n");
+  git("mv", "rust/tessera-order/src/unwind.rs", "rust/tessera-order/src/engine/unwind.rs");
+  const movedTestOnly = await codeChange("HEAD", undefined, root);
+  assert.equal(movedTestOnly.added + movedTestOnly.removed, 0);
+  assert.ok(!movedTestOnly.files.some(({ path }) => path.endsWith("unwind.rs")));
   await rm(join(root, "rust/tessera-order"), { recursive: true });
   assert.equal((await codeChange("HEAD", undefined, root)).current, 0);
 });

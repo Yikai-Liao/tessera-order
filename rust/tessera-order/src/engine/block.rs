@@ -46,7 +46,7 @@
 
 use crate::engine::trace::{self, Event};
 #[cfg(test)]
-use crate::unwind;
+use crate::engine::unwind;
 use alloc::vec::Vec;
 use core::{marker::PhantomData, mem::MaybeUninit, ops::Range, ptr};
 

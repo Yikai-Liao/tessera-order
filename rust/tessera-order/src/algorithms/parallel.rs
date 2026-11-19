@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Rayon entry points for sorting.
-//!
-//! The parallel engine shares the serial probes and node/tile sorting.
-//! Large inputs partition the root across disjoint shards, then transfer each
-//! bucket directly into its exclusive final band and finish it in that task.
-//! Small inputs and one-thread pools use the serial engine.
+//! Rayon sorting entry points and their record and extractor bounds.
 
 use crate::engine::{self, ByKey, Direct, RadixKey};
 

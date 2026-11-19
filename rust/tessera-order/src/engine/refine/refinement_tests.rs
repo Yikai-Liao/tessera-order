@@ -272,7 +272,7 @@ fn partial_child_failure_restores_records_and_releases_workspace() {
             let mut workspace = Workspace::new();
             let entered = Cell::new(false);
             let mut calls = 0u64;
-            let outcome = crate::unwind::catch(|| {
+            let outcome = crate::engine::unwind::catch(|| {
                 let mut extractor = ByKey(|record: &Owned| {
                     calls += 1;
                     if record.seen.replace(true) {

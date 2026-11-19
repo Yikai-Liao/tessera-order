@@ -19,14 +19,15 @@ Full sorting and single-rank selection share node planning, leaf finishing and s
 
 ## Knowledge boundaries
 
-The private `engine/` module exposes complete operations: `sort`, `select_nth`, `distribute` and, with Rayon, `par_sort`. The public adapters supply extractors or build index and key buffers; they do not assemble rank requests, manage engine workspace or name movement modules. `engine/mod.rs` reexports existing operations rather than adding forwarding calls or a policy trait; all paths below are relative to `src/engine/` unless marked as adapters.
+`src/lib.rs` documents the crate and reexports its public API. `src/algorithms.rs` and its submodules implement the public ordering operations. They supply extractors or build index and key buffers; they do not assemble rank requests, manage engine workspace or name movement modules. The private `engine/` module exposes complete operations: `sort`, `select_nth`, `distribute` and, with Rayon, `par_sort`. `engine/mod.rs` reexports these operations without forwarding calls or a policy trait. The paths below are relative to `src/engine/`.
 
 Keeping every module at crate root allowed an adapter to depend on a block directory or a tile guard. The module boundary removes that dependency possibility without changing execution. A separate public engine crate would force lifetime, extractor and allocation contracts to stabilize before the current consumers have established them; that remains deferred.
 
 | Owner | Complete responsibility | Consumers need to know |
 |---|---|---|
-| `../algorithms.rs` | Build and sort the output indices for argsort; adapt the public selection calls | Complete sort and selection, not movement state or planner details |
-| `../cached.rs` | Cache encoded keys, detect order and variation, and choose distribution or an index permutation | Complete distribution or sort, not their scratch or intermediate boundaries |
+| `../algorithms.rs` | Define serial sort, argsort and selection; build and sort the output indices for argsort | Complete sort and selection, not movement state or planner details |
+| `../algorithms/cached.rs` | Cache encoded keys, detect order and variation, and choose distribution or an index permutation | Complete distribution or sort, not their scratch or intermediate boundaries |
+| `../algorithms/parallel.rs` | Define the feature-gated sorting API and its record and extractor bounds | Complete parallel sort, not its scheduling or ownership transfer |
 | `distribution.rs` | Stable finite-category distribution and its storage lifetime | Category keys in a bounded bit window; no returned boundaries |
 | `refine.rs` | Selection bounds, rank projection, root preparation, default tile budget, candidate-bit progress and ordered refinement. Serial and parallel entries preserve actual variation and narrow a 128-bit key through one `KeyHalf` (`key.rs`) | Final band ranges and complete partition and finishing operations |
 | `workspace.rs` | Reusable tile and block capacity owned inside refinement | Capacity is reusable after restoration; no live movement state survives an operation |

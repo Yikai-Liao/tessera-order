@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Test helper for observing panic recovery across record-moving operations.
+//! Test helper for observing the engine's panic recovery.
 
 use alloc::boxed::Box;
 use core::any::Any;

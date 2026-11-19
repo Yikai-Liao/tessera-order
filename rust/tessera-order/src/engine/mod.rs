@@ -16,6 +16,9 @@ mod tile;
 mod trace;
 mod workspace;
 
+#[cfg(test)]
+mod unwind;
+
 pub mod thresholds;
 
 pub use key::RadixKey;

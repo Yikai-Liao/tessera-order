@@ -24,6 +24,8 @@ const SOURCES = ["rust/tessera-order/src/", "rust/tessera-sort/src/"];
 // old engine traversal becomes engine/refine. API and trace code stay excluded.
 const ENGINE =
   /^rust\/tessera-(?:order|sort)\/src\/((?:engine\/)?(?:block|key|portable_simd|scan|unwind)(?:\.rs$|\/.*\.rs$)|engine(?:\.rs$|\/(?:refine|plan|parallel|refinement_tests)(?:\.rs$|\/.*\.rs$)))/;
+// These module roots declare children in scope but do not contribute lines.
+const MODULE_ROOT = /\/src\/(lib\.rs|engine\/mod\.rs)$/;
 
 /** Compare core production lines from commits or the working tree; owns temporary snapshots. */
 export async function codeChange(
@@ -46,7 +48,7 @@ export async function codeChange(
       )
     )
       .split("\0")
-      .filter((path) => ENGINE.test(path));
+      .filter((path) => ENGINE.test(path) || MODULE_ROOT.test(path));
     const files = new Map<string, string>();
     if (!paths.length) return files;
     const tree = join(temporary, revision ?? "working");
@@ -59,7 +61,8 @@ export async function codeChange(
     }
     const excluded: string[] = [];
     for (const path of new Set(paths)) {
-      const relative = ENGINE.exec(path)![1];
+      const engine = ENGINE.exec(path);
+      const relative = (engine ?? MODULE_ROOT.exec(path))![1];
       const source = await readFile(join(tree, "src", relative), "utf8").catch(
         (error: NodeJS.ErrnoException) => {
           if (!revision && error.code === "ENOENT") return "";
@@ -67,8 +70,11 @@ export async function codeChange(
         },
       );
       const { lines, testModules } = production(source);
-      files.set(relative, lines.length ? `${lines.join("\n")}\n` : "");
-      const directory = relative.endsWith("/mod.rs") ? dirname(relative) : relative.slice(0, -3);
+      if (engine) files.set(relative, lines.length ? `${lines.join("\n")}\n` : "");
+      const directory =
+        relative === "lib.rs" || relative.endsWith("/mod.rs")
+          ? dirname(relative)
+          : relative.slice(0, -3);
       for (const name of testModules)
         excluded.push(directory === "." ? name : `${directory}/${name}`);
     }

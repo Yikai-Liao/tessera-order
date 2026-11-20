@@ -1,6 +1,6 @@
 # Working on Tessera
 
-Build a mature, small and reliable sorting library, with a shared benchmark system for local revision comparisons, PR feedback and comparisons with other sorting algorithms. Preserve the existing figures. Prefer fewer concepts, states and independently maintained rules over shorter syntax or more abstraction. Code and documentation are in English.
+Build a small, reliable ordering engine for high-performance algorithms and ordered containers, with a shared benchmark system for local revision comparisons, PR feedback and comparisons with other sorting algorithms. Preserve the existing figures. Prefer fewer concepts, states and independently maintained rules over shorter syntax or more abstraction. Code and documentation are in English.
 
 ## Start with the task
 
@@ -32,6 +32,7 @@ Start performance work with a small representative selection, then expand eviden
 
 Use the `software-design-philosophy` skill for structural engine changes. Judge maintainability by change amplification, cognitive load and hidden dependencies, not by line or file count.
 
+- **Optimize the shared ordering engine.** Treat today’s algorithms as its first consumers. Keep each public operation a thin adapter that states the order or ranks it needs. When an operation is slow, trace the redundant key reads, classifications or record moves to the engine primitive that owns them. Choose a representation or algorithm that other consumers can reuse. A speedup confined to a bespoke implementation of one API does not justify adding it to the engine. Measure complete operations against the standard library and competitive alternatives, and guard full-sort performance when improving another operation.
 - **Trace real changes.** Before choosing a boundary, follow tasks such as changing sampling, tile capacity, partition selection, block layout or task size. Each rule has one owner; consumers do not reconstruct it. Use the [engine vocabulary](docs/design/engine.md#vocabulary): subproblems, buckets, tiles, blocks, primitives, cost models and scheduling are distinct.
 - **Deep operations, not wrappers.** A boundary hides decisions or owns a complete invariant-preserving operation. Do not add a type, trait or forwarding layer merely to name a concept.
 - **One analysis for serial and parallel.** Partition choice, bucket meaning and finishing rules have one authority; parallel code differs only in scheduling and ownership transfer.

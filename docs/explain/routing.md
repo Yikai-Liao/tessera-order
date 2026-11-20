@@ -95,6 +95,12 @@ Serial and parallel roots share this decision. A parallel root shards equality a
 
 While the block partition completes, each requested child that fits a tile is finished **at once**, while its records are still in cache. Larger requested children are routed again after the partition. A requested tile is fully sorted even when only one rank is needed.
 
+## When the result is a permutation
+
+An index word only needs enough low bits to name a source position. For a dense argsort the engine first counts the highest varying digit. It writes each source position into that digit’s band, with the next key bits in the spare high bits of the word. Sorting the band by those high bits keeps the source positions attached. Only a group whose packed prefixes tie can need another read of the source keys. Emitting positions in input order and refining them stably preserves equal-key order.
+
+Cached-key sorting uses the same source order for a wide key window. A dense permutation moves payloads along its cycles. A sparse permutation can move its ordered source runs directly.
+
 ## Summary
 
 | Input | Route | Cost |

@@ -149,6 +149,25 @@ fn argsort_keeps_source_and_float_bits() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "large input crosses the machine-word prefix boundary")]
+fn argsort_refines_prefix_ties_and_preserves_complete_ties() {
+    // Many source indices share the same high prefix. Their distinguishing
+    // low bits cannot fit above the index in one word, even on a 64-bit host.
+    let keys: Vec<_> = (0..16_393u64)
+        .map(|i| {
+            let mixed = i.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+            (u128::from(mixed >> 56) << 120) | u128::from((mixed >> 31) & 7)
+        })
+        .collect();
+    let mut expected: Vec<_> = (0..keys.len()).collect();
+    expected.sort_by_key(|&i| keys[i]);
+    assert_eq!(argsort(&keys), expected);
+    let mut rows: Vec<_> = (0..keys.len()).collect();
+    sort_by_cached_key(&mut rows, |&i| keys[i]);
+    assert_eq!(rows, expected);
+}
+
+#[test]
 fn argsort_unwind_keeps_source_positions_and_interior_edits() {
     let source = [3u32, 1, 2].map(|id| (Box::new(id), Cell::new(0)));
     let mut edits = [0; 4];

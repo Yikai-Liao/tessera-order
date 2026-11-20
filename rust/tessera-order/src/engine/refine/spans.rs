@@ -16,29 +16,28 @@ struct Span {
 pub(super) struct SourceOrder(Vec<Span>);
 
 impl SourceOrder {
-    /// A serial finisher owns the complete subproblem. Parallel roots hand
-    /// their buckets to finishers before trying serial sparse movement.
-    pub(super) fn finish<T, E: Extract<T>>(
-        records: &mut [T],
+    /// A single digit already finishes a narrow window. Wider nodes can use
+    /// compact source spans, budgeted for the records they will eventually move.
+    pub(super) fn for_node<T, E: Extract<T>>(
+        records: &[T],
         varying: u128,
         required: Requirement,
         extractor: &mut E,
-    ) -> bool {
-        if plan::complete_digit(varying).is_none()
-            && let Some(order) = Self::discover(records, extractor, required)
-        {
-            order.apply(records);
-            return true;
+        record_bytes: usize,
+    ) -> Option<Self> {
+        if plan::complete_digit(varying).is_some() {
+            return None;
         }
-        false
+        Self::discover(records, extractor, required, record_bytes)
     }
 
     /// Resolves the requested order when the exceptional positions fit the
     /// workspace. An abandoned construction has only read the source.
-    pub(super) fn discover<T, E: Extract<T>>(
+    fn discover<T, E: Extract<T>>(
         records: &[T],
         extractor: &mut E,
         required: Requirement,
+        record_bytes: usize,
     ) -> Option<Self> {
         let len = records.len();
         if len < plan::KEY_SAMPLE_LEN {
@@ -49,7 +48,7 @@ impl SourceOrder {
         // one outlier can interrupt a source run and split a destination run.
         let entry_bytes = size_of::<(E::Value, usize)>()
             + size_of::<Range<usize>>()
-            + 3 * (size_of::<Span>() + size_of::<T>());
+            + 3 * (size_of::<Span>() + record_bytes);
         let tile = (TILE_BYTES / entry_bytes).max(1);
         let limit = tile * len.div_ceil(tile).isqrt();
         // Use nearby pairs from across the input to estimate how many
@@ -258,6 +257,15 @@ impl SourceOrder {
         })
     }
 
+    /// Emit an index result directly from its contiguous runs.
+    pub(super) fn into_indices(self) -> Vec<usize> {
+        let mut indices = Vec::with_capacity(self.0.last().map_or(0, |s| s.end));
+        for (_, source) in self.spans() {
+            indices.extend(source);
+        }
+        indices
+    }
+
     /// Gather isolated records first. Every longer span comes from the same
     /// monotone subsequence, so all its source and destination ranges have
     /// the same relative order. Move each such span at most once.
@@ -347,7 +355,13 @@ mod tests {
                 let mut ids: Vec<_> = (0..len).collect();
                 let mut records: Vec<_> = ids.iter_mut().collect();
                 let mut extract = ByKey(|r: &&mut usize| keys[**r]);
-                let order = SourceOrder::discover(&records, &mut extract, required).unwrap();
+                let order = SourceOrder::discover(
+                    &records,
+                    &mut extract,
+                    required,
+                    size_of::<&mut usize>(),
+                )
+                .unwrap();
                 order.apply(&mut records);
                 if let Requirement::Nth(index) = required {
                     assert_eq!(*records[index], expected[index]);

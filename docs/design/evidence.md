@@ -250,7 +250,13 @@ The repeat does not erase the initial losses: several directions or control wind
 
 Local linked comparisons against `ddb2f6d` on a Ryzen 7 8845H showed why sparse discovery follows the insertion probe. With 65,536 records and 1% adjacent swaps, trying sparse discovery first gave candidate speeds of 0.31× for u64, 0.68× for 16-byte rows and 0.58× for 128-byte records, taking the prior revision as 1.00×. Insertion can resolve those swaps directly. For swaps between distant quarters of the input, the span representation instead moves whole ordered intervals. At the same length, a subsequent linked screen measured 1.95×, 2.40× and 3.50× against the primary prior placement. These are complete serial calls.
 
-A whole-root serial attempt also competed with four-worker sorting. In the paired process comparison on one million records with distant swaps, candidate speeds were 0.73×, 0.80× and 0.96× in the same record-width order. This motivates admitting the operation at a serial finisher, after the scheduler has assigned the slice. Parallel acceptance requires measurements of those complete calls.
+A whole-root serial attempt also competed with four-worker sorting. In the paired process comparison on one million records with distant swaps, candidate speeds were 0.73×, 0.80× and 0.96× in the same record-width order. This motivates admitting the operation at a serial finisher, after the scheduler has assigned the slice. After scheduling first, the corresponding four-worker medians were 1.00×, 1.01× and 1.00×. The remaining million-record random and skew controls in that comparison ranged from 0.99× to 1.02×. These are paired process comparisons.
+
+## Stable source permutations
+
+A local nine-block comparison on a Ryzen 7 8845H measured complete argsort calls on direct u64, 16-byte rows and 128-byte records, at 65,536 and one million records. Inputs covered random keys, 16 distinct keys, 99% skew, adjacent swaps and distant swaps. With stable std index ordering as 1.00×, the span and packed-prefix implementation achieved 1.77–14.75× over the 30 cases. Against the std unstable index adapter with source indices breaking ties, the range was 2.62–16.68×. Both comparisons checked exact source positions. These ratios compare complete algorithms on this host.
+
+Cached-key sorting can consume a sparse source order directly. On 65,536 wide records with 99% skew and up to 65,536 category IDs, expanding the order into individual indices and following cycles achieved 0.87× against std stable category grouping. Moving the source intervals intact achieved 2.70×. The same final comparison covered random and skewed inputs at all three record widths, with speeds of 1.94–7.08×. It includes category extraction, payload movement and offset output.
 
 ## Serial slice-operation baseline
 

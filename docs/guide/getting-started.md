@@ -92,7 +92,7 @@ Adjust the path to your checkout. These APIs are serial and need no feature flag
 
 ## Select one rank
 
-`select_nth` and `select_nth_by_key` return the records before the requested zero-based rank, the record at that rank, and the records after it. A full stable sort defines the record at the rank and the membership of both sides, including when ties cross the rank. The two sides need not be sorted. An index outside the slice panics before any record moves or any key is evaluated.
+`select_nth` and `select_nth_by_key` return the records before the requested zero-based rank, the record at that rank, and the records after it. A full stable sort defines the record at the rank and the membership of both sides, including when ties cross the rank. Equal-key records keep their input order on both sides, so either side can be refined again. An index outside the slice panics before any record moves or any key is evaluated.
 
 ```rust
 let mut rows = [(2u32, "first"), (1, "middle"), (2, "last")];

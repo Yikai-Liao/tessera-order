@@ -41,9 +41,8 @@ fn permutation<T: BenchmarkRecord>(values: &[T], input: &[T]) -> Result<(), Stri
     Ok(())
 }
 
-/// Checks the selected rank and each side's membership, irrespective of order.
-/// Stable selection compares exact identities; weak selection compares keys
-/// and independently checks that every payload record survived intact.
+/// Checks the selected rank and both memberships. For stable selection,
+/// a stable completion of each side must reproduce the exact reference.
 pub(super) fn selection<T: BenchmarkRecord>(
     values: &[T],
     input: &[T],
@@ -69,7 +68,7 @@ pub(super) fn selection<T: BenchmarkRecord>(
     }
     let same_members = |values: &[T], reference: &[T]| {
         let mut members: Vec<_> = values.iter().collect();
-        members.sort_unstable_by(|a, b| a.order(b).then_with(|| a.index().cmp(&b.index())));
+        members.sort_by(|a, b| a.order(b));
         members.iter().zip(reference).all(|(a, b)| matches(a, b))
     };
     if !same_members(&values[..index], &reference[..index])
@@ -85,18 +84,24 @@ mod tests {
     use super::*;
     use crate::case::Row;
     #[test]
-    fn stable_selection_checks_ranked_identity_and_unordered_membership() {
-        let reference: Vec<_> = (0..5).map(|row| Row { key: 0u64, row }).collect();
+    fn stable_selection_checks_tie_order_and_allows_mixed_keys_within_a_side() {
+        let reference: Vec<_> = [0u64, 1, 1, 1, 1, 1, 2]
+            .into_iter()
+            .enumerate()
+            .map(|(row, key)| Row {
+                key,
+                row: row as u32,
+            })
+            .collect();
         let mut values = reference.clone();
-        values.swap(0, 1);
-        values.swap(3, 4);
-        assert!(selection(&values, &reference, &reference, 2, true).is_ok());
-
-        let mut wrong = values.clone();
-        wrong.swap(0, 3); // The pivot is correct, but records crossed it.
-        assert!(selection(&wrong, &reference, &reference, 2, true).is_err());
-        values.swap(1, 2); // The pivot has the right key but wrong identity.
-        assert!(selection(&values, &reference, &reference, 2, true).is_err());
+        values[..3].rotate_left(1);
+        values[4..].rotate_right(1);
+        assert!(selection(&values, &reference, &reference, 3, true).is_ok());
+        for (a, b) in [(0, 1), (5, 6), (0, 5), (0, 3)] {
+            let mut wrong = values.clone();
+            wrong.swap(a, b);
+            assert!(selection(&wrong, &reference, &reference, 3, true).is_err());
+        }
     }
 
     #[test]

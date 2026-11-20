@@ -19,6 +19,7 @@ pub(crate) mod parallel;
 mod plan;
 #[cfg(test)]
 mod refinement_tests;
+mod spans;
 
 use crate::engine::tile;
 
@@ -457,6 +458,9 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             self.scratch
                 .tile
                 .sort::<E>(records, varying, self.extractor);
+            return;
+        }
+        if spans::SourceOrder::finish(records, varying, required, self.extractor) {
             return;
         }
         let plan = plan_node(records, varying, self.tile_len, self.extractor);

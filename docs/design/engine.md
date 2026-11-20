@@ -35,6 +35,7 @@ Keeping every module at crate root allowed an adapter to depend on a block direc
 | `refine/plan.rs` | Bounded sampling and executable node partition decisions | Records, candidate variation and tile capacity go in; a node decision comes out |
 | `tile.rs`, `tile/plan.rs` | Capacity, complete leaf planning, scratch allocation, cached classification, counting passes and restoration | Finish a cursor-bounded slice; no raw pointer, cursor layout or guard crosses the boundary |
 | `block.rs`, `block/` | Physical block storage, stable bucket chains, ledger costs, completion and recovery | A `Classify` bucket per record goes in; bucket boundaries and completed bands come out |
+| `refine/spans.rs` | Discover a bounded sparse permutation and apply its contiguous spans | Every long span belongs to one monotone source sequence. Key evaluation ends before record movement starts. |
 | `refine/parallel.rs` | Shard count, task scheduling and scratch pooling for the shared decisions | Exclusive bucket borrows and the planner's decision, not a second cost model |
 
 A change to sampled occupancy or a leaf estimate stays in planning and does not touch record movement. A change to tile scratch layout stays with its counting and recovery operation. Tile cursor size, record capacity, alignment padding and table capacity derive from the cursor type and the shared byte budget, and planning consumes those facts. Block metadata costs are derived beside the physical representation (`finish::serial_descriptor_bytes`), not copied into the strategy model.

@@ -39,6 +39,16 @@ Next, one scan computes the [varying bits](keys.md#varying-bits). If no bit vari
 
 Only now is tile and block scratch allocated. Budgeted insertion on a larger unsorted input may already have allocated its probe-key buffer; confirmed ordered and constant inputs never allocate.
 
+## Sparse source order
+
+A serial finisher can resolve a node by describing where the records come from. It first gives a digit that covers every varying bit its usual counting or distribution path. For wider key windows, a sample of adjacent pairs estimates whether a short list of exceptional records could explain the disorder. Construction stops when the entries exceed a square-root workspace budget. A failed attempt leaves all records in place.
+
+For mostly ordered input, the finisher keeps a stack of ordered source intervals. At an inversion it removes both endpoints. Each removed pair contains an endpoint that any ordered subsequence must exclude, and the pairs have disjoint positions. If deleting *k* records would suffice, at most *2k* enter the exception list. The finisher sorts these records by key and original position, then merges them with the retained intervals.
+
+A frequent sampled key offers another ordered subsequence, all its occurrences in input order. For full sorting, the exceptions fill the intervals below and above that key. For a rank inside its equal band, the finisher counts how many exceptions belong on each side. It shifts just enough exception slots across the cut to put the selected occurrence at its rank. Equal keys in both streams retain their input order.
+
+Both constructions yield a sequence of source spans. Only isolated records need parking in scratch. The longer spans come from the same ordered subsequence, so the finisher can move them in bulk and then restore the isolated records. A parallel root hands complete buckets to its finishers before they try this serial work.
+
 ## Nodes and tiles
 
 From here on, the engine works on subproblems. Full sorting refines every unfinished band; single-rank selection uses the same plan but only refines the band containing the requested rank. A partition always completes stable movement for every band, including those that receive no further key analysis. The [engine reference](../design/engine.md#ordered-rank-requirements) owns projection and workspace invariants.

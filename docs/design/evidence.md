@@ -246,6 +246,12 @@ The repeat does not erase the initial losses: several directions or control wind
 
 **Disposition:** retain the internal simplification with timing acceptance open. Keep the individual differences above unresolved rather than tune source layout to a favorable copy. Partial-operation, segmented and Rayon timing, broader key widths and platforms remain uncovered; this screen closes none of the earlier foundation timing debt.
 
+## Sparse order as source spans
+
+Local linked comparisons against `ddb2f6d` on a Ryzen 7 8845H showed why sparse discovery follows the insertion probe. With 65,536 records and 1% adjacent swaps, trying sparse discovery first gave candidate speeds of 0.31× for u64, 0.68× for 16-byte rows and 0.58× for 128-byte records, taking the prior revision as 1.00×. Insertion can resolve those swaps directly. For swaps between distant quarters of the input, the span representation instead moves whole ordered intervals. At the same length, a subsequent linked screen measured 1.95×, 2.40× and 3.50× against the primary prior placement. These are complete serial calls.
+
+A whole-root serial attempt also competed with four-worker sorting. In the paired process comparison on one million records with distant swaps, candidate speeds were 0.73×, 0.80× and 0.96× in the same record-width order. This motivates admitting the operation at a serial finisher, after the scheduler has assigned the slice. Parallel acceptance requires measurements of those complete calls.
+
 ## Serial slice-operation baseline
 
 This baseline covers the earlier development surface, including operations [removed before 0.2](algorithm-extensions-proposal.md#release-surface-alignment). The first serial extensions shared one rank-requirement authority and one refinement executor. Argsort used indices as payloads; segmented sorting reused invocation workspace across complete refinements. Top-k, prefixes and selected ranks did not introduce a second mover, recovery protocol or tile engine. That small shared implementation was not evidence that every workload was fastest.

@@ -1,0 +1,361 @@
+// SPDX-License-Identifier: BSD-2-Clause
+
+//! A stable permutation represented by contiguous spans of source positions.
+//! A long ordered subsequence stays in its original runs. Only the records
+//! excluded from it need individually ranked source positions.
+
+use super::{Extract, Requirement, TILE_BYTES, plan};
+use alloc::vec::Vec;
+use core::ops::Range;
+
+struct Span {
+    source: usize,
+    end: usize,
+}
+
+pub(super) struct SourceOrder(Vec<Span>);
+
+impl SourceOrder {
+    /// A serial finisher owns the complete subproblem. Parallel roots hand
+    /// their buckets to finishers before trying serial sparse movement.
+    pub(super) fn finish<T, E: Extract<T>>(
+        records: &mut [T],
+        varying: u128,
+        required: Requirement,
+        extractor: &mut E,
+    ) -> bool {
+        if plan::complete_digit(varying).is_none()
+            && let Some(order) = Self::discover(records, extractor, required)
+        {
+            order.apply(records);
+            return true;
+        }
+        false
+    }
+
+    /// Resolves the requested order when the exceptional positions fit the
+    /// workspace. An abandoned construction has only read the source.
+    pub(super) fn discover<T, E: Extract<T>>(
+        records: &[T],
+        extractor: &mut E,
+        required: Requirement,
+    ) -> Option<Self> {
+        let len = records.len();
+        if len < plan::KEY_SAMPLE_LEN {
+            return None;
+        }
+        // A tile of metadata per square root of the number of input tiles.
+        // Charge both construction and the worst-case split in the output:
+        // one outlier can interrupt a source run and split a destination run.
+        let entry_bytes = size_of::<(E::Value, usize)>()
+            + size_of::<Range<usize>>()
+            + 3 * (size_of::<Span>() + size_of::<T>());
+        let tile = (TILE_BYTES / entry_bytes).max(1);
+        let limit = tile * len.div_ceil(tile).isqrt();
+        // Use nearby pairs from across the input to estimate how many
+        // exceptional positions need storage. Construction enforces the limit.
+        let allowance = limit.saturating_mul(plan::KEY_SAMPLE_LEN).div_ceil(len);
+        let pivot = extractor.key(&records[len / 2]);
+        let (mut inversions, mut exceptions) = (0, 0);
+        for j in 0..plan::KEY_SAMPLE_LEN {
+            let i = plan::sample_index(len, j).min(len - 2);
+            let key = extractor.key(&records[i]);
+            exceptions += usize::from(key != pivot);
+            inversions += usize::from(key > extractor.key(&records[i + 1]));
+            if inversions > allowance && exceptions > allowance {
+                return None;
+            }
+        }
+        if exceptions <= allowance {
+            return Self::dominant(records, extractor, pivot, required, limit);
+        }
+        if inversions > allowance {
+            return None;
+        }
+        let mut runs: Vec<Range<usize>> = Vec::new();
+        let mut removed = Vec::new();
+        let mut index = 0;
+        // The retained positions form a nondecreasing stack. Removing both
+        // ends of an inversion charges a distinct pair: deleting k records
+        // to obtain any sorted subsequence can intersect at most k such pairs.
+        while index < len {
+            let mut previous = extractor.key(&records[index]);
+            if let Some(last) = runs.last_mut() {
+                let source = last.end - 1;
+                let held = extractor.key(&records[source]);
+                if held > previous {
+                    if removed.len() + 2 > limit {
+                        return None;
+                    }
+                    removed.extend([(held, source), (previous, index)]);
+                    last.end -= 1;
+                    if last.start == last.end {
+                        runs.pop();
+                    }
+                    index += 1;
+                    continue;
+                }
+            }
+            let start = index;
+            index += 1;
+            while index < len {
+                let next = extractor.key(&records[index]);
+                if previous > next {
+                    break;
+                }
+                previous = next;
+                index += 1;
+            }
+            // A changing key can erase an inversion between its two probes.
+            // Keep adjacent source intervals coalesced even in that case.
+            if let Some(last) = runs.last_mut()
+                && last.end == start
+            {
+                last.end = index;
+            } else {
+                runs.push(start..index);
+            }
+        }
+        removed.sort_unstable(); // source position breaks every equal-key tie
+        let mut order = Self(Vec::with_capacity(removed.len() + runs.len()));
+        let mut runs = runs.into_iter();
+        let mut run = runs.next();
+        for (key, source) in removed {
+            while let Some(range) = &mut run {
+                let first = range.start;
+                if (extractor.key(&records[first]), first) >= (key, source) {
+                    break;
+                }
+                let last = range.end - 1;
+                if last == first || (extractor.key(&records[last]), last) < (key, source) {
+                    order.push(range.clone());
+                    run = runs.next();
+                } else {
+                    let (mut lo, mut hi) = (first + 1, last);
+                    while lo < hi {
+                        let mid = lo + (hi - lo) / 2;
+                        if (extractor.key(&records[mid]), mid) < (key, source) {
+                            lo = mid + 1;
+                        } else {
+                            hi = mid;
+                        }
+                    }
+                    order.push(first..lo);
+                    range.start = lo;
+                    break;
+                }
+            }
+            order.push(source..source + 1);
+        }
+        for range in run.into_iter().chain(runs) {
+            order.push(range);
+        }
+        Some(order)
+    }
+
+    /// The equal-key background stays in source order. The smaller stream of
+    /// exceptions can be sorted independently because its keys are disjoint.
+    fn dominant<T, E: Extract<T>>(
+        records: &[T],
+        extractor: &mut E,
+        pivot: E::Value,
+        required: Requirement,
+        limit: usize,
+    ) -> Option<Self> {
+        let mut positions = Vec::new();
+        let mut entries = Vec::new();
+        let mut lower = 0;
+        for (source, record) in records.iter().enumerate() {
+            let key = extractor.key(record);
+            if key != pivot {
+                if entries.len() == limit {
+                    return None;
+                }
+                lower += usize::from(key < pivot);
+                positions.push(source);
+                entries.push((key, source));
+            }
+        }
+        let len = records.len();
+        let background = len - entries.len();
+        let mut destinations = positions.clone();
+        if let Requirement::Nth(index) = required
+            && (lower..lower + background).contains(&index)
+        {
+            // Within each side, the exceptions can stay in input order too.
+            if lower != 0 && lower != entries.len() {
+                entries.sort_by_key(|&(key, _)| key >= pivot);
+            }
+            // Position of the requested occurrence in the background stream.
+            // positions[i] - i counts background records before exception i.
+            let rank = index - lower;
+            let (mut lo, mut hi) = (0, positions.len());
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                if positions[mid] - mid <= rank {
+                    lo = mid + 1
+                } else {
+                    hi = mid
+                }
+            }
+            let source = rank + lo;
+            // Restore the two prefix counts at the cut. Keep every exception
+            // slot outside the correction interval at its original position.
+            if lo > lower {
+                for (offset, slot) in destinations[lower..lo].iter_mut().enumerate() {
+                    *slot = index + 1 + offset;
+                }
+            } else {
+                for (offset, slot) in destinations[lo..lower].iter_mut().enumerate() {
+                    *slot = source + offset;
+                }
+            }
+        } else {
+            entries.sort_unstable(); // (key, source) preserves input order on ties
+            for (i, slot) in destinations.iter_mut().enumerate() {
+                *slot = if i < lower { i } else { background + i };
+            }
+        }
+        // Fill the gaps between destinations from the ordered background.
+        let mut order = Self(Vec::with_capacity(entries.len() + 1));
+        let mut original = positions.into_iter().peekable();
+        let (mut read, mut write) = (0, 0);
+        for (dest, exception) in destinations
+            .into_iter()
+            .zip(entries.into_iter().map(|(_, src)| src))
+            .map(|(dest, src)| (dest, Some(src)))
+            .chain(core::iter::once((len, None)))
+        {
+            while write < dest {
+                while original.next_if_eq(&read).is_some() {
+                    read += 1;
+                }
+                let count = (original.peek().copied().unwrap_or(len) - read).min(dest - write);
+                order.push(read..read + count);
+                read += count;
+                write += count;
+            }
+            if let Some(src) = exception {
+                order.push(src..src + 1);
+                write += 1;
+            }
+        }
+        Some(order)
+    }
+
+    fn push(&mut self, range: Range<usize>) {
+        let start = self.0.last().map_or(0, |s| s.end);
+        self.0.push(Span {
+            source: range.start,
+            end: start + range.len(),
+        });
+    }
+
+    fn spans(&self) -> impl DoubleEndedIterator<Item = (usize, Range<usize>)> + '_ {
+        self.0.iter().enumerate().map(|(i, s)| {
+            let start = if i == 0 { 0 } else { self.0[i - 1].end };
+            (start, s.source..s.source + (s.end - start))
+        })
+    }
+
+    /// Gather isolated records first. Every longer span comes from the same
+    /// monotone subsequence, so all its source and destination ranges have
+    /// the same relative order. Move each such span at most once.
+    pub(super) fn apply<T>(&self, records: &mut [T]) {
+        use core::{mem::MaybeUninit, ptr};
+        let singles = self
+            .spans()
+            .filter(|(dest, r)| r.len() == 1 && *dest != r.start)
+            .count();
+        let mut saved = Vec::<MaybeUninit<T>>::with_capacity(singles);
+        let scratch = saved.as_mut_ptr().cast::<T>();
+        let data = records.as_mut_ptr();
+        // SAFETY: the spans partition both source and destination. All key
+        // calls, rank arithmetic and allocation are complete before movement.
+        // Scratch has one distinct slot for every singleton. Between copies
+        // we access only raw pointers and immutable span metadata. No user
+        // code runs while a record is held in scratch.
+        unsafe {
+            for (slot, (_, src)) in self
+                .spans()
+                .filter(|(dest, r)| r.len() == 1 && *dest != r.start)
+                .enumerate()
+            {
+                ptr::copy_nonoverlapping(data.add(src.start), scratch.add(slot), 1);
+            }
+            // A left-moving span ends before every later source. Every earlier
+            // right-moving source also ends before this span's destination.
+            for (dest, src) in self.spans() {
+                if src.len() > 1 && dest < src.start {
+                    ptr::copy(data.add(src.start), data.add(dest), src.len());
+                }
+            }
+            // The symmetric backward traversal protects unread right movers.
+            for (dest, src) in self.spans().rev() {
+                if src.len() > 1 && dest > src.start {
+                    ptr::copy(data.add(src.start), data.add(dest), src.len());
+                }
+            }
+            for (slot, (dest, _)) in self
+                .spans()
+                .filter(|(dest, r)| r.len() == 1 && *dest != r.start)
+                .enumerate()
+            {
+                ptr::copy_nonoverlapping(scratch.add(slot), data.add(dest), 1);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::key::ByKey;
+
+    #[test]
+    fn stable_projection_of_sparse_exceptions_and_ordered_runs() {
+        let len = 193;
+        let ordered: Vec<_> = (0..len).map(|i| i as u64 / 3).collect();
+        let mut swapped = ordered.clone();
+        for (a, b) in [(2, 191), (15, 110), (10, 167), (51, 133)] {
+            swapped.swap(a, b);
+        }
+        let dominant: Vec<_> = (0..len)
+            .map(|i| {
+                if i % 11 == 0 {
+                    0
+                } else if i % 7 == 0 {
+                    4
+                } else {
+                    2
+                }
+            })
+            .collect();
+        for keys in [ordered, swapped, dominant] {
+            let mut expected: Vec<_> = (0..len).collect();
+            expected.sort_by_key(|&i| keys[i]);
+            for required in [
+                Requirement::All,
+                Requirement::Nth(0),
+                Requirement::Nth(18),
+                Requirement::Nth(93),
+                Requirement::Nth(167),
+                Requirement::Nth(len - 1),
+            ] {
+                // A duplicate owner or invalid overlap in either direction is
+                // observable through the unique mutable references under Miri.
+                let mut ids: Vec<_> = (0..len).collect();
+                let mut records: Vec<_> = ids.iter_mut().collect();
+                let mut extract = ByKey(|r: &&mut usize| keys[**r]);
+                let order = SourceOrder::discover(&records, &mut extract, required).unwrap();
+                order.apply(&mut records);
+                if let Requirement::Nth(index) = required {
+                    assert_eq!(*records[index], expected[index]);
+                    records[..index].sort_by_key(|r| keys[**r]);
+                    records[index + 1..].sort_by_key(|r| keys[**r]);
+                }
+                assert_eq!(records.iter().map(|r| **r).collect::<Vec<_>>(), expected);
+            }
+        }
+    }
+}

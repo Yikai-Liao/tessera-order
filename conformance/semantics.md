@@ -61,7 +61,7 @@ The Rust implementation requires `std` and allocates heap scratch through the gl
 `argsort` and `select_nth` are available without a feature gate. Each has a direct-key form and a `_by_key` form accepting `FnMut(&T) -> K`; the latter does not require `Clone`, `Send` or `Sync` records. Let `S` be a conceptual complete stable sort of the input. Both operations use record identity, not just key equality, to define their results.
 
 - `argsort` returns the source indices in the order of `S`. Equal keys keep increasing source-index order. It allocates O(n) for the output, plus workspace for sorting the indices.
-- `select_nth` returns three disjoint mutable borrows: the records before the selected position, the record `S[index]`, and the records after it. Each outer region contains exactly its members of `S`, in unspecified order. It uses the full sort's [workspace bound](#space) and allocates no output. As with Rust's [`slice::select_nth_unstable_by_key`], `index >= len` panics, including every index on an empty slice. Tessera checks the index before moving records or calling the key function.
+- `select_nth` returns three disjoint mutable borrows: the records before the selected position, the record `S[index]`, and the records after it. Each outer region contains exactly its members of `S`. Equal-key records keep their original relative order throughout the slice. Within a region, the order of records with different keys is unspecified. It uses the full sort's [workspace bound](#space) and allocates no output. As with Rust's [`slice::select_nth_unstable_by_key`], `index >= len` panics, including every index on an empty slice. Tessera checks the index before moving records or calling the key function.
 
 ## Rust Rayon entry points
 

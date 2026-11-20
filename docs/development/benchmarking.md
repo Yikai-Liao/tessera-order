@@ -203,7 +203,7 @@ New plans admit four workloads. Admission is for a caller-visible result worth m
 |---|---|---|
 | `sort` (default) | None | Complete in-place sorting. |
 | `argsort` | None | Exact stable index permutation of an immutable input, including creation of the index vector. |
-| `select` | `--index I` | One zero-based ranked member and correct membership on either side, with no ordering required within either side. |
+| `select` | `--index I` | One zero-based ranked member and correct membership on either side. Stable variants preserve the input order of ties throughout the slice. |
 | `partition-buckets` | `--bucket-count R` | Stable grouping into R categories and all R+1 offsets, including empty categories. |
 
 - **Argsort.** Tessera calls `argsort` or `argsort_by_key`. The reference constructs indices and sorts them by key; `std-unstable` breaks ties by original index to return the same stable permutation.

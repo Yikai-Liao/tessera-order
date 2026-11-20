@@ -20,8 +20,9 @@ fn selection_preserves_stable_members_across_node_and_tile_boundaries() {
     let index = len / 2;
     let (before, selected, after) = select_nth_by_key(&mut values, index, |r| r.0);
     assert_eq!(*selected, expected[index]);
-    before.sort_unstable();
-    after.sort_unstable();
+    // Stable sorting each side must recover the original stable reference.
+    before.sort_by_key(|r| r.0);
+    after.sort_by_key(|r| r.0);
     assert_eq!(before, &expected[..index]);
     assert_eq!(after, &expected[index + 1..]);
 }

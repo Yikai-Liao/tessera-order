@@ -166,7 +166,9 @@ export function sections(summary: ReportSummary) {
     ...new Set(
       summary.rows
         .map((r) => caseSection(r.name))
-        .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title))
+        .sort(
+          (a, b) => a.order - b.order || a.title.localeCompare(b.title, "en", { numeric: true }),
+        )
         .map((section) => section.title),
     ),
   ];

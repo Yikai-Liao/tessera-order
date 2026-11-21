@@ -1,115 +1,115 @@
 # 3. Routing an input
 
-Before any radix pass, Tessera checks whether the input needs one. Many real inputs are already sorted, nearly sorted, reversed, constant, or dominated by one key, and a radix sort that ignores this does full passes for nothing. This page follows root preparation and `Sorter::sort_node` in [`engine/refine.rs`](../../rust/tessera-order/src/engine/refine.rs) in order.
-
-## Order probe
-
-`probe_order` goes straight to the full scan, `confirm_order`, for fewer than 8,192 records. Larger inputs sample adjacent pairs at a stride of `max(128, floor(n / 4,096))`. The three limits serve different purposes. The 128-record minimum stride bounds what an ordered input pays for its sample before the confirming scan. The 4,096-pair target preserves the original sampling density on large inputs, where a sample can catch an unsorted tail before confirmation reads nearly every key. Below 8,192 records, a sample would hold fewer than 64 pairs, so confirmation runs directly. The [shared-order assessment](../design/evidence.md#shared-order-confirmation-for-serial-operations) records the trade-off. The first three keys of the confirming scan can establish a direction or rule out both directions. If they all tie, the last key determines which direction to check. Equal endpoints require every intervening key to match. It returns ascending (sorted or constant keys), strictly descending, descending with ties, or unsorted.
-
-For larger inputs, the sample classifies the input:
-
-| Sampled pairs | Class | What happens |
-|---|---|---|
-| some ascending and some descending | **unsorted** | finish insertion-sized tiles; otherwise try budgeted insertion |
-| all equal | **flat** | decide after the varying-bit scan (below) |
-| all `≤`, or all `≥` | candidate order | a full scan, `confirm_order`, checks every pair |
-
-A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
-
-The sample rejects most unsorted inputs within a few pairs, so the full scan runs only on inputs that look ordered. Its ascending continuation is the vector scan budgeted insertion uses for direct primitive keys, with a scalar fallback for other keys and short slices. The scalar continuation extracts four successive keys and combines their ordering results before deciding whether to continue, allowing independent comparisons to overlap; an inversion may therefore evaluate the remaining keys in its group before returning. The final short tail still checks one pair at a time. Its descending continuation also records whether any adjacent pair ties.
-
-## Budgeted insertion
-
-An unsorted input no longer than the [small-leaf threshold](tiles.md#three-leaves) goes straight to stable insertion: a budget and a varying-bit scan would only lead back to the same leaf. `insertion_probe` owns this check, the probe window and the budget.
-
-A larger unsorted input may still be *nearly* sorted: a sorted log with a few late entries, for example. Insertion sort finishes such an input in linear time, but on a random input it is quadratic. Tessera therefore gives it a **swap budget** and abandons it when the budget runs out.
-
-- If the input fits in one tile, insertion runs on the records with a budget of `floor(n / 4)` swaps.
-- Otherwise, the keys of a probe window (one tile's worth of records) are copied into a buffer and insertion-sorted there first, with a budget of `floor(window / 4)`. The number of swaps on the window predicts the number on the whole input: the budget for the records is `floor(swaps × n / window)`. The product is computed in a wider integer type, so it cannot overflow before division on a 32-bit target; the resulting budget is at most `floor(n / 4)`. A window that needed no swaps proves nothing, because the inversions are elsewhere, so the radix path continues.
-
-The quarter-record allowance limits wasted exchanges before a failed probe falls back to radix sorting. It is an empirical work budget, not a test for any distribution: inputs with more inversions may leave insertion earlier, while insertion-sized leaves still finish without a budget.
-
-An abandoned insertion pass leaves the records in a different order, but every swap exchanged two adjacent out-of-order records, so equal keys never crossed. The input is still a *stable permutation* of itself, and the radix path sorts it correctly.
-
-## Varying bits and flat inputs
-
-Next, one scan computes the [varying bits](keys.md#varying-bits). If no bit varies, every key is equal and the sort is done. A **flat** probe, where every sampled pair was equal, is then confirmed with a full order scan. The sample could have missed a few differing keys between its pairs.
-
-128-bit keys whose variation fits in the low or high 64 bits continue as 64-bit keys.
-
-Only now is tile and block scratch allocated. Budgeted insertion on a larger unsorted input may already have allocated its probe-key buffer; confirmed ordered and constant inputs never allocate.
-
-## Sparse source order
-
-A serial finisher can describe a permutation as long runs of source positions and a few isolated records. After the insertion probe, a node wider than one digit samples the input. If most keys are alike, their occurrences form the ordered background. If most positions are already ordered and every rank is required, the finisher removes both ends of each inversion from a stack of source runs. Each disjoint pair costs at most two exceptions for one record any ordered subsequence must exclude. Selection skips this construction: radix selection discards most buckets after one pass, which on small records costs less than the complete order. Exceeding the square-root exception budget returns control to ordinary partitioning before any records move.
-
-A rank can supply its own boundary. If every key to its right is at least its key *p*, collect the records at most *p* needed to fill the prefix through the rank. Any matches taken from the right have key *p*, so taking them in input order places the correct occurrence. The left-hand bound works in reverse. For the first or last rank, the boundary probe either certifies the endpoint or finds the furthest key that beats it. Within that range a forward scan takes the first minimum or the last maximum and checks whether the displaced endpoint has a peer. Without a peer, swap the two records. With a peer, rotate the winner to the endpoint so the intervening records stay in source order.
-
-A short requested end also fits the exception budget. A batch of keyed positions keeps its best half whenever it fills. If the original end keys occur only in the end, the winners and displaced records can exchange slots directly.
-
-Both constructions merge isolated source positions with runs from the background. Reserving a destination band for equal keys establishes their full order. Reserving one position establishes a rank. The mover parks isolated records, copies the longer runs in overlap-safe order, and restores the parked records. Rayon schedules the slice before its serial finisher tries this path.
-
-## Nodes and tiles
-
-From here on, the engine works on subproblems. Full sorting refines every unfinished band; single-rank selection uses the same plan but only refines the band containing the requested rank. A partition always completes stable movement for every band, including those that receive no further key analysis. The [engine reference](../design/engine.md#ordered-rank-requirements) owns projection and workspace invariants.
-
-Requested subproblems continue in place:
-
-- a **tile** is a slice that fits the cache-resident tile budget, the [size defined on the tiles page](tiles.md). It is finished in a scratch buffer of the same size;
-- a **node** is anything larger. It is split by a stable partition into children, and each child is routed again.
-
-A partition child larger than a tile, and every child of a parallel root, enters `sort_child`. It reuses the root’s order probe first: confirmed ascending children return, and descending ones take the same strict or stable reversal, without a varying-bit scan. Unfinished children scan varying bits within the remaining candidate mask; constant children are done. A flat sample with actual variation then receives the deferred full order confirmation, just as at the root. This keeps constant children’s vectorizable scan while saving a full pass over confirmed ordered children. A partition can expose an ordered child anywhere in the input, without an end-run detector or a length cap. Only unordered children continue to `sort_node`, and the analysis allocates nothing. Tile-sized children of a serial partition skip the order probe and go straight to their [tile leaf](tiles.md).
-
-`plan_node` then chooses a node's partition, in this order. If its varying bits span at most 8 bits, one window sorts it completely: a counted window or a block partition of that window.
-
-### Counted window
-
-A record sorted by its own key is interchangeable with every record of the same key: equal encoded keys are equal bit patterns. For those inputs — `sort`, not `sort_by_key` — the engine counts the records of each value in the window and fills each run with the key decoded from that value and the bits all keys share outside the window. The runs come out in key order, with no block partition and no record moves.
-
-Records sorted by a key function keep their payloads: two records with key 7 may hold different data and in a fixed order between them. Counting would drop that, so `sort_by_key` takes the [block partition](block-partition.md) below instead.
-
-### Block partition of the window
-
-Otherwise the window takes a [block partition](block-partition.md), which also finishes the node.
-
-### Repeated key
-
-A wider node of at least four tiles, so that its bounded sample is paid for, samples up to 128 keys, one from each equal stratum. A golden-ratio offset inside each stratum avoids aliasing with periodic data, and locally ordered input still gives independent observations rather than runs of neighbours that share their top digit. Sorting this bounded sample lets both equality detection and digit occupancy use the same extracted keys. If one value fills at least a quarter of the sample, an **equality partition** splits the node into keys below, equal to, and above that value. The equal band is finished, since all of its keys are the same. The same pass also splits whichever outer band crosses the node's highest varying bit, so every remaining band holds that bit constant and is routed again without it. Each record's bucket is its rank (0, 1 or 2) plus that bit, which keeps the four buckets in key order: above the bit all keys agree, so a key below the value cannot have the bit set unless the value does, and a key above it cannot lack the bit if the value has it.
-
-A heavily skewed distribution (Zipf, a default value, a null marker) would otherwise put most records in one bucket on every digit, and that bucket would cost one pass per digit.
-
-Consuming that bit is what bounds the recursion. Without it, an outer band would keep every candidate bit, and an input that places a new, smaller key on exactly the sampled records would let each equality partition peel only those records: linear nesting depth and quadratic work, even with consistent keys. A changing key function could likewise make the sampled value disappear and leave the node unchanged. Every node partition (equality, runs or top digit) removes the top varying bit from each unfinished child, so a node nests at most once per key bit.
-
-### Already in bucket order
-
-A node may already hold the two runs its top varying bit separates. `two_runs` reads that bit and reports whether the node is `0*1*` or `1*0*`; the second form is one rotation away from the first, and both runs keep their own order. Those runs *are* the partition: the bit leaves the candidate and each run is routed again, with no sample and no partition pass. This covers sorted data with a separated block of keys at either end, or any other arrangement the order already groups. The scan stops at the first record that breaks the pattern, so it costs a few key reads when it fails and one pass when it succeeds.
-
-### Top digit
-
-Otherwise the node is split on the digit under its highest varying bit, with the [stable block partition](block-partition.md). `choose_split_digit` picks the width:
-
-1. Aim for children of half a tile: with `target = tile records / 2`, start with enough bits for `n / target` children, clamped to 3–8 bits. Wider splits measured slower on 10 million records because of page and TLB pressure.
-2. Project the key sample onto the digit. If it hits fewer than a quarter of the digit's buckets, widen the digit by 2 bits and check again, up to 12 bits. Above 9 bits, 128 keys cannot fill a quarter of the buckets, so widening continues without a check. Widening stops at bits no key varies in: they add empty buckets, and every bucket reserves block scratch, without separating a single key. The equality check's sample is reused; a node below four tiles samples here for the first time.
-
-Serial and parallel roots share this decision. A parallel root shards equality and digit partitions across threads and executes an existing-run split serially, without resampling.
-
-While the block partition completes, each requested child that fits a tile is finished **at once**, while its records are still in cache. Larger requested children are routed again after the partition. A requested tile is fully sorted even when only one rank is needed.
-
-## When the result is a permutation
-
-Argsort expands sparse runs into its existing index buffer. For dense input it counts the highest varying byte and emits each source index into its band in input order. Short bands use source keys directly. For denser bands, spare bits in the index word hold the next key prefix. Within a band the words order by key prefix and then by source position. Only a tied prefix with unresolved bits requires another source-key lookup. Cached-key sorting can apply the resulting cycles or the original sparse runs directly to its payloads.
-
-## Summary
+Many real inputs are already sorted, nearly sorted, reversed, constant or dominated by one key. A radix sort that ignores this makes full passes for nothing. Tessera checks the cheap explanations first and pays for radix passes only on what is left.
 
 | Input | Route | Cost |
 |---|---|---|
-| sorted | probe + one confirming scan | ~1 read pass, no allocation |
-| reversed | probe + scan + stable reversal | ~2 passes, no allocation |
-| all keys equal | direct confirmation on short inputs; otherwise flat sample + varying-bit scan | ~1 read pass, no allocation |
-| unsorted tile, insertion-sized | insertion finish | bounded quadratic leaf, no allocation |
-| larger nearly sorted input | budgeted insertion | linear in n plus inversions |
-| one dominant key | equality partition | one partition, the equal band is done |
-| ordered or constant child exposed by a partition | full order confirmation, then return or stable reversal | at most linear work in that child |
-| node already in two runs of its top varying bit | split at that bit | one scan, no partition pass or scratch |
-| at most 8 varying bits, record is its own key | counted window | one counting pass and one fill |
-| everything else | top-digit block partition, then tiles | one streaming pass per node level, then cache-resident tiles |
+| sorted | order probe, one confirming scan | ~1 read pass, no allocation |
+| reversed | order probe, scan, stable reversal | ~2 passes, no allocation |
+| all keys equal | varying-bit scan | ~1 read pass, no allocation |
+| nearly sorted | budgeted insertion | linear in n plus inversions |
+| a few records out of place, or one dominant key | sparse source order | sorts only the exceptions; each run moves once |
+| one frequent key | equality partition | one partition; the equal band is done |
+| already grouped by the top bit | split at that bit | one scan, no record moves |
+| at most 8 varying bits, the record is its own key | counted window | one counting pass and one fill |
+| everything else | top-digit block partition, then tiles | one streaming pass per level, then cache-resident tiles |
+
+## Order probe
+
+**Problem.** Sorted and reversed inputs are common, but proving order takes a full scan, which an unsorted input should not pay for.
+
+**Idea.** Sample about 4,096 adjacent pairs, evenly spaced. If the sample contains both an ascending and a descending pair, the input is unsorted, and a random input is rejected after a few pairs. Only if every sampled pair agrees does a full scan check every pair. Inputs below 8,192 records skip the sample, which would hold fewer than 64 pairs, and scan directly.
+
+The sample stride is at least 128 records, which bounds what an ordered input pays for sampling before its confirming scan. On large inputs, 4,096 pairs are dense enough to catch an unsorted tail before the confirmation has read nearly every key.
+
+**Result.**
+
+- **Ascending:** done.
+- **Strictly descending:** reverse the slice.
+- **Descending with ties:** reverse the slice, then reverse each run of equal keys back, so equal keys keep their input order.
+- **Every sampled pair equal (flat):** decided after the [varying-bit scan](#varying-bits-and-flat-inputs).
+
+## Budgeted insertion
+
+**Problem.** A sorted log with a few late entries is not sorted, but almost. Insertion sort finishes it in linear time; on a random input, it is quadratic.
+
+**Idea.** Run insertion sort with a **swap budget** and give up when the budget runs out.
+
+- An unsorted input of at most [48 records](tiles.md#three-leaves) is insertion-sorted without a budget; that is its leaf anyway.
+- An input that fits in one [tile](tiles.md) gets one swap per four records.
+- A larger input first insertion-sorts a copy of one tile's worth of keys. The swaps it needed, scaled to the whole input, become the budget, capped at one swap per four records. A window that needed no swaps proves nothing, because the inversions may be elsewhere, so the radix path continues.
+
+The quarter-record allowance is a work budget, not a test for any distribution: it limits how much a failed attempt can waste.
+
+**Why it is safe to give up.** Every swap exchanged two adjacent records that were out of order, so equal keys never crossed. An abandoned pass leaves a different but still stable arrangement, and the radix path sorts it correctly.
+
+## Varying bits and flat inputs
+
+One scan computes the [varying bits](keys.md#varying-bits). If no bit varies, every key is equal and the sort is done. If the order probe saw only equal pairs but some bit varies, a full order scan runs now: the sample may have missed a few differing keys between its pairs, and the input may still be sorted.
+
+A 128-bit key whose variation fits in its low or high 64 bits is sorted as a 64-bit key.
+
+Scratch is allocated only after these checks, so sorted, reversed and constant inputs never allocate.
+
+## Sparse source order
+
+**Problem.** Some inputs are in order except for a few records, or consist mostly of one key with a few others. Their sorted output is nearly the input itself, yet a radix partition moves every record once per digit.
+
+**Idea.** Describe the output as long **runs** of records that stay in source order, plus a few **exceptions**. Sort only the exceptions, merge them between the runs, and move each run once.
+
+It applies when one digit cannot finish the node, and in two forms:
+
+- **One dominant key.** A sample of 128 keys nearly all equals the middle record's key. The records with other keys are the exceptions; the dominant key's records stay in source order between the smaller and the larger exceptions.
+- **A few inversions** (full sort only). Scan left to right. Whenever a key is smaller than the last kept one, remove both records. For `1 2 3 9 4 5 6`, the drop from `9` to `4` removes both, leaving runs `1 2 3` and `5 6` and exceptions `4, 9`. The merge gives `1 2 3 4 5 6 9`. Removing both is necessary because the scan cannot tell which one is misplaced; but one of the two must be, so this removes at most twice the minimum.
+
+**Why it is stable.** Exceptions are sorted by key and then by source position, and each is merged before the first run record that it precedes in that order.
+
+**Budget.** The number of exceptions is capped at O(√n), within the engine's memory bound. Every key is read before any record moves, so exceeding the cap falls back to partitioning with nothing to undo.
+
+Selection does not try the inversion form: radix selection discards most buckets after one pass, which is cheaper than building the complete order. Its own shortcuts are on [Beyond sorting](operations.md#select-one-rank).
+
+## Nodes and tiles
+
+From here on, the engine works on subproblems:
+
+- a **tile** fits the [cache-resident tile budget](tiles.md) and is finished in a scratch buffer of the same size;
+- a **node** is anything larger. A stable partition splits it into children, and each child is routed again.
+
+A child larger than a tile repeats the order probe and the varying-bit scan within the bits that are left. A partition can therefore expose an ordered or constant region anywhere in the input, and that region costs one scan. Tile-sized children of a serial partition skip the probe and go straight to their [tile leaf](tiles.md).
+
+A node takes the first partition that applies, in the order below. Every node partition removes at least the top varying bit from each unfinished child, so a node nests at most once per key bit, even if the key function changes its answers.
+
+### Counted window
+
+If the node's varying bits span at most 8 bits, one window finishes it.
+
+When the records are the keys themselves (`sort`, not `sort_by_key`), two records with equal keys are identical bit patterns. The engine counts each value in the window and writes each run from its count: the key is rebuilt from the window value and the bits all keys share. Nothing is moved.
+
+Records sorted by a key function carry payloads, so equal keys are not interchangeable; they take one [block partition](block-partition.md) of the window instead.
+
+### Repeated key
+
+**Problem.** A skewed distribution (Zipf, a default value, a null marker) puts most records in one bucket on every digit, and that bucket costs one pass per digit.
+
+**Idea.** A node of at least four tiles, large enough to pay for it, samples up to 128 keys, one from each equal stratum. If one value fills at least a quarter of the sample, an **equality partition** splits the node into keys below, equal to, and above that value. The equal band is finished.
+
+**Bounding the depth.** The same pass also splits the outer band that crosses the node's highest varying bit, so every remaining band has that bit constant. Without this, an adversarial input could place a new, smaller key on exactly the sampled records at every level: each partition would peel off only those records, giving linear depth and quadratic work. Removing a bit per level caps the depth at the key width.
+
+The resulting four buckets stay in key order: all keys agree above that bit, so within the crossing band the bit separates smaller keys from larger ones.
+
+The stratum offsets follow the golden ratio so that the sample does not alias with periodic data, and the sorted sample is reused to choose the top digit below.
+
+### Already in bucket order
+
+A node may already consist of two runs separated by its top varying bit: all keys with the bit clear, then all with it set, or the reverse. Those runs *are* the partition. The reverse form needs one rotation. The bit leaves the candidates and each run is routed again, with no sample and no partition pass. A scan detects this; it stops at the first record that breaks the pattern, so a failed check costs a few key reads.
+
+### Top digit
+
+Otherwise the node is split on the digit under its highest varying bit, with the [stable block partition](block-partition.md). The width is chosen in two steps:
+
+1. Aim for children of half a tile: enough bits for `n / (tile records / 2)` children, clamped to 3–8 bits. Wider splits measured slower on 10 million records because of page and TLB pressure.
+2. Check the key sample against the digit. If it hits fewer than a quarter of the digit's buckets, the keys are concentrated: widen by 2 bits and check again, up to 12 bits. Beyond 9 bits, 128 keys cannot fill a quarter of the buckets, so widening continues without the check. Widening stops at bits no key varies in, which would add empty buckets without separating any keys.
+
+While the partition completes, each child that fits a tile is finished at once, while its records are still in cache. Larger children are routed again afterwards.
+
+Serial and parallel roots make the same decision. A parallel root shards equality and digit partitions across threads and splits existing runs serially.

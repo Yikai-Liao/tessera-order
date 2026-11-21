@@ -1,51 +1,44 @@
 # How Tessera works
 
-Tessera's engine sorts stably, in linear time, with O(√n) extra memory. Every operation runs on it; these pages follow the full sort, the complete request. Below, its core step runs in the engine itself, compiled to WebAssembly.
-
-## Tessera: a stable split without a second buffer
-
-<BlockPartitionDemo />
-
-The input splits on the tens digit of two-digit keys into four buckets. Each bucket fills a chain of fixed-size blocks, and once an input block has been read it becomes free for any bucket's output. A short ledger then copies each chain into its final range. Equal keys keep their input order (the small number under each key), and the only extra memory is a few spare blocks. [The block partition](block-partition.md#step-by-step) explains every row, label and control.
+Tessera is a radix sort that stays stable without a second, input-sized buffer and skips work the data does not need. Both demos below run the engine itself, compiled to WebAssembly.
 
 ## The textbook: LSD needs an input-sized buffer
 
 <CountingPassDemo />
 
-A textbook LSD radix sort repeats this counting pass once per digit: count each digit value, turn the counts into start positions, then copy every record into its bucket in a second array as large as the input. For 10 million 8-byte records that buffer is 76 MiB; Tessera needs about 6 MiB. [Radix sort in one pass](radix-sort.md) builds LSD, MSD and Tessera from this pass and compares them on one input.
+A textbook LSD radix sort repeats this counting pass once per digit: count each digit value, turn the counts into start positions, then copy every record into its bucket in a second array as large as the input. For 10 million 8-byte records that buffer is 76 MiB. [Radix sort in one pass](radix-sort.md) builds LSD, MSD and Tessera from this pass.
 
-## The idea in three sentences
+## Tessera: a stable split without a second buffer
 
-1. Split large inputs on their **top digit** with a stable **block partition** that recycles consumed input blocks as output blocks. It needs only 2R spare blocks and a little metadata per block (R is the number of buckets).
-2. Once a bucket fits a **cache-resident tile**, finish it in a cache-resident scratch buffer with the cheapest leaf: insertion sort, a tile-local MSD partition, or LSD counting passes.
-3. Before any of that, **skip work the data does not need**: sorted, reversed or nearly sorted inputs, key bits that never change, and heavily repeated keys. Partition children get the same order check.
+<BlockPartitionDemo />
 
-## The pipeline
+Tessera splits in place. Here the input splits on the tens digit into four buckets. Each bucket fills a chain of fixed-size blocks, and once an input block has been read it becomes free for any bucket's output. A short ledger then copies each chain into its final range. Equal keys keep their input order (the small number under each key), and the only extra memory is a few spare blocks: about 6 MiB instead of 76 MiB for those 10 million records. [The block partition](block-partition.md#step-by-step) explains every row and control.
+
+## The whole engine
 
 <PipelineMap />
 
-The figure, as a list (the rules, thresholds and reasons for each stage are on [routing](routing.md), [the block partition](block-partition.md) and [tiles](tiles.md)):
+1. **Skip what the data does not need.** An order probe returns ascending inputs at once and reverses descending ones stably. Unsorted inputs get an insertion pass with a swap budget, which finishes nearly sorted ones. One scan finds the key bits that vary; if none do, the input is done.
+2. **Split large inputs (nodes).** A node takes the first partition that applies: one window covering every varying bit when they span at most 8 bits (counted directly when the records are their own keys), an equality partition when one key is frequent, a split at its top varying bit when it is already grouped by that bit, or otherwise a block partition on its top digit. Each split removes at least one key bit, so recursion never goes deeper than the key is wide.
+3. **Route the children again.** A child larger than a tile repeats the order check and the varying-bit scan before it is split, so an ordered or constant region exposed anywhere costs one scan.
+4. **Finish cache-sized pieces (tiles) in a scratch buffer**, where a second buffer is cheap: insertion sort, a tile-local MSD split, or LSD counting passes.
 
-1. **Order probe.** Sample adjacent pairs. Ascending inputs return at once, descending inputs reverse stably.
-2. **Budgeted insertion.** Unsorted inputs get an insertion pass with a swap budget, so nearly sorted inputs finish here.
-3. **Varying bits.** One scan finds the key bits that differ. If none do, the input is done; later digits cover only those bits.
-4. **Node or tile.** A slice larger than a tile is a *node*, anything smaller a *tile*. A child larger than a tile scans its remaining bits and confirms its order again before routing.
-5. **Node partitions.** A node with a repeated key takes an equality partition, a node already in two runs of its top bit is split there without moving records, and the rest take a top-digit block partition. Tile-sized children finish as soon as the partition completes their band.
-6. **Tile leaves.** A tile is finished by insertion sort, a tile-local MSD partition or LSD counting passes.
+Argsort, selection and cached-key sorting reuse the same steps and skip the ones their answer does not need.
 
 ## Reading order
 
 | Page | You will learn |
 |---|---|
-| [1. Radix sort in one pass](radix-sort.md) | Counting passes, LSD versus MSD, and a side-by-side comparison with Block LSD and Tessera |
+| [1. Radix sort in one pass](radix-sort.md) | Counting passes, LSD versus MSD, and how Tessera combines them |
 | [2. Keys as unsigned integers](keys.md) | How signed integers, floats and `Reverse` become radix keys, and why constant bits are free |
-| [3. Routing an input](routing.md) | The order probe, budgeted insertion, nodes and tiles, ordered children and repeated keys |
-| [4. The block partition](block-partition.md) | The O(√n) stable partition, step by step, its parallel form, and how the block size is chosen |
-| [5. Finishing tiles](tiles.md) | Digit planning, the cost model, and the three tile leaves |
+| [3. Routing an input](routing.md) | How sorted, nearly sorted, repeated and partly ordered inputs avoid radix passes |
+| [4. The block partition](block-partition.md) | The O(√n) stable split, step by step, its parallel form and the block size |
+| [5. Finishing tiles](tiles.md) | Choosing digits and the leaf that finishes each cache-sized piece |
 | [6. Ownership and panics](safety.md) | Why any record type is safe, and what happens when a key function panics |
+| [7. Beyond sorting](operations.md) | How argsort, selection and cached-key sorting skip work a full sort does |
 
 ## Memory
 
-Memory is O(√n) block scratch plus a fixed-size tile buffer and small tables, all on the heap except the tile-local cursor tables. [Ordering semantics](../../conformance/semantics.md#space) states the contract, and each part is explained where it arises: [block scratch](block-partition.md#choosing-the-block-size), [tile scratch and cursor tables](tiles.md).
+Extra memory is O(√n) block scratch plus a fixed-size tile buffer and small tables. [Ordering semantics](../../conformance/semantics.md#space) states the contract; [block scratch](block-partition.md#choosing-the-block-size) and [tile scratch](tiles.md) explain the parts.
 
-These pages own the routing rules, thresholds and their reasons; the [engine reference](../design/engine.md) owns code boundaries and invariants.
+These pages own the routing rules, thresholds and their reasons; the [engine reference](../design/engine.md) maps them to code.

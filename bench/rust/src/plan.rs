@@ -517,7 +517,10 @@ mod tests {
                 "include": [{"types": [input["ty"]], "distributions": [input["distribution"]], "lengths": [input["len"]]}]
             });
             let parsed = Plan::parse(&plan.to_string());
-            if let Some(id) = entry["comparison"].as_str() {
+            let kind = entry["operation"]["kind"].as_str().unwrap();
+            if let ("argsort" | "select" | "partition-buckets", Some(id)) =
+                (kind, entry["comparison"].as_str())
+            {
                 let cases = parsed.unwrap().inputs().unwrap();
                 assert_eq!(cases.len(), 1);
                 assert_eq!(cases[0].id(), id);
@@ -531,7 +534,7 @@ mod tests {
     #[test]
     fn presets_preserve_coverage() {
         for (text, expected) in [
-            (include_str!("../../plans/continuous.toml"), 80),
+            (include_str!("../../plans/continuous.toml"), 68),
             (include_str!("../../plans/smoke.toml"), 125),
             (include_str!("../../plans/release.toml"), 381),
             (include_str!("../../plans/parallel.toml"), 16),
@@ -692,33 +695,35 @@ mod tests {
     #[test]
     fn include_rules_carry_revision_operations() {
         let rule = r#"{"types":["u64"],"distributions":["random"],"lengths":[1000]}"#;
-        let top = r#"{"types":["u64"],"distributions":["random"],"lengths":[1000],
-            "operation":{"kind":"top-k","k":10}}"#;
+        let select = r#"{"types":["u64"],"distributions":["random"],"lengths":[1000],
+            "operation":{"kind":"select","index":10}}"#;
         let plan = Plan::parse(&format!(
-            r#"{{"schema":1,"algorithms":["tessera"],"include":[{rule},{top}]}}"#
+            r#"{{"schema":1,"algorithms":["tessera"],"include":[{rule},{select}]}}"#
         ))
         .unwrap();
         assert!(plan.has_rule_operations());
         let ids: Vec<_> = plan.inputs().unwrap().iter().map(InputCase::id).collect();
-        assert_eq!(ids, ["u64/random/1000/s1", "u64/random/1000/s1/top-k/10"]);
+        assert_eq!(ids, ["u64/random/1000/s1", "u64/random/1000/s1/select/10"]);
         for invalid in [
             format!(
-                r#"{{"schema":1,"algorithms":["tessera"],"include":[{rule}],"exclude":[{top}]}}"#
+                r#"{{"schema":1,"algorithms":["tessera"],"include":[{rule}],"exclude":[{select}]}}"#
             ),
             format!(
-                r#"{{"schema":1,"algorithms":["tessera"],"include":[{rule}],"parallel":[{top}]}}"#
+                r#"{{"schema":1,"algorithms":["tessera"],"include":[{rule}],"parallel":[{select}]}}"#
             ),
             format!(
-                r#"{{"schema":2,"algorithms":["tessera"],"operation":{{"kind":"argsort"}},"include":[{top}]}}"#
+                r#"{{"schema":2,"algorithms":["tessera"],"operation":{{"kind":"argsort"}},"include":[{select}]}}"#
             ),
         ] {
             assert!(Plan::parse(&invalid).is_err(), "{invalid}");
         }
-        let short = top.replace("1000", "5");
-        let plan = Plan::parse(&format!(
-            r#"{{"schema":1,"algorithms":["tessera"],"include":[{short}]}}"#
-        ));
-        assert!(plan.is_err() || plan.unwrap().inputs().is_err());
+        let short = select.replace("1000", "5");
+        assert!(
+            Plan::parse(&format!(
+                r#"{{"schema":1,"algorithms":["tessera"],"include":[{short}]}}"#
+            ))
+            .is_err()
+        );
     }
 
     #[test]

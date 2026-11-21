@@ -21,7 +21,7 @@ The engine is a Stable Rust port of the research prototype in `sort-research-rs`
 
 ## Stable category partition baseline
 
-A bounded complete-call screen compared the unreleased binary and finite-category operations with standard stable sorting, Glidesort and Radsort compositions that sort by the same deterministic category and construct the returned boundaries. Categories were encoded keys modulo R; these are sorting-based references, not dedicated buffered partition algorithms. The public classifier contract is stronger than those deterministic compositions: it requires one evaluation per record in input order. The comparison includes all classification, scratch allocation and output construction, not just scatter.
+A bounded complete-call screen compared the former development-only binary and finite-category operations with standard stable sorting, Glidesort and Radsort compositions that sort by the same deterministic category and construct the returned boundaries. Categories were encoded keys modulo R; these are sorting-based references, not dedicated buffered partition algorithms. The former classifier contract required one evaluation per record in input order. The comparison included all classification, scratch allocation and output construction, not just scatter.
 
 Coverage was u64 keys, 16-byte rows and 128-byte records. Binary and seven-category runs each covered random, 16-value and constant inputs at 4,096 and 65,536 records; 257 categories covered random and 16-value inputs at 65,536. The host was an i7-10875H pinned to one logical CPU, Rust 1.99.1/LLVM 23.1.3, with the existing powersave governor, SMT and turbo unchanged. Three paired blocks used a 5 ms target, repeated Tessera A/A, independent record/boundary verification and separate verified memory measurements.
 
@@ -49,13 +49,13 @@ For nontrivial inputs the category implementation completes distribution even wh
 
 Category count matters to space in practice, not only asymptotically. At 257 categories and 65,536 random u64 records, measured peak extra heap was 1,177,656 bytes, exceeding the 524,288-byte input. Internal fan-out padding and the [block floors](../explain/block-partition.md#choosing-the-block-size) remain charged. O(√(nR) + R) does not promise less space than a linear buffer at every n and R. Returned offsets were included in each peak and retained before reference sorting, so peak minus output is a coexisting workspace measurement; fixed stack tables were not measured.
 
-A follow-up timed Tessera's own `sort_by_key` with the same category as key, building the same boundaries ([operation comparisons](../development/benchmarking.md#serial-operation-comparisons)); binary references use the same literal two-way classifier as the predicate entry. General sorting was slower on all 36 nonconstant inputs. The difference follows from information, not from an isolated defect: the category entry knows the bucket width from its count, while sorting has no range, so it probes order, attempts insertion and scans for varying bits before partitioning. A category in a wide key type never varies in its upper bits, so that scan always reads every record. For binary categories the sample's mode also selects an equality partition. Optimizing those probes is general sorting work; it cannot remove the scan without range information. The [release surface](algorithm-extensions-proposal.md#release-surface-alignment) therefore carries the range in the key type through `sort_by_cached_key` rather than as a public count.
+A follow-up timed Tessera's own `sort_by_key` with the same category as key, building the same boundaries ([operation comparisons](../development/benchmarking.md#serial-operation-comparisons)); binary references use the same literal two-way classifier as the predicate entry. General sorting was slower on all 36 nonconstant inputs. The difference follows from information, not from an isolated defect: the category entry knew the bucket width from its count, while sorting had no range, so it probed order, attempted insertion and scanned for varying bits before partitioning. A category in a wide key type never varies in its upper bits, so that scan always reads every record. For binary categories the sample's mode also selects an equality partition. Optimizing those probes is general sorting work; it cannot remove the scan without range information. The retained cached-key sort instead learns the varying bits during extraction.
 
-**Disposition:** retain the functional serial operations with performance acceptance open. This screen supports usefulness against the named sorting compositions, not superiority to a dedicated buffered partition or a source-change speedup. Two other wide-record cases had A/A windows of about ±12.0% and ±9.9%; only three blocks, one host and one placement were sampled. Dedicated buffered baselines, larger inputs, other classifier costs and controlled follow-up remain necessary; no full-sort foundation timing debt is resolved by these results.
+**Disposition:** neither category partition entry ships in [0.2](algorithm-extensions-proposal.md#release-surface-alignment). This screen supports usefulness against the named sorting compositions, not superiority to a dedicated buffered partition or a source-change speedup. Two other wide-record cases had A/A windows of about ±12.0% and ±9.9%; only three blocks, one host and one placement were sampled. A future partition comparison would need dedicated buffered baselines, larger inputs, other classifier costs and controlled follow-up. No full-sort foundation timing debt is resolved by these results.
 
 ## Cached-key category grouping
 
-Two `sort_by_cached_key` implementations were screened against the count-taking category movement on the workloads above. The cached-key route, since then the `tessera` route of `partition-buckets`, sorts by the category as the narrowest unsigned key (`u8` up to 256 categories, `u16` beyond) and then builds the same boundaries, which evaluates the category a second time; the movement returns its boundaries without that pass. Coverage was u64 keys, 16-byte rows and 128-byte records, random, 16-value and constant inputs, 4,096 and 65,536 records, for two, seven and 257 categories: 18 inputs each. The host was a Xeon Gold 6140 with SMT off, pinned to one CPU, Rust 1.99.1, three paired blocks of 5 ms samples. Ratios below are cached-key time over category-movement time.
+Two `sort_by_cached_key` implementations were screened against the count-taking category movement on the workloads above. In this comparison, the cached-key route sorted by the category as the narrowest unsigned key (`u8` up to 256 categories, `u16` beyond) and then built the same boundaries, which evaluated the category a second time; the former movement returned its boundaries without that pass. Coverage was u64 keys, 16-byte rows and 128-byte records, random, 16-value and constant inputs, 4,096 and 65,536 records, for two, seven and 257 categories: 18 inputs each. The host was a Xeon Gold 6140 with SMT off, pinned to one CPU, Rust 1.99.1, three paired blocks of 5 ms samples. Ratios below are cached-key time over category-movement time.
 
 | Route | Two categories | Seven categories | 257 categories | Peak heap at 65,536 records |
 |---|---|---|---|---|
@@ -64,7 +64,7 @@ Two `sort_by_cached_key` implementations were screened against the count-taking 
 
 Routing by type pays for the type's range rather than the data's. Every `u8` key distributes into 256 buckets, whose block floors dominate wide records, and every `u16` key takes the pair sort, whatever the actual category count. Routing by the cached keys moves with the data's own width, so its space follows the categories that occur, and ordered or constant inputs return after the caching pass. Its remaining cost is structural: one classifier evaluation per record, with no range known in advance, either commits the movement to the key type's whole range before the first record is classified, or caches the keys and moves in a second pass. The count-taking movement avoids both, because the caller supplies the fan-out. An unmaintained probe without boundary construction put the second pass near 1.4 times the movement on 65,536 u64 records, so the reference's second classification accounts for part of the measured ratio. A caller who groups by a computed category pays that second evaluation too, unless the records carry the category.
 
-**Disposition:** keep the range-routed implementation. Removing the count-taking entry trades these individually listed losses for an interface without a category limit, as the [release surface](algorithm-extensions-proposal.md#release-surface-alignment) decided. The binary `partition` keeps the one-pass movement. The ratios come from one host and three blocks; several 4,096-record intervals were wide.
+**Disposition:** keep the range-routed implementation. Removing the count-taking entry traded these individually listed losses for an interface without a category limit. The binary predicate entry was also removed before release; one-pass internal distribution remains for cached sorting, whose public result does not include boundaries. The ratios come from one host and three blocks; several 4,096-record intervals were wide.
 
 ## Unstable node-partition feasibility
 
@@ -248,7 +248,7 @@ The repeat does not erase the initial losses: several directions or control wind
 
 ## Serial slice-operation baseline
 
-The first serial extensions keep one rank-requirement authority and one refinement executor. Argsort changes the payload to indices; segmented sorting reuses invocation workspace across complete refinements. Top-k, prefixes and selected ranks do not introduce a second mover, recovery protocol or tile engine. This is a small shared implementation, not evidence that every workload is fastest.
+This baseline covers the earlier development surface, including operations [removed before 0.2](algorithm-extensions-proposal.md#release-surface-alignment). The first serial extensions shared one rank-requirement authority and one refinement executor. Argsort used indices as payloads; segmented sorting reused invocation workspace across complete refinements. Top-k, prefixes and selected ranks did not introduce a second mover, recovery protocol or tile engine. That small shared implementation was not evidence that every workload was fastest.
 
 A bounded Rust comparison covered direct u64, 16-byte keyed records and 128-byte records on random, d16 and zipf2 inputs at 65,536 and 262,144 records. Nine paired blocks included full-call allocation, exact result checking and separate argsort output/workspace accounting. Random partial workloads saved substantial descendant work relative to full-sort references. This is a workload comparison, not source attribution or a new complexity bound. The host retained powersave, turbo and SMT; the observed block ranges are not confidence intervals.
 
@@ -276,44 +276,34 @@ A separate historical full-sort build and linked-placement screen against Founda
 
 ### Shared order confirmation for serial operations
 
-Two shared rules reduce what ordered inputs pay before the engine returns them. Full sorting, argsort, segmented sorting, partial ranks and Rayon preparation all use them, and no distribution, record type or operation selects a separate route. The [routing page](../explain/routing.md#order-probe) owns the limits and scan rules.
+The [order probe](../explain/routing.md#order-probe) reduces what full sorting, argsort, single-rank selection and Rayon preparation pay to recognize order. Sampling fewer adjacent pairs on medium-sized inputs avoids touching much of an ordered slice twice. Grouping scalar confirmation lets independent comparisons overlap while retaining forward extraction. An inversion may evaluate the rest of its group.
 
-- **Sample cost floor.** The order sample's stride is at least 128 records. Before this floor, a fixed 4,096-pair sample on 65,536 u64 keys touched about half of the input's cache lines before the confirming scan read all of them.
-- **Grouped scalar confirmation.** Non-vector extractors read four keys and combine their comparisons before one rejection branch. Keys are still extracted once each, forward; an inversion may read the rest of its group. Record ownership, panic propagation and allocation are unchanged.
+Reducing the sample at every length lost the cheap rejection of localized disorder. With a target of 512 pairs, the hosted comparison for a million records with an unsorted tail was 19% slower in serial and 10–15% slower with four threads. The stride floor retains the medium-size saving and the original sampling density on large inputs. In the final hosted comparison against the pre-change engine, that tail case returned to the noise range.
 
-The floor alone would shrink the sample on every large input. The 4,096-pair cap stays, because the sample is what rejects disorder confined to a small part of the input: with 512 pairs, the hosted PR suite measured `sorted_tail` at 1,048,576 records 19% slower serially and 10–15% slower in parallel. At that size, the unsorted last 1/128 of the records met about four sampled pairs. With the cap, inputs of at least 524,288 records sample exactly as before, and inputs of 8,192 to 524,288 records sample at the floor.
+The linked full-sort screen found gains on ordered and equal inputs at 65,536 records across three record widths, with random controls approximately unchanged. The ranked-operation screen used separate processes and does not attribute its gains to the source changes. Short-input placement sensitivity remains open, including the outside-A/A median for `u32/sorted99` at 1,000 records. Grouped confirmation also changes the short path, even though its direct-confirmation gate is unchanged. [PR #234](https://github.com/Yikai-Liao/tessera-order/pull/234) retains the measured ranges and placement limits.
 
-On the i7-10875H (Rust 1.99.1, one pinned CPU), linked full-sort screens at 65,536 records measured these current/baseline ratios. At this length the floor yields the same 512 pairs.
+### Rejected serial movement experiments
 
-| Records | Sorted | Equal |
-|---|---:|---:|
-| u64 | 0.782–0.789 | 0.803–0.805 |
-| 16-byte rows | 0.638–0.644 | 0.718–0.719 |
-| 128-byte records | 0.885–0.889 | 0.896–0.898 |
+On the former binary partition API, prefix classification saved movement on already partitioned inputs, but replay control slowed the ordinary random-input classifier. Removing replay by distributing only the unclassified suffix and rotating the leading nonmatching run still added a full movement step and lost on random, low-cardinality and sorted-key workloads. Fixed four-record scatter groups also failed to beat width-scaled grouping and were slower for wide records.
 
-Random inputs were unchanged. All five ranked operations on sorted and equal 16-byte rows gained similarly (0.61–0.72). Short-input placement sensitivity remains: u32 sorted99 at 1,000 records had a median of 0.965, outside its A/A window, without meeting the report's agreement rule for a slowdown. Short inputs still confirm directly, but grouped confirmation does change their scan, so this limits the claim rather than proving the short path free of regression.
+Geometric collection of insertion-probe keys slowed nearly sorted inputs without a robust random-input gain. Exact-length key collection did not improve cached-key grouping beyond measurement noise. Deriving writer positions from block ends did not justify the extra arithmetic and cold-path division. Preserve the existing probe and writer state until a replacement demonstrates a saving.
 
-The remaining serial disadvantages are concrete work differences, not grounds for distribution-specific routing:
+### Narrowed API selection screen
 
-- On equal inputs, binary partition still loses to stable sorting, Glidesort, Radsort and Tessera's category-sort compositions. The public predicate must run exactly once per record, in input order.
-- Cached category grouping still loses to the by-key category-sort composition on equal inputs and on some wide-record inputs. The cached-key contract and the boundary-construction pass account for the difference.
-- Standard unstable Top-k, prefix and selection remain faster on random and d16 inputs; rank range and multiple selection lose on wide records. Arbitrary equal-key membership is weaker than Tessera's stable membership, so these losses do not measure stability alone.
+A bounded screen against `704f5a9` measured `select` at zero-based rank 32,768 on random inputs of 65,536 records. Ratios are current time divided by baseline time; brackets give the paired 99% median interval.
 
-Two alternatives were rejected:
+| Input | Current / baseline [bounds] |
+|---|---:|
+| `u64` | 0.9840 [0.9018, 1.0722] |
+| `row_u64` | 0.9902 [0.9372, 1.0645] |
 
-- Binary preclassification with replay control avoided movement on already partitioned inputs, but made random u64 partition 1.34 times baseline at 65,536 records and about 2.4 times at 1,000.
-- Collecting insertion-probe keys geometrically gave no robust random gain and lost on sorted99 inputs.
+The random `u64` full-sort controls were also within noise: 1.0101 [0.9928, 1.0405] at 48 records and 0.9973 [0.9942, 1.0167] at 65,536. None of these four single-placement comparisons establishes a speedup or a result against the standard library.
 
-### Serial movement follow-up
+### Tile-local selection experiment
 
-Fresh-process paired screens on 65,536 records tested four further mechanisms on the same host; none was retained. A new attempt must avoid the cost named here rather than retry the same construction.
+A prototype took a top-digit MSD pass for partial requests and finished only the requested bands. It measured slower on every partial operation in the then-current continuous suite. For random 65,536-record u64 input, multiple selection was 59% slower, rank range 38%, and single selection, prefix and top-k 19–20%; `row_u64` cases were 6–24% slower. Argsort, chunks and partitions were unchanged. The prototype was not merged; a replacement must improve on complete tile sorting for a concrete selection workload.
 
-- **Four-record scatter groups for every width.** This would remove the width-scaled grouping rule. It showed no material gain, and wide-record partition was slightly slower.
-- **Replay-free ordered prefix.** Binary partition would scan the matching prefix, distribute only the unclassified suffix, then rotate the leading nonmatching run behind the matching output. Equal inputs ran at 0.23–0.28 times baseline, but the final rotation's extra movement cost 5–11% on random, d16 and sorted-key inputs of every record type.
-- **Exact-length key collection.** Category grouping collected keys from a chain instead of pushing them. Every case stayed inside the alert window (median ratios 0.99–1.05), so no gain justified the change.
-- **Writer locations derived from block ends.** This removed each writer's stored index without adding record storage. There were no alerts; the best row results (0.96) did not justify the extra address arithmetic and cold-path division.
-
-[Tile-local selection](algorithm-extensions-proposal.md#ordered-refinement-without-a-general-policy-framework) is recorded with its measured loss in the extension proposal.
+Skipping empty or singleton buckets during rank projection, or using a narrower initial digit for incomplete requests, did not recover the loss on random 16-byte rows. Sparse cursor-table walks and rank projections replaced one contiguous insertion sweep. A candidate needs to preserve that cheap finish or demonstrate a workload where skipping work pays for the traversal.
 
 ## Structure analysis
 

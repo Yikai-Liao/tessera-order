@@ -12,7 +12,6 @@ use super::{
     record::{BenchmarkRecord, CaseInput, OwnedRecord, PreparedRecords, WideRecord},
 };
 use crate::case::Row;
-#[cfg(any(test, feature = "operations"))]
 use crate::plan::Operation;
 use rdst::RadixSort;
 use std::{cmp::Reverse, hint::black_box, mem::MaybeUninit, rc::Rc};
@@ -26,17 +25,7 @@ pub(super) trait TesseraAdapter: BenchmarkRecord {
     #[cfg(feature = "operations")]
     fn argsort(records: &[Self]) -> Vec<usize>;
     #[cfg(feature = "operations")]
-    fn segments(records: &mut [Self], segment_len: usize);
-    #[cfg(feature = "operations")]
-    fn prefix(records: &mut [Self], len: usize);
-    #[cfg(feature = "operations")]
-    fn top_k(records: &mut [Self], k: usize);
-    #[cfg(feature = "operations")]
     fn select(records: &mut [Self], index: usize);
-    #[cfg(feature = "operations")]
-    fn rank_range(records: &mut [Self], ranks: std::ops::Range<usize>);
-    #[cfg(feature = "operations")]
-    fn select_many(records: &mut [Self], indices: &[usize]);
 
     /// Sorts through the independently named baseline crate.
     #[cfg(tessera_bench_revisions)]
@@ -86,21 +75,11 @@ macro_rules! revision_sorts {
 /// Supplies only the direct/by-key API distinction; operation behavior stays
 /// in the library and kernel preparation owns the workload/output shape.
 macro_rules! slice_operations {
-    ($argsort:ident, $chunks:ident, $partial:ident, $select:ident, $many:ident $(, $key:expr)?) => {
+    ($argsort:ident, $select:ident $(, $key:expr)?) => {
         #[cfg(feature = "operations")]
         fn argsort(records: &[Self]) -> Vec<usize> { tessera_order::$argsort(records $(, $key)?) }
         #[cfg(feature = "operations")]
-        fn segments(records: &mut [Self], segment_len: usize) { tessera_order::$chunks(records, segment_len $(, $key)?); }
-        #[cfg(feature = "operations")]
-        fn prefix(records: &mut [Self], len: usize) { tessera_order::$partial(records, ..len $(, $key)?); }
-        #[cfg(feature = "operations")]
-        fn top_k(records: &mut [Self], k: usize) { tessera_order::$partial(records, k..k $(, $key)?); }
-        #[cfg(feature = "operations")]
         fn select(records: &mut [Self], index: usize) { tessera_order::$select(records, index $(, $key)?); }
-        #[cfg(feature = "operations")]
-        fn rank_range(records: &mut [Self], ranks: std::ops::Range<usize>) { tessera_order::$partial(records, ranks $(, $key)?); }
-        #[cfg(feature = "operations")]
-        fn select_many(records: &mut [Self], indices: &[usize]) { tessera_order::$many(records, indices $(, $key)?); }
     };
 }
 
@@ -118,7 +97,7 @@ macro_rules! tessera_keys {
                 tessera_order::stable_sort(records);
             }
 
-            slice_operations!(argsort, sort_chunks, partial_sort, select_nth, select_nth_many);
+            slice_operations!(argsort, select_nth);
 
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort);
@@ -142,7 +121,7 @@ macro_rules! tessera_records {
                 tessera_order::stable_sort_by_key(records, |r| r.key);
             }
 
-            slice_operations!(argsort_by_key, sort_chunks_by_key, partial_sort_by_key, select_nth_by_key, select_nth_many_by_key, |r| r.key);
+            slice_operations!(argsort_by_key, select_nth_by_key, |r| r.key);
 
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort_by_key, |r| r.key);
@@ -225,7 +204,6 @@ struct BatchKernel<T, F> {
     buffers: Vec<Vec<T>>,
     sort: F,
     stable: bool,
-    required: Option<Vec<std::ops::Range<usize>>>,
     description: &'static str,
     worker_threads: usize,
 }
@@ -244,15 +222,12 @@ impl<T: BenchmarkRecord, F: FnMut(&mut [T])> Kernel for BatchKernel<T, F> {
     }
     fn check(&self) -> Result<(), String> {
         for v in &self.buffers {
-            if self.input.operation().is_noop(self.input.original().len()) {
-                // No-op contracts require original order, not just membership.
-                check::check(v, self.input.original(), self.input.original(), true)?;
-            } else if let Some(ranges) = &self.required {
-                check::refinement(
+            if let Operation::Select { index } = *self.input.operation() {
+                check::selection(
                     v,
                     self.input.original(),
                     self.input.reference(),
-                    ranges,
+                    index,
                     self.stable,
                 )?;
             } else {
@@ -294,7 +269,6 @@ fn prepare_call<T: BenchmarkRecord>(
 ) -> Box<dyn Kernel> {
     Box::new(BatchKernel {
         description,
-        required: input.operation().required_ranges(),
         input,
         buffers: Vec::new(),
         sort,
@@ -308,18 +282,24 @@ fn prepare_radsort<T: BenchmarkRecord, K: radsort::Key>(
     key: impl Fn(&T) -> K + Copy + 'static,
 ) -> Box<dyn Kernel> {
     #[cfg(feature = "operations")]
-    if !input.operation().is_sort() {
-        if input.operation().bucket_count().is_some() {
-            return operations::categories("radsort", input).expect("category sorting supported");
+    match *input.operation() {
+        Operation::PartitionBuckets { bucket_count } => {
+            return operations::categories("radsort", input, bucket_count)
+                .expect("category sorting supported");
         }
-        if matches!(input.operation(), Operation::Argsort {}) {
+        Operation::Argsort {} => {
             return operations::indices(input, move |source| {
                 let mut indices: Vec<_> = (0..source.len()).collect();
                 radsort::sort_by_key(&mut indices, |&index| key(&source[index]));
                 indices
             });
         }
-        return operations::reference(input, move |values| radsort::sort_by_key(values, key));
+        Operation::Select { .. } => {
+            return operations::selection_reference(input, move |values| {
+                radsort::sort_by_key(values, key);
+            });
+        }
+        Operation::Sort {} => {}
     }
     prepare_kernel(input, true, move |values| radsort::sort_by_key(values, key))
 }
@@ -603,7 +583,6 @@ mod tests {
                 v.sort();
             },
             stable: true,
-            required: None,
             description: "test fixture",
             worker_threads: 0,
         };

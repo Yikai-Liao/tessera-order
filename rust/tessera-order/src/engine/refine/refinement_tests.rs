@@ -1,48 +1,38 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Private rank consumers exercise the production executor before public APIs.
+//! Refinement and recovery at node and tile boundaries.
 
 use super::*;
 use crate::engine::key::{ByKey, RadixKey};
 use core::cell::Cell;
-use core::ops::Range;
 
-/// Required positions are exact; every intervening region has exact members.
-pub(super) fn assert_members(actual: &[usize], expected: &[usize], intervals: &[Range<usize>]) {
-    let mut start = 0;
-    for range in intervals {
-        let mut gap = actual[start..range.start].to_vec();
-        let mut reference = expected[start..range.start].to_vec();
-        gap.sort_unstable();
+/// The pivot has its stable identity. The two sides have the correct members.
+pub(super) fn assert_members(actual: &[usize], expected: &[usize], index: usize) {
+    assert_eq!(actual[index], expected[index]);
+    for range in [0..index, index + 1..expected.len()] {
+        let mut ids = actual[range.clone()].to_vec();
+        let mut reference = expected[range].to_vec();
+        ids.sort_unstable();
         reference.sort_unstable();
-        assert_eq!(gap, reference);
-        assert_eq!(actual[range.clone()], expected[range.clone()]);
-        start = range.end;
+        assert_eq!(ids, reference);
     }
-    let mut tail = actual[start..].to_vec();
-    let mut reference = expected[start..].to_vec();
-    tail.sort_unstable();
-    reference.sort_unstable();
-    assert_eq!(tail, reference);
 }
 
 fn check_keys<K: RadixKey>(keys: &[K]) {
     let len = keys.len();
     let mut expected: Vec<_> = (0..len).collect();
     expected.sort_by_key(|&id| keys[id].encode());
-    let mut workspace = Workspace::new();
-    let mut check = |intervals: &[Range<usize>]| {
+    for index in [0, 1, len / 4, len / 2, len - 1] {
         for tile_bytes in [128, TILE_BYTES] {
             let mut records: Vec<_> = keys.iter().copied().zip(0..len).collect();
             refine_with_tile_bytes(
                 &mut records,
                 ByKey(|record: &(K, usize)| record.0),
-                Requirement::new(len, intervals),
-                Some(&mut workspace),
+                Requirement::Nth(index),
                 tile_bytes,
             );
             let ids: Vec<_> = records.iter().map(|record| record.1).collect();
-            assert_members(&ids, &expected, intervals);
+            assert_members(&ids, &expected, index);
             // All equal-key members, including skipped ones, must remain in their
             // original relative order so later refinement needs no original index.
             records.sort_by_key(|record| record.0.encode());
@@ -51,32 +41,6 @@ fn check_keys<K: RadixKey>(keys: &[K]) {
                 expected
             );
         }
-    };
-    check(&[]);
-    for range in [
-        0..len,
-        0..len / 3,
-        len / 3..2 * len / 3,
-        len / 2..len / 2 + 1,
-        0..0,
-        len / 2..len / 2,
-        len..len,
-    ] {
-        check(core::slice::from_ref(&range));
-    }
-    check(&[
-        len / 4..len / 4,
-        len / 2..len / 2 + 1,
-        3 * len / 4..3 * len / 4,
-    ]);
-    for count in [7, 31] {
-        let intervals: Vec<_> = (1..=count)
-            .map(|i| {
-                let rank = i * len / (count + 1);
-                rank..rank + 1
-            })
-            .collect();
-        check(&intervals);
     }
 }
 
@@ -135,18 +99,6 @@ fn partial_ranks_match_stable_record_identities() {
 }
 
 #[test]
-fn empty_requirement_does_not_evaluate_keys() {
-    let mut records = [3u64, 1, 2];
-    refine(
-        &mut records,
-        ByKey(|_: &u64| -> u64 { panic!("empty request evaluated a key") }),
-        Requirement::new(3, &[]),
-        None,
-    );
-    assert_eq!(records, [3, 1, 2]);
-}
-
-#[test]
 fn skipped_bands_receive_only_parent_classification() {
     let len = if cfg!(miri) { 97 } else { 193 };
     // Both cache-hot tile finishing and deferred large-child continuation must
@@ -162,8 +114,7 @@ fn skipped_bands_receive_only_parent_classification() {
             .collect();
         let mut expected: Vec<_> = (0..len).collect();
         expected.sort_by_key(|&id| records[id].0);
-        let ranks = 2..9;
-        let intervals = core::slice::from_ref(&ranks);
+        let index = 2;
         let mut extractor = ByKey(|record: &(u64, usize, Cell<bool>)| {
             let classified = record.2.replace(true);
             assert!(
@@ -184,18 +135,18 @@ fn skipped_bands_receive_only_parent_classification() {
                 shift: 63,
                 width: 1,
             }),
-            Requirement::new(len, intervals),
+            Requirement::Nth(index),
         );
         assert_members(
             &records.iter().map(|record| record.1).collect::<Vec<_>>(),
             &expected,
-            intervals,
+            index,
         );
     }
 }
 
 #[test]
-fn equality_band_satisfies_multiple_ranks_without_analysis() {
+fn equality_band_satisfies_rank_without_analysis() {
     let len = if cfg!(miri) { 65 } else { 193 };
     let equal = 1u64 << 63;
     let mut records: Vec<_> = (0..len)
@@ -213,8 +164,6 @@ fn equality_band_satisfies_multiple_ranks_without_analysis() {
     let first = records.iter().filter(|record| record.0 < equal).count();
     let count = records.iter().filter(|record| record.0 == equal).count();
     let middle = first + count / 2;
-    let last = first + count - 2;
-    let intervals = [first + 1..first + 2, middle..middle + 1, last..last + 1];
     let mut extractor = ByKey(|record: &(u64, usize, Cell<bool>)| {
         assert!(
             !record.2.replace(true),
@@ -231,12 +180,12 @@ fn equality_band_satisfies_multiple_ranks_without_analysis() {
         &mut records,
         u64::MAX as u128,
         NodePlan::Equal(equal),
-        Requirement::new(len, &intervals),
+        Requirement::Nth(middle),
     );
     assert_members(
         &records.iter().map(|record| record.1).collect::<Vec<_>>(),
         &expected,
-        &intervals,
+        middle,
     );
 }
 
@@ -245,7 +194,7 @@ fn rotated_runs_project_post_rotation_coordinates() {
     let len = if cfg!(miri) { 65 } else { 193 };
     let high_len = len / 3;
     let low_len = len - high_len;
-    for ranks in [2..9, low_len - 2..low_len + 3] {
+    for index in [2, low_len - 1, low_len, len - 1] {
         let mut records: Vec<_> = (0..len)
             .map(|id| {
                 let low = ((id % 19) as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 1;
@@ -254,10 +203,9 @@ fn rotated_runs_project_post_rotation_coordinates() {
             .collect();
         let mut expected: Vec<_> = (0..len).collect();
         expected.sort_by_key(|&id| records[id].0);
-        let intervals = core::slice::from_ref(&ranks);
         let mut extractor = ByKey(|record: &(u64, usize)| {
             assert!(
-                ranks.end > low_len || record.1 >= high_len,
+                (index < low_len) == (record.1 >= high_len),
                 "unrequested rotated run was analyzed"
             );
             record.0
@@ -274,12 +222,12 @@ fn rotated_runs_project_post_rotation_coordinates() {
                 boundary: high_len,
                 set: true,
             },
-            Requirement::new(len, intervals),
+            Requirement::Nth(index),
         );
         assert_members(
             &records.iter().map(|record| record.1).collect::<Vec<_>>(),
             &expected,
-            intervals,
+            index,
         );
         records.sort_by_key(|record| record.0);
         assert_eq!(
@@ -321,11 +269,10 @@ fn partial_child_failure_restores_records_and_releases_workspace() {
                     }
                 })
                 .collect();
-            let ranks = 2..9;
             let mut workspace = Workspace::new();
             let entered = Cell::new(false);
             let mut calls = 0u64;
-            let outcome = crate::unwind::catch(|| {
+            let outcome = crate::engine::unwind::catch(|| {
                 let mut extractor = ByKey(|record: &Owned| {
                     calls += 1;
                     if record.seen.replace(true) {
@@ -347,7 +294,7 @@ fn partial_child_failure_restores_records_and_releases_workspace() {
                         shift: 63,
                         width: 1,
                     }),
-                    Requirement::new(len, core::slice::from_ref(&ranks)),
+                    Requirement::Nth(2),
                 );
             });
             assert!(entered.get(), "fixture never reached child analysis");
@@ -364,14 +311,12 @@ fn partial_child_failure_restores_records_and_releases_workspace() {
                 .map(|record| (record.key, record.id))
                 .collect();
             expected.sort_by_key(|record| record.0);
-            let all = 0..len;
-            refine_with_tile_bytes(
-                &mut records,
-                ByKey(|record: &Owned| record.key),
-                Requirement::new(len, core::slice::from_ref(&all)),
-                Some(&mut workspace),
-                128,
-            );
+            Sorter {
+                scratch: &mut workspace,
+                extractor: &mut ByKey(|record: &Owned| record.key),
+                tile_len,
+            }
+            .sort_child(&mut records, u64::MAX as u128, Requirement::All);
             assert_eq!(
                 records
                     .iter()

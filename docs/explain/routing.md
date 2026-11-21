@@ -1,10 +1,10 @@
 # 3. Routing an input
 
-Before any radix pass, Tessera checks whether the input needs one. Many real inputs are already sorted, nearly sorted, reversed, constant, or dominated by one key, and a radix sort that ignores this does full passes for nothing. This page follows `engine::refine` and `Sorter::sort_node` in [`engine/refine.rs`](../../rust/tessera-order/src/engine/refine.rs) in order.
+Before any radix pass, Tessera checks whether the input needs one. Many real inputs are already sorted, nearly sorted, reversed, constant, or dominated by one key, and a radix sort that ignores this does full passes for nothing. This page follows root preparation and `Sorter::sort_node` in [`engine/refine.rs`](../../rust/tessera-order/src/engine/refine.rs) in order.
 
 ## Order probe
 
-`probe_order` goes straight to the full scan, `confirm_order`, for fewer than 8,192 records. Larger inputs sample adjacent pairs at a stride of `max(128, floor(n / 4,096))`. The three limits serve different purposes. The 128-record minimum stride bounds what an ordered input pays for its sample before the confirming scan. The 4,096-pair cap keeps the sample large enough on big inputs to meet disorder confined to a small part of them, such as an unsorted tail, before a confirmation scan reads nearly every key. Below 8,192 records, a sample would hold fewer than 64 pairs, so confirmation runs directly. The [shared-order assessment](../design/evidence.md#shared-order-confirmation-for-serial-operations) records the trade-off. Confirmation reads each key once. Its first three keys can already show both a rising and a falling pair, which returns unsorted at once. Otherwise it skips leading equal keys, fixes the direction at the first unequal key, and checks only that direction from there. It returns ascending (sorted or constant keys), strictly descending, descending with ties, or unsorted.
+`probe_order` goes straight to the full scan, `confirm_order`, for fewer than 8,192 records. Larger inputs sample adjacent pairs at a stride of `max(128, floor(n / 4,096))`. The three limits serve different purposes. The 128-record minimum stride bounds what an ordered input pays for its sample before the confirming scan. The 4,096-pair target preserves the original sampling density on large inputs, where a sample can catch an unsorted tail before confirmation reads nearly every key. Below 8,192 records, a sample would hold fewer than 64 pairs, so confirmation runs directly. The [shared-order assessment](../design/evidence.md#shared-order-confirmation-for-serial-operations) records the trade-off. Confirmation reads each key once. Its first three keys can already show both a rising and a falling pair, which returns unsorted at once. Otherwise it skips leading equal keys, fixes the direction at the first unequal key, and checks only that direction from there. It returns ascending (sorted or constant keys), strictly descending, descending with ties, or unsorted.
 
 For larger inputs, the sample classifies the input:
 
@@ -41,7 +41,7 @@ Only now is tile and block scratch allocated. Budgeted insertion on a larger uns
 
 ## Nodes and tiles
 
-From here on, the engine works on subproblems and refines the requested ordered ranks. Public full sorting requests every rank; private partial requests use the same routing. A partition always completes stable movement for every band, but an unrequested band receives no further key analysis. The [engine reference](../design/engine.md#ordered-rank-requirements) owns projection and workspace invariants.
+From here on, the engine works on subproblems. Full sorting refines every unfinished band; single-rank selection uses the same plan but only refines the band containing the requested rank. A partition always completes stable movement for every band, including those that receive no further key analysis. The [engine reference](../design/engine.md#ordered-rank-requirements) owns projection and workspace invariants.
 
 Requested subproblems continue in place:
 
@@ -83,7 +83,7 @@ Otherwise the node is split on the digit under its highest varying bit, with the
 
 Serial and parallel roots share this decision. A parallel root shards equality and digit partitions across threads and executes an existing-run split serially, without resampling.
 
-While the block partition completes, each requested child that fits a tile is finished **at once**, while its records are still in cache. Larger requested children are routed again after the partition. A requested tile may be fully sorted even when only some of its ranks are needed; the existing leaf mechanisms stay unchanged.
+While the block partition completes, each requested child that fits a tile is finished **at once**, while its records are still in cache. Larger requested children are routed again after the partition. A requested tile is fully sorted even when only one rank is needed.
 
 ## Summary
 

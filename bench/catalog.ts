@@ -116,25 +116,42 @@ export function modeOrder(id: string) {
   return order < 0 ? catalog.modes.length : order;
 }
 
-/** Versioned public-operation parameters, separate from implementation identity. */
 const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const sort = z.strictObject({ kind: z.literal("sort") });
+const argsort = z.strictObject({ kind: z.literal("argsort") });
+const select = z.strictObject({ kind: z.literal("select"), index: count });
+const partitionBuckets = z.strictObject({
+  kind: z.literal("partition-buckets"),
+  bucket_count: count.min(1),
+});
+
+/** Operations that new benchmark plans may request. */
+export const liveOperationSchema = z.discriminatedUnion("kind", [
+  sort,
+  argsort,
+  select,
+  partitionBuckets,
+]);
+
+/** Persisted operation parameters, in their original report section order. */
 export const operationSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("sort") }),
-  z.strictObject({ kind: z.literal("argsort") }),
+  sort,
+  argsort,
   z.strictObject({ kind: z.literal("partition") }),
-  z.strictObject({ kind: z.literal("partition-buckets"), bucket_count: count.min(1) }),
+  partitionBuckets,
   z.strictObject({ kind: z.literal("segments"), segment_len: count.min(1) }),
   z.strictObject({ kind: z.literal("top-k"), k: count }),
   z.strictObject({ kind: z.literal("prefix"), prefix_len: count }),
-  z.strictObject({ kind: z.literal("select"), index: count }),
+  select,
   z
     .strictObject({ kind: z.literal("rank-range"), start: count, end: count })
     .refine((range) => range.start <= range.end, "reversed rank range"),
   z.strictObject({ kind: z.literal("select-many"), indices: z.array(count) }),
 ]);
 export type Operation = z.infer<typeof operationSchema>;
-/** CLI choices derive from the operation schema, never a second registry. */
-export const operationKinds = operationSchema.options.map((schema) => schema.shape.kind.value);
+/** CLI choices follow current plan admission, not report compatibility. */
+export const operationKinds = liveOperationSchema.options.map((schema) => schema.shape.kind.value);
+const reportOperationOrder = operationSchema.options.map((schema) => schema.shape.kind.value);
 
 /** Validate parameters against a resolved count before building or allocating inputs. */
 export function validateOperation(operation: Operation, len: number) {
@@ -151,19 +168,6 @@ export function validateOperation(operation: Operation, len: number) {
               ? operation.indices.every((i) => i < len)
               : true;
   if (!valid) throw new Error(`Operation parameters exceed input length ${len}`);
-}
-
-/** Decode an exact half-open rank range; empty ranges are no-op requests. */
-export function parseRankRange(value: string) {
-  const match = /^(0|[1-9]\d*):(0|[1-9]\d*)$/.exec(value);
-  if (!match) throw new Error("expected start:end with nonnegative integer ranks");
-  const parsed = operationSchema.parse({
-    kind: "rank-range",
-    start: Number(match[1]),
-    end: Number(match[2]),
-  });
-  if (parsed.kind !== "rank-range") throw new Error("invalid rank range");
-  return { start: parsed.start, end: parsed.end };
 }
 
 /** Extra identity components; complete sorting retains historical IDs. */
@@ -217,6 +221,34 @@ export function operationLabel(operation?: Operation) {
       return `Stable ranks [${operation.start}, ${operation.end})`;
     case "select-many":
       return `Stable multiple selection · ${operation.indices.length} requests`;
+  }
+}
+
+const counted = (value: number) => value.toLocaleString("en-US");
+
+/** Name an operation in figure sections and table cells, where the full label is too long. */
+export function operationTitle(operation: Operation) {
+  switch (operation.kind) {
+    case "sort":
+      return "sort";
+    case "argsort":
+      return "argsort";
+    case "partition":
+      return "binary partition";
+    case "partition-buckets":
+      return `categories · ${counted(operation.bucket_count)}`;
+    case "segments":
+      return `chunks · ${counted(operation.segment_len)}`;
+    case "top-k":
+      return `top-k · ${counted(operation.k)}`;
+    case "prefix":
+      return `prefix · ${counted(operation.prefix_len)}`;
+    case "select":
+      return `select · rank ${counted(operation.index)}`;
+    case "rank-range":
+      return `ranks · ${counted(operation.start)}–${counted(operation.end)}`;
+    case "select-many":
+      return `select-many · ${counted(operation.indices.length)} ranks`;
   }
 }
 
@@ -289,9 +321,11 @@ export function parseComparisonId(id: string) {
       case "select":
         candidate = { kind, index: integer(parameter ?? "") };
         break;
-      case "rank-range":
-        candidate = { kind, ...parseRankRange((parameter ?? "").replaceAll("-", ":")) };
+      case "rank-range": {
+        const [start, end] = (parameter ?? "").split("-");
+        candidate = { kind, start: integer(start), end: integer(end ?? "") };
         break;
+      }
       case "select-many":
         candidate = {
           kind,
@@ -349,7 +383,7 @@ export function caseParts(id: string) {
     if (parts[0] !== "rust" || parts.length < 6) throw new Error();
     parsed = parseComparisonId(parts.slice(1, -1).join("/"));
   } catch {
-    return { type: "", input: id, n: "", extra: "", seed: "", mode: "" };
+    return { type: "", input: id, operation: "", kind: "", n: "", extra: "", seed: "", mode: "" };
   }
   const { ty, seed, operation } = parsed;
   const record = recordType(ty),
@@ -357,11 +391,12 @@ export function caseParts(id: string) {
   const extra = [seed === "s1" ? "" : `seed ${seed.slice(1)}`, mode === "api" ? "" : mode].filter(
     Boolean,
   );
-  const input = shape.compact ?? shape.label;
   return {
     type: record.compact ?? record.label,
-    // Operation cases share inputs with sorting cases; every table and figure row names the operation.
-    input: operation ? `${input} · ${operationLabel(operation)}` : input,
+    input: shape.compact ?? shape.label,
+    // Operation cases share inputs with sorting cases; figures group them by this name.
+    operation: operation ? operationTitle(operation) : "",
+    kind: operation?.kind ?? "",
     n: parsed.len.toLocaleString("en-US"),
     extra: extra.join(", "),
     seed,
@@ -382,7 +417,8 @@ export function caseName(id: string) {
 /** Order case IDs for reading: mode, length, record type, input, then seed; unknown entries last. */
 export function compareCases(a: string, b: string) {
   const key = (id: string) => {
-    const [, ty = "", shape = "", length = "", seed = "", mode = ""] = id.split("/");
+    const [, ty = "", shape = "", length = "", seed = ""] = id.split("/");
+    const mode = id.split("/").at(-1) ?? "";
     const rank = (list: { id: string }[], value: string) => {
       const found = list.findIndex((entry) => entry.id === value);
       return found < 0 ? list.length : found;
@@ -399,11 +435,24 @@ export function compareCases(a: string, b: string) {
   return x.reduce((order, value, i) => order || value - y[i], 0) || a.localeCompare(b);
 }
 
+/** Name a case's figure section: its API mode for full sorting, otherwise its operation.
+ * Sorting sections come first in mode order, then operations in catalog order. */
+export function caseSection(id: string) {
+  const parts = caseParts(id);
+  return parts.operation
+    ? {
+        title: parts.operation.toUpperCase(),
+        order:
+          catalog.modes.length + 1 + reportOperationOrder.indexOf(parts.kind as Operation["kind"]),
+      }
+    : { title: modeName(parts.mode).toUpperCase(), order: modeOrder(parts.mode) };
+}
+
 /** Format a case's readable label while preserving unknown identifiers. */
 export function caseLabel(id: string) {
   const parts = caseParts(id);
   return (
-    [parts.type, parts.input, parts.n].filter(Boolean).join(" · ") +
+    [parts.type, parts.input, parts.operation, parts.n].filter(Boolean).join(" · ") +
     (parts.extra ? `, ${parts.extra}` : "")
   );
 }

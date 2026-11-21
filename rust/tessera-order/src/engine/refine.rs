@@ -23,7 +23,6 @@ mod refinement_tests;
 use crate::engine::tile;
 
 use crate::engine::order::scan_varying_bits;
-use crate::engine::rank::Requirement;
 use crate::engine::thresholds::{INSERTION_MAX, TILE_BYTES};
 use crate::engine::workspace::Workspace;
 use plan::{NodePlan, plan_node};
@@ -38,6 +37,23 @@ use crate::engine::key::{
 };
 
 type KeyValue<T, E> = <E as Extract<T>>::Value;
+
+/// Positions to finish in the current slice. Movement always completes every band.
+#[derive(Clone, Copy)]
+enum Requirement {
+    All,
+    Nth(usize),
+}
+
+impl Requirement {
+    fn project(self, band: core::ops::Range<usize>) -> Option<Self> {
+        match self {
+            Self::All if !band.is_empty() => Some(Self::All),
+            Self::Nth(index) if band.contains(&index) => Some(Self::Nth(index - band.start)),
+            _ => None,
+        }
+    }
+}
 
 /// The candidate bits left when every child holds the top bit of a nonzero
 /// `varying` constant, as after a run or equality split.
@@ -79,7 +95,7 @@ impl Split {
         lend: fn(&mut C) -> &mut E,
         scratch: &mut Workspace<T>,
         tile_len: usize,
-        required: Requirement<'_>,
+        required: Requirement,
     ) -> Vec<usize> {
         let tile = &mut scratch.tile;
         let mut visit =
@@ -111,26 +127,20 @@ struct Sorter<'a, T, E> {
 
 /// Sorts the complete input through the shared ordered-refinement entry.
 pub(crate) fn sort<T, E: Extract<T>>(records: &mut [T], extractor: E) {
-    let ranks = 0..records.len();
-    let required = Requirement::new(records.len(), core::slice::from_ref(&ranks));
-    refine(records, extractor, required, None);
+    refine_with_tile_bytes(records, extractor, Requirement::All, TILE_BYTES);
 }
 
-/// Refines requested ranks with invocation-owned reusable capacity.
-///
-/// Root preparation and half-key narrowing are performed once here, not in
-/// algorithm adapters. Empty requirements do no key work. A borrowed workspace
-/// retains capacity for the owning invocation; otherwise fresh storage is
-/// constructed only after preparation. The engine chooses its default tile
-/// budget; ordered and constant roots do not allocate or initialize unused
-/// movement storage.
-pub(crate) fn refine<T, E: Extract<T>>(
-    records: &mut [T],
+/// Places the stable ranked record and returns the three disjoint regions.
+pub(crate) fn select_nth<T, E: Extract<T>>(
+    values: &mut [T],
+    index: usize,
     extractor: E,
-    required: Requirement<'_>,
-    workspace: Option<&mut Workspace<T>>,
-) {
-    refine_with_tile_bytes(records, extractor, required, workspace, TILE_BYTES);
+) -> (&mut [T], &mut T, &mut [T]) {
+    assert!(index < values.len(), "selection index out of bounds");
+    refine_with_tile_bytes(values, extractor, Requirement::Nth(index), TILE_BYTES);
+    let (before, rest) = values.split_at_mut(index);
+    let (selected, after) = rest.split_first_mut().unwrap();
+    (before, selected, after)
 }
 
 /// Executes refinement with an explicit budget, shared by the production entry
@@ -138,29 +148,18 @@ pub(crate) fn refine<T, E: Extract<T>>(
 fn refine_with_tile_bytes<T, E: Extract<T>>(
     records: &mut [T],
     mut extractor: E,
-    required: Requirement<'_>,
-    workspace: Option<&mut Workspace<T>>,
+    required: Requirement,
     tile_bytes: usize,
 ) {
     let record_bytes = core::mem::size_of::<T>();
     if records.len() < 2 || record_bytes == 0 {
         return;
     }
-    let Some(required) = required.project(0..records.len()) else {
-        return;
-    };
     let tile_len = tile_capacity::<T>(tile_bytes);
     let Some(varying) = prepare::<_, _>(records, &mut extractor, tile_len) else {
         return;
     };
-    let mut local;
-    let workspace = match workspace {
-        Some(workspace) => workspace,
-        None => {
-            local = Workspace::new();
-            &mut local
-        }
-    };
+    let workspace = &mut Workspace::new();
     if E::Value::BITS > 64 {
         if varying >> 64 == 0 {
             Sorter::<T, _> {
@@ -191,9 +190,7 @@ fn refine_with_tile_bytes<T, E: Extract<T>>(
 
 #[cfg(test)]
 fn sort_with_tile_bytes<T, E: Extract<T>>(records: &mut [T], extractor: E, tile_bytes: usize) {
-    let ranks = 0..records.len();
-    let required = Requirement::new(records.len(), core::slice::from_ref(&ranks));
-    refine_with_tile_bytes(records, extractor, required, None, tile_bytes);
+    refine_with_tile_bytes(records, extractor, Requirement::All, tile_bytes);
 }
 
 /// Finishes ordered or small roots, otherwise returns their varying bits.
@@ -413,7 +410,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         boundary: usize,
         set: bool,
         varying: u128,
-        required: Requirement<'_>,
+        required: Requirement,
     ) {
         // Rotation preserves each run's internal order.
         let boundary = if set {
@@ -434,7 +431,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
     }
 
     /// Finishes a child using remaining variation, order and the shared node policy.
-    fn sort_child(&mut self, records: &mut [T], candidate: u128, required: Requirement<'_>) {
+    fn sort_child(&mut self, records: &mut [T], candidate: u128, required: Requirement) {
         if records.len() < 2 || candidate == 0 {
             return;
         }
@@ -458,7 +455,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
     }
 
     /// Routes a slice whose order has already been probed.
-    fn sort_node(&mut self, records: &mut [T], varying: u128, required: Requirement<'_>) {
+    fn sort_node(&mut self, records: &mut [T], varying: u128, required: Requirement) {
         let len = records.len();
         if len < 2 || varying == 0 {
             return;
@@ -479,7 +476,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         records: &mut [T],
         varying: u128,
         plan: NodePlan<E::Value>,
-        required: Requirement<'_>,
+        required: Requirement,
     ) {
         match plan {
             NodePlan::Equal(equal) => self.partition_equal(records, equal, varying, required),
@@ -496,7 +493,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         records: &mut [T],
         digit: Digit,
         varying: u128,
-        required: Requirement<'_>,
+        required: Requirement,
     ) {
         // The split digit is constant inside each child, so its bits are
         // excluded from the next scan.
@@ -529,7 +526,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         records: &mut [T],
         equal: KeyValue<T, E>,
         varying: u128,
-        required: Requirement<'_>,
+        required: Requirement,
     ) {
         let rank = Rank::new(&mut *self.extractor, equal, varying);
         let split = Split::equality(&rank, varying);
@@ -551,7 +548,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
         records: &mut [T],
         ends: Vec<usize>,
         split: Split,
-        required: Requirement<'_>,
+        required: Requirement,
     ) {
         let mut start = 0;
         for (bucket, &end) in ends.iter().enumerate() {
@@ -627,18 +624,13 @@ mod tests {
         records[4] = 1;
         let mut expected = records.clone();
         expected.sort();
-        let len = records.len();
         let mut scratch = Workspace::new();
         Sorter {
             scratch: &mut scratch,
             extractor: &mut Direct,
             tile_len: tile_capacity::<u64>(TILE_BYTES),
         }
-        .sort_child(
-            &mut records,
-            u64::MAX as u128,
-            Requirement::new(len, core::slice::from_ref(&(0..len))),
-        );
+        .sort_child(&mut records, u64::MAX as u128, Requirement::All);
         assert_eq!(records, expected);
     }
 
@@ -826,12 +818,7 @@ mod tests {
                 extractor: &mut extractor,
                 tile_len,
             }
-            .execute_node(
-                &mut records,
-                0x1ff,
-                plan,
-                Requirement::new(len, core::slice::from_ref(&(0..len))),
-            );
+            .execute_node(&mut records, 0x1ff, plan, Requirement::All);
 
             assert!(drops.borrow().is_empty());
             for (id, record) in records.iter().enumerate() {

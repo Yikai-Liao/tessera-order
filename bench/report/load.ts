@@ -4,7 +4,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { algorithm, comparisonGroup, operationSchema, validateOperation } from "../catalog.ts";
-import { parsePlan } from "../plan.ts";
+import { parseRetainedPlan } from "../plan.ts";
 import { pairedBudget } from "../statistics.ts";
 import {
   caseId,
@@ -85,7 +85,7 @@ function parseManifest(value: unknown): Manifest {
     if (v.adapter !== undefined) assertString(v.adapter);
     names.add(v.name);
   }
-  const operation = value.suite_version === 2 ? parsePlan(value.plan).operation : undefined;
+  const operation = value.suite_version === 2 ? parseRetainedPlan(value.plan).operation : undefined;
   if (value.suite_version === 2) {
     if (!operation || operation.kind === "sort")
       throw new Error("schema 2 measurements require an explicit non-sort plan");

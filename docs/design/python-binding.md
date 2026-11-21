@@ -22,7 +22,7 @@ Keywords keep their NumPy meaning, and every NumPy-accepted value is honored bec
 - `key` is Tessera's extension for lists, following Python's `sorted`; NumPy has no counterpart.
 - `out` follows NumPy's general output-array convention, because NumPy sorts in place only through the `ndarray.sort` method, which a binding cannot add. `out=a` sorts the input in place with the core's memory bound; another writable container of the same type, length and element type receives the result.
 
-`partition(a, kth, ...)` and `argpartition(a, kth, ...)` follow after the first release with NumPy's signatures, including an integer or a sequence of integers for `kth`. They map to the Rust multiple-selection operation; equal keys resolve as in a stable argsort, which is observable only in `argpartition` indices.
+Defer `partition(a, kth, ...)` and `argpartition(a, kth, ...)` until there is a design for NumPy's signatures, including an integer or a sequence of integers for `kth`. Rust exposes only single-rank selection. Stable sort or argsort is a correctness reference for several ranks but does not save refinement work. Equal keys would resolve as in a stable argsort, which is observable only in `argpartition` indices.
 
 These return and mutation rules are identical for all supported container families.
 
@@ -60,7 +60,7 @@ Start with one-dimensional `int8/16/32/64`, `uint8/16/32/64`, and `float32/64`.
 | Noncontiguous one-dimensional view, including negative stride | Reject | Read in logical view order |
 | Read-only numeric array | Reject | Supported |
 | Unaligned or non-native-endian numeric array | Reject | Convert into owned aligned/native working storage; preserve output dtype |
-| Multidimensional array | Deferred pending an `axis` contract; `axis=-1` on C-contiguous rows is planned to map to the Rust fixed-length [chunk sort](algorithm-extensions-proposal.md#release-surface-alignment) | Deferred |
+| Multidimensional array | Deferred pending an `axis` contract; `axis=-1` on C-contiguous rows can loop over slices and sort each row independently | Deferred |
 | Object, string, complex or structured dtype | No direct sort | Extract a supported numeric key array, then argsort it |
 
 Indices for a view are relative to that view, not its backing array. Sorted copies preserve dtype, including byte order; any working-storage conversion and its cost are included in the interface's space and timing measurements. No noncontiguous input is silently treated as a contiguous slice.

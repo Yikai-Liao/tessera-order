@@ -3,7 +3,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseCriterionId, revisionSampling } from "../catalog.ts";
-import { type Plan, parsePlan } from "../plan.ts";
+import { type Plan, parseRetainedPlan, type RetainedPlan } from "../plan.ts";
 import { summarizeRatios } from "../statistics.ts";
 import type { BuildProvenance } from "../workspace.ts";
 
@@ -11,7 +11,7 @@ import type { BuildProvenance } from "../workspace.ts";
  * Tessera's serial API, its four-thread API, or both; any other algorithm would be identical
  * code in both builds. Other operations are serial. Returns the worker threads the scheduler
  * must reserve. */
-export function revisionThreads(plan: Plan): 1 | 4 {
+export function revisionThreads(plan: RetainedPlan): 1 | 4 {
   if (plan.operation && plan.operation.kind !== "sort") {
     if (plan.algorithms.join() !== "tessera")
       throw new Error("Revision comparisons of an operation measure only serial tessera");
@@ -84,7 +84,7 @@ export interface RevisionPair {
 /** Complete build inventory and plan; no measurement host, samples or shard. */
 export interface PreparedPair extends RevisionPair {
   kind: "prepared-revisions";
-  plan: Plan;
+  plan: RetainedPlan;
 }
 
 /** Measurement state; empty samples are incomplete, never a prepared build. */
@@ -102,7 +102,7 @@ export interface LocalRun extends RevisionPair {
   shard?: Shard;
 }
 
-/** Read one frozen preparation contract for execution or JSON-only CI validation. */
+/** Read frozen preparation metadata. Execution must separately admit its plan. */
 export async function readPrepared(directory: string): Promise<PreparedPair> {
   const pair = JSON.parse(await readFile(join(directory, "prepared.json"), "utf8"));
   if (
@@ -119,7 +119,7 @@ export async function readPrepared(directory: string): Promise<PreparedPair> {
     !pair.binaryPaths?.current
   )
     throw new Error("Expected an unmeasured prepared revision pair");
-  pair.plan = parsePlan(pair.plan);
+  pair.plan = parseRetainedPlan(pair.plan);
   revisionThreads(pair.plan);
   return pair;
 }

@@ -39,7 +39,7 @@ function table(rows: Row[]) {
     ...rows.map((r) =>
       [
         "",
-        cell(r.parts.input),
+        cell([r.parts.input, r.parts.operation].filter(Boolean).join(" · ")),
         cell(r.parts.type),
         r.parts.n,
         cell(modeName(r.parts.mode)),

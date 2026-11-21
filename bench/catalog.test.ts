@@ -4,11 +4,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
+  caseLabel,
   caseParts,
+  caseSection,
   comparisonGroup,
   comparisonId,
   criterionGroup,
   criterionId,
+  operationKinds,
   operationSchema,
   parseComparisonId,
   parseCriterionId,
@@ -66,10 +69,13 @@ test("strict identities reject unknown fields without tightening historical labe
   });
   assert.deepEqual(rawCaseParts("old/id"), { input: "id", sub: "" });
   assert.equal(caseParts("not-an-id").input, "not-an-id");
-  assert.notEqual(
-    caseParts("rust/u64/random/65536/s1/argsort/api").input,
-    caseParts("rust/u64/random/65536/s1/api").input,
-  );
+  // Operation cases keep the plain input name and get their own figure section.
+  const operation = "rust/u64/random/65536/s1/rank-range/16384-24576/api";
+  assert.equal(caseParts(operation).input, caseParts("rust/u64/random/65536/s1/api").input);
+  assert.equal(caseSection(operation).title, "RANKS · 16,384–24,576");
+  assert.equal(caseSection("rust/u64/random/65536/s1/api").title, "SERIAL");
+  assert.ok(caseSection(operation).order > caseSection("rust/u64/random/65536/s1/par-4").order);
+  assert.equal(caseLabel(operation), "u64 · random · ranks · 16,384–24,576 · 65,536");
 });
 
 test("operation identities and parameter admission match the shared language fixture", () => {
@@ -93,7 +99,8 @@ test("operation identities and parameter admission match the shared language fix
       continue;
     }
     const operation = operationSchema.parse(entry.operation);
-    parsePlan(plan);
+    if (operationKinds.some((kind) => kind === operation.kind)) parsePlan(plan);
+    else assert.throws(() => parsePlan(plan));
     assert.equal(comparisonId({ ...input, operation }), entry.comparison);
     assert.equal(comparisonGroup({ ...input, operation }), entry.group);
     assert.deepEqual(parseComparisonId(entry.comparison), { ...input, seed: "s1", operation });

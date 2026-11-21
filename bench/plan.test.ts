@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { decodeConfig } from "./config.ts";
-import { loadPlan, parsePlan, selectCaseIds } from "./plan.ts";
+import { loadPlan, parsePlan, planSchema, selectCaseIds } from "./plan.ts";
 
 const fixture = decodeConfig(
   readFileSync(new URL("./plans/selection.fixture.toml", import.meta.url), "utf8"),
@@ -65,28 +65,23 @@ test("malformed and unsupported plans fail before execution", () => {
   assert.throws(() => selectCaseIds(ids, "^never$"), /no supported cases/);
 });
 
-test("operation overrides retain exact raw requests and reject unrelated flags", async () => {
+test("operation overrides retain exact parameters and reject unrelated flags", async () => {
   const selected = await loadPlan("local", {
-    operation: "select-many",
-    indices: [99, 0, 99],
+    operation: "select",
+    index: 99,
     lengths: [100],
   });
   assert.equal(selected.schema, 2);
-  assert.deepEqual(selected.operation, { kind: "select-many", indices: [99, 0, 99] });
+  assert.deepEqual(selected.operation, { kind: "select", index: 99 });
   for (const invalid of [
-    { operation: "argsort" as const, prefixLen: 1 },
-    { operation: "top-k" as const },
-    { operation: "top-k" as const, k: 101, lengths: [100] },
-    { operation: "prefix" as const, prefixLen: 5, lengths: ["tile-next" as const] },
-    { prefixLen: 5 },
+    { operation: "argsort" as const, index: 1 },
+    { operation: "select" as const },
+    { operation: "select" as const, index: 100, lengths: [100] },
+    { operation: "select" as const, index: 5, lengths: ["tile-next" as const] },
+    { index: 5 },
+    { operation: "partition-buckets" as const, bucketCount: 0 },
   ])
     await assert.rejects(loadPlan("local", invalid));
-  assert.deepEqual(
-    (await loadPlan("local", { operation: "partition-buckets", bucketCount: 7 })).operation,
-    { kind: "partition-buckets", bucket_count: 7 },
-  );
-  await assert.rejects(loadPlan("local", { operation: "partition-buckets", bucketCount: 0 }));
-  await assert.rejects(loadPlan("local", { operation: "partition", bucketCount: 2 }));
   const result = spawnSync(
     process.execPath,
     [
@@ -109,20 +104,64 @@ test("operation overrides retain exact raw requests and reject unrelated flags",
   });
 });
 
+test("new plans, the editor schema and the CLI exclude retained-only workloads", () => {
+  const cli = (...args: string[]) =>
+    spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("../tools/index.ts", import.meta.url)), "plan", "local", ...args],
+      { encoding: "utf8" },
+    );
+  const schema = JSON.stringify(planSchema());
+  const help = cli("--help");
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(
+    help.stdout.replace(/\s+/g, " "),
+    /choices: "sort", "argsort", "select", "partition-buckets"/,
+  );
+  for (const operation of [
+    { kind: "partition" },
+    { kind: "segments", segment_len: 73 },
+    { kind: "top-k", k: 10 },
+    { kind: "prefix", prefix_len: 10 },
+    { kind: "rank-range", start: 10, end: 20 },
+    { kind: "select-many", indices: [99, 0, 99] },
+  ]) {
+    const rule = { lengths: [100] };
+    const base = { algorithms: ["tessera"], include: [rule] };
+    assert.throws(() => parsePlan({ ...base, schema: 2, operation }));
+    assert.throws(() => parsePlan({ ...base, schema: 1, include: [{ ...rule, operation }] }));
+    assert.ok(!schema.includes(JSON.stringify(operation.kind)));
+    const result = cli("--operation", operation.kind);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Allowed choices/);
+  }
+  for (const flag of ["--k", "--prefix-len", "--indices", "--segment-len", "--rank-range"]) {
+    assert.ok(!help.stdout.includes(`${flag} `));
+    assert.match(cli(flag, "1").stderr, /unknown option/);
+  }
+});
+
 test("revision suites place operations on include rules; an override replaces them", async () => {
   const rule = { types: ["u64"], distributions: ["random"], lengths: [1000] };
-  const top = { ...rule, operation: { kind: "top-k", k: 10 } };
-  parsePlan({ schema: 1, algorithms: ["tessera"], include: [rule, top] });
+  const select = { ...rule, operation: { kind: "select", index: 10 } };
+  parsePlan({ schema: 1, algorithms: ["tessera"], include: [rule, select] });
   for (const invalid of [
-    { schema: 1, algorithms: ["tessera"], include: [rule], exclude: [top] },
-    { schema: 1, algorithms: ["tessera"], include: [rule], parallel: [top] },
-    { schema: 2, algorithms: ["tessera"], operation: { kind: "argsort" }, include: [top] },
-    { schema: 1, algorithms: ["tessera"], include: [{ ...top, lengths: ["tile-next"] }] },
-    { schema: 1, algorithms: ["tessera"], include: [{ ...top, lengths: [5] }] },
+    { schema: 1, algorithms: ["tessera"], include: [rule], exclude: [select] },
+    { schema: 1, algorithms: ["tessera"], include: [rule], parallel: [select] },
+    { schema: 2, algorithms: ["tessera"], operation: { kind: "argsort" }, include: [select] },
+    { schema: 1, algorithms: ["tessera"], include: [{ ...select, lengths: ["tile-next"] }] },
+    { schema: 1, algorithms: ["tessera"], include: [{ ...select, lengths: [5] }] },
   ])
     assert.throws(() => parsePlan(invalid));
   const continuous = await loadPlan("continuous");
-  assert.ok(continuous.include.some((entry) => entry.operation));
+  assert.deepEqual(
+    continuous.include.flatMap((entry) => entry.operation ?? []),
+    [
+      { kind: "argsort" },
+      { kind: "partition-buckets", bucket_count: 16 },
+      { kind: "select", index: 32768 },
+    ],
+  );
   const sorting = await loadPlan("continuous", { operation: "sort" });
   assert.ok(sorting.include.length > 0 && sorting.include.every((entry) => !entry.operation));
 });

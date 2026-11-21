@@ -19,7 +19,7 @@ Full sorting and single-rank selection share node planning, leaf finishing and s
 
 ## Knowledge boundaries
 
-`src/lib.rs` documents the crate and reexports its public API. `src/algorithms.rs` and its submodules implement the public ordering operations. They supply extractors or build index and key buffers; they do not assemble rank requests, manage engine workspace or name movement modules. The private `engine/` module exposes complete operations: `sort`, `select_nth`, `distribute` and, with Rayon, `par_sort`. `engine/mod.rs` reexports these operations without forwarding calls or a policy trait. The paths below are relative to `src/engine/`.
+`src/lib.rs` documents the crate and reexports its public API. `src/algorithms.rs` and its submodules implement the public ordering operations. They supply extractors or build index and key buffers; they do not assemble rank requests, manage engine workspace or name movement modules. The private `engine/` module resolves complete sorts, rank cuts, source permutations and cached distributions. With Rayon it also provides `par_sort`. `engine/mod.rs` reexports these operations without forwarding calls or a policy trait. The paths below are relative to `src/engine/`.
 
 Keeping every module at crate root allowed an adapter to depend on a block directory or a tile guard. The module boundary removes that dependency possibility without changing execution. A separate public engine crate would force lifetime, extractor and allocation contracts to stabilize before the current consumers have established them; that remains deferred.
 
@@ -27,7 +27,7 @@ The [Rust architecture policies](../development/ci.md#rust-architecture-policies
 
 | Owner | Complete responsibility | Consumers need to know |
 |---|---|---|
-| `../algorithms.rs` | Define serial sort, argsort and selection; build and sort the output indices for argsort | Complete sort and selection, not movement state or planner details |
+| `../algorithms.rs` | Expose serial sort, argsort and selection through the engine operations | Their public contracts and key extractors |
 | `../algorithms/cached.rs` | Cache encoded keys, detect order and variation, and choose distribution or an index permutation | Complete distribution or sort, not their scratch or intermediate boundaries |
 | `../algorithms/parallel.rs` | Define the feature-gated sorting API and its record and extractor bounds | Complete parallel sort, not its scheduling or ownership transfer |
 | `distribution.rs` | Stable finite-category distribution and its storage lifetime | Category keys in a bounded bit window; no returned boundaries |
@@ -37,6 +37,7 @@ The [Rust architecture policies](../development/ci.md#rust-architecture-policies
 | `refine/plan.rs` | Bounded sampling and executable node partition decisions | Records, candidate variation and tile capacity go in; a node decision comes out |
 | `tile.rs`, `tile/plan.rs` | Capacity, complete leaf planning, scratch allocation, cached classification, counting passes and restoration | Finish a cursor-bounded slice; no raw pointer, cursor layout or guard crosses the boundary |
 | `block.rs`, `block/` | Physical block storage, stable bucket chains, ledger costs, completion and recovery | A `Classify` bucket per record goes in; bucket boundaries and completed bands come out |
+| `refine/spans.rs` | Discover a bounded sparse permutation and apply its contiguous spans | Every long span belongs to one monotone source sequence. Key evaluation ends before record movement starts. |
 | `refine/parallel.rs` | Shard count, task scheduling and scratch pooling for the shared decisions | Exclusive bucket borrows and the planner's decision, not a second cost model |
 
 A change to sampled occupancy or a leaf estimate stays in planning and does not touch record movement. A change to tile scratch layout stays with its counting and recovery operation. Tile cursor size, record capacity, alignment padding and table capacity derive from the cursor type and the shared byte budget, and planning consumes those facts. Block metadata costs are derived beside the physical representation (`finish::serial_descriptor_bytes`), not copied into the strategy model.
@@ -85,7 +86,9 @@ A stage's rule changes on its page, in the code and in the page's model together
 
 ## Ordered rank requirements
 
-`sort` and `select_nth` share private ordered refinement. The requirement is either `All` or `Nth(index)`, with the index local to the current slice. Selection validates the root index before mutation or key calls, then returns three disjoint borrows after refinement. Argsort sorts its index output with `ByKey`: numeric indices are payloads, never direct keys eligible for count/refill.
+`sort` and `select_nth` share private ordered refinement. The requirement is either `All` or `Nth(index)`, with the index local to the current slice. Selection validates the root index before mutation or key calls, then returns three disjoint borrows after refinement. For argsort and wide-window cached-key sorting, `refine/indices.rs` owns the stable source permutation. Argsort requests indices and cached-key sorting applies spans or cycles to records. See [index output](../explain/routing.md#when-the-result-is-a-permutation).
+
+A rank in a root larger than one tile can finish from a one-sided boundary or a bounded ordered end. A serial finisher can resolve a node with a dominant key or, in a full sort, sparse inversions as source spans instead of partitioning it; for a rank it reserves just that position. See [sparse source order](../explain/routing.md#sparse-source-order).
 
 `Requirement::project` keeps `All` for every nonempty band. For `Nth`, it keeps only the band containing the rank and subtracts that band's start. Projection uses final parent-relative ranges, independent of callback order; for existing runs these are the ranges after rotation. An equal-key band is already finished: its stable movement establishes ranked identity within the band.
 

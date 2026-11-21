@@ -66,6 +66,14 @@ Routing by type pays for the type's range rather than the data's. Every `u8` key
 
 **Disposition:** keep the range-routed implementation. Removing the count-taking entry traded these individually listed losses for an interface without a category limit. The binary predicate entry was also removed before release; one-pass internal distribution remains for cached sorting, whose public result does not include boundaries. The ratios come from one host and three blocks; several 4,096-record intervals were wide.
 
+## Classified prefix and tile-rank follow-up
+
+The [tile-local selection experiment](#tile-local-selection-experiment) had a follow-up in [PR #236](https://github.com/Yikai-Liao/tessera-order/pull/236). A full cursor-table walk more than doubled small single-selection time in a local screen. The prototype used binary search over completed cursors to find buckets enclosing sparse requests. Replacing the contiguous insertion finish with per-bucket insertion slowed a rank-range case. The contiguous finish applies when all buckets are insertion-sized.
+
+The binary partition prototype consumed whole runs of known classifications before the ordinary suffix classifier. The scatter limit also needed isolation: with a runtime block limit, fixed-call counters for Zipf2 argsort showed about 8.5% more data reads. Choosing the limit statically eliminated nearly all the extra reads. Identical-source and placement variation left the elapsed-time effect unresolved.
+
+The [hosted comparison](https://github.com/Yikai-Liao/tessera-order/runs/132914599059) for `52347742` against `704f5a9` flagged a 40.4% slowdown for serial binary partition on 65,536 random `u64` records. The cause was unresolved. [PR #239](https://github.com/Yikai-Liao/tessera-order/pull/239) removed that public API.
+
 ## Unstable node-partition feasibility
 
 A retired serial feasibility study against `0499d35` shared root preparation, key encoding and half-key dispatch, node planning, candidate-bit progress, child routing and stable tile finishing. Only node movement changed: a histogram defined final bucket bands, then bounded cursors placed records with safe in-slice swaps instead of stable block chains and ledger completion. Classification could panic without leaving a hole; a changed key targeting a full band stopped that partition, while candidate-bit consumption still bounded recursion. Ordered reversal stayed stable. This is a research prototype, not a supported release API or a production-ready kernel.
@@ -245,6 +253,16 @@ The table retains every input where either baseline was classified faster in eit
 The repeat does not erase the initial losses: several directions or control windows changed, and the wide-record d16 loss persists against baseline A but not B. The same-source current-copy / paired-current-mean median ratio was 1.186 on 48-record keyed d16 input in the first screen. Symbol and disassembly inspection found distinct current root bodies, so those copies do not isolate address placement alone. These controls establish neither zero cost nor a source-causal penalty.
 
 **Disposition:** retain the internal simplification with timing acceptance open. Keep the individual differences above unresolved rather than tune source layout to a favorable copy. Partial-operation, segmented and Rayon timing, broader key widths and platforms remain uncovered; this screen closes none of the earlier foundation timing debt.
+
+## Sparse order as source spans
+
+These local speeds divide reference time by Tessera time on a Ryzen 7 8845H. The full-sort reference is `ddb2f6d`. Run sparse discovery after insertion and after parallel scheduling. Trying it first on 65,536 records with 1% adjacent swaps cost throughput at all three widths (0.31× for u64, 0.68× for 16-byte rows and 0.58× for 128-byte records). Trying it before scheduling on one million distant-swap records likewise cost throughput (0.73×, 0.80× and 0.96× with four workers). Serial finishers preserve the gain on distant swaps without delaying parallel work.
+
+On 65,536 random 128-byte records, a bounded end reached 1.15–1.26× against `select_nth_unstable_by_key` at ranks 1–4, and 0.67× at rank 0. At the median, random and 16-distinct-key records reached 0.48× and 0.38×. The standard selector permits ties to change order. Keep the disjointness proof bounded to the end. Checking the entire slice for cross-region ties reached 0.53× at the random median. Membership bitmaps still require stable payload movement and reached 0.43× there. Revisit dense ranks when a design reduces record transfers.
+
+## Stable source permutations
+
+Counted emission and packed prefixes save different work. Routing packed words through a fresh root partition took 29.7% longer than `ddb2f6d` on 65,536 random u64 keys. Emitting bare indices avoided packing at that size, but repeated source-key lookups on one million random 128-byte records reduced argsort speed from 6.80× to 3.68× against stable standard-library index sorting. For sparse permutations, moving runs directly also saved the cost of expanding and following index cycles. On 65,536 wide records with 99% skew and up to 65,536 category IDs, cached-key sorting improved from 0.87× to 2.70× against stable standard-library grouping.
 
 ## Serial slice-operation baseline
 

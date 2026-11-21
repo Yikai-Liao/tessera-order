@@ -20,8 +20,9 @@ fn selection_preserves_stable_members_across_node_and_tile_boundaries() {
     let index = len / 2;
     let (before, selected, after) = select_nth_by_key(&mut values, index, |r| r.0);
     assert_eq!(*selected, expected[index]);
-    before.sort_unstable();
-    after.sort_unstable();
+    // Stable sorting each side must recover the original stable reference.
+    before.sort_by_key(|r| r.0);
+    after.sort_by_key(|r| r.0);
     assert_eq!(before, &expected[..index]);
     assert_eq!(after, &expected[index + 1..]);
 }
@@ -145,6 +146,27 @@ fn argsort_keeps_source_and_float_bits() {
     assert_eq!(argsort(&floats.map(Reverse)), expected);
     assert_eq!(floats.map(f64::to_bits), bits);
     assert!(argsort::<u64>(&[]).is_empty());
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "large input crosses the machine-word prefix boundary")]
+fn argsort_refines_prefix_ties_and_preserves_complete_ties() {
+    // Many source indices share the same high prefix. Their distinguishing
+    // low bits cannot fit above the index in one word, even on a 64-bit host.
+    let keys: Vec<_> = (0..65_537u64)
+        .map(|i| {
+            let mixed = i.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+            (u128::from(mixed >> 56) << 120)
+                | (u128::from((mixed >> 55) & 1) << 64)
+                | u128::from((mixed >> 31) & 7)
+        })
+        .collect();
+    let mut expected: Vec<_> = (0..keys.len()).collect();
+    expected.sort_by_key(|&i| keys[i]);
+    assert_eq!(argsort(&keys), expected);
+    let mut rows: Vec<_> = (0..keys.len()).collect();
+    sort_by_cached_key(&mut rows, |&i| keys[i]);
+    assert_eq!(rows, expected);
 }
 
 #[test]

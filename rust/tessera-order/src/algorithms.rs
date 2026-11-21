@@ -126,12 +126,8 @@ pub fn argsort<K: RadixKey>(values: &[K]) -> Vec<usize> {
 /// let rows = [(2u32, "first"), (1, "middle"), (2, "last")];
 /// assert_eq!(tessera_order::argsort_by_key(&rows, |r| r.0), [1, 0, 2]);
 /// ```
-pub fn argsort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &[T], mut key: F) -> Vec<usize> {
-    let mut indices: Vec<_> = (0..values.len()).collect();
-    // Indices are payloads, not direct keys: counting/refilling indices would
-    // destroy their identity when source keys repeat.
-    engine::sort(&mut indices, ByKey(|index: &usize| key(&values[*index])));
-    indices
+pub fn argsort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &[T], key: F) -> Vec<usize> {
+    engine::argsort(values, key)
 }
 
 /// Places the record that [`sort`] would place at `index`, and
@@ -139,8 +135,10 @@ pub fn argsort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &[T], mut key: 
 ///
 /// Like [`slice::select_nth_unstable`], with equal keys resolved as the stable sort
 /// resolves them: the selected record is that sort's record at `index`, and the
-/// two outer regions are exactly its records before and after, in unspecified
-/// order. The workspace bound is that of [`sort`].
+/// two outer regions contain exactly its records before and after. Equal keys
+/// retain their input order throughout the slice. Records with different
+/// keys may appear in any order within a region. The workspace bound is
+/// that of [`sort`].
 ///
 /// # Panics
 ///

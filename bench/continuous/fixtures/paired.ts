@@ -13,8 +13,13 @@ const defaultCases = [48, 49, 1000, 65536, 1000000]
   .sort();
 
 /** Synthetic blocks exercise protocol validation, not measured performance. */
-export function pairedRun(index = 1, ratio = 1.2, allCases = defaultCases): LocalRun {
-  const cases = shardCases(allCases, index, CONTINUOUS_SHARDS);
+export function pairedRun(
+  index = 1,
+  ratio = 1.2,
+  allCases = defaultCases,
+  count = CONTINUOUS_SHARDS,
+): LocalRun {
+  const cases = shardCases(allCases, index, count);
   const build = {
     rustc: "rustc fixture",
     target: "x86_64-unknown-linux-gnu",
@@ -53,7 +58,7 @@ export function pairedRun(index = 1, ratio = 1.2, allCases = defaultCases): Loca
       aslr: "disabled",
     },
     cases,
-    shard: { index, count: CONTINUOUS_SHARDS, allCases },
+    shard: { index, count, allCases },
     sampleCounts: Object.fromEntries(
       cases.map((id) => [id, revisionSampling(parseCriterionId(id).len).samples]),
     ),
@@ -74,13 +79,14 @@ export async function writePaired(
   directory: string,
   ratio = 1.2,
   selection?: Pick<PreparedPair, "cases" | "plan">,
+  count = CONTINUOUS_SHARDS,
 ) {
   const plan = selection?.plan ?? (await loadPlan("continuous"));
   const runs: LocalRun[] = [];
-  for (let index = 1; index <= CONTINUOUS_SHARDS; index++) {
+  for (let index = 1; index <= count; index++) {
     const out = join(directory, `paired-${index}`);
     await mkdir(out, { recursive: true });
-    const run = pairedRun(index, ratio, selection?.cases);
+    const run = pairedRun(index, ratio, selection?.cases, count);
     await writeFile(join(out, "local.json"), JSON.stringify(run));
     await writeFile(join(out, "plan.json"), JSON.stringify(plan));
     runs.push(run);

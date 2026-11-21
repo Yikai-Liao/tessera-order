@@ -16,9 +16,12 @@
 #[cfg(feature = "rayon")]
 pub(crate) mod parallel;
 
+mod indices;
+pub(crate) use indices::{argsort, order_by_cached_indices};
 mod plan;
 #[cfg(test)]
 mod refinement_tests;
+mod spans;
 
 use crate::engine::tile;
 
@@ -156,6 +159,12 @@ fn refine_with_tile_bytes<T, E: Extract<T>>(
         return;
     }
     let tile_len = tile_capacity::<T>(tile_bytes);
+    if let Requirement::Nth(index) = required
+        && records.len() > tile_len
+        && spans::SourceOrder::finish_cut(records, index, &mut extractor)
+    {
+        return;
+    }
     let Some(varying) = prepare::<_, _>(records, &mut extractor, tile_len) else {
         return;
     };
@@ -334,16 +343,16 @@ fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
 /// Rejects a mixed prefix, then confirms one direction while preserving strictness.
 fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
     // Three keys are the shortest mixed-direction witness. Reject it
-    // before selecting a directional continuation; each key is read once.
+    // before starting the directional scan.
     let first = extractor.key(&records[0]);
-    let mut keys = records[1..].iter().map(|record| extractor.key(record));
-    let Some(mut current) = keys.next() else {
+    let mut tail = records[1..].iter();
+    let Some(mut current) = tail.next().map(|record| extractor.key(record)) else {
         return Order::Ascending;
     };
     let mut ascending = first <= current;
     let mut descending = first >= current;
     let mut strict = first != current;
-    if let Some(after) = keys.next() {
+    if let Some(after) = tail.next().map(|record| extractor.key(record)) {
         ascending &= current <= after;
         descending &= current >= after;
         strict &= current != after;
@@ -352,23 +361,39 @@ fn confirm_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
         }
         current = after;
     }
-    if ascending && descending {
-        let Some(after) = keys.find(|&key| key != current) else {
-            return Order::Ascending;
-        };
-        ascending = current < after;
-        current = after;
+    if ascending
+        && descending
+        && let Some((last, middle)) = tail.as_slice().split_last()
+    {
+        // An equal prefix leaves just one possible direction between the
+        // endpoints. Equal endpoints require a constant middle.
+        let last = extractor.key(last);
+        if current == last {
+            let anchor = current.to_u128();
+            return if middle.chunks(64).all(|block| {
+                block
+                    .iter()
+                    .fold(0, |diff, r| diff | (extractor.key(r).to_u128() ^ anchor))
+                    == 0
+            }) {
+                Order::Ascending
+            } else {
+                Order::Unsorted
+            };
+        }
+        ascending = current < last;
     }
     if ascending {
         // The prefix is already encoded and checked; scan only the remaining suffix.
-        let tail = &records[records.len() - keys.len()..];
+        let tail = tail.as_slice();
         return if extractor.confirm_ascending(tail, current) {
             Order::Ascending
         } else {
             Order::Unsorted
         };
     }
-    for after in keys {
+    for record in tail {
+        let after = extractor.key(record);
         if current < after {
             return Order::Unsorted;
         }
@@ -464,6 +489,12 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             self.scratch
                 .tile
                 .sort::<E>(records, varying, self.extractor);
+            return;
+        }
+        if let Some(order) =
+            spans::SourceOrder::for_node(records, varying, required, self.extractor, size_of::<T>())
+        {
+            order.apply(records);
             return;
         }
         let plan = plan_node(records, varying, self.tile_len, self.extractor);

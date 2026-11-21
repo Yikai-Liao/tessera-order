@@ -143,7 +143,7 @@ types = [ "u128" ]
 distributions = [ "random", "sparse8" ]
 lengths = [ 1000000 ]
 
-# One direct-key and one keyed-record case guard each admitted non-sort call.
+# Random direct-key and keyed-record cases guard each admitted non-sort call.
 [[include]]
 types = [ "u64", "row_u64" ]
 distributions = [ "random" ]
@@ -159,5 +159,25 @@ operation = { kind = "partition-buckets", bucket_count = 16 }
 [[include]]
 types = [ "u64", "row_u64" ]
 distributions = [ "random" ]
+lengths = [ 65536 ]
+operation = { kind = "select", index = 32768 }
+
+# The wider category range exercises the cached-key index-permutation fallback.
+[[include]]
+types = [ "u64", "row_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+operation = { kind = "partition-buckets", bucket_count = 65537 }
+
+# Duplicate keys exercise stable index order and exact rank membership.
+[[include]]
+types = [ "row_u64" ]
+distributions = [ "d16" ]
+lengths = [ 65536 ]
+operation = { kind = "argsort" }
+
+[[include]]
+types = [ "row_u64" ]
+distributions = [ "d16" ]
 lengths = [ 65536 ]
 operation = { kind = "select", index = 32768 }

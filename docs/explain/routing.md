@@ -4,7 +4,7 @@ Before any radix pass, Tessera checks whether the input needs one. Many real inp
 
 ## Order probe
 
-`probe_order` goes straight to the full scan, `confirm_order`, for fewer than 8,192 records. Larger inputs sample adjacent pairs at a stride of `max(128, floor(n / 4,096))`. The three limits serve different purposes. The 128-record minimum stride bounds what an ordered input pays for its sample before the confirming scan. The 4,096-pair target preserves the original sampling density on large inputs, where a sample can catch an unsorted tail before confirmation reads nearly every key. Below 8,192 records, a sample would hold fewer than 64 pairs, so confirmation runs directly. The [shared-order assessment](../design/evidence.md#shared-order-confirmation-for-serial-operations) records the trade-off. Confirmation reads each key once. Its first three keys can already show both a rising and a falling pair, which returns unsorted at once. Otherwise it skips leading equal keys, fixes the direction at the first unequal key, and checks only that direction from there. It returns ascending (sorted or constant keys), strictly descending, descending with ties, or unsorted.
+`probe_order` goes straight to the full scan, `confirm_order`, for fewer than 8,192 records. Larger inputs sample adjacent pairs at a stride of `max(128, floor(n / 4,096))`. The three limits serve different purposes. The 128-record minimum stride bounds what an ordered input pays for its sample before the confirming scan. The 4,096-pair target preserves the original sampling density on large inputs, where a sample can catch an unsorted tail before confirmation reads nearly every key. Below 8,192 records, a sample would hold fewer than 64 pairs, so confirmation runs directly. The [shared-order assessment](../design/evidence.md#shared-order-confirmation-for-serial-operations) records the trade-off. The first three keys of the confirming scan can establish a direction or rule out both directions. If they all tie, the last key determines which direction to check. Equal endpoints require every intervening key to match. It returns ascending (sorted or constant keys), strictly descending, descending with ties, or unsorted.
 
 For larger inputs, the sample classifies the input:
 
@@ -14,7 +14,7 @@ For larger inputs, the sample classifies the input:
 | all equal | **flat** | decide after the varying-bit scan (below) |
 | all `≤`, or all `≥` | candidate order | a full scan, `confirm_order`, checks every pair |
 
-A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. Any leading equal keys skipped while finding the direction rule out strict descent. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
+A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
 
 The sample rejects most unsorted inputs within a few pairs, so the full scan runs only on inputs that look ordered. Its ascending continuation is the vector scan budgeted insertion uses for direct primitive keys, with a scalar fallback for other keys and short slices. The scalar continuation extracts four successive keys and combines their ordering results before deciding whether to continue, allowing independent comparisons to overlap; an inversion may therefore evaluate the remaining keys in its group before returning. The final short tail still checks one pair at a time. Its descending continuation also records whether any adjacent pair ties.
 
@@ -38,6 +38,14 @@ Next, one scan computes the [varying bits](keys.md#varying-bits). If no bit vari
 128-bit keys whose variation fits in the low or high 64 bits continue as 64-bit keys.
 
 Only now is tile and block scratch allocated. Budgeted insertion on a larger unsorted input may already have allocated its probe-key buffer; confirmed ordered and constant inputs never allocate.
+
+## Sparse source order
+
+A serial finisher can describe a permutation as long runs of source positions and a few isolated records. After the insertion probe, a node wider than one digit samples the input. If most keys are alike, their occurrences form the ordered background. If most positions are already ordered and every rank is required, the finisher removes both ends of each inversion from a stack of source runs. Each disjoint pair costs at most two exceptions for one record any ordered subsequence must exclude. Selection skips this construction: radix selection discards most buckets after one pass, which on small records costs less than the complete order. Exceeding the square-root exception budget returns control to ordinary partitioning before any records move.
+
+A rank can supply its own boundary. If every key to its right is at least its key *p*, collect the records at most *p* needed to fill the prefix through the rank. Any matches taken from the right have key *p*, so taking them in input order places the correct occurrence. The left-hand bound works in reverse. A short requested end also fits the exception budget. A batch of keyed positions keeps its best half whenever it fills. If the original end keys occur only in the end, the winners and displaced records can exchange slots directly.
+
+Both constructions merge isolated source positions with runs from the background. Reserving a destination band for equal keys establishes their full order. Reserving one position establishes a rank. The mover parks isolated records, copies the longer runs in overlap-safe order, and restores the parked records. Rayon schedules the slice before its serial finisher tries this path.
 
 ## Nodes and tiles
 
@@ -84,6 +92,10 @@ Otherwise the node is split on the digit under its highest varying bit, with the
 Serial and parallel roots share this decision. A parallel root shards equality and digit partitions across threads and executes an existing-run split serially, without resampling.
 
 While the block partition completes, each requested child that fits a tile is finished **at once**, while its records are still in cache. Larger requested children are routed again after the partition. A requested tile is fully sorted even when only one rank is needed.
+
+## When the result is a permutation
+
+Argsort expands sparse runs into its existing index buffer. For dense input it counts the highest varying byte and emits each source index into its band in input order. Short bands use source keys directly. For denser bands, spare bits in the index word hold the next key prefix. Within a band the words order by key prefix and then by source position. Only a tied prefix with unresolved bits requires another source-key lookup. Cached-key sorting can apply the resulting cycles or the original sparse runs directly to its payloads.
 
 ## Summary
 

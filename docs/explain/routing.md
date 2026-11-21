@@ -95,7 +95,7 @@ While the block partition completes, each requested child that fits a tile is fi
 
 ## When the result is a permutation
 
-Argsort counts the highest varying byte and emits each source index into its band in input order. Spare bits in the index word hold the next key prefix. Refining these packed words preserves ties and needs the source keys again only where tied prefixes leave bits unresolved. Cached-key sorting can apply the resulting cycles or the original sparse runs directly to its payloads.
+Argsort expands sparse runs into its existing index buffer. For dense input it counts the highest varying byte and emits each source index into its band in input order. Spare bits in the index word hold the next key prefix. Refining these packed words preserves ties and needs the source keys again only where tied prefixes leave bits unresolved. Cached-key sorting can apply the resulting cycles or the original sparse runs directly to its payloads.
 
 ## Summary
 

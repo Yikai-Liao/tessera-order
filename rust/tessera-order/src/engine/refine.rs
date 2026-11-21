@@ -16,6 +16,8 @@
 #[cfg(feature = "rayon")]
 pub(crate) mod parallel;
 
+mod indices;
+pub(crate) use indices::{argsort, order_by_cached_indices};
 mod plan;
 #[cfg(test)]
 mod refinement_tests;
@@ -490,7 +492,7 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             return;
         }
         if let Some(order) =
-            spans::SourceOrder::for_node(records, varying, required, self.extractor)
+            spans::SourceOrder::for_node(records, varying, required, self.extractor, size_of::<T>())
         {
             order.apply(records);
             return;

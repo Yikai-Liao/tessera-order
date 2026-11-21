@@ -126,12 +126,8 @@ pub fn argsort<K: RadixKey>(values: &[K]) -> Vec<usize> {
 /// let rows = [(2u32, "first"), (1, "middle"), (2, "last")];
 /// assert_eq!(tessera_order::argsort_by_key(&rows, |r| r.0), [1, 0, 2]);
 /// ```
-pub fn argsort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &[T], mut key: F) -> Vec<usize> {
-    let mut indices: Vec<_> = (0..values.len()).collect();
-    // Indices are payloads, not direct keys: counting/refilling indices would
-    // destroy their identity when source keys repeat.
-    engine::sort(&mut indices, ByKey(|index: &usize| key(&values[*index])));
-    indices
+pub fn argsort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &[T], key: F) -> Vec<usize> {
+    engine::argsort(values, key)
 }
 
 /// Places the record that [`sort`] would place at `index`, and

@@ -93,6 +93,10 @@ Serial and parallel roots share this decision. A parallel root shards equality a
 
 While the block partition completes, each requested child that fits a tile is finished **at once**, while its records are still in cache. Larger requested children are routed again after the partition. A requested tile is fully sorted even when only one rank is needed.
 
+## When the result is a permutation
+
+Argsort expands sparse runs into its existing index buffer. For dense input it counts the highest varying byte and emits each source index into its band in input order. Short bands use source keys directly. For denser bands, spare bits in the index word hold the next key prefix. Within a band the words order by key prefix and then by source position. Only a tied prefix with unresolved bits requires another source-key lookup. Cached-key sorting can apply the resulting cycles or the original sparse runs directly to its payloads.
+
 ## Summary
 
 | Input | Route | Cost |

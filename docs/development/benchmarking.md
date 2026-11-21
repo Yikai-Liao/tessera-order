@@ -195,6 +195,30 @@ bun run --silent tools plan --schema > benchmark-plan.schema.json               
 
 `--plan` takes a preset name or a `.toml`/`.json` path. Comma-separated CLI axes replace that axis in every inclusion rule; exclusions stay. `--algorithms` (only `compare algorithms` and `plan`) replaces the algorithm selection; only algorithm-block preparation adds its required controls. Presets are not different execution routes: use `local` or `continuous` for revision/counter work, and `smoke`, `release` or `parallel` for algorithm comparisons. Revision comparisons measure only `tessera`, `tessera-par-4` or both, because their builds replace only the Tessera library; counters require a serial-only selection. These are operation constraints, not plan formats. `--group` runs one resumable group and marks the report partial. Every result keeps its frozen `plan.json`.
 
+## Choosing references and cases
+
+These rules decide which implementations and cases a cross-implementation comparison measures, for sorting and every other operation. The [comparison model proposal](../design/comparison-model-proposal.md) plans how operations, execution and implementations are identified and published.
+
+Every reference has one role for the operation it is compared on; an implementation without a role is not added.
+
+| Role | Meaning | Required |
+|---|---|---|
+| Denominator | What a Rust user writes today with the standard library (or Rayon, for parallel execution) to get the same result. Speeds are ratios to it. | Yes |
+| Composition baseline | The same result composed from Tessera's existing calls, such as a full sort for selection. It shows the work the operation saves, which is the condition for [admitting the operation](../design/algorithm-extensions-proposal.md#0-2-additions). | For every operation except full sorting |
+| Strongest public implementation | The fastest known implementation of the same result contract, in any language. | When one exists |
+| Ecosystem choice | An implementation callers commonly use for the result. | No |
+
+An implementation is admitted for an operation when its result passes the shared checker, it is pinned as a dependency or a [verified native source](#implementations) with a compatible license, native code uses the published LLVM major, and it supports the operation's ranking cohort. A weaker tie contract is labelled separately and never enters a stable ranking. Remove an implementation when upstream is abandoned, it cannot build on supported hosts, or it repeats another reference's algorithm without a distinct question. Hosted [main tracking](continuous-benchmarks.md#main-long-term-tracking) additionally needs each of the implementation's jobs to finish within its time limit; an implementation that cannot is left out of hosted tracking only, and local release comparisons, which no hosted limit governs, keep it.
+
+Cases reuse the shared [input generator](#input-generation) and its identities, so readings line up across operations; an operation adds only its own parameter axes, such as the selected rank or the thread count. Each axis answers a stated question:
+
+- **Record shape:** keys, rows, wide records and owned records. Wide records matter most where an operation avoids moving records, as argsort does.
+- **Distribution:** at least one pattern from each catalog group, so every group has a representative.
+- **Length:** a short input, a cache-resident input and one beyond the last-level cache, chosen around the thresholds where costs change.
+- **Parameters:** stated relative to the input length (for example a middle, a 1% and a last rank), with absolute values in the case ID.
+
+Each operation has one named ranking cohort; an implementation that lacks a cohort case is not ranked rather than credited. Fix the cases before measuring the opponents: a case is added for the question it answers, not for its result, and cases Tessera loses stay. Before adding lengths to a tracked operation, estimate its cases against the hosted job limit.
+
 ## Serial operation comparisons
 
 New plans admit four workloads. Admission is for a caller-visible result worth measuring, not for every API entry point or internal engine route. Add a workload only when it answers a distinct performance question, has a complete result that an independent checker can verify, and has a meaningful reference on the same inputs. Adding a comparison workload does not automatically add it to the PR or main suites.

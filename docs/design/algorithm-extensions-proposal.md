@@ -6,6 +6,8 @@ This page records the unreleased 0.2 scope decision and constraints on future ex
 
 Keep stable full sorting, cached-key sorting, optional Rayon full sorting, argsort and single-rank selection. Argsort provides a different output without moving source records; single-rank selection can avoid finishing unrelated bands while preserving the same selected record and side membership as a full stable sort. Both have complete, useful contracts without exposing a second planner, workspace or movement protocol.
 
+0.2 also admits two extensions that fill gaps in that surface without a new contract decision; see [0.2 additions](#0-2-additions).
+
 <a id="public-surface-and-remaining-proposals"></a>
 <a id="released-entry-points"></a>
 
@@ -34,6 +36,26 @@ The following families were removed before 0.2. A familiar term did not establis
 | Chunk sorting | A fixed `chunk_len` has to define what happens to a short tail, as in Rust's [`chunks_mut` versus `chunks_exact_mut`](https://doc.rust-lang.org/std/primitive.slice.html#method.chunks_mut). An offset list instead describes variable-length segments. A precedent for iterating chunks does not establish a separate sorting operation or its result. |
 
 See the [migration guide](../guide/getting-started.md#migrate-from-earlier-development-snapshots) for compositions and their costs. The [serial operation baseline](evidence.md#serial-slice-operation-baseline) and [category baseline](evidence.md#stable-category-partition-baseline) preserve the earlier results; performance alone does not settle the API contract.
+
+<a id="0-2-additions"></a>
+
+### 0.2 additions
+
+An addition must save work that a composition of existing calls or the standard library cannot, meet the precedent rule above, and reuse an existing engine operation. The retained surface already covers every output the engine produces serially: moved records, cached keys, indices and one rank. The gaps are combinations of those outputs with capabilities already present, so 0.2 adds two.
+
+- **Parallel argsort**: `par_argsort` and `par_argsort_by_key` under the `rayon` feature. NumPy's `argsort` fixes the result and Rayon's `par_` prefix the execution; the result equals `argsort`'s, ties included. Large index sorts over columns are the main dataframe and database consumer, and they are serial today. The engine argsort already sorts `usize` words through an extractor over the source slice, with key prefixes packed into spare index bits. The parallel form must reach those words through the existing parallel root rather than a second scatter. Its records are shared, so `T: Sync` replaces `par_sort_by_key`'s `T: Send`, and the key function is `Fn + Sync` as there.
+- **Tuple keys**: `RadixKey` for `(A, B)` and longer tuples of keys whose encodings fit together in 128 bits, ordered like the tuple's `Ord`: the first field's encoding takes the high bits. Every existing entry point gains multi-column ordering without a new function; callers no longer pack signed or float fields by hand. A tuple too wide for 128 bits has no implementation, so it fails to compile. Only key encoding changes; varying-bit detection already discards constant high bits, and `Reverse` applies per field or to the whole tuple.
+
+Not admitted, with the reason:
+
+| Candidate | Reason |
+|---|---|
+| `par_sort_by_cached_key` | Rayon has the name, but it needs parallel cached-key distribution, which the engine lacks. Revisit after the parallel gaps above, with an expensive-key consumer. |
+| Index selection (NumPy `argpartition`) | Building every index to return one rank saves little; it waits for [read-only small results](#further-engine-capabilities). |
+| `par_select_nth` | No precedent; single-rank selection is bandwidth-bound and already skips unrelated bands. |
+| `sort_unstable` | A radix engine saves nothing by dropping stability, so the name would not denote a weaker contract. |
+| Unique values and counts | No Rust slice precedent fixes the result shape; it waits for a consumer of [full-key counts](#further-engine-capabilities). |
+| Variable-length and string keys | They need a different representation than fixed-width encoded keys; separate work after 0.2. |
 
 <a id="composition-and-persistent-use"></a>
 

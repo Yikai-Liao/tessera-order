@@ -66,6 +66,14 @@ Routing by type pays for the type's range rather than the data's. Every `u8` key
 
 **Disposition:** keep the range-routed implementation. Removing the count-taking entry traded these individually listed losses for an interface without a category limit. The binary predicate entry was also removed before release; one-pass internal distribution remains for cached sorting, whose public result does not include boundaries. The ratios come from one host and three blocks; several 4,096-record intervals were wide.
 
+## Classified prefix and tile-rank follow-up
+
+The [tile-local selection experiment](#tile-local-selection-experiment) had a follow-up in [PR #236](https://github.com/Yikai-Liao/tessera-order/pull/236). A full cursor-table walk more than doubled small single-selection time in a local screen. The prototype used binary search over completed cursors to find buckets enclosing sparse requests. Replacing the contiguous insertion finish with per-bucket insertion slowed a rank-range case. The contiguous finish applies when all buckets are insertion-sized.
+
+The binary partition prototype consumed whole runs of known classifications before the ordinary suffix classifier. The scatter limit also needed isolation: with a runtime block limit, fixed-call counters for Zipf2 argsort showed about 8.5% more data reads. Choosing the limit statically eliminated nearly all the extra reads. Identical-source and placement variation left the elapsed-time effect unresolved.
+
+The [hosted comparison](https://github.com/Yikai-Liao/tessera-order/runs/132914599059) for `52347742` against `704f5a9` flagged a 40.4% slowdown for serial binary partition on 65,536 random `u64` records. The cause was unresolved. [PR #239](https://github.com/Yikai-Liao/tessera-order/pull/239) removed that public API.
+
 ## Unstable node-partition feasibility
 
 A retired serial feasibility study against `0499d35` shared root preparation, key encoding and half-key dispatch, node planning, candidate-bit progress, child routing and stable tile finishing. Only node movement changed: a histogram defined final bucket bands, then bounded cursors placed records with safe in-slice swaps instead of stable block chains and ledger completion. Classification could panic without leaving a hole; a changed key targeting a full band stopped that partition, while candidate-bit consumption still bounded recursion. Ordered reversal stayed stable. This is a research prototype, not a supported release API or a production-ready kernel.

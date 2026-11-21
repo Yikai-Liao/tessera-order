@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { comparisonGroup, comparisonId, type Operation } from "../catalog.ts";
+import { renderFigures } from "./charts.ts";
 import { createFixture } from "./fixture.ts";
 import { collectWarnings, writeReport } from "./index.ts";
 import { loadRun, validateRun } from "./load.ts";
@@ -61,6 +62,23 @@ test("paired ratios respect noise", () => {
     summarize(dataset).get(measurementId("default", s.caseId, "std-stable"))!.verdict,
     "within noise",
   );
+});
+
+test("a partial release selection shows each case rather than partial release panels", () => {
+  const full = createFixture();
+  assert.ok(renderFigures(full, summarize(full)).some((figure) => figure.name === "lengths"));
+  // A shared f64 case and u64 random lengths would fill a pattern panel and the length figure.
+  const kept = ["f64/random/1000000/s1", "u64/random/1000/s1", "u64/random/1000000/s1"];
+  const dataset = createFixture();
+  dataset.manifest.cases = dataset.manifest.cases.filter((input) =>
+    kept.includes(comparisonId(input)),
+  );
+  dataset.samples = dataset.samples.filter((sample) => kept.includes(sample.case_id));
+  dataset.memory = dataset.memory.filter((sample) => kept.includes(sample.case_id));
+  validateRun(dataset);
+  const figures = renderFigures(dataset, summarize(dataset));
+  assert.equal(figures.length, kept.length);
+  assert.ok(figures.every((figure) => figure.table.includes("A/A range")));
 });
 
 test("revision placements retain their own measured verdict", () => {

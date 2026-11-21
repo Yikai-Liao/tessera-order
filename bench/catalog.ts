@@ -56,13 +56,6 @@ export const catalog = z
     comparison: z.object({
       types: z.array(z.string()),
       summaryShapes: z.array(z.string()),
-      typeGroups: z.array(
-        z.object({
-          title: z.string(),
-          keys: z.boolean(),
-          types: z.array(z.string()),
-        }),
-      ),
     }),
   })
   .parse(

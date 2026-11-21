@@ -10,7 +10,7 @@ import { LAYOUT_CONTROLS, type LayoutControl, parseLayoutSeeds } from "../bench/
 import { renderLocalReport } from "../bench/local/report.ts";
 import { compareLocal } from "../bench/local/runner.ts";
 import { loadPlan, planSchema, type SelectionOptions } from "../bench/plan.ts";
-import { compareAlgorithms, resumeComparison } from "../bench/release.ts";
+import { compareImplementations, resumeComparison } from "../bench/release.ts";
 import { writeReport } from "../bench/report/index.ts";
 import { pairedBudget } from "../bench/statistics.ts";
 import { workingTreeDirty } from "../bench/workspace.ts";
@@ -91,7 +91,7 @@ function addSelectionOptions(command: Command, presets: string) {
 
 function selectAxes(options: MeasurementOptions): SelectionOptions {
   return Object.fromEntries(
-    ["algorithms", "types", "distributions", "lengths", "operation", "index", "bucketCount"]
+    ["implementations", "types", "distributions", "lengths", "operation", "index", "bucketCount"]
       .filter((key) => options[key as keyof MeasurementOptions] !== undefined)
       .map((key) => [key, options[key as keyof MeasurementOptions]]),
   );
@@ -123,7 +123,9 @@ async function report(directories: string[], partial = false) {
 
 /** Register experiment selection, comparison, verification and regeneration tasks. */
 export function experimentCommands(program: Command) {
-  const compare = program.command("compare").description("Compare source revisions or algorithms");
+  const compare = program
+    .command("compare")
+    .description("Compare source revisions or implementations");
   const measurement = (name: string, description: string, presets: string) =>
     addSelectionOptions(compare.command(name), presets)
       .description(description)
@@ -231,13 +233,13 @@ export function experimentCommands(program: Command) {
     );
 
   measurement(
-    "algorithms",
+    "implementations",
     "Build, measure and report a resumable comparison",
     "smoke/release/parallel",
   )
     .option(
-      "--algorithms <ids>",
-      "comma-separated algorithms (required controls are retained)",
+      "--implementations <ids>",
+      "comma-separated implementations (required controls are retained)",
       parseList,
     )
     .addOption(blockOption())
@@ -253,7 +255,7 @@ export function experimentCommands(program: Command) {
       parsePositiveInteger,
       256,
     )
-    .option("--group <type/shape>", "measure one complete group and report it as partial")
+    .option("--group <type/distribution>", "measure one complete group and report it as partial")
     .action(
       async (
         options: MeasurementOptions & {
@@ -267,7 +269,7 @@ export function experimentCommands(program: Command) {
         const root = await repositoryRoot();
         const out = resultDirectory(root, options.out);
         await runTask(out, Boolean(program.opts().verbose), () =>
-          compareAlgorithms({
+          compareImplementations({
             root,
             out,
             cpu: options.cpu,
@@ -307,16 +309,16 @@ export function experimentCommands(program: Command) {
       ) => {
         const plan = await loadPlan(options.plan ?? "smoke", {
           ...selectAxes(options),
-          algorithms: [
+          implementations: [
             "tessera",
             "std-stable",
-            ...catalog.algorithms.filter((a) => a.adapter === "revision").map((a) => a.id),
+            ...catalog.implementations.filter((a) => a.adapter === "revision").map((a) => a.id),
           ],
         });
         const root = await repositoryRoot();
         const out = resultDirectory(root, options.out);
         await runTask(out, Boolean(program.opts().verbose), () =>
-          compareAlgorithms({
+          compareImplementations({
             root,
             out,
             plan,
@@ -343,7 +345,7 @@ export function experimentCommands(program: Command) {
     program.command("plan [name-or-file]"),
     "local/continuous/main/smoke/release/parallel",
   )
-    .option("--algorithms <ids>", "comma-separated algorithms", parseList)
+    .option("--implementations <ids>", "comma-separated implementations", parseList)
     .description("Print a resolved plan without compiling or measuring")
     .addOption(
       new Option("--format <format>", "output encoding").choices(["json", "toml"]).default("json"),
@@ -368,7 +370,7 @@ export function experimentCommands(program: Command) {
   program
     .command("report <directories...>")
     .description("Regenerate figures and tables without building")
-    .option("--partial", "allow completed groups of an algorithm suite")
+    .option("--partial", "allow completed groups of an implementation plan")
     .action(async (directories: string[], options: { partial?: boolean }) => {
       const result = await report(directories, options.partial);
       console.log(JSON.stringify({ out: resolve(directories[0]), result: result ?? "reported" }));

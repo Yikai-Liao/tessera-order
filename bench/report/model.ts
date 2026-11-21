@@ -6,7 +6,7 @@ export { comparisonId as caseId } from "../catalog.ts";
 
 import { median, type PairedVerdict, summarizePaired } from "../statistics.ts";
 
-export const { summaryShapes: shapes, types } = catalog.comparison;
+export const { summaryDistributions: distributions, types } = catalog.comparison;
 export const { lengths } = catalog.inputs;
 export interface Case extends CaseIdentity {
   variants: string[];
@@ -15,8 +15,8 @@ export interface Case extends CaseIdentity {
 }
 export interface Manifest {
   schema: number;
-  suite: string;
-  suite_version: number;
+  plan_name: string;
+  plan_version: number;
   index_bytes?: number;
   build: string;
   blocks: number;

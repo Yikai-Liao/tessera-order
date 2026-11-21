@@ -41,7 +41,7 @@ Report the invariant preserved or contract changed, regression coverage, command
 
 ## Performance changes
 
-Use the maintained benchmark CLI and its [protocol](docs/development/benchmarking.md#command-capabilities), which defines paired timing, A/A ranges and the extra controls needed to attribute a source-change gain rather than compare algorithms. Report measured coverage, environment, control ranges and a results link, and investigate changes outside the controls. Process-level screens and continuous alerts alone do not isolate source changes from code placement.
+Use the maintained benchmark CLI and its [protocol](docs/development/benchmarking.md#command-capabilities), which defines paired timing, A/A ranges and the extra controls needed to attribute a source-change gain rather than compare implementations. Report measured coverage, environment, control ranges and a results link, and investigate changes outside the controls. Process-level screens and continuous alerts alone do not isolate source changes from code placement.
 
 When a measured choice keeps a separate copy of engine code, for example to preserve serial inlining contexts, its comment names the evidence, tests constrain the invariants both copies share, and the roadmap states what evidence would allow merging them.
 

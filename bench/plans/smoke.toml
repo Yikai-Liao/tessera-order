@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 schema = 1
-algorithms = [ "tessera", "std-stable", "radsort", "voracious", "glidesort", "glidesort-sqrt", "std-unstable", "rdst" ]
+implementations = [ "tessera", "std-stable", "radsort", "voracious", "glidesort", "glidesort-sqrt", "std-unstable", "rdst" ]
 exclude = []
 
 # Validate the release plan's type/distribution pairs at a small length.

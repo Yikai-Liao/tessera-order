@@ -4,7 +4,7 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { command } from "../../tools/process.ts";
 import { repositoryRoot, runTask } from "../../tools/tasks.ts";
-import { algorithm as catalogAlgorithm } from "../catalog.ts";
+import { implementation as catalogImplementation } from "../catalog.ts";
 import { loadPlan } from "../plan.ts";
 import { withComparisonWorkspace } from "../release.ts";
 import {
@@ -13,17 +13,17 @@ import {
   resolveCommit,
   workingTreeDirty,
 } from "../workspace.ts";
-import { trackingAlgorithm } from "./algorithms.ts";
 import { reportFailure } from "./failure.ts";
+import { trackingImplementation } from "./implementations.ts";
 import { remoteJobs } from "./jobs.ts";
 import { runSchema, type TrackingRun } from "./result.ts";
 
 /** Local image name shared by the build and measurement stages; the registry tag is the measurer's. */
-export const localImage = (algorithm: string) => `tessera-tracking:${algorithm}`;
+export const localImage = (implementation: string) => `tessera-tracking:${implementation}`;
 
 /** What the build stage hands to measurement, next to the saved image. */
 export type TrackingBuild = {
-  algorithm: string;
+  implementation: string;
   hash: string;
   commit_time: string;
   rustc: string;
@@ -38,10 +38,10 @@ export type TrackingBuild = {
 /**
  * Key the memory worker's rows by timed case ID and require one row per timed case.
  *
- * The worker measures each selected algorithm on every input of the plan; rows for an
- * algorithm or mode the run does not time are dropped. A row's mode follows its algorithm.
+ * The worker measures each selected implementation on every input of the plan; rows for an
+ * implementation or mode the run does not time are dropped. A row's mode follows its implementation.
  */
-export function trackingMemory(journal: string, algorithms: string[], ids: string[]) {
+export function trackingMemory(journal: string, implementations: string[], ids: string[]) {
   const timed = new Set(ids);
   const peaks: Record<string, number> = {};
   for (const line of journal.split("\n").filter(Boolean)) {
@@ -52,8 +52,8 @@ export function trackingMemory(journal: string, algorithms: string[], ids: strin
       peak_extra_bytes: number;
       verified: boolean;
     };
-    if (row.build !== "default" || !algorithms.includes(row.variant)) continue;
-    const threads = catalogAlgorithm(row.variant).threads;
+    if (row.build !== "default" || !implementations.includes(row.variant)) continue;
+    const threads = catalogImplementation(row.variant).threads;
     const id = `rust/${row.case_id}/${threads ? `par-${threads}` : "api"}`;
     if (!timed.has(id)) continue;
     if (!row.verified || !Number.isSafeInteger(row.peak_extra_bytes) || row.peak_extra_bytes < 0)
@@ -66,13 +66,13 @@ export function trackingMemory(journal: string, algorithms: string[], ids: strin
   return peaks;
 }
 
-// CI-only, without credentials: freeze one algorithm into one tested image.
-// Builds of different algorithms run in parallel; measurement (`run.ts`) is serialized.
+// CI-only, without credentials: freeze one implementation into one tested image.
+// Builds of different implementations run in parallel; measurement (`run.ts`) is serialized.
 if (import.meta.main) {
   const root = await repositoryRoot();
-  const algorithm = trackingAlgorithm(process.env.TRACKING_ALGORITHM ?? "tessera");
+  const implementation = trackingImplementation(process.env.TRACKING_IMPLEMENTATION ?? "tessera");
   const out = join(root, "bench/results/tracking-build");
-  await reportFailure(`Build (${algorithm.id})`, `${out}.log`, () =>
+  await reportFailure(`Build (${implementation.id})`, `${out}.log`, () =>
     runTask(out, false, async () => {
       if (await workingTreeDirty(root))
         throw new Error("Tracking requires a clean committed checkout");
@@ -83,7 +83,7 @@ if (import.meta.main) {
         await command("git", ["show", "-s", "--format=%cI", source], { cwd: root, capture: true }),
       ).toISOString();
       await mkdir(out);
-      const native = algorithm.adapter === "native";
+      const native = implementation.adapter === "native";
       return withComparisonWorkspace(root, native, async ({ tree, target }) => {
         const env = await benchmarkEnvironment(tree, {
           targetTriple: "x86_64-unknown-linux-gnu",
@@ -106,11 +106,11 @@ if (import.meta.main) {
         await mkdir(context);
         await copyFile(built.executable, join(context, "benchmark"));
         await command("strip", ["--strip-debug", join(context, "benchmark")]);
-        // Tessera's history keeps both continuous modes; an opponent replaces the algorithm selection.
-        // Absolute tracking records full sorting, so the PR suite's operation rules stay out.
+        // Tessera's history keeps both continuous modes; an opponent replaces the implementation selection.
+        // Absolute tracking records full sorting, so the PR plan's operation rules stay out.
         const plan = await loadPlan("continuous", {
           operation: "sort",
-          ...(algorithm.id === "tessera" ? {} : { algorithms: [algorithm.id] }),
+          ...(implementation.id === "tessera" ? {} : { implementations: [implementation.id] }),
         });
         await writeFile(join(context, "plan.json"), JSON.stringify(plan));
         // Peak extra allocation per case, measured by the same instrumented worker as local
@@ -121,11 +121,13 @@ if (import.meta.main) {
           targetTriple: "x86_64-unknown-linux-gnu",
           env,
         });
-        const memoryAlgorithms =
-          algorithm.id === "glidesort-sqrt" ? ["tessera", algorithm.id] : plan.algorithms;
+        const memoryImplementations =
+          implementation.id === "glidesort-sqrt"
+            ? ["tessera", implementation.id]
+            : plan.implementations;
         await writeFile(
           join(out, "memory-plan.json"),
-          JSON.stringify({ ...plan, algorithms: memoryAlgorithms }),
+          JSON.stringify({ ...plan, implementations: memoryImplementations }),
         );
         await command(memory.executable, [
           "--plan",
@@ -145,7 +147,7 @@ if (import.meta.main) {
         await writeFile(join(context, "cases.ids"), ids.join("\n") + "\n");
         const peaks = trackingMemory(
           await readFile(join(context, "scratch/memory.jsonl"), "utf8"),
-          plan.algorithms,
+          plan.implementations,
           ids,
         );
         const jobs = remoteJobs(ids);
@@ -153,7 +155,7 @@ if (import.meta.main) {
           await writeFile(join(context, `job-${index + 1}.ids`), job.join("\n") + "\n");
         for (const name of ["Dockerfile", "run.sh"])
           await copyFile(join(root, "bench/tracking", name), join(context, name));
-        const image = localImage(algorithm.id);
+        const image = localImage(implementation.id);
         await command("docker", [
           "build",
           "--target",
@@ -166,7 +168,7 @@ if (import.meta.main) {
         await command("docker", ["run", "--rm", "--network=none", image, "/app/run.sh", "--test"]);
         await command("docker", ["save", "-o", join(out, "image.tar"), image]);
         const build: TrackingBuild = {
-          algorithm: algorithm.id,
+          implementation: implementation.id,
           hash: source,
           commit_time: commitTime,
           rustc: built.provenance.rustc,
@@ -185,7 +187,12 @@ if (import.meta.main) {
           jobs,
         };
         await writeFile(join(out, "build.json"), JSON.stringify(build));
-        return { algorithm: algorithm.id, hash: source, cases: ids.length, jobs: jobs.length };
+        return {
+          implementation: implementation.id,
+          hash: source,
+          cases: ids.length,
+          jobs: jobs.length,
+        };
       });
     }),
   );

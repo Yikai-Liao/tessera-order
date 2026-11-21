@@ -6,15 +6,15 @@
 |---|---|
 | Library source or library manifest | Rust validation, PR revision measurement and Docs (the figures replay the engine) |
 | Library tests or Rust validation workflow | Rust validation |
-| Root Cargo manifest/lockfile, toolchain or `.cargo/` | Rust validation, algorithm comparison checks and PR revision measurement |
-| Native adapters or algorithm-session tooling | Algorithm comparison checks |
-| Shared benchmark Rust inputs, adapter kernels, plan selection/expansion, sampling or build configuration | Algorithm comparison checks and PR revision measurement |
+| Root Cargo manifest/lockfile, toolchain or `.cargo/` | Rust validation, implementation comparison checks and PR revision measurement |
+| Native adapters or implementation-session tooling | Implementation comparison checks |
+| Shared benchmark Rust inputs, adapter kernels, plan selection/expansion, sampling or build configuration | Implementation comparison checks and PR revision measurement |
 | Revision execution or shard validation | PR revision measurement |
 | Reports, status or publication tooling | Repository tooling checks only |
 | Markdown, site inputs, shared figure templates or the figure engine (`rust/tessera-trace/`) | Docs |
 | C++ library inputs | C++ validation, when its manifest exists |
 
-An engine-only PR fetches no native sources, installs no TBB and skips the algorithm harness (`Algorithm harness (Rust and C++)`, job ID `comparison`): its automatic checks are library correctness and the `prepare → measure → report` revision measurement. Comparator-only changes skip the library platform, Miri and sanitizer jobs. Shared build inputs select both.
+An engine-only PR fetches no native sources, installs no TBB and skips the implementation harness (`Algorithm harness (Rust and C++)`, job ID `comparison`): its automatic checks are library correctness and the `prepare → measure → report` revision measurement. Comparator-only changes skip the library platform, Miri and sanitizer jobs. Shared build inputs select both.
 
 Issue and PR templates, Dependabot configuration, `fuzz/`, manual diagnostics and the separate title, DCO and release workflows select no extra lane. A path no row names, an unavailable base and manual dispatch select all lanes, so a new kind of file needs a row. The opt-in [main performance workflow](continuous-benchmarks.md#main-long-term-tracking) is independent of these lanes and `ci-ok`. PR updates cancel obsolete runs; each main push has its own concurrency group, so a later non-docs push cannot cancel a pending site deployment.
 
@@ -36,7 +36,7 @@ Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, 
 | AddressSanitizer | `asan` | the same |
 | `cargo package` | in `rust / lint` | the same |
 | Paired continuous measurement | one preparation job and the configured complete-case shards, inputs up to 1M | none; independent opt-in absolute-time tracking on relevant pushes |
-| Algorithm harness tests, doctests, native smoke checks and report generation | `comparison`, for affected comparison/shared inputs | the same |
+| Implementation harness tests, doctests, native smoke checks and report generation | `comparison`, for affected comparison/shared inputs | the same |
 
 Cargo caches are saved from `main` only. Pull requests, including those into long-lived branches, restore `main`'s copies and save nothing, so each key keeps one copy within GitHub's 10 GB repository limit, and PR copies cannot evict the caches every PR restores. A PR that changes a cache key builds that cache cold until it merges. PR benchmark preparation saves its own [aligned-build dependency cache](continuous-benchmarks.md#capacity-and-recovery).
 
@@ -58,9 +58,9 @@ A cell's commands live in one composite action, [`rust-test`](../../.github/acti
 
 The Rust lint job tests the library's native `trace` hooks. It also runs Clippy and rustdoc over all workspace features, including the benchmark's native-facing code. Clippy and rustdoc do not link binaries, so they set `TESSERA_BENCH_CHECK_ONLY=1` to skip native compilation and linker inputs, and the lint runner needs no native sources or tools. Cargo tracks the variable, so a check-only build cannot suppress a later executable build's native setup.
 
-### Algorithm harness
+### Implementation harness
 
-The comparison job owns benchmark formatting, Clippy, rustdoc and functional checks. It checks the benchmark crate with every feature (setting `TESSERA_BENCH_CHECK_ONLY` only for Clippy and rustdoc), runs its harness tests and doctests in the isolated workspace that builds the native competitors, and checks that native programs link no parallel runtime. It compiles the standalone native registry with GCC and Clang on Linux and, in a comparison-owned Windows job, with both MSVC preprocessors; native benchmarking itself supports Linux x86-64 only. The smoke check uses Rayon, exercises the shared Criterion/paired executable with tiny random/equal inputs for every available production algorithm and record type (including normal memory evidence for `glidesort-sqrt`), validates the smoke suite and generates a partial report. A library change does not rerun the benchmark crate's own tests: building the smoke benchmark against both revisions already rejects changed case identities.
+The comparison job owns benchmark formatting, Clippy, rustdoc and functional checks. It checks the benchmark crate with every feature (setting `TESSERA_BENCH_CHECK_ONLY` only for Clippy and rustdoc), runs its harness tests and doctests in the isolated workspace that builds the native competitors, and checks that native programs link no parallel runtime. It compiles the standalone native registry with GCC and Clang on Linux and, in a comparison-owned Windows job, with both MSVC preprocessors; native benchmarking itself supports Linux x86-64 only. The smoke check uses Rayon, exercises the shared Criterion/paired executable with tiny random/equal inputs for every available production implementation and record type (including normal memory evidence for `glidesort-sqrt`), validates the smoke plan and generates a partial report. A library change does not rerun the benchmark crate's own tests: building the smoke benchmark against both revisions already rejects changed case identities.
 
 The job pins Ubuntu 24.04 LTS and the image's Clang. It installs TBB headers only when absent, from a private source list naming the four Ubuntu suites on the Azure archive mirror, which [recovered from the Canonical outage](https://github.com/actions/runner-images/issues/15296) where the Kernel.org mirror timed out. Apt reads only that list and the image's keyrings, so it still verifies Ubuntu's signed metadata, and unrelated runner repositories cannot block it; retries and step and job timeouts bound the installation.
 
@@ -103,4 +103,4 @@ Run the [commands in `AGENTS.md`](../../AGENTS.md#commands) before pushing; a pu
 | Fetch and verify pinned native sources | `bun run --silent tools native fetch` |
 | Validate a release tag | `bun run --silent tools release verify --tag rust/v0.1.0` |
 
-Benchmark commands are in the [protocol](benchmarking.md#command-capabilities). `ci check` is a functional smoke check with one-millisecond samples, not an experiment: it materializes HEAD and working-tree copies, runs harness tests and doctests, validates the smoke suite, measures one `u64/random` group, checks native linkage under `--native` and generates a partial report. Routing, title and DCO also have dependency-free entry points in `.github/scripts/`; DCO runs the base commit's trusted code without installing PR code.
+Benchmark commands are in the [protocol](benchmarking.md#command-capabilities). `ci check` is a functional smoke check with one-millisecond samples, not an experiment: it materializes HEAD and working-tree copies, runs harness tests and doctests, validates the smoke plan, measures one `u64/random` group, checks native linkage under `--native` and generates a partial report. Routing, title and DCO also have dependency-free entry points in `.github/scripts/`; DCO runs the base commit's trusted code without installing PR code.

@@ -89,14 +89,14 @@ fn main() {
     let plan = Plan::parse(&text).expect("valid benchmark plan");
     let available = list_variants();
     assert!(
-        plan.algorithms().iter().all(|id| available
+        plan.implementations().iter().all(|id| available
             .iter()
             .any(|v| v.name == id && v.adapter != "revision")),
-        "unavailable algorithm"
+        "unavailable implementation"
     );
     let variants: Vec<_> = available
         .into_iter()
-        .filter(|v| plan.algorithms().iter().any(|id| id == v.name))
+        .filter(|v| plan.implementations().iter().any(|id| id == v.name))
         .collect();
     assert_eq!(
         variants
@@ -105,7 +105,7 @@ fn main() {
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
         variants.len(),
-        "Criterion requires one algorithm per API mode"
+        "Criterion requires one implementation per API mode"
     );
     // An adapter's capability decides coverage; unsupported cases are simply not listed.
     let mut supported = Vec::new();
@@ -144,15 +144,18 @@ fn main() {
             "unknown or unsupported case selection"
         );
     }
-    let scratch: BTreeMap<String, usize> =
-        if plan.algorithms().iter().any(|id| id == "glidesort-sqrt") {
-            tessera_bench::read_scratch(std::path::Path::new(
-                &std::env::var("TESSERA_BENCH_SCRATCH").expect("scratch measurement required"),
-            ))
-            .expect("compatible memory evidence")
-        } else {
-            BTreeMap::new()
-        };
+    let scratch: BTreeMap<String, usize> = if plan
+        .implementations()
+        .iter()
+        .any(|id| id == "glidesort-sqrt")
+    {
+        tessera_bench::read_scratch(std::path::Path::new(
+            &std::env::var("TESSERA_BENCH_SCRATCH").expect("scratch measurement required"),
+        ))
+        .expect("compatible memory evidence")
+    } else {
+        BTreeMap::new()
+    };
     let mut criterion = Criterion::default().without_plots().configure_from_args();
     for (variant, case, mode, id) in supported {
         if selected

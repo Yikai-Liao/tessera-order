@@ -66,7 +66,7 @@ unsafe impl NativeRecord for WideRecord {
 /// Row order shared with the C++ registry; names are checked across the FFI.
 #[derive(Clone, Copy)]
 #[repr(u32)]
-enum NativeAlgorithm {
+enum NativeImplementation {
     Clausecker,
     Fluxsort,
     Ips2ra,
@@ -76,7 +76,7 @@ enum NativeAlgorithm {
     Crumsort,
     Duckdb,
 }
-impl NativeAlgorithm {
+impl NativeImplementation {
     /// Resolves a catalog name before any timing begins.
     fn from_name(name: &str) -> Option<Self> {
         Some(match name {
@@ -96,11 +96,11 @@ impl NativeAlgorithm {
 /// A native entry point that sorts one complete record buffer.
 type Sort = unsafe extern "C" fn(*mut c_void, usize);
 unsafe extern "C" {
-    /// Looks up a native algorithm and record representation.
-    fn bench_kernel(algorithm: u32, ty: u32) -> Option<Sort>;
-    /// Reads a static algorithm name, or NULL outside the registry.
+    /// Looks up a native implementation and record representation.
+    fn bench_kernel(implementation: u32, ty: u32) -> Option<Sort>;
+    /// Reads a static implementation name, or NULL outside the registry.
     #[cfg(test)]
-    fn bench_algorithm_name(algorithm: u32) -> *const c_char;
+    fn bench_implementation_name(implementation: u32) -> *const c_char;
     /// Reads a native record size, alignment or payload offset.
     fn bench_layout(ty: u32, field: u32) -> usize;
     /// Returns `VQSort`'s runtime instruction-set target.
@@ -113,9 +113,9 @@ pub(super) fn prepare<T: NativeRecord>(
     v: Variant,
     input: std::rc::Rc<PreparedRecords<T>>,
 ) -> Option<Box<dyn Kernel>> {
-    let algorithm = NativeAlgorithm::from_name(v.name)?;
+    let implementation = NativeImplementation::from_name(v.name)?;
     // SAFETY: The registry returns a static function pointer or NULL for these indices.
-    let sort = unsafe { bench_kernel(algorithm as u32, T::TYPE as u32) }?;
+    let sort = unsafe { bench_kernel(implementation as u32, T::TYPE as u32) }?;
     Some(prepare_kernel(input, v.stable, move |values| {
         // SAFETY: NativeRecord binds T to the registry's C layout for TYPE.
         unsafe { sort(values.as_mut_ptr().cast(), values.len()) };
@@ -164,29 +164,30 @@ mod tests {
     }
 
     #[test]
-    fn algorithm_names_match() {
-        let algorithms: Vec<_> = crate::plan::catalog()
-            .algorithms
+    fn implementation_names_match() {
+        let implementations: Vec<_> = crate::plan::catalog()
+            .implementations
             .iter()
-            .filter(|algorithm| algorithm.adapter == "native")
+            .filter(|implementation| implementation.adapter == "native")
             .collect();
-        for algorithm in &algorithms {
-            let row = NativeAlgorithm::from_name(&algorithm.id)
-                .unwrap_or_else(|| panic!("unregistered native algorithm: {}", algorithm.id));
+        for implementation in &implementations {
+            let row = NativeImplementation::from_name(&implementation.id).unwrap_or_else(|| {
+                panic!("unregistered native implementation: {}", implementation.id)
+            });
             // SAFETY: The registry bounds-checks the row and returns a static name or NULL.
-            let pointer = unsafe { bench_algorithm_name(row as u32) };
+            let pointer = unsafe { bench_implementation_name(row as u32) };
             assert!(
                 !pointer.is_null(),
                 "missing native row for {}",
-                algorithm.id
+                implementation.id
             );
             // SAFETY: The non-null registry name is a static NUL-terminated string.
             let name = unsafe { CStr::from_ptr(pointer) };
-            assert_eq!(name.to_str().unwrap(), algorithm.id);
+            assert_eq!(name.to_str().unwrap(), implementation.id);
         }
         // SAFETY: Registry lookups reject indices outside their tables.
         unsafe {
-            assert!(bench_algorithm_name(algorithms.len() as u32).is_null());
+            assert!(bench_implementation_name(implementations.len() as u32).is_null());
             assert!(bench_kernel(u32::MAX, 0).is_none());
             assert!(bench_kernel(0, u32::MAX).is_none());
             assert_eq!(bench_layout(u32::MAX, 0), 0);
@@ -200,7 +201,7 @@ mod tests {
         let plan = crate::plan::Plan::parse(
             r#"
             schema = 1
-            algorithms = ["duckdb"]
+            implementations = ["duckdb"]
             [[include]]
             lengths = [1, 2, 23, 24, 127, 128, 129, 1023, 1024, 1025, 8192]
         "#,
@@ -219,15 +220,15 @@ mod tests {
                     operation: crate::plan::Operation::Sort {},
                 }),
         );
-        for algorithm in crate::plan::catalog()
-            .algorithms
+        for implementation in crate::plan::catalog()
+            .implementations
             .iter()
             .filter(|a| a.adapter == "native")
         {
             let variant = Variant {
-                name: &algorithm.id,
-                stable: algorithm.stable,
-                adapter: &algorithm.adapter,
+                name: &implementation.id,
+                stable: implementation.stable,
+                adapter: &implementation.adapter,
                 threads: None,
             };
             for case in &cases {

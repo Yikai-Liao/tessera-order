@@ -25,9 +25,9 @@ A docs-only commit inside a verified PR then runs formatting, lints and Docs onl
 
 The [continuous plan](../development/continuous-benchmarks.md#cases) uses a small set of operation cases to detect entry and finishing regressions; the sorting cases already cover the shared engine. Operation cases run on every measured PR rather than being selected by entry ownership. That selection would save little: most library changes touch shared engine code and would select every group. An entry-only change could skip some cases, but only through a second ownership table beside `ROUTES`. Revisit that trade-off if operation coverage grows to dominate the shards; keep broader operation comparisons in explicit plans.
 
-## Keep cross-algorithm comparisons out of PR timing
+## Keep cross-implementation comparisons out of PR timing
 
-Comparisons with other algorithms answer "how does Tessera compare", not "did this change regress". They stay manual: per-operation plans with each operation's reference set, run with `compare algorithms` locally or through the diagnostics workflow, and a release plan that covers every released operation once per release. PR CI keeps only the comparison lane's correctness checks: adapters build and their outputs verify.
+Comparisons with other implementations answer "how does Tessera compare", not "did this change regress". They stay manual: per-operation plans with each operation's reference set, run with `compare implementations` locally or through the diagnostics workflow, and a release plan that covers every released operation once per release. PR CI keeps only the comparison lane's correctness checks: adapters build and their outputs verify.
 
 ## Cache hygiene
 
@@ -40,6 +40,6 @@ Comparisons with other algorithms answer "how does Tessera compare", not "did th
 1. Cache hygiene: workflow-only and immediately measurable on preparation time.
 2. Fingerprint reuse for the existing lanes.
 3. Operation cases in the continuous plan (implemented; entry-ownership selection deferred).
-4. Per-operation cross-algorithm plans and their release coverage, after the [comparison model](comparison-model-proposal.md#stages) identifies operations and execution in plans and results.
+4. Per-operation cross-implementation plans and their release coverage, after the [comparison model](comparison-model-proposal.md#stages) identifies operations and execution in plans and results.
 
 Each step records its measured critical path and runner-minutes in its PR. The [roadmap](../../ROADMAP.md) tracks the steps.

@@ -48,7 +48,7 @@ export async function withComparisonWorkspace<T>(
 }
 
 /** Reproduce CI's harness tests, smoke validation, tiny timing run and offline report. */
-export async function checkAlgorithms(root: string, out: string, native: boolean) {
+export async function checkImplementations(root: string, out: string, native: boolean) {
   if (native && process.platform !== "linux")
     throw new Error("Native linkage checks require Linux and ldd");
   await mkdir(out, { recursive: false });
@@ -99,8 +99,9 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
     const available = await command(executable, ["list"], { cwd: tree, capture: true });
     for (const line of available.split("\n").filter(Boolean)) {
       const id = line.split("\t")[0];
-      if (catalog.algorithms.find((entry) => entry.id === id)?.adapter === "revision") continue;
-      await writeFile(planPath, JSON.stringify({ ...plan, algorithms: [id] }));
+      if (catalog.implementations.find((entry) => entry.id === id)?.adapter === "revision")
+        continue;
+      await writeFile(planPath, JSON.stringify({ ...plan, implementations: [id] }));
       const env: NodeJS.ProcessEnv = { TESSERA_BENCH_PLAN: planPath };
       const listed = await command(worker.executable, [], {
         capture: true,
@@ -109,7 +110,7 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
       if (!listed.trim()) throw new Error(`Shared worker lists no cases for ${id}`);
       if (id === "glidesort-sqrt") {
         const memoryPlan = join(check, "memory-plan.json");
-        await writeFile(memoryPlan, JSON.stringify({ ...plan, algorithms: ["tessera"] }));
+        await writeFile(memoryPlan, JSON.stringify({ ...plan, implementations: ["tessera"] }));
         env.TESSERA_BENCH_SCRATCH = join(check, "memory");
         await command(join(dirname(executable), "memory"), [
           "--plan",
@@ -120,10 +121,10 @@ export async function checkAlgorithms(root: string, out: string, native: boolean
       }
       await command(worker.executable, ["--test"], { env });
     }
-    await command(executable, ["validate", "--suite", "smoke"], { cwd: tree });
+    await command(executable, ["validate", "--plan", "smoke"], { cwd: tree });
     await command(
       executable,
-      ["run", "--suite", "smoke", "--group", "u64/random", "--sample-ms", "1", "--out", out],
+      ["run", "--plan", "smoke", "--group", "u64/random", "--sample-ms", "1", "--out", out],
       { cwd: tree },
     );
     await writeReport([out], true);
@@ -143,11 +144,11 @@ export interface ReleaseOptions {
 }
 
 /** Retain the executable pair, then measure verified batches and report one experiment. */
-export async function compareAlgorithms(options: ReleaseOptions) {
+export async function compareImplementations(options: ReleaseOptions) {
   pairedBudget(options.blocks);
   if (options.revisions && options.plan.operation)
     throw new Error(
-      "Linked revisions support full sorting only; use compare algorithms for other operations",
+      "Linked revisions support full sorting only; use compare implementations for other operations",
     );
   await mkdir(options.out, { recursive: false });
   return withSessionLock(options.out, async () => {
@@ -162,11 +163,11 @@ async function prepareComparison(options: ReleaseOptions) {
   // Controls belong to this measurement operation, not the shared selection parser.
   const plan = parsePlan({
     ...options.plan,
-    algorithms: [...new Set(["tessera", "std-stable", ...options.plan.algorithms])],
+    implementations: [...new Set(["tessera", "std-stable", ...options.plan.implementations])],
   });
   if (cpu) await command("taskset", ["-c", cpu, "true"]);
-  const native = plan.algorithms.some((id) =>
-    catalog.algorithms.some((entry) => entry.id === id && entry.adapter === "native"),
+  const native = plan.implementations.some((id) =>
+    catalog.implementations.some((entry) => entry.id === id && entry.adapter === "native"),
   );
   const planPath = join(out, "plan.json");
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
@@ -174,8 +175,8 @@ async function prepareComparison(options: ReleaseOptions) {
     const features = [
       ...(plan.operation ? ["operations"] : []),
       ...(native ? ["compare-native"] : []),
-      ...(plan.algorithms.some((id) =>
-        catalog.algorithms.some((entry) => entry.id === id && entry.threads),
+      ...(plan.implementations.some((id) =>
+        catalog.implementations.some((entry) => entry.id === id && entry.threads),
       )
         ? ["rayon"]
         : []),

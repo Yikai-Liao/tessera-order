@@ -216,8 +216,8 @@ test("raw results round trip", async () => {
   try {
     await writeFixture(dir);
     const summary = await writeReport([dir]);
-    assert.equal(summary.kind, "algorithm-comparison");
-    assert.equal(summary.ratio, "algorithm / paired Tessera mean");
+    assert.equal(summary.kind, "implementation-comparison");
+    assert.equal(summary.ratio, "implementation / paired Tessera mean");
     assert.equal(summary.focus.length, 5);
     assert.ok(summary.omittedChanges > 0);
     const bmf = JSON.parse(await readFile(join(dir, "bmf.json"), "utf8"));
@@ -294,7 +294,7 @@ function operationFixture(operation: Operation) {
   const id = comparisonId(c),
     group = comparisonGroup(c);
   Object.assign(dataset.manifest, {
-    suite_version: 2,
+    plan_version: 2,
     index_bytes: 8,
     cases: [c],
     variants: [
@@ -304,7 +304,7 @@ function operationFixture(operation: Operation) {
     plan: {
       schema: 2,
       operation,
-      algorithms: [...variants, "rdst"],
+      implementations: [...variants, "rdst"],
       include: [{ types: [c.ty], distributions: [c.distribution], lengths: [c.len] }],
     },
   });

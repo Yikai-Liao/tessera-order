@@ -98,7 +98,7 @@ function renderResults(dataset: Dataset, summaries: Map<string, Summary>): strin
       ]);
     }
     if (rows.length)
-      output += `<details>\n<summary>${ty}</summary>\n\n${renderTable(["Shape", "Length", "Build", "A/A range", ...variants], rows)}\n</details>\n\n`;
+      output += `<details>\n<summary>${ty}</summary>\n\n${renderTable(["Distribution", "Length", "Build", "A/A range", ...variants], rows)}\n</details>\n\n`;
   }
   return output;
 }
@@ -113,7 +113,7 @@ function renderCapabilities(dataset: Dataset) {
     ),
   ]);
   let out = `## Capabilities\n\n${renderTable(["Variant", "Sort contract", "Pool workers", ...types], rows)}\n`;
-  if (manifest.suite_version === 1)
+  if (manifest.plan_version === 1)
     return (
       out +
       "Unstable sorts on records are listed as a separate task: their permutation check allows equal keys to change order. A dash means the adapter does not support the task.\n\n"
@@ -190,11 +190,11 @@ function renderProvenance(dataset: Dataset) {
 export async function writeReport(directories: string[], partial = false) {
   const dataset = await loadRun(directories, partial),
     summaries = summarize(dataset),
-    charts = dataset.manifest.suite_version === 1 ? renderFigures(dataset, summaries) : [];
+    charts = dataset.manifest.plan_version === 1 ? renderFigures(dataset, summaries) : [];
   const out = join(directories[0], "report");
   await mkdir(out, { recursive: true });
   const operation = dataset.manifest.cases[0].operation;
-  let markdown = `# ${operation ? operationLabel(operation) : "Sorting comparison"}\n\n${partial ? "Partial suite; only completed groups are shown." : `${dataset.manifest.suite} suite, version ${dataset.manifest.suite_version}.`} Every value is regenerated from the accompanying manifests, host fingerprint, blocks and memory samples.\n\n`;
+  let markdown = `# ${operation ? operationLabel(operation) : "Sorting comparison"}\n\n${partial ? "Partial plan; only completed groups are shown." : `${dataset.manifest.plan_name} plan, version ${dataset.manifest.plan_version}.`} Every value is regenerated from the accompanying manifests, host fingerprint, blocks and memory samples.\n\n`;
   if (operation)
     markdown += `Operation: \`${JSON.stringify(operation)}\`. Times are complete-call latency divided by input length, not by output count.\n\n`;
   markdown +=
@@ -208,7 +208,7 @@ export async function writeReport(directories: string[], partial = false) {
   const revisions = dataset.manifest.revisions;
   if (revisions) {
     markdown +=
-      "## Linked revision controls\n\nTwo named crates represent each revision, alongside the repeated primary-current A/A call. Ratios divide each placement by the current A/A mean: a slower baseline row indicates a current improvement. Compare both baseline copies and the second current copy, not only one favorable placement. Adapter entry offsets prove distinct call boundaries, not distinct internal sort bodies; inspect the retained executable before source attribution. This is a serial comparison; parallel revision process screens use the shared worker with explicit four-thread algorithms.\n\n";
+      "## Linked revision controls\n\nTwo named crates represent each revision, alongside the repeated primary-current A/A call. Ratios divide each placement by the current A/A mean: a slower baseline row indicates a current improvement. Compare both baseline copies and the second current copy, not only one favorable placement. Adapter entry offsets prove distinct call boundaries, not distinct internal sort bodies; inspect the retained executable before source attribution. This is a serial comparison; parallel revision process screens use the shared worker with explicit four-thread implementations.\n\n";
     markdown += "```json\n" + JSON.stringify(revisions, null, 2) + "\n```\n\n";
   }
   const conditions = collectWarnings(dataset);
@@ -220,7 +220,7 @@ export async function writeReport(directories: string[], partial = false) {
       "## Parallel measurement scope\n\nPools are started and warmed before timing and allocation counting; each timed call includes pool dispatch and sort scratch allocation. Peak heap bytes exclude pre-existing pool/runtime storage and thread stacks. All workers exit before the next adapter. Ratios use the serial Tessera A/A pair, not a separate parallel A/A pair. The inverse ratio is whole-call speedup over serial Tessera, not source-change attribution or parallel-only noise control.\n\n";
   if (!operation)
     markdown +=
-      "## Figure scope\n\nStandard panels show fixed slices and aggregates, not every measured case. The 1M input panels include all selected distributions for each type, including the new skew, key-structure, disorder and finite-float cases. Record panels rank stable sorts only. Ranking and cross-type aggregate panels retain the ten baseline distributions for a common comparison; they do not summarize the whole expanded suite. The memory panel takes the worst across all selected 10M u64 distributions. The selected-input panel is a fallback used only when no standard panel can be drawn. All completed cases, including custom lengths absent from the figures, remain in [Full results](#full-results) and [summaries.json](summaries.json).\n\n";
+      "## Figure scope\n\nStandard panels show fixed slices and aggregates, not every measured case. The 1M input panels include all selected distributions for each type, including the new skew, key-structure, disorder and finite-float cases. Record panels rank stable sorts only. Ranking and cross-type aggregate panels retain the ten baseline distributions for a common comparison; they do not summarize the whole expanded plan. The memory panel takes the worst across all selected 10M u64 distributions. The selected-input panel is a fallback used only when no standard panel can be drawn. All completed cases, including custom lengths absent from the figures, remain in [Full results](#full-results) and [summaries.json](summaries.json).\n\n";
   for (const chart of charts) {
     await writeFile(join(out, `${chart.name}.svg`), chart.svg);
     markdown += `## ${chart.subject}\n\n${chart.summary}\n\n![${chart.title}](${chart.name}.svg)\n\n<details>\n<summary>Plotted values</summary>\n\n${chart.table}\n</details>\n\n`;
@@ -247,11 +247,11 @@ export async function writeReport(directories: string[], partial = false) {
   );
   await writeFile(join(directories[0], "bmf.json"), `${JSON.stringify(bmf, null, 2)}\n`);
   return {
-    kind: "algorithm-comparison",
+    kind: "implementation-comparison",
     partial,
     protocol: "paired-blocks-aa",
     blocks: count,
-    ratio: "algorithm / paired Tessera mean",
+    ratio: "implementation / paired Tessera mean",
     range: "observed block range",
     affinity: dataset.host.affinity ?? "unknown",
     // Ratios name the opponent: an opponent faster than Tessera is the actionable loss.

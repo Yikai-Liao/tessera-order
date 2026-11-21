@@ -3,7 +3,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { algorithm, comparisonGroup, operationSchema, validateOperation } from "../catalog.ts";
+import { comparisonGroup, implementation, operationSchema, validateOperation } from "../catalog.ts";
 import { parseRetainedPlan } from "../plan.ts";
 import { pairedBudget } from "../statistics.ts";
 import {
@@ -50,10 +50,10 @@ function parseManifest(value: unknown): Manifest {
   assertObject(value);
   if (
     value.schema !== 1 ||
-    (value.suite_version !== 1 && value.suite_version !== 2) ||
-    !["smoke", "release", "custom"].includes(String(value.suite))
+    (value.plan_version !== 1 && value.plan_version !== 2) ||
+    !["smoke", "release", "custom"].includes(String(value.plan_name))
   )
-    throw new Error("unsupported measurement schema or suite");
+    throw new Error("unsupported measurement schema or plan");
   assertInteger(value.blocks, 1);
   pairedBudget(value.blocks);
   if (value.build !== "default")
@@ -85,8 +85,8 @@ function parseManifest(value: unknown): Manifest {
     if (v.adapter !== undefined) assertString(v.adapter);
     names.add(v.name);
   }
-  const operation = value.suite_version === 2 ? parseRetainedPlan(value.plan).operation : undefined;
-  if (value.suite_version === 2) {
+  const operation = value.plan_version === 2 ? parseRetainedPlan(value.plan).operation : undefined;
+  if (value.plan_version === 2) {
     if (!operation || operation.kind === "sort")
       throw new Error("schema 2 measurements require an explicit non-sort plan");
     assertInteger(value.index_bytes, 1);
@@ -106,7 +106,7 @@ function parseManifest(value: unknown): Manifest {
       c.variants.some((v) => !names.has(v))
     )
       throw new Error("invalid case capabilities");
-    if (value.suite_version === 1) {
+    if (value.plan_version === 1) {
       if (c.operation !== undefined) throw new Error("schema 1 measurements are sorting only");
     } else {
       const actual = operationSchema.parse(c.operation);
@@ -233,7 +233,7 @@ export function validateRun(dataset: Dataset): void {
       memories.has(id)
     )
       throw new Error(`invalid or duplicate memory sample ${id}`);
-    if (m.suite_version === 2) {
+    if (m.plan_version === 2) {
       assertInteger(r.output_bytes);
       const expected =
         c.operation?.kind === "argsort"
@@ -251,9 +251,10 @@ export function validateRun(dataset: Dataset): void {
   for (const c of m.cases) {
     if (dataset.partial && !samples.has(measurementId(build, caseId(c), "tessera"))) continue;
     for (const v of c.variants) {
-      const adapter = m.variants.find((entry) => entry.name === v)?.adapter ?? algorithm(v).adapter;
+      const adapter =
+        m.variants.find((entry) => entry.name === v)?.adapter ?? implementation(v).adapter;
       if (
-        (m.suite_version === 2 ||
+        (m.plan_version === 2 ||
           c.len <= 1000000 ||
           c.ty === "u64" ||
           v === "tessera" ||
@@ -286,7 +287,7 @@ export async function loadRun(directories: string[], partial = false): Promise<D
     const memory = await readJson(join(directory, "memory-manifest-default.json"));
     assertObject(memory);
     for (const field of [
-      ...(manifest.suite_version === 2 ? ["suite_version", "plan", "cases", "index_bytes"] : []),
+      ...(manifest.plan_version === 2 ? ["plan_version", "plan", "cases", "index_bytes"] : []),
       "schema",
       "blocks",
       "source_sha256",

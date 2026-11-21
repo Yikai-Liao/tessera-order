@@ -50,7 +50,7 @@ require('node:readline').createInterface({input: process.stdin}).on('line', requ
     kind: "prepared-revisions",
     plan: parsePlan({
       schema: 1,
-      algorithms: ["tessera"],
+      implementations: ["tessera"],
       include: [{ types: ["u64"], distributions: ["random"], lengths: [48] }],
     }),
     schema: 1,

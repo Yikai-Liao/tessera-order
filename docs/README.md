@@ -10,12 +10,12 @@ Every fact has one owner. Other pages link to it and never restate its numbers o
 | Check ordering, panic or memory guarantees | [Shared semantics](../conformance/semantics.md) |
 | Learn the algorithm | [Explanation](explain/index.md), with interactive figures |
 | Change the engine | [Engine reference](design/engine.md), then the [explanation page](explain/index.md#reading-order) for the stage you change; [validation](../CONTRIBUTING.md#engine-changes) |
-| Measure a change or compare algorithms | [Benchmark protocol](development/benchmarking.md#run-an-experiment); [engine evidence](design/evidence.md) before repeating an experiment |
+| Measure a change or compare implementations | [Benchmark protocol](development/benchmarking.md#run-an-experiment); [engine evidence](design/evidence.md) before repeating an experiment |
 | Read PR or main performance feedback | [PR feedback](development/continuous-benchmarks.md#read-feedback-from-a-pr) |
 | Change benchmark tooling or figures | [Tooling design](design/benchmark-tooling.md), [figure guide](development/benchmark-figures.md) |
 | Change CI, the site or a release | [CI](development/ci.md), [site guide](development/docs-site.md), [releases](../RELEASING.md) |
 | Contribute | [Contributing](../CONTRIBUTING.md) |
-| Plan future work | [Roadmap](../ROADMAP.md), [algorithm extensions proposal](design/algorithm-extensions-proposal.md), [Python binding design](design/python-binding.md) (not implemented) |
+| Plan future work | [Roadmap](../ROADMAP.md), [operation extensions proposal](design/operation-extensions-proposal.md), [Python binding design](design/python-binding.md) (not implemented) |
 
 ## Who owns what
 
@@ -27,7 +27,7 @@ Every fact has one owner. Other pages link to it and never restate its numbers o
 | Failed experiments, open measured losses, placement lessons, structure analysis | [engine evidence](design/evidence.md) | An experiment is rejected, an accepted change keeps a loss, or a structural conclusion or its premise changes |
 | Measurements of an accepted change | Its PR description; a retained mechanism names the saving that justifies it at its owner | The change merges |
 | Unfinished work and its acceptance | [roadmap](../ROADMAP.md) | Work starts, lands or is rejected |
-| Unimplemented algorithm interfaces and dependency migration choices | [algorithm extensions proposal](design/algorithm-extensions-proposal.md) | A proposed interface or migration decision changes; move implemented facts to their current owners |
+| Unimplemented operation interfaces and dependency migration choices | [operation extensions proposal](design/operation-extensions-proposal.md) | A proposed interface or migration decision changes; move implemented facts to their current owners |
 | Measurement commands, statistics, inputs, result formats | [benchmark protocol](development/benchmarking.md) | A command, input or statistic changes |
 | Hosted benchmark pipeline, PR reports, alerts | [continuous benchmarks](development/continuous-benchmarks.md) | The hosted pipeline changes |
 | Benchmark module ownership and change paths | [tooling design](design/benchmark-tooling.md) | A module boundary moves |

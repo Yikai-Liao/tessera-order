@@ -48,7 +48,7 @@ These rounded values come from the recorded `release-benchmark-raw-2d6fac2` sess
 
 | Question | Template | Visual encoding |
 |---|---|---|
-| How do algorithms rank? | Named rows | One dot per algorithm on a shared ratio axis |
+| How do implementations rank? | Named rows | One dot per implementation on a shared ratio axis |
 | Where is Tessera among competitors? | Grouped rows with a field of marks | Competitor dots, Tessera emphasized, value and rank columns |
 | How does extra memory grow with the input? | Curves on log–log axes | One line per sort over input length; Tessera heavy with its points, the others thin context lines; a dotted √n slope through Tessera's last point |
 | Which build regressed? | PR comparison matrix | Shared cases, one column per build, stems from zero |

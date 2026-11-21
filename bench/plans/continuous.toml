@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 schema = 1
-algorithms = [ "tessera", "tessera-par-4" ]
+implementations = [ "tessera", "tessera-par-4" ]
 exclude = []
 
 # Small random inputs exercise parallel-entry overhead and serial fallback;
@@ -89,7 +89,7 @@ lengths = [ 65536 ]
 
 [[include]]
 types = [ "u64" ]
-# Specialized direct-key shapes stay at 65k to leave room for the parallel tail.
+# Specialized direct-key distributions stay at 65k to leave room for the parallel tail.
 distributions = [ "sorted", "reverse", "sorted99", "equal", "far_swaps", "d16", "d4096", "sparse_digits", "zipf2", "skew99", "two_values", "sorted_tail", "runs" ]
 lengths = [ 65536 ]
 

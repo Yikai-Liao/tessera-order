@@ -44,7 +44,7 @@ const ROUTES: [RegExp, Lane[]][] = [
     ["cpp"],
   ],
   [/^\.github\/scripts\/install_native_tools\.sh$/, ["comparison"]],
-  // Tooling that renders or reads results and never builds or times a sorting algorithm.
+  // Tooling that renders or reads results and never builds or times a sorting implementation.
   [/^bench\/plot\//, ["docs"]],
   [/^bench\/tracking\/(result|history)\.ts$/, ["benchmark", "docs"]],
   [

@@ -30,14 +30,14 @@ const axesSchema = z.strictObject({
 });
 
 function selectionSchema<T extends z.ZodType<Operation>>(operation: T) {
-  // Include rules of a sorting plan may measure an operation instead (revision suites).
+  // Include rules of a sorting plan may measure an operation instead (revision plans).
   const rule = axesSchema.extend({ operation: operation.optional() });
   return z
     .strictObject({
       $comment: z.string().optional(),
       schema: z.union([z.literal(1), z.literal(2)]),
       operation: operation.optional(),
-      algorithms: choices(ids(catalog.algorithms)),
+      implementations: choices(ids(catalog.implementations)),
       include: z.array(rule).min(1),
       exclude: z.array(rule).default([]),
       parallel: z.array(rule).optional(),
@@ -70,16 +70,16 @@ const retainedSchema = selectionSchema(operationSchema);
 type Axes = z.infer<typeof axesSchema>;
 /** A validated experiment selection, independent of its measurement protocol. */
 export type Plan = z.infer<typeof schema>;
-/** A frozen plan may describe a workload that is no longer executable. */
+/** A frozen plan may describe an operation that is no longer executable. */
 export type RetainedPlan = z.infer<typeof retainedSchema>;
 export type SelectionOptions = Axes & {
-  algorithms?: string[];
+  implementations?: string[];
   operation?: z.infer<typeof liveOperationSchema>["kind"];
   index?: number;
   bucketCount?: number;
 };
 
-/** Validate a new selection without choosing a measurement protocol or adding algorithms. */
+/** Validate a new selection without choosing a measurement protocol or adding implementations. */
 export function parsePlan(value: unknown): Plan {
   const plan = schema.parse(value);
   validateLengths(plan);
@@ -112,9 +112,9 @@ function validateLengths(plan: RetainedPlan) {
     const operation = effective(rule)!;
     for (const len of rule.lengths ?? catalog.inputs.lengths) {
       const includedTypes = rule.types ?? catalog.types.map((t) => t.id);
-      const includedShapes = rule.distributions ?? catalog.distributions.map((d) => d.id);
+      const includedDistributions = rule.distributions ?? catalog.distributions.map((d) => d.id);
       const survives = includedTypes.some((ty) =>
-        includedShapes.some(
+        includedDistributions.some(
           (distribution) =>
             !plan.exclude.some(
               (r) =>
@@ -135,7 +135,7 @@ export async function loadPlan(name: string, options: SelectionOptions = {}): Pr
     ? fileURLToPath(new URL(`./plans/${name}.toml`, import.meta.url))
     : name;
   const plan = schema.parse(decodeConfig(await readFile(path, "utf8"), path));
-  const { algorithms, operation, index, bucketCount, ...axes } = options;
+  const { implementations, operation, index, bucketCount, ...axes } = options;
   const parameters = {
     ...(index === undefined ? {} : { index }),
     ...(bucketCount === undefined ? {} : { bucket_count: bucketCount }),
@@ -157,7 +157,7 @@ export async function loadPlan(name: string, options: SelectionOptions = {}): Pr
   }
   return parsePlan({
     ...selected,
-    algorithms: algorithms ?? plan.algorithms,
+    implementations: implementations ?? plan.implementations,
     include: selected.include.map((entry) => ({ ...entry, ...axes })),
     ...(plan.parallel ? { parallel: plan.parallel.map((entry) => ({ ...entry, ...axes })) } : {}),
   });

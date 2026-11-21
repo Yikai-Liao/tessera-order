@@ -177,7 +177,7 @@ impl<T: BenchmarkRecord> PreparedRecords<T> {
         })
     }
 
-    /// Prepares a validated workload without retaining per-call workspace.
+    /// Prepares a validated operation without retaining per-call workspace.
     fn for_case(case: &InputCase, original: Vec<T>) -> Rc<Self> {
         case.operation
             .validate(original.len())
@@ -220,7 +220,7 @@ pub enum CaseInput {
     OwnedRecord(Rc<PreparedRecords<OwnedRecord>>),
 }
 impl CaseInput {
-    /// Generates and prepares the concrete record representation of a suite case.
+    /// Generates and prepares the concrete record representation of a plan case.
     pub fn new(c: &InputCase) -> Self {
         match c.ty.as_str() {
             "u32" => Self::U32(PreparedRecords::for_case(
@@ -307,7 +307,7 @@ impl CaseInput {
                     })
                     .collect(),
             )),
-            _ => unreachable!("suite contains an unknown type"),
+            _ => unreachable!("plan contains an unknown type"),
         }
     }
 

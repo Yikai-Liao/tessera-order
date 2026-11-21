@@ -8,18 +8,18 @@ import { summarizeRatios } from "../statistics.ts";
 import type { BuildProvenance } from "../workspace.ts";
 
 /** Revision builds replace only the Tessera library, so a revision comparison measures exactly
- * Tessera's serial API, its four-thread API, or both; any other algorithm would be identical
+ * Tessera's serial API, its four-thread API, or both; any other implementation would be identical
  * code in both builds. Other operations are serial. Returns the worker threads the scheduler
  * must reserve. */
 export function revisionThreads(plan: RetainedPlan): 1 | 4 {
   if (plan.operation && plan.operation.kind !== "sort") {
-    if (plan.algorithms.join() !== "tessera")
+    if (plan.implementations.join() !== "tessera")
       throw new Error("Revision comparisons of an operation measure only serial tessera");
     return 1;
   }
-  if (!plan.algorithms.every((id) => id === "tessera" || id === "tessera-par-4"))
+  if (!plan.implementations.every((id) => id === "tessera" || id === "tessera-par-4"))
     throw new Error("Revision comparisons measure only tessera and tessera-par-4");
-  return plan.algorithms.includes("tessera-par-4") ? 4 : 1;
+  return plan.implementations.includes("tessera-par-4") ? 4 : 1;
 }
 
 /** Whether a plan measures any operation other than full sorting, which needs the harness's

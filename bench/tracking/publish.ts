@@ -3,9 +3,9 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { caseLabel, caseName, caseParts, caseSection, catalog, compareCases } from "../catalog.ts";
-import { trackingAlgorithm } from "./algorithms.ts";
 import { GROWTH_FILE, writeComparison } from "./comparison.ts";
 import { renderMainOverview } from "./history.ts";
+import { trackingImplementation } from "./implementations.ts";
 import {
   type Facet,
   growthSchema,
@@ -91,18 +91,18 @@ export async function appendRun(directory: string, input: TrackingRun) {
   await writeFile(join(directory, "preview.svg"), renderMainOverview(runs, index.cases));
 }
 
-// Usage: publish.ts ALGORITHM JOURNAL, or publish.ts growth FILE, run from the data checkout's
-// root; both regenerate `comparison.json` from every algorithm present and the growth sweep.
+// Usage: publish.ts IMPLEMENTATION JOURNAL, or publish.ts growth FILE, run from the data checkout's
+// root; both regenerate `comparison.json` from every implementation present and the growth sweep.
 if (import.meta.main) {
-  const [algorithm, input] = process.argv.slice(2);
-  if (algorithm === "growth") {
+  const [implementation, input] = process.argv.slice(2);
+  if (implementation === "growth") {
     // The latest sweep replaces the previous one; Git keeps the history.
     const growth = growthSchema.parse(JSON.parse(await readFile(input, "utf8")));
     await writeFile(GROWTH_FILE, `${JSON.stringify(growth)}\n`);
   } else {
     const runs = parseRuns(await readFile(input, "utf8"));
     if (runs.length !== 1) throw new Error("Expected exactly one complete run");
-    await appendRun(trackingAlgorithm(algorithm).id, runs[0]);
+    await appendRun(trackingImplementation(implementation).id, runs[0]);
   }
   await writeComparison(".");
 }

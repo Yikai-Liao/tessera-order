@@ -2,7 +2,7 @@
 
 [plan]
 schema = 1
-algorithms = [ "tessera" ]
+implementations = [ "tessera" ]
 
 [[plan.include]]
 types = [ "u64", "row_u64" ]

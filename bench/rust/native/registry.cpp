@@ -23,8 +23,8 @@ struct Layout {
   X(row64, BenchRow64, offsetof(BenchRow64, row))                              \
   X(record, BenchRecord, offsetof(BenchRecord, payload))
 
-// Row order is checked against Rust's NativeAlgorithm ABI.
-#define NATIVE_ALGORITHMS(X)                                                   \
+// Row order is checked against Rust's NativeImplementation ABI.
+#define NATIVE_IMPLEMENTATIONS(X)                                                   \
   X(clausecker)                                                                \
   X(fluxsort)                                                                  \
   X(ips2ra)                                                                    \
@@ -34,7 +34,7 @@ struct Layout {
   X(crumsort)                                                                  \
   X(duckdb)
 
-// Supported algorithm/record pairs. One entry generates both the C declaration
+// Supported implementation/record pairs. One entry generates both the C declaration
 // and the typed binding; omitted pairs have no kernel.
 #define NATIVE_KERNELS(X)                                                      \
   X(clausecker, row32)                                                         \
@@ -81,34 +81,34 @@ NATIVE_RECORDS(RECORD)
 #undef RECORD
 } // namespace records
 
-namespace algorithms {
-#define ALGORITHM(NAME)                                                        \
+namespace implementations {
+#define IMPLEMENTATION(NAME)                                                        \
   struct NAME {                                                                \
     static constexpr auto name = #NAME;                                        \
   };
-NATIVE_ALGORITHMS(ALGORITHM)
-#undef ALGORITHM
-} // namespace algorithms
+NATIVE_IMPLEMENTATIONS(IMPLEMENTATION)
+#undef IMPLEMENTATION
+} // namespace implementations
 
-template <typename Algorithm, typename Record> constexpr Sort kernel = nullptr;
+template <typename Implementation, typename Record> constexpr Sort kernel = nullptr;
 
-#define KERNEL(ALGORITHM, RECORD)                                              \
-  extern "C" void bench_##ALGORITHM##_##RECORD(void *, size_t);                \
+#define KERNEL(IMPLEMENTATION, RECORD)                                              \
+  extern "C" void bench_##IMPLEMENTATION##_##RECORD(void *, size_t);                \
   template <>                                                                  \
-  constexpr Sort kernel<algorithms::ALGORITHM, records::RECORD> =              \
-      bench_##ALGORITHM##_##RECORD;
+  constexpr Sort kernel<implementations::IMPLEMENTATION, records::RECORD> =              \
+      bench_##IMPLEMENTATION##_##RECORD;
 NATIVE_KERNELS(KERNEL)
 #undef KERNEL
 
 #define RECORD_TAG(NAME, TYPE, OFFSET) records::NAME{},
 static constexpr auto record_types = std::tuple{NATIVE_RECORDS(RECORD_TAG)};
 #undef RECORD_TAG
-#define ALGORITHM_TAG(NAME) algorithms::NAME{},
-static constexpr auto algorithm_types =
-    std::tuple{NATIVE_ALGORITHMS(ALGORITHM_TAG)};
-#undef ALGORITHM_TAG
+#define IMPLEMENTATION_TAG(NAME) implementations::NAME{},
+static constexpr auto implementation_types =
+    std::tuple{NATIVE_IMPLEMENTATIONS(IMPLEMENTATION_TAG)};
+#undef IMPLEMENTATION_TAG
 #undef NATIVE_KERNELS
-#undef NATIVE_ALGORITHMS
+#undef NATIVE_IMPLEMENTATIONS
 #undef NATIVE_RECORDS
 
 // std::apply preserves the type-list order for both layout rows and kernel
@@ -122,27 +122,27 @@ struct RegistryRow {
   std::array<Sort, layouts.size()> kernels;
 };
 
-template <typename Algorithm> constexpr RegistryRow registry_row(Algorithm) {
-  return {Algorithm::name,
+template <typename Implementation> constexpr RegistryRow registry_row(Implementation) {
+  return {Implementation::name,
           std::apply(
               [](auto... record) {
-                return std::array{kernel<Algorithm, decltype(record)>...};
+                return std::array{kernel<Implementation, decltype(record)>...};
               },
               record_types)};
 }
 
 static constexpr auto registry = std::apply(
-    [](auto... algorithm) { return std::array{registry_row(algorithm)...}; },
-    algorithm_types);
+    [](auto... implementation) { return std::array{registry_row(implementation)...}; },
+    implementation_types);
 
-extern "C" Sort bench_kernel(unsigned algorithm, unsigned type) noexcept {
-  if (algorithm >= registry.size() || type >= layouts.size())
+extern "C" Sort bench_kernel(unsigned implementation, unsigned type) noexcept {
+  if (implementation >= registry.size() || type >= layouts.size())
     return nullptr;
-  return registry[algorithm].kernels[type];
+  return registry[implementation].kernels[type];
 }
 
-extern "C" const char *bench_algorithm_name(unsigned algorithm) noexcept {
-  return algorithm < registry.size() ? registry[algorithm].name : nullptr;
+extern "C" const char *bench_implementation_name(unsigned implementation) noexcept {
+  return implementation < registry.size() ? registry[implementation].name : nullptr;
 }
 
 extern "C" size_t bench_layout(unsigned type, unsigned field) noexcept {

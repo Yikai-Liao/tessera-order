@@ -9,7 +9,7 @@ export const JOB_TIMEOUT_S = 300;
  * Catalog warm-up and sampling time planned per remote job, in seconds.
  *
  * The catalog budget is a floor, not a duration: VM start, input preparation,
- * verification and Criterion analysis come on top, and a slow algorithm's
+ * verification and Criterion analysis come on top, and a slow implementation's
  * flat sampling can exceed its window. Remotely, `std-stable`'s 62 cases
  * (148 s of budget) took 185 s, and Tessera's 34 four-thread cases (164 s)
  * took 234 s; half the timeout keeps such jobs near 200 s.
@@ -23,7 +23,7 @@ function samplingSeconds(id: string) {
 }
 
 /**
- * Split one algorithm's inventory into the fewest remote jobs whose catalog
+ * Split one implementation's inventory into the fewest remote jobs whose catalog
  * budget fits `JOB_SAMPLING_S`, keeping list order and balancing the jobs.
  * Each job is a complete Bencher run; the jobs together measure every case once.
  */

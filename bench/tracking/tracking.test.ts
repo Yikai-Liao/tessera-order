@@ -9,7 +9,6 @@ import { parseHTML } from "linkedom/worker";
 import { z } from "zod";
 import { catalog } from "../catalog.ts";
 import type { RowChart } from "../plot/rows.ts";
-import { trackingAlgorithm, trackingAlgorithms, trackingBranch } from "./algorithms.ts";
 import { trackingMemory } from "./build.ts";
 import {
   comparisonData,
@@ -29,6 +28,11 @@ import {
   renderMainOverview,
   renderMainTrend,
 } from "./history.ts";
+import {
+  trackingBranch,
+  trackingImplementation,
+  trackingImplementations,
+} from "./implementations.ts";
 import { remoteJobs } from "./jobs.ts";
 import { appendRun, trackingCases, trackingFacets } from "./publish.ts";
 import {
@@ -78,21 +82,21 @@ const run: TrackingRun = {
 };
 
 test("tracking excludes revision controls and operation-only references", () => {
-  assert.ok(trackingAlgorithms.some((entry) => entry.id === "tessera"));
+  assert.ok(trackingImplementations.some((entry) => entry.id === "tessera"));
   assert.ok(
-    trackingAlgorithms.every((entry) => !["revision", "reference"].includes(entry.adapter)),
+    trackingImplementations.every((entry) => !["revision", "reference"].includes(entry.adapter)),
   );
   for (const id of ["tessera-full", "tessera-copy", "tessera-baseline"]) {
-    assert.throws(() => trackingAlgorithm(id), /Unknown tracking algorithm/);
-    assert.throws(() => trackingBranch(id), /Unknown tracking algorithm/);
+    assert.throws(() => trackingImplementation(id), /Unknown tracking implementation/);
+    assert.throws(() => trackingBranch(id), /Unknown tracking implementation/);
   }
 });
 
-test("each algorithm's reports must come from its own Cloud branch", () => {
+test("each implementation's reports must come from its own Cloud branch", () => {
   const raw = report();
-  raw.branch.name = "algorithm-glidesort";
+  raw.branch.name = "implementation-glidesort";
   assert.throws(() => summarizeReport(raw, source, "example", [PREVIEW_CASE], "main"));
-  assert.ok(summarizeReport(raw, source, "example", [PREVIEW_CASE], "algorithm-glidesort"));
+  assert.ok(summarizeReport(raw, source, "example", [PREVIEW_CASE], "implementation-glidesort"));
 });
 
 test("only complete matching absolute reports enter history", () => {
@@ -524,7 +528,7 @@ test("memory rows key timed cases by mode and must cover every timed case", () =
   const journal = [
     row("u64/random/65536/s1", "tessera", 4096),
     row("u64/random/65536/s1", "tessera-par-4", 8192),
-    // Inputs and algorithms the run does not time are dropped.
+    // Inputs and implementations the run does not time are dropped.
     row("u64/sorted/1000000/s1", "tessera", 0),
     row("u64/random/65536/s1", "std-stable", 524288),
   ].join("\n");
@@ -679,10 +683,10 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
 });
 
 test("tracking schedules only variants that fit the tracking hardware", () => {
-  assert.ok(trackingAlgorithms.every((entry) => (entry.threads ?? 1) <= TRACKING_SPEC.cpus));
+  assert.ok(trackingImplementations.every((entry) => (entry.threads ?? 1) <= TRACKING_SPEC.cpus));
   // Wider catalog variants stay available to local comparisons.
-  assert.ok(catalog.algorithms.some((entry) => (entry.threads ?? 1) > TRACKING_SPEC.cpus));
-  assert.ok(!trackingAlgorithms.some((entry) => entry.id === "tessera-par-8"));
+  assert.ok(catalog.implementations.some((entry) => (entry.threads ?? 1) > TRACKING_SPEC.cpus));
+  assert.ok(!trackingImplementations.some((entry) => entry.id === "tessera-par-8"));
 });
 
 test("the comparison ranks 32-bit-key records and adds parallel scaling", () => {
@@ -729,10 +733,10 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   assert.equal(trackingScaling(latest), null);
 });
 
-test("the growth sweep keeps one peak per algorithm and length", () => {
+test("the growth sweep keeps one peak per implementation and length", () => {
   const plan = {
     schema: 1 as const,
-    algorithms: ["tessera", "glidesort"],
+    implementations: ["tessera", "glidesort"],
     include: [
       { types: ["row_u32" as const], distributions: ["random" as const], lengths: [1024, 4096] },
     ],

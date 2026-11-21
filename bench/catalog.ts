@@ -11,7 +11,7 @@ const blockBudget = z.object({
 });
 const inputDefaults = z.object({ lengths: z.array(z.number().int().positive()) });
 
-/** Language-neutral benchmark identities, presentation metadata and suite order. */
+/** Language-neutral benchmark identities, presentation metadata and plan order. */
 export const catalog = z
   .object({
     schema: z.literal(1),
@@ -26,7 +26,7 @@ export const catalog = z
         }),
       )
       .min(1),
-    algorithms: z.array(
+    implementations: z.array(
       identity.extend({
         stable: z.boolean(),
         family: z.string(),
@@ -55,7 +55,7 @@ export const catalog = z
     inputs: inputDefaults,
     comparison: z.object({
       types: z.array(z.string()),
-      summaryShapes: z.array(z.string()),
+      summaryDistributions: z.array(z.string()),
     }),
   })
   .parse(
@@ -76,15 +76,21 @@ function index<T extends { id: string }>(entries: T[]) {
   return new Map(entries.map((entry) => [entry.id, entry]));
 }
 
-const algorithms = index(catalog.algorithms);
+const implementations = index(catalog.implementations);
 const records = index(catalog.types);
 const distributions = index(catalog.distributions);
 const modes = index(catalog.modes);
 
-/** Look up an algorithm's presentation without parsing its identifier. */
-export function algorithm(id: string): (typeof catalog.algorithms)[number] {
+/** Look up an implementation's presentation without parsing its identifier. */
+export function implementation(id: string): (typeof catalog.implementations)[number] {
   return (
-    algorithms.get(id) ?? { id, label: id, family: "comparison", adapter: "unknown", stable: false }
+    implementations.get(id) ?? {
+      id,
+      label: id,
+      family: "comparison",
+      adapter: "unknown",
+      stable: false,
+    }
   );
 }
 
@@ -380,13 +386,13 @@ export function caseParts(id: string) {
   }
   const { ty, seed, operation } = parsed;
   const record = recordType(ty),
-    shape = distribution(parsed.distribution);
+    distributionEntry = distribution(parsed.distribution);
   const extra = [seed === "s1" ? "" : `seed ${seed.slice(1)}`, mode === "api" ? "" : mode].filter(
     Boolean,
   );
   return {
     type: record.compact ?? record.label,
-    input: shape.compact ?? shape.label,
+    input: distributionEntry.compact ?? distributionEntry.label,
     // Operation cases share inputs with sorting cases; figures group them by this name.
     operation: operation ? operationTitle(operation) : "",
     kind: operation?.kind ?? "",
@@ -410,7 +416,7 @@ export function caseName(id: string) {
 /** Order case IDs for reading: mode, length, record type, input, then seed; unknown entries last. */
 export function compareCases(a: string, b: string) {
   const key = (id: string) => {
-    const [, ty = "", shape = "", length = "", seed = ""] = id.split("/");
+    const [, ty = "", distributionId = "", length = "", seed = ""] = id.split("/");
     const mode = id.split("/").at(-1) ?? "";
     const rank = (list: { id: string }[], value: string) => {
       const found = list.findIndex((entry) => entry.id === value);
@@ -420,7 +426,7 @@ export function compareCases(a: string, b: string) {
       modeOrder(mode),
       Number(length) || Number.MAX_SAFE_INTEGER,
       rank(catalog.types, ty),
-      rank(catalog.distributions, shape),
+      rank(catalog.distributions, distributionId),
       Number(seed.slice(1)) || Number.MAX_SAFE_INTEGER,
     ];
   };

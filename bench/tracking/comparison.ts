@@ -2,7 +2,13 @@
 
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { algorithm, catalog, comparisonId, distribution, parseComparisonId } from "../catalog.ts";
+import {
+  catalog,
+  comparisonId,
+  distribution,
+  implementation,
+  parseComparisonId,
+} from "../catalog.ts";
 import {
   type Cohort,
   comparisonFigures,
@@ -11,7 +17,7 @@ import {
   renderParallel,
   type Scaling,
 } from "../report/charts.ts";
-import { trackingAlgorithms } from "./algorithms.ts";
+import { trackingImplementations } from "./implementations.ts";
 import {
   type ComparisonData,
   comparisonSchema,
@@ -26,7 +32,7 @@ const SERIAL = "api";
 const key = (id: string) => `rust/${id}/${SERIAL}`;
 
 /**
- * Each algorithm's latest run on the hardware of Tessera's latest run.
+ * Each implementation's latest run on the hardware of Tessera's latest run.
  *
  * Runs are independent: their ratios are descriptive, not paired verdicts.
  */
@@ -54,7 +60,7 @@ export function trackingField(runs: Map<string, TrackingRun>): Field {
   );
   return {
     // Serial adapters only; a named parallel variant is not an opponent of serial runs.
-    algorithms: trackingAlgorithms
+    implementations: trackingImplementations
       .filter((entry) => runs.has(entry.id) && entry.threads === undefined)
       .map((entry) => ({ name: entry.id, stable: entry.stable })),
     cases: [...ids].map(parseComparisonId),
@@ -92,27 +98,29 @@ export function trackingCohort(field: Field): Cohort | null {
       (a, b) => b[1].length - a[1].length || b[0] - a[0],
     );
     if (!found) return null;
-    const shapes = found[1]
+    const distributions = found[1]
       .map((entry) => entry.distribution)
       .toSorted((a, b) => order.indexOf(a) - order.indexOf(b));
-    return { n: found[0], shapes, cases };
+    return { n: found[0], distributions, cases };
   };
-  const over = (shapes: string[], patterns: string) =>
-    shapes.length === 1
-      ? `on the ${distribution(shapes[0]).label} input`
-      : `geometric mean over the ${shapes.length} ${patterns}`;
+  const over = (distributions: string[], patterns: string) =>
+    distributions.length === 1
+      ? `on the ${distribution(distributions[0]).label} input`
+      : `geometric mean over the ${distributions.length} ${patterns}`;
   const u64 = widest("u64");
   if (!u64) return null;
   const records = widest(RANKING_TYPE);
   const ranking = records ? { ty: RANKING_TYPE, ...records } : { ty: "u64", ...u64 };
-  const { n, shapes } = u64;
+  const { n, distributions } = u64;
   // Element types compare over the patterns every measured type shares at that length.
   const types = Map.groupBy(
     field.cases.filter((entry) => entry.len === n && measured(comparisonId(entry))),
     (entry) => entry.ty,
   );
-  const typeShapes = shapes.filter((shape) =>
-    [...types.values()].every((cases) => cases.some((entry) => entry.distribution === shape)),
+  const typeDistributions = distributions.filter((distributionId) =>
+    [...types.values()].every((cases) =>
+      cases.some((entry) => entry.distribution === distributionId),
+    ),
   );
   const shared = field.cases.filter((entry) => measured(comparisonId(entry)));
   const lengths = [...Map.groupBy(shared, (entry) => entry.len)]
@@ -135,15 +143,15 @@ export function trackingCohort(field: Field): Cohort | null {
       ty: ranking.ty,
       n: ranking.n,
       lengths: [ranking.n],
-      shapes: ranking.shapes,
-      label: over(ranking.shapes, "measured input patterns"),
+      distributions: ranking.distributions,
+      label: over(ranking.distributions, "measured input patterns"),
     },
     n,
-    sweep: { shape: "random", lengths },
+    sweep: { distributionId: "random", lengths },
     short: { lengths: shortLengths, types: shortTypes },
-    shapes,
-    typeShapes,
-    typeShapesLabel: over(typeShapes, "input patterns every type has"),
+    distributions,
+    typeDistributions,
+    typeDistributionsLabel: over(typeDistributions, "input patterns every type has"),
   };
 }
 
@@ -154,8 +162,8 @@ export function trackingCohort(field: Field): Cohort | null {
  */
 export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null {
   const variant = (adapter: string, threads: number) =>
-    trackingAlgorithms.find((entry) => entry.adapter === adapter && entry.threads === threads);
-  const counts = trackingAlgorithms
+    trackingImplementations.find((entry) => entry.adapter === adapter && entry.threads === threads);
+  const counts = trackingImplementations
     .filter((entry) => entry.adapter === "tessera-par" && entry.threads !== undefined)
     .map((entry) => entry.threads!)
     .filter((t) =>
@@ -185,9 +193,9 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
     threads: counts,
     tessera: hashes,
     inputs: inputs.map((id) => {
-      const { ty, distribution: shape } = parseComparisonId(id);
+      const { ty, distribution: distributionId } = parseComparisonId(id);
       return {
-        label: `${ty} · ${distribution(shape).label}`,
+        label: `${ty} · ${distribution(distributionId).label}`,
         tessera: of("tessera-par", id),
         rayon: of("rayon-stable", id),
       };
@@ -195,13 +203,13 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
   };
 }
 
-/** The growth sweep in the figures' terms: serial tracking algorithms, in catalog order. */
+/** The growth sweep in the figures' terms: serial tracking implementations, in catalog order. */
 export function trackingGrowth(record: GrowthRecord): Growth {
   return {
     ty: record.type,
     distribution: record.distribution,
     lengths: record.lengths,
-    peaks: trackingAlgorithms
+    peaks: trackingImplementations
       .filter((entry) => entry.threads === undefined && entry.id in record.peaks)
       .map((entry) => ({ name: entry.id, values: record.peaks[entry.id] })),
     source: `Tessera at ${record.hash.slice(0, 7)}`,
@@ -209,7 +217,7 @@ export function trackingGrowth(record: GrowthRecord): Growth {
 }
 
 /**
- * Build the published comparison from every algorithm's journals and the growth sweep. Without a cohort, such as
+ * Build the published comparison from every implementation's journals and the growth sweep. Without a cohort, such as
  * before `slice::sort` has a run on Tessera's latest hardware, it has no figures, so the site
  * never shows an earlier comparison as the latest one.
  */
@@ -241,10 +249,10 @@ export function comparisonData(
   return comparisonSchema.parse({
     spec: latest?.spec ?? null,
     runs: [...(latest?.runs ?? [])]
-      .filter(([id]) => cohort && field.algorithms.some((entry) => entry.name === id))
+      .filter(([id]) => cohort && field.implementations.some((entry) => entry.name === id))
       .map(([id, run]) => ({
         algorithm: id,
-        label: algorithm(id).label,
+        label: implementation(id).label,
         hash: run.hash,
         time: run.time,
         workflow: run.workflow,
@@ -258,11 +266,11 @@ export function comparisonData(
 /** The growth sweep's file at the data root, written by `publish.ts growth`. */
 export const GROWTH_FILE = "growth.json";
 
-/** Regenerate `comparison.json` at the data root from every algorithm directory present. */
+/** Regenerate `comparison.json` at the data root from every implementation directory present. */
 export async function writeComparison(root: string) {
   const present = new Set(await readdir(root));
   const runs = new Map<string, TrackingRun[]>();
-  for (const { id } of trackingAlgorithms) {
+  for (const { id } of trackingImplementations) {
     if (!present.has(id)) continue;
     const files = (await readdir(join(root, id))).filter((file) => file.endsWith(".jsonl"));
     const list = (

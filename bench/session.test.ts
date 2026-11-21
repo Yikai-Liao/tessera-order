@@ -75,7 +75,7 @@ test("resume rejects incomplete or altered experiments before execution", async 
   }
 });
 
-test("resume rejects even an unchanged frozen plan for a retired workload", async (t) => {
+test("resume rejects even an unchanged frozen plan for a retired operation", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-retired-session-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const session = await prepared(directory);
@@ -85,7 +85,7 @@ test("resume rejects even an unchanged frozen plan for a retired workload", asyn
     JSON.stringify({
       schema: 2,
       operation: { kind: "top-k", k: 10 },
-      algorithms: ["tessera", "std-stable"],
+      implementations: ["tessera", "std-stable"],
       include: [{ lengths: [1000] }],
     }),
   );

@@ -31,7 +31,7 @@ const BUILD: &str = "default";
 /// Command selection, output location and sampling limits.
 struct Options {
     command: String,
-    suite: String,
+    plan_name: String,
     group: Option<String>,
     plan: crate::plan::Plan,
     plan_path: Option<PathBuf>,
@@ -49,7 +49,7 @@ impl Options {
         };
         let mut options = Self {
             command,
-            suite: "smoke".into(),
+            plan_name: "smoke".into(),
             group: None,
             plan: crate::plan::Plan::parse(include_str!("../../../plans/smoke.toml"))?,
             plan_path: None,
@@ -69,8 +69,10 @@ impl Options {
                 .next()
                 .ok_or_else(|| format!("missing value for {key}"))?;
             match key.as_str() {
-                "--suite" => options.suite = value,
                 "--group" => options.group = Some(value),
+                "--plan" if matches!(value.as_str(), "smoke" | "release") => {
+                    options.plan_name = value
+                }
                 "--plan" => options.plan_path = Some(value.into()),
                 "--out" => options.output_dir = value.into(),
                 "--blocks" => {
@@ -99,13 +101,13 @@ impl Options {
             }
         }
         let text = if let Some(path) = &options.plan_path {
-            options.suite = "custom".into();
+            options.plan_name = "custom".into();
             fs::read_to_string(path)?
         } else {
-            match options.suite.as_str() {
+            match options.plan_name.as_str() {
                 "smoke" => include_str!("../../../plans/smoke.toml").into(),
                 "release" => include_str!("../../../plans/release.toml").into(),
-                _ => return Err("expected smoke or release suite".into()),
+                _ => return Err("expected smoke or release plan".into()),
             }
         };
         options.plan = crate::plan::Plan::parse(&text)?;
@@ -113,26 +115,28 @@ impl Options {
             && ["tessera", "std-stable"].iter().any(|id| {
                 !options
                     .plan
-                    .algorithms
+                    .implementations
                     .iter()
                     .any(|selected| selected == id)
             })
         {
-            return Err("paired algorithm runs require tessera and std-stable controls".into());
+            return Err(
+                "paired implementation runs require tessera and std-stable controls".into(),
+            );
         }
         if options.plan.has_rule_operations() {
-            return Err("algorithm comparisons take one plan-level operation; rule operations are for revision suites".into());
+            return Err("implementation comparisons take one plan-level operation; rule operations are for revision plans".into());
         }
         if !options.plan.operation().is_sort() && !cfg!(feature = "operations") {
-            return Err("non-sort workloads require the operations benchmark feature; the library APIs are always available".into());
+            return Err("non-sort operations require the operations benchmark feature; the library APIs are always available".into());
         }
         let available = variant::list_variants();
-        for id in &options.plan.algorithms {
+        for id in &options.plan.implementations {
             if BUILD == "default"
                 && options.plan_path.is_some()
                 && !available.iter().any(|entry| entry.name == id)
             {
-                return Err(format!("algorithm {id} is unavailable; enable its compare-native/rayon feature or use tools compare revisions for revision adapters").into());
+                return Err(format!("implementation {id} is unavailable; enable its compare-native/rayon feature or use tools compare revisions for revision adapters").into());
             }
         }
         Ok(options)
@@ -156,11 +160,11 @@ impl Options {
         Ok(cases)
     }
 
-    /// Retains the selected algorithms available in this build configuration.
+    /// Retains the selected implementations available in this build configuration.
     fn variants(&self) -> Vec<variant::Variant> {
         variant::list_variants()
             .into_iter()
-            .filter(|entry| self.plan.algorithms.iter().any(|id| id == entry.name))
+            .filter(|entry| self.plan.implementations.iter().any(|id| id == entry.name))
             .collect()
     }
 }
@@ -205,7 +209,7 @@ fn append_record(file: &mut File, value: &impl serde::Serialize) -> Result<()> {
     file.flush()?;
     Ok(())
 }
-/// Combines build provenance with the suite and adapter capabilities.
+/// Combines build provenance with the plan and adapter capabilities.
 fn create_manifest(options: &Options, cases: &[InputCase]) -> Value {
     let mut provenance: Value =
         serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/provenance.json")))
@@ -217,8 +221,8 @@ fn create_manifest(options: &Options, cases: &[InputCase]) -> Value {
             fs::read(std::env::current_exe().expect("executable path")).expect("read executable")
         )
     ));
-    provenance["suite"] = json!(options.suite);
-    provenance["suite_version"] = json!(if options.plan.operation().is_sort() {
+    provenance["plan_name"] = json!(options.plan_name);
+    provenance["plan_version"] = json!(if options.plan.operation().is_sort() {
         1
     } else {
         2
@@ -435,7 +439,7 @@ fn measure_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
     if let Some(path) = &options.plan_path {
         cmd.arg("--plan").arg(path);
     } else {
-        cmd.args(["--suite", &options.suite]);
+        cmd.args(["--plan", &options.plan_name]);
     }
     if let Some(g) = &options.group {
         cmd.args(["--group", g]);
@@ -507,7 +511,7 @@ pub fn main(memory: bool) -> Result<()> {
             "compare <list|validate|run>"
         };
         println!(
-            "{command} [--suite smoke|release | --plan FILE] [--group TYPE/SHAPE] [--out DIR] [--sample-ms N] [--memory-mib N] [--blocks 3|9]"
+            "{command} [--plan smoke|release|FILE] [--group TYPE/DISTRIBUTION] [--out DIR] [--sample-ms N] [--memory-mib N] [--blocks 3|9]"
         );
         return Ok(());
     }

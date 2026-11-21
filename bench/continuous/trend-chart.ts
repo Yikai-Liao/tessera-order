@@ -51,7 +51,7 @@ export function trendSvg(trend: TrendSummary, base = "main") {
   const sorting = (name: string) => !caseParts(name).operation;
   const groups: TrendChart["groups"] = [
     ...apiModes.map((mode) => ({
-      title: modeName(mode).toUpperCase(),
+      title: modeName(mode),
       rows: [
         {
           name: { input: "Overall", tag: "", sub: "geometric mean", strong: true },

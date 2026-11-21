@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { type caseParts, modeOrder } from "../catalog.ts";
+import { type caseParts, caseSection } from "../catalog.ts";
 
 export { caseLabel, caseParts } from "../catalog.ts";
 export { formatChange } from "../plot/annotations.ts";
@@ -141,11 +141,14 @@ export function summarizeRows(rows: Row[], identity: ReportIdentity) {
   };
 }
 
-/** The geometric mean of current/baseline over compared cases, optionally within one mode. */
-export function geomean(summary: ReportSummary, mode?: string) {
+/** The geometric mean of current/baseline over compared cases, optionally within one
+ * figure section. */
+export function geomean(summary: ReportSummary, section?: string) {
   const compared = summary.rows.filter(
     (r): r is ComparedRow =>
-      r.baseline !== null && r.value > 0 && (mode === undefined || r.parts.mode === mode),
+      r.baseline !== null &&
+      r.value > 0 &&
+      (section === undefined || caseSection(r.name).title === section),
   );
   if (!compared.length) return null;
   return {
@@ -157,8 +160,14 @@ export function geomean(summary: ReportSummary, mode?: string) {
   };
 }
 
-export function modes(summary: ReportSummary) {
-  return [...new Set(summary.rows.map((r) => r.parts.mode))].sort(
-    (a, b) => modeOrder(a) - modeOrder(b) || a.localeCompare(b),
-  );
+/** Figure sections present in a report, in reading order. */
+export function sections(summary: ReportSummary) {
+  return [
+    ...new Set(
+      summary.rows
+        .map((r) => caseSection(r.name))
+        .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title))
+        .map((section) => section.title),
+    ),
+  ];
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { caseName, caseSection, modeName } from "../catalog.ts";
+import { caseName, caseSection } from "../catalog.ts";
 import { type ChangeChart, renderChanges } from "../plot/changes.ts";
 import type { NameCell } from "../plot/layout.ts";
 import {
@@ -10,8 +10,8 @@ import {
   geomean,
   isMajor,
   MAJOR,
-  modes,
   type ReportSummary,
+  sections,
 } from "./report.ts";
 
 // Small improvements fold only when another alert remains visible; regressions
@@ -52,15 +52,15 @@ export function chartSvg(summary: ReportSummary, base = "main") {
       ],
     })),
   }));
-  // Quiet runs still show a compact mode summary; individual rows keep the
+  // Quiet runs still show one summary per call; individual rows keep the
   // existing alert selection and folding rules above.
   if (!changed.length)
     groups.push({
       title: "OVERVIEW",
-      rows: modes(summary).map((mode) => {
-        const value = geomean(summary, mode);
+      rows: sections(summary).map((section) => {
+        const value = geomean(summary, section);
         return {
-          name: { input: modeName(mode), sub: "geometric mean", tag: "", strong: true },
+          name: { input: section, sub: "geometric mean", tag: "", strong: true },
           cells: [
             value
               ? {

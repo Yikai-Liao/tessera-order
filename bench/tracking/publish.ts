@@ -2,15 +2,7 @@
 
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  caseLabel,
-  caseName,
-  caseParts,
-  catalog,
-  compareCases,
-  modeName,
-  modeOrder,
-} from "../catalog.ts";
+import { caseLabel, caseName, caseParts, caseSection, catalog, compareCases } from "../catalog.ts";
 import { trackingAlgorithm } from "./algorithms.ts";
 import { GROWTH_FILE, writeComparison } from "./comparison.ts";
 import { renderMainOverview } from "./history.ts";
@@ -24,19 +16,22 @@ import {
   type TrackingRun,
 } from "./result.ts";
 
-/** Present cases from the catalog in reading order; historical IDs keep readable fallbacks. */
+/** Present cases by call, then in catalog reading order; historical IDs keep readable fallbacks. */
 export function trackingCases(ids: string[]): TrackingCase[] {
-  return ids.toSorted(compareCases).map((id) => {
-    const parts = caseParts(id);
-    return {
-      id,
-      label: caseLabel(id),
-      group: modeName(parts.mode) || "other",
-      ...caseName(id),
-      type: parts.type || "other",
-      length: parts.n || "other",
-    };
-  });
+  const section = (id: string) => caseSection(id).order;
+  return ids
+    .toSorted((a, b) => section(a) - section(b) || compareCases(a, b))
+    .map((id) => {
+      const parts = caseParts(id);
+      return {
+        id,
+        label: caseLabel(id),
+        group: caseSection(id).title || "other",
+        ...caseName(id),
+        type: parts.type || "other",
+        length: parts.n || "other",
+      };
+    });
 }
 
 /** Each filterable field's values in catalog order; unknown values follow, in reading order. */
@@ -56,7 +51,7 @@ export function trackingFacets(cases: TrackingCase[]) {
     type: ordered("type", (id) => rank(catalog.types, part(id, 1))),
     input: ordered("input", (id) => rank(catalog.distributions, part(id, 2))),
     length: ordered("length", (id) => Number(part(id, 3)) || Number.MAX_SAFE_INTEGER),
-    group: ordered("group", (id) => modeOrder(part(id, 5))),
+    group: ordered("group", (id) => caseSection(id).order),
   };
 }
 

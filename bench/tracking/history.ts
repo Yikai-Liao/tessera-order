@@ -204,25 +204,23 @@ export function renderMainTrend(
 ) {
   const spec = mainTrend(runs, cases, link);
   if (!spec) return "";
-  const groups = spec.groups.map((group) => ({ ...group, title: group.title.toUpperCase() }));
   return renderTrends({
     ...spec,
     id,
-    groups,
     minimumWidth,
     positions: positions(comparableRuns(runs), horizontal),
     guide: horizontal === "time" ? "Commit time (UTC)" : "Commits · timestamp order",
   });
 }
 
-/** Only each mode's geometric mean, compact enough for the README. */
+/** Only each call's geometric mean, compact enough for the README. */
 export function renderMainOverview(runs: TrackingRun[], cases: TrackingCase[]) {
   const spec = mainTrend(runs, cases);
   if (!spec) return "";
-  // Each group's first row is its aggregate; the group name becomes its label.
+  // Each group's first row is its aggregate; the call name becomes its label.
   const rows = spec.groups.map(({ title, rows: [aggregate] }) => ({
     ...aggregate,
-    name: { ...aggregate.name, input: title[0].toUpperCase() + title.slice(1) },
+    name: { ...aggregate.name, input: title },
   }));
   return renderTrends({ ...spec, id: "main-overview", groups: [{ title: "OVERVIEW", rows }] });
 }

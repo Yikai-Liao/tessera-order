@@ -78,15 +78,17 @@ distributions = [
   { id = "sorted_tail", label = "sorted + tail", group = "Presorted" },
 ]
 
+# Each mode is named by the entry point its full sorts call. CI runs four
+# threads, so only other thread counts carry a suffix.
 modes = [
-  { id = "api", label = "serial" },
-  { id = "unstable", label = "unstable" },
-  { id = "par", label = "parallel" },
-  { id = "par-1", label = "parallel · 1 thread" },
-  { id = "par-2", label = "parallel · 2 threads" },
-  { id = "par-4", label = "parallel · 4 threads" },
-  { id = "par-8", label = "parallel · 8 threads" },
-  { id = "par_unstable", label = "parallel unstable" },
+  { id = "api", label = "sort" },
+  { id = "unstable", label = "sort_unstable" },
+  { id = "par", label = "par_sort" },
+  { id = "par-1", label = "par_sort · 1 thread" },
+  { id = "par-2", label = "par_sort · 2 threads" },
+  { id = "par-4", label = "par_sort" },
+  { id = "par-8", label = "par_sort · 8 threads" },
+  { id = "par_unstable", label = "par_sort_unstable" },
 ]
 
 [continuous]

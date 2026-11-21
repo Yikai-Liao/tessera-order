@@ -66,6 +66,16 @@ Routing by type pays for the type's range rather than the data's. Every `u8` key
 
 **Disposition:** keep the range-routed implementation. Removing the count-taking entry traded these individually listed losses for an interface without a category limit. The binary predicate entry was also removed before release; one-pass internal distribution remains for cached sorting, whose public result does not include boundaries. The ratios come from one host and three blocks; several 4,096-record intervals were wide.
 
+## Tile ranks and classified prefixes
+
+One prototype reused rank requests in the existing MSD tile plan. A full cursor-table walk more than doubled small single-selection time in a local screen. Use binary searches over completed cursors for sparse requests and retain contiguous insertion finishing for dense requests. Per-bucket insertion slowed a rank-range case ([PR #236](https://github.com/Yikai-Liao/tessera-order/pull/236)).
+
+An already partitioned input needed one predicate scan with no scratch or movement. After an inversion, replaying known classifications one record at a time roughly doubled the cost of cheap `u64` classification in a local screen. A future design that reuses a classified prefix should consume whole runs ahead of the ordinary suffix classifier.
+
+Keep prefix-specific bounds out of the ordinary scatter loop. Fixed-call counters for Zipf2 argsort showed about 8.5% more data reads with a runtime block limit. Choosing the limit statically removed nearly all of those reads. Variation in identical-source and placement controls left the effect on elapsed time unresolved.
+
+The hosted benchmark for `52347742` flagged a 40.4% slowdown for serial binary partition on 65,536 random `u64` records. The cause was unresolved, and the predicate partition API has since been removed ([benchmark check](https://github.com/Yikai-Liao/tessera-order/runs/132914599059), [PR #239](https://github.com/Yikai-Liao/tessera-order/pull/239)). A separate open experiment explores source spans for argsort and single-rank selection ([PR #241](https://github.com/Yikai-Liao/tessera-order/pull/241)).
+
 ## Unstable node-partition feasibility
 
 A retired serial feasibility study against `0499d35` shared root preparation, key encoding and half-key dispatch, node planning, candidate-bit progress, child routing and stable tile finishing. Only node movement changed: a histogram defined final bucket bands, then bounded cursors placed records with safe in-slice swaps instead of stable block chains and ledger completion. Classification could panic without leaving a hole; a changed key targeting a full band stopped that partition, while candidate-bit consumption still bounded recursion. Ordered reversal stayed stable. This is a research prototype, not a supported release API or a production-ready kernel.

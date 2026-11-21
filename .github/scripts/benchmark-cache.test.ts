@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-test("PR preparation can restore the existing static main build's dependency cache", () => {
+test("PR alignment has its own dependency cache and both tracking builds retain their flags", () => {
   // Bun owns YAML parsing; the subprocess keeps Bun-only APIs out of tooling's Node types.
   const configurations = JSON.parse(
     execFileSync(
@@ -40,7 +40,11 @@ console.log(JSON.stringify([
     ),
   ) as { environment: Record<string, string>; workspace: string; key: string }[];
   const [pr, main, native] = configurations;
-  assert.deepEqual(pr, main);
+  assert.equal(pr.workspace, main.workspace);
+  assert.notEqual(pr.key, main.key);
+  assert.match(pr.environment.RUSTFLAGS, /-x86-branches-within-32B-boundaries/);
+  assert.match(pr.environment.RUSTFLAGS, /-align-all-functions=6/);
+  assert.doesNotMatch(main.environment.RUSTFLAGS, /-x86-branches|-align-all-functions/);
   assert.equal(pr.environment.CARGO_PROFILE_BENCH_DEBUG, "0");
   assert.equal(pr.environment.CARGO_BUILD_TARGET, "x86_64-unknown-linux-gnu");
   assert.match(pr.environment.RUSTFLAGS, /target-feature=\+crt-static/);

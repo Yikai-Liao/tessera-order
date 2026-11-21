@@ -36,6 +36,12 @@ Pull requests that touch the site, its pages or the library source run the same 
 
 ## Writing pages
 
+Site pages serve three readers: someone deciding whether to use Tessera (home and performance), someone using it (guide), and someone learning how it works (explanation). Contributors read the repository documents.
+
+- One idea per paragraph, conclusion first. Explain a technique as the problem, the idea, why it is correct and what it saves, with a small example or number.
+- Reader pages name no functions or source files; the [engine reference](../design/engine.md) maps rules to code. Release status and migration stay at the end of the guide.
+- State results, not their history: no decisions, experiments or process.
+
 - Write plain Markdown with relative links, as for GitHub. The site turns a link to another page into a site link, and a link to source code, a directory or a file outside the site into a GitHub link.
 - A figure is a Vue component placed on its own line, for example `<BlockPartitionDemo />`. Register new components in `docs/.vitepress/theme/index.ts`.
 - The text around a figure must say everything the figure shows. Readers of the Markdown source, including agents, do not see the figures.

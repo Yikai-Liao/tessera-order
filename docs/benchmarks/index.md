@@ -11,6 +11,15 @@ import AlgorithmComparison from "../.vitepress/theme/components/AlgorithmCompari
 import PerformanceHistory from "../.vitepress/theme/components/PerformanceHistory.vue";
 </script>
 
+In the current measurements:
+
+- **Large random inputs:** Tessera is the fastest stable sort for most key and record types. On `u32` keys, unstable SIMD and radix sorts are faster.
+- **Sorted and nearly sorted inputs:** sorted inputs are faster than with `slice::sort`, and nearly sorted ones many times faster.
+- **Weak spots:** reversed input, a sorted run followed by a random tail, heavily skewed (Zipf) keys and very short random inputs can be slower than `slice::sort`. [Engine evidence](../design/evidence.md#landed-with-open-losses) tracks these losses.
+- **Memory:** extra memory grows as √n, while `slice::sort`, radsort and glidesort allocate buffers proportional to the input.
+
+The [algorithm comparison](algorithms.md) shows every figure behind these statements.
+
 <AlgorithmComparison view="overview" />
 
 ## Main history
@@ -21,21 +30,15 @@ How long Tessera takes to sort fixed inputs on main, measured on Bencher's Intel
 
 ## Using the history
 
-**Filters.** Type, distribution, length and mode filter independently; any selected value matches, and "All" clears a filter. The trend, its group means and the table cover the matching cases.
-
-**All cases.** One row per case, grouped by the call it measures, such as `sort`, `par_sort` or `argsort`, each group led by its geometric mean. A row shows run time relative to its first measurement in the range (the dashed line): blue is faster, orange slower. Each row has its own vertical scale with a minimum span that keeps noise flat, so read the size of a change from the value on the right. Rows share run positions, so a step aligned across rows came from one commit; a gap means the run did not measure that case. The headline is the geometric mean over the matching cases.
-
-**Compared cases.** Click a row to add or remove it from the comparison above the trend; up to four cases share one axis and keep their colours. **Change %** (default) plots `(run time / baseline − 1) × 100%`; **Run time** plots absolute time on a log axis. Each case's baseline is its first comparable report in the range, by commit timestamp, and is shown above the chart; changing the range can change it, switching axes does not. Pale bars are Criterion's within-run confidence intervals. Hover for SHAs, times (UTC) and baselines; click a point to open its commit.
-
-**Horizontal axis.** Both charts order reports by Git committer timestamp. **Commit** (default) gives each report an equal slot; reruns of one SHA stay separate, ordered by measurement time. **Time (UTC)** spaces the same reports by commit time, so reports with equal timestamps can overlap. Reports without a commit timestamp fall back to measurement time, with a notice. Commit time is not a guaranteed merge order. The all-case trend always shows relative change.
-
-**Range and zoom.** Presets and dates filter benchmark start time, not commit time, and include whole UTC days; downloads follow this range. Drag across the comparison to zoom to a range of reports; **Reset zoom**, or changing the range, restores it. The URL records cases, axes, filters, dates and zoom, so a view can be shared.
-
-**Latest values.** The table lists each matching case's latest estimate, interval and change; a value older than the latest run shows its date. Its checkboxes select compared cases by keyboard.
+- **Filter** by type, distribution, length and mode; the trend, group means and table follow the filters.
+- **All cases** shows one row per case, grouped by the call it measures, relative to its first run in the range: blue is faster, orange slower. Each row has its own scale, so read the size of a change from its value. A step aligned across rows came from one commit.
+- **Click a row** to compare up to four cases on one axis, as change in percent or as run time. Pale bars are Criterion's within-run intervals. Hover for details; click a point to open its commit.
+- **Axis and range:** reports are ordered by commit time, one slot per report or spaced by time. Presets and dates select benchmark days (UTC); drag across the comparison to zoom. The URL records the whole view, so it can be shared.
+- **Latest values** lists each case's latest estimate, interval and change.
 
 ## Reading the trend
 
-Changes include compiler and dependency upgrades as well as library changes. Criterion intervals are within-run estimates, not cross-run regression tests, and do not remove code-layout effects or differences between machines of the same specification. Missing measurements are absent, not passes or zeroes.
+Each case's baseline is its first report in the selected range, so changing the range can change it. Commit time is not a guaranteed merge order. Changes include compiler and dependency upgrades as well as library changes. Criterion intervals are within-run estimates, not cross-run regression tests, and do not remove code-layout effects or differences between machines of the same specification. Missing measurements are absent, not passes or zeroes.
 
 Every view uses only runs on the latest run's hardware specification within the range, so environments are never mixed; select an earlier range to inspect older environments. Group means chain each case's ratio to its own previous measurement, so a case that joins later does not shift the mean; with an unchanged case set this equals the geometric mean of the cases' changes.
 

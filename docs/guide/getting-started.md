@@ -26,7 +26,7 @@ Tessera needs `std` and Rust 1.89 or newer. It selects supported vector instruct
 | find the record at one rank, such as the median | `select_nth`, `select_nth_by_key` |
 | use several threads | `par_sort`, `par_sort_by_key` |
 
-All of them place equal keys exactly as a stable sort would. Extra memory is O(√n), except that argsort returns an index per record and cached-key sorting stores a key per record.
+All of them place equal keys exactly as a stable sort would. Serial calls use O(√n) extra memory and parallel calls O(P√n) for P threads; in addition, argsort returns an index per record and cached-key sorting stores a key per record.
 
 ## Sort keys
 
@@ -89,6 +89,8 @@ assert!(values[4].is_nan());
 
 [Keys as unsigned integers](../explain/keys.md) shows how each key type is encoded.
 
+<a id="multi-field-sorting-and-groups"></a>
+
 ## Sort by several fields
 
 Sort by the least significant field first, then by the more significant ones. Stability keeps the earlier order within each group:
@@ -134,7 +136,7 @@ assert_eq!(after, [(2, "last")]);
 
 ## Group by a cached key
 
-`sort_by_cached_key` calls the key function once per record, in input order. Use it when the key is costly or must not run twice. Grouping by a small category is its best case: when the keys differ only in a few bits, the records are distributed in one pass.
+`sort_by_cached_key` calls the key function at most once per record: once each, in input order, unless the slice has fewer than two records or the records are zero-sized, which need no calls. Use it when the key is costly or must not run twice. Grouping by a small category is its best case: when the keys differ only in a few bits, the records are distributed in one pass.
 
 ```rust
 let mut jobs = [(2, "a"), (0, "b"), (2, "c"), (0, "d")];

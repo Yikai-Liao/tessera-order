@@ -21,7 +21,7 @@ hero:
 
 features:
   - title: Small memory footprint
-    details: Sorting 10 million 8-byte records takes about 6 MiB of scratch, where a textbook radix sort allocates 76 MiB.
+    details: Scratch grows as √n, not with the input. A textbook radix sort needs a second buffer as large as the input.
     link: /explain/block-partition
   - title: Free when the data is easy
     details: Sorted, reversed, nearly sorted and constant inputs skip the radix passes. A heavily repeated key takes one partition, and key bits that never change are never sorted.
@@ -48,7 +48,7 @@ tessera_order::sort_by_key(&mut rows, |row| row.0);
 assert_eq!(rows, [(10, "a"), (30, "c"), (30, "d")]);
 ```
 
-The key is an integer up to 128 bits, an `f32` or `f64`, or `Reverse` of one of these. Records with equal keys keep their input order.
+The key is an integer up to 128 bits, an `f32` or `f64`, or `Reverse` of one of these. Records with equal keys keep their input order. The published 0.1 release names this function `stable_sort_by_key`; see [versions](guide/getting-started.md#versions).
 
 ## Is it for you?
 

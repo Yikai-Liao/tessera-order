@@ -254,7 +254,9 @@ A bounded end can avoid moving most payloads. In nine paired blocks at 65,536 ra
 
 ## Stable source permutations
 
-Across 30 cases on the same host (three record widths, five distributions, 65,536 and one million records), complete argsort calls with packed prefixes or source spans reached 1.77–14.75× against stable standard-library index sorting in nine paired blocks. Both outputs had to match the exact source positions. Cached-key sorting benefits from applying sparse runs directly. On 65,536 wide records with 99% skew and up to 65,536 category IDs, expanding them into indices and following cycles reached 0.87× against stable standard-library category grouping. Moving the runs intact reached 2.70×.
+Across 30 cases on the same host (three record widths, five distributions, 65,536 and one million records), argsort reached 1.60–12.65× against stable standard-library index sorting in nine paired blocks, with exact source positions checked. Counted emission and packed prefixes save different work. Routing packed words through a fresh root partition took 29.7% longer than `ddb2f6d` on 65,536 random u64 keys. Emitting bare indices saved time at that length, but on one million random 128-byte records the speed against standard-library index sorting fell from 6.80× to 3.68×. Repeated source-key reads are expensive at that scale.
+
+Cached-key sorting benefits from applying sparse runs directly. On 65,536 wide records with 99% skew and up to 65,536 category IDs, expanding them into indices and following cycles reached 0.87× against stable standard-library category grouping. Moving the runs intact reached 2.70×.
 
 ## Serial slice-operation baseline
 

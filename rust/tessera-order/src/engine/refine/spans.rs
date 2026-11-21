@@ -114,7 +114,7 @@ impl SourceOrder {
                 .iter()
                 .enumerate()
                 .map(|(i, r)| (extractor.key(r), i));
-            Self::ordered_end(len, end, entries)
+            Self::ordered_end(len, end, entries, size_of::<T>())
         };
         order.apply(records);
         true
@@ -262,7 +262,12 @@ impl SourceOrder {
         let band = match required {
             Requirement::Nth(i) if !equal.contains(&i) => {
                 let end = if i < lower { 0..i + 1 } else { i..len };
-                return Some(Self::ordered_end(len, end, entries.into_iter()));
+                return Some(Self::ordered_end(
+                    len,
+                    end,
+                    entries.into_iter(),
+                    size_of::<T>(),
+                ));
             }
             Requirement::Nth(i) => {
                 if lower != 0 && lower != entries.len() {
@@ -280,12 +285,13 @@ impl SourceOrder {
     }
 
     /// Gather just one ordered end from a stream containing all its members.
-    /// The complement stays in source order. A batch reduction discards one
-    /// end's worth of candidates before another reduction can be necessary.
+    /// A batch reduction discards a full batch of candidates. When the original
+    /// end has no ties outside it, only its slots and the winners' slots move.
     fn ordered_end<V: Unsigned>(
         len: usize,
         end: Range<usize>,
-        entries: impl Iterator<Item = (V, usize)>,
+        entries: impl DoubleEndedIterator<Item = (V, usize)>,
+        record_bytes: usize,
     ) -> Self {
         let count = end.len();
         let upper = end.start != 0;
@@ -293,9 +299,29 @@ impl SourceOrder {
         let orient = |(key, src): (V, usize)| if upper { (!key, !src) } else { (key, src) };
         let mut entries = entries.map(orient);
         let mut kept = Vec::with_capacity(2 * count);
-        kept.extend(entries.by_ref().take(count));
+        if upper {
+            kept.extend(entries.by_ref().rev().take(count));
+        } else {
+            kept.extend(entries.by_ref().take(count));
+        }
         let mut ceiling = *kept.iter().max().unwrap();
-        for entry in entries {
+        // A sparse stream can omit original end positions. Check for ties only
+        // when every end key is present and a record costs more than its entry.
+        let original: Vec<_> = if record_bytes > size_of::<(V, usize)>()
+            && kept.iter().all(|&e| end.contains(&orient(e).1))
+        {
+            kept.iter().map(|e| e.0).collect()
+        } else {
+            Vec::new()
+        };
+        let first = kept[0].0.to_u128();
+        let fixed = !original.iter().fold(0, |v, k| v | (k.to_u128() ^ first))
+            & (u128::MAX >> (128 - V::BITS));
+        // Each exact lookup costs up to `count` comparisons. Common fixed
+        // bits usually reject a key outright. Abandon the proof if matching
+        // those bits would cost more than one comparison per input on average.
+        let mut lookups = len / count;
+        let mut save = |entry| {
             if entry < ceiling {
                 kept.push(entry);
                 if kept.len() == 2 * count {
@@ -303,7 +329,21 @@ impl SourceOrder {
                     kept.truncate(count);
                 }
             }
-        }
+        };
+        let disjoint = !original.is_empty()
+            && fixed != 0
+            && entries.by_ref().all(|entry| {
+                save(entry);
+                if (entry.0.to_u128() ^ first) & fixed != 0 {
+                    return true;
+                }
+                if lookups == 0 || original.contains(&entry.0) {
+                    return false;
+                }
+                lookups -= 1;
+                true
+            });
+        entries.for_each(save);
         kept.sort_unstable();
         kept.truncate(count);
         if upper {
@@ -312,6 +352,21 @@ impl SourceOrder {
         let selected = kept.iter().map(|&e| orient(e).1);
         let mut sources: Vec<_> = selected.clone().collect();
         sources.sort_unstable();
+        if disjoint {
+            // Winners may cross their peers because (key, source) selects them
+            // at the stable end of each tie. The displaced end records travel
+            // in source order and have no peers in the untouched slots.
+            let displaced = end.clone().filter(|i| sources.binary_search(i).is_err());
+            let ordered: Vec<_> = if upper {
+                displaced.chain(selected).collect()
+            } else {
+                selected.chain(displaced).collect()
+            };
+            sources.extend(end);
+            sources.sort_unstable();
+            sources.dedup();
+            return Self::around_band(len, &sources, ordered.into_iter(), 0, 0..0);
+        }
         let (band, before) = if upper {
             (0..end.start, 0)
         } else {
@@ -465,21 +520,37 @@ mod tests {
     use crate::engine::key::ByKey;
 
     #[test]
-    fn bounded_ends_keep_the_complement_in_source_order() {
+    fn bounded_ends_preserve_all_equal_key_positions() {
         let keys = [6u8, 1, 4, 4, 2, 0, 5, 1, 6, 0, 3, 0, 1, 5, 4, 2, 3];
         let len = keys.len();
         let mut ranked: Vec<_> = (0..len).collect();
         ranked.sort_by_key(|&i| keys[i]);
         for count in 1..=len / 2 {
             for end in [0..count, len - count..len] {
-                let order = SourceOrder::ordered_end(len, end.clone(), keys.into_iter().zip(0..))
-                    .into_indices();
+                let mut order =
+                    SourceOrder::ordered_end(len, end.clone(), keys.into_iter().zip(0..len), len)
+                        .into_indices();
                 assert_eq!(order[end.clone()], ranked[end.clone()]);
-                assert!(order[..end.start].is_sorted() && order[end.end..].is_sorted());
-                let mut all = order;
-                all.sort_unstable();
-                assert!(all.into_iter().eq(0..len));
+                order[..end.start].sort_by_key(|&i| keys[i]);
+                order[end.end..].sort_by_key(|&i| keys[i]);
+                assert_eq!(order, ranked);
             }
+        }
+    }
+
+    #[test]
+    fn disjoint_end_moves_only_the_winners_and_their_slots() {
+        let keys = [9u8, 9, 6, 2, 3, 2, 1, 1];
+        let len = keys.len();
+        for end in [0..2, len - 2..len] {
+            let order = SourceOrder::ordered_end(
+                len,
+                end,
+                keys.into_iter().zip(0..len),
+                size_of::<[u8; 128]>(),
+            );
+            // Both pairs change ends. Equal-key background records stay put.
+            assert_eq!(order.into_indices(), [6, 7, 2, 3, 4, 5, 0, 1]);
         }
     }
 

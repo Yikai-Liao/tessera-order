@@ -360,9 +360,6 @@ function renderInputs(field: Field, cohort: Cohort, name: string, ty = "u64"): F
   const patterns = field.cases
     .filter((input) => input.ty === ty && input.len === n)
     .map((input) => input.distribution);
-  // Retain the small-selection fallback rather than presenting a single input
-  // as a full pattern panel.
-  if (ty === "u64" && !cohort.shapes.every((shape) => patterns.includes(shape))) return null;
   const stableOnly = recordType(ty).task === "records";
   const plotted: [string, Standing][] = [];
   const nsPerKey: number[] = [];
@@ -862,6 +859,11 @@ export function comparisonFigures(
 }
 
 export function renderFigures(dataset: Dataset, summaries: Map<string, Summary>): Figure[] {
-  const figures = comparisonFigures(reportField(dataset, summaries), RELEASE);
-  return figures.length ? figures : renderSelected(dataset, summaries);
+  const field = reportField(dataset, summaries);
+  // Release figures need the release ranking's cases. A smaller selection shows each of its
+  // cases instead, so no case loses its paired ranges to a partial release panel.
+  const release = rankingCases(RELEASE, RELEASE.ranking.n).every((id) =>
+    field.cases.some((input) => caseId(input) === id),
+  );
+  return release ? comparisonFigures(field, RELEASE) : renderSelected(dataset, summaries);
 }

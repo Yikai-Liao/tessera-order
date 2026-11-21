@@ -23,6 +23,8 @@ Full sorting and single-rank selection share node planning, leaf finishing and s
 
 Keeping every module at crate root allowed an adapter to depend on a block directory or a tile guard. The module boundary removes that dependency possibility without changing execution. A separate public engine crate would force lifetime, extractor and allocation contracts to stabilize before the current consumers have established them; that remains deferred.
 
+The [Rust architecture policies](../development/ci.md#rust-architecture-policies) check this boundary in CI.
+
 | Owner | Complete responsibility | Consumers need to know |
 |---|---|---|
 | `../algorithms.rs` | Expose serial sort, argsort and selection through the engine operations | Their public contracts and key extractors |

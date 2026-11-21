@@ -56,10 +56,8 @@ jobs:
         run: echo 'C++ is planned; checks activate when cpp/CMakeLists.txt is added.' >> "$GITHUB_STEP_SUMMARY"
 
 
-  # Formatting and lints for TypeScript, Vue, CSS, JSON and the CI
-  # scripts. These checks cover the whole repository on every
-  # run. No language build reads these settings, so this job runs beside the
-  # language jobs instead of gating them.
+  # Repository-wide formatting, tooling checks and Rust source policies.
+  # The lint and language jobs run in parallel.
   lint:
     runs-on: ubuntu-latest
     steps:

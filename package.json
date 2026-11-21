@@ -4,7 +4,8 @@
   "description": "Documentation site and CI tooling for Tessera",
   "type": "module",
   "scripts": {
-    "lint": "bun run --bun biome ci .",
+    "lint": "bun run --bun biome ci . && bun run lint:architecture",
+    "lint:architecture": "bun .github/scripts/check-architecture.ts",
     "format": "bun run --bun biome check --write .",
     "docs:wasm": "bun docs/.vitepress/wasm.ts",
     "docs:dev": "bun run docs:wasm && bun run --bun vitepress dev docs",

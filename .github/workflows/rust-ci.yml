@@ -84,6 +84,7 @@ jobs:
           RUSTDOCFLAGS: -D warnings
           TESSERA_BENCH_CHECK_ONLY: "1"
       - run: cargo package -p tessera-order
+      - run: "cargo test -p tessera-order --lib --features trace trace::"
 
   miri:
     name: miri (${{ matrix.mode }})

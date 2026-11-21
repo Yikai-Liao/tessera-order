@@ -534,7 +534,7 @@ mod tests {
     #[test]
     fn presets_preserve_coverage() {
         for (text, expected) in [
-            (include_str!("../../plans/continuous.toml"), 68),
+            (include_str!("../../plans/continuous.toml"), 72),
             (include_str!("../../plans/smoke.toml"), 125),
             (include_str!("../../plans/release.toml"), 381),
             (include_str!("../../plans/parallel.toml"), 16),
@@ -623,6 +623,29 @@ mod tests {
         }
         require(&cases, "u128", "sparse8", 1_000_000);
         require(&cases, "u64", "bimodal", 1_000_000);
+
+        #[cfg(feature = "operations")]
+        let tessera = crate::list_variants()
+            .into_iter()
+            .find(|variant| variant.name == "tessera")
+            .unwrap();
+        for id in [
+            "u64/random/65536/s1/partition-buckets/16",
+            "row_u64/random/65536/s1/partition-buckets/16",
+            "u64/random/65536/s1/partition-buckets/65537",
+            "row_u64/random/65536/s1/partition-buckets/65537",
+            "row_u64/d16/65536/s1/argsort",
+            "row_u64/d16/65536/s1/select/32768",
+        ] {
+            let case = cases.iter().find(|case| case.id() == id);
+            assert!(case.is_some(), "missing required continuous workload: {id}");
+            #[cfg(feature = "operations")]
+            assert!(
+                tessera.supports(&crate::CaseInput::new(&case.unwrap().probe())),
+                "unsupported continuous workload: {id}"
+            );
+        }
+
         // Bound the expensive serial phase without locking input iteration order.
         assert_eq!(cases.iter().filter(|case| case.len >= 1_000_000).count(), 8);
         assert!(!cases.iter().any(|case| {

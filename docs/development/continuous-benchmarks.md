@@ -61,7 +61,7 @@ The [continuous plan](../../bench/plans/continuous.toml) caps inputs at 1,000,00
 - `u128/sparse8`, `f64/finite_signed` and `rec128_u64/sparse_digits` at 1M.
 - Random 65,536-record `u32`, `u64`, `row_u32` and `row_u64`, for entry overhead and the serial fallback below the byte threshold.
 
-The PR suite adds `argsort`, `select` and `partition-buckets` beside sorting, each on random 65,536-record `u64` and `row_u64` inputs. These cases guard the cost of producing each complete result on a direct key and a keyed record; the sorting cases exercise the shared engine across input shapes. Both revisions must build the same selected adapters. Case IDs follow the [comparison grammar](benchmarking.md#serial-operation-comparisons) with the `api` mode. Retired cases stay in historical reports, not in new PR inventories.
+The PR suite runs `argsort`, `select` and `partition-buckets` on random 65,536-record `u64` and `row_u64` inputs. Category grouping covers both direct cached-key distribution and the index-permutation fallback. The suite also runs `argsort` and `select` on `row_u64/d16` at the same length to exercise stable index order and exact rank membership with ties. Both revisions must build the same selected adapters. Case IDs follow the [comparison grammar](benchmarking.md#serial-operation-comparisons) with the `api` mode. Retired cases stay in historical reports, not in new PR inventories.
 
 Larger lengths are explicit local plan overrides; historical reports keep their original inventories. The [catalog](../../bench/catalog.toml) owns per-revision budgets, divided across fresh workers; startup, input preparation and at least one complete batch add to them.
 

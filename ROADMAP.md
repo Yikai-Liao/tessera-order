@@ -86,7 +86,8 @@ An independent track binding the Rust crate; see the [design](docs/design/python
 
 ## Benchmark tooling and investigations
 
-- Finish the [CI scaling proposal](docs/design/ci-scaling-proposal.md). Cache hygiene, lane reuse and continuous operation cases are implemented. Next come per-operation cross-algorithm plans.
+- Finish the [CI scaling proposal](docs/design/ci-scaling-proposal.md). Cache hygiene, lane reuse and continuous operation cases are implemented. Next come per-operation cross-algorithm plans, after the comparison model below.
+- Land the [comparison model](docs/design/comparison-model-proposal.md#stages) one stage per PR: vocabulary, catalog and case IDs, plan schema 3, routes in results, then publication. Each stage is done when the complete serial and parallel listings, shard partitioning and the shared ID fixture agree before and after, reports regenerate from a fresh session, and no measured algorithm, input or sampling changes; publication is done when the rewritten data branch loads on the site with per-operation sections.
 
 - Fix the sample duration and prepared-memory cap of local paired sessions from the test machine's memory and the time a 10M-record case takes.
 - Investigate benchmark build invalidation without weakening provenance. Missing watched paths can force repeated rebuilds, but the existing watches do not cover every file that can affect Git dirty state. A solution must reliably detect dirty-state changes outside the benchmark source trees, optional revision file transitions and packed or detached Git references. Validate actual Cargo builds and snapshot workflows before changing the watches.

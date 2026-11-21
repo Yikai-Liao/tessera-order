@@ -207,9 +207,10 @@ distributions = [ "d16" ]
 lengths = [ 65536 ]
 operation = { kind = "select", index = 65535 }
 
-# Longer index lists pack a key prefix beside each index.
+# Longer index lists pack a key prefix beside each index. One million-record
+# case guards the packed bands without doubling the long serial phase.
 [[include]]
-types = [ "u64", "row_u64" ]
+types = [ "u64" ]
 distributions = [ "random" ]
 lengths = [ 1000000 ]
 operation = { kind = "argsort" }

@@ -16,7 +16,7 @@ pub(crate) struct Catalog {
     schema: u32,
     #[serde(rename = "pairedBlocks")]
     pub(crate) paired_blocks: PairedBlocks,
-    pub(crate) algorithms: Vec<Algorithm>,
+    pub(crate) implementations: Vec<Implementation>,
     pub(crate) types: Vec<RecordType>,
     distributions: Vec<Distribution>,
     inputs: InputDefaults,
@@ -68,9 +68,9 @@ pub fn revision_sampling(len: usize) -> &'static RevisionSampling {
         .expect("revision sampling budget")
 }
 
-/// An algorithm's identity, stability and executable adapter family.
+/// An implementation's identity, stability and executable adapter family.
 #[derive(Deserialize)]
-pub(crate) struct Algorithm {
+pub(crate) struct Implementation {
     pub(crate) id: String,
     pub(crate) stable: bool,
     pub(crate) adapter: String,
@@ -143,7 +143,7 @@ struct Rule {
     #[serde(skip_serializing_if = "Option::is_none")]
     lengths: Option<Vec<Length>>,
     /// An operation for this include rule's cases in a sorting plan, so one
-    /// revision suite measures sorting and selected operations together.
+    /// revision plan measures sorting and selected operations together.
     #[serde(skip_serializing_if = "Option::is_none")]
     operation: Option<Operation>,
 }
@@ -237,8 +237,8 @@ pub struct Plan {
     schema: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     operation: Option<Operation>,
-    /// Explicit algorithm selection; measurement drivers own their controls.
-    pub(crate) algorithms: Vec<String>,
+    /// Explicit implementation selection; measurement drivers own their controls.
+    pub(crate) implementations: Vec<String>,
     include: Vec<Rule>,
     #[serde(default)]
     exclude: Vec<Rule>,
@@ -262,7 +262,7 @@ impl Plan {
             (2, Some(operation)) => !operation.is_sort(),
             _ => false,
         };
-        if !valid_schema || plan.include.is_empty() || plan.algorithms.is_empty() {
+        if !valid_schema || plan.include.is_empty() || plan.implementations.is_empty() {
             return Err("expected a nonempty schema 1 plan, or schema 2 with an operation".into());
         }
         let types: Vec<_> = catalog().types.iter().map(|ty| ty.id.clone()).collect();
@@ -278,13 +278,15 @@ impl Plan {
                     .enumerate()
                     .all(|(index, id)| !values[..index].contains(id))
         };
-        if !unique(&plan.algorithms)
-            || plan
-                .algorithms
-                .iter()
-                .any(|id| !catalog().algorithms.iter().any(|entry| entry.id == *id))
+        if !unique(&plan.implementations)
+            || plan.implementations.iter().any(|id| {
+                !catalog()
+                    .implementations
+                    .iter()
+                    .any(|entry| entry.id == *id)
+            })
         {
-            return Err("unknown or duplicate algorithm IDs".into());
+            return Err("unknown or duplicate implementation IDs".into());
         }
         for rule in plan
             .include
@@ -353,15 +355,15 @@ impl Plan {
     }
 
     /// Whether include rules add operations to a sorting plan. Revision
-    /// suites measure those per case; algorithm comparisons take one
+    /// plans measure those per case; implementation comparisons take one
     /// plan-level operation.
     pub fn has_rule_operations(&self) -> bool {
         self.include.iter().any(|rule| rule.operation.is_some())
     }
 
-    /// Returns exactly the algorithms selected in this plan.
-    pub fn algorithms(&self) -> &[String] {
-        &self.algorithms
+    /// Returns exactly the implementations selected in this plan.
+    pub fn implementations(&self) -> &[String] {
+        &self.implementations
     }
 
     /// Includes matching products, then removes matching exclusions.
@@ -399,7 +401,7 @@ impl Plan {
                 .types
                 .clone()
                 .unwrap_or_else(|| catalog().types.iter().map(|ty| ty.id.clone()).collect());
-            let shapes = rule.distributions.clone().unwrap_or_else(|| {
+            let distribution_ids = rule.distributions.clone().unwrap_or_else(|| {
                 catalog()
                     .distributions
                     .iter()
@@ -415,7 +417,7 @@ impl Plan {
                     .collect()
             });
             for ty in &types {
-                for distribution in &shapes {
+                for distribution in &distribution_ids {
                     for length in &lengths {
                         let len = length.resolve(ty);
                         if !self
@@ -513,7 +515,7 @@ mod tests {
         let input = &fixture["operation_case"];
         for entry in fixture["operations"].as_array().unwrap() {
             let plan = serde_json::json!({
-                "schema": 2, "algorithms": ["tessera"], "operation": entry["operation"],
+                "schema": 2, "implementations": ["tessera"], "operation": entry["operation"],
                 "include": [{"types": [input["ty"]], "distributions": [input["distribution"]], "lengths": [input["len"]]}]
             });
             let parsed = Plan::parse(&plan.to_string());
@@ -565,7 +567,7 @@ mod tests {
                 inputs.iter().any(|case| {
                     case.ty == ty && case.distribution == distribution && case.len == len
                 }),
-                "missing required continuous workload: {ty}/{distribution}/{len}/s1"
+                "missing required continuous input: {ty}/{distribution}/{len}/s1"
             );
         };
         // Policy identities must survive equal-count substitutions in the plan.
@@ -642,11 +644,11 @@ mod tests {
             "rec128_u64/random/65536/s1/select/65535",
         ] {
             let case = cases.iter().find(|case| case.id() == id);
-            assert!(case.is_some(), "missing required continuous workload: {id}");
+            assert!(case.is_some(), "missing required continuous input: {id}");
             #[cfg(feature = "operations")]
             assert!(
                 tessera.supports(&crate::CaseInput::new(&case.unwrap().probe())),
-                "unsupported continuous workload: {id}"
+                "unsupported continuous input: {id}"
             );
         }
 
@@ -725,7 +727,7 @@ mod tests {
         let select = r#"{"types":["u64"],"distributions":["random"],"lengths":[1000],
             "operation":{"kind":"select","index":10}}"#;
         let plan = Plan::parse(&format!(
-            r#"{{"schema":1,"algorithms":["tessera"],"include":[{rule},{select}]}}"#
+            r#"{{"schema":1,"implementations":["tessera"],"include":[{rule},{select}]}}"#
         ))
         .unwrap();
         assert!(plan.has_rule_operations());
@@ -733,13 +735,13 @@ mod tests {
         assert_eq!(ids, ["u64/random/1000/s1", "u64/random/1000/s1/select/10"]);
         for invalid in [
             format!(
-                r#"{{"schema":1,"algorithms":["tessera"],"include":[{rule}],"exclude":[{select}]}}"#
+                r#"{{"schema":1,"implementations":["tessera"],"include":[{rule}],"exclude":[{select}]}}"#
             ),
             format!(
-                r#"{{"schema":1,"algorithms":["tessera"],"include":[{rule}],"parallel":[{select}]}}"#
+                r#"{{"schema":1,"implementations":["tessera"],"include":[{rule}],"parallel":[{select}]}}"#
             ),
             format!(
-                r#"{{"schema":2,"algorithms":["tessera"],"operation":{{"kind":"argsort"}},"include":[{select}]}}"#
+                r#"{{"schema":2,"implementations":["tessera"],"operation":{{"kind":"argsort"}},"include":[{select}]}}"#
             ),
         ] {
             assert!(Plan::parse(&invalid).is_err(), "{invalid}");
@@ -747,7 +749,7 @@ mod tests {
         let short = select.replace("1000", "5");
         assert!(
             Plan::parse(&format!(
-                r#"{{"schema":1,"algorithms":["tessera"],"include":[{short}]}}"#
+                r#"{{"schema":1,"implementations":["tessera"],"include":[{short}]}}"#
             ))
             .is_err()
         );
@@ -755,7 +757,7 @@ mod tests {
 
     #[test]
     fn relative_lengths_follow_records() {
-        let plan = Plan::parse(r#"{"schema":1,"algorithms":["tessera"],
+        let plan = Plan::parse(r#"{"schema":1,"implementations":["tessera"],
             "include":[{"types":["u64","row_u64"],"distributions":["random"],"lengths":["tile-next"]}]}"#).unwrap();
         for case in plan.inputs().unwrap() {
             let bytes = if case.ty == "u64" { 8 } else { 16 };

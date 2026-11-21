@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Deterministic seed-one inputs shared by the continuous and comparison suites.
+//! Deterministic seed-one inputs shared by the continuous and comparison plans.
 
 use std::cmp::Ordering;
 use tessera_order::RadixKey;
@@ -105,7 +105,7 @@ pub struct Row<K> {
     pub row: u32,
 }
 
-/// A wide C-layout record with the smoke suite's indexed, otherwise zero-filled payload.
+/// A wide C-layout record with the smoke plan's indexed, otherwise zero-filled payload.
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub struct Wide {

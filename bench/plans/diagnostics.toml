@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 schema = 1
-algorithms = ["tessera"]
+implementations = ["tessera"]
 
 [[include]]
 types = ["u32", "u64"]

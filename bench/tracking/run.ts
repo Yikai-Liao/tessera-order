@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { z } from "zod";
 import { command } from "../../tools/process.ts";
 import { repositoryRoot, runTask } from "../../tools/tasks.ts";
-import { trackingAlgorithm, trackingBranch } from "./algorithms.ts";
 import { localImage, type TrackingBuild } from "./build.ts";
 import { reportFailure } from "./failure.ts";
+import { trackingBranch, trackingImplementation } from "./implementations.ts";
 import { JOB_TIMEOUT_S } from "./jobs.ts";
 import { combineReports, runSchema, summarizeReport, TRACKING_SPEC } from "./result.ts";
 
@@ -23,31 +23,33 @@ const QUEUE_WAIT_S = 50 * 60;
 // CI-only: push the image `build.ts` froze, measure its remote jobs in order, then summarize
 // the complete run. The workflow owns event policy, credentials, serialization and Git publication.
 const root = await repositoryRoot();
-const algorithm = trackingAlgorithm(process.env.TRACKING_ALGORITHM ?? "tessera");
+const implementation = trackingImplementation(process.env.TRACKING_IMPLEMENTATION ?? "tessera");
 const input = join(root, "bench/results/tracking-build");
 const out = join(root, "bench/results/tracking");
-await reportFailure(`Track (${algorithm.id})`, `${out}.log`, () =>
+await reportFailure(`Track (${implementation.id})`, `${out}.log`, () =>
   runTask(out, false, async () => {
     const build: TrackingBuild = JSON.parse(await readFile(join(input, "build.json"), "utf8"));
     const project = process.env.BENCHER_PROJECT ?? "";
     if (
       !/^[a-z0-9-]+$/.test(project) ||
-      build.algorithm !== algorithm.id ||
+      build.implementation !== implementation.id ||
       process.env.GITHUB_SHA !== build.hash ||
       process.env.GITHUB_REF !== "refs/heads/main"
     )
-      throw new Error("Expected Bencher project and this algorithm's exact main Actions build");
+      throw new Error(
+        "Expected Bencher project and this implementation's exact main Actions build",
+      );
     await mkdir(out);
     await command("docker", ["load", "-i", join(input, "image.tar")]);
-    const imageTag = `registry.bencher.dev/${project}:${algorithm.id}-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`;
-    await command("docker", ["tag", localImage(algorithm.id), imageTag]);
+    const imageTag = `registry.bencher.dev/${project}:${implementation.id}-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`;
+    await command("docker", ["tag", localImage(implementation.id), imageTag]);
     await command("docker", ["push", imageTag]);
     const image = await command(
       "docker",
       ["image", "inspect", imageTag, "--format", "{{index .RepoDigests 0}}"],
       { capture: true },
     );
-    const branch = trackingBranch(algorithm.id);
+    const branch = trackingBranch(implementation.id);
     // Submit every job first so that they queue together, then wait for each in order.
     // The CLI's own wait is twice the job timeout and counts queueing, so attach instead.
     const submitted = [];
@@ -109,6 +111,6 @@ await reportFailure(`Track (${algorithm.id})`, `${out}.log`, () =>
       ...(build.native ? { native: build.native } : {}),
     });
     await writeFile(join(out, run.time.slice(0, 7) + ".jsonl"), JSON.stringify(run) + "\n");
-    return { algorithm: algorithm.id, hash: build.hash, jobs: jobs.length, image };
+    return { implementation: implementation.id, hash: build.hash, jobs: jobs.length, image };
   }),
 );

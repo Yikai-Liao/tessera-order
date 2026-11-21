@@ -73,7 +73,7 @@ macro_rules! revision_sorts {
 }
 
 /// Supplies only the direct/by-key API distinction; operation behavior stays
-/// in the library and kernel preparation owns the workload/output shape.
+/// in the library and kernel preparation owns the operation and output layout.
 macro_rules! slice_operations {
     ($argsort:ident, $select:ident $(, $key:expr)?) => {
         #[cfg(feature = "operations")]
@@ -307,7 +307,7 @@ fn prepare_radsort<T: BenchmarkRecord, K: radsort::Key>(
 /// An adapter's public name and stability contract.
 #[derive(Clone, Copy)]
 pub struct Variant {
-    /// Catalog algorithm identity.
+    /// Catalog implementation identity.
     pub name: &'static str,
     /// Whether equal keys retain input order.
     pub stable: bool,
@@ -319,21 +319,21 @@ pub struct Variant {
 /// Lists the adapters measured in the selected executable configuration.
 pub fn list_variants() -> Vec<Variant> {
     crate::plan::catalog()
-        .algorithms
+        .implementations
         .iter()
-        .filter(|algorithm| {
-            algorithm.adapter == "common"
-                || (algorithm.adapter == "reference" && cfg!(feature = "operations"))
-                || (cfg!(feature = "rayon") && algorithm.threads.is_some())
-                || (algorithm.adapter == "revision" && cfg!(tessera_bench_revisions))
-                || algorithm.adapter == "rust"
-                || (algorithm.adapter == "native" && cfg!(feature = "compare-native"))
+        .filter(|implementation| {
+            implementation.adapter == "common"
+                || (implementation.adapter == "reference" && cfg!(feature = "operations"))
+                || (cfg!(feature = "rayon") && implementation.threads.is_some())
+                || (implementation.adapter == "revision" && cfg!(tessera_bench_revisions))
+                || implementation.adapter == "rust"
+                || (implementation.adapter == "native" && cfg!(feature = "compare-native"))
         })
-        .map(|algorithm| Variant {
-            name: &algorithm.id,
-            stable: algorithm.stable,
-            adapter: &algorithm.adapter,
-            threads: algorithm.threads,
+        .map(|implementation| Variant {
+            name: &implementation.id,
+            stable: implementation.stable,
+            adapter: &implementation.adapter,
+            threads: implementation.threads,
         })
         .collect()
 }

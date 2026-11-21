@@ -78,9 +78,9 @@ export const runSchema = z
 export type TrackingRun = z.infer<typeof runSchema>;
 
 /**
- * Peak extra heap bytes of every algorithm on one input pattern across lengths, measured on
+ * Peak extra heap bytes of every implementation on one input pattern across lengths, measured on
  * Actions in one build (`growth.ts`). Counts do not depend on the host, so no Bencher run is
- * involved. A null peak is a length the algorithm does not support.
+ * involved. A null peak is a length the implementation does not support.
  */
 export const growthSchema = z
   .object({
@@ -100,7 +100,7 @@ export const growthSchema = z
   .refine(
     (growth) =>
       Object.values(growth.peaks).every((values) => values.length === growth.lengths.length),
-    "Every algorithm needs one peak entry per length",
+    "Every implementation needs one peak entry per length",
   );
 export type GrowthRecord = z.infer<typeof growthSchema>;
 /** A case's catalog presentation; the browser cannot read the catalog, so publication supplies it. */
@@ -192,7 +192,7 @@ const figureSchema = z.object({
   /** Markdown table of every plotted value, naming each sort, including values beyond the axis. */
   table: z.string(),
 });
-/** Cross-algorithm figures from each algorithm's latest run, published as `comparison.json`. */
+/** Cross-implementation figures from each implementation's latest run, published as `comparison.json`. */
 export const comparisonSchema = z.object({
   // Null before Tessera has a run.
   spec: z.uuid().nullable(),

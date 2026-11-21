@@ -17,9 +17,9 @@ test("CLI exposes experiments separately from continuous stages and CI checks", 
   const group = (name: string) => program.commands.find((command) => command.name() === name)!;
   const compare = group("compare");
   assert.deepEqual(compare.commands.map((command) => command.name()).sort(), [
-    "algorithms",
     "commit",
     "counters",
+    "implementations",
     "probe-counters",
     "resume",
     "revisions",
@@ -36,7 +36,7 @@ test("CLI exposes experiments separately from continuous stages and CI checks", 
     const options = command.options.map((option) => option.long);
     assert.ok(!options.includes("--shard"));
     assert.ok(!options.includes("--prepare-only"));
-    assert.equal(options.includes("--algorithms"), command.name() === "algorithms");
+    assert.equal(options.includes("--implementations"), command.name() === "implementations");
     const plan = command.options.find((option) => option.long === "--plan");
     if (plan)
       assert.ok(
@@ -58,9 +58,9 @@ test("CLI rejects misplaced options before creating outputs", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   for (const args of [
-    ["compare", "commit", "--algorithms", "tessera"],
-    ["compare", "counters", "--algorithms", "tessera"],
-    ["compare", "revisions", "--algorithms", "tessera"],
+    ["compare", "commit", "--implementations", "tessera"],
+    ["compare", "counters", "--implementations", "tessera"],
+    ["compare", "revisions", "--implementations", "tessera"],
     ["compare", "commit", "--prepare-only"],
     ["compare", "commit", "--shard", "1/4"],
     ["continuous", "measure", "missing", "--shard", "5/4"],

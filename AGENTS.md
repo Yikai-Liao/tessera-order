@@ -1,6 +1,6 @@
 # Working on Tessera
 
-Build a small, reliable ordering engine for high-performance algorithms and ordered containers, with a shared benchmark system for local revision comparisons, PR feedback and comparisons with other sorting algorithms. Preserve the existing figures. Prefer fewer concepts, states and independently maintained rules over shorter syntax or more abstraction. Code and documentation are in English.
+Build a small, reliable ordering engine for high-performance algorithms and ordered containers, with a shared benchmark system for local revision comparisons, PR feedback and comparisons with other sorting implementations. Preserve the existing figures. Prefer fewer concepts, states and independently maintained rules over shorter syntax or more abstraction. Code and documentation are in English.
 
 ## Start with the task
 
@@ -22,7 +22,7 @@ Use the maintained CLI from the repository root. Its compact output serves agent
 
 - Preview selection: `bun run --silent tools plan NAME`.
 - Compare working tree with a commit: `bun run --silent tools compare commit COMMIT`.
-- Compare sorting algorithms: `bun run --silent tools compare algorithms`.
+- Compare sorting implementations: `bun run --silent tools compare implementations`.
 - Regenerate retained results: `bun run --silent tools report DIR`.
 - Read feedback: `bun run --silent tools status --pr NUMBER` or `bun run --silent tools status main`. Match the exact head; inspect benchmark verdicts separately from workflow states. PR comparisons run automatically; independent main tracking is opt-in ([contract](docs/development/continuous-benchmarks.md#main-long-term-tracking)).
 

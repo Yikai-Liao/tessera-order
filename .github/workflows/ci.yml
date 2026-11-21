@@ -141,7 +141,7 @@ jobs:
           }
 
   comparison:
-    name: Algorithm harness (Rust and C++)
+    name: Implementation harness (Rust and C++)
     needs: changes
     if: needs.changes.outputs.comparison == 'true'
     runs-on: ubuntu-24.04

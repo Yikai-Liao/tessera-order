@@ -167,14 +167,14 @@ console.log(supported.join("\\n"));
   }
 });
 
-test("revision scheduling follows selected algorithms, not the presence of parallel case rules", async () => {
+test("revision scheduling follows selected implementations, not the presence of parallel case rules", async () => {
   const local = await loadPlan("local");
   assert.equal(revisionThreads(local), 1);
   assert.equal(revisionThreads(await loadPlan("continuous")), 4);
-  assert.equal(revisionThreads(await loadPlan("local", { algorithms: ["tessera-par-4"] })), 4);
-  assert.throws(() => revisionThreads({ ...local, algorithms: ["tessera-par-8"] }));
-  for (const algorithms of [["tessera", "std-stable"], ["std-stable"], ["rayon-stable-4"]])
-    assert.throws(() => revisionThreads({ ...local, algorithms }), /only tessera/);
+  assert.equal(revisionThreads(await loadPlan("local", { implementations: ["tessera-par-4"] })), 4);
+  assert.throws(() => revisionThreads({ ...local, implementations: ["tessera-par-8"] }));
+  for (const implementations of [["tessera", "std-stable"], ["std-stable"], ["rayon-stable-4"]])
+    assert.throws(() => revisionThreads({ ...local, implementations }), /only tessera/);
 });
 
 test("revision comparison enables historical SIMD without changing current builds", () => {

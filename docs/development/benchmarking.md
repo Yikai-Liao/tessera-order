@@ -1,6 +1,6 @@
 # Benchmarking
 
-The comparison runner in `bench/rust` measures sorting algorithms on one machine: Tessera against the standard stable sort, other stable sorts, unstable sorts under their weaker tie contract, and the extra memory of each. [Continuous benchmarks](continuous-benchmarks.md) track PR regressions and publish the algorithm comparison; local experiments and source attribution use the paired measurements described here.
+The comparison runner in `bench/rust` measures sorting implementations on one machine: Tessera against the standard stable sort, other stable sorts, unstable sorts under their weaker tie contract, and the extra memory of each. [Continuous benchmarks](continuous-benchmarks.md) track PR regressions and publish the implementation comparison; local experiments and source attribution use the paired measurements described here.
 
 ## Command capabilities
 
@@ -13,16 +13,16 @@ Run `bun run tools` from the repository root after `bun install --frozen-lockfil
 | Compare fixed-work counters | `bun run tools compare counters COMMIT` | Verified serial batches with Callgrind instruction and simulated cache/branch counts |
 | Probe local PMU access | `bun run tools compare probe-counters --out DIR` | Read-only, per-event `perf` availability on the current host |
 | Compare linked source revisions | `bun run tools compare revisions BASE --current HEAD` | Serial revisions and independently named copies in one process, repeated-current A/A, verification, allocation and retained executables |
-| Compare algorithms | `bun run tools compare algorithms` | Registered algorithms in one timing executable, three shuffled blocks by default, two Tessera calls for A/A, verification and allocation measurement |
-| Local parallel comparison | `bun run tools compare algorithms --plan parallel --cpu 0,2,4,6,8,10,12,14` | Serial controls, Tessera-8 and Rayon stable-8 in the same harness; choose a CPU list for the host |
-| Full algorithm comparison | `bun run tools compare algorithms --plan release` | Release coverage and native opponents |
+| Compare implementations | `bun run tools compare implementations` | Registered implementations in one timing executable, three shuffled blocks by default, two Tessera calls for A/A, verification and allocation measurement |
+| Local parallel comparison | `bun run tools compare implementations --plan parallel --cpu 0,2,4,6,8,10,12,14` | Serial controls, Tessera-8 and Rayon stable-8 in the same harness; choose a CPU list for the host |
+| Full implementation comparison | `bun run tools compare implementations --plan release` | Release coverage and native opponents |
 | Resume an interrupted comparison | `bun run tools compare resume DIR` | Recorded selection, settings and exact retained builds; no rebuilding |
 | Preview or customize inputs | `bun run --silent tools plan NAME` | Validated selection without compiling or measuring |
 | Regenerate a report | `bun run tools report DIR` | Statistics and figures from retained results, without new measurements |
 | Read main or PR feedback | `bun run --silent tools status main` or `bun run --silent tools status --pr NUMBER` | Exact-ref workflow and benchmark states; [read-only interpretation](continuous-benchmarks.md#read-feedback-from-a-pr) |
 | Inspect core engine production lines | `bun run --silent tools code [BASE] [--current COMMIT] [--text] [--details]` | The same source scope and line statistics as PR reports, without builds or measurements |
 
-`compare commit` defaults to `HEAD` and the `local` plan; `compare algorithms` to the `smoke` plan. Incomplete algorithm sessions report only with `--partial`; revision reports need every case's full sample budget.
+`compare commit` defaults to `HEAD` and the `local` plan; `compare implementations` to the `smoke` plan. Incomplete implementation sessions report only with `--partial`; revision reports need every case's full sample budget.
 
 CLI benchmark builds, including hosted ones, align loops and non-fallthrough blocks to 64 bytes (`-C llvm-args=-align-loops=64`, `-C llvm-args=-align-all-nofallthru-blocks=6`) for both revisions, Rust competitors and memory workers. The builder prepends these to the flags a Cargo probe resolves from the environment and configuration, so explicit values override them, and records the effective flags in provenance. Direct Cargo commands keep their own configuration.
 
@@ -41,7 +41,7 @@ The build embeds the TOML resources and forbids runtime code generation from str
 
 Build and measurement tasks print one compact JSON object with `out`, `log` and `result`. Subprocess output goes to the adjacent `OUT.log` (each `compare resume` writes its own `OUT.resume-TIMESTAMP-PID.log`); a failed task exits nonzero with the log path. `--verbose` streams diagnostics instead, so stdout is no longer JSON only.
 
-A completed comparison returns the protocol, ratio denominator, interval meaning, measured and faster/slower/within-noise counts, the host affinity, and up to five changes with numeric evidence: current regressions first for revision screens, opponents faster than Tessera first otherwise. `omittedChanges` counts the rest and `summaries.json` has everything. Algorithm counts cover opponent/input pairs, excluding the two Tessera controls; layout results stay per layout; preparation returns an identity and case count, not a verdict. An affinity of `inherited` or a multi-CPU mask means no single CPU was pinned. `report` returns the same summary from retained files; `plan` prints compact JSON or editable TOML.
+A completed comparison returns the protocol, ratio denominator, interval meaning, measured and faster/slower/within-noise counts, the host affinity, and up to five changes with numeric evidence: current regressions first for revision screens, opponents faster than Tessera first otherwise. `omittedChanges` counts the rest and `summaries.json` has everything. Implementation counts cover opponent/input pairs, excluding the two Tessera controls; layout results stay per layout; preparation returns an identity and case count, not a verdict. An affinity of `inherited` or a multi-CPU mask means no single CPU was pinned. `report` returns the same summary from retained files; `plan` prints compact JSON or editable TOML.
 
 Exit status describes execution, not a speedup: a successful `status` means the read succeeded, not that workflows passed. `status` prints one object for the exact `target.head` of a remote ref, keeping the latest run per workflow/event/branch and listing only unfinished or failed jobs; `--details` adds check summaries, the report comment and links, `--text` a short overview. It changes no GitHub state and needs `gh auth login`. [PR feedback](continuous-benchmarks.md#read-feedback-from-a-pr) explains how to read it.
 
@@ -67,7 +67,7 @@ jsdiff compares the filtered physical lines, ignoring comment and within-line wh
    bun run --silent tools plan local --types u64,row_u64 --distributions random,zipf2
    ```
 
-   Use `local` for revision comparisons, `smoke` for a small algorithm comparison, `release` for full coverage.
+   Use `local` for revision comparisons, `smoke` for a small implementation comparison, `release` for full coverage.
 
 2. Record host and compiler conditions. Prefer an idle machine, performance governor, disabled turbo/SMT and a pinned logical CPU the affinity policy allows; changing governor, turbo or SMT needs operator approval. Native opponents need the [native prerequisites](#native-prerequisites).
 3. Run the command:
@@ -76,26 +76,26 @@ jsdiff compares the filtered physical lines, ignoring comment and within-line wh
    # Revision comparison; HEAD~1 must have a compatible API and harness.
    bun run tools compare commit HEAD~1 --types u64,row_u64 --distributions random,zipf2 --cpu 2
 
-   # Rust-only algorithm smoke comparison, including verification and reporting.
-   bun run tools compare algorithms
+   # Rust-only implementation smoke comparison, including verification and reporting.
+   bun run tools compare implementations
 
-   # Full algorithm comparison, including native opponents.
-   bun run tools compare algorithms --plan release --cpu 2
+   # Full implementation comparison, including native opponents.
+   bun run tools compare implementations --plan release --cpu 2
    ```
 
-   CPU 2 is an example. `--out DIR` names a new directory (default `bench/results/<timestamp>`). Algorithm comparisons take `--sample-ms` (default 5) and `--memory-mib` (default 256), fixed for the session. Keep raw results and research harnesses outside Git.
+   CPU 2 is an example. `--out DIR` names a new directory (default `bench/results/<timestamp>`). Implementation comparisons take `--sample-ms` (default 5) and `--memory-mib` (default 256), fixed for the session. Keep raw results and research harnesses outside Git.
 
 4. Retain the plan, provenance, verification and controls. Report coverage, environment, ratios, A/A ranges and result location, and name partial, interrupted and unmeasured coverage. Investigate changes outside the controls, including in untouched cases; do not dismiss them as noise or tune source layout to one executable.
 
 ## Additional source-attribution controls
 
-Results hold for the measured inputs and environment. Attributing a gain to a source change rather than code placement needs in-process revision comparisons with independent placement controls ([engine evidence](../design/evidence.md#reading-small-case-results)); `compare commit` and continuous alerts alone do not provide it. `compare commit` alternates A/B samples of two executables without an A/A pass, and `--layout-seeds` varies section order across builds without sharing an address space; `compare revisions` provides that control. `compare algorithms` measures the current snapshot only, not a baseline commit.
+Results hold for the measured inputs and environment. Attributing a gain to a source change rather than code placement needs in-process revision comparisons with independent placement controls ([engine evidence](../design/evidence.md#reading-small-case-results)); `compare commit` and continuous alerts alone do not provide it. `compare commit` alternates A/B samples of two executables without an A/A pass, and `--layout-seeds` varies section order across builds without sharing an address space; `compare revisions` provides that control. `compare implementations` measures the current snapshot only, not a baseline commit.
 
 For an experiment the tools cannot run, extend the maintained pipeline so verification, provenance and reporting stay shared, starting with a bounded prototype; confirm unusual resource costs or host-wide changes with the operator.
 
 ## Linked revision comparisons
 
-`bun run tools compare revisions BASE --current HEAD` links two named crates per revision into one serial executable: `tessera` and `tessera-copy` for current, `tessera-baseline` and `tessera-baseline-copy` for baseline, with repeated-current `tessera-aa` and `std-stable` as controls. Without `--current` it uses the working snapshot. It shares the algorithm pipeline's axes, sampling, affinity, verification, budgets, allocation measurement, retention, resume and reports, but chooses its own adapters, rejects `--algorithms` and selects no parallel APIs.
+`bun run tools compare revisions BASE --current HEAD` links two named crates per revision into one serial executable: `tessera` and `tessera-copy` for current, `tessera-baseline` and `tessera-baseline-copy` for baseline, with repeated-current `tessera-aa` and `std-stable` as controls. Without `--current` it uses the working snapshot. It shares the implementation pipeline's axes, sampling, affinity, verification, budgets, allocation measurement, retention, resume and reports, but chooses its own adapters, rejects `--implementations` and selects no parallel APIs.
 
 The temporary workspace renames copied packages without rewriting Rust source; it may add local lock entries but no different registry or Git entries. Provenance keeps resolved commits, original and generated source hashes and all four libraries' features, checked against Cargo artifacts. Incompatible baselines fail before timing; historical libraries enable their opt-in SIMD feature.
 
@@ -113,7 +113,7 @@ This measures whole calls, not scan throughput, code generation or attribution; 
 
 ## Working-tree comparisons
 
-`compare commit [COMMIT]` and `compare algorithms` snapshot staged, unstaged and untracked sources without touching the checkout, build under `~/code/tessera-bench/` (`TESSERA_BENCH_WORK`) and clean up afterwards. Builds reuse `target/tessera-bench` (`TESSERA_BENCH_TARGET_DIR`, relative to the repository root); remove it for a cold build and never share it across trust boundaries. Internal symlinks are materialized; escaping or dangling links and cycles are rejected, and baseline links must resolve inside the selected commit's archive.
+`compare commit [COMMIT]` and `compare implementations` snapshot staged, unstaged and untracked sources without touching the checkout, build under `~/code/tessera-bench/` (`TESSERA_BENCH_WORK`) and clean up afterwards. Builds reuse `target/tessera-bench` (`TESSERA_BENCH_TARGET_DIR`, relative to the repository root); remove it for a cold build and never share it across trust boundaries. Internal symlinks are materialized; escaping or dangling links and cycles are rejected, and baseline links must resolve inside the selected commit's archive.
 
 `compare commit` accepts any local commit compatible with the current crate API, harness and lockfile: both revisions use the current harness, lockfile and toolchain, and the baseline substitutes only `rust/tessera-order`. Linux workers run under `setarch -R` (checked before building). Timed IDs must match between revisions. The `local` plan measures only `rust/u64/random/65536/s1/api`; override its axes instead of running the full continuous inventory, and narrow IDs with `--filter`.
 
@@ -158,7 +158,7 @@ Plans in [`bench/plans/`](../../bench/plans/) use TOML or JSON and decode into o
 | Preset | Default selection |
 |---|---|
 | `local` | Tessera, random `u64`, 65,536 records, `api` |
-| `continuous` / `main` | One shared PR/main selection and explicit serial/four-thread Tessera algorithms; see the [cases](continuous-benchmarks.md#cases) |
+| `continuous` / `main` | One shared PR/main selection and explicit serial/four-thread Tessera implementations; see the [cases](continuous-benchmarks.md#cases) |
 | `smoke` | Rust competitors, 125 inputs at 1,000 records |
 | `release` | Rust and native competitors, 381 inputs across four lengths |
 | `parallel` | Serial controls, Tessera-8 and Rayon stable-8; 16 inputs at 1M records |
@@ -167,7 +167,7 @@ A plan is a union of `include` products followed by `exclude` products:
 
 ```toml [my-plan.toml]
 schema = 1
-algorithms = ["glidesort", "radsort"]
+implementations = ["glidesort", "radsort"]
 
 [[include]]
 types = ["u32", "u64"]
@@ -182,18 +182,18 @@ lengths = [1_000_000]
 
 Values within an axis are alternatives, axes within a rule form a Cartesian product, each included input is measured once, and any matching exclusion removes a combination. Omitted axes use catalog defaults when including and match everything when excluding. Empty choices and unknown fields or identities are errors. The axes are `types`, `distributions` and `lengths`: positive record counts, or `"insertion-max"`, `"insertion-next"` and `"tile-next"`, resolved from the measured library's thresholds and record width. Case IDs keep the resolved number, and a commit comparison rejects differing IDs.
 
-There is no `harness` field: all plans use the same catalog, input generator and sorting adapters. Parsing retains exactly the requested algorithms. The Criterion/paired worker requires one algorithm per API mode because its IDs identify input and mode, not algorithm; tracking stores algorithms in separate directories. Serial adapters use `include`; parallel adapters use the separate `parallel` rules when present, otherwise `include`, with their actual thread count in the ID. The continuous plan explicitly selects `tessera` and `tessera-par-4`; a Tessera selection does not implicitly add another algorithm. Paired algorithm blocks instead use the union of both selections as a common input cohort and preparation adds `tessera` and `std-stable` controls to the frozen plan, with a separate Tessera A/A call during sampling. Inputs use seed 1, and an empty selection fails before timing. Native algorithms add pinned source acquisition and native compilation. Unsupported adapter/type pairs are never measured or reported as zero.
+There is no `harness` field: all plans use the same catalog, input generator and sorting adapters. Parsing retains exactly the requested implementations. The Criterion/paired worker requires one implementation per API mode because its IDs identify input and mode, not implementation; tracking stores implementations in separate directories. Serial adapters use `include`; parallel adapters use the separate `parallel` rules when present, otherwise `include`, with their actual thread count in the ID. The continuous plan explicitly selects `tessera` and `tessera-par-4`; a Tessera selection does not implicitly add another implementation. Paired implementation blocks instead use the union of both selections as a common input cohort and preparation adds `tessera` and `std-stable` controls to the frozen plan, with a separate Tessera A/A call during sampling. Inputs use seed 1, and an empty selection fails before timing. Native implementations add pinned source acquisition and native compilation. Unsupported adapter/type pairs are never measured or reported as zero.
 
 ```sh
 bun run --silent tools plan local --types u32,u64 --distributions random,zipf2           # preview
 bun run --silent tools plan local --types u32,u64 --format toml > my-plan.toml           # save, then reuse:
 bun run tools compare commit main --plan my-plan.toml
-bun run tools compare algorithms --plan smoke --algorithms glidesort,radsort \
+bun run tools compare implementations --plan smoke --implementations glidesort,radsort \
   --types u64 --distributions random,zipf2 --lengths 1234,65536                  # override
 bun run --silent tools plan --schema > benchmark-plan.schema.json                         # editor schema
 ```
 
-`--plan` takes a preset name or a `.toml`/`.json` path. Comma-separated CLI axes replace that axis in every inclusion rule; exclusions stay. `--algorithms` (only `compare algorithms` and `plan`) replaces the algorithm selection; only algorithm-block preparation adds its required controls. Presets are not different execution routes: use `local` or `continuous` for revision/counter work, and `smoke`, `release` or `parallel` for algorithm comparisons. Revision comparisons measure only `tessera`, `tessera-par-4` or both, because their builds replace only the Tessera library; counters require a serial-only selection. These are operation constraints, not plan formats. `--group` runs one resumable group and marks the report partial. Every result keeps its frozen `plan.json`.
+`--plan` takes a preset name or a `.toml`/`.json` path. Comma-separated CLI axes replace that axis in every inclusion rule; exclusions stay. `--implementations` (only `compare implementations` and `plan`) replaces the implementation selection; only implementation-block preparation adds its required controls. Presets are not different execution routes: use `local` or `continuous` for revision/counter work, and `smoke`, `release` or `parallel` for implementation comparisons. Revision comparisons measure only `tessera`, `tessera-par-4` or both, because their builds replace only the Tessera library; counters require a serial-only selection. These are operation constraints, not plan formats. `--group` runs one resumable group and marks the report partial. Every result keeps its frozen `plan.json`.
 
 ## Choosing references and cases
 
@@ -204,7 +204,7 @@ Every reference has one role for the operation it is compared on; an implementat
 | Role | Meaning | Required |
 |---|---|---|
 | Denominator | What a Rust user writes today with the standard library (or Rayon, for parallel execution) to get the same result. Speeds are ratios to it. | Yes |
-| Composition baseline | The same result composed from Tessera's existing calls, such as a full sort for selection. It shows the work the operation saves, which is the condition for [admitting the operation](../design/algorithm-extensions-proposal.md#0-2-additions). | For every operation except full sorting |
+| Composition baseline | The same result composed from Tessera's existing calls, such as a full sort for selection. It shows the work the operation saves, which is the condition for [admitting the operation](../design/operation-extensions-proposal.md#0-2-additions). | For every operation except full sorting |
 | Strongest public implementation | The fastest known implementation of the same result contract, in any language. | When one exists |
 | Ecosystem choice | An implementation callers commonly use for the result. | No |
 
@@ -221,7 +221,7 @@ Each operation has one named ranking cohort; an implementation that lacks a coho
 
 ## Serial operation comparisons
 
-New plans admit four workloads. Admission is for a caller-visible result worth measuring, not for every API entry point or internal engine route. Add a workload only when it answers a distinct performance question, has a complete result that an independent checker can verify, and has a meaningful reference on the same inputs. Adding a comparison workload does not automatically add it to the PR or main suites.
+New plans admit four operations. Admission is for a caller-visible result worth measuring, not for every API entry point or internal engine route. Add an operation only when it answers a distinct performance question, has a complete result that an independent checker can verify, and has a meaningful reference on the same inputs. Adding a comparison operation does not automatically add it to the PR or main suites.
 
 | Operation | CLI parameters | Result being measured |
 |---|---|---|
@@ -232,42 +232,42 @@ New plans admit four workloads. Admission is for a caller-visible result worth m
 
 - **Argsort.** Tessera calls `argsort` or `argsort_by_key`. The reference constructs indices and sorts them by key; `std-unstable` breaks ties by original index to return the same stable permutation.
 - **Selection.** Tessera calls `select_nth` or `select_nth_by_key`. `std-stable`, Glidesort, Radsort and the optional `tessera-full` control sort the whole input as semantic references, not as partial selectors. `std-unstable` uses partial selection and may choose arbitrary equal-key members, including on payload records. It must still return the correct ranked key, partition membership by key and preserve every record. Stable routes also preserve the exact stable member identities at the rank and on each side. Ratios between these routes do not isolate the cost of stability.
-- **Bucket partition.** The category is the encoded key modulo R, not the complete original key. Tessera calls `sort_by_cached_key` using the narrowest unsigned key width that represents the categories, then computes offsets. On inputs of at least two records, the cached-key sort evaluates the classifier once per record; the offset pass evaluates it again. `std-stable`, Glidesort, Radsort and `tessera-full` stably sort by the same category and compute the same offsets. These are sorting compositions, not dedicated output-buffer partition algorithms. The checker verifies stable category order and every offset.
+- **Bucket partition.** The category is the encoded key modulo R, not the complete original key. Tessera calls `sort_by_cached_key` using the narrowest unsigned key width that represents the categories, then computes offsets. On inputs of at least two records, the cached-key sort evaluates the classifier once per record; the offset pass evaluates it again. `std-stable`, Glidesort, Radsort and `tessera-full` stably sort by the same category and compute the same offsets. These are sorting compositions, not dedicated output-buffer partition implementations. The checker verifies stable category order and every offset.
 
-`compare algorithms` measures one workload at a time. Typed Rust preparation admits only supported adapter/input pairs and records each implementation route and omission. Tessera and `std-stable` are required controls for every selected case, even in a restricted group; an unsupported control fails the run before it writes measurement journals.
+`compare implementations` measures one operation at a time. Typed Rust preparation admits only supported adapter/input pairs and records each implementation route and omission. Tessera and `std-stable` are required controls for every selected case, even in a restricted group; an unsupported control fails the run before it writes measurement journals.
 
 ```sh
 bun run --silent tools plan smoke --operation select --index 32768 \
   --types u64,row_u64 --distributions random,d16 --lengths 65536
-bun run tools compare algorithms --operation select --index 32768 \
-  --algorithms std-stable,std-unstable,glidesort,radsort,tessera-full \
+bun run tools compare implementations --operation select --index 32768 \
+  --implementations std-stable,std-unstable,glidesort,radsort,tessera-full \
   --types u64,row_u64 --distributions random,d16 --lengths 65536 --cpu 2
-bun run tools compare algorithms --operation argsort \
-  --algorithms std-stable,std-unstable,glidesort,radsort \
+bun run tools compare implementations --operation argsort \
+  --implementations std-stable,std-unstable,glidesort,radsort \
   --types u64,record128 --distributions random --lengths 65536 --cpu 2
 ```
 
-A custom non-sort plan uses `schema = 2` with, for example, `operation = { kind = "select", index = 32768 }`. The bucket workload uses `bucket_count`. Non-sort plans require literal positive input lengths. The selection index must be a nonnegative integer smaller than every surviving input length, and the bucket count must be positive. Unrelated parameter flags are errors.
+A custom non-sort plan uses `schema = 2` with, for example, `operation = { kind = "select", index = 32768 }`. The bucket operation uses `bucket_count`. Non-sort plans require literal positive input lengths. The selection index must be a nonnegative integer smaller than every surviving input length, and the bucket count must be positive. Unrelated parameter flags are errors.
 
-Revision plans can instead mix sorting and serial workloads by setting `operation` on individual include rules in schema 1, as the [PR suite](continuous-benchmarks.md#cases) does. The operation applies only to that rule's inputs and follows the same parameter checks. Exclude and parallel rules cannot carry operations. An explicit `--operation` drops rules with their own operation and applies the requested workload to the remaining rules, using schema 1 for `sort` and schema 2 otherwise. Algorithm comparisons reject per-rule operations; linked revision and counter studies are full-sort only. [Main tracking](continuous-benchmarks.md#main-long-term-tracking) uses only the sorting cases.
+Revision plans can instead mix sorting and serial operations by setting `operation` on individual include rules in schema 1, as the [PR plan](continuous-benchmarks.md#cases) does. The operation applies only to that rule's inputs and follows the same parameter checks. Exclude and parallel rules cannot carry operations. An explicit `--operation` drops rules with their own operation and applies the requested operation to the remaining rules, using schema 1 for `sort` and schema 2 otherwise. Implementation comparisons reject per-rule operations; linked revision and counter studies are full-sort only. [Main tracking](continuous-benchmarks.md#main-long-term-tracking) uses only the sorting cases.
 
-The timer covers each complete call, including scratch allocation, classification where applicable, and mandatory output construction. Argsort and bucket partition retain their newly allocated results until checking; discarding earlier results, restoring mutable inputs and verification are outside the clock. The prepared batch-memory cap includes mutable record/payload buffers and retained output; shared originals/references and transient call workspace are separate. Algorithm comparisons use the same paired blocks and A/A statistic as sorting, and report time per input record, not per retained index, selected rank or bucket.
+The timer covers each complete call, including scratch allocation, classification where applicable, and mandatory output construction. Argsort and bucket partition retain their newly allocated results until checking; discarding earlier results, restoring mutable inputs and verification are outside the clock. The prepared batch-memory cap includes mutable record/payload buffers and retained output; shared originals/references and transient call workspace are separate. Implementation comparisons use the same paired blocks and A/A statistic as sorting, and report time per input record, not per retained index, selected rank or bucket.
 
 The separate allocation worker verifies one complete call for every admitted case and variant. Peak extra heap includes output: O(n) indices for argsort, O(R) offsets for bucket partition and no heap output for in-place selection. Memory rows retain peak extra heap and output bytes separately; reports estimate workspace by subtracting retained output bytes from peak extra heap.
 
-Full-sort IDs remain unchanged. Other comparison IDs append the operation and parameters, for example `u64/random/65536/s1/select/32768` with resumable group `u64/random/select/32768`. The manifest keeps the exact operation and frozen plan. `tools report` still regenerates retained results for retired workloads with the original IDs. Retired workloads cannot be selected or resumed with the current CLI. Non-sort algorithm reports remain tables and JSON; the full-sort figures keep their existing cohorts and meaning.
+Full-sort IDs remain unchanged. Other comparison IDs append the operation and parameters, for example `u64/random/65536/s1/select/32768` with resumable group `u64/random/select/32768`. The manifest keeps the exact operation and frozen plan. `tools report` still regenerates retained results for retired operations with the original IDs. Retired operations cannot be selected or resumed with the current CLI. Non-sort implementation reports remain tables and JSON; the full-sort figures keep their existing cohorts and meaning.
 
 ## Local parallel comparisons
 
-The `parallel` plan is an ordinary algorithm comparison with the `rayon` feature; hosted comparisons use their own four-thread cases. Iterate with one representative input and one logical CPU per physical core (`lscpu -e=CPU,CORE`; on the Ryzen 7 8845H adjacent CPUs are SMT siblings):
+The `parallel` plan is an ordinary implementation comparison with the `rayon` feature; hosted comparisons use their own four-thread cases. Iterate with one representative input and one logical CPU per physical core (`lscpu -e=CPU,CORE`; on the Ryzen 7 8845H adjacent CPUs are SMT siblings):
 
 ```sh
-bun run tools compare algorithms --plan parallel \
+bun run tools compare implementations --plan parallel \
   --types row_u64 --distributions random --lengths 10000000 \
   --cpu 0,2,4,6,8,10,12,14 --out /tmp/tessera-parallel
 ```
 
-The defaults are `tessera-par-8` and `rayon-stable-8` plus the serial controls; one-, two- and four-worker adapters are `--algorithms` choices. Each adapter owns a pool of its width, built and warmed outside timing and allocation counting; each sort includes `ThreadPool::install` and the public call. Workers inherit the affinity mask, and Linux thread checks allow only the pool's workers plus the caller. Oversubscribed runs are not scaling evidence.
+The defaults are `tessera-par-8` and `rayon-stable-8` plus the serial controls; one-, two- and four-worker adapters are `--implementations` choices. Each adapter owns a pool of its width, built and warmed outside timing and allocation counting; each sort includes `ThreadPool::install` and the public call. Workers inherit the affinity mask, and Linux thread checks allow only the pool's workers plus the caller. Oversubscribed runs are not scaling evidence.
 
 The ratio is variant time over paired serial Tessera time; its inverse is the whole-call speedup. The A/A range controls the serial baseline, not parallel variability, and there is no placement control. Peak extra heap excludes pool storage and thread stacks. Inputs below the parallel cutoff and one-worker pools only check the serial fallback.
 
@@ -277,12 +277,12 @@ Rust competitors need Cargo's stable toolchain. Native competitors also need Lin
 
 `TESSERA_BENCH_CHECK_ONLY=1 cargo clippy --workspace --all-targets --all-features` (or `cargo doc`) checks without the native toolchain by omitting native compilation and link inputs; leave it unset for builds, tests and measurements.
 
-## Resuming algorithm comparisons
+## Resuming implementation comparisons
 
-`compare algorithms` retains one `compare`/`memory` executable pair under `bin/` before measuring. Schema-2 `session.json` records their hashes, the plan hash, CPU, group, block budget and sampling limits. A session interrupted before `session.json` exists was never prepared; start a new directory.
+`compare implementations` retains one `compare`/`memory` executable pair under `bin/` before measuring. Schema-2 `session.json` records their hashes, the plan hash, CPU, group, block budget and sampling limits. A session interrupted before `session.json` exists was never prepared; start a new directory.
 
 ```sh
-bun run tools compare algorithms --plan release --cpu 2 --out bench/results/release
+bun run tools compare implementations --plan release --cpu 2 --out bench/results/release
 bun run tools compare resume bench/results/release   # same directory; no rebuild or overrides
 ```
 
@@ -295,17 +295,17 @@ Use the binaries directly only to split groups across directories or debug the h
 ```sh
 bun run tools native fetch
 cargo build --release -p tessera-bench --features compare-native --target-dir target/compare-default
-taskset -c 2 target/compare-default/release/compare run --suite release --out bench/results/release
+taskset -c 2 target/compare-default/release/compare run --plan release --out bench/results/release
 bun run tools report bench/results/release
 ```
 
-`compare list` and `compare validate --suite smoke|release` check support and correctness. Direct binaries default to nine blocks (`--blocks 3` for a short screen, for timing and memory alike); a retained manifest fixes the budget. `compare run` first runs the sibling `memory` executable, which repairs its journal and measures missing rows. `--group TYPE/SHAPE` (for example `u64/random`) selects one group; a repeated run skips completed groups and replaces an interrupted one. A changed executable, provenance, suite or host fingerprint needs a new directory. Directories with matching hosts and manifests report together (`bun run tools report DIR1 DIR2`, written to the first). The report needs the complete suite unless `--partial` is given, and writes `bmf.json` for the Bencher CLI.
+`compare list` and `compare validate --plan smoke|release` check support and correctness. Direct binaries default to nine blocks (`--blocks 3` for a short screen, for timing and memory alike); a retained manifest fixes the budget. `compare run` first runs the sibling `memory` executable, which repairs its journal and measures missing rows. `--group TYPE/DISTRIBUTION` (for example `u64/random`) selects one group; a repeated run skips completed groups and replaces an interrupted one. A changed executable, provenance, plan or host fingerprint needs a new directory. Directories with matching hosts and manifests report together (`bun run tools report DIR1 DIR2`, written to the first). The report needs the complete plan unless `--partial` is given, and writes `bmf.json` for the Bencher CLI.
 
 Every build uses the SIMD backend. Revisions without it, dual-build results and schema-1 sessions are rejected; report them with their original tooling revision.
 
-## Cases and suites
+## Cases and plans
 
-Case IDs are `type/distribution/length/s1`. A group is all lengths of one type and distribution. The release suite has 381 inputs: the original 260-case cross-type matrix and 121 cases using the high-value distributions from continuous tracking; `smoke` validates the same 125 type/distribution pairs at 1,000 records.
+Case IDs are `type/distribution/length/s1`. A group is all lengths of one type and distribution. The release plan has 381 inputs: the original 260-case cross-type matrix and 121 cases using the high-value distributions from continuous tracking; `smoke` validates the same 125 type/distribution pairs at 1,000 records.
 
 | Type | Task | Representation |
 |---|---|---|

@@ -54,7 +54,7 @@ test("strict identities reject unknown fields without tightening historical labe
   for (const invalid of [
     id.replace("rust/", "other/"),
     id.replace("u64", "future-type"),
-    id.replace("random", "future-shape"),
+    id.replace("random", "future-distribution"),
     id.replace("65536", "0"),
     id.replace("s1", "seed"),
     id.replace("api", "future-mode"),
@@ -90,7 +90,7 @@ test("operation identities and parameter admission match the shared language fix
   for (const entry of fixture.operations) {
     const plan = {
       schema: 2,
-      algorithms: ["tessera"],
+      implementations: ["tessera"],
       operation: entry.operation,
       include: [{ types: [input.ty], distributions: [input.distribution], lengths: [input.len] }],
     };

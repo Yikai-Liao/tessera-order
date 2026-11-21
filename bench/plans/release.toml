@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 schema = 1
-algorithms = [ "tessera", "std-stable", "radsort", "voracious", "glidesort", "glidesort-sqrt", "std-unstable", "rdst", "clausecker", "fluxsort", "ips2ra", "ips4o", "vqsort", "x86simdsort", "crumsort", "duckdb" ]
+implementations = [ "tessera", "std-stable", "radsort", "voracious", "glidesort", "glidesort-sqrt", "std-unstable", "rdst", "clausecker", "fluxsort", "ips2ra", "ips4o", "vqsort", "x86simdsort", "crumsort", "duckdb" ]
 
 # Keep the original cross-type matrix for comparable aggregate figures.
 [[include]]
@@ -30,7 +30,7 @@ lengths = [ 65536, 1000000 ]
 types = [ "f64" ]
 distributions = [ "finite_signed" ]
 
-# Check large-input scaling without multiplying every new shape by every type.
+# Check large-input scaling without multiplying every new distribution by every type.
 [[include]]
 types = [ "u64" ]
 distributions = [ "equal", "d4096", "two_values", "hot50", "sparse8", "sparse_digits", "bimodal", "far_swaps", "sorted_tail" ]

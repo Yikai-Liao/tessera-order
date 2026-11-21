@@ -7,7 +7,7 @@
 # original Block LSD code. glidesort-sqrt is omitted: its buffer is sized from
 # Tessera's own peak.
 schema = 1
-algorithms = [
+implementations = [
   "tessera", "std-stable", "radsort", "glidesort", "std-unstable", "rdst",
   "clausecker", "fluxsort", "ips2ra", "ips4o", "crumsort", "duckdb",
 ]

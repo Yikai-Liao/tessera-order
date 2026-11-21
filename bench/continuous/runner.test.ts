@@ -151,7 +151,7 @@ test("retired PR cases can be reported from prepared and measured JSON but not e
     cases: [...pairedRun().shard!.allCases, id].sort(),
     plan: {
       schema: 1,
-      algorithms: ["tessera", "tessera-par-4"],
+      implementations: ["tessera", "tessera-par-4"],
       include: [
         { types: ["u64"], distributions: ["random"], lengths: [48, 49, 1000, 65536, 1000000] },
         {

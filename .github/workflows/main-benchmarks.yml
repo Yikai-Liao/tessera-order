@@ -6,8 +6,8 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      algorithm:
-        description: Catalog algorithm ID to measure, or all to measure every production algorithm in turn
+      implementation:
+        description: Catalog implementation ID to measure, or all to measure every production implementation in turn
         required: true
         type: string
         default: tessera
@@ -41,21 +41,21 @@ jobs:
       - id: selection
         if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.benchmark == 'true'
         env:
-          TRACKING_ALGORITHM: ${{ github.event_name == 'workflow_dispatch' && inputs.algorithm || 'tessera' }}
-        run: bun bench/tracking/algorithms.ts
+          TRACKING_IMPLEMENTATION: ${{ github.event_name == 'workflow_dispatch' && inputs.implementation || 'tessera' }}
+        run: bun bench/tracking/implementations.ts
 
   # Builds need no credentials and run in parallel; each freezes one tested image as an artifact.
   build:
     needs: changes
     if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.benchmark == 'true')
-    name: Build (${{ matrix.algorithm }})
+    name: Build (${{ matrix.implementation }})
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      TRACKING_ALGORITHM: ${{ matrix.algorithm }}
+      TRACKING_IMPLEMENTATION: ${{ matrix.implementation }}
       CC: clang
       CXX: clang++
       TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/benchmark
@@ -90,7 +90,7 @@ jobs:
         run: bun bench/tracking/build.ts
       - uses: actions/upload-artifact@v7
         with:
-          name: tracking-build-${{ matrix.algorithm }}
+          name: tracking-build-${{ matrix.implementation }}
           path: |
             bench/results/tracking-build/build.json
             bench/results/tracking-build/image.tar
@@ -99,12 +99,12 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: tracking-build-log-${{ matrix.algorithm }}
+          name: tracking-build-log-${{ matrix.implementation }}
           path: bench/results/tracking-build.log
           retention-days: 14
           if-no-files-found: ignore
 
-  # Extra memory across lengths for every algorithm, in one native build. Peak allocation counts
+  # Extra memory across lengths for every implementation, in one native build. Peak allocation counts
   # do not depend on the host, so this runs on Actions alone and publishes without Bencher.
   growth:
     needs: changes
@@ -170,13 +170,13 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-  # Measurement waits for every build, then runs one algorithm at a time: Bencher has a single
+  # Measurement waits for every build, then runs one implementation at a time: Bencher has a single
   # remote slot, and Actions concurrency groups would cancel queued jobs rather than hold them.
-  # An algorithm whose build failed fails here when its artifact is missing; the others continue.
+  # An implementation whose build failed fails here when its artifact is missing; the others continue.
   track:
     needs: [changes, build]
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.benchmark == 'true') }}
-    name: Track (${{ matrix.algorithm }})
+    name: Track (${{ matrix.implementation }})
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -188,7 +188,7 @@ jobs:
     permissions:
       contents: write
     env:
-      TRACKING_ALGORITHM: ${{ matrix.algorithm }}
+      TRACKING_IMPLEMENTATION: ${{ matrix.implementation }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -202,7 +202,7 @@ jobs:
           version: 0.6.16
       - uses: actions/download-artifact@v8
         with:
-          name: tracking-build-${{ matrix.algorithm }}
+          name: tracking-build-${{ matrix.implementation }}
           path: bench/results/tracking-build
       - name: Push the frozen image and measure its remote jobs
         env:
@@ -232,17 +232,17 @@ jobs:
             else
               git checkout --orphan "initial-$attempt"
             fi
-            bun "$GITHUB_WORKSPACE/bench/tracking/publish.ts" "$TRACKING_ALGORITHM" ../tracking/*.jsonl
-            git add -- "$TRACKING_ALGORITHM" comparison.json
+            bun "$GITHUB_WORKSPACE/bench/tracking/publish.ts" "$TRACKING_IMPLEMENTATION" ../tracking/*.jsonl
+            git add -- "$TRACKING_IMPLEMENTATION" comparison.json
             git diff --cached --quiet && break
-            git commit -s -m "chore(bench): record $TRACKING_ALGORITHM performance ${GITHUB_SHA:0:7}" -m 'Assisted-by: OpenAI'
+            git commit -s -m "chore(bench): record $TRACKING_IMPLEMENTATION performance ${GITHUB_SHA:0:7}" -m 'Assisted-by: OpenAI'
             git push origin HEAD:refs/heads/benchmark-data && break
             [ "$attempt" != 3 ] || exit 1
           done
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: performance-evidence-${{ matrix.algorithm }}
+          name: performance-evidence-${{ matrix.implementation }}
           path: |
             bench/results/tracking/*.jsonl
             bench/results/tracking/bencher-*.json

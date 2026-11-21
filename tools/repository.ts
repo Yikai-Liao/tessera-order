@@ -5,7 +5,7 @@ import { runTitleCheck } from "../.github/scripts/check_pr_title.ts";
 import { runDcoCheck } from "../.github/scripts/check-dco.ts";
 import { routeChanges } from "../.github/scripts/ci_changes.ts";
 import { verifyRustRelease } from "../.github/scripts/release.ts";
-import { checkAlgorithms } from "../bench/release.ts";
+import { checkImplementations } from "../bench/release.ts";
 import { fetchNative } from "../bench/rust/native/fetch.ts";
 import { repositoryRoot, resultDirectory, runTask } from "./tasks.ts";
 
@@ -22,7 +22,7 @@ export function repositoryCommands(program: Command) {
       const root = await repositoryRoot();
       const out = resultDirectory(root, options.out);
       await runTask(out, Boolean(program.opts().verbose), () =>
-        checkAlgorithms(root, out, Boolean(options.native)),
+        checkImplementations(root, out, Boolean(options.native)),
       );
     });
   ci.command("changes")

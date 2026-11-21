@@ -16,7 +16,7 @@ fn category_batches_budget_and_measure_retained_offsets() {
     fs::write(
         &plan,
         serde_json::to_vec(&serde_json::json!({
-            "schema": 2, "algorithms": ["tessera", "std-stable"],
+            "schema": 2, "implementations": ["tessera", "std-stable"],
             "operation": { "kind": "partition-buckets", "bucket_count": bucket_count },
             "include": [{ "types": ["u32"], "distributions": ["random"], "lengths": [1] }]
         }))
@@ -71,17 +71,17 @@ fn memory_resumes_missing_adapters() {
         std::env::temp_dir().join(format!("tessera-memory-resume-{}", std::process::id()));
     fs::create_dir_all(&directory).unwrap();
     let plan = directory.join("plan.json");
-    let mut algorithms = vec!["tessera", "std-stable"];
+    let mut implementations = vec!["tessera", "std-stable"];
     if cfg!(tessera_bench_revisions) {
-        algorithms.extend(["tessera-baseline", "tessera-baseline-copy", "tessera-copy"]);
+        implementations.extend(["tessera-baseline", "tessera-baseline-copy", "tessera-copy"]);
     }
     if cfg!(feature = "rayon") {
-        algorithms.extend(["tessera-par-8", "rayon-stable-8"]);
+        implementations.extend(["tessera-par-8", "rayon-stable-8"]);
     }
     fs::write(
         &plan,
         serde_json::to_vec(&serde_json::json!({
-            "schema": 1,  "algorithms": algorithms,
+            "schema": 1,  "implementations": implementations,
             "include": [{"types": ["u64"], "distributions": ["random"], "lengths": [49]}]
         }))
         .unwrap(),
@@ -110,7 +110,7 @@ fn memory_resumes_missing_adapters() {
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .collect();
-    assert_eq!(rows.len(), algorithms.len());
+    assert_eq!(rows.len(), implementations.len());
     let tessera = rows.iter().find(|row| row["variant"] == "tessera").unwrap();
     fs::write(&journal, format!("{tessera}\n{{\"partial\":")).unwrap();
     let records = |path| {
@@ -148,7 +148,7 @@ fn short_budget_is_retained_and_fixed() {
     fs::write(
         &plan,
         serde_json::to_vec(&serde_json::json!({
-            "schema": 1,  "algorithms": ["tessera", "std-stable"],
+            "schema": 1,  "implementations": ["tessera", "std-stable"],
             "include": [{"types": ["u64"], "distributions": ["random"], "lengths": [49]}]
         }))
         .unwrap(),
@@ -224,7 +224,7 @@ fn large_parallel_memory_is_measured() {
         &plan,
         serde_json::to_vec(&serde_json::json!({
             "schema": 1,
-            "algorithms": ["tessera-par-8"],
+            "implementations": ["tessera-par-8"],
             "include": [{
                 "types": ["u32", "row_u32"],
                 "distributions": ["equal"], "lengths": [1_000_001]
@@ -271,7 +271,7 @@ fn parallel_adapters_validate_records() {
         &plan,
         serde_json::to_vec(&serde_json::json!({
             "schema": 1,
-            "algorithms": ["tessera-par-8", "rayon-stable-8"],
+            "implementations": ["tessera-par-8", "rayon-stable-8"],
             "include": [{
                 "types": ["f64", "reverse_u64", "reverse_f64", "row_u64", "record128", "owned"],
                 "distributions": ["random", "d16"], "lengths": [131_073]

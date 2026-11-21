@@ -15,17 +15,18 @@ const fixture = decodeConfig(
 
 test("presets load through the same validator and overrides replace selection", async () => {
   for (const preset of ["local", "continuous", "smoke", "release", "parallel"])
-    assert.ok((await loadPlan(preset)).algorithms.includes("tessera"));
+    assert.ok((await loadPlan(preset)).implementations.includes("tessera"));
   const plan = await loadPlan("local", {
     types: ["u64"],
     distributions: ["random"],
     lengths: [1234],
   });
   assert.deepEqual(plan.include, [{ types: ["u64"], distributions: ["random"], lengths: [1234] }]);
-  assert.deepEqual(parsePlan(fixture.plan).algorithms, ["tessera"]);
-  assert.deepEqual((await loadPlan("continuous", { algorithms: ["glidesort"] })).algorithms, [
-    "glidesort",
-  ]);
+  assert.deepEqual(parsePlan(fixture.plan).implementations, ["tessera"]);
+  assert.deepEqual(
+    (await loadPlan("continuous", { implementations: ["glidesort"] })).implementations,
+    ["glidesort"],
+  );
   assert.deepEqual(parsePlan(decodeConfig(JSON.stringify(plan), "plan.json")), plan);
 });
 
@@ -43,7 +44,7 @@ test("Reverse direct keys are opt-in comparison inputs", async () => {
       defaults.include.every((rule) => rule.types && !rule.types.some((id) => types.includes(id))),
     );
   }
-  assert.deepEqual(parsePlan({ ...plan, algorithms: ["tessera"] }).include, plan.include);
+  assert.deepEqual(parsePlan({ ...plan, implementations: ["tessera"] }).include, plan.include);
 });
 
 test("malformed and unsupported plans fail before execution", () => {
@@ -104,7 +105,7 @@ test("operation overrides retain exact parameters and reject unrelated flags", a
   });
 });
 
-test("new plans, the editor schema and the CLI exclude retained-only workloads", () => {
+test("new plans, the editor schema and the CLI exclude retained-only operations", () => {
   const cli = (...args: string[]) =>
     spawnSync(
       process.execPath,
@@ -127,7 +128,7 @@ test("new plans, the editor schema and the CLI exclude retained-only workloads",
     { kind: "select-many", indices: [99, 0, 99] },
   ]) {
     const rule = { lengths: [100] };
-    const base = { algorithms: ["tessera"], include: [rule] };
+    const base = { implementations: ["tessera"], include: [rule] };
     assert.throws(() => parsePlan({ ...base, schema: 2, operation }));
     assert.throws(() => parsePlan({ ...base, schema: 1, include: [{ ...rule, operation }] }));
     assert.ok(!schema.includes(JSON.stringify(operation.kind)));
@@ -141,16 +142,16 @@ test("new plans, the editor schema and the CLI exclude retained-only workloads",
   }
 });
 
-test("revision suites place operations on include rules; an override replaces them", async () => {
+test("revision plans place operations on include rules; an override replaces them", async () => {
   const rule = { types: ["u64"], distributions: ["random"], lengths: [1000] };
   const select = { ...rule, operation: { kind: "select", index: 10 } };
-  parsePlan({ schema: 1, algorithms: ["tessera"], include: [rule, select] });
+  parsePlan({ schema: 1, implementations: ["tessera"], include: [rule, select] });
   for (const invalid of [
-    { schema: 1, algorithms: ["tessera"], include: [rule], exclude: [select] },
-    { schema: 1, algorithms: ["tessera"], include: [rule], parallel: [select] },
-    { schema: 2, algorithms: ["tessera"], operation: { kind: "argsort" }, include: [select] },
-    { schema: 1, algorithms: ["tessera"], include: [{ ...select, lengths: ["tile-next"] }] },
-    { schema: 1, algorithms: ["tessera"], include: [{ ...select, lengths: [5] }] },
+    { schema: 1, implementations: ["tessera"], include: [rule], exclude: [select] },
+    { schema: 1, implementations: ["tessera"], include: [rule], parallel: [select] },
+    { schema: 2, implementations: ["tessera"], operation: { kind: "argsort" }, include: [select] },
+    { schema: 1, implementations: ["tessera"], include: [{ ...select, lengths: ["tile-next"] }] },
+    { schema: 1, implementations: ["tessera"], include: [{ ...select, lengths: [5] }] },
   ])
     assert.throws(() => parsePlan(invalid));
   const continuous = await loadPlan("continuous");

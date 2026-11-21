@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 //! Versioned operation parameters, concrete identities and borrowed input facts.
-//! Public calls own execution and allocation; this module resolves only workload
+//! Public calls own execution and allocation; this module resolves only operation
 //! inputs and independent verification expectations, never engine decisions.
 
 use serde::{Deserialize, Serialize};
 
-/// Workload parameters; admitted routes define stable or arbitrary tie membership.
+/// Operation parameters; admitted routes define stable or arbitrary tie membership.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Operation {
@@ -33,7 +33,7 @@ impl Default for Operation {
 }
 
 impl Operation {
-    /// Whether this is the historical complete-sorting workload.
+    /// Whether this is the historical complete-sorting operation.
     pub fn is_sort(&self) -> bool {
         matches!(self, Self::Sort {})
     }

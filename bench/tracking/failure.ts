@@ -7,12 +7,12 @@ const KNOWN: [RegExp, (match: RegExpMatchArray) => string][] = [
   [
     /VM execution timed out after (\d+)s/,
     ([, seconds]) =>
-      `A remote job ran longer than Bencher's ${seconds} s limit. bench/tracking/jobs.ts plans each job's share of that limit; a slow algorithm may need a smaller share.`,
+      `A remote job ran longer than Bencher's ${seconds} s limit. bench/tracking/jobs.ts plans each job's share of that limit; a slow implementation may need a smaller share.`,
   ],
   [
     /Timed out waiting for remote job after (\d+) seconds/,
     ([, seconds]) =>
-      `Bencher did not finish a job within ${seconds} s of waiting, queueing included. Other runs hold the single remote slot; rerun this algorithm when the queue is shorter. The job may still complete in Bencher.`,
+      `Bencher did not finish a job within ${seconds} s of waiting, queueing included. Other runs hold the single remote slot; rerun this implementation when the queue is shorter. The job may still complete in Bencher.`,
   ],
 ];
 

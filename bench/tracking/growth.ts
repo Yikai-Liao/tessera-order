@@ -16,9 +16,9 @@ import { reportFailure } from "./failure.ts";
 import { type GrowthRecord, growthSchema } from "./result.ts";
 
 /**
- * Arrange the memory worker's rows as one peak per algorithm and length.
+ * Arrange the memory worker's rows as one peak per implementation and length.
  *
- * The growth plan selects one type and one input pattern; an algorithm that does not support
+ * The growth plan selects one type and one input pattern; an implementation that does not support
  * the type has no rows and no entry, and a missing length is null.
  */
 export function growthPeaks(journal: string, plan: Plan) {
@@ -37,10 +37,11 @@ export function growthPeaks(journal: string, plan: Plan) {
       peak_extra_bytes: number;
       verified: boolean;
     };
-    const [ty, shape, len] = row.case_id.split("/");
+    const [ty, rowDistribution, len] = row.case_id.split("/");
     const at = lengths.indexOf(Number(len));
-    if (row.build !== "default" || ty !== type || shape !== distribution || at < 0) continue;
-    if (!plan.algorithms.includes(row.variant))
+    if (row.build !== "default" || ty !== type || rowDistribution !== distribution || at < 0)
+      continue;
+    if (!plan.implementations.includes(row.variant))
       throw new Error(`Unplanned variant: ${row.variant}`);
     if (!row.verified || !Number.isSafeInteger(row.peak_extra_bytes) || row.peak_extra_bytes < 0)
       throw new Error(`Invalid memory row: ${row.case_id} ${row.variant}`);
@@ -54,7 +55,7 @@ export function growthPeaks(journal: string, plan: Plan) {
   return { type, distribution, lengths, peaks };
 }
 
-// CI-only, without credentials: measure every algorithm's extra memory across the growth plan's
+// CI-only, without credentials: measure every implementation's extra memory across the growth plan's
 // lengths in one native build. Counts do not depend on the host, so this needs no Bencher run.
 if (import.meta.main) {
   const root = await repositoryRoot();
@@ -98,7 +99,7 @@ if (import.meta.main) {
         return {
           hash,
           lengths: record.lengths.length,
-          algorithms: Object.keys(record.peaks).length,
+          implementations: Object.keys(record.peaks).length,
         };
       });
     }),

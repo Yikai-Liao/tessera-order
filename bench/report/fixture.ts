@@ -4,10 +4,10 @@ import { catalog } from "../catalog.ts";
 import {
   caseId,
   type Dataset,
+  distributions,
   lengths,
   type Manifest,
   type Sample,
-  shapes,
   types,
 } from "./model.ts";
 
@@ -23,7 +23,7 @@ export function createFixture(blocks = 9): Dataset {
     { name: "vqsort", stable: false },
   ];
   const cases = types.flatMap((ty) =>
-    shapes.flatMap((distribution) =>
+    distributions.flatMap((distribution) =>
       lengths
         .filter((n) => n <= 1000000 || !["record128", "owned"].includes(ty))
         .map((len) => ({
@@ -39,8 +39,8 @@ export function createFixture(blocks = 9): Dataset {
   );
   const m: Manifest = {
     schema: 1,
-    suite: "release",
-    suite_version: 1,
+    plan_name: "release",
+    plan_version: 1,
     build: "default",
     blocks,
     cases,

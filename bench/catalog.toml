@@ -10,7 +10,7 @@ revisionSampling = [
   { min_len = 1, warm_ms = 500, window_ms = 1500, samples = 30 },
 ]
 
-algorithms = [
+implementations = [
   { id = "tessera", label = "Tessera", stable = true, family = "radix", adapter = "common" },
   { id = "tessera-full", label = "Tessera full-sort reference", stable = true, family = "radix", adapter = "reference", detail = "complete stable sorting", description = "full-sort reference for required ranks or stable category grouping" },
   { id = "tessera-baseline", label = "Tessera baseline A", stable = true, family = "radix", adapter = "revision" },
@@ -104,4 +104,4 @@ lengths = [1000,65536,1000000,10000000]
 [comparison]
 types = ["u32","u64","f64","row_u64","record128","owned","row_u32","reverse_u64","reverse_f64"]
 # Fixed cross-type aggregates; targeted inputs are plotted separately.
-summaryShapes = ["random","d256","d16","zipf1.1","zipf2","skew99","sorted","reverse","sorted99","runs"]
+summaryDistributions = ["random","d256","d16","zipf1.1","zipf2","skew99","sorted","reverse","sorted99","runs"]

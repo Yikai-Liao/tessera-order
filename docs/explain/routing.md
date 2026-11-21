@@ -41,19 +41,11 @@ Only now is tile and block scratch allocated. Budgeted insertion on a larger uns
 
 ## Sparse source order
 
-A serial finisher can resolve a node by describing where the records come from. It first gives a digit that covers every varying bit its usual counting or distribution path. For wider key windows, a sample of adjacent pairs estimates whether a short list of exceptional records could explain the disorder. Construction stops when the entries exceed a square-root workspace budget. A failed attempt leaves all records in place.
+A serial finisher can describe a permutation as long runs of source positions and a few isolated records. After the insertion probe, a node wider than one digit samples the input. If most keys are alike, their occurrences form the ordered background. If most positions are already ordered, the finisher removes both ends of each inversion from a stack of source runs. Each disjoint pair costs at most two exceptions for one record any ordered subsequence must exclude. Exceeding the square-root exception budget returns control to ordinary partitioning before any records move.
 
-For mostly ordered input, the finisher keeps a stack of ordered source intervals. At an inversion it removes both endpoints. Each removed pair contains an endpoint that any ordered subsequence must exclude, and the pairs have disjoint positions. If deleting *k* records would suffice, at most *2k* enter the exception list. The finisher sorts these records by key and original position, then merges them with the retained intervals.
+A rank can supply its own boundary. If every key to its right is at least its key *p*, collect the records at most *p* needed to fill the prefix through the rank. Any matches taken from the right have key *p*, so taking them in input order places the correct occurrence. The left-hand bound works in reverse. A short requested end also fits the exception budget. A batch of keyed positions keeps its best half whenever it fills. If the original end keys occur only in the end, the winners and displaced records can exchange slots directly.
 
-A rank can also bound its own movement. Suppose the key at the requested position is *p* and every key to its right is at least *p*. Start at the first earlier record greater than *p*. Keep records at most *p* in source order until they fill the prefix through the requested rank. Every extra record taken from the right has key *p*, so the last one is the required stable occurrence. Move the skipped records to the end of this window in source order. Everything beyond the window already belongs on its side of the cut. A bound on the left permits the mirror operation. If the window contains too few matches or too many skipped records, discovery ends before any payload moves.
-
-A frequent sampled key offers another ordered subsequence, all its occurrences in input order. For full sorting, the exceptions fill the intervals below and above that key. For a rank inside its equal band, the finisher counts how many exceptions belong on each side. It shifts just enough exception slots across the cut to put the selected occurrence at its rank. Equal keys in both streams retain their input order.
-
-An ordered prefix or suffix can itself be the sparse part of the result. Keep a bounded batch of `(key, source position)` pairs. Each time the batch holds twice the requested count, discard its worse half. Each such reduction pays for a full batch of new candidates. Order the surviving positions and place them at the requested end. When moving records costs more space than keeping their keyed positions, the same scan checks whether any original end key occurs outside the end. Bits that all end keys share rule out most comparisons on diverse keys. The total exact lookup work is bounded by the input length. If the end keys are disjoint from the rest, move only the winners and displaced end records among their own slots. Otherwise fill the complement in source order.
-
-The placement rule also covers a dominant key. Reserve a destination interval for the background stream. Clamp each exceptional slot to leave room for every later exception on its side before the interval, or every earlier exception on its side after the interval. These bounds increase with the slot index, so the slots stay distinct and in order. Reserving the whole equal-key band completes a sort. Reserving just the requested rank establishes its stable occurrence.
-
-These constructions yield a sequence of source spans. Only isolated records need parking in scratch. The longer spans come from the same ordered subsequence, so the finisher can move them in bulk and then restore the isolated records. A parallel root hands complete buckets to its finishers before they try this serial work.
+Both constructions merge isolated source positions with runs from the background. Reserving a destination band for equal keys establishes their full order. Reserving one position establishes a rank. The mover parks isolated records, copies the longer runs in overlap-safe order, and restores the parked records. Rayon schedules the slice before its serial finisher tries this path.
 
 ## Nodes and tiles
 
@@ -103,9 +95,7 @@ While the block partition completes, each requested child that fits a tile is fi
 
 ## When the result is a permutation
 
-An index word only needs enough low bits to name a source position. For a dense argsort the engine first counts the highest varying digit. It writes each source position into that digit’s band, with the next key bits in the spare high bits of the word. Sorting the band by those high bits keeps the source positions attached. Only a group whose packed prefixes tie can need another read of the source keys. Emitting positions in input order and refining them stably preserves equal-key order.
-
-Cached-key sorting uses the same source order for a wide key window. A dense permutation moves payloads along its cycles. A sparse permutation can move its ordered source runs directly.
+Argsort counts the highest varying byte and emits each source index into its band in input order. Spare bits in the index word hold the next key prefix. Refining these packed words preserves ties and needs the source keys again only where tied prefixes leave bits unresolved. Cached-key sorting can apply the resulting cycles or the original sparse runs directly to its payloads.
 
 ## Summary
 

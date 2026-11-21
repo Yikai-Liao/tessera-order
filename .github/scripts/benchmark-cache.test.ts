@@ -44,10 +44,11 @@ console.log(JSON.stringify([
   assert.notEqual(pr.key, main.key);
   assert.match(pr.environment.RUSTFLAGS, /-x86-branches-within-32B-boundaries/);
   assert.match(pr.environment.RUSTFLAGS, /-align-all-functions=6/);
-  assert.doesNotMatch(main.environment.RUSTFLAGS, /-x86-branches|-align-all-functions/);
+  assert.equal(main.environment.RUSTFLAGS, "-C target-feature=+crt-static");
   assert.equal(pr.environment.CARGO_PROFILE_BENCH_DEBUG, "0");
   assert.equal(pr.environment.CARGO_BUILD_TARGET, "x86_64-unknown-linux-gnu");
   assert.match(pr.environment.RUSTFLAGS, /target-feature=\+crt-static/);
-  assert.doesNotMatch(native.environment.RUSTFLAGS, /crt-static/);
+  assert.equal(native.environment.RUSTFLAGS, "");
+  assert.notEqual(main.key, native.key);
   assert.notEqual(native.key, pr.key);
 });

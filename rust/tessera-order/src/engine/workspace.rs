@@ -9,7 +9,7 @@ use super::{block, tile};
 
 /// Lazy storage shared across serial subproblems of the owning invocation.
 /// Parallel finishers borrow separate owners from the invocation-local pool.
-pub(super) struct Workspace<T> {
+pub(in crate::engine) struct Workspace<T> {
     pub(super) tile: tile::Scratch<T>,
     pub(super) block: block::Buffers<T>,
 }

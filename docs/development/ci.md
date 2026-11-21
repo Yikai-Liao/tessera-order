@@ -44,9 +44,9 @@ Cargo caches are saved from `main` only. Pull requests, including those into lon
 
 `bun run lint:architecture` runs the [source checker](../../.github/scripts/check-architecture.ts) in the repository-wide lint job. It checks the library's Rust source, including non-ignored new files in the worktree.
 
-- Keep the engine private. Review changes to the [engine facade](../design/engine.md#knowledge-boundaries) against the export list in the checker. Engine code cannot import the whole crate or refer back to the `algorithms` module through a crate-root or relative path.
-- Keep `Workspace` fields and methods inside the engine.
-- Use individual lint names in `allow` and `expect` instead of `warnings` or lint groups that cover the protected safety lints. The same rule applies inside `cfg_attr`. Exceptions to `unsafe_op_in_unsafe_fn`, `clippy::missing_safety_doc` and `clippy::undocumented_unsafe_blocks` must attach to a function or statement and include a nonempty `reason`.
+- Keep the engine private. Review changes to the [engine facade](../design/engine.md#knowledge-boundaries) against the export list in the checker. The checker flags direct paths from the engine to the crate-root `algorithms` module, including relative paths and grouped or renamed imports, as well as imports of the whole crate. Indirect references through crate-root re-exports fall outside this path check.
+- The checker requires the top-level `Workspace` declaration in `engine/workspace.rs` to use `pub(in crate::engine)`. Rust privacy enforces use of the type within the engine.
+- Use individual lint names in `allow` and `expect` instead of `warnings` or lint groups that cover the protected safety lints. The same rule applies inside `cfg_attr`. Exceptions to `unsafe_op_in_unsafe_fn`, `clippy::missing_safety_doc` and `clippy::undocumented_unsafe_blocks` must attach to a function, statement or direct block tail expression and include a nonempty `reason`.
 
 The checker works on parsed source before macro expansion and name resolution. Rust and Clippy still check privacy, lint settings and unsafe code.
 

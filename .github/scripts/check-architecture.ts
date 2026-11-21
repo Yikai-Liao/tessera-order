@@ -104,37 +104,6 @@ function visibility(node: SgNode): string {
   return modifier ? syntaxText(modifier) : "";
 }
 
-function workspaceMemberIsInternal(member: SgNode, moduleDepth: number): boolean {
-  const scope = member.kind() === "visibility_modifier" ? syntaxText(member) : visibility(member);
-  if (privateVisibility.has(scope) || /^pub\(incrate::engine(?:::|\))/.test(scope)) return true;
-  const parents = /^pub\((?:in)?(super(?:::super)*)\)$/.exec(scope)?.[1];
-  return (
-    parents !== undefined && parents.split("::").length < moduleDepth + inlineModuleDepth(member)
-  );
-}
-
-function workspaceMembers(root: SgNode): SgNode[] {
-  const declarations = root.findAll({
-    rule: { any: [{ kind: "struct_item" }, { kind: "impl_item" }] },
-  });
-  return declarations.flatMap((item) => {
-    if (item.kind() === "struct_item" && syntaxText(item.field("name")!) === "Workspace") {
-      const body = item.field("body");
-      return body?.kind() === "ordered_field_declaration_list"
-        ? body.namedChildren().filter((child) => child.kind() === "visibility_modifier")
-        : (body?.namedChildren().filter((child) => child.kind() === "field_declaration") ?? []);
-    }
-    if (item.kind() === "impl_item") {
-      const type = item.field("type")!;
-      const base = type.kind() === "generic_type" ? type.field("type")! : type;
-      if (syntaxText(base.field("name") ?? base) === "Workspace") {
-        return item.field("body")!.namedChildren();
-      }
-    }
-    return [];
-  });
-}
-
 function attributeArguments(tree: SgNode): SgNode[][] {
   const args: SgNode[][] = [[]];
   for (const token of tree.children().slice(1, -1)) {
@@ -163,12 +132,32 @@ function lintSuppressions(tokens: SgNode[]): SgNode[][][] {
 function hasReason(args: SgNode[][]): boolean {
   return args.some(
     ([name, equals, value]) =>
-      name?.text() === "reason" &&
+      name &&
+      syntaxText(name) === "reason" &&
       equals?.kind() === "=" &&
       (value?.kind() === "string_literal" || value?.kind() === "raw_string_literal") &&
       value
         .namedChildren()
         .some((child) => child.kind() === "string_content" && child.text().trim()),
+  );
+}
+
+function hasLocalLintScope(attribute: SgNode): boolean {
+  if (attribute.kind() === "inner_attribute_item") return false;
+  const [target, following] = attribute
+    .nextAll()
+    .filter((node) => node.isNamed() && !isComment(node) && node.kind() !== "attribute_item");
+  if (!target) return false;
+  const kind = String(target.kind());
+  if (localLintScopes.has(kind)) return true;
+
+  // The parser represents a block tail as a bare expression sibling.
+  // A final declaration is still an item, even without a semicolon.
+  return (
+    attribute.parent()?.kind() === "block" &&
+    !following &&
+    kind !== "ERROR" &&
+    !/_(item|declaration|definition|statement)$/.test(kind)
   );
 }
 
@@ -214,21 +203,23 @@ export function checkRustSource(path: string, source: string): string[] {
     }
   }
 
+  if (path === `${engineRoot}/workspace.rs`) {
+    for (const item of root.namedChildren()) {
+      if (
+        item.kind() === "struct_item" &&
+        syntaxText(item.field("name")!) === "Workspace" &&
+        visibility(item) !== "pub(incrate::engine)"
+      ) {
+        report(item, "engine-boundary", "Scope the Workspace type to crate::engine.");
+      }
+    }
+  }
+
   if (engine) {
     const moduleDepth = path
       .slice(sourceRoot.length + 1)
       .replace(/\/mod\.rs$/, "")
       .split("/").length;
-    for (const member of workspaceMembers(root)) {
-      if (!workspaceMemberIsInternal(member, moduleDepth)) {
-        report(
-          member,
-          "engine-boundary",
-          "Keep Workspace storage and operations inside the engine.",
-        );
-      }
-    }
-
     const paths = root.findAll({
       rule: {
         any: [
@@ -277,22 +268,15 @@ export function checkRustSource(path: string, source: string): string[] {
           `Name the individual lint instead of suppressing ${group}.`,
         );
       }
-      if (names.some((name) => safetyLints.has(name))) {
-        const target = node
-          .nextAll()
-          .find((next) => next.kind() !== "attribute_item" && !isComment(next));
-        if (
-          node.kind() === "inner_attribute_item" ||
-          !target ||
-          !localLintScopes.has(String(target.kind())) ||
-          !hasReason(args)
-        ) {
-          report(
-            node,
-            "safety-lint-scope",
-            "Safety-lint exceptions require a specific function or statement and a nonempty reason.",
-          );
-        }
+      if (
+        names.some((name) => safetyLints.has(name)) &&
+        (!hasLocalLintScope(node) || !hasReason(args))
+      ) {
+        report(
+          node,
+          "safety-lint-scope",
+          "Safety-lint exceptions require a specific function, statement or block tail expression and a nonempty reason.",
+        );
       }
     }
   }

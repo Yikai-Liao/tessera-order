@@ -123,36 +123,54 @@ test("engine code cannot refer to adapters or import the crate root", () => {
   );
 });
 
-test("Workspace fields and methods stay inside the engine", () => {
+test("only the engine's top-level Workspace declaration is checked", () => {
   rejects(workspace, "engine-boundary", [
-    "pub(super) struct Workspace<T> { pub(crate) block: T }",
-    "pub(super) struct Workspace<T>(pub T);",
-    "impl<T> self::Workspace<T> { pub(crate) fn buffers(&self) {} }",
-    "impl<T> Workspace<T> { pub(crate) fn new() -> Self { todo!() } }",
-    "mod nested { impl<T> super::Workspace<T> { pub(crate) fn buffers(&self) {} } }",
+    "pub(crate) struct Workspace<T> { block: T }",
+    "pub struct r#Workspace<T>(T);",
   ]);
-  rejects(`${engine}/refine/mod.rs`, "engine-boundary", [
-    "impl<T> super::workspace::Workspace<T> { pub(crate) fn buffers(&self) {} }",
-  ]);
-  rejects(facade, "engine-boundary", [
-    "impl<T> workspace::Workspace<T> { pub(super) fn buffers(&self) {} }",
-  ]);
+  const localWorkspace = `
+    mod nested {
+      pub(crate) struct Workspace;
+      impl Workspace {
+        pub(crate) fn unrelated() {}
+      }
+    }
+  `;
+  assert.deepEqual(checkRustSource(`${engine}/refine.rs`, localWorkspace), []);
   assert.deepEqual(
     checkRustSource(
       workspace,
       `
-    pub(super) struct Workspace<T> {
-      pub(super) block: T,
-      pub(in crate::engine) tile: T,
-    }
-    impl<T> Workspace<T> {
-      pub(super) fn new() -> Self { todo!() }
-      fn internal(&self) {}
-    }
-  `,
+      pub(in crate::engine) struct Workspace<T> { pub(super) block: T }
+      ${localWorkspace}
+    `,
     ),
     [],
   );
+});
+
+test("safety-lint exceptions can attach to a block's direct tail expression", () => {
+  const path = `${engine}/block.rs`;
+  for (const reason of ["reason", "r#reason"]) {
+    assert.deepEqual(
+      checkRustSource(
+        path,
+        `
+      unsafe fn read_tail(p: *const u32) -> u32 {
+        #[allow(unsafe_op_in_unsafe_fn, ${reason} = "caller guarantees readability")]
+        p.read()
+        // The comment does not change the tail expression.
+      }
+    `,
+      ),
+      [],
+    );
+  }
+  rejects(path, "safety-lint-scope", [
+    "unsafe fn f(p: *const u32) -> u32 { #[allow(unsafe_op_in_unsafe_fn)] p.read() }",
+    'fn f() { #[allow(unsafe_op_in_unsafe_fn, reason = "local")] const VALUE: u32 = 1; }',
+    'fn f() { #[allow(unsafe_op_in_unsafe_fn, reason = "local")] mod nested {} }',
+  ]);
 });
 
 test("safety-lint exceptions need a reason and a function or statement scope", () => {

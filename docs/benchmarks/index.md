@@ -16,7 +16,7 @@ In the current measurements:
 - **Large random inputs:** Tessera is the fastest stable sort for most key and record types. On `u32` keys, unstable SIMD and radix sorts are faster.
 - **Sorted and nearly sorted inputs:** sorted inputs are faster than with `slice::sort`, and nearly sorted ones many times faster.
 - **Weak spots:** reversed input, a sorted run followed by a random tail, heavily skewed (Zipf) keys and very short random inputs can be slower than `slice::sort`. [Engine evidence](../design/evidence.md#landed-with-open-losses) tracks these losses.
-- **Memory:** extra memory grows as √n, while `slice::sort`, radsort and glidesort allocate buffers proportional to the input.
+- **Memory:** a serial `sort` needs extra memory that grows as √n, while `slice::sort`, radsort and glidesort allocate buffers proportional to the input. Parallel sorting, argsort and cached-key sorting have [their own bounds](../../conformance/semantics.md#space).
 
 The [algorithm comparison](algorithms.md) shows every figure behind these statements.
 

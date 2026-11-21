@@ -117,13 +117,69 @@ pub(crate) fn finish_insertion<T, E: Extract<T>>(
 pub(crate) fn confirm_ascending<T, E: Extract<T>>(
     records: &[T],
     extractor: &mut E,
-    previous: E::Value,
+    mut previous: E::Value,
 ) -> bool {
-    records
-        .iter()
+    // Combine each group's ordering results before the rejection decision;
+    // independent comparisons can overlap without promising branchless code.
+    // Keys still run once, in order; an inversion may read the rest of its group.
+    let (chunks, tail) = records.as_chunks::<4>();
+    for chunk in chunks {
+        let mut ordered = true;
+        for record in chunk {
+            let current = extractor.key(record);
+            ordered &= previous <= current;
+            previous = current;
+        }
+        if !ordered {
+            return false;
+        }
+    }
+    tail.iter()
         .try_fold(previous, |before, record| {
             let after = extractor.key(record);
             (before <= after).then_some(after)
         })
         .is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::key::ByKey;
+    use alloc::vec::Vec;
+
+    #[test]
+    fn confirmation_checks_group_boundaries_and_preserves_key_order() {
+        for len in 0..=17 {
+            for inverted in 0..=len {
+                let records: Vec<_> = (0..len)
+                    .map(|id| {
+                        (
+                            if id == inverted {
+                                0u64
+                            } else {
+                                id as u64 / 2 + 1
+                            },
+                            id,
+                        )
+                    })
+                    .collect();
+                for previous in [0, 10] {
+                    let expected = records.first().is_none_or(|record| previous <= record.0)
+                        && records.windows(2).all(|pair| pair[0].0 <= pair[1].0);
+                    let mut visited = Vec::new();
+                    let actual = confirm_ascending(
+                        &records,
+                        &mut ByKey(|record: &(u64, usize)| {
+                            visited.push(record.1);
+                            record.0
+                        }),
+                        previous,
+                    );
+                    assert_eq!(actual, expected);
+                    assert!(visited.iter().enumerate().all(|(index, &id)| index == id));
+                }
+            }
+        }
+    }
 }

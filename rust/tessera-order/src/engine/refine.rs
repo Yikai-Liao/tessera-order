@@ -294,8 +294,8 @@ fn finish_ordered<T, E: Extract<T>>(records: &mut [T], order: Order, extractor: 
     }
 }
 
-/// Pair count at which the order sample stops growing. Disorder confined to a
-/// fraction `f` of a large input still meets about `f * ORDER_SAMPLES` pairs.
+/// Target pair count for choosing the stride on large inputs. A contiguous
+/// region covering a fraction `f` of the input meets about `f * ORDER_SAMPLES` pairs.
 const ORDER_SAMPLES: usize = 4096;
 /// Minimum stride: the sample reads at most two keys per this many records,
 /// bounding its cost on ordered inputs, which also pay the confirming scan.
@@ -605,12 +605,16 @@ mod tests {
 
     #[test]
     fn confirm_order_finds_unsampled_inversion() {
-        let len = if cfg!(miri) { 130 } else { 8192 };
+        let len = if cfg!(miri) {
+            130
+        } else {
+            ORDER_SAMPLE_MIN_LEN
+        };
         let mut values: Vec<_> = (0..len as u64).collect();
-        let index = (len / 2) & !1;
+        // At the sampling threshold, pairs end at multiples of 128. The
+        // swap sits between two pairs. Miri uses direct confirmation.
+        let index = len / 2 + 1;
         values.swap(index, index + 1);
-        // At 8192 records the strided gate checks odd pair offsets. Miri
-        // exercises the confirmation directly on a shorter vector scan.
         assert!(confirm_order(&values, &mut Direct) == Order::Unsorted);
         crate::sort(&mut values);
         assert_eq!(values, (0..len as u64).collect::<Vec<_>>());

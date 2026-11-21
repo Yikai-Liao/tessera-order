@@ -534,7 +534,7 @@ mod tests {
     #[test]
     fn presets_preserve_coverage() {
         for (text, expected) in [
-            (include_str!("../../plans/continuous.toml"), 76),
+            (include_str!("../../plans/continuous.toml"), 83),
             (include_str!("../../plans/smoke.toml"), 125),
             (include_str!("../../plans/release.toml"), 381),
             (include_str!("../../plans/parallel.toml"), 16),
@@ -651,7 +651,7 @@ mod tests {
         }
 
         // Bound the expensive serial phase without locking input iteration order.
-        assert_eq!(cases.iter().filter(|case| case.len >= 1_000_000).count(), 8);
+        assert_eq!(cases.iter().filter(|case| case.len >= 1_000_000).count(), 9);
         assert!(!cases.iter().any(|case| {
             case.ty == "u64"
                 && ["skew99", "two_values"].contains(&case.distribution.as_str())

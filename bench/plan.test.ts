@@ -167,6 +167,10 @@ test("revision suites place operations on include rules; an override replaces th
       { kind: "select", index: 65535 },
       { kind: "select", index: 0 },
       { kind: "select", index: 65535 },
+      { kind: "argsort" },
+      { kind: "select", index: 4 },
+      { kind: "argsort" },
+      { kind: "select", index: 32768 },
     ],
   );
   const sorting = await loadPlan("continuous", { operation: "sort" });

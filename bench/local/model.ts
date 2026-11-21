@@ -98,6 +98,8 @@ export interface LocalRun extends RevisionPair {
     cpu: string;
     affinity: string;
     aslr?: "disabled" | "uncontrolled";
+    /** CPUs of concurrent serial lanes, one per physical core; absent for one lane. */
+    serialLanes?: string[];
   };
   shard?: Shard;
 }

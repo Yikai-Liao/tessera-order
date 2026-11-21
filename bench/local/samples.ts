@@ -1,10 +1,38 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { readFile } from "node:fs/promises";
 import { platform } from "node:os";
 import { basename, dirname } from "node:path";
 import { command, diagnostic } from "../../tools/process.ts";
 import { parseCriterionId, revisionSampling } from "../catalog.ts";
-import type { LocalRun } from "./model.ts";
+import { type LocalRun, shardCases } from "./model.ts";
+
+/** Serial cases measured at once on a host reserved for four-thread cases. Each lane
+ * takes one physical core, so lanes never share an SMT sibling's caches and ports. */
+const SERIAL_LANES = 2;
+
+/** One CPU per physical core in `mask`, in mask order, at most `SERIAL_LANES`. Without
+ * readable topology the host keeps a single lane. */
+export async function serialLanes(
+  mask: string,
+  core: (cpu: string) => Promise<string> = async (cpu) => {
+    const topology = `/sys/devices/system/cpu/cpu${cpu}/topology`;
+    const read = (name: string) => readFile(`${topology}/${name}`, "utf8");
+    return `${(await read("physical_package_id")).trim()}:${(await read("core_id")).trim()}`;
+  },
+): Promise<string[]> {
+  const lanes = new Map<string, string>();
+  for (const cpu of mask.split(",")) {
+    let id: string;
+    try {
+      id = await core(cpu);
+    } catch {
+      return [mask.split(",")[0]];
+    }
+    if (!lanes.has(id)) lanes.set(id, cpu);
+  }
+  return [...lanes.values()].slice(0, SERIAL_LANES);
+}
 
 /** Measure adjacent AB/BA samples in fresh worker pairs, retaining one total case budget. */
 export async function measureSamples(
@@ -22,10 +50,14 @@ export async function measureSamples(
   const mixed = (run.shard?.allCases ?? run.cases).some(
     (id) => parseCriterionId(id).mode === "par-4",
   );
-  for (const id of run.cases) {
-    diagnostic(`Sampling ${id}`);
-    const parallel = parseCriterionId(id).mode === "par-4";
-    const mask = parallel || !mixed ? cpu : cpu?.split(",")[0];
+  // Concurrent lanes finish in any order; keep each snapshot write whole.
+  let saving = Promise.resolve();
+  const persist = () => {
+    saving = saving.then(save);
+    return saving;
+  };
+  const measureCase = async (id: string, mask: string | undefined) => {
+    diagnostic(`Sampling ${id}${mask ? ` on CPU ${mask}` : ""}`);
     const count = run.sampleCounts[id];
     const worker = (
       role: keyof typeof binaries,
@@ -75,6 +107,35 @@ export async function measureSamples(
       samples.push(pair);
     }
     run.samples[id] = samples;
-    await save();
+    await persist();
+  };
+  // Four-thread cases own every reserved CPU; serial lanes start only after them.
+  const parallel = run.cases.filter((id) => parseCriterionId(id).mode === "par-4");
+  const serial = run.cases.filter((id) => parseCriterionId(id).mode !== "par-4");
+  for (const id of parallel) await measureCase(id, cpu);
+  const lanes = mixed && cpu ? await serialLanes(cpu) : [cpu];
+  const count = Math.min(lanes.length, serial.length);
+  if (count > 1) run.host.serialLanes = lanes.slice(0, count) as string[];
+  if (count <= 1) {
+    for (const id of serial) await measureCase(id, mixed ? cpu?.split(",")[0] : cpu);
+  } else {
+    // A failed lane stops the others at their next case; each running worker is reaped.
+    let failed = false;
+    const results = await Promise.allSettled(
+      lanes.slice(0, count).map(async (mask, index) => {
+        for (const id of shardCases(serial, index + 1, count)) {
+          if (failed) return;
+          try {
+            await measureCase(id, mask);
+          } catch (error) {
+            failed = true;
+            throw error;
+          }
+        }
+      }),
+    );
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure) throw failure.reason;
   }
+  await saving;
 }

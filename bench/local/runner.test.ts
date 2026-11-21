@@ -12,7 +12,7 @@ import { simdFeatures } from "../workspace.ts";
 import { revisionThreads, summarizeLocal } from "./model.ts";
 import { renderLocalReport } from "./report.ts";
 import { comparisonCpus, selectedCases, serialBaselineManifest } from "./runner.ts";
-import { measureSamples } from "./samples.ts";
+import { measureSamples, serialLanes } from "./samples.ts";
 
 test("retained budgets survive catalog changes without accepting incomplete samples", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-retained-budget-"));
@@ -194,4 +194,15 @@ test("revision comparison enables historical SIMD without changing current build
   ]) {
     assert.throws(() => simdFeatures(manifest), /no supported SIMD backend/);
   }
+});
+
+test("serial lanes take one CPU per physical core", async () => {
+  const cores: Record<string, string> = { "0": "0:0", "1": "0:0", "2": "0:1", "3": "0:1" };
+  assert.deepEqual(await serialLanes("0,1,2,3", async (cpu) => cores[cpu]), ["0", "2"]);
+  assert.deepEqual(await serialLanes("0,1,2,3", async (cpu) => `0:${cpu}`), ["0", "1"]);
+  assert.deepEqual(await serialLanes("0,1", async () => "0:0"), ["0"]);
+  const unreadable = async () => {
+    throw new Error("no topology");
+  };
+  assert.deepEqual(await serialLanes("4,5,6,7", unreadable), ["4"]);
 });

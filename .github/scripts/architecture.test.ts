@@ -75,7 +75,7 @@ test("the facade exports complete operations, including single-rank selection", 
     pub(self) mod tile;
     pub mod thresholds;
     pub use key::RadixKey;
-    pub(crate) use self::refine::{sort, select_nth};
+    pub(crate) use self::refine::{argsort, order_by_cached_indices, select_nth, sort};
     #[cfg(feature = "rayon")]
     pub(crate) use refine::parallel::sort as par_sort;
     #[cfg(feature = "trace")]

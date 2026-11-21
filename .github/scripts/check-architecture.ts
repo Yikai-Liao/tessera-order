@@ -19,6 +19,8 @@ const facadeExports = new Set([
   "key::RadixKey",
   "key::Unsigned",
   "key::bit_len",
+  "refine::argsort",
+  "refine::order_by_cached_indices",
   "refine::parallel::sort",
   "refine::select_nth",
   "refine::sort",

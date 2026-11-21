@@ -10,6 +10,8 @@ use crate::engine::{
 };
 use alloc::vec::Vec;
 
+const BANDS: usize = 1 << u8::BITS;
+
 pub(crate) fn argsort<T, K: RadixKey>(values: &[T], key: impl FnMut(&T) -> K) -> Vec<usize> {
     let mut indices = Vec::new();
     if let Some(order) = order_indices(values, key, size_of::<usize>(), &mut indices) {
@@ -66,14 +68,21 @@ fn order_indices<T, K: RadixKey>(
     let lower = varying & ((1u128 << digit_shift) - 1);
     let index_bits = bit_len((len - 1) as u128);
     let index_mask = usize::MAX >> (usize::BITS as usize - index_bits);
-    let prefix_shift = bit_len(lower)
-        .saturating_sub(usize::BITS as usize - index_bits)
-        .max(low);
+    // When a high-byte band averages at most one entry per next-byte value,
+    // finish its short index list from source keys. Denser bands amortize
+    // packing another prefix and decoding its ties.
+    let prefix_bits = if len.div_ceil(BANDS) <= BANDS {
+        0
+    } else {
+        index_bits.min(usize::BITS as usize - index_bits)
+    };
+    let prefix_shift = bit_len(lower).saturating_sub(prefix_bits).max(low);
+    let prefix_mask = lower >> prefix_shift;
     // Each band has the same high digit. Use the spare bits of its index
     // words for the next key prefix, preserving source order on ties.
     let encoded = |r: &T| key(r).encode().to_u128();
     let ends = scatter_indices(values, indices, encoded, digit_shift, |key, source| {
-        if lower == 0 {
+        if prefix_mask == 0 {
             source
         } else {
             ((key >> prefix_shift) as usize) << index_bits | source
@@ -91,36 +100,27 @@ fn order_indices<T, K: RadixKey>(
         }
         let band = &mut indices[start..end];
         start = end;
-        let mut prefix = ByKey(|word: &usize| *word >> index_bits);
-        if band.len() <= tile_len {
-            scratch
-                .tile
-                .finish_child(band, lower >> prefix_shift, &mut prefix);
-        } else {
+        if prefix_mask != 0 {
             Sorter {
                 scratch: &mut scratch,
-                extractor: &mut prefix,
+                extractor: &mut ByKey(|word: &usize| *word >> index_bits),
                 tile_len,
             }
-            .sort_child(band, lower >> prefix_shift, Requirement::All);
+            .sort_child(band, prefix_mask, Requirement::All);
         }
-        if remaining == 0 {
-            for word in band {
-                *word &= index_mask;
-            }
-            continue;
-        }
-        for ties in band.chunk_by_mut(|a, b| *a >> index_bits == *b >> index_bits) {
-            for word in &mut *ties {
-                *word &= index_mask;
-            }
-            if ties.len() > 1 {
-                Sorter {
-                    scratch: &mut scratch,
-                    extractor: &mut extract,
-                    tile_len,
+        let mut sorter = Sorter {
+            scratch: &mut scratch,
+            extractor: &mut extract,
+            tile_len,
+        };
+        if prefix_mask == 0 {
+            sorter.sort_child(band, remaining, Requirement::All);
+        } else {
+            for ties in band.chunk_by_mut(|a, b| *a >> index_bits == *b >> index_bits) {
+                for word in &mut *ties {
+                    *word &= index_mask;
                 }
-                .sort_child(ties, remaining, Requirement::All);
+                sorter.sort_child(ties, remaining, Requirement::All);
             }
         }
     }
@@ -135,9 +135,9 @@ fn scatter_indices<T>(
     mut key: impl FnMut(&T) -> u128,
     shift: usize,
     pack: impl Fn(u128, usize) -> usize,
-) -> [usize; 256] {
+) -> [usize; BANDS] {
     let band = |key: u128| usize::from((key >> shift) as u8);
-    let mut ends = [0; 256];
+    let mut ends = [0; BANDS];
     for record in records {
         ends[band(key(record))] += 1;
     }

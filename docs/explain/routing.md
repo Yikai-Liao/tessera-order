@@ -4,7 +4,7 @@ Before any radix pass, Tessera checks whether the input needs one. Many real inp
 
 ## Order probe
 
-`probe_order` samples adjacent pairs at a stride of `max(1, floor(n / 4,096))`. At stride 1 (fewer than 8,192 records) it goes straight to the full scan, `confirm_order`, since sampling every pair first would repeat its work. That scan reads each key once. Its first three keys can already show both a rising and a falling pair, which returns unsorted at once. Otherwise it skips leading equal keys, fixes the direction at the first unequal key, and checks only that direction from there. It returns ascending (sorted or constant keys), strictly descending, descending with ties, or unsorted.
+`probe_order` samples adjacent pairs at a stride of `max(1, floor(n / 4,096))`. At stride 1 (fewer than 8,192 records) it goes straight to the full scan, `confirm_order`, since sampling every pair first would repeat its work. The first three keys can establish a direction or rule out both directions. If they all tie, the last key determines which direction to check. Equal endpoints require every intervening key to match. It returns ascending (sorted or constant keys), strictly descending, descending with ties, or unsorted.
 
 At larger strides, the sample classifies the input:
 
@@ -14,7 +14,7 @@ At larger strides, the sample classifies the input:
 | all equal | **flat** | decide after the varying-bit scan (below) |
 | all `≤`, or all `≥` | candidate order | a full scan, `confirm_order`, checks every pair |
 
-A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. Any leading equal keys skipped while finding the direction rule out strict descent. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
+A confirmed **ascending** input returns immediately. A strictly descending input is reversed directly. For other confirmed descending inputs, the engine reverses the slice and then each run of equal keys (`reverse_stably`), because a plain reversal would put equal keys in reverse input order.
 
 The sample rejects most unsorted inputs within a few pairs, so the full scan runs only on inputs that look ordered. Its ascending continuation is the vector scan budgeted insertion uses for direct primitive keys, with a scalar fallback for other keys and short slices; its descending continuation also records whether any adjacent pair ties.
 
@@ -95,7 +95,7 @@ While the block partition completes, each requested child that fits a tile is fi
 
 ## When the result is a permutation
 
-Argsort expands sparse runs into its existing index buffer. For dense input it counts the highest varying byte and emits each source index into its band in input order. Spare bits in the index word hold the next key prefix. Refining these packed words preserves ties and needs the source keys again only where tied prefixes leave bits unresolved. Cached-key sorting can apply the resulting cycles or the original sparse runs directly to its payloads.
+Argsort expands sparse runs into its existing index buffer. For dense input it counts the highest varying byte and emits each source index into its band in input order. Short bands use source keys directly. For denser bands, spare bits in the index word hold the next key prefix. Within a band the words order by key prefix and then by source position. Only a tied prefix with unresolved bits requires another source-key lookup. Cached-key sorting can apply the resulting cycles or the original sparse runs directly to its payloads.
 
 ## Summary
 

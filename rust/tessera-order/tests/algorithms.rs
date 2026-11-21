@@ -153,7 +153,7 @@ fn argsort_keeps_source_and_float_bits() {
 fn argsort_refines_prefix_ties_and_preserves_complete_ties() {
     // Many source indices share the same high prefix. Their distinguishing
     // low bits cannot fit above the index in one word, even on a 64-bit host.
-    let keys: Vec<_> = (0..16_393u64)
+    let keys: Vec<_> = (0..65_537u64)
         .map(|i| {
             let mixed = i.wrapping_mul(0x9e37_79b9_7f4a_7c15);
             (u128::from(mixed >> 56) << 120)

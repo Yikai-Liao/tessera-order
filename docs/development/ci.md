@@ -40,6 +40,16 @@ Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, 
 
 Cargo caches are saved from `main` only. Pull requests, including those into long-lived branches, restore `main`'s copies and save nothing, so each key keeps one copy within GitHub's 10 GB repository limit, and PR copies cannot evict the caches every PR restores. A PR that changes a cache key builds that cache cold until it merges. The exception is benchmark preparation: main performance tracking saves its key, so preparation saves only while that tracking is disabled.
 
+### Rust architecture policies
+
+`bun run lint:architecture` runs the [source checker](../../.github/scripts/check-architecture.ts) in the repository-wide lint job. It checks the library's Rust source, including non-ignored new files in the worktree.
+
+- Keep the engine private. Review changes to the [engine facade](../design/engine.md#knowledge-boundaries) against the export list in the checker. Engine code cannot import the whole crate or refer back to the `algorithms` module through a crate-root or relative path.
+- Keep `Workspace` fields and methods inside the engine.
+- Use individual lint names in `allow` and `expect` instead of `warnings` or lint groups that cover the protected safety lints. The same rule applies inside `cfg_attr`. Exceptions to `unsafe_op_in_unsafe_fn`, `clippy::missing_safety_doc` and `clippy::undocumented_unsafe_blocks` must attach to a function or statement and include a nonempty `reason`.
+
+The checker works on parsed source before macro expansion and name resolution. Rust and Clippy still check privacy, lint settings and unsafe code.
+
 ### Rust tests
 
 Each test cell tests only `tessera-order`, with the SIMD backend and the `rayon` entry points, also on Rust 1.89. There are no scalar or no-std configurations. The cells disable test-profile debug information to save compilation, at the cost of less informative backtraces; Miri, sanitizers, benchmarks and release builds are unaffected. Rayon tests cover sharded root scatter, caller-pool bucket scheduling, the one-thread fallback, task panics and record preservation. Miri uses [bounded safety fixtures](../../CONTRIBUTING.md#validation), leaving exhaustive arithmetic to native tests. The two Miri jobs interpret the serial and Rayon ownership fixtures, the latter including sequential fixtures for parallel storage and bucket handoff; native tests cover threaded scheduling. AddressSanitizer runs the library's serial and Rayon builds; benchmark executables stay with the comparison job, unsanitized.

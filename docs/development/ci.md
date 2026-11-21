@@ -14,7 +14,7 @@
 | Markdown, site inputs, shared figure templates or the figure engine (`rust/tessera-trace/`) | Docs |
 | C++ library inputs | C++ validation, when its manifest exists |
 
-An engine-only PR fetches no native sources, installs no TBB and skips the implementation harness (`Algorithm harness (Rust and C++)`, job ID `comparison`): its automatic checks are library correctness and the `prepare → measure → report` revision measurement. Comparator-only changes skip the library platform, Miri and sanitizer jobs. Shared build inputs select both.
+An engine-only PR fetches no native sources, installs no TBB and skips the implementation harness (`Implementation harness (Rust and C++)`, job ID `comparison`): its automatic checks are library correctness and the `prepare → measure → report` revision measurement. Comparator-only changes skip the library platform, Miri and sanitizer jobs. Shared build inputs select both.
 
 Issue and PR templates, Dependabot configuration, `fuzz/`, manual diagnostics and the separate title, DCO and release workflows select no extra lane. A path no row names, an unavailable base and manual dispatch select all lanes, so a new kind of file needs a row. The opt-in [main performance workflow](continuous-benchmarks.md#main-long-term-tracking) is independent of these lanes and `ci-ok`. PR updates cancel obsolete runs; each main push has its own concurrency group, so a later non-docs push cannot cancel a pending site deployment.
 

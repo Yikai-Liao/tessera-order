@@ -163,6 +163,10 @@ test("revision suites place operations on include rules; an override replaces th
       { kind: "partition-buckets", bucket_count: 65537 },
       { kind: "argsort" },
       { kind: "select", index: 32768 },
+      { kind: "argsort" },
+      { kind: "select", index: 4 },
+      { kind: "argsort" },
+      { kind: "select", index: 32768 },
     ],
   );
   const sorting = await loadPlan("continuous", { operation: "sort" });

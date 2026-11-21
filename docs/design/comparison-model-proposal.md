@@ -53,11 +53,12 @@ Existing IDs are not migrated. The tooling has no compatibility requirement befo
 ## Plans and CLI
 
 - **Plan schema 3.** `schema` is a format version only. Every include rule may carry `operation` and `threads` alongside the input axes, and `exclude` rules may exclude any dimension. The `[[parallel]]` rule kind is removed. Live and retired operations are separate schemas: new selections accept only live operations, and the retained-result decoder alone accepts retired ones.
-- **CLI.** `--operation` takes API names (`sort`, `argsort`, `select_nth`, `sort_by_cached_key`). `--threads` selects execution like `--lengths`. `--group` takes the group ID above. Direct executables take a plan instead of `--suite`. `compare algorithms` keeps its name; its help and the protocol define it as a comparison of implementations.
+- **CLI.** `--operation` takes API names (`sort`, `argsort`, `select_nth`, `sort_by_cached_key`). `--threads` selects execution like `--lengths`. `--group` takes the group ID above. Direct executables take a plan instead of `--suite`. `compare algorithms` becomes `compare implementations` and `--algorithms` becomes `--implementations`, as does the plan field.
 - **Cohorts.** `catalog.comparison` moves into each operation's entry, so each operation names its own ranking types and patterns.
 
 ## Results and publication
 
+- **Names.** Every remaining use of "algorithm" for an implementation is renamed: the tracking workflow input and matrix field, `TRACKING_ALGORITHM`, `bench/tracking/algorithms.ts`, Bencher branches (`implementation-<id>`) and the `algorithm` field of `comparison.json` runs. No old name is kept as an alias; a rename that leaves the previous term in use somewhere is not finished.
 - **Run records** in `<implementation>/YYYY-MM.jsonl` add `operation`, `execution` and `routes` (route per case group, from the runner's listing). A tracking job measures one implementation, operation and execution, so each job keeps its own time budget, and the comparison takes the latest run per (implementation, operation, execution). An aggregate comes from one run; it never combines cases from different runs.
 - **Index.** `<implementation>/index.json` gains `operation` and `execution` facets.
 - **Growth.** `growth.json` is keyed by operation, because argsort's retained index output and in-place selection answer different memory questions.
@@ -83,7 +84,7 @@ The strongest public implementations for selection and argsort are still to be s
 
 Each stage is a separate PR and changes no measured algorithm, input or sampling.
 
-1. **Vocabulary.** Define the five concepts in [benchmark tooling](benchmark-tooling.md), rename `shape`, `suite`, `workload` and `mode` in code and documentation, and rename the catalog's `algorithms` to `implementations`.
+1. **Vocabulary.** Define the five concepts in [benchmark tooling](benchmark-tooling.md), rename `shape`, `suite` and `workload` in code and documentation, and rename `algorithm` to `implementation` everywhere it means an implementation: catalog, plans, CLI (`compare implementations`, `--implementations`), tracking workflow, data branch fields and Bencher branches. `mode` goes in stage 2 with the table it names.
 2. **Catalog and IDs.** Add the `operations` table, the execution axis and the ID owner; remove `modes`, thread-suffixed IDs and `tessera-full`. Compare complete serial and parallel listings before and after, and check shard partitioning.
 3. **Plan schema 3 and CLI options.** Rewrite the repository plans.
 4. **Routes in results.** The runner lists routes, manifests retain them and reports take the denominator from the operation.

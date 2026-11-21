@@ -80,7 +80,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target/benchmark"
-          # Only static Rust workers share the PR cache; keep native outputs separate.
+          # Static Rust and native tracking builds use separate dependency caches.
           shared-key: ${{ matrix.native && 'benchmark-native' || 'benchmark-static' }}-${{ hashFiles('Cargo.toml', 'bench/workspace.ts') }}
       - uses: oven-sh/setup-bun@v2
         with:

@@ -56,10 +56,12 @@ export interface Cohort {
    * "speed vs slice::sort, " in its guide.
    */
   ranking: { ty: string; n: number; lengths: number[]; shapes: string[]; label: string };
-  /** Length of the element-type figure and the first length of the input-pattern figures. */
+  /** Length of the input-pattern and element-type figures. */
   n: number;
-  /** Further lengths the per-type input-pattern figures add as their own groups. */
-  moreLengths: number[];
+  /** The input-length figure compares `shape` at each of `lengths`, ascending. */
+  sweep: { shape: string; lengths: number[] };
+  /** The short-input figure compares every input pattern of `types` at each of `lengths`. */
+  short: { lengths: number[]; types: string[] };
   /** Input patterns every u64 input-pattern figure must have. */
   shapes: string[];
   /** Input patterns the element-type figure compares; every type must have each of them. */
@@ -351,69 +353,145 @@ function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
   );
 }
 
-// Each measured input pattern of one type, at the cohort's length and then at each further
-// length the type was measured at. Records admit only stable sorts; for keys, stability is
-// unobservable and every sort competes.
-function renderInputs(
-  field: Field,
-  cohort: Cohort,
-  name: string,
-  n: number,
-  ty = "u64",
-): Figure | null {
-  const { moreLengths } = cohort;
-  const patternsAt = (len: number) =>
-    field.cases
-      .filter((input) => input.ty === ty && input.len === len)
-      .map((input) => input.distribution);
+// Each measured input pattern of one type. Records admit only stable sorts;
+// for keys, stability is unobservable and every sort competes.
+function renderInputs(field: Field, cohort: Cohort, name: string, ty = "u64"): Figure | null {
+  const { n } = cohort;
+  const patterns = field.cases
+    .filter((input) => input.ty === ty && input.len === n)
+    .map((input) => input.distribution);
   // Retain the small-selection fallback rather than presenting a single input
   // as a full pattern panel.
-  if (ty === "u64" && !cohort.shapes.every((shape) => patternsAt(n).includes(shape))) return null;
-  const record = recordType(ty);
-  const stableOnly = record.task === "records";
+  if (ty === "u64" && !cohort.shapes.every((shape) => patterns.includes(shape))) return null;
+  const stableOnly = recordType(ty).task === "records";
   const plotted: [string, Standing][] = [];
   const nsPerKey: number[] = [];
-  const rowsAt = (len: number, shapes: (readonly [string, string])[]) =>
-    shapes
-      .filter(([shape]) => patternsAt(len).includes(shape))
+  const groups = SHAPE_GROUPS.map((g) => ({
+    title: g.title,
+    rows: g.shapes
+      .filter(([shape]) => patterns.includes(shape))
       .flatMap(([shape, label]) => {
-        const id = caseId({ ty, distribution: shape, len });
+        const id = caseId({ ty, distribution: shape, len: n });
         const s = standing(field, [id], stableOnly);
         const ns = field.nsPerKey(id, "tessera");
         if (!s || ns === null) return [];
-        const sized = moreLengths.length ? `${label} · ${formatLength(len)}` : label;
-        plotted.push([sized, s]);
+        plotted.push([label, s]);
         nsPerKey.push(ns);
         return [fieldRow({ input: label, sub: "", tag: "" }, s)];
-      });
-  const lengths = [n, ...moreLengths];
-  const groups = (
-    moreLengths.length
-      ? lengths.map((len) => ({
-          title: `${formatLength(len)} elements`,
-          rows: rowsAt(
-            len,
-            SHAPE_GROUPS.flatMap((g) => g.shapes),
-          ),
-        }))
-      : SHAPE_GROUPS.map((g) => ({ title: g.title, rows: rowsAt(n, g.shapes) }))
-  ).filter((g) => g.rows.length);
-  if (!plotted.length) return null;
+      }),
+  })).filter((g) => g.rows.length);
+  // The element-type figure already shows a type's shared pattern; a panel needs a few more.
+  if (plotted.length < (ty === "u64" ? 1 : 3)) return null;
   const standings = plotted.map(([, s]) => s);
-  const title = fieldTitle(standings, moreLengths.length ? "cases" : "inputs");
-  const dot = `each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to slice::sort`;
+  const title = fieldTitle(standings, "inputs");
   return {
     name,
-    subject: moreLengths.length
-      ? `${elements(ty)} by input pattern and length`
-      : `${elements(ty)} by input pattern${n <= SHORT ? `, ${formatLength(n)} elements` : ""}`,
-    summary: `Each row is one input pattern${moreLengths.length ? ", grouped by length" : ""}. Each dot is one ${stableOnly ? "stable sort (records keep equal keys in order)" : "sort"}, placed by its speed relative to slice::sort; the columns give Tessera's speed and rank.`,
+    subject: `${elements(ty)} by input pattern`,
+    summary: `Each row is one input pattern. Each dot is one ${stableOnly ? "stable sort (records keep equal keys in order)" : "sort"}, placed by its speed relative to slice::sort; the columns give Tessera's speed and rank.`,
     title,
     ...rendered({
       title,
-      guide: moreLengths.length
-        ? `${elements(ty)} · ${dot}`
-        : `${formatLength(n)} ${elements(ty)} · ${dot}`,
+      guide: `${formatLength(n)} ${elements(ty)} · each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to slice::sort`,
+      columns: ["Speed", "Rank"],
+      groups,
+      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
+      axis: SPEED_AXIS,
+      legend: kindLegend,
+    }),
+    table: fieldTable(plotted, nsPerKey),
+  };
+}
+
+// One pattern at each sweep length, one group per type, so a reader follows how Tessera's
+// standing changes with length. A type needs two lengths to show a change.
+function renderLengths(field: Field, cohort: Cohort): Figure | null {
+  const { shape, lengths } = cohort.sweep;
+  const plotted: [string, Standing][] = [];
+  const firsts: [number, boolean][] = [];
+  const groups = TYPE_GROUPS.flatMap((g) =>
+    g.types.map(([ty]) => {
+      const rows = lengths.flatMap((len) => {
+        const s = standing(field, [caseId({ ty, distribution: shape, len })], !g.keys);
+        return s ? [[len, s] as const] : [];
+      });
+      return {
+        title: `${elements(ty)} · against ${g.keys ? "any sort" : "stable sorts"}`,
+        rows:
+          rows.length < 2
+            ? []
+            : rows.map(([len, s]) => {
+                plotted.push([`${elements(ty)} · ${formatLength(len)}`, s]);
+                firsts.push([len, s.rank === 1]);
+                return fieldRow({ input: `${formatLength(len)} elements`, sub: "", tag: "" }, s);
+              }),
+      };
+    }),
+  ).filter((g) => g.rows.length);
+  if (!plotted.length) return null;
+  const standings = plotted.map(([, s]) => s);
+  // The shortest length from which Tessera leads at every longer measured length, if any.
+  const from = lengths.find((len) => firsts.every(([at, first]) => at < len || first));
+  const title =
+    from === lengths[0] || from === undefined
+      ? fieldTitle(standings, "cases")
+      : `Fastest from ${formatLength(from)} elements up`;
+  const input = distribution(shape).label;
+  return {
+    name: "lengths",
+    subject: "Speed by input length",
+    summary: `Each row is one input length, on the ${input} input. Each dot is one sort, placed by its speed relative to slice::sort; records compare only stable sorts.`,
+    title,
+    ...rendered({
+      title,
+      guide: `${input} input · each dot is one sort, placed by its speed relative to slice::sort`,
+      columns: ["Speed", "Rank"],
+      groups,
+      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
+      axis: SPEED_AXIS,
+      legend: kindLegend,
+    }),
+    table: fieldTable(plotted),
+  };
+}
+
+// Every pattern of the short-input types, grouped by length and type, where fixed per-call
+// costs and fallbacks decide the result.
+function renderShort(field: Field, cohort: Cohort): Figure | null {
+  const { lengths, types } = cohort.short;
+  const plotted: [string, Standing][] = [];
+  const nsPerKey: number[] = [];
+  const shapes = SHAPE_GROUPS.flatMap((g) => g.shapes);
+  const groups = lengths
+    .flatMap((len) =>
+      types.map((ty) => {
+        const stableOnly = recordType(ty).task === "records";
+        return {
+          title: `${formatLength(len)} ${elements(ty)}`,
+          rows: shapes.flatMap(([shape, label]) => {
+            const id = caseId({ ty, distribution: shape, len });
+            const s = standing(field, [id], stableOnly);
+            const ns = field.nsPerKey(id, "tessera");
+            if (!s || ns === null) return [];
+            plotted.push([`${label} · ${formatLength(len)} ${elements(ty)}`, s]);
+            nsPerKey.push(ns);
+            return [fieldRow({ input: label, sub: "", tag: "" }, s)];
+          }),
+        };
+      }),
+    )
+    .filter((g) => g.rows.length);
+  if (!plotted.length) return null;
+  const standings = plotted.map(([, s]) => s);
+  const title = fieldTitle(standings, "inputs");
+  return {
+    name: "short",
+    subject: "Short inputs",
+    summary:
+      "Each row is one input pattern, grouped by length and element type. Each dot is one sort, placed by its speed relative to slice::sort; records compare only stable sorts.",
+    title,
+    ...rendered({
+      title,
+      guide: `${lengths.map(formatLength).join(" and ")} elements · each dot is one sort, placed by its speed relative to slice::sort`,
       columns: ["Speed", "Rank"],
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
@@ -751,7 +829,8 @@ const RELEASE: Cohort = {
     label: `geometric mean over the ${shapes.length} baseline input patterns`,
   },
   n: LARGE,
-  moreLengths: [],
+  sweep: { shape: "random", lengths },
+  short: { lengths: [SHORT], types: ["u64"] },
   shapes,
   typeShapes: shapes,
   typeShapesLabel: `geometric mean over the ${shapes.length} baseline input patterns`,
@@ -765,24 +844,24 @@ const RELEASE: Cohort = {
 export function comparisonFigures(
   field: Field,
   cohort: Cohort,
-  short?: number,
   memory = false,
   growth?: Growth,
 ): Figure[] {
   return [
     renderRanking(field, cohort, memory),
-    renderInputs(field, cohort, "inputs", cohort.n),
+    renderLengths(field, cohort),
+    renderInputs(field, cohort, "inputs"),
     ...catalog.types
       .map((type) => type.id)
       .filter((ty) => ty !== "u64")
-      .map((ty) => renderInputs(field, cohort, `inputs-${ty}`, cohort.n, ty)),
-    ...(short === undefined ? [] : [renderInputs(field, cohort, "short", short)]),
+      .map((ty) => renderInputs(field, cohort, `inputs-${ty}`, ty)),
+    renderShort(field, cohort),
     renderTypes(field, cohort),
     renderGrowth(growth ?? fieldGrowth(field, "u64")),
   ].filter((f): f is Figure => f !== null);
 }
 
 export function renderFigures(dataset: Dataset, summaries: Map<string, Summary>): Figure[] {
-  const figures = comparisonFigures(reportField(dataset, summaries), RELEASE, SHORT);
+  const figures = comparisonFigures(reportField(dataset, summaries), RELEASE);
   return figures.length ? figures : renderSelected(dataset, summaries);
 }

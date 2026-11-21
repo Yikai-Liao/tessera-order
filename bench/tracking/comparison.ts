@@ -77,9 +77,10 @@ const RANKING_TYPE = "row_u32";
 
 /**
  * The cohort follows the continuous plan instead of fixed lengths. The ranking and the
- * u64 input-pattern figures each use their type's length with the most input patterns that
- * both Tessera and slice::sort measured, the longest on a tie; input-pattern figures then
- * add every other measured length, so each published serial case appears in one of them.
+ * input-pattern figures each use their type's length with the most input patterns that
+ * both Tessera and slice::sort measured, the longest on a tie. The length and short-input
+ * figures use comparison lengths: those where some type has several patterns. Lengths
+ * with one pattern per type probe engine thresholds and stay in PR feedback.
  */
 export function trackingCohort(field: Field): Cohort | null {
   const measured = (id: string) =>
@@ -113,14 +114,22 @@ export function trackingCohort(field: Field): Cohort | null {
   const typeShapes = shapes.filter((shape) =>
     [...types.values()].every((cases) => cases.some((entry) => entry.distribution === shape)),
   );
-  // Input-pattern figures add every other length measured by both Tessera and slice::sort.
-  const moreLengths = [
-    ...new Set(
-      field.cases.filter((entry) => measured(comparisonId(entry))).map((entry) => entry.len),
-    ),
-  ]
-    .filter((len) => len !== n)
+  const shared = field.cases.filter((entry) => measured(comparisonId(entry)));
+  const lengths = [...Map.groupBy(shared, (entry) => entry.len)]
+    .filter(([, cases]) =>
+      [...Map.groupBy(cases, (entry) => entry.ty).values()].some((of) => of.length > 1),
+    )
+    .map(([len]) => len)
     .toSorted((a, b) => a - b);
+  // Short inputs show every pattern of each type with several patterns at a shorter length.
+  const shortLengths = lengths.filter((len) => len < n);
+  const shortTypes = catalog.types
+    .map((type) => type.id)
+    .filter((ty) =>
+      shortLengths.some(
+        (len) => shared.filter((entry) => entry.ty === ty && entry.len === len).length > 1,
+      ),
+    );
   return {
     ranking: {
       ty: ranking.ty,
@@ -130,7 +139,8 @@ export function trackingCohort(field: Field): Cohort | null {
       label: over(ranking.shapes, "measured input patterns"),
     },
     n,
-    moreLengths,
+    sweep: { shape: "random", lengths },
+    short: { lengths: shortLengths, types: shortTypes },
     shapes,
     typeShapes,
     typeShapesLabel: over(typeShapes, "input patterns every type has"),
@@ -215,7 +225,7 @@ export function comparisonData(
   const parallel = scaling ? renderParallel(scaling) : null;
   // Parallel sorting follows the serial figures and precedes memory.
   const all = cohort
-    ? comparisonFigures(field, cohort, undefined, true, growth && trackingGrowth(growth))
+    ? comparisonFigures(field, cohort, true, growth && trackingGrowth(growth))
     : [];
   const memory = all.findIndex((figure) => figure.name === "memory");
   if (parallel) all.splice(memory < 0 ? all.length : memory, 0, parallel);

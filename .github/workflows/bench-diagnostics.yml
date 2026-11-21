@@ -45,7 +45,7 @@ jobs:
             interleaved) groups='new-aa old-ab new-ab old-aa';;
           esac
           for group in $groups; do
-            bun ../bench/local/replay.ts "$group" "$cpu" > "output/$group.json"
+            REPLAY_SPREAD=1 bun ../bench/local/replay.ts "$group" "$cpu" > "output/$group.json"
           done
       - uses: actions/upload-artifact@v7
         with:

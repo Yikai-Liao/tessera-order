@@ -27,6 +27,7 @@ export async function measureSamples(
     const parallel = parseCriterionId(id).mode === "par-4";
     const mask = parallel || !mixed ? cpu : cpu?.split(",")[0];
     const count = run.sampleCounts[id];
+    let stackBytes = 0;
     const worker = (
       role: keyof typeof binaries,
       interact: (exchange: (request: string) => Promise<string>) => Promise<void>,
@@ -39,6 +40,7 @@ export async function measureSamples(
         cwd: dirname(binary),
         interact,
         env: {
+          TESSERA_STACK_SAMPLE: "x".repeat(stackBytes),
           TESSERA_BENCH_PAIRED: "1",
           TESSERA_BENCH_IDS: id,
           TESSERA_BENCH_PLAN: planPath,
@@ -47,6 +49,7 @@ export async function measureSamples(
     };
     const samples: { baseline: number; current: number }[] = [];
     for (let index = 0; index < count; index++) {
+      stackBytes = process.env.REPLAY_SPREAD ? (index * 1088) % 4096 : 0;
       const roles =
         index % 2 ? (["current", "baseline"] as const) : (["baseline", "current"] as const);
       const pair = { baseline: 0, current: 0 };

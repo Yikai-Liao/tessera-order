@@ -1,9 +1,8 @@
 # Getting started
 
-Tessera sorts slices by a primitive key: an integer up to 128 bits, an `f32` or `f64`, or `Reverse` of one of these. It is stable, runs in linear time for a fixed key width, and moves records of any type.
+Tessera sorts slices by a numeric key: an integer up to 128 bits, an `f32` or `f64`, or `Reverse` of one of these. Every operation is stable, runs in linear time for a fixed key width, and accepts records of any type.
 
-> [!NOTE]
-> This guide describes the unreleased 0.2 API. The published 0.1 package names the full sorts `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key`; 0.2 keeps those names as deprecated aliases. [Cached-key sorting](#group-by-a-cached-key), [selection](#select-one-rank) and [argsort](#get-sorted-indices) are new in 0.2 and require a [development checkout](#try-the-development-api). 0.x minor releases may still change the API; see the [roadmap](../../ROADMAP.md).
+This guide follows the main branch, which will become 0.2. [Versions](#versions) lists what 0.1 names differently and what it lacks.
 
 ## Install
 
@@ -12,11 +11,24 @@ Tessera sorts slices by a primitive key: an integer up to 128 bits, an `f32` or 
 tessera-order = "0.1"
 ```
 
-The crate requires `std`, Rust 1.89 or newer and `fearless_simd`. Vector scans and prefix sums automatically select supported instructions; keys without a vector kernel use scalar scans. There is no `portable-simd` or `std` feature, and disabling default features does not change these requirements. Rayon remains optional; see the [Cargo feature documentation](../../rust/tessera-order/src/lib.rs).
+Tessera needs `std` and Rust 1.89 or newer. It selects supported vector instructions automatically; the only public feature is the optional [`rayon`](#parallel-sorting).
+
+<a id="choose-an-operation"></a>
+
+## Choose an operation
+
+| You want to | Call |
+|---|---|
+| sort numbers | `sort` |
+| sort records by a field | `sort_by_key` |
+| sort by a key that is costly to compute | `sort_by_cached_key` |
+| know the sorted order without moving records | `argsort`, `argsort_by_key` |
+| find the record at one rank, such as the median | `select_nth`, `select_nth_by_key` |
+| use several threads | `par_sort`, `par_sort_by_key` |
+
+All of them place equal keys exactly as a stable sort would. Extra memory is O(√n), except that argsort returns an index per record and cached-key sorting stores a key per record.
 
 ## Sort keys
-
-`sort` sorts a slice of keys:
 
 ```rust
 let mut values: Vec<i64> = vec![42, -7, 19, -7, 3];
@@ -25,8 +37,6 @@ assert_eq!(values, [-7, -7, 3, 19, 42]);
 ```
 
 ## Sort records by a key
-
-`sort_by_key` sorts any records by a key that a function computes. Records with equal keys keep their input order:
 
 ```rust
 struct Row {
@@ -44,7 +54,9 @@ let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
 assert_eq!(names, ["a", "c", "d"]);
 ```
 
-The key function may be called several times per record, in any order. It should return the same key for a record throughout one call. If it does not, the operation may panic or return with unspecified ordering, but every record is still in the slice exactly once.
+Records with equal keys keep their input order, so `"c"` stays before `"d"`.
+
+The key function may run several times per record, in any order, and must return the same key for a record throughout the call. If it does not, the call may panic or leave the order unspecified, but every record is still in the slice exactly once.
 
 ## Descending order
 
@@ -58,7 +70,7 @@ tessera_order::sort_by_key(&mut rows, |row| Reverse(row.0));
 assert_eq!(rows, [(2, "first"), (2, "last"), (1, "middle")]);
 ```
 
-Do not sort ascending and then reverse the slice. That would also reverse the order of equal keys.
+Sorting ascending and then reversing the slice would also reverse the order of equal keys.
 
 ## Floats
 
@@ -77,73 +89,9 @@ assert!(values[4].is_nan());
 
 [Keys as unsigned integers](../explain/keys.md) shows how each key type is encoded.
 
-<a id="partial-sorting-and-selected-ranks"></a>
+## Sort by several fields
 
-## Try the development API
-
-To try cached-key sorting, selection and argsort before 0.2, use a local checkout instead of the crates.io dependency:
-
-```toml
-[dependencies]
-tessera-order = { path = "../tessera-order/rust/tessera-order" }
-```
-
-Adjust the path to your checkout. These APIs are serial and need no feature flag.
-
-## Select one rank
-
-`select_nth` and `select_nth_by_key` return the records before the requested zero-based rank, the record at that rank, and the records after it. A full stable sort defines the record at the rank and the membership of both sides, including when ties cross the rank. Equal-key records keep their input order on both sides, so either side can be refined again. An index outside the slice panics before any record moves or any key is evaluated.
-
-```rust
-let mut rows = [(2u32, "first"), (1, "middle"), (2, "last")];
-let (before, selected, after) = tessera_order::select_nth_by_key(&mut rows, 1, |r| r.0);
-assert_eq!(before, [(1, "middle")]);
-assert_eq!(*selected, (2, "first"));
-assert_eq!(after, [(2, "last")]);
-```
-
-<a id="index-output-and-chunks"></a>
-
-## Get sorted indices
-
-`argsort` and `argsort_by_key` leave source records in place and return their indices in stable sorted order. The returned index vector takes O(n) memory in addition to sorting scratch.
-
-```rust
-let source = [(2u32, "first"), (1, "middle"), (2, "last")];
-assert_eq!(tessera_order::argsort_by_key(&source, |r| r.0), [1, 0, 2]);
-```
-
-See [serial slice semantics](../../conformance/semantics.md#serial-slice-operations) for the full contracts.
-
-<a id="partitions-and-groups"></a>
-
-## Group by a cached key
-
-To group by category, sort by the category key and traverse the runs. Use `sort_by_cached_key` when extraction is costly or should not run twice for a record on a nontrivial input. If the input needs reordering and its keys differ only in a sufficiently narrow bit window, the engine distributes the records in one pass:
-
-```rust
-let mut jobs = [(2, "a"), (0, "b"), (2, "c"), (0, "d")];
-tessera_order::sort_by_cached_key(&mut jobs, |job| job.0 as u8);
-let groups: Vec<_> = jobs.chunk_by(|a, b| a.0 == b.0).map(<[_]>::len).collect();
-assert_eq!(groups, [2, 2]);
-```
-
-See [cached-key semantics](../../conformance/semantics.md#cached-keys) for callback evaluation, panic recovery and memory.
-
-## Migrate from earlier development snapshots
-
-The following functions appeared only in unreleased checkouts. For `_by_key` variants, use the corresponding keyed operations with the same substitutions.
-
-| Earlier API | Replacement |
-|---|---|
-| `partition` | Use `sort_by_cached_key(&mut records, \|r\| u8::from(!predicate(r)))` to put matches first and preserve order on both sides. Count matches during extraction to find the split. Handle slices shorter than two and zero-sized records separately if the predicate must run for every record. Cached sorting uses O(n) key storage. |
-| `k_smallest`, `k_largest` | Sort stably and take `[..k]`, sorting by `Reverse` for largest. When `0 < k < len`, you can instead select rank `k` and sort the returned `before` slice in the same order. Use the reversed order for both calls when taking the largest records. |
-| `partial_sort`, `select_nth_many` | Sort stably once, then take the range or read the requested positions. This sorts more than the old functions required. For one position, use `select_nth`. |
-| `sort_chunks` | Loop over `records.chunks_mut(chunk_len)` and sort each chunk, including a short final chunk. For a keyed sort, pass `&mut key` to each call if the extractor is stateful. Calls do not share scratch. |
-
-## Multi-field sorting and groups
-
-Compose stable sorts from the least significant field to the most significant. Traverse equal grouping keys with the standard slice API rather than a separate grouping engine:
+Sort by the least significant field first, then by the more significant ones. Stability keeps the earlier order within each group:
 
 ```rust
 let mut rows = [(2u32, 30u64), (1, 40), (2, 10), (1, 20)];
@@ -155,19 +103,57 @@ let counts: Vec<_> = rows.chunk_by(|a, b| a.0 == b.0)
 assert_eq!(counts, [(1, 2), (2, 2)]);
 ```
 
-These public calls own independent workspace lifetimes; this composition does not promise cross-call allocation reuse. Group equality must match the chosen normalized key. Ordinary iterators and collections provide counting, reduction and deduplication, with their own consuming and callback-panic contracts.
+After sorting, `chunk_by` walks the groups. Its equality must match the sort key.
+
+<a id="index-output-and-chunks"></a>
+
+## Get sorted indices
+
+`argsort` and `argsort_by_key` leave the source in place and return the indices in stable sorted order:
+
+```rust
+let source = [(2u32, "first"), (1, "middle"), (2, "last")];
+assert_eq!(tessera_order::argsort_by_key(&source, |r| r.0), [1, 0, 2]);
+```
+
+<a id="partial-sorting-and-selected-ranks"></a>
+
+## Select one rank
+
+`select_nth` and `select_nth_by_key` place the record at a zero-based rank and return the records before it, the record itself and the records after it. The answer is the one a full stable sort would give, including when equal keys straddle the rank, and both sides keep input order among equal keys. An out-of-range index panics before any record moves.
+
+```rust
+let mut rows = [(2u32, "first"), (1, "middle"), (2, "last")];
+let (before, selected, after) = tessera_order::select_nth_by_key(&mut rows, 1, |r| r.0);
+assert_eq!(before, [(1, "middle")]);
+assert_eq!(*selected, (2, "first"));
+assert_eq!(after, [(2, "last")]);
+```
+
+<a id="partitions-and-groups"></a>
+
+## Group by a cached key
+
+`sort_by_cached_key` calls the key function once per record, in input order. Use it when the key is costly or must not run twice. Grouping by a small category is its best case: when the keys differ only in a few bits, the records are distributed in one pass.
+
+```rust
+let mut jobs = [(2, "a"), (0, "b"), (2, "c"), (0, "d")];
+tessera_order::sort_by_cached_key(&mut jobs, |job| job.0 as u8);
+let groups: Vec<_> = jobs.chunk_by(|a, b| a.0 == b.0).map(<[_]>::len).collect();
+assert_eq!(groups, [2, 2]);
+```
 
 ## Parallel sorting
 
-Enable the optional `rayon` feature for `par_sort` and `par_sort_by_key`. Add a direct Rayon dependency if the application configures a custom pool:
+Enable the `rayon` feature for `par_sort` and `par_sort_by_key`:
 
 ```toml
 [dependencies]
 tessera-order = { version = "0.1", features = ["rayon"] }
-rayon = "1.10"
+rayon = "1.10"  # only to configure a custom pool
 ```
 
-The entry points use Rayon's current pool. A caller can select its own pool with `install`:
+They run in Rayon's current pool; `install` selects another:
 
 ```rust
 let pool = rayon::ThreadPoolBuilder::new().num_threads(8).build().unwrap();
@@ -176,11 +162,37 @@ pool.install(|| tessera_order::par_sort_by_key(&mut records, |record| record.0))
 assert_eq!(records, [(1, "middle"), (2, "first"), (2, "last")]);
 ```
 
-Records need `Send`; the by-key callback needs `Fn + Sync` because calls may overlap. Stability and record preservation remain unchanged. Small inputs and one-thread pools use the serial engine, and ordered/constant fast paths do not promise parallel acceleration. The [parallel contract](../../conformance/semantics.md#rust-rayon-entry-points) covers panic recovery and the O(P√n) auxiliary-space bound.
+Records need `Send`, and the key function needs `Fn + Sync` because calls overlap. Small inputs and one-thread pools run serially, and sorted or constant inputs need not get faster with more threads. Extra memory is O(P√n) for P threads.
 
 ## When to use something else
 
-- **Orders defined by a comparator**, strings, or other variable-length keys: use `slice::sort_by`. A comparator cannot be turned into radix digits.
-- **No allocator**: Tessera needs O(√n) scratch memory, so it needs `alloc`.
+- **A comparator**, strings or other variable-length keys: use `slice::sort_by`. A comparator cannot be turned into radix digits.
+- **No allocator**: Tessera needs O(√n) scratch memory.
 
-The exact guarantees are in the [ordering semantics](../../conformance/semantics.md).
+## Versions
+
+The published 0.1 release has only the four full sorts, named `stable_sort`, `stable_sort_by_key`, `par_stable_sort` and `par_stable_sort_by_key`. Main renames them and keeps the old names as deprecated aliases. Cached-key sorting, argsort and selection are new and unreleased. 0.x minor releases may still change the API; see the [roadmap](../../ROADMAP.md).
+
+<a id="try-the-development-api"></a>
+
+To try the new operations now, depend on a local checkout. They need no feature flag:
+
+```toml
+[dependencies]
+tessera-order = { path = "../tessera-order/rust/tessera-order" }
+```
+
+### Migrate from earlier development snapshots
+
+These functions appeared only in unreleased checkouts. For `_by_key` variants, use the keyed operations with the same substitutions.
+
+| Earlier API | Replacement |
+|---|---|
+| `partition` | `sort_by_cached_key(&mut records, \|r\| u8::from(!predicate(r)))` puts matches first and preserves order on both sides. Count matches during extraction to find the split. If the predicate must run for every record, handle slices shorter than two and zero-sized records separately. Cached sorting stores one key per record. |
+| `k_smallest`, `k_largest` | Sort and take `[..k]`, sorting by `Reverse` for the largest. When `0 < k < len`, you can instead select rank `k` and sort the returned `before` slice, using the reversed order in both calls for the largest. |
+| `partial_sort`, `select_nth_many` | Sort once, then take the range or read the positions. For one position, use `select_nth`. |
+| `sort_chunks` | Sort each of `records.chunks_mut(chunk_len)`, including a short final chunk. Pass `&mut key` to each call if the extractor is stateful. |
+
+## Exact guarantees
+
+The [ordering semantics](../../conformance/semantics.md) state every contract: [serial operations](../../conformance/semantics.md#serial-slice-operations), [cached keys](../../conformance/semantics.md#cached-keys), [the parallel entry points](../../conformance/semantics.md#rust-rayon-entry-points), panics and memory.

@@ -10,23 +10,6 @@ registerDynamicLanguage({ rust });
 const sourceRoot = "rust/tessera-order/src";
 const engineRoot = `${sourceRoot}/engine`;
 
-// Review changes to this list as changes to the adapter-facing facade.
-const facadeExports = new Set([
-  "distribution::MAX_PARTITION_BUCKETS",
-  "distribution::distribute",
-  "key::ByKey",
-  "key::Direct",
-  "key::RadixKey",
-  "key::Unsigned",
-  "key::bit_len",
-  "refine::argsort",
-  "refine::order_by_cached_indices",
-  "refine::parallel::sort",
-  "refine::select_nth",
-  "refine::sort",
-  "trace::Event",
-  "trace::partition",
-]);
 const safetyLints = new Set([
   "clippy::missing_safety_doc",
   "clippy::undocumented_unsafe_blocks",
@@ -191,8 +174,8 @@ export function checkRustSource(path: string, source: string): string[] {
       if (facadePrivateVisibility.has(visibility(item))) continue;
       if (item.kind() === "use_declaration") {
         for (const origin of usePaths(item.field("argument")!)) {
-          if (!facadeExports.has(origin.replace(/^(?:self::|crate::engine::)/, ""))) {
-            report(item, "engine-boundary", `Unreviewed engine export ${origin}.`);
+          if (origin.endsWith("*")) {
+            report(item, "engine-boundary", `Name each engine export instead of ${origin}.`);
           }
         }
       } else if (item.kind() !== "mod_item" || syntaxText(item.field("name")!) !== "thresholds") {

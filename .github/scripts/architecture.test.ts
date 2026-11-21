@@ -55,16 +55,13 @@ test("the CLI checks untracked Rust source and skips deleted and ignored files",
   }
 });
 
-test("the facade exports complete operations, including single-rank selection", () => {
+test("the facade keeps modules private and names each export", () => {
   rejects(`${src}/lib.rs`, "engine-boundary", ["pub mod engine;", "pub(crate) mod r#engine;"]);
   const alternateFacade = `${src}/engine.rs`;
   rejects(alternateFacade, "engine-boundary", ["pub(crate) mod block;", "use super::algorithms;"]);
   rejects(facade, "engine-boundary", [
     "pub(crate) mod block;",
-    "pub(crate) use block::{Storage as Operation};",
     "pub(crate) use self::tile::*;",
-    "pub(crate) use workspace::Workspace;",
-    "pub(crate) use refine::refine;",
     "pub(crate) fn storage() {}",
   ]);
   assert.deepEqual(

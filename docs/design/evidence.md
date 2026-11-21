@@ -13,6 +13,8 @@ Process-level and three-block screens flag changes to investigate; only linked i
 | Serial CI artifacts (`fafaaa2` → `a26cac4`), `row_u64/equal/48` | Alert +6.9%; candidate/baseline 1.0231 against A/A 0.9672–1.0328; both executables ran the same 348 instructions | Placement sensitivity; a small whole-binary cost cannot be excluded |
 | Eight-core parallel | Same-entry A/A 0.80–1.20 with inherited masks, 0.90–1.10 pinned, 0.78–1.22 on the pinned repeat | No stable detection window for a 5–10% source gain on this host |
 
+PR builds now combine 64-byte function entries with LLVM’s 32-byte x86 branch-boundary alignment. Each replay compared the archived pair with the rebuilt pair on the same runners and seed-one inputs. The replays warmed each worker immediately before its sample. The PR scheduler warms both workers before sampling the pair. Across two Xeons and an EPYC, the `u64/random/49` median change for PR #241 ranged from +6.6% to +39.5% with the archived builds and −0.6% to +2.6% with alignment. For the separate PR #248 pair the ranges were −5.2% to −0.3% and +0.1% to +1.1%, respectively. Its `row_u32/random/49` range narrowed from −1.2% to +60.9% to +1.9% to +2.7%. Each case still measures 30 pairs under the usual alert rule. These controls support the build choice for the observed runners. They do not isolate the effect of either flag or bound future layouts. [PR #241 replay](https://github.com/Yikai-Liao/tessera-order/actions/runs/44876013127), [PR #248 replay](https://github.com/Yikai-Liao/tessera-order/actions/runs/44876213334).
+
 Branch alignment is not a free speedup: it changed the prototype's own time by −30% to +69% across small cases. Stable Rust has no attribute for function or branch alignment, so a source change that helps one binary can hurt another. The crate has nothing to fix; benchmarks control placement ([source-attribution controls](../development/benchmarking.md#additional-source-attribution-controls)), and CLI builds default to 64-byte loop and block alignment.
 
 ## Port parity baseline
@@ -259,6 +261,20 @@ The repeat does not erase the initial losses: several directions or control wind
 These local speeds divide reference time by Tessera time on a Ryzen 7 8845H. The full-sort reference is `ddb2f6d`. Run sparse discovery after insertion and after parallel scheduling. Trying it first on 65,536 records with 1% adjacent swaps cost throughput at all three widths (0.31× for u64, 0.68× for 16-byte rows and 0.58× for 128-byte records). Trying it before scheduling on one million distant-swap records likewise cost throughput (0.73×, 0.80× and 0.96× with four workers). Serial finishers preserve the gain on distant swaps without delaying parallel work.
 
 On 65,536 random 128-byte records, a bounded end reached 1.15–1.26× against `select_nth_unstable_by_key` at ranks 1–4, and 0.67× at rank 0. At the median, random and 16-distinct-key records reached 0.48× and 0.38×. The standard selector permits ties to change order. Keep the disjointness proof bounded to the end. Checking the entire slice for cross-region ties reached 0.53× at the random median. Membership bitmaps still require stable payload movement and reached 0.43× there. Revisit dense ranks when a design reduces record transfers.
+
+### Stable endpoints
+
+For a one-record end, keep the winner's source position and the displaced key's peer flag in one forward scan. The [routing explanation](../explain/routing.md#sparse-source-order) describes the swap and stable rotation. This avoids a second key scan, block metadata and heap allocation. On 65,536 random 128-byte records, reducing to a key and searching again for its position reached 0.65× / 0.64× standard unstable selection speed at the first / last rank. Reducing keyed positions inside the general bounded-end permutation reached 0.77× / 0.73×. The single scan reached 1.04× / 0.95×. These alternatives and the [block prototype](https://github.com/Yikai-Liao/tessera-order/issues/242) give little reason to tune a block size for these endpoints.
+
+The Ryzen 7 8845H screen compared `ce88a8f` and the single scan in separate builds. Each speed divides paired standard unstable selection time by stable Tessera time. Brackets give the single scan's repeated-Tessera A/A range over nine blocks.
+
+| Random records | First, baseline → single scan | Last, baseline → single scan |
+| --- | --- | --- |
+| u64 | 0.33× → 0.50× [0.98, 1.02] | 0.51× → 0.70× [0.77, 1.23] |
+| 16-byte row | 0.62× → 0.90× [0.86, 1.14] | 0.43× → 0.68× [0.71, 1.29] |
+| 128-byte record | 0.68× → 1.04× [0.96, 1.04] | 0.71× → 0.95× [0.76, 1.24] |
+
+In the elapsed-time comparison across builds, both endpoints improved on reverse and 16-value inputs at all three widths. Three cases took longer. They were u64/distant-swaps first (+8%), 16-byte row/distant-swaps last (+3%) and u64/random last (+10%). For the last case the standard selector also took longer in the candidate build, which explains why its relative speed rose. A repeat with longer samples found lower last-rank times in both cases (row/distant-swaps −9%, u64/random −31%). The u64/distant-swaps first-rank loss was not repeated. Cross-build timings cannot isolate the source effect. All 24 candidate endpoint cases used zero extra heap. On complete sorts of the same inputs, both baseline copies and the second candidate copy stayed within the A/A verdict for all 12 cases. The widest full-sort A/A range was 0.57–1.43. These controls leave smaller costs unresolved.
 
 ## Stable source permutations
 

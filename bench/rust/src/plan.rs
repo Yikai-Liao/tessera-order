@@ -534,7 +534,7 @@ mod tests {
     #[test]
     fn presets_preserve_coverage() {
         for (text, expected) in [
-            (include_str!("../../plans/continuous.toml"), 72),
+            (include_str!("../../plans/continuous.toml"), 76),
             (include_str!("../../plans/smoke.toml"), 125),
             (include_str!("../../plans/release.toml"), 381),
             (include_str!("../../plans/parallel.toml"), 16),
@@ -636,6 +636,10 @@ mod tests {
             "row_u64/random/65536/s1/partition-buckets/65537",
             "row_u64/d16/65536/s1/argsort",
             "row_u64/d16/65536/s1/select/32768",
+            "row_u64/d16/65536/s1/select/0",
+            "row_u64/d16/65536/s1/select/65535",
+            "rec128_u64/random/65536/s1/select/0",
+            "rec128_u64/random/65536/s1/select/65535",
         ] {
             let case = cases.iter().find(|case| case.id() == id);
             assert!(case.is_some(), "missing required continuous workload: {id}");

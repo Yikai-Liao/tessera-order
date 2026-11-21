@@ -13,6 +13,8 @@ Process-level and three-block screens flag changes to investigate; only linked i
 | Serial CI artifacts (`fafaaa2` → `a26cac4`), `row_u64/equal/48` | Alert +6.9%; candidate/baseline 1.0231 against A/A 0.9672–1.0328; both executables ran the same 348 instructions | Placement sensitivity; a small whole-binary cost cannot be excluded |
 | Eight-core parallel | Same-entry A/A 0.80–1.20 with inherited masks, 0.90–1.10 pinned, 0.78–1.22 on the pinned repeat | No stable detection window for a 5–10% source gain on this host |
 
+Replaying the same archived [PR #241](https://github.com/Yikai-Liao/tessera-order/pull/241) executables on three hosted runners reproduced the serial `u64/random/49` gap. Under both warm-up schedules, the candidate took 38–40% longer on two Intel Xeon 6975P-C runners and 6–7% longer on one AMD EPYC 7763. Same-binary A/A medians for this case were within 0.5% on all three. The cross-revision gap depends on the host for these binaries and survives immediate warm-up. Compare results within CPU models when interpreting PR histories. Separating engine changes from code placement still requires independent binary placements. [Hosted replay](https://github.com/Yikai-Liao/tessera-order/actions/runs/44874457041).
+
 Branch alignment is not a free speedup: it changed the prototype's own time by −30% to +69% across small cases. Stable Rust has no attribute for function or branch alignment, so a source change that helps one binary can hurt another. The crate has nothing to fix; benchmarks control placement ([source-attribution controls](../development/benchmarking.md#additional-source-attribution-controls)), and CLI builds default to 64-byte loop and block alignment.
 
 ## Port parity baseline

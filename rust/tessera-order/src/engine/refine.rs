@@ -19,6 +19,7 @@ pub(crate) mod parallel;
 mod plan;
 #[cfg(test)]
 mod refinement_tests;
+mod spans;
 
 use crate::engine::tile;
 
@@ -480,6 +481,14 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
             self.scratch
                 .tile
                 .sort::<E>(records, varying, self.extractor);
+            return;
+        }
+        // Radix selection discards most buckets, so a complete sparse order
+        // only pays off when every rank is required.
+        if matches!(required, Requirement::All)
+            && let Some(order) = spans::SourceOrder::for_node(records, varying, self.extractor)
+        {
+            order.apply(records);
             return;
         }
         let plan = plan_node(records, varying, self.tile_len, self.extractor);

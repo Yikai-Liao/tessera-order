@@ -254,6 +254,10 @@ The repeat does not erase the initial losses: several directions or control wind
 
 **Disposition:** retain the internal simplification with timing acceptance open. Keep the individual differences above unresolved rather than tune source layout to a favorable copy. Partial-operation, segmented and Rayon timing, broader key widths and platforms remain uncovered; this screen closes none of the earlier foundation timing debt.
 
+## Sparse order as source spans
+
+These local speeds divide reference time by Tessera time on a Ryzen 7 8845H. The full-sort reference is `ddb2f6d`. Run sparse discovery after insertion and after parallel scheduling. Trying it first on 65,536 records with 1% adjacent swaps cost throughput at all three widths (0.31× for u64, 0.68× for 16-byte rows and 0.58× for 128-byte records). Trying it before scheduling on one million distant-swap records likewise cost throughput (0.73×, 0.80× and 0.96× with four workers). Serial finishers preserve the gain on distant swaps without delaying parallel work.
+
 ## Serial slice-operation baseline
 
 This baseline covers the earlier development surface, including operations [removed before 0.2](algorithm-extensions-proposal.md#release-surface-alignment). The first serial extensions shared one rank-requirement authority and one refinement executor. Argsort used indices as payloads; segmented sorting reused invocation workspace across complete refinements. Top-k, prefixes and selected ranks did not introduce a second mover, recovery protocol or tile engine. That small shared implementation was not evidence that every workload was fastest.

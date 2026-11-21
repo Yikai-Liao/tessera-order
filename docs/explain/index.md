@@ -19,7 +19,7 @@ Tessera splits in place. Here the input splits on the tens digit into four bucke
 <PipelineMap />
 
 1. **Skip what the data does not need.** An order probe returns ascending inputs at once and reverses descending ones stably. Unsorted inputs get an insertion pass with a swap budget, which finishes nearly sorted ones. One scan finds the key bits that vary; if none do, the input is done.
-2. **Split large inputs (nodes).** A node takes the first partition that applies: an equality partition when one key is frequent, a split at its top varying bit when it is already grouped by that bit, or otherwise a block partition on its top digit. Each split removes at least one key bit, so recursion never goes deeper than the key is wide.
+2. **Split large inputs (nodes).** A node takes the first partition that applies: one window covering every varying bit when they span at most 8 bits (counted directly when the records are their own keys), an equality partition when one key is frequent, a split at its top varying bit when it is already grouped by that bit, or otherwise a block partition on its top digit. Each split removes at least one key bit, so recursion never goes deeper than the key is wide.
 3. **Route the children again.** A child larger than a tile repeats the order check and the varying-bit scan before it is split, so an ordered or constant region exposed anywhere costs one scan.
 4. **Finish cache-sized pieces (tiles) in a scratch buffer**, where a second buffer is cheap: insertion sort, a tile-local MSD split, or LSD counting passes.
 

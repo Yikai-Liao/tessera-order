@@ -3,38 +3,35 @@ layout: home
 
 hero:
   name: Tessera
-  text: Stable radix ordering with O(√n) auxiliary memory
-  tagline: One linear-time engine for stable sorting, argsort and single-rank selection, safe for records that own resources.
+  text: Stable radix sorting in O(√n) extra memory
+  tagline: A Rust library that sorts records of any type by an integer or float key, keeps equal keys in input order, and needs no input-sized buffer.
   image:
     src: /logo.svg
     alt: Tessera logo, a mosaic rosette
   actions:
     - theme: brand
-      text: How it works
-      link: /explain/
-    - theme: alt
       text: Get started
       link: /guide/getting-started
+    - theme: alt
+      text: How it works
+      link: /explain/
     - theme: alt
       text: GitHub
       link: https://github.com/Yikai-Liao/tessera-order
 
 features:
-  - title: Stable sorting, argsort and selection
-    details: Return sorted indices without moving records, or find one ranked record without requiring a full sort. Cached-key sorting, argsort and selection are unreleased 0.2 APIs.
-    link: /guide/getting-started#try-the-development-api
-  - title: Stable, without a second buffer
-    details: A block partition recycles consumed input blocks as output blocks, so a split needs O(√n) memory instead of an n-record buffer.
+  - title: Small memory footprint
+    details: Scratch grows as √n, not with the input. A textbook radix sort needs a second buffer as large as the input.
     link: /explain/block-partition
-  - title: Adaptive
-    details: Sorted, reversed, nearly sorted, constant and heavily repeated inputs take shortcuts, and key bits that never change cost nothing.
+  - title: Free when the data is easy
+    details: Sorted, reversed, nearly sorted and constant inputs skip the radix passes. A heavily repeated key takes one partition, and key bits that never change are never sorted.
     link: /explain/routing
-  - title: Any record type
-    details: No Copy, Clone, Default or Ord. Records are moved, never duplicated, even if the key function misbehaves or panics.
+  - title: Safe for any record
+    details: Records need no Copy, Clone, Default or Ord. Each is moved, never duplicated, even if the key function panics.
     link: /explain/safety
-  - title: Wide keys
-    details: Integers up to 128 bits, f32 and f64 in total_cmp order, and Reverse for descending order that stays stable.
-    link: /explain/keys
+  - title: One engine, several answers
+    details: Sort in place, return sorted indices without moving records, or find one ranked record without sorting the rest.
+    link: /guide/getting-started#choose-an-operation
 ---
 
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
@@ -42,6 +39,22 @@ features:
 <script setup lang="ts">
 import AlgorithmComparison from "./.vitepress/theme/components/AlgorithmComparison.vue";
 </script>
+
+## In three lines
+
+```rust
+let mut rows = vec![(30i64, "c"), (10, "a"), (30, "d")];
+tessera_order::sort_by_key(&mut rows, |row| row.0);
+assert_eq!(rows, [(10, "a"), (30, "c"), (30, "d")]);
+```
+
+The key is an integer up to 128 bits, an `f32` or `f64`, or `Reverse` of one of these. Records with equal keys keep their input order. The published 0.1 release names this function `stable_sort_by_key`; see [versions](guide/getting-started.md#versions).
+
+## Is it for you?
+
+**A good fit** when you sort large slices by a numeric key, need equal keys to stay in input order, or cannot afford a second buffer as large as the input.
+
+**Use something else** when the order comes from a comparator, or keys are strings or other variable-length values: use `slice::sort_by`. Tessera also needs an allocator.
 
 ## Measured against other sorts
 

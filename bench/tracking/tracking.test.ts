@@ -151,7 +151,7 @@ test("publication is idempotent, combines months and keeps the README SVG URL st
     {
       id: PREVIEW_CASE,
       label: "u64 · random · 65,536",
-      group: "serial",
+      group: "sort",
       input: "random",
       sub: "u64 · 65,536",
       tag: "",
@@ -225,14 +225,14 @@ test("cases follow mode, length, record type and catalog input order", () => {
     ],
   );
   assert.equal(cases[2].tag, "seed 2");
-  assert.equal(cases[5].group, "parallel · 4 threads");
+  assert.equal(cases[5].group, "par_sort");
   // Filter values follow the catalog, not the order cases first appear in.
   const facets = trackingFacets(cases);
   assert.deepEqual(facets, {
     type: ["u32", "u64"],
     input: ["random", "sorted"],
     length: ["32", "65,536", "1,000,000"],
-    group: ["serial", "parallel · 4 threads"],
+    group: ["sort", "par_sort"],
   });
   assert.equal(indexSchema.parse({ months: [], cases, facets }).cases.length, ids.length);
 });
@@ -288,7 +288,7 @@ test("the trend aligns gaps and chain-links aggregates across changing case sets
   assert.equal(comparison.frame.start, Date.parse(runs[0].time));
   // Without links, the overview keeps only the mode aggregate.
   const overview = texts(renderMainOverview(runs, cases));
-  assert.ok(overview.includes("Serial") && !overview.includes("random"));
+  assert.ok(overview.includes("sort") && !overview.includes("random"));
   assert.deepEqual(
     latestValues(runs, cases).map((row) => [
       row.entry.id,

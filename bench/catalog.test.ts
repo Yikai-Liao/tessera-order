@@ -72,8 +72,8 @@ test("strict identities reject unknown fields without tightening historical labe
   // Operation cases keep the plain input name and get their own figure section.
   const operation = "rust/u64/random/65536/s1/rank-range/16384-24576/api";
   assert.equal(caseParts(operation).input, caseParts("rust/u64/random/65536/s1/api").input);
-  assert.equal(caseSection(operation).title, "RANKS · 16,384–24,576");
-  assert.equal(caseSection("rust/u64/random/65536/s1/api").title, "SERIAL");
+  assert.equal(caseSection(operation).title, "ranks · 16,384–24,576");
+  assert.equal(caseSection("rust/u64/random/65536/s1/api").title, "sort");
   assert.ok(caseSection(operation).order > caseSection("rust/u64/random/65536/s1/par-4").order);
   assert.equal(caseLabel(operation), "u64 · random · ranks · 16,384–24,576 · 65,536");
 });

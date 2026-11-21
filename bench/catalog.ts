@@ -244,7 +244,7 @@ export function operationTitle(operation: Operation) {
     case "prefix":
       return `prefix · ${counted(operation.prefix_len)}`;
     case "select":
-      return `select · rank ${counted(operation.index)}`;
+      return `select_nth · rank ${counted(operation.index)}`;
     case "rank-range":
       return `ranks · ${counted(operation.start)}–${counted(operation.end)}`;
     case "select-many":
@@ -435,17 +435,18 @@ export function compareCases(a: string, b: string) {
   return x.reduce((order, value, i) => order || value - y[i], 0) || a.localeCompare(b);
 }
 
-/** Name a case's figure section: its API mode for full sorting, otherwise its operation.
- * Sorting sections come first in mode order, then operations in catalog order. */
+/** Name a case's figure section by the entry point it measures: its mode's sort for full
+ * sorting, otherwise its operation. Sorting sections come first in mode order, then
+ * operations in catalog order. */
 export function caseSection(id: string) {
   const parts = caseParts(id);
   return parts.operation
     ? {
-        title: parts.operation.toUpperCase(),
+        title: parts.operation,
         order:
           catalog.modes.length + 1 + reportOperationOrder.indexOf(parts.kind as Operation["kind"]),
       }
-    : { title: modeName(parts.mode).toUpperCase(), order: modeOrder(parts.mode) };
+    : { title: modeName(parts.mode), order: modeOrder(parts.mode) };
 }
 
 /** Format a case's readable label while preserving unknown identifiers. */

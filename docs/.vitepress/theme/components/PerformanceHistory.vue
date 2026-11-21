@@ -67,7 +67,7 @@ const FILTERS: { facet: Facet; key: string; name: string }[] = [
   { facet: "type", key: "type", name: "Type" },
   { facet: "input", key: "distribution", name: "Distribution" },
   { facet: "length", key: "length", name: "Length" },
-  { facet: "group", key: "mode", name: "Mode" },
+  { facet: "group", key: "call", name: "Call" },
 ];
 const filters = ref<Record<Facet, string[]>>({ type: [], input: [], length: [], group: [] });
 const AXES = [
@@ -647,7 +647,7 @@ const emptyMessage = computed(() => {
           <tr>
             <th><span class="visually-hidden">Compare</span></th>
             <th>Case</th>
-            <th>Mode</th>
+            <th>Call</th>
             <th class="number">Latest</th>
             <th class="number">Interval</th>
             <th class="number">Change</th>

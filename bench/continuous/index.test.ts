@@ -148,8 +148,8 @@ test("raw paired samples drive configured checks and the existing shared chart",
   assert.match(body, /1.2000×/);
   assert.ok(body.includes("Median interval"));
   assert.doesNotMatch(body, /1.20 ns|0.800 ns/);
-  assert.match(body, /serial/);
-  assert.match(body, /4|Parallel/);
+  assert.match(body, /\| sort \|/);
+  assert.match(body, /\| par_sort \|/);
   const images = action.requests
     .filter((request) => request.path.endsWith("/git/trees"))
     .flatMap((request) => request.body.tree as { content: string }[]);

@@ -27,9 +27,9 @@ function labels(summary: TrendSummary) {
 }
 
 function section(text: (string | null)[], mode: string, next?: string) {
-  const start = text.indexOf(modeName(mode).toUpperCase());
+  const start = text.indexOf(modeName(mode));
   assert.notEqual(start, -1, `missing ${mode} heading`);
-  const end = next ? text.indexOf(modeName(next).toUpperCase()) : text.length;
+  const end = next ? text.indexOf(modeName(next)) : text.length;
   assert.ok(end > start);
   return text.slice(start + 1, end);
 }
@@ -57,7 +57,11 @@ test("trend cases stay with their mode aggregate and keep swing order within eac
   assert.ok(parallelLabels.includes("seed 2"));
   assert.ok(!serialLabels.includes(caseParts(parallel.name).input));
   assert.ok(!parallelLabels.includes(caseParts(serial.name).input));
-  assert.ok(!text.includes(modeName("par-4")), "mode belongs in the heading, not row tags");
+  assert.equal(
+    text.filter((label) => label === modeName("par-4")).length,
+    1,
+    "the call belongs in the heading, not row tags",
+  );
 });
 
 test("a quiet single-mode history still has its titled aggregate", () => {

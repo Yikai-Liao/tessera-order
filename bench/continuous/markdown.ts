@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { modeName } from "../catalog.ts";
+import { caseSection } from "../catalog.ts";
 import { type CodeChange, codeTable } from "../code-change.ts";
 import { formatChange, type ReportSummary, type Row, short } from "./report.ts";
 
@@ -34,15 +34,15 @@ const status = { regression: "slower", improvement: "faster", within: "", missin
 
 function table(rows: Row[]) {
   return [
-    "| Input | Type | N | Mode | Median interval | Current / baseline | Change | Alert | ID |",
-    "|---|---|---:|---|---:|---:|---:|---|---|",
+    "| Call | Input | Type | N | Median interval | Current / baseline | Change | Alert | ID |",
+    "|---|---|---|---:|---:|---:|---:|---|---|",
     ...rows.map((r) =>
       [
         "",
-        cell([r.parts.input, r.parts.operation].filter(Boolean).join(" · ")),
+        cell(caseSection(r.name).title),
+        cell(r.parts.input),
         cell(r.parts.type),
         r.parts.n,
-        cell(modeName(r.parts.mode)),
         `${ratio(r.lower)} – ${ratio(r.upper)}`,
         ratio(r.value),
         formatChange(r.change),

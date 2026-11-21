@@ -294,17 +294,24 @@ fn finish_ordered<T, E: Extract<T>>(records: &mut [T], order: Order, extractor: 
     }
 }
 
-/// Target pair count used to choose the order gate's stride.
+/// Target pair count for choosing the stride on large inputs. A contiguous
+/// region covering a fraction `f` of the input meets about `f * ORDER_SAMPLES` pairs.
 const ORDER_SAMPLES: usize = 4096;
+/// Minimum stride: the sample reads at most two keys per this many records,
+/// bounding its cost on ordered inputs, which also pay the confirming scan.
+const ORDER_SAMPLE_MIN_STRIDE: usize = 128;
+/// Short inputs confirm directly: their sample would hold fewer than 64 pairs
+/// and could save at most part of one short scan.
+const ORDER_SAMPLE_MIN_LEN: usize = 8192;
 
-/// Classifies adjacent keys directly at unit stride, otherwise samples pairs
-/// before confirming candidate order with a full scan.
+/// Confirms short inputs directly; larger inputs sample adjacent pairs before
+/// confirming candidate order with a full scan.
 #[inline(never)]
 fn probe_order<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Order {
-    let stride = (records.len() / ORDER_SAMPLES).max(1);
-    if stride == 1 {
+    if records.len() < ORDER_SAMPLE_MIN_LEN {
         return confirm_order(records, extractor);
     }
+    let stride = (records.len() / ORDER_SAMPLES).max(ORDER_SAMPLE_MIN_STRIDE);
     let mut ascending = true;
     let mut descending = true;
     for index in (stride..records.len()).step_by(stride) {
@@ -598,12 +605,16 @@ mod tests {
 
     #[test]
     fn confirm_order_finds_unsampled_inversion() {
-        let len = if cfg!(miri) { 130 } else { 8192 };
+        let len = if cfg!(miri) {
+            130
+        } else {
+            ORDER_SAMPLE_MIN_LEN
+        };
         let mut values: Vec<_> = (0..len as u64).collect();
-        let index = (len / 2) & !1;
+        // At the sampling threshold, pairs end at multiples of 128. The
+        // swap sits between two pairs. Miri uses direct confirmation.
+        let index = len / 2 + 1;
         values.swap(index, index + 1);
-        // At 8192 records the strided gate checks odd pair offsets. Miri
-        // exercises the confirmation directly on a shorter vector scan.
         assert!(confirm_order(&values, &mut Direct) == Order::Unsorted);
         crate::sort(&mut values);
         assert_eq!(values, (0..len as u64).collect::<Vec<_>>());
@@ -612,8 +623,8 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore = "sampling adds no distinct ownership boundary")]
     fn child_flat_sample_does_not_certify_order() {
-        let mut records = alloc::vec![0u64; 3 * ORDER_SAMPLES];
-        // At stride three, index four belongs to neither sampled pair.
+        let mut records = alloc::vec![0u64; 3 * ORDER_SAMPLE_MIN_LEN];
+        // Index four belongs to neither sampled pair at this stride.
         records[4] = 1;
         let mut expected = records.clone();
         expected.sort();

@@ -274,6 +274,20 @@ The partial parameters were Top-k/prefix length 1,024, single rank 32,768, inter
 
 A separate historical full-sort build and linked-placement screen against Foundation D succeeded with the new-operation benchmark adapters disabled. Small timing differences also appeared between identical-source copies, including u64 random at 65,536 records and several 1,000-record cases. It establishes build compatibility, not regression freedom, and does not close the [foundation acceptance gaps](#algorithm-extension-foundations). Full-sort figure cohorts are unchanged; non-sort results remain tables and JSON.
 
+### Shared order confirmation for serial operations
+
+The [order probe](../explain/routing.md#order-probe) reduces what full sorting, argsort, single-rank selection and Rayon preparation pay to recognize order. Sampling fewer adjacent pairs on medium-sized inputs avoids touching much of an ordered slice twice. Grouping scalar confirmation lets independent comparisons overlap while retaining forward extraction. An inversion may evaluate the rest of its group.
+
+Reducing the sample at every length lost the cheap rejection of localized disorder. With a target of 512 pairs, the hosted comparison for a million records with an unsorted tail was 19% slower in serial and 10–15% slower with four threads. The stride floor retains the medium-size saving and the original sampling density on large inputs. In the hosted comparison of `fc815ca` against `10362bf`, that tail case returned to the noise range.
+
+The historical linked full-sort screen used the interim 512-pair implementation against `10362bf`. Its 65,536-record inputs have the same stride under the final rule. The screen found gains on ordered and equal inputs across three record widths, with random controls approximately unchanged. The ranked-operation screen used separate processes and does not attribute its gains to the source changes. Short-input placement sensitivity remains open, including the outside-A/A median for `u32/sorted99` at 1,000 records. Grouped confirmation also changes the short path, even though its direct-confirmation gate is unchanged. [PR #234](https://github.com/Yikai-Liao/tessera-order/pull/234) retains the measured ranges and placement limits.
+
+### Rejected serial movement experiments
+
+On the former binary partition API, prefix classification saved movement on already partitioned inputs, but replay control slowed the ordinary random-input classifier. Removing replay by distributing only the unclassified suffix and rotating the leading nonmatching run still added a full movement step and lost on random, low-cardinality and sorted-key workloads. Fixed four-record scatter groups also failed to beat width-scaled grouping and were slower for wide records.
+
+Geometric collection of insertion-probe keys slowed nearly sorted inputs without a robust random-input gain. Exact-length key collection did not improve cached-key grouping beyond measurement noise. Deriving writer positions from block ends did not justify the extra arithmetic and cold-path division. Preserve the existing probe and writer state until a replacement demonstrates a saving.
+
 ### Narrowed API selection screen
 
 A bounded screen against `704f5a9` measured `select` at zero-based rank 32,768 on random inputs of 65,536 records. Ratios are current time divided by baseline time; brackets give the paired 99% median interval.
@@ -288,6 +302,8 @@ The random `u64` full-sort controls were also within noise: 1.0101 [0.9928, 1.04
 ### Tile-local selection experiment
 
 A prototype took a top-digit MSD pass for partial requests and finished only the requested bands. It measured slower on every partial operation in the then-current continuous suite. For random 65,536-record u64 input, multiple selection was 59% slower, rank range 38%, and single selection, prefix and top-k 19–20%; `row_u64` cases were 6–24% slower. Argsort, chunks and partitions were unchanged. The prototype was not merged; a replacement must improve on complete tile sorting for a concrete selection workload.
+
+Skipping empty or singleton buckets during rank projection, or using a narrower initial digit for incomplete requests, did not recover the loss on random 16-byte rows. Sparse cursor-table walks and rank projections replaced one contiguous insertion sweep. A candidate needs to preserve that cheap finish or demonstrate a workload where skipping work pays for the traversal.
 
 ## Structure analysis
 

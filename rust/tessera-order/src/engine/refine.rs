@@ -157,6 +157,12 @@ fn refine_with_tile_bytes<T, E: Extract<T>>(
         return;
     }
     let tile_len = tile_capacity::<T>(tile_bytes);
+    if let Requirement::Nth(index) = required
+        && records.len() > tile_len
+        && spans::SourceOrder::finish_cut(records, index, &mut extractor)
+    {
+        return;
+    }
     let Some(varying) = prepare::<_, _>(records, &mut extractor, tile_len) else {
         return;
     };
@@ -483,10 +489,8 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
                 .sort::<E>(records, varying, self.extractor);
             return;
         }
-        // Radix selection discards most buckets, so a complete sparse order
-        // only pays off when every rank is required.
-        if matches!(required, Requirement::All)
-            && let Some(order) = spans::SourceOrder::for_node(records, varying, self.extractor)
+        if let Some(order) =
+            spans::SourceOrder::for_node(records, varying, required, self.extractor)
         {
             order.apply(records);
             return;

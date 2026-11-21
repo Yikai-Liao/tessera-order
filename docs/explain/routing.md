@@ -41,7 +41,7 @@ Only now is tile and block scratch allocated. Budgeted insertion on a larger uns
 
 ## Sparse source order
 
-A serial finisher can describe a permutation as long runs of source positions and a few isolated records. After the insertion probe, a node wider than one digit samples the input. If most keys are alike, their occurrences form the ordered background. If most positions are already ordered, the finisher removes both ends of each inversion from a stack of source runs. Each disjoint pair costs at most two exceptions for one record any ordered subsequence must exclude. Exceeding the square-root exception budget returns control to ordinary partitioning before any records move.
+A serial finisher can describe a permutation as long runs of source positions and a few isolated records. Only full sorts take this path: single-rank selection discards most buckets after one pass, which on small records costs less than building the complete order. After the insertion probe, a node wider than one digit samples the input. If most keys are alike, their occurrences form the ordered background. If most positions are already ordered, the finisher removes both ends of each inversion from a stack of source runs. Each disjoint pair costs at most two exceptions for one record any ordered subsequence must exclude. Exceeding the square-root exception budget returns control to ordinary partitioning before any records move.
 
 Both constructions merge isolated source positions with runs from the background. Reserving a destination band for equal keys establishes their full order. The mover parks isolated records, copies the longer runs in overlap-safe order, and restores the parked records. Rayon schedules the slice before its serial finisher tries this path.
 

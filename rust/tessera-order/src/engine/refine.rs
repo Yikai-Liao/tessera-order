@@ -483,8 +483,11 @@ impl<T, E: Extract<T>> Sorter<'_, T, E> {
                 .sort::<E>(records, varying, self.extractor);
             return;
         }
-        // A complete order also satisfies a single rank.
-        if let Some(order) = spans::SourceOrder::for_node(records, varying, self.extractor) {
+        // Radix selection discards most buckets, so a complete sparse order
+        // only pays off when every rank is required.
+        if matches!(required, Requirement::All)
+            && let Some(order) = spans::SourceOrder::for_node(records, varying, self.extractor)
+        {
             order.apply(records);
             return;
         }

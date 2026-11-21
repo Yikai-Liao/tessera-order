@@ -86,9 +86,12 @@ rl.on("line", request => {
   if (mask) await assert.rejects(comparisonCpus(true, "0"), /four available CPUs/);
   const events = (await readFile(join(directory, "events"), "utf8")).trim().split("\n");
   assert.deepEqual(
-    events.filter((s) => s.endsWith(":sample")),
+    events.filter((s) => s.endsWith(":warm") || s.endsWith(":sample")),
     Array.from({ length: 30 * run.cases.length }, (_, i) =>
-      i % 2 ? ["current:sample", "baseline:sample"] : ["baseline:sample", "current:sample"],
+      (i % 2 ? ["current", "baseline"] : ["baseline", "current"]).flatMap((role) => [
+        `${role}:warm`,
+        `${role}:sample`,
+      ]),
     ).flat(),
   );
   const pids = (await readFile(join(directory, "pids"), "utf8")).trim().split("\n");

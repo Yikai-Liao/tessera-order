@@ -54,15 +54,14 @@ export async function measureSamples(
         if (JSON.parse(await a("start")).id !== id) throw new Error("Wrong first case");
         await worker(roles[1], async (b) => {
           if (JSON.parse(await b("start")).id !== id) throw new Error("Wrong second case");
-          for (const exchange of [a, b]) {
-            const warm = JSON.parse(await exchange("warm"));
-            if (warm.id !== id || warm.samples !== count)
-              throw new Error("Incompatible sample budgets");
-          }
           for (const [role, exchange] of [
             [roles[0], a],
             [roles[1], b],
           ] as const) {
+            // Warm the worker that will run next on this CPU.
+            const warm = JSON.parse(await exchange("warm"));
+            if (warm.id !== id || warm.samples !== count)
+              throw new Error("Incompatible sample budgets");
             const value = JSON.parse(await exchange("sample"));
             if (![value.elapsed_ns, value.sorts].every((v) => Number.isSafeInteger(v) && v > 0))
               throw new Error("Invalid worker observation");

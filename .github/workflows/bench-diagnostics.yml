@@ -32,6 +32,7 @@ jobs:
           git diff 99061eeb HEAD -- bench/rust/src/comparison/variant.rs > "$RUNNER_TEMP/corpus.patch"
           git restore --source=ace911a9 -- bench/rust bench/catalog.toml bench/plans Cargo.toml Cargo.lock rust
           git apply "$RUNNER_TEMP/corpus.patch"
+          sed -i '/Box::new(BatchKernel {/a\        corpus: vec![],' bench/rust/src/comparison/variant/parallel.rs
           bun run tools continuous prepare ddb2f6d9 --out bench/results/replay || { tail -80 bench/results/replay.log; exit 1; }
       - uses: actions/upload-artifact@v7
         with:

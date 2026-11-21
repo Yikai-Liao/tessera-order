@@ -5,7 +5,38 @@ permissions:
   contents: read
   actions: read
 jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/benchmark
+      CARGO_BUILD_TARGET: x86_64-unknown-linux-gnu
+      CARGO_PROFILE_BENCH_DEBUG: "0"
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target/benchmark"
+          shared-key: benchmark-static-${{ hashFiles('Cargo.toml', 'bench/workspace.ts') }}
+          save-if: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: |
+          git restore --source=ace911a9 -- rust/tessera-order
+          bun run tools continuous prepare ddb2f6d9 --out bench/results/replay
+      - uses: actions/upload-artifact@v7
+        with:
+          name: replay-pair
+          path: bench/results/replay
   replay:
+    needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 6
     strategy:
@@ -22,17 +53,10 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - uses: actions/download-artifact@v8
         with:
-          github-token: ${{ github.token }}
-          run-id: 44862687879
-          artifact-ids: 14690970523
-          merge-multiple: true
+          name: replay-pair
           path: replay
       - run: |
           cd replay
-          sha256sum -c <<'HASHES'
-          2740880e531489af9bf63cad3577b2a572c0fd92b683c849afc164802d9e8419  binaries/baseline-default/worker
-          5a63f97425a93592cfc572f47a9ed7d540444b6faf41906a9765e88a53c382ff  binaries/current-default/worker
-          HASHES
           chmod +x binaries/*/worker
           jq '.plan' prepared.json > plan.json
           git show 99061eeb:bench/local/samples.ts > ../bench/local/replay-old.ts
@@ -45,7 +69,7 @@ jobs:
             interleaved) groups='new-aa old-ab new-ab old-aa';;
           esac
           for group in $groups; do
-            REPLAY_SPREAD=1 bun ../bench/local/replay.ts "$group" "$cpu" > "output/$group.json"
+            TESSERA_REPLAY_CORPUS=${group%%-*} bun ../bench/local/replay.ts "$group" "$cpu" > "output/$group.json"
           done
       - uses: actions/upload-artifact@v7
         with:

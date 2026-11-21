@@ -202,6 +202,7 @@ pub trait Kernel {
 struct BatchKernel<T, F> {
     input: Rc<PreparedRecords<T>>,
     buffers: Vec<Vec<T>>,
+    corpus: Vec<Vec<T>>,
     sort: F,
     stable: bool,
     description: &'static str,
@@ -211,8 +212,8 @@ impl<T: BenchmarkRecord, F: FnMut(&mut [T])> Kernel for BatchKernel<T, F> {
     fn restore(&mut self, batch: usize) {
         self.buffers
             .resize_with(batch, || self.input.original().clone());
-        for v in &mut self.buffers {
-            v.clone_from(self.input.original());
+        for (i, v) in self.buffers.iter_mut().enumerate() {
+            v.clone_from(if self.corpus.is_empty() {self.input.original()} else {&self.corpus[i % self.corpus.len()]});
         }
     }
     fn run_batch(&mut self) {
@@ -268,6 +269,10 @@ fn prepare_call<T: BenchmarkRecord>(
     description: &'static str,
 ) -> Box<dyn Kernel> {
     Box::new(BatchKernel {
+        corpus: if std::env::var("TESSERA_REPLAY_CORPUS").as_deref() == Ok("new") && input.original().len() <= 64 {
+            let mut state=1u64;
+            (0..64).map(|_| { let mut v=input.original().clone(); for i in (1..v.len()).rev() {state=state.wrapping_mul(6364136223846793005).wrapping_add(1); v.swap(i,(state>>32) as usize % (i+1));} v }).collect()
+        } else {vec![]},
         description,
         input,
         buffers: Vec::new(),
@@ -577,6 +582,7 @@ mod tests {
         assert!(k.check().is_err());
         let mut k = BatchKernel {
             input,
+            corpus: vec![],
             buffers: vec![],
             sort: |v: &mut [u64]| {
                 assert_eq!(v, [3, 1, 2]);

@@ -53,7 +53,11 @@ test("routing keeps library, comparison and revision checks with their owners", 
     ],
     [["rust/tessera-trace/src/lib.rs", "rust/tessera-trace/Cargo.lock"], { docs: true }],
     [
-      ["rust/tessera-order/tests/memory.rs", ".github/actions/rust-test/action.yml"],
+      [
+        "rust/tessera-order/tests/memory.rs",
+        ".github/actions/rust-test/action.yml",
+        ".github/miri-nextest.toml",
+      ],
       { rust: true },
     ],
     [

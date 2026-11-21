@@ -41,6 +41,14 @@ test("all shards cover the same input inventory once, including four-thread mode
   assert.deepEqual(shardCases([...selected].reverse(), 1, CONTINUOUS_SHARDS), runs[0].cases);
 });
 
+test("complete results from an earlier matrix width can still be rendered", async (t) => {
+  const out = await mkdtemp(join(tmpdir(), "tessera-shards-retained-"));
+  t.after(() => rm(out, { recursive: true, force: true }));
+  const retained = await writePaired(out, 1.2, undefined, 6);
+  const loaded = await readPaired(out, source, join(out, "prepared"));
+  assert.deepEqual(pairedBmf(loaded), pairedBmf(retained));
+});
+
 test("rejects a self-consistent but shortened inventory across every shard", async (t) => {
   const out = await mkdtemp(join(tmpdir(), "tessera-shard-truncated-"));
   t.after(() => rm(out, { recursive: true, force: true }));

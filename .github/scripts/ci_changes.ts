@@ -28,7 +28,7 @@ const ROUTES: [RegExp, Lane[]][] = [
   ],
   // Tests exercise the engine but are not the code that PR measurements compare.
   [
-    /^rust\/[^/]+\/(tests\/|LICENSE$)|^(rustfmt\.toml|\.github\/workflows\/rust-ci\.yml|\.github\/actions\/rust-test\/)/,
+    /^rust\/[^/]+\/(tests\/|LICENSE$)|^(rustfmt\.toml|\.github\/workflows\/rust-ci\.yml|\.github\/actions\/rust-test\/|\.github\/miri-nextest\.toml$)/,
     ["rust"],
   ],
   // The figures replay the library through this WebAssembly crate.

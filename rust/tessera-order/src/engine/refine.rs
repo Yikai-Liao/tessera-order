@@ -600,7 +600,65 @@ mod tests {
 
     use super::*;
     use crate::engine::key::ByKey;
+    use core::cell::Cell;
     use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    #[test]
+    fn endpoint_selection_preserves_callback_edits() {
+        for rank in [0, 3] {
+            let keys = if rank == 0 {
+                [5, 5, 4, 1]
+            } else {
+                [9, 6, 5, 5]
+            };
+            let records = || core::array::from_fn::<_, 4, _>(|id| (id, Cell::new(keys[id])));
+            let mut values = records();
+            let tile_bytes = core::mem::size_of_val(&values) / 2;
+            let peer = if rank == 0 { 1 } else { 2 };
+            // The boundary probe stops at the opposite end. Only the winner
+            // scan reaches the peer next to the displaced endpoint.
+            let panic = catch_unwind(AssertUnwindSafe(|| {
+                refine_with_tile_bytes(
+                    &mut values,
+                    ByKey(|(id, key): &(usize, Cell<u8>)| {
+                        if *id == peer {
+                            key.set(42);
+                            std::panic::panic_any(*id);
+                        }
+                        key.get()
+                    }),
+                    Requirement::Nth(rank),
+                    tile_bytes,
+                );
+            }))
+            .unwrap_err();
+            assert_eq!(*panic.downcast::<usize>().unwrap(), peer);
+            assert_eq!(
+                values.map(|(id, key)| (id, key.get())),
+                core::array::from_fn(|id| (id, if id == peer { 42 } else { keys[id] }))
+            );
+
+            let mut values = records();
+            let mut edits = [0; 4];
+            refine_with_tile_bytes(
+                &mut values,
+                ByKey(|(id, key): &(usize, Cell<u8>)| {
+                    edits[*id] += 1;
+                    key.replace(key.get() + 1)
+                }),
+                Requirement::Nth(rank),
+                tile_bytes,
+            );
+            values.sort_by_key(|r| r.0);
+            // The opposite endpoint is read by both the boundary probe and
+            // the winner scan and returns a different key the second time.
+            assert!(edits[3 - rank] >= 2);
+            assert_eq!(
+                values.map(|(id, key)| (id, key.get())),
+                core::array::from_fn(|id| (id, keys[id] + edits[id]))
+            );
+        }
+    }
 
     #[test]
     fn confirmation_preserves_direction_and_ties() {

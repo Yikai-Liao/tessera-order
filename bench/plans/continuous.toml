@@ -182,6 +182,31 @@ distributions = [ "d16" ]
 lengths = [ 65536 ]
 operation = { kind = "select", index = 32768 }
 
+# Endpoints exercise one-rank placement on wide records and on ties.
+[[include]]
+types = [ "rec128_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+operation = { kind = "select", index = 0 }
+
+[[include]]
+types = [ "rec128_u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+operation = { kind = "select", index = 65535 }
+
+[[include]]
+types = [ "row_u64" ]
+distributions = [ "d16" ]
+lengths = [ 65536 ]
+operation = { kind = "select", index = 0 }
+
+[[include]]
+types = [ "row_u64" ]
+distributions = [ "d16" ]
+lengths = [ 65536 ]
+operation = { kind = "select", index = 65535 }
+
 # Longer index lists pack a key prefix beside each index.
 [[include]]
 types = [ "u64", "row_u64" ]

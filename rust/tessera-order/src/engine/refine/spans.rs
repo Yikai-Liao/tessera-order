@@ -53,6 +53,14 @@ impl SourceOrder {
         let limit = Self::exception_limit::<E::Value>(len, size_of::<T>());
         let skipped = match (first_high, last_low) {
             (None, None) => return true,
+            (None, Some(end)) if rank == 0 => {
+                place_extreme(&mut records[..=end], false, pivot, extractor);
+                return true;
+            }
+            (Some(start), None) if rank == len - 1 => {
+                place_extreme(&mut records[start..], true, pivot, extractor);
+                return true;
+            }
             (Some(start), None) => prefix_holes(
                 (start..len).map(|i| (i, extractor.key(&records[i]) <= pivot)),
                 rank + 1 - start,
@@ -448,6 +456,38 @@ impl SourceOrder {
     }
 }
 
+/// The cut probe found a strictly better key in this slice. Scanning in
+/// source order makes `min_by_key` prefer the first minimum and `max_by_key` the
+/// last maximum. A swap is safe when the displaced endpoint has no peers.
+fn place_extreme<T, E: Extract<T>>(
+    records: &mut [T],
+    last: bool,
+    anchor: E::Value,
+    extractor: &mut E,
+) {
+    let end = if last { records.len() - 1 } else { 0 };
+    let candidates = if last { 0..end } else { 1..records.len() };
+    let mut has_peer = false;
+    let key = |&i: &usize| {
+        let key = extractor.key(&records[i]);
+        has_peer |= key == anchor;
+        key
+    };
+    let winner = if last {
+        candidates.max_by_key(key)
+    } else {
+        candidates.min_by_key(key)
+    }
+    .unwrap();
+    if !has_peer {
+        records.swap(end, winner);
+    } else if last {
+        records[winner..].rotate_left(1);
+    } else {
+        records[..=winner].rotate_right(1);
+    }
+}
+
 /// Source positions skipped on the way to the required match.
 fn prefix_holes(
     scan: impl Iterator<Item = (usize, bool)>,
@@ -511,6 +551,29 @@ mod tests {
             let mut indices: Vec<_> = (0..len).collect();
             order.apply(&mut indices);
             assert_eq!(indices, [6, 7, 2, 3, 4, 5, 0, 1]);
+        }
+    }
+
+    #[test]
+    fn endpoint_cuts_preserve_the_winner_and_displaced_peers() {
+        // The first and last extremes both tie. Each displaced endpoint can
+        // cross its peer. Replacing both peers also exercises direct swaps.
+        for peer in [5u8, 6] {
+            let keys = [5, peer, 9, 1, 9, 1, peer, 5];
+            for rank in [0, keys.len() - 1] {
+                let mut ids: Vec<_> = (0..keys.len()).collect();
+                let mut expected = ids.clone();
+                expected.sort_by_key(|&id| keys[id]);
+                assert!(SourceOrder::finish_cut(
+                    &mut ids,
+                    rank,
+                    &mut ByKey(|id: &usize| keys[*id])
+                ));
+                assert_eq!(ids[rank], expected[rank]);
+                ids[..rank].sort_by_key(|&id| keys[id]);
+                ids[rank + 1..].sort_by_key(|&id| keys[id]);
+                assert_eq!(ids, expected);
+            }
         }
     }
 

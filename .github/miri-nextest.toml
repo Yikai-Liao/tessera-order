@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+# Interpret the longest fixture while other tests can occupy the remaining cores.
+[[profile.default.overrides]]
+filter = 'test(partial_ranks_match_stable_record_identities)'
+priority = 1

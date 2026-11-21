@@ -13,8 +13,9 @@ import { type LocalRun, readPrepared, shardCases, summarizeLocal } from "../loca
 import { parseRetainedPlan } from "../plan.ts";
 import { type BencherReport, type Row, summarizeRows } from "./report.ts";
 
-/** Hosted matrix width; workflows obtain their matrix from this owner. */
-export const CONTINUOUS_SHARDS = 6;
+/** Hosted matrix width. More shards shorten the slowest measurement at the
+ * cost of another runner setup per shard and more concurrent slots. */
+export const CONTINUOUS_SHARDS = 8;
 
 /** Exact source identity captured by this CI run. */
 export interface PairedSource {
@@ -60,8 +61,8 @@ export async function readPaired(directory: string, source: PairedSource, prepar
   }
   if (!runs.length) throw new Error("No completed measurement shards");
   const count = runs[0].shard?.count;
-  if (count !== CONTINUOUS_SHARDS || count !== runs.length)
-    throw new Error("Missing measurement shards");
+  // Retained runs keep their own partition width when hosted scheduling changes.
+  if (count !== runs.length) throw new Error("Missing measurement shards");
   const indexes = new Set<number>();
   for (const run of runs) {
     const shard = run.shard;

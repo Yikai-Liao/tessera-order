@@ -120,7 +120,7 @@ jobs:
       - run: cargo miri setup
         if: steps.miri-cache.outputs.cache-hit != 'true'
       # Each test gets its own interpreter so the runner's cores can be used.
-      - run: cargo miri nextest run -p tessera-order
+      - run: cargo miri nextest run --config-file .github/miri-nextest.toml -p tessera-order
         if: matrix.mode == 'serial'
       # Sequential ownership fixtures cover the optional Rayon storage paths;
       # native pool tests cover scheduling, which these Miri fixtures do not.

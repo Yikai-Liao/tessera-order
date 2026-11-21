@@ -29,4 +29,4 @@ pub(crate) use distribution::{MAX_PARTITION_BUCKETS, distribute};
 pub(crate) use key::{ByKey, Direct, Unsigned, bit_len};
 #[cfg(feature = "rayon")]
 pub(crate) use refine::parallel::sort as par_sort;
-pub(crate) use refine::{select_nth, sort};
+pub(crate) use refine::{argsort, order_by_cached_indices, select_nth, sort};

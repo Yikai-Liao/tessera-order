@@ -260,6 +260,10 @@ These local speeds divide reference time by Tessera time on a Ryzen 7 8845H. The
 
 On 65,536 random 128-byte records, a bounded end reached 1.15–1.26× against `select_nth_unstable_by_key` at ranks 1–4, and 0.67× at rank 0. At the median, random and 16-distinct-key records reached 0.48× and 0.38×. The standard selector permits ties to change order. Keep the disjointness proof bounded to the end. Checking the entire slice for cross-region ties reached 0.53× at the random median. Membership bitmaps still require stable payload movement and reached 0.43× there. Revisit dense ranks when a design reduces record transfers.
 
+## Stable source permutations
+
+Counted emission and packed prefixes save different work. Routing packed words through a fresh root partition took 29.7% longer than `ddb2f6d` on 65,536 random u64 keys. Emitting bare indices avoided packing at that size, but repeated source-key lookups on one million random 128-byte records reduced argsort speed from 6.80× to 3.68× against stable standard-library index sorting. For sparse permutations, moving runs directly also saved the cost of expanding and following index cycles. On 65,536 wide records with 99% skew and up to 65,536 category IDs, cached-key sorting improved from 0.87× to 2.70× against stable standard-library grouping.
+
 ## Serial slice-operation baseline
 
 This baseline covers the earlier development surface, including operations [removed before 0.2](algorithm-extensions-proposal.md#release-surface-alignment). The first serial extensions shared one rank-requirement authority and one refinement executor. Argsort used indices as payloads; segmented sorting reused invocation workspace across complete refinements. Top-k, prefixes and selected ranks did not introduce a second mover, recovery protocol or tile engine. That small shared implementation was not evidence that every workload was fastest.

@@ -7,10 +7,10 @@
 //! ordered and which bits vary. When the varying bits fit one stable
 //! distribution, as with category keys, the records move once by those bits
 //! and the distribution replays the cached keys instead of calling the key
-//! function. Otherwise the keys are sorted as (key, input index) pairs and the
-//! records follow the sorted indices.
+//! function. Otherwise the engine orders the source indices by the cached keys,
+//! then moves each record to its destination.
 
-use crate::engine::{self, ByKey, MAX_PARTITION_BUCKETS, RadixKey, Unsigned, bit_len};
+use crate::engine::{self, MAX_PARTITION_BUCKETS, RadixKey, Unsigned, bit_len};
 use alloc::vec::Vec;
 
 /// Sorts records by a key, evaluating the key function at most once per record
@@ -40,7 +40,7 @@ use alloc::vec::Vec;
 /// inputs, whose order is known only once every key is evaluated. Keys that
 /// differ only in a narrow bit window, such as category IDs, then move the
 /// records once within the [`crate::sort_by_key`] scratch bound; other keys sort
-/// (key, index) pairs with [`crate::sort`] scratch.
+/// source indices with [`crate::argsort`] workspace.
 ///
 /// # Examples
 ///
@@ -94,31 +94,6 @@ pub fn sort_by_cached_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], m
             digit
         });
     } else {
-        sort_by_index(values, keys);
-    }
-}
-
-/// Pairs every cached key with its input index, sorts the pairs stably by key
-/// and moves each record to its sorted position. `keys[i]` is the key of
-/// `values[i]`. Nothing here runs caller code or can panic.
-fn sort_by_index<T, V: Unsigned>(values: &mut [T], keys: Vec<V>) {
-    let mut cache: Vec<(V, usize)> = keys.into_iter().zip(0..).collect();
-    engine::sort(&mut cache, ByKey(|entry: &(V, usize)| entry.0));
-    // The sorted position `j` takes the record at input index `cache[j].1`.
-    // Each cycle of that permutation is applied with swaps; a finished
-    // position records itself as its source, so later starts skip it.
-    for start in 0..values.len() {
-        let mut position = start;
-        loop {
-            let source = cache[position].1;
-            cache[position].1 = position;
-            if source == start {
-                break;
-            }
-            // `values[position]` holds the cycle's starting record and the
-            // unfinished `values[source]` still holds its input record.
-            values.swap(position, source);
-            position = source;
-        }
+        engine::order_by_cached_indices(values, keys);
     }
 }

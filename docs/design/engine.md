@@ -19,13 +19,13 @@ Full sorting and single-rank selection share node planning, leaf finishing and s
 
 ## Knowledge boundaries
 
-`src/lib.rs` documents the crate and reexports its public API. `src/algorithms.rs` and its submodules implement the public ordering operations. They supply extractors or build index and key buffers; they do not assemble rank requests, manage engine workspace or name movement modules. The private `engine/` module exposes complete operations: `sort`, `select_nth`, `distribute` and, with Rayon, `par_sort`. `engine/mod.rs` reexports these operations without forwarding calls or a policy trait. The paths below are relative to `src/engine/`.
+`src/lib.rs` documents the crate and reexports its public API. `src/algorithms.rs` and its submodules implement the public ordering operations. They supply extractors or build index and key buffers; they do not assemble rank requests, manage engine workspace or name movement modules. The private `engine/` module resolves complete sorts, rank cuts, source permutations and cached distributions. With Rayon it also provides `par_sort`. `engine/mod.rs` reexports these operations without forwarding calls or a policy trait. The paths below are relative to `src/engine/`.
 
 Keeping every module at crate root allowed an adapter to depend on a block directory or a tile guard. The module boundary removes that dependency possibility without changing execution. A separate public engine crate would force lifetime, extractor and allocation contracts to stabilize before the current consumers have established them; that remains deferred.
 
 | Owner | Complete responsibility | Consumers need to know |
 |---|---|---|
-| `../algorithms.rs` | Define serial sort, argsort and selection; build and sort the output indices for argsort | Complete sort and selection, not movement state or planner details |
+| `../algorithms.rs` | Expose serial sort, argsort and selection through the engine operations | Their public contracts and key extractors |
 | `../algorithms/cached.rs` | Cache encoded keys, detect order and variation, and choose distribution or an index permutation | Complete distribution or sort, not their scratch or intermediate boundaries |
 | `../algorithms/parallel.rs` | Define the feature-gated sorting API and its record and extractor bounds | Complete parallel sort, not its scheduling or ownership transfer |
 | `distribution.rs` | Stable finite-category distribution and its storage lifetime | Category keys in a bounded bit window; no returned boundaries |
@@ -84,7 +84,7 @@ A stage's rule changes on its page, in the code and in the page's model together
 
 ## Ordered rank requirements
 
-`sort` and `select_nth` share private ordered refinement. The requirement is either `All` or `Nth(index)`, with the index local to the current slice. Selection validates the root index before mutation or key calls, then returns three disjoint borrows after refinement. Argsort sorts its index output with `ByKey`: numeric indices are payloads, never direct keys eligible for count/refill.
+`sort` and `select_nth` share private ordered refinement. The requirement is either `All` or `Nth(index)`, with the index local to the current slice. Selection validates the root index before mutation or key calls, then returns three disjoint borrows after refinement. For argsort and wide-window cached-key sorting, `refine/indices.rs` owns the stable source permutation. Argsort requests indices and cached-key sorting applies spans or cycles to records. See [index output](../explain/routing.md#when-the-result-is-a-permutation).
 
 A rank in a root larger than one tile can finish from a one-sided boundary or a bounded ordered end. A serial finisher can resolve a node with a dominant key or, in a full sort, sparse inversions as source spans instead of partitioning it; for a rank it reserves just that position. See [sparse source order](../explain/routing.md#sparse-source-order).
 

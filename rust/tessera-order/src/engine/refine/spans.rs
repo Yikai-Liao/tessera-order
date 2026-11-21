@@ -103,12 +103,13 @@ impl SourceOrder {
         varying: u128,
         required: Requirement,
         extractor: &mut E,
+        record_bytes: usize,
     ) -> Option<Self> {
         let len = records.len();
         if len < plan::KEY_SAMPLE_LEN || plan::complete_digit(varying).is_some() {
             return None;
         }
-        let limit = Self::exception_limit::<E::Value>(len, size_of::<T>());
+        let limit = Self::exception_limit::<E::Value>(len, record_bytes);
         // Sample admission only. Both constructions enforce the actual limit.
         let allowance = limit.saturating_mul(plan::KEY_SAMPLE_LEN).div_ceil(len);
         let pivot = extractor.key(&records[len / 2]);
@@ -397,6 +398,14 @@ impl SourceOrder {
         })
     }
 
+    pub(super) fn write_indices(&self, output: &mut Vec<usize>) {
+        output.clear();
+        output.reserve(self.len());
+        for (_, source) in self.spans() {
+            output.extend(source);
+        }
+    }
+
     /// Gather isolated records first. Every longer span comes from the same
     /// monotone subsequence, so all its source and destination ranges have
     /// the same relative order. Move each such span at most once.
@@ -562,9 +571,13 @@ mod tests {
                 // the sample size, so both constructions are exercised.
                 let mut records: Vec<_> = (0..len).map(|i| (Box::new(i), [0u8; 1024])).collect();
                 let mut extract = ByKey(|r: &(Box<usize>, [u8; 1024])| keys[*r.0]);
-                let Some(order) =
-                    SourceOrder::for_node(&records, u64::MAX.into(), required, &mut extract)
-                else {
+                let Some(order) = SourceOrder::for_node(
+                    &records,
+                    u64::MAX.into(),
+                    required,
+                    &mut extract,
+                    size_of::<(Box<usize>, [u8; 1024])>(),
+                ) else {
                     // Selection uses only the dominant-key construction.
                     assert!(!mostly_equal && matches!(required, Requirement::Nth(_)));
                     continue;

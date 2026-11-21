@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Resolve the stable permutation of immutable keys. Contiguous source spans
-//! can move a payload intact. Dense inputs keep source positions and their
-//! remaining key prefixes together in index-sized words.
+//! Stable permutations for index output and cached-key record movement.
 
-use super::{
-    Requirement, Sorter, bands::Bands, bit_len, prepare, spans::SourceOrder, tile_capacity,
-};
+use super::{Requirement, Sorter, bit_len, prepare, spans::SourceOrder, tile_capacity};
 use crate::engine::{
     key::{ByKey, RadixKey, Unsigned},
     thresholds::TILE_BYTES,
@@ -14,46 +10,47 @@ use crate::engine::{
 };
 use alloc::vec::Vec;
 
-enum IndexOrder {
-    Spans(SourceOrder),
-    Dense(Vec<usize>),
-}
-
 pub(crate) fn argsort<T, K: RadixKey>(values: &[T], key: impl FnMut(&T) -> K) -> Vec<usize> {
-    match index_order(values, key, size_of::<usize>()) {
-        IndexOrder::Spans(order) => order.into_indices(),
-        IndexOrder::Dense(indices) => indices,
+    let mut indices = Vec::new();
+    if let Some(order) = order_indices(values, key, size_of::<usize>(), &mut indices) {
+        order.write_indices(&mut indices);
     }
+    indices
 }
 
 pub(crate) fn order_by_cached_indices<T, V: Unsigned>(values: &mut [T], keys: Vec<V>) {
-    let order = index_order(&keys, |v| *v, size_of::<T>());
+    let mut indices = Vec::new();
+    let spans = order_indices(&keys, |v| *v, size_of::<T>(), &mut indices);
     drop(keys);
-    match order {
-        IndexOrder::Spans(order) => order.apply(values),
-        IndexOrder::Dense(indices) => apply_cycles(values, indices),
+    if let Some(order) = spans {
+        drop(indices);
+        order.apply(values);
+    } else {
+        apply_cycles(values, indices);
     }
 }
 
-fn index_order<T, K: RadixKey>(
+/// Fill `indices` with the stable permutation, or return source spans that
+/// the caller can expand in the same buffer or apply directly to its records.
+fn order_indices<T, K: RadixKey>(
     values: &[T],
     mut key: impl FnMut(&T) -> K,
     record_bytes: usize,
-) -> IndexOrder {
+    indices: &mut Vec<usize>,
+) -> Option<SourceOrder> {
     let len = values.len();
-    let mut indices: Vec<_> = (0..len).collect();
+    indices.clear();
+    indices.extend(0..len);
     if len < 2 {
-        return IndexOrder::Dense(indices);
+        return None;
     }
     let tile_len = tile_capacity::<usize>(TILE_BYTES);
     let mut extract = ByKey(|i: &usize| key(&values[*i]));
-    let Some(varying) = prepare(&mut indices, &mut extract, tile_len) else {
-        return IndexOrder::Dense(indices);
-    };
+    let varying = prepare(indices, &mut extract, tile_len)?;
     let mut scratch = Workspace::new();
     if len <= tile_len {
-        scratch.tile.sort(&mut indices, varying, &mut extract);
-        return IndexOrder::Dense(indices);
+        scratch.tile.sort(indices, varying, &mut extract);
+        return None;
     }
     if let Some(order) = SourceOrder::for_node(
         values,
@@ -62,38 +59,38 @@ fn index_order<T, K: RadixKey>(
         &mut ByKey(&mut key),
         record_bytes,
     ) {
-        return IndexOrder::Spans(order);
+        return Some(order);
     }
-    let digit = Bands::window(varying);
-    let partition = Bands::count(values.iter().map(|r| digit.byte(key(r).encode())));
-    let lower = varying & ((1u128 << digit.shift) - 1);
     let low = varying.trailing_zeros() as usize;
+    let digit_shift = bit_len(varying).saturating_sub(u8::BITS as usize).max(low);
+    let lower = varying & ((1u128 << digit_shift) - 1);
     let index_bits = bit_len((len - 1) as u128);
     let index_mask = usize::MAX >> (usize::BITS as usize - index_bits);
-    // Drop the digit shared by this band. Store as many remaining key bits as
-    // fit above a source index, so ordering the band reads compact words.
     let prefix_shift = bit_len(lower)
         .saturating_sub(usize::BITS as usize - index_bits)
         .max(low);
-    partition.emit(
-        &mut indices,
-        values.iter().enumerate().map(|(source, value)| {
-            let encoded = key(value).encode();
-            let word = if lower == 0 {
-                source
-            } else {
-                ((encoded.to_u128() >> prefix_shift) as usize) << index_bits | source
-            };
-            (digit.byte(encoded), word)
-        }),
-    );
+    // Each band has the same high digit. Use the spare bits of its index
+    // words for the next key prefix, preserving source order on ties.
+    let encoded = |r: &T| key(r).encode().to_u128();
+    let ends = scatter_indices(values, indices, encoded, digit_shift, |key, source| {
+        if lower == 0 {
+            source
+        } else {
+            ((key >> prefix_shift) as usize) << index_bits | source
+        }
+    });
     if lower == 0 {
-        return IndexOrder::Dense(indices);
+        return None;
     }
     let remaining = lower & ((1u128 << prefix_shift) - 1);
     let mut extract = ByKey(|i: &usize| key(&values[*i]));
-    for range in partition.ranges() {
-        let band = &mut indices[range];
+    let mut start = 0;
+    for end in ends {
+        if end == start {
+            continue;
+        }
+        let band = &mut indices[start..end];
+        start = end;
         let mut prefix = ByKey(|word: &usize| *word >> index_bits);
         if band.len() <= tile_len {
             scratch
@@ -127,7 +124,38 @@ fn index_order<T, K: RadixKey>(
             }
         }
     }
-    IndexOrder::Dense(indices)
+    None
+}
+
+/// Emit words into stable high-byte bands. Changed extractor results may
+/// invalidate the counts, so verify every cursor before exposing the order.
+fn scatter_indices<T>(
+    records: &[T],
+    words: &mut [usize],
+    mut key: impl FnMut(&T) -> u128,
+    shift: usize,
+    pack: impl Fn(u128, usize) -> usize,
+) -> [usize; 256] {
+    let band = |key: u128| usize::from((key >> shift) as u8);
+    let mut ends = [0; 256];
+    for record in records {
+        ends[band(key(record))] += 1;
+    }
+    let mut start = 0;
+    let mut next = ends;
+    for (cursor, end) in next.iter_mut().zip(&mut ends) {
+        *cursor = start;
+        start += *end;
+        *end = start;
+    }
+    for (source, record) in records.iter().enumerate() {
+        let encoded = key(record);
+        let slot = &mut next[band(encoded)];
+        words[*slot] = pack(encoded, source);
+        *slot += 1;
+    }
+    assert!(next == ends, "inconsistent radix partition");
+    ends
 }
 
 /// Mark finished positions in the permutation so the cycles take linear time together.

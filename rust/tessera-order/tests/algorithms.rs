@@ -156,7 +156,9 @@ fn argsort_refines_prefix_ties_and_preserves_complete_ties() {
     let keys: Vec<_> = (0..16_393u64)
         .map(|i| {
             let mixed = i.wrapping_mul(0x9e37_79b9_7f4a_7c15);
-            (u128::from(mixed >> 56) << 120) | u128::from((mixed >> 31) & 7)
+            (u128::from(mixed >> 56) << 120)
+                | (u128::from((mixed >> 55) & 1) << 64)
+                | u128::from((mixed >> 31) & 7)
         })
         .collect();
     let mut expected: Vec<_> = (0..keys.len()).collect();

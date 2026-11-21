@@ -16,7 +16,6 @@
 #[cfg(feature = "rayon")]
 pub(crate) mod parallel;
 
-mod bands;
 mod indices;
 pub(crate) use indices::{argsort, order_by_cached_indices};
 mod plan;

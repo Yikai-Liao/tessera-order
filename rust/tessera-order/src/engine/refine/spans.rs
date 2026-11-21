@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! A stable permutation represented by contiguous spans of source positions.
-//! A long ordered subsequence stays in its original runs. Only the records
-//! excluded from it need individually ranked source positions.
+//! A stable permutation of isolated records and runs from one ordered source stream.
 
 use super::{Extract, Requirement, TILE_BYTES, Unsigned, plan};
 use alloc::vec::Vec;
@@ -16,21 +14,6 @@ struct Span {
 pub(super) struct SourceOrder(Vec<Span>);
 
 impl SourceOrder {
-    /// A single digit already finishes a narrow window. Wider nodes can use
-    /// compact source spans, budgeted for the records they will eventually move.
-    pub(super) fn for_node<T, E: Extract<T>>(
-        records: &[T],
-        varying: u128,
-        required: Requirement,
-        extractor: &mut E,
-        record_bytes: usize,
-    ) -> Option<Self> {
-        if plan::complete_digit(varying).is_some() {
-            return None;
-        }
-        Self::discover(records, extractor, required, record_bytes)
-    }
-
     fn exception_limit<V>(len: usize, record_bytes: usize) -> usize {
         // A tile of metadata per square root of the number of input tiles.
         // Charge both construction and the worst-case split in the output:
@@ -50,15 +33,16 @@ impl SourceOrder {
         extractor: &mut E,
     ) -> bool {
         let pivot = extractor.key(&records[rank]);
-        let max = u128::MAX >> (128 - E::Value::BITS);
-        let first_high = if pivot.to_u128() == max {
+        let len = records.len();
+        let zero = E::Value::from_usize(0);
+        let first_high = if pivot == !zero {
             None
         } else {
             records[..rank]
                 .iter()
                 .position(|r| extractor.key(r) > pivot)
         };
-        let last_low = if pivot.to_u128() == 0 {
+        let last_low = if pivot == zero {
             None
         } else {
             records[rank + 1..]
@@ -66,13 +50,13 @@ impl SourceOrder {
                 .rposition(|r| extractor.key(r) < pivot)
                 .map(|i| rank + 1 + i)
         };
-        let limit = Self::exception_limit::<E::Value>(records.len(), size_of::<T>());
+        let limit = Self::exception_limit::<E::Value>(len, size_of::<T>());
         let skipped = match (first_high, last_low) {
             (None, None) => return true,
             (Some(start), None) => prefix_holes(
-                (start..records.len()).map(|i| (i, extractor.key(&records[i]) <= pivot)),
+                (start..len).map(|i| (i, extractor.key(&records[i]) <= pivot)),
                 rank + 1 - start,
-                limit.min(records.len() - rank - 1),
+                limit.min(len - rank - 1),
             ),
             (None, Some(end)) => prefix_holes(
                 (0..=end)
@@ -91,17 +75,10 @@ impl SourceOrder {
             let (band, before) = if first_high.is_some() {
                 (0..rank + 1, 0)
             } else {
-                (rank..records.len(), sources.len())
+                (rank..len, sources.len())
             };
-            Self::around_band(
-                records.len(),
-                &sources,
-                sources.iter().copied(),
-                before,
-                band,
-            )
+            Self::around_band(len, &sources, sources.iter().copied(), before, band)
         } else {
-            let len = records.len();
             let end = if rank < len / 2 {
                 0..rank + 1
             } else {
@@ -120,21 +97,20 @@ impl SourceOrder {
         true
     }
 
-    /// Resolves the requested order when the exceptional positions fit the
-    /// workspace. An abandoned construction has only read the source.
-    fn discover<T, E: Extract<T>>(
+    /// Discover sparse order only when one digit cannot finish the node.
+    pub(super) fn for_node<T, E: Extract<T>>(
         records: &[T],
-        extractor: &mut E,
+        varying: u128,
         required: Requirement,
+        extractor: &mut E,
         record_bytes: usize,
     ) -> Option<Self> {
         let len = records.len();
-        if len < plan::KEY_SAMPLE_LEN {
+        if len < plan::KEY_SAMPLE_LEN || plan::complete_digit(varying).is_some() {
             return None;
         }
         let limit = Self::exception_limit::<E::Value>(len, record_bytes);
-        // Use nearby pairs from across the input to estimate how many
-        // exceptional positions need storage. Construction enforces the limit.
+        // Sample admission only. Both constructions enforce the actual limit.
         let allowance = limit.saturating_mul(plan::KEY_SAMPLE_LEN).div_ceil(len);
         let pivot = extractor.key(&records[len / 2]);
         let (mut inversions, mut exceptions) = (0, 0);
@@ -150,15 +126,11 @@ impl SourceOrder {
         if exceptions <= allowance {
             return Self::dominant(records, extractor, pivot, required, limit);
         }
-        if inversions > allowance {
-            return None;
-        }
         let mut runs: Vec<Range<usize>> = Vec::new();
         let mut removed = Vec::new();
         let mut index = 0;
-        // The retained positions form a nondecreasing stack. Removing both
-        // ends of an inversion charges a distinct pair: deleting k records
-        // to obtain any sorted subsequence can intersect at most k such pairs.
+        // Each disjoint inverted pair costs at least one deletion. Scan each
+        // surviving run before writing its span to keep metadata off the hot loop.
         while index < len {
             let mut previous = extractor.key(&records[index]);
             if let Some(last) = runs.last_mut() {
@@ -179,14 +151,13 @@ impl SourceOrder {
             }
             let start = index;
             index += 1;
-            while index < len {
-                let next = extractor.key(&records[index]);
-                if previous > next {
-                    break;
-                }
-                previous = next;
-                index += 1;
-            }
+            index += records[index..]
+                .iter()
+                .position(|r| {
+                    let next = extractor.key(r);
+                    core::mem::replace(&mut previous, next) > next
+                })
+                .unwrap_or(len - index);
             // A changing key can erase an inversion between its two probes.
             // Keep adjacent source intervals coalesced even in that case.
             if let Some(last) = runs.last_mut()
@@ -197,45 +168,26 @@ impl SourceOrder {
                 runs.push(start..index);
             }
         }
-        removed.sort_unstable(); // source position breaks every equal-key tie
-        let mut order = Self(Vec::with_capacity(removed.len() + runs.len()));
-        let mut runs = runs.into_iter();
-        let mut run = runs.next();
-        for (key, source) in removed {
-            while let Some(range) = &mut run {
-                let first = range.start;
-                if (extractor.key(&records[first]), first) >= (key, source) {
-                    break;
-                }
-                let last = range.end - 1;
-                if last == first || (extractor.key(&records[last]), last) < (key, source) {
-                    order.push(range.clone());
-                    run = runs.next();
+        removed.sort_unstable();
+        Some(Self::merge(
+            runs.into_iter(),
+            removed.into_iter(),
+            |run, entry, _| {
+                // An exception lies outside this entire source run. One position
+                // comparison therefore breaks every equal-key tie in the run.
+                let mut precedes = |r: &T| (extractor.key(r), run.start) < entry;
+                let slice = &records[run.clone()];
+                if !precedes(&slice[0]) {
+                    0
+                } else if precedes(slice.last().unwrap()) {
+                    slice.len()
                 } else {
-                    let (mut lo, mut hi) = (first + 1, last);
-                    while lo < hi {
-                        let mid = lo + (hi - lo) / 2;
-                        if (extractor.key(&records[mid]), mid) < (key, source) {
-                            lo = mid + 1;
-                        } else {
-                            hi = mid;
-                        }
-                    }
-                    order.push(first..lo);
-                    range.start = lo;
-                    break;
+                    slice.partition_point(precedes)
                 }
-            }
-            order.push(source..source + 1);
-        }
-        for range in run.into_iter().chain(runs) {
-            order.push(range);
-        }
-        Some(order)
+            },
+        ))
     }
 
-    /// The equal-key background stays in source order. The smaller stream of
-    /// exceptions can be sorted independently because its keys are disjoint.
     fn dominant<T, E: Extract<T>>(
         records: &[T],
         extractor: &mut E,
@@ -321,7 +273,8 @@ impl SourceOrder {
         // bits usually reject a key outright. Abandon the proof if matching
         // those bits would cost more than one comparison per input on average.
         let mut lookups = len / count;
-        let mut save = |entry| {
+        let mut disjoint = !original.is_empty() && fixed != 0;
+        for entry in entries {
             if entry < ceiling {
                 kept.push(entry);
                 if kept.len() == 2 * count {
@@ -329,21 +282,11 @@ impl SourceOrder {
                     kept.truncate(count);
                 }
             }
-        };
-        let disjoint = !original.is_empty()
-            && fixed != 0
-            && entries.by_ref().all(|entry| {
-                save(entry);
-                if (entry.0.to_u128() ^ first) & fixed != 0 {
-                    return true;
-                }
-                if lookups == 0 || original.contains(&entry.0) {
-                    return false;
-                }
-                lookups -= 1;
-                true
-            });
-        entries.for_each(save);
+            if disjoint && (entry.0.to_u128() ^ first) & fixed == 0 {
+                disjoint = lookups != 0 && !original.contains(&entry.0);
+                lookups = lookups.saturating_sub(1);
+            }
+        }
         kept.sort_unstable();
         kept.truncate(count);
         if upper {
@@ -375,10 +318,7 @@ impl SourceOrder {
         Self::around_band(len, &sources, selected, before, band)
     }
 
-    /// Reserve `band` for the background stream. `ordered` supplies the
-    /// exceptional sources once each, with `before` of them needed before the
-    /// band. Keep each slot as close to its original position as will leave
-    /// room for the others. Fill intervening gaps from the source runs in order.
+    /// Clamp exceptional slots to the two sides of the reserved background band.
     fn around_band(
         len: usize,
         sources: &[usize],
@@ -393,33 +333,54 @@ impl SourceOrder {
                 slot.max(band.end + (i - before))
             }
         });
-        let placements = slots.zip(ordered);
-        let mut order = Self(Vec::with_capacity(sources.len() + 1));
-        let mut original = sources.iter().copied().peekable();
-        let (mut read, mut write) = (0, 0);
-        for (dest, exception) in placements
-            .map(|(dest, src)| (dest, Some(src)))
-            .chain(core::iter::once((len, None)))
-        {
-            while write < dest {
-                while original.next_if_eq(&read).is_some() {
-                    read += 1;
+        let mut start = 0;
+        let runs = sources.iter().copied().chain([len]).map(|end| {
+            let run = start..end;
+            start = end + 1;
+            run
+        });
+        Self::merge(runs, slots.zip(ordered), |run, (slot, _), written| {
+            (slot - written).min(run.len())
+        })
+    }
+
+    /// Merge exceptional sources into disjoint source runs. `prefix` gives the
+    /// number of records in the current run that precede the next exception.
+    fn merge<K: Copy>(
+        runs: impl Iterator<Item = Range<usize>>,
+        exceptions: impl Iterator<Item = (K, usize)>,
+        mut prefix: impl FnMut(&Range<usize>, (K, usize), usize) -> usize,
+    ) -> Self {
+        let mut order = Self(Vec::with_capacity(
+            runs.size_hint().0 + exceptions.size_hint().0,
+        ));
+        let mut runs = runs.filter(|r| !r.is_empty()).peekable();
+        for entry in exceptions {
+            while let Some(run) = runs.peek_mut() {
+                let n = prefix(run, entry, order.len());
+                if n != 0 {
+                    order.push(run.start..run.start + n);
+                    run.start += n;
                 }
-                let count = (original.peek().copied().unwrap_or(len) - read).min(dest - write);
-                order.push(read..read + count);
-                read += count;
-                write += count;
+                if run.start != run.end {
+                    break;
+                }
+                runs.next();
             }
-            if let Some(src) = exception {
-                order.push(src..src + 1);
-                write += 1;
-            }
+            order.push(entry.1..entry.1 + 1);
+        }
+        for run in runs {
+            order.push(run);
         }
         order
     }
 
+    fn len(&self) -> usize {
+        self.0.last().map_or(0, |s| s.end)
+    }
+
     fn push(&mut self, range: Range<usize>) {
-        let start = self.0.last().map_or(0, |s| s.end);
+        let start = self.len();
         self.0.push(Span {
             source: range.start,
             end: start + range.len(),
@@ -433,13 +394,12 @@ impl SourceOrder {
         })
     }
 
-    /// Emit an index result directly from its contiguous runs.
-    pub(super) fn into_indices(self) -> Vec<usize> {
-        let mut indices = Vec::with_capacity(self.0.last().map_or(0, |s| s.end));
+    pub(super) fn write_indices(&self, output: &mut Vec<usize>) {
+        output.clear();
+        output.reserve(self.len());
         for (_, source) in self.spans() {
-            indices.extend(source);
+            output.extend(source);
         }
-        indices
     }
 
     /// Gather isolated records first. Every longer span comes from the same
@@ -447,11 +407,12 @@ impl SourceOrder {
     /// the same relative order. Move each such span at most once.
     pub(super) fn apply<T>(&self, records: &mut [T]) {
         use core::{mem::MaybeUninit, ptr};
-        let singles = self
-            .spans()
-            .filter(|(dest, r)| r.len() == 1 && *dest != r.start)
-            .count();
-        let mut saved = Vec::<MaybeUninit<T>>::with_capacity(singles);
+        assert_eq!(records.len(), self.len());
+        let singles = || {
+            self.spans()
+                .filter(|(dest, r)| r.len() == 1 && *dest != r.start)
+        };
+        let mut saved = Vec::<MaybeUninit<T>>::with_capacity(singles().count());
         let scratch = saved.as_mut_ptr().cast::<T>();
         let data = records.as_mut_ptr();
         // SAFETY: the spans partition both source and destination. All key
@@ -460,11 +421,7 @@ impl SourceOrder {
         // we access only raw pointers and immutable span metadata. No user
         // code runs while a record is held in scratch.
         unsafe {
-            for (slot, (_, src)) in self
-                .spans()
-                .filter(|(dest, r)| r.len() == 1 && *dest != r.start)
-                .enumerate()
-            {
+            for (slot, (_, src)) in singles().enumerate() {
                 ptr::copy_nonoverlapping(data.add(src.start), scratch.add(slot), 1);
             }
             // A left-moving span ends before every later source. Every earlier
@@ -480,11 +437,7 @@ impl SourceOrder {
                     ptr::copy(data.add(src.start), data.add(dest), src.len());
                 }
             }
-            for (slot, (dest, _)) in self
-                .spans()
-                .filter(|(dest, r)| r.len() == 1 && *dest != r.start)
-                .enumerate()
-            {
+            for (slot, (dest, _)) in singles().enumerate() {
                 ptr::copy_nonoverlapping(scratch.add(slot), data.add(dest), 1);
             }
         }
@@ -527,9 +480,9 @@ mod tests {
         ranked.sort_by_key(|&i| keys[i]);
         for count in 1..=len / 2 {
             for end in [0..count, len - count..len] {
-                let mut order =
-                    SourceOrder::ordered_end(len, end.clone(), keys.into_iter().zip(0..len), len)
-                        .into_indices();
+                let mut order = Vec::new();
+                SourceOrder::ordered_end(len, end.clone(), keys.into_iter().zip(0..len), len)
+                    .write_indices(&mut order);
                 assert_eq!(order[end.clone()], ranked[end.clone()]);
                 order[..end.start].sort_by_key(|&i| keys[i]);
                 order[end.end..].sort_by_key(|&i| keys[i]);
@@ -550,7 +503,9 @@ mod tests {
                 size_of::<[u8; 128]>(),
             );
             // Both pairs change ends. Equal-key background records stay put.
-            assert_eq!(order.into_indices(), [6, 7, 2, 3, 4, 5, 0, 1]);
+            let mut indices = Vec::new();
+            order.write_indices(&mut indices);
+            assert_eq!(indices, [6, 7, 2, 3, 4, 5, 0, 1]);
         }
     }
 
@@ -582,9 +537,8 @@ mod tests {
         let len = 193;
         let ordered: Vec<_> = (0..len).map(|i| i as u64 / 3).collect();
         let mut swapped = ordered.clone();
-        for (a, b) in [(2, 191), (15, 110), (10, 167), (51, 133)] {
-            swapped.swap(a, b);
-        }
+        swapped[..len / 2].rotate_right(1);
+        swapped[len / 2..].rotate_left(1);
         let dominant: Vec<_> = (0..len)
             .map(|i| {
                 if i % 11 == 0 {
@@ -612,11 +566,12 @@ mod tests {
                 let mut ids: Vec<_> = (0..len).collect();
                 let mut records: Vec<_> = ids.iter_mut().collect();
                 let mut extract = ByKey(|r: &&mut usize| keys[**r]);
-                let order = SourceOrder::discover(
+                let order = SourceOrder::for_node(
                     &records,
-                    &mut extract,
+                    u64::MAX.into(),
                     required,
-                    size_of::<&mut usize>(),
+                    &mut extract,
+                    1024, // keep the exception budget below the sample size
                 )
                 .unwrap();
                 order.apply(&mut records);

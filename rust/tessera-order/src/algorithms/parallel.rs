@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Rayon entry points for sorting.
-//!
-//! The parallel engine shares the serial probes and node/tile sorting.
-//! Large inputs partition the root across disjoint shards, then transfer each
-//! bucket directly into its exclusive final band and finish it in that task.
-//! Small inputs and one-thread pools use the serial engine.
+//! Rayon sorting entry points and their record and extractor bounds.
 
 use crate::engine::{self, ByKey, Direct, RadixKey};
 
@@ -47,16 +42,19 @@ pub fn par_sort<K: RadixKey + Send>(values: &mut [K]) {
 /// # Key function
 ///
 /// `key` must implement `Fn + Sync` so Rayon jobs can borrow it concurrently.
-/// It does not need `Send` or `Clone`. It may be called several times per
-/// record, in any order, and should return the same key for a record throughout
-/// the call. Inconsistent keys may make the sort panic or leave the result's
-/// order unspecified, with every record still present exactly once.
+/// It does not need `Send` or `Clone`. It may run concurrently, any number of
+/// times per record and in any order. The key must stay the same for each
+/// record throughout the call to obtain a stable sorted result. Inconsistent
+/// keys may cause a panic or leave the result's order unspecified, with every
+/// record still present exactly once.
 ///
 /// # Panics
 ///
-/// If `key` panics, every record is restored to `values`, in an unspecified
-/// order, before the panic propagates to the caller. No record is dropped or
-/// duplicated.
+/// If `key` unwinds, the same record preservation and lack of rollback as for
+/// [`crate::sort_by_key`] apply, including changes through interior mutability.
+/// Other tasks may still call `key`, but all tasks join and every record is
+/// restored before the panic reaches the caller. If multiple tasks panic,
+/// which panic propagates is unspecified.
 ///
 /// # Memory
 ///

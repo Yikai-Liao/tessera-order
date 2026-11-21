@@ -9,14 +9,14 @@ use super::{block, tile};
 
 /// Lazy storage shared across serial subproblems of the owning invocation.
 /// Parallel finishers borrow separate owners from the invocation-local pool.
-pub(crate) struct Workspace<T> {
+pub(super) struct Workspace<T> {
     pub(super) tile: tile::Scratch<T>,
     pub(super) block: block::Buffers<T>,
 }
 
 impl<T> Workspace<T> {
     /// Creates an empty owner; the complete operations allocate as needed.
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             tile: tile::Scratch::new(),
             block: block::Buffers::new(),

@@ -9,14 +9,10 @@
 //! input order, and needs no `Copy`, `Clone`, `Default` or `Ord` on the
 //! records it moves.
 //!
-//! The other operations are the standard ones they are named after:
-//! [`partial_sort`], [`k_smallest`], [`k_largest`], [`select_nth`],
-//! [`select_nth_many`], [`sort_chunks`], [`argsort`] and [`partition`]. Each
-//! returns a result that its standard counterpart may return, with equal keys
-//! resolved as the stable [`sort`] resolves them. Every operation is stable, so
-//! names carry no `stable_` prefix; an `_unstable` suffix stays reserved for a
-//! cheaper variant. There are no `_by` comparator variants, because the radix
-//! engine needs keys, not comparisons.
+//! [`argsort`] returns indices in stable sorted order. [`select_nth`] places
+//! the same record as a stable sort would at a given position and leaves the
+//! order within either outer region unspecified. There are no `_by`
+//! comparator variants, because the radix engine needs keys, not comparisons.
 //!
 //! # Examples
 //!
@@ -43,6 +39,15 @@
 //! `Reverse` rather than reversing an ascending result, which would also
 //! reverse the order of equal keys.
 //!
+//! # Panics and unwinding
+//!
+//! Like Rust's [`slice::sort_by_key`], in-place operations keep every original
+//! record exactly once if the key function unwinds, including changes made
+//! through interior mutability. Recovery itself does not call the key
+//! function or roll back its side effects. Neither input order nor a valid
+//! partial result is guaranteed.
+//! [`argsort_by_key`] never moves the source records, even on unwind.
+//!
 //! # Memory
 //!
 //! Inputs larger than one 64 KiB tile are split by a stable block partition
@@ -52,7 +57,7 @@
 //! [`sort_by_key`]. Each tile-local MSD level also keeps a cursor table
 //! of up to 32 KiB on the stack, with at most 22 levels for 128-bit keys.
 //!
-//! Each call allocates scratch as needed and frees it before returning.
+//! Each call allocates scratch as needed and frees it on return or unwind.
 //!
 //! # Backend and Cargo features
 //!
@@ -74,147 +79,18 @@
 extern crate alloc;
 
 mod algorithms;
-mod cached;
 mod engine;
-#[cfg(feature = "rayon")]
-mod parallel;
-mod partition;
 
-#[cfg(test)]
-mod unwind;
-
-pub use algorithms::{
-    argsort, argsort_by_key, k_largest, k_largest_by_key, k_smallest, k_smallest_by_key,
-    partial_sort, partial_sort_by_key, select_nth, select_nth_by_key, select_nth_many,
-    select_nth_many_by_key, sort_chunks, sort_chunks_by_key,
-};
-pub use engine::RadixKey;
+pub use algorithms::cached::sort_by_cached_key;
 #[cfg(feature = "rayon")]
 #[allow(deprecated)]
-pub use parallel::{par_sort, par_sort_by_key, par_stable_sort, par_stable_sort_by_key};
-pub use partition::partition;
-
-/// Sorts keys in ascending order, keeping equal keys in input order.
-///
-/// The order is the encoded order documented on [`RadixKey`]: integers in their
-/// usual order, floats as [`f64::total_cmp`], and [`Reverse`](core::cmp::Reverse)
-/// keys descending.
-///
-/// # Memory
-///
-/// Allocates the scratch described in the [crate documentation](crate#memory)
-/// and frees it before returning. Inputs that are already ordered or constant
-/// do not allocate.
-///
-/// # Examples
-///
-/// ```
-/// let mut values = [0.5f64, -0.0, f64::NAN, 0.0, -1.0];
-/// tessera_order::sort(&mut values);
-/// let bits: Vec<u64> = values.iter().map(|x| x.to_bits()).collect();
-/// let expected = [-1.0f64, -0.0, 0.0, 0.5, f64::NAN].map(f64::to_bits);
-/// assert_eq!(bits, expected);
-/// ```
-pub fn sort<K: RadixKey>(values: &mut [K]) {
-    engine::sort::<K, _>(values, engine::Direct);
-}
-
-/// Sorts records by a key, keeping records with equal keys in input order.
-///
-/// `key` maps a record to a [`RadixKey`]. Records of any type are moved, never
-/// cloned or dropped, so `String`, `Box<T>` and `&mut T` records are fine.
-///
-/// # Key function
-///
-/// `key` may be called several times for each record, in any order. It should
-/// return the same key for a record throughout one call. If it does not, the
-/// sort may panic or return with the result in unspecified order; either way
-/// the slice still holds every record exactly once.
-///
-/// # Panics
-///
-/// If `key` panics, the panic propagates to the caller after every record has
-/// been moved back into `values`, in an unspecified order. No record is
-/// dropped or duplicated.
-///
-/// # Memory
-///
-/// As [`sort`], plus up to two bytes per tile record of cached bucket
-/// IDs.
-///
-/// # Examples
-///
-/// ```
-/// struct Row {
-///     timestamp: i64,
-///     name: String,
-/// }
-///
-/// let mut rows = vec![
-///     Row { timestamp: 30, name: "c".into() },
-///     Row { timestamp: 10, name: "a".into() },
-///     Row { timestamp: 30, name: "d".into() },
-/// ];
-/// tessera_order::sort_by_key(&mut rows, |row| row.timestamp);
-/// let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
-/// assert_eq!(names, ["a", "c", "d"]);
-/// ```
-pub fn sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
-    engine::sort::<T, _>(values, engine::ByKey(key));
-}
-
-/// Renamed to [`sort`]; the contract is unchanged.
-#[deprecated(since = "0.2.0", note = "renamed to `sort`")]
-pub fn stable_sort<K: RadixKey>(values: &mut [K]) {
-    sort(values);
-}
-
-/// Renamed to [`sort_by_key`]; the contract is unchanged.
-#[deprecated(since = "0.2.0", note = "renamed to `sort_by_key`")]
-pub fn stable_sort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
-    sort_by_key(values, key);
-}
-
-/// Sorts records by a key, evaluating the key function at most once per record
-/// and keeping records with equal keys in input order.
-///
-/// Use this instead of [`sort_by_key`] when `key` is expensive or must
-/// not run twice for a record, as with [`slice::sort_by_cached_key`]. Records
-/// of any type are moved, never cloned or dropped.
-///
-/// # Key function
-///
-/// `key` is called exactly once per record, in input order, when `values` holds
-/// at least two records that are not zero-sized; otherwise it is not called.
-///
-/// # Panics
-///
-/// If `key` panics, the panic propagates to the caller with every record still
-/// in `values`, in an unspecified order. No record is dropped or duplicated.
-///
-/// # Memory
-///
-/// Caches every key, O(n) as in the standard library, also for ordered
-/// inputs, whose order is known only once every key is evaluated. Keys that
-/// differ only in a narrow bit window, such as category IDs, then move the
-/// records once within the [`sort_by_key`] scratch bound; other keys sort
-/// (key, index) pairs with [`sort`] scratch.
-///
-/// # Examples
-///
-/// ```
-/// let mut words = ["delta", "Alpha", "charlie", "Bravo"];
-/// let mut calls = 0;
-/// tessera_order::sort_by_cached_key(&mut words, |word| {
-///     calls += 1;
-///     word.to_lowercase().as_bytes()[0]
-/// });
-/// assert_eq!(words, ["Alpha", "Bravo", "charlie", "delta"]);
-/// assert_eq!(calls, 4);
-/// ```
-pub fn sort_by_cached_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &mut [T], key: F) {
-    cached::sort(values, key);
-}
+pub use algorithms::parallel::{
+    par_sort, par_sort_by_key, par_stable_sort, par_stable_sort_by_key,
+};
+pub use algorithms::{argsort, argsort_by_key, select_nth, select_nth_by_key, sort, sort_by_key};
+#[allow(deprecated)]
+pub use algorithms::{stable_sort, stable_sort_by_key};
+pub use engine::RadixKey;
 
 /// Internal thresholds, exported for benchmarks that probe boundary sizes.
 ///

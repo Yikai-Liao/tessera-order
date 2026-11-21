@@ -6,6 +6,7 @@ import { basename, dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { z } from "zod";
 import { cpuListSchema } from "./affinity.ts";
+import { parsePlan } from "./plan.ts";
 import { findPairedBudget } from "./statistics.ts";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -70,7 +71,7 @@ export async function retainBuild(out: string, binary: string): Promise<Build> {
   };
 }
 
-/** Load a prepared session; reject changed plans, binaries or host platforms before execution. */
+/** Load a session for execution; reject retired workloads and changed inputs. */
 export async function loadSession(out: string): Promise<Session> {
   let document: string;
   try {
@@ -85,8 +86,10 @@ export async function loadSession(out: string): Promise<Session> {
   const session = schema.parse(JSON.parse(document));
   if (session.platform !== process.platform)
     throw new Error("Session platform differs from this host");
-  if ((await fileHash(join(out, "plan.json"))) !== session.planSha256)
+  const plan = await readFile(join(out, "plan.json"));
+  if (createHash("sha256").update(plan).digest("hex") !== session.planSha256)
     throw new Error("Session plan changed; start a new experiment instead");
+  parsePlan(JSON.parse(plan.toString("utf8")));
   const paths = executables(out);
   if (
     (await fileHash(paths.compare)) !== session.build.compareSha256 ||

@@ -40,21 +40,15 @@ Keep lanes bounded: the account's 20 concurrent slots are shared by benchmarks, 
 
 Cargo caches are saved from `main` only. Pull requests, including those into long-lived branches, restore `main`'s copies and save nothing, so each key keeps one copy within GitHub's 10 GB repository limit, and PR copies cannot evict the caches every PR restores. A PR that changes a cache key builds that cache cold until it merges. The exception is benchmark preparation: main performance tracking saves its key, so preparation saves only while that tracking is disabled.
 
-### Architecture policies
+### Rust architecture policies
 
-`bun run lint` includes `bun run lint:architecture`, so the repository-wide `lint` job blocks architecture violations on every change. [`check-architecture.ts`](../../.github/scripts/check-architecture.ts) reads tracked and untracked, non-ignored source files without building or executing them. Its [tests](../../.github/scripts/architecture.test.ts) run through `bun run tools:test`, covering rejected changes, legal exceptions and the current repository.
+`bun run lint:architecture` runs the [source checker](../../.github/scripts/check-architecture.ts) in the repository-wide lint job. It checks the library's Rust source, including non-ignored new files in the worktree.
 
-| Diagnostic | Contract and enforcement |
-|---|---|
-| `engine-boundary` | Protect the [private engine facade](../design/engine.md#knowledge-boundaries): reject references back to adapter modules, widened engine/module visibility, exposed workspace storage and unreviewed facade exports. New complete operations require reviewing their contract and updating the export policy in [`rust-policy.ts`](../../.github/scripts/rust-policy.ts). |
-| `plot-purity` | Protect the [figure boundary](../design/benchmark-tooling.md#figure-boundary): templates depend on their own modules and the declared rendering packages, with no host I/O, business interpretation or ambient DOM. Pass time, randomness and other host state as data; the existing private document is allowed. |
-| `offline-report` | Protect [offline report regeneration](../design/benchmark-tooling.md#ownership): reports may use shared catalog, plan, statistics, summary and figure modules, and declared parsing and filesystem packages. Execution, measurement, networking and publication dependencies are rejected. |
-| `command-entry` | Protect the [execution owner](../design/benchmark-tooling.md#common-changes): production `tools/` and `bench/` code starts asynchronous subprocesses through `tools/process.ts`. Explicit named synchronous `child_process` imports remain available for bounded inspections; namespace imports, alternate loaders and Bun process APIs are rejected outside the owner. |
-| `safety-lint-scope` | Protect [unsafe validation](../../CONTRIBUTING.md#engine-changes): library source cannot suppress `warnings` or `clippy::all`. Exceptions to unsafe-operation or safety-documentation lints require an outer attribute on a specific function or statement with a nonempty `reason`, rather than a crate or module exemption. |
+- Keep the engine private. Review changes to the [engine facade](../design/engine.md#knowledge-boundaries) against the export list in the checker. Engine code cannot import the whole crate or refer back to the `algorithms` module through a crate-root or relative path.
+- Keep `Workspace` fields and methods inside the engine.
+- Use individual lint names in `allow` and `expect` instead of `warnings` or lint groups that cover the protected safety lints. The same rule applies inside `cfg_attr`. Exceptions to `unsafe_op_in_unsafe_fn`, `clippy::missing_safety_doc` and `clippy::undocumented_unsafe_blocks` must attach to a function or statement and include a nonempty `reason`.
 
-TypeScript checks follow local imports, re-exports and literal dynamic imports, including dependencies reached through test helpers. Production roots require literal module specifiers and explicit, resolvable `.ts` paths for local imports, matching the [direct TypeScript execution contract](../design/benchmark-tooling.md#dependencies-and-verification); `.js` specifiers and emitted-JavaScript routes are rejected. Test files and fixtures are exempt from the subprocess policy only while unreachable through runtime imports from production roots. Restricted dependency closures use the same source paths; their package and module policies live in the checker. Global API checks follow lexical symbols and simple aliases, so a local `document`, `fetch` or `Bun` parameter is not confused with a host API.
-
-These are source policies, not a security sandbox or a proof of purity. They do not inspect package internals, evaluate arbitrary computed JavaScript or resolve Rust types and macros; Rust syntax remains the compiler's responsibility. Existing Clippy safety-documentation checks, conformance tests, Miri and benchmark validation retain their roles.
+The checker works on parsed source before macro expansion and name resolution. Rust and Clippy still check privacy, lint settings and unsafe code.
 
 ### Rust tests
 

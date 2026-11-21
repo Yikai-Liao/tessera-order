@@ -2,7 +2,7 @@
 
 This page owns the engine's code boundaries and invariants in `rust/tessera-order`. Routing rules, thresholds and their reasons live on the [explanation pages](../explain/index.md); [engine evidence](evidence.md) keeps failed experiments and open measured losses.
 
-Full-sort and rank entries share node decisions, rank projection, workspace and stable block movement. Requested ranks determine which completed children need further refinement.
+Full sorting and single-rank selection share node planning, leaf finishing and stable block movement. Selection can skip refinement of bands that do not contain the requested rank. Cached-key sorting can use stable distribution without ordered refinement.
 
 ## Vocabulary
 
@@ -10,7 +10,7 @@ Full-sort and rank entries share node decisions, rank projection, workspace and 
 |---|---|
 | Key | The unsigned integer a record sorts by. Signed integers, floats and `Reverse` keys are encoded into unsigned keys whose integer order is the requested order. |
 | Digit | A window of key bits handled by one pass: a shift and a width. |
-| Subproblem | An exclusive record slice, candidate key bits and a borrowed requirement for ordered ranks. A completed digit leaves the mask even if a key function changes its answers. |
+| Subproblem | An exclusive record slice, candidate key bits and a requirement to finish all positions or one local rank. A completed digit leaves the mask even if a key function changes its answers. |
 | Bucket | A logical, stable classification group. It may span physical blocks; once complete it is a contiguous subproblem, not necessarily a task or a tile. |
 | Block | A physical storage and ownership-transfer unit of the stable partition. Its size and metadata costs belong to the block mechanism. |
 | Node | A subproblem larger than the tile capacity, split by a stable block partition or by existing ordered runs. |
@@ -19,20 +19,20 @@ Full-sort and rank entries share node decisions, rank projection, workspace and 
 
 ## Knowledge boundaries
 
-The private `engine/` module exposes complete refinement and stable distribution, sealed key extraction, immutable rank requirements and an opaque reusable workspace. `lib.rs`, `algorithms.rs`, `cached.rs`, `partition.rs` and the public Rayon adapters choose output semantics and compose these operations. They cannot name the engine's movement modules or access workspace storage. `engine/mod.rs` reexports existing operations rather than adding forwarding calls or a policy trait; all paths below are relative to `src/engine/` unless marked as adapters.
+`src/lib.rs` documents the crate and reexports its public API. `src/algorithms.rs` and its submodules implement the public ordering operations. They supply extractors or build index and key buffers; they do not assemble rank requests, manage engine workspace or name movement modules. The private `engine/` module exposes complete operations: `sort`, `select_nth`, `distribute` and, with Rayon, `par_sort`. `engine/mod.rs` reexports these operations without forwarding calls or a policy trait. The paths below are relative to `src/engine/`.
 
 Keeping every module at crate root allowed an adapter to depend on a block directory or a tile guard. The module boundary removes that dependency possibility without changing execution. A separate public engine crate would force lifetime, extractor and allocation contracts to stabilize before the current consumers have established them; that remains deferred.
 
-The [architecture policies](../development/ci.md#architecture-policies) guard this boundary against reverse dependencies, widened visibility and storage re-exports. Rust privacy remains the authority for which items callers can access.
+The [Rust architecture policies](../development/ci.md#rust-architecture-policies) check this boundary in CI.
 
 | Owner | Complete responsibility | Consumers need to know |
 |---|---|---|
-| `../algorithms.rs` | Complete serial argsort, segmented sorting, Top-k, prefix and selection calls; validate public arguments and shape outputs | Shared rank requirements and complete refinement, not movement state or planner details |
-| `../partition.rs` | Binary predicate adaptation and trivial-input call semantics | Complete stable category distribution |
-| `distribution.rs` | Finite-category distribution, storage lifetime and boundary output | Category keys and cumulative ends, not block or tile ownership |
-| `refine.rs` | Root preparation, default tile budget, candidate-bit progress and ordered refinement. Serial and parallel entries preserve actual variation and narrow a 128-bit key through one `KeyHalf` (`key.rs`) | Required rank views and complete partition and finishing operations |
-| `rank.rs` | Validate normalized required intervals and cuts once and project immutable borrowed views into final bands | Parent-relative final ranges, not keys, classifications or callback order |
-| `workspace.rs` | Invocation-owned reusable tile and block capacity, lent through complete operations | Capacity is reusable after restoration; no live movement state survives an operation |
+| `../algorithms.rs` | Define serial sort, argsort and selection; build and sort the output indices for argsort | Complete sort and selection, not movement state or planner details |
+| `../algorithms/cached.rs` | Cache encoded keys, detect order and variation, and choose distribution or an index permutation | Complete distribution or sort, not their scratch or intermediate boundaries |
+| `../algorithms/parallel.rs` | Define the feature-gated sorting API and its record and extractor bounds | Complete parallel sort, not its scheduling or ownership transfer |
+| `distribution.rs` | Stable finite-category distribution and its storage lifetime | Category keys in a bounded bit window; no returned boundaries |
+| `refine.rs` | Selection bounds, rank projection, root preparation, default tile budget, candidate-bit progress and ordered refinement. Serial and parallel entries preserve actual variation and narrow a 128-bit key through one `KeyHalf` (`key.rs`) | Final band ranges and complete partition and finishing operations |
+| `workspace.rs` | Reusable tile and block capacity owned inside refinement | Capacity is reusable after restoration; no live movement state survives an operation |
 | `order.rs` | Scalar order and candidate-masked variation scans, stable insertion loops, independent of recursive execution | Extractors supply keys; direct-key callers supply a scan in their selected SIMD context |
 | `refine/plan.rs` | Bounded sampling and executable node partition decisions | Records, candidate variation and tile capacity go in; a node decision comes out |
 | `tile.rs`, `tile/plan.rs` | Capacity, complete leaf planning, scratch allocation, cached classification, counting passes and restoration | Finish a cursor-bounded slice; no raw pointer, cursor layout or guard crosses the boundary |
@@ -43,9 +43,9 @@ A change to sampled occupancy or a leaf estimate stays in planning and does not 
 
 ## Category distribution
 
-Arbitrary classifiers are not sorting keys: an order probe or comparison-based leaf could reevaluate them or change their evaluation order. `engine::distribute` therefore bypasses ordered refinement and calls its classifier exactly once per record, in input order. It has two callers: binary [`partition`](../../conformance/semantics.md#binary-partition), whose trivial cases (fewer than two records, zero-sized records) still owe every predicate call and do not move, and `sort_by_cached_key`, which replays [cached keys](../../conformance/semantics.md#cached-keys) by call count when they vary only within one distribution's bit window.
+When the [cached keys](../../conformance/semantics.md#cached-keys) vary only within one distribution's bit window, their digits already determine final key order. `engine::distribute` bypasses ordered refinement and classifies each record exactly once in input order. That order lets `sort_by_cached_key` replay its cached digits by call count without calling the user's extractor again. Wider keys take the adapter's index-permutation path.
 
-A bounded tile uses `Scratch::distribute`: one counting pass, the existing cached-ID storage and restoration guard, and completed cursor ends. A larger input uses `block::partition` with no child finishing; it returns only after every band retires. Neither route retains live ownership state, nor reconstructs boundaries by calling user code again. Sorting by category is a simpler reference composition, but cannot supply the classifier-evaluation contract and is not used for either caller.
+A bounded tile uses `Scratch::distribute`: one counting pass with the existing cached-ID storage and restoration guard, without collecting per-bucket ends. A larger input uses `block::partition` and returns after every band retires. That shared operation still builds the ends and invokes a band finisher for full refinement; distribution discards the ends and supplies a no-op finisher. Neither path returns boundaries to the cached-key caller.
 
 ## Cost model
 
@@ -85,11 +85,11 @@ A stage's rule changes on its page, in the code and in the page's model together
 
 ## Ordered rank requirements
 
-Full sorting and the stable serial [slice operations](../../conformance/semantics.md#serial-slice-operations) use the common `engine::refine` entry. Full sorting requests All ranks. Partial requests borrow sorted, separated intervals in root coordinates; a degenerate interval expresses a membership cut without ordering a position. Root validation precedes mutation and key calls; an empty requirement returns before preparation. A full interval becomes the All representation, including the empty full input. A partial sort, `k_smallest` and selection borrow one interval without allocation; multiple selection validates and normalizes indices once in `rank.rs`. An empty partial-sort range `k..k` requests only the membership boundary at `k`. Projection drops it when it is already a band endpoint, including either end of the root, before any further key work.
+`sort` and `select_nth` share private ordered refinement. The requirement is either `All` or `Nth(index)`, with the index local to the current slice. Selection validates the root index before mutation or key calls, then returns three disjoint borrows after refinement. Argsort sorts its index output with `ByKey`: numeric indices are payloads, never direct keys eligible for count/refill.
 
-`Requirement::project` intersects a final parent-relative band with the borrowed intervals and translates its origin without allocation. Covered children become All; absent intersections skip further analysis. Binary searches are independent of callback order, so serial and concurrent completion use one authority. Equality bands are already complete; their stable movement establishes ranked identity even when requests cut through equal keys. Existing-run ranges are projected after rotation.
+`Requirement::project` keeps `All` for every nonempty band. For `Nth`, it keeps only the band containing the rank and subtracts that band's start. Projection uses final parent-relative ranges, independent of callback order; for existing runs these are the ranges after rotation. An equal-key band is already finished: its stable movement establishes ranked identity within the band.
 
-Every partition completes movement for every band. Only further analysis and finishing may be skipped. Requested tiles may be completely sorted; this preserves insertion, counting and LSD/MSD leaves rather than adding a partial tile engine. Root preparation, narrowed key facts and child candidate masks pass directly to execution. A serial invocation reuses one workspace; segmented sorting lends that invocation’s workspace successively to complete segment refinements. Argsort creates the index output and sorts it with `ByKey` source extraction: numeric indices are payloads, never direct keys eligible for count/refill. Parallel tasks borrow workspace capacity from their invocation-owned pool.
+Every partition completes movement for every band. Only further analysis and finishing may be skipped. Node planning does not depend on the requirement, and requested tiles still finish with the complete insertion, counting or LSD/MSD sort. Root preparation can also finish more than the selected position. Prepared key facts and child candidate masks pass directly to execution. A serial invocation reuses one workspace internally; parallel tasks borrow capacity from their invocation-owned pool.
 
 ## Parallel root completion
 

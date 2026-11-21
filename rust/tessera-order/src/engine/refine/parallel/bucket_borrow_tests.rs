@@ -15,8 +15,7 @@ fn sort_group<T: Send, E: Extract<T> + Clone + Send>(records: &mut [T], extracto
                      _: core::ops::Range<usize>,
                      bucket: &mut [T],
                      digit: &mut KeyDigit<E, E::Value>| {
-        let ranks = 0..bucket.len();
-        let required = Requirement::new(bucket.len(), core::slice::from_ref(&ranks));
+        let required = Requirement::All;
         Sorter::<T, E> {
             scratch: &mut child_scratch,
             extractor: &mut digit.extractor,
@@ -73,11 +72,7 @@ fn streamed_child_can_reenter_and_panic() {
                     extractor: &mut extractor,
                     tile_len: 8,
                 }
-                .sort_root(
-                    &mut records,
-                    u128::from(u64::MAX),
-                    Requirement::new(len, core::slice::from_ref(&(0..len))),
-                );
+                .sort_root(&mut records, u128::from(u64::MAX), Requirement::All);
             });
         }));
         assert!(entered.load(Ordering::Relaxed));
@@ -123,9 +118,7 @@ fn equality_roots_match_serial_policy() {
         let mut serial = records.clone();
         let mut expected = records.clone();
         expected.sort_by_key(|row| row.0.get());
-        let len = records.len();
-        let ranks = 0..len;
-        let required = Requirement::new(len, core::slice::from_ref(&ranks));
+        let required = Requirement::All;
         let mut extractor = ByKey(|row: &(Cell<u128>, Box<usize>)| row.0.get());
         assert!(
             matches!(plan_node(&records, u128::MAX, 1, &mut extractor), NodePlan::Equal(pivot) if pivot == equal)
@@ -180,8 +173,7 @@ fn descending_children_keep_equal_key_order() {
         let mut records = band.to_vec();
         let mut expected = records.clone();
         expected.sort_by_key(|row| row.0);
-        let ranks = 0..records.len();
-        let required = Requirement::new(records.len(), core::slice::from_ref(&ranks));
+        let required = Requirement::All;
         Sorter::<_, _> {
             scratch: &mut Workspace::new(),
             extractor: &mut ByKey(|row: &(u64, usize)| row.0),
@@ -202,9 +194,7 @@ fn partial_root_bands_keep_exclusive_records_and_recover() {
         .build()
         .unwrap();
     let len = 257;
-    let one = 3..7;
-    let pair = [3..7, len - 7..len - 3];
-    for intervals in [core::slice::from_ref(&one), pair.as_slice()] {
+    for index in [3, len - 7] {
         for fail in [false, true] {
             let mut backing: Vec<_> = (0..len).map(Cell::new).collect();
             let mut records: Vec<_> = backing
@@ -226,7 +216,7 @@ fn partial_root_bands_keep_exclusive_records_and_recover() {
             let key = |record: &(u64, usize, &mut Cell<usize>, Cell<bool>)| {
                 if record.3.replace(true) {
                     assert!(
-                        intervals.len() > 1 || record.0 >> 63 == 0,
+                        (index == 3) == (record.0 >> 63 == 0),
                         "skipped root band was analyzed"
                     );
                     entered.store(true, Ordering::Relaxed);
@@ -251,7 +241,7 @@ fn partial_root_bands_keep_exclusive_records_and_recover() {
                             finished: None,
                         },
                         3,
-                        Requirement::new(len, intervals),
+                        Requirement::Nth(index),
                     );
                 });
             }));
@@ -259,7 +249,7 @@ fn partial_root_bands_keep_exclusive_records_and_recover() {
             assert_eq!(result.is_err(), fail);
             let mut ids: Vec<_> = records.iter().map(|record| record.1).collect();
             if !fail {
-                assert_members(&ids, &expected, intervals);
+                assert_members(&ids, &expected, index);
             }
             ids.sort_unstable();
             assert_eq!(ids, (0..len).collect::<Vec<_>>());

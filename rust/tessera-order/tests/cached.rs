@@ -3,6 +3,7 @@
 //! Cached-key sorting: order, stability, key evaluation and ownership.
 
 use std::{
+    cell::Cell,
     cmp::{Ordering, Reverse},
     panic::{AssertUnwindSafe, catch_unwind},
 };
@@ -104,26 +105,35 @@ fn zero_sized_records_do_not_call_the_key() {
 }
 
 #[test]
-fn key_panics_leave_records_unmoved() {
-    // Keys are cached before any record moves, so a panic at any call leaves
-    // owned and borrowed records exactly in input order.
+fn key_unwind_keeps_records_and_interior_edits() {
     let len = if cfg!(miri) { 65 } else { 8193 };
     let mut values: Vec<_> = (0..len).collect();
     for failure in [1, len / 2, len] {
-        let mut records: Vec<_> = values.iter_mut().map(|v| (v.to_string(), v)).collect();
-        let mut calls = 0;
+        let mut records: Vec<_> = values
+            .iter_mut()
+            .map(|v| (v.to_string(), Cell::new(false), v))
+            .collect();
+        let mut visited = Vec::new();
         let outcome = catch_unwind(AssertUnwindSafe(|| {
             sort_by_cached_key(&mut records, |r| {
-                calls += 1;
-                assert_ne!(calls, failure, "key failed");
+                visited.push(*r.2);
+                r.1.set(true);
+                if visited.len() == failure {
+                    std::panic::panic_any(*r.2);
+                }
                 Reverse(r.0.len())
             })
         }));
-        assert!(outcome.is_err());
-        assert_eq!(calls, failure, "key ran during recovery");
-        for (id, (text, value)) in records.iter_mut().enumerate() {
+        assert_eq!(
+            *outcome.unwrap_err().downcast::<usize>().unwrap(),
+            failure - 1
+        );
+        assert!(visited.into_iter().eq(0..failure));
+        records.sort_unstable_by_key(|r| *r.2);
+        for (id, (text, touched, value)) in records.iter_mut().enumerate() {
             assert_eq!(*text, id.to_string());
             assert_eq!(**value, id);
+            assert_eq!(touched.get(), id < failure);
         }
     }
 }

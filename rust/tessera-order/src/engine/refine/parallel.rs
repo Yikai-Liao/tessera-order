@@ -27,8 +27,7 @@ pub(crate) fn sort<T: Send, E: Extract<T> + Clone + Send + Sync>(
 
     let tile_len = tile_capacity::<T>(TILE_BYTES);
     let mut scratch = Workspace::new();
-    let ranks = 0..records.len();
-    let required = Requirement::new(records.len(), core::slice::from_ref(&ranks));
+    let required = Requirement::All;
     let Some(varying) = prepare::<_, _>(records, &mut extractor, tile_len) else {
         return;
     };
@@ -93,7 +92,7 @@ impl<T> Pool<T> {
 
 impl<T: Send, E: Extract<T> + Clone + Sync> Sorter<'_, T, E> {
     /// Partitions the root and finishes each bucket in its movement task.
-    fn sort_root(&mut self, records: &mut [T], varying: u128, required: Requirement<'_>)
+    fn sort_root(&mut self, records: &mut [T], varying: u128, required: Requirement)
     where
         E: Send,
     {
@@ -142,7 +141,7 @@ impl<T: Send, E: Extract<T> + Clone + Sync> Sorter<'_, T, E> {
         classifier: C,
         split: Split,
         shards: usize,
-        required: Requirement<'_>,
+        required: Requirement,
     ) {
         let pool = Pool::new();
         let extractor = &*self.extractor;

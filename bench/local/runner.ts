@@ -7,7 +7,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
 import { parseCriterionId } from "../catalog.ts";
-import { type Plan, selectCaseIds } from "../plan.ts";
+import { type Plan, parsePlan, selectCaseIds } from "../plan.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
   benchmarkEnvironment,
@@ -341,9 +341,10 @@ export async function comparePrepared(options: {
   shard?: { index: number; count: number };
 }) {
   const { root, prepared, out } = options;
+  const { kind: _kind, plan: frozenPlan, ...pair } = await readPrepared(prepared);
+  const plan = parsePlan(frozenPlan);
   assertWorkerEnvironment();
   if (platform() === "linux") await command("setarch", ["-R", "true"]);
-  const { kind: _kind, plan, ...pair } = await readPrepared(prepared);
   const catalogHash = createHash("sha256")
     .update(await readFile(join(root, "bench/catalog.toml")))
     .digest("hex");

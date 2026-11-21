@@ -8,11 +8,12 @@ import { loadPlan } from "../../plan.ts";
 import { CONTINUOUS_SHARDS } from "../paired.ts";
 import { baseHash, hash } from "./report.ts";
 
+const defaultCases = [48, 49, 1000, 65536, 1000000]
+  .flatMap((len) => ["api", "par-4"].map((mode) => `rust/u64/random/${len}/s1/${mode}`))
+  .sort();
+
 /** Synthetic blocks exercise protocol validation, not measured performance. */
-export function pairedRun(index = 1, ratio = 1.2): LocalRun {
-  const allCases = [48, 49, 1000, 65536, 1000000]
-    .flatMap((len) => ["api", "par-4"].map((mode) => `rust/u64/random/${len}/s1/${mode}`))
-    .sort();
+export function pairedRun(index = 1, ratio = 1.2, allCases = defaultCases): LocalRun {
   const cases = shardCases(allCases, index, CONTINUOUS_SHARDS);
   const build = {
     rustc: "rustc fixture",
@@ -69,14 +70,19 @@ export function pairedRun(index = 1, ratio = 1.2): LocalRun {
 }
 
 /** Write the exact directory layout produced by download-artifact. */
-export async function writePaired(directory: string, ratio = 1.2) {
+export async function writePaired(
+  directory: string,
+  ratio = 1.2,
+  selection?: Pick<PreparedPair, "cases" | "plan">,
+) {
+  const plan = selection?.plan ?? (await loadPlan("continuous"));
   const runs: LocalRun[] = [];
   for (let index = 1; index <= CONTINUOUS_SHARDS; index++) {
     const out = join(directory, `paired-${index}`);
     await mkdir(out, { recursive: true });
-    const run = pairedRun(index, ratio);
+    const run = pairedRun(index, ratio, selection?.cases);
     await writeFile(join(out, "local.json"), JSON.stringify(run));
-    await writeFile(join(out, "plan.json"), JSON.stringify(await loadPlan("continuous")));
+    await writeFile(join(out, "plan.json"), JSON.stringify(plan));
     runs.push(run);
   }
   const { shard, samples: _samples, sampleCounts: _counts, host: _host, ...pair } = runs[0];
@@ -84,7 +90,7 @@ export async function writePaired(directory: string, ratio = 1.2) {
     ...pair,
     cases: shard!.allCases,
     kind: "prepared-revisions",
-    plan: await loadPlan("continuous"),
+    plan,
   };
   await mkdir(join(directory, "prepared"), { recursive: true });
   await writeFile(join(directory, "prepared", "prepared.json"), JSON.stringify(prepared));

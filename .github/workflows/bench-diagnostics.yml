@@ -29,6 +29,7 @@ jobs:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: |
+          git fetch origin refs/pull/248/head
           git restore --source=d7b8f0c6 -- bench/rust bench/catalog.toml bench/plans Cargo.toml Cargo.lock rust
           bun run tools continuous prepare 292f7b0f --out bench/results/replay || { tail -80 bench/results/replay.log; exit 1; }
       - uses: actions/upload-artifact@v7

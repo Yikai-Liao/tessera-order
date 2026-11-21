@@ -260,6 +260,20 @@ These local speeds divide reference time by Tessera time on a Ryzen 7 8845H. The
 
 On 65,536 random 128-byte records, a bounded end reached 1.15–1.26× against `select_nth_unstable_by_key` at ranks 1–4, and 0.67× at rank 0. At the median, random and 16-distinct-key records reached 0.48× and 0.38×. The standard selector permits ties to change order. Keep the disjointness proof bounded to the end. Checking the entire slice for cross-region ties reached 0.53× at the random median. Membership bitmaps still require stable payload movement and reached 0.43× there. Revisit dense ranks when a design reduces record transfers.
 
+### Stable endpoints
+
+For a one-record end, keep the winner's source position and the displaced key's peer flag in one forward scan. The [routing explanation](../explain/routing.md#sparse-source-order) describes the swap and stable rotation. This avoids a second key scan, block metadata and heap allocation. On 65,536 random 128-byte records, reducing to a key and searching again for its position reached 0.65× / 0.64× standard unstable selection speed at the first / last rank. Reducing keyed positions inside the general bounded-end permutation reached 0.77× / 0.73×. The single scan reached 1.04× / 0.95×. These alternatives and the [block prototype](https://github.com/Yikai-Liao/tessera-order/issues/242) give little reason to tune a block size for these endpoints.
+
+The Ryzen 7 8845H screen compared `ce88a8f` and the single scan in separate builds. Each speed divides paired standard unstable selection time by stable Tessera time. Brackets give the single scan's repeated-Tessera A/A range over nine blocks.
+
+| Random records | First, baseline → single scan | Last, baseline → single scan |
+| --- | --- | --- |
+| u64 | 0.33× → 0.50× [0.98, 1.02] | 0.51× → 0.70× [0.77, 1.23] |
+| 16-byte row | 0.62× → 0.90× [0.86, 1.14] | 0.43× → 0.68× [0.71, 1.29] |
+| 128-byte record | 0.68× → 1.04× [0.96, 1.04] | 0.71× → 0.95× [0.76, 1.24] |
+
+In the elapsed-time comparison across builds, both endpoints improved on reverse and 16-value inputs at all three widths. Three cases took longer. They were u64/distant-swaps first (+8%), 16-byte row/distant-swaps last (+3%) and u64/random last (+10%). For the last case the standard selector also took longer in the candidate build, which explains why its relative speed rose. A repeat with longer samples found lower last-rank times in both cases (row/distant-swaps −9%, u64/random −31%). The u64/distant-swaps first-rank loss was not repeated. Cross-build timings cannot isolate the source effect. All 24 candidate endpoint cases used zero extra heap. On complete sorts of the same inputs, both baseline copies and the second candidate copy stayed within the A/A verdict for all 12 cases. The widest full-sort A/A range was 0.57–1.43. These controls leave smaller costs unresolved.
+
 ## Stable source permutations
 
 Counted emission and packed prefixes save different work. Routing packed words through a fresh root partition took 29.7% longer than `ddb2f6d` on 65,536 random u64 keys. Emitting bare indices avoided packing at that size, but repeated source-key lookups on one million random 128-byte records reduced argsort speed from 6.80× to 3.68× against stable standard-library index sorting. For sparse permutations, moving runs directly also saved the cost of expanding and following index cycles. On 65,536 wide records with 99% skew and up to 65,536 category IDs, cached-key sorting improved from 0.87× to 2.70× against stable standard-library grouping.

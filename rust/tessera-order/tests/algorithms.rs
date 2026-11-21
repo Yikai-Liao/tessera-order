@@ -70,40 +70,42 @@ fn selection_returns_a_mutable_borrow_of_the_stable_rank() {
 #[test]
 fn selection_unwind_keeps_all_records_and_the_panicking_callbacks_edit() {
     let len = if cfg!(miri) { 97 } else { 20_003 };
-    let key = |id: usize| (id as u64).wrapping_mul(0x9e3779b97f4a7c15);
-    let mut values: Vec<_> = (0..len).map(|id| (id, Cell::new(false))).collect();
-    let mut calls = 0;
-    select_nth_by_key(&mut values, len / 2, |(id, _)| {
-        calls += 1;
-        key(*id)
-    });
-    let fail_at = calls / 2;
-    values.sort_unstable_by_key(|r| r.0);
-
-    let mut calls = 0;
-    let panic = catch_unwind(AssertUnwindSafe(|| {
-        select_nth_by_key(&mut values, len / 2, |(id, edited)| {
+    let key = |id: usize| (1 + (id / 4) as u64).wrapping_mul(0x9e3779b97f4a7c15);
+    for index in [0, len / 2, len - 1] {
+        let mut values: Vec<_> = (0..len).map(|id| (id, Cell::new(false))).collect();
+        let mut calls = 0;
+        select_nth_by_key(&mut values, index, |(id, _)| {
             calls += 1;
-            if calls == fail_at {
-                edited.set(true);
-                std::panic::panic_any(*id);
-            }
             key(*id)
         });
-    }))
-    .unwrap_err();
-    let edited_id = *panic.downcast::<usize>().unwrap();
-    assert_eq!(calls, fail_at);
-    values.sort_unstable_by_key(|r| r.0);
-    for (id, record) in values.iter().enumerate() {
-        assert_eq!(record.0, id);
-        assert_eq!(record.1.get(), id == edited_id);
+        let fail_at = calls / 2;
+        values.sort_unstable_by_key(|r| r.0);
+
+        let mut calls = 0;
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            select_nth_by_key(&mut values, index, |(id, edited)| {
+                calls += 1;
+                if calls == fail_at {
+                    edited.set(true);
+                    std::panic::panic_any(*id);
+                }
+                key(*id)
+            });
+        }))
+        .unwrap_err();
+        let edited_id = *panic.downcast::<usize>().unwrap();
+        assert_eq!(calls, fail_at);
+        values.sort_unstable_by_key(|r| r.0);
+        for (id, record) in values.iter().enumerate() {
+            assert_eq!(record.0, id);
+            assert_eq!(record.1.get(), id == edited_id);
+        }
     }
 }
 
 #[test]
 fn inconsistent_keys_preserve_records_and_any_returned_indices() {
-    let len = 97;
+    let len = if cfg!(miri) { 97 } else { 8_193 };
     let mut values: Vec<_> = (0..len).map(|id| (id, Cell::new(false))).collect();
     let key = |(id, flip): &(usize, Cell<bool>)| {
         if flip.replace(!flip.get()) {
@@ -116,11 +118,13 @@ fn inconsistent_keys_preserve_records_and_any_returned_indices() {
         indices.sort_unstable();
         assert!(indices.into_iter().eq(0..len));
     }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        select_nth_by_key(&mut values, len / 2, key);
-    }));
-    values.sort_unstable_by_key(|r| r.0);
-    assert!(values.iter().map(|r| r.0).eq(0..len));
+    for index in [0, len / 2, len - 1] {
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            select_nth_by_key(&mut values, index, key);
+        }));
+        values.sort_unstable_by_key(|r| r.0);
+        assert!(values.iter().map(|r| r.0).eq(0..len));
+    }
 }
 
 #[test]

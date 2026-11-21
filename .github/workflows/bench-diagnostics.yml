@@ -12,7 +12,7 @@ jobs:
       TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/benchmark
       CARGO_BUILD_TARGET: x86_64-unknown-linux-gnu
       CARGO_PROFILE_BENCH_DEBUG: "0"
-      RUSTFLAGS: -C target-feature=+crt-static
+      RUSTFLAGS: -C target-feature=+crt-static -C llvm-args=-x86-branches-within-32B-boundaries -C llvm-args=-align-all-functions=6
     steps:
       - uses: actions/checkout@v7
         with:
@@ -29,10 +29,7 @@ jobs:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: |
-          git diff 99061eeb HEAD -- bench/rust/src/comparison/variant.rs > "$RUNNER_TEMP/corpus.patch"
           git restore --source=ace911a9 -- bench/rust bench/catalog.toml bench/plans Cargo.toml Cargo.lock rust
-          git apply "$RUNNER_TEMP/corpus.patch"
-          sed -i '/Box::new(BatchKernel {/a\        corpus: vec![],' bench/rust/src/comparison/variant/parallel.rs
           bun run tools continuous prepare ddb2f6d9 --out bench/results/replay || { tail -80 bench/results/replay.log; exit 1; }
       - uses: actions/upload-artifact@v7
         with:
@@ -58,9 +55,16 @@ jobs:
         with:
           name: replay-pair
           path: replay
+      - uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: 44862687879
+          artifact-ids: 14690970523
+          merge-multiple: true
+          path: original
       - run: |
           cd replay
-          chmod +x binaries/*/worker
+          chmod +x binaries/*/worker ../original/binaries/*/worker
           jq '.plan' prepared.json > plan.json
           git show 99061eeb:bench/local/samples.ts > ../bench/local/replay-old.ts
           mkdir output

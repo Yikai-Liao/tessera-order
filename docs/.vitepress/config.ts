@@ -150,6 +150,7 @@ export default defineConfig({
             { text: "4. The block partition", link: "/explain/block-partition" },
             { text: "5. Finishing tiles", link: "/explain/tiles" },
             { text: "6. Ownership and panics", link: "/explain/safety" },
+            { text: "7. Beyond sorting", link: "/explain/operations" },
           ],
         },
       ],

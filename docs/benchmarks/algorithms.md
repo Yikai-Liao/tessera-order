@@ -15,6 +15,6 @@ How Tessera compares with other Rust and C++ sorts on the same inputs, measured 
 
 ## Reading the figures
 
-**Speed** is `slice::sort` run time divided by the sort's run time on the same case, so 2× takes half as long. A ranking is the geometric mean over the input patterns named in its subtitle, at one length; a sort that lacks one of those cases is not ranked rather than credited. **Extra memory** is the largest peak heap allocation of one sort beyond the input, over the named cases; "–" means it was not recorded.
+**Speed** is `slice::sort` run time divided by the sort's run time on the same case, so 2× takes half as long. A ranking is the geometric mean over the input patterns named in its subtitle, at one length; a sort that lacks one of those cases is not ranked rather than credited. The length figure follows random input across lengths; the pattern figures compare input patterns at one length, and the short-input figure every pattern at shorter lengths, where fixed per-call costs decide. **Extra memory** is the largest peak heap allocation of one sort beyond the input, over the named cases; "–" means it was not recorded.
 
 Runs of different sorts are independent: their ratios are descriptive and come from different jobs, possibly days apart, on machines of the same specification. They are not the paired verdicts PR checks give; [main history](index.md) shows Tessera's own trend. Coverage and publication belong to the [tracking contract](../development/continuous-benchmarks.md#data-and-site-publication).

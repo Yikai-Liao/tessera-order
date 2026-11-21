@@ -576,27 +576,36 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
         : {}),
     });
   };
-  const cases = ["u64/random/65536/s1", "u64/reverse/65536/s1", "u64/random/1048576/s1"];
+  const cases = [
+    "u64/random/65536/s1",
+    "u64/reverse/65536/s1",
+    "u64/random/1048576/s1",
+    "u64/random/1000/s1",
+    "u64/sorted/1000/s1",
+  ];
   const at = (values: number[]) => Object.fromEntries(cases.map((id, i) => [id, values[i]]));
   const runs = new Map([
     [
       "tessera",
       [
-        tracked(other, "2026-10-01T00:00:00Z", at([1, 1, 1])),
-        tracked(uuid, "2026-11-01T00:00:00Z", at([10, 20, 100]), at([100, 100, 1000])),
+        tracked(other, "2026-10-01T00:00:00Z", at([1, 1, 1, 1, 1])),
+        tracked(uuid, "2026-11-01T00:00:00Z", at([10, 20, 100, 3, 1]), at([100, 100, 1000, 1, 1])),
       ],
     ],
-    ["std-stable", [tracked(uuid, "2026-11-02T00:00:00Z", at([40, 20, 800]), at([1, 2, 3]))]],
+    [
+      "std-stable",
+      [tracked(uuid, "2026-11-02T00:00:00Z", at([40, 20, 800, 2, 1]), at([1, 2, 3, 1, 1]))],
+    ],
     // Latest on another spec: the comparison uses the earlier run on Tessera's spec.
     [
       "glidesort",
       [
-        tracked(uuid, "2026-11-03T00:00:00Z", at([20, 20, 400])),
-        tracked(other, "2026-11-04T00:00:00Z", at([1, 1, 1])),
+        tracked(uuid, "2026-11-03T00:00:00Z", at([20, 20, 400, 2, 2])),
+        tracked(other, "2026-11-04T00:00:00Z", at([1, 1, 1, 1, 1])),
       ],
     ],
     // Lacks the reverse input, so it is listed but not ranked as a loss or a win.
-    ["radsort", [tracked(uuid, "2026-11-05T00:00:00Z", { [cases[0]]: 5 })]],
+    ["radsort", [tracked(uuid, "2026-11-05T00:00:00Z", { [cases[0]]: 50 })]],
   ]);
   assert.equal(latestRuns(new Map())?.spec, undefined);
   const latest = latestRuns(runs)!;
@@ -621,6 +630,23 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
   // Geometric mean of 40/10 and 20/20; the worst peak over the cohort's cases.
   assert.deepEqual(tessera.cells, ["2×", "100 B"]);
   assert.ok(!JSON.stringify(rows).includes("radsort"));
+  // Lengths with a single pattern per type are threshold probes: the length figure and the
+  // short-input figure use only lengths where some type has several patterns.
+  const chart = (name: string) => data.figures.find((figure) => figure.name === name)!;
+  const rowsOf = (name: string) =>
+    (chart(name).chart as RowChart).groups.map((group) => [
+      group.title,
+      group.rows.map((row) => row.name.input),
+    ]);
+  assert.deepEqual(rowsOf("lengths"), [
+    ["u64 keys · against any sort", ["1,000 elements", "65,536 elements"]],
+  ]);
+  assert.equal(chart("lengths").title, "Fastest from 65,536 elements up");
+  assert.deepEqual(
+    rowsOf("inputs").flatMap(([, rows]) => rows),
+    ["random", "reverse"],
+  );
+  assert.deepEqual(rowsOf("short"), [["1,000 u64 keys", ["random", "sorted"]]]);
   // Without a cohort, the comparison is published empty, replacing any earlier one.
   const alone = comparisonData(new Map([["tessera", runs.get("tessera")!]]));
   assert.deepEqual([alone.spec, alone.runs, alone.overview, alone.figures], [uuid, [], null, []]);
@@ -633,7 +659,7 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
         "tessera",
         [
           tracked(uuid, "2026-11-06T00:00:00Z", {
-            ...at([10, 20, 100]),
+            ...at([10, 20, 100, 1, 1]),
             "f64/random/65536/s1": 10,
           }),
         ],
@@ -642,7 +668,7 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
         "std-stable",
         [
           tracked(uuid, "2026-11-06T00:00:00Z", {
-            ...at([40, 20, 800]),
+            ...at([40, 20, 800, 2, 1]),
             "f64/random/65536/s1": 30,
           }),
         ],

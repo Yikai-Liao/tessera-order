@@ -22,7 +22,14 @@ fn check_keys<K: RadixKey>(keys: &[K]) {
     let len = keys.len();
     let mut expected: Vec<_> = (0..len).collect();
     expected.sort_by_key(|&id| keys[id].encode());
-    for index in [0, 1, len / 4, len / 2, len - 1] {
+    // Under Miri, exercise both ends and an interior rank for every key shape
+    // and tile budget. Native tests also check ranks next to and between them.
+    let ranks: &[_] = if cfg!(miri) {
+        &[0, len / 2, len - 1]
+    } else {
+        &[0, 1, len / 4, len / 2, len - 1]
+    };
+    for &index in ranks {
         for tile_bytes in [128, TILE_BYTES] {
             let mut records: Vec<_> = keys.iter().copied().zip(0..len).collect();
             refine_with_tile_bytes(

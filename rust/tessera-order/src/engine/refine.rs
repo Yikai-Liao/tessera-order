@@ -160,6 +160,12 @@ fn refine_with_tile_bytes<T, E: Extract<T>>(
         return;
     }
     let tile_len = tile_capacity::<T>(tile_bytes);
+    if let Requirement::Nth(index) = required
+        && records.len() > tile_len
+        && spans::SourceOrder::finish_cut(records, index, &mut extractor)
+    {
+        return;
+    }
     let Some(varying) = prepare::<_, _>(records, &mut extractor, tile_len) else {
         return;
     };

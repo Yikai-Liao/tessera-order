@@ -4,7 +4,7 @@
 //! A long ordered subsequence stays in its original runs. Only the records
 //! excluded from it need individually ranked source positions.
 
-use super::{Extract, Requirement, TILE_BYTES, plan};
+use super::{Extract, Requirement, TILE_BYTES, Unsigned, plan};
 use alloc::vec::Vec;
 use core::ops::Range;
 
@@ -31,6 +31,81 @@ impl SourceOrder {
         Self::discover(records, extractor, required, record_bytes)
     }
 
+    fn exception_limit<V>(len: usize, record_bytes: usize) -> usize {
+        // A tile of metadata per square root of the number of input tiles.
+        // Charge both construction and the worst-case split in the output:
+        // one outlier can interrupt a source run and split a destination run.
+        let entry_bytes = size_of::<(V, usize)>()
+            + size_of::<Range<usize>>()
+            + 3 * (size_of::<Span>() + record_bytes);
+        let tile = (TILE_BYTES / entry_bytes).max(1);
+        tile * len.div_ceil(tile).isqrt()
+    }
+
+    /// Finish a cut whose current key bounds at least one entire side. If one
+    /// side has holes, fill them through the required occurrence of the pivot
+    /// and leave every record beyond that occurrence in place.
+    pub(super) fn finish_cut<T, E: Extract<T>>(
+        records: &mut [T],
+        rank: usize,
+        extractor: &mut E,
+    ) -> bool {
+        let pivot = extractor.key(&records[rank]);
+        let max = u128::MAX >> (128 - E::Value::BITS);
+        let first_high = if pivot.to_u128() == max {
+            None
+        } else {
+            records[..rank]
+                .iter()
+                .position(|r| extractor.key(r) > pivot)
+        };
+        let last_low = if pivot.to_u128() == 0 {
+            None
+        } else {
+            records[rank + 1..]
+                .iter()
+                .rposition(|r| extractor.key(r) < pivot)
+                .map(|i| rank + 1 + i)
+        };
+        let limit = Self::exception_limit::<E::Value>(records.len(), size_of::<T>());
+        let (window, skipped, first_dest) = match (first_high, last_low) {
+            (None, None) => return true,
+            (Some(_), Some(_)) => return false,
+            (Some(start), None) => {
+                let suffix = &mut records[start..];
+                let needed = rank + 1 - start;
+                let Some((len, skipped)) = take_prefix(
+                    suffix.iter().map(|r| extractor.key(r) <= pivot),
+                    needed,
+                    limit,
+                ) else {
+                    return false;
+                };
+                let first_dest = len - skipped.len();
+                (&mut suffix[..len], skipped, first_dest)
+            }
+            (None, Some(end)) => {
+                let prefix = &mut records[..=end];
+                let needed = end - rank + 1;
+                let Some((len, mut skipped)) = take_prefix(
+                    prefix.iter().rev().map(|r| extractor.key(r) >= pivot),
+                    needed,
+                    limit,
+                ) else {
+                    return false;
+                };
+                skipped.reverse();
+                for i in &mut skipped {
+                    *i = len - 1 - *i;
+                }
+                (&mut prefix[end + 1 - len..], skipped, 0)
+            }
+        };
+        let placements = (first_dest..).zip(skipped.iter().copied());
+        Self::place_exceptions(window.len(), &skipped, placements).apply(window);
+        true
+    }
+
     /// Resolves the requested order when the exceptional positions fit the
     /// workspace. An abandoned construction has only read the source.
     fn discover<T, E: Extract<T>>(
@@ -43,14 +118,7 @@ impl SourceOrder {
         if len < plan::KEY_SAMPLE_LEN {
             return None;
         }
-        // A tile of metadata per square root of the number of input tiles.
-        // Charge both construction and the worst-case split in the output:
-        // one outlier can interrupt a source run and split a destination run.
-        let entry_bytes = size_of::<(E::Value, usize)>()
-            + size_of::<Range<usize>>()
-            + 3 * (size_of::<Span>() + record_bytes);
-        let tile = (TILE_BYTES / entry_bytes).max(1);
-        let limit = tile * len.div_ceil(tile).isqrt();
+        let limit = Self::exception_limit::<E::Value>(len, record_bytes);
         // Use nearby pairs from across the input to estimate how many
         // exceptional positions need storage. Construction enforces the limit.
         let allowance = limit.saturating_mul(plan::KEY_SAMPLE_LEN).div_ceil(len);
@@ -215,13 +283,24 @@ impl SourceOrder {
                 *slot = if i < lower { i } else { background + i };
             }
         }
-        // Fill the gaps between destinations from the ordered background.
-        let mut order = Self(Vec::with_capacity(entries.len() + 1));
-        let mut original = positions.into_iter().peekable();
-        let (mut read, mut write) = (0, 0);
-        for (dest, exception) in destinations
+        let placements = destinations
             .into_iter()
-            .zip(entries.into_iter().map(|(_, src)| src))
+            .zip(entries.into_iter().map(|(_, source)| source));
+        Some(Self::place_exceptions(len, &positions, placements))
+    }
+
+    /// Place exceptional records and fill the gaps with the remaining source
+    /// runs in order. `sources` lists unique positions in ascending order.
+    /// The destination-ordered placements use each of those sources once.
+    fn place_exceptions(
+        len: usize,
+        sources: &[usize],
+        placements: impl Iterator<Item = (usize, usize)>,
+    ) -> Self {
+        let mut order = Self(Vec::with_capacity(sources.len() + 1));
+        let mut original = sources.iter().copied().peekable();
+        let (mut read, mut write) = (0, 0);
+        for (dest, exception) in placements
             .map(|(dest, src)| (dest, Some(src)))
             .chain(core::iter::once((len, None)))
         {
@@ -239,7 +318,7 @@ impl SourceOrder {
                 write += 1;
             }
         }
-        Some(order)
+        order
     }
 
     fn push(&mut self, range: Range<usize>) {
@@ -315,10 +394,57 @@ impl SourceOrder {
     }
 }
 
+/// Return the source extent containing the first `needed` matches and the
+/// positions skipped within it. Budget exhaustion leaves the input untouched.
+fn take_prefix(
+    matches: impl Iterator<Item = bool>,
+    mut needed: usize,
+    limit: usize,
+) -> Option<(usize, Vec<usize>)> {
+    let mut skipped = Vec::new();
+    for (i, keep) in matches.enumerate() {
+        if keep {
+            needed -= 1;
+            if needed == 0 {
+                return Some((i + 1, skipped));
+            }
+        } else {
+            if skipped.len() == limit {
+                return None;
+            }
+            skipped.push(i);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::engine::key::ByKey;
+
+    #[test]
+    fn one_sided_cut_places_the_stable_occurrence() {
+        let input = [1u8, 6, 3, 7, 3, 4, 3, 6, 3, 9, 3];
+        for reverse in [false, true] {
+            let keys = if reverse {
+                core::array::from_fn(|i| 10 - input[input.len() - 1 - i])
+            } else {
+                input
+            };
+            let rank = if reverse { keys.len() - 1 - 4 } else { 4 };
+            let mut expected: Vec<_> = (0..keys.len()).collect();
+            expected.sort_by_key(|&i| keys[i]);
+            let mut ids: Vec<_> = (0..keys.len()).collect();
+            let mut records: Vec<_> = ids.iter_mut().collect();
+            let mut extract = ByKey(|r: &&mut usize| keys[**r]);
+            assert!(SourceOrder::finish_cut(&mut records, rank, &mut extract));
+            assert_eq!(*records[rank], expected[rank]);
+            records[..rank].sort_by_key(|r| keys[**r]);
+            records[rank + 1..].sort_by_key(|r| keys[**r]);
+            assert!(records.iter().map(|r| **r).eq(expected));
+        }
+    }
 
     #[test]
     fn stable_projection_of_sparse_exceptions_and_ordered_runs() {

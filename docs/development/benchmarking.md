@@ -208,7 +208,7 @@ Every reference has one role for the operation it is compared on; an implementat
 | Strongest public implementation | The fastest known implementation of the same result contract, in any language. | When one exists |
 | Ecosystem choice | An implementation callers commonly use for the result. | No |
 
-An implementation is admitted for an operation when its result passes the shared checker, it is pinned as a dependency or a [verified native source](#implementations) with a compatible license, native code uses the published LLVM major, it supports the operation's ranking cohort, and one tracking job for it completes within the hosted time budget. A weaker tie contract is labelled separately and never enters a stable ranking. Remove an implementation when upstream is abandoned, it cannot build on the runner, it repeats another reference's algorithm without a distinct question, or it exceeds the budget.
+An implementation is admitted for an operation when its result passes the shared checker, it is pinned as a dependency or a [verified native source](#implementations) with a compatible license, native code uses the published LLVM major, and it supports the operation's ranking cohort. A weaker tie contract is labelled separately and never enters a stable ranking. Remove an implementation when upstream is abandoned, it cannot build on supported hosts, or it repeats another reference's algorithm without a distinct question. Hosted [main tracking](continuous-benchmarks.md#main-long-term-tracking) additionally needs each of the implementation's jobs to finish within its time limit; an implementation that cannot is left out of hosted tracking only, and local release comparisons, which no hosted limit governs, keep it.
 
 Cases reuse the shared [input generator](#input-generation) and its identities, so readings line up across operations; an operation adds only its own parameter axes, such as the selected rank or the thread count. Each axis answers a stated question:
 
@@ -217,7 +217,7 @@ Cases reuse the shared [input generator](#input-generation) and its identities, 
 - **Length:** a short input, a cache-resident input and one beyond the last-level cache, chosen around the thresholds where costs change.
 - **Parameters:** stated relative to the input length (for example a middle, a 1% and a last rank), with absolute values in the case ID.
 
-Each operation has one named ranking cohort; an implementation that lacks a cohort case is not ranked rather than credited. Fix the cases before measuring the opponents: a case is added for the question it answers, not for its result, and cases Tessera loses stay. Estimate cases × implementations against the job budget before adding lengths.
+Each operation has one named ranking cohort; an implementation that lacks a cohort case is not ranked rather than credited. Fix the cases before measuring the opponents: a case is added for the question it answers, not for its result, and cases Tessera loses stay. Before adding lengths to a tracked operation, estimate its cases against the hosted job limit.
 
 ## Serial operation comparisons
 

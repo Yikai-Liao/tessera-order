@@ -33,7 +33,6 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: "rust/tessera-trace -> ../../target/trace"
       - run: bun install --frozen-lockfile
-      - run: "cargo test -p tessera-order --lib --features trace trace::"
       - run: >-
           cargo clippy --manifest-path rust/tessera-trace/Cargo.toml
           --target wasm32-unknown-unknown --target-dir target/trace -- -D warnings

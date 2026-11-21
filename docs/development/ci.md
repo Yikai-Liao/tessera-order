@@ -46,7 +46,7 @@ Each test cell tests only `tessera-order`, with the SIMD backend and the `rayon`
 
 A cell's commands live in one composite action, [`rust-test`](../../.github/actions/rust-test/action.yml), called by both the pull request cells and the extra `main` cells. They are two jobs over one action because a job's `if` is evaluated before its matrix expands.
 
-The Rust lint job runs Clippy and rustdoc over all workspace features, including the benchmark's native-facing code. These commands link nothing, so they set `TESSERA_BENCH_CHECK_ONLY=1` to skip native compilation and linker inputs, and the lint runner needs no native sources or tools. Cargo tracks the variable, so a check-only build cannot suppress a later executable build's native setup.
+The Rust lint job tests the library's native `trace` hooks. It also runs Clippy and rustdoc over all workspace features, including the benchmark's native-facing code. Clippy and rustdoc do not link binaries, so they set `TESSERA_BENCH_CHECK_ONLY=1` to skip native compilation and linker inputs, and the lint runner needs no native sources or tools. Cargo tracks the variable, so a check-only build cannot suppress a later executable build's native setup.
 
 ### Algorithm harness
 
@@ -58,7 +58,7 @@ A cached Cargo target keeps workspace outputs, including native objects, keyed b
 
 ### Docs and diagnostics
 
-The docs workflow builds the figure engine for WebAssembly, tests the library's `trace` hooks, lints the engine crate, runs the model and replay tests and site type checks, then builds the site and checks its links.
+The docs workflow builds and lints the figure engine for WebAssembly, runs the model and replay tests and site type checks, then builds the site and checks its links.
 
 The [benchmark diagnostics workflow](../../.github/workflows/bench-diagnostics.yml) runs only by manual dispatch: fixed-work counters or a five-layout sample on the four serial inputs of the diagnostics plan, with an optional baseline. It has read-only permissions, no Cloud submission and a 45-minute timeout, and keeps results and logs as 14-day artifacts.
 

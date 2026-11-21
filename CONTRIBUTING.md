@@ -84,7 +84,7 @@ Scope is optional: one lowercase word naming the area, such as `engine`, `block`
 
 Branches need not be up to date with `main`; rebase only for conflicts. Describe user-visible changes in the PR: [release notes](RELEASING.md#release-checklist) are written from merged PRs, without a shared changelog.
 
-When a PR merges or is closed, delete its branch on GitHub and locally and remove its worktree; `gh pr merge --squash --delete-branch` handles the branches. Squash merges leave the branch tip outside `main`, so `git branch --merged` misses them: judge a branch by its PR state, and keep any branch with commits after its PR head. Removing a worktree deletes its ignored files, so move raw results you still need out first. Long-lived work and development branches, such as `work/`, `experiment/`, `research/` and `explore/` branches and branches that carry a series of PRs, stay until their owner retires them.
+When a PR merges or is closed, delete its branch on GitHub and locally and remove its worktree; `gh pr merge --squash --delete-branch` handles the branches. Squash merges leave the branch tip outside `main`, so `git branch --merged` misses them: judge a branch by its PR state, and keep any branch with commits after its PR head. Removing a worktree deletes its ignored files, so first move out any ignored work you still need, such as raw results and research harnesses; build outputs, caches and vendored sources can go. Long-lived work and development branches, such as `work/`, `experiment/`, `research/` and `explore/` branches and branches that carry a series of PRs, stay until their owner retires them.
 
 ## Sign-off (DCO)
 

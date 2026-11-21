@@ -145,6 +145,17 @@ pub(super) enum NodePlan<V> {
     Digit(Digit),
 }
 
+/// One digit that covers every remaining difference leaves finished
+/// buckets, so no sample or run check can select a cheaper partition.
+pub(super) fn complete_digit(varying: u128) -> Option<Digit> {
+    let low = varying.trailing_zeros() as usize;
+    let span = bit_len(varying) - low;
+    (span <= SPLIT_BITS).then_some(Digit {
+        shift: low,
+        width: span,
+    })
+}
+
 /// Chooses a partition for a nonconstant node larger than its tile budget.
 pub(super) fn plan_node<T, E: Extract<T>>(
     records: &[T],
@@ -152,15 +163,8 @@ pub(super) fn plan_node<T, E: Extract<T>>(
     tile_len: usize,
     extractor: &mut E,
 ) -> NodePlan<E::Value> {
-    // One digit that covers every remaining difference leaves finished
-    // buckets, so no sample or run check can select a cheaper partition.
-    let low = varying.trailing_zeros() as usize;
-    let span = bit_len(varying) - low;
-    if span <= SPLIT_BITS {
-        return NodePlan::Digit(Digit {
-            shift: low,
-            width: span,
-        });
+    if let Some(digit) = complete_digit(varying) {
+        return NodePlan::Digit(digit);
     }
     let sample = (records.len() >= 4 * tile_len).then(|| KeySample::collect(records, extractor));
     if let Some(equal) = sample.as_ref().and_then(KeySample::mode) {

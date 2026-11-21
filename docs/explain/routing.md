@@ -39,6 +39,12 @@ Next, one scan computes the [varying bits](keys.md#varying-bits). If no bit vari
 
 Only now is tile and block scratch allocated. Budgeted insertion on a larger unsorted input may already have allocated its probe-key buffer; confirmed ordered and constant inputs never allocate.
 
+## Sparse source order
+
+A serial finisher can describe a permutation as long runs of source positions and a few isolated records. After the insertion probe, a node wider than one digit samples the input. If most keys are alike, their occurrences form the ordered background. If most positions are already ordered, the finisher removes both ends of each inversion from a stack of source runs. Each disjoint pair costs at most two exceptions for one record any ordered subsequence must exclude. Exceeding the square-root exception budget returns control to ordinary partitioning before any records move.
+
+Both constructions merge isolated source positions with runs from the background. Reserving a destination band for equal keys establishes their full order. The mover parks isolated records, copies the longer runs in overlap-safe order, and restores the parked records. Rayon schedules the slice before its serial finisher tries this path.
+
 ## Nodes and tiles
 
 From here on, the engine works on subproblems. Full sorting refines every unfinished band; single-rank selection uses the same plan but only refines the band containing the requested rank. A partition always completes stable movement for every band, including those that receive no further key analysis. The [engine reference](../design/engine.md#ordered-rank-requirements) owns projection and workspace invariants.

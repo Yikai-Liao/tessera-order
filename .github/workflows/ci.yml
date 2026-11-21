@@ -203,11 +203,19 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      # Keep short-case branch placement controlled in both measured executables.
       TESSERA_BENCH_TARGET_DIR: ${{ github.workspace }}/target/benchmark
       CARGO_BUILD_TARGET: x86_64-unknown-linux-gnu
       CARGO_PROFILE_BENCH_DEBUG: "0"
-      RUSTFLAGS: -C target-feature=+crt-static -C llvm-args=-x86-branches-within-32B-boundaries -C llvm-args=-align-all-functions=6
+      # Short sorts take hundreds of nanoseconds. Shifting hot instructions during a
+      # rebuild can move their timing enough to look like a regression (u64/random/49).
+      # Apply the same layout rules to the baseline and candidate x86-64 binaries:
+      # LLVM pads selected branches (including fused compare-and-branch pairs) away
+      # from 32-byte boundaries and aligns function entries to 2^6 = 64 bytes.
+      # For the Xeon and EPYC replay results, see docs/design/evidence.md#reading-small-case-results.
+      RUSTFLAGS: >-
+        -C target-feature=+crt-static
+        -C llvm-args=-x86-branches-within-32B-boundaries
+        -C llvm-args=-align-all-functions=6
       CC: clang
       CXX: clang++
     outputs:

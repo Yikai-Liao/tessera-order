@@ -42,9 +42,8 @@ impl SourceOrder {
         tile * len.div_ceil(tile).isqrt()
     }
 
-    /// Finish a cut whose current key bounds at least one entire side. If one
-    /// side has holes, fill them through the required occurrence of the pivot
-    /// and leave every record beyond that occurrence in place.
+    /// Finish from a certified key boundary or a bounded ordered end. Both
+    /// plans describe sparse placements against the original source order.
     pub(super) fn finish_cut<T, E: Extract<T>>(
         records: &mut [T],
         rank: usize,
@@ -68,41 +67,56 @@ impl SourceOrder {
                 .map(|i| rank + 1 + i)
         };
         let limit = Self::exception_limit::<E::Value>(records.len(), size_of::<T>());
-        let (window, skipped, first_dest) = match (first_high, last_low) {
+        let skipped = match (first_high, last_low) {
             (None, None) => return true,
-            (Some(_), Some(_)) => return false,
-            (Some(start), None) => {
-                let suffix = &mut records[start..];
-                let needed = rank + 1 - start;
-                let Some((len, skipped)) = take_prefix(
-                    suffix.iter().map(|r| extractor.key(r) <= pivot),
-                    needed,
-                    limit,
-                ) else {
-                    return false;
-                };
-                let first_dest = len - skipped.len();
-                (&mut suffix[..len], skipped, first_dest)
-            }
-            (None, Some(end)) => {
-                let prefix = &mut records[..=end];
-                let needed = end - rank + 1;
-                let Some((len, mut skipped)) = take_prefix(
-                    prefix.iter().rev().map(|r| extractor.key(r) >= pivot),
-                    needed,
-                    limit,
-                ) else {
-                    return false;
-                };
-                skipped.reverse();
-                for i in &mut skipped {
-                    *i = len - 1 - *i;
-                }
-                (&mut prefix[end + 1 - len..], skipped, 0)
-            }
+            (Some(start), None) => prefix_holes(
+                (start..records.len()).map(|i| (i, extractor.key(&records[i]) <= pivot)),
+                rank + 1 - start,
+                limit.min(records.len() - rank - 1),
+            ),
+            (None, Some(end)) => prefix_holes(
+                (0..=end)
+                    .rev()
+                    .map(|i| (i, extractor.key(&records[i]) >= pivot)),
+                end + 1 - rank,
+                limit.min(rank),
+            )
+            .map(|mut holes| {
+                holes.reverse();
+                holes
+            }),
+            _ => None,
         };
-        let placements = (first_dest..).zip(skipped.iter().copied());
-        Self::place_exceptions(window.len(), &skipped, placements).apply(window);
+        let order = if let Some(sources) = skipped {
+            let (band, before) = if first_high.is_some() {
+                (0..rank + 1, 0)
+            } else {
+                (rank..records.len(), sources.len())
+            };
+            Self::around_band(
+                records.len(),
+                &sources,
+                sources.iter().copied(),
+                before,
+                band,
+            )
+        } else {
+            let len = records.len();
+            let end = if rank < len / 2 {
+                0..rank + 1
+            } else {
+                rank..len
+            };
+            if end.len() > limit {
+                return false;
+            }
+            let entries = records
+                .iter()
+                .enumerate()
+                .map(|(i, r)| (extractor.key(r), i));
+            Self::ordered_end(len, end, entries)
+        };
+        order.apply(records);
         true
     }
 
@@ -244,59 +258,87 @@ impl SourceOrder {
             }
         }
         let len = records.len();
-        let background = len - entries.len();
-        let mut destinations = positions.clone();
-        if let Requirement::Nth(index) = required
-            && (lower..lower + background).contains(&index)
-        {
-            // Within each side, the exceptions can stay in input order too.
-            if lower != 0 && lower != entries.len() {
-                entries.sort_by_key(|&(key, _)| key >= pivot);
+        let equal = lower..len - (entries.len() - lower);
+        let band = match required {
+            Requirement::Nth(i) if !equal.contains(&i) => {
+                let end = if i < lower { 0..i + 1 } else { i..len };
+                return Some(Self::ordered_end(len, end, entries.into_iter()));
             }
-            // Position of the requested occurrence in the background stream.
-            // positions[i] - i counts background records before exception i.
-            let rank = index - lower;
-            let (mut lo, mut hi) = (0, positions.len());
-            while lo < hi {
-                let mid = lo + (hi - lo) / 2;
-                if positions[mid] - mid <= rank {
-                    lo = mid + 1
-                } else {
-                    hi = mid
+            Requirement::Nth(i) => {
+                if lower != 0 && lower != entries.len() {
+                    entries.sort_by_key(|&(key, _)| key >= pivot);
                 }
+                i..i + 1
             }
-            let source = rank + lo;
-            // Restore the two prefix counts at the cut. Keep every exception
-            // slot outside the correction interval at its original position.
-            if lo > lower {
-                for (offset, slot) in destinations[lower..lo].iter_mut().enumerate() {
-                    *slot = index + 1 + offset;
-                }
-            } else {
-                for (offset, slot) in destinations[lo..lower].iter_mut().enumerate() {
-                    *slot = source + offset;
-                }
+            Requirement::All => {
+                entries.sort_unstable(); // source position breaks equal-key ties
+                equal
             }
-        } else {
-            entries.sort_unstable(); // (key, source) preserves input order on ties
-            for (i, slot) in destinations.iter_mut().enumerate() {
-                *slot = if i < lower { i } else { background + i };
-            }
-        }
-        let placements = destinations
-            .into_iter()
-            .zip(entries.into_iter().map(|(_, source)| source));
-        Some(Self::place_exceptions(len, &positions, placements))
+        };
+        let ordered = entries.into_iter().map(|(_, src)| src);
+        Some(Self::around_band(len, &positions, ordered, lower, band))
     }
 
-    /// Place exceptional records and fill the gaps with the remaining source
-    /// runs in order. `sources` lists unique positions in ascending order.
-    /// The destination-ordered placements use each of those sources once.
-    fn place_exceptions(
+    /// Gather just one ordered end from a stream containing all its members.
+    /// The complement stays in source order. A batch reduction discards one
+    /// end's worth of candidates before another reduction can be necessary.
+    fn ordered_end<V: Unsigned>(
+        len: usize,
+        end: Range<usize>,
+        entries: impl Iterator<Item = (V, usize)>,
+    ) -> Self {
+        let count = end.len();
+        let upper = end.start != 0;
+        // Complement both fields so upper-end ties prefer later source positions.
+        let orient = |(key, src): (V, usize)| if upper { (!key, !src) } else { (key, src) };
+        let mut entries = entries.map(orient);
+        let mut kept = Vec::with_capacity(2 * count);
+        kept.extend(entries.by_ref().take(count));
+        let mut ceiling = *kept.iter().max().unwrap();
+        for entry in entries {
+            if entry < ceiling {
+                kept.push(entry);
+                if kept.len() == 2 * count {
+                    ceiling = *kept.select_nth_unstable(count - 1).1;
+                    kept.truncate(count);
+                }
+            }
+        }
+        kept.sort_unstable();
+        kept.truncate(count);
+        if upper {
+            kept.reverse();
+        }
+        let selected = kept.iter().map(|&e| orient(e).1);
+        let mut sources: Vec<_> = selected.clone().collect();
+        sources.sort_unstable();
+        let (band, before) = if upper {
+            (0..end.start, 0)
+        } else {
+            (count..len, count)
+        };
+        Self::around_band(len, &sources, selected, before, band)
+    }
+
+    /// Reserve `band` for the background stream. `ordered` supplies the
+    /// exceptional sources once each, with `before` of them needed before the
+    /// band. Keep each slot as close to its original position as will leave
+    /// room for the others. Fill intervening gaps from the source runs in order.
+    fn around_band(
         len: usize,
         sources: &[usize],
-        placements: impl Iterator<Item = (usize, usize)>,
+        ordered: impl Iterator<Item = usize>,
+        before: usize,
+        band: Range<usize>,
     ) -> Self {
+        let slots = sources.iter().enumerate().map(|(i, &slot)| {
+            if i < before {
+                slot.min(band.start - (before - i))
+            } else {
+                slot.max(band.end + (i - before))
+            }
+        });
+        let placements = slots.zip(ordered);
         let mut order = Self(Vec::with_capacity(sources.len() + 1));
         let mut original = sources.iter().copied().peekable();
         let (mut read, mut write) = (0, 0);
@@ -394,25 +436,24 @@ impl SourceOrder {
     }
 }
 
-/// Return the source extent containing the first `needed` matches and the
-/// positions skipped within it. Budget exhaustion leaves the input untouched.
-fn take_prefix(
-    matches: impl Iterator<Item = bool>,
+/// Source positions skipped on the way to the required match.
+fn prefix_holes(
+    scan: impl Iterator<Item = (usize, bool)>,
     mut needed: usize,
     limit: usize,
-) -> Option<(usize, Vec<usize>)> {
-    let mut skipped = Vec::new();
-    for (i, keep) in matches.enumerate() {
+) -> Option<Vec<usize>> {
+    let mut holes = Vec::new();
+    for (source, keep) in scan {
         if keep {
             needed -= 1;
             if needed == 0 {
-                return Some((i + 1, skipped));
+                return Some(holes);
             }
         } else {
-            if skipped.len() == limit {
+            if holes.len() == limit {
                 return None;
             }
-            skipped.push(i);
+            holes.push(source);
         }
     }
     None
@@ -422,6 +463,25 @@ fn take_prefix(
 mod tests {
     use super::*;
     use crate::engine::key::ByKey;
+
+    #[test]
+    fn bounded_ends_keep_the_complement_in_source_order() {
+        let keys = [6u8, 1, 4, 4, 2, 0, 5, 1, 6, 0, 3, 0, 1, 5, 4, 2, 3];
+        let len = keys.len();
+        let mut ranked: Vec<_> = (0..len).collect();
+        ranked.sort_by_key(|&i| keys[i]);
+        for count in 1..=len / 2 {
+            for end in [0..count, len - count..len] {
+                let order = SourceOrder::ordered_end(len, end.clone(), keys.into_iter().zip(0..))
+                    .into_indices();
+                assert_eq!(order[end.clone()], ranked[end.clone()]);
+                assert!(order[..end.start].is_sorted() && order[end.end..].is_sorted());
+                let mut all = order;
+                all.sort_unstable();
+                assert!(all.into_iter().eq(0..len));
+            }
+        }
+    }
 
     #[test]
     fn one_sided_cut_places_the_stable_occurrence() {

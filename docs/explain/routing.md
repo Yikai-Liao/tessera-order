@@ -49,7 +49,11 @@ A rank can also bound its own movement. Suppose the key at the requested positio
 
 A frequent sampled key offers another ordered subsequence, all its occurrences in input order. For full sorting, the exceptions fill the intervals below and above that key. For a rank inside its equal band, the finisher counts how many exceptions belong on each side. It shifts just enough exception slots across the cut to put the selected occurrence at its rank. Equal keys in both streams retain their input order.
 
-Both constructions yield a sequence of source spans. Only isolated records need parking in scratch. The longer spans come from the same ordered subsequence, so the finisher can move them in bulk and then restore the isolated records. A parallel root hands complete buckets to its finishers before they try this serial work.
+An ordered prefix or suffix can itself be the sparse part of the result. Keep a bounded batch of `(key, source position)` pairs. Each time the batch holds twice the requested count, discard its worse half. Each such reduction pays for a full batch of new candidates. Order the surviving positions and place them at the requested end. The other records stay in source order.
+
+The placement rule also covers a dominant key. Reserve a destination interval for the background stream. Clamp each exceptional slot to leave room for every later exception on its side before the interval, or every earlier exception on its side after the interval. These bounds increase with the slot index, so the slots stay distinct and in order. Reserving the whole equal-key band completes a sort. Reserving just the requested rank establishes its stable occurrence.
+
+These constructions yield a sequence of source spans. Only isolated records need parking in scratch. The longer spans come from the same ordered subsequence, so the finisher can move them in bulk and then restore the isolated records. A parallel root hands complete buckets to its finishers before they try this serial work.
 
 ## Nodes and tiles
 

@@ -16,7 +16,7 @@ Controlled timing acceptance is still open for the [extension foundations](docs/
 
 Evaluate the [complete-operation boundary](docs/design/engine.md#knowledge-boundaries) against the preceding stages: cover selection at band boundaries and ties, cached-key distribution, argsort, short and large full sorts, and Rayon large-child completion. Use A/A and placement controls where supported. Revisit [tile-local selection](docs/design/evidence.md#tile-local-selection-experiment) only with a workload and a design that can improve on full tile sorting. No speedup or regression acceptance follows from the structural change alone.
 
-Measure stable rank placement at the edges and in the interior on dense wide records. The current root partition moves payloads into every digit bucket even when the consumer needs a single boundary. See the [sparse-order measurements](docs/design/evidence.md#sparse-order-as-source-spans).
+Reduce payload movement for interior ranks and the minimum of dense wide records. The current root partition moves payloads into every digit bucket even when the consumer needs a single boundary. See the [sparse-order measurements](docs/design/evidence.md#sparse-order-as-source-spans).
 
 Cached-key distribution on block-sized inputs still builds per-bucket ends and invokes a no-op finisher through the block operation that full refinement needs for boundaries and child finishing. This change removes only tile boundary output; it does not establish a block speedup. Revisit a complete movement-only block operation if allocation or timing evidence justifies it, keeping the same restoration guarantees.
 

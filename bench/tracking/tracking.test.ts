@@ -621,6 +621,16 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
   // Geometric mean of 40/10 and 20/20; the worst peak over the cohort's cases.
   assert.deepEqual(tessera.cells, ["2×", "100 B"]);
   assert.ok(!JSON.stringify(rows).includes("radsort"));
+  // Every serial case both Tessera and the standard library measured appears, at each length.
+  const inputs = data.figures.find((figure) => figure.name === "inputs")!;
+  assert.deepEqual(
+    (inputs.chart as RowChart).groups.map((group) => [group.title, group.rows.length]),
+    [
+      ["65,536 elements", 2],
+      ["1,048,576 elements", 1],
+    ],
+  );
+  assert.equal(inputs.title, "Fastest on 2 of 3 cases, top 3 on 3");
   // Without a cohort, the comparison is published empty, replacing any earlier one.
   const alone = comparisonData(new Map([["tessera", runs.get("tessera")!]]));
   assert.deepEqual([alone.spec, alone.runs, alone.overview, alone.figures], [uuid, [], null, []]);

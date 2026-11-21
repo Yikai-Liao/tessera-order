@@ -78,7 +78,8 @@ const RANKING_TYPE = "row_u32";
 /**
  * The cohort follows the continuous plan instead of fixed lengths. The ranking and the
  * u64 input-pattern figures each use their type's length with the most input patterns that
- * both Tessera and slice::sort measured, the longest on a tie.
+ * both Tessera and slice::sort measured, the longest on a tie; input-pattern figures then
+ * add every other measured length, so each published serial case appears in one of them.
  */
 export function trackingCohort(field: Field): Cohort | null {
   const measured = (id: string) =>
@@ -112,6 +113,14 @@ export function trackingCohort(field: Field): Cohort | null {
   const typeShapes = shapes.filter((shape) =>
     [...types.values()].every((cases) => cases.some((entry) => entry.distribution === shape)),
   );
+  // Input-pattern figures add every other length measured by both Tessera and slice::sort.
+  const moreLengths = [
+    ...new Set(
+      field.cases.filter((entry) => measured(comparisonId(entry))).map((entry) => entry.len),
+    ),
+  ]
+    .filter((len) => len !== n)
+    .toSorted((a, b) => a - b);
   return {
     ranking: {
       ty: ranking.ty,
@@ -121,6 +130,7 @@ export function trackingCohort(field: Field): Cohort | null {
       label: over(ranking.shapes, "measured input patterns"),
     },
     n,
+    moreLengths,
     shapes,
     typeShapes,
     typeShapesLabel: over(typeShapes, "input patterns every type has"),

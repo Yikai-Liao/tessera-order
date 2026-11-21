@@ -139,8 +139,10 @@ pub fn argsort_by_key<T, K: RadixKey, F: FnMut(&T) -> K>(values: &[T], mut key: 
 ///
 /// Like [`slice::select_nth_unstable`], with equal keys resolved as the stable sort
 /// resolves them: the selected record is that sort's record at `index`, and the
-/// two outer regions are exactly its records before and after, in unspecified
-/// order. The workspace bound is that of [`sort`].
+/// two outer regions contain exactly its records before and after. Equal keys
+/// retain their input order throughout the slice. Records with different
+/// keys may appear in any order within a region. The workspace bound is
+/// that of [`sort`].
 ///
 /// # Panics
 ///

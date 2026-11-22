@@ -12,11 +12,11 @@ import {
   parseCriterionId,
 } from "../catalog.ts";
 import { GROWTH_FILE, writeComparison } from "./comparison.ts";
+import { growthSchema } from "./growth.ts";
 import { renderMainOverview } from "./history.ts";
 import { trackingImplementation } from "./implementations.ts";
 import {
   type Facet,
-  growthSchema,
   indexSchema,
   parseRuns,
   runSchema,

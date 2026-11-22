@@ -91,34 +91,6 @@ export const runSchema = z
   );
 export type TrackingRun = z.infer<typeof runSchema>;
 
-/**
- * Peak extra heap bytes of every implementation on one input pattern across lengths, measured on
- * Actions in one build (`growth.ts`). Counts do not depend on the host, so no Bencher run is
- * involved. A null peak is a length the implementation does not support.
- */
-export const growthSchema = z
-  .object({
-    time: z.iso.datetime(),
-    hash: z.string().regex(/^[a-f0-9]{40}$/),
-    workflow: runSchema.shape.workflow,
-    rustc: z.string(),
-    native: z.object({ cc: z.string(), cxx: z.string(), build: z.json() }),
-    /** The kind of the one operation the growth plan measures; that section shows the sweep. */
-    operation: z.string().min(1),
-    type: z.string().min(1),
-    distribution: z.string().min(1),
-    lengths: z
-      .array(z.number().int().positive())
-      .min(2)
-      .refine((values) => values.every((n, index) => index === 0 || n > values[index - 1])),
-    peaks: z.record(z.string().min(1), z.array(z.number().int().nonnegative().nullable())),
-  })
-  .refine(
-    (growth) =>
-      Object.values(growth.peaks).every((values) => values.length === growth.lengths.length),
-    "Every implementation needs one peak entry per length",
-  );
-export type GrowthRecord = z.infer<typeof growthSchema>;
 /** A case's catalog presentation; the browser cannot read the catalog, so publication supplies it. */
 export const caseSchema = z.object({
   id: z.string().min(1),

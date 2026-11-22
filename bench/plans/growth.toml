@@ -1,11 +1,8 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
-# Extra memory against input length, for the comparison's growth figure. Peak
-# allocation counts do not depend on the host, so this plan only feeds the
-# memory worker, never timing. The records match the comparison's ranking:
-# 32-bit-key rows are the one format every radix opponent sorts, including the
-# original Block LSD code. glidesort-sqrt is omitted: its buffer is sized from
-# Tessera's own peak.
+# Implementation inventory and memory sweeps for tracking/growth.ts. The 32-bit-key
+# rows admit the original Block LSD code. glidesort-sqrt is omitted because
+# Tessera's own peak determines its buffer size.
 schema = 3
 implementations = [
   "tessera", "std-stable", "radsort", "glidesort", "std-unstable", "rdst",
@@ -13,6 +10,25 @@ implementations = [
 ]
 
 [[include]]
+operation = { kind = "sort" }
+types = [ "row_u32" ]
+distributions = [ "random" ]
+lengths = [ 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216 ]
+
+[[include]]
+operation = { kind = "argsort" }
+types = [ "row_u32" ]
+distributions = [ "random" ]
+lengths = [ 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216 ]
+
+[[include]]
+operation = { kind = "select_nth", index = 512 }
+types = [ "row_u32" ]
+distributions = [ "random" ]
+lengths = [ 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216 ]
+
+[[include]]
+operation = { kind = "partition-buckets", bucket_count = 16 }
 types = [ "row_u32" ]
 distributions = [ "random" ]
 lengths = [ 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216 ]

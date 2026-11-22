@@ -23,7 +23,7 @@ Reduce payload movement for dense interior ranks. The root currently moves recor
 
 Cached-key distribution on block-sized inputs still builds per-bucket ends and invokes a no-op finisher through the block operation that full refinement needs for boundaries and child finishing. This change removes only tile boundary output; it does not establish a block speedup. Revisit a complete movement-only block operation if allocation or timing evidence justifies it, keeping the same restoration guarantees.
 
-Resolve short-input placement sensitivity for [shared order confirmation](docs/design/evidence.md#shared-order-confirmation-for-serial-operations) before claiming a gain across input sizes.
+Resolve short-input placement sensitivity for [shared order confirmation](docs/design/evidence.md#shared-order-confirmation-for-serial-operations) before claiming a gain across input sizes. Recheck [short insertion leaves](docs/design/evidence.md#short-insertion-leaves) on another host and close the tiny-input gap against stable slice sorting while recovering the nearly ordered float cases.
 
 Next capabilities follow the [engine capability design](docs/design/operation-extensions-proposal.md#further-engine-capabilities), each with a concrete consumer and independent acceptance:
 

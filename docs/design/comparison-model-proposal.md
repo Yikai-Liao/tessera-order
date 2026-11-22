@@ -6,13 +6,13 @@ Status: identities, routes and per-operation publication have landed; populating
 
 The [implementation comparison](../benchmarks/implementations.md) renders one section per operation of `comparison.json`, but only full sorting has a section:
 
-- **Only sorting has a cohort and figures.** Tracking measures only the sorting cases, `comparison.ts` chooses a sort cohort, and the figure templates assume the sort reference.
+- **Only sorting has a cohort and figures.** Tracking runs hold every operation's cases, but `comparison.ts` chooses only a sort cohort, and the figure templates assume the sort reference.
 - **Implementation entries carry sort semantics.** `std-stable` is labelled `slice::sort`, although its argsort route sorts an index vector by key and its selection route sorts the whole input. A selection section would show `std-unstable` as "slice::sort_unstable" while it calls `select_nth_unstable`.
 
 ## Plan
 
 - **Labels.** A displayed row name combines the implementation label and the route detail when they differ, such as "slice::sort_unstable · select_nth_unstable". Section titles derive from the operation's entry labels and execution ("argsort", "par_argsort · 8 threads"), always naming the worker count. Stability is a property of the route; unstable record results never enter a stable ranking.
-- **Tracking.** A tracking job measures one implementation, operation and execution, so each job keeps its own time budget; the comparison takes the latest run per (implementation, operation, execution), and an aggregate never combines cases from different runs. `growth.json` gains a section per operation, because argsort's retained index output and in-place selection answer different memory questions.
+- **Tracking.** Each section draws its cases from the latest run per column, so an aggregate never combines cases from different runs. `growth.json` gains a section per operation, because argsort's retained index output and in-place selection answer different memory questions.
 - **Figures.** Each published operation has a ranking with memory, a pattern figure and a length figure, plus one figure per parameter axis (such as rank position for selection), from the existing row and curve templates with the operation's own reference. A new template needs a new question. The home page keeps the sort ranking. A summary of Tessera's speed per operation is deferred: each operation has its own reference, and the figure would have to prevent reading ratios across references as comparable.
 
 The catalog names each operation's reference. The composition baselines answer whether a dedicated route beats composing the result from a sort:

@@ -4,7 +4,7 @@
 
 use super::{
     record::{BenchmarkRecord, PreparedRecords, WideRecord},
-    variant::{Kernel, Variant, prepare_kernel},
+    variant::{Kernel, Variant},
 };
 use crate::case::Row;
 use serde_json::{Value, json};
@@ -116,15 +116,12 @@ pub(super) fn prepare<T: NativeRecord>(
     let implementation = NativeImplementation::from_name(v.name)?;
     // SAFETY: The registry returns a static function pointer or NULL for these indices.
     let sort = unsafe { bench_kernel(implementation as u32, T::TYPE as u32) }?;
-    Some(prepare_kernel(
-        input,
-        v.stable,
-        "C++ registry sort entry",
-        move |values| {
+    Some(
+        v.prepare_call(input, "C++ registry sort entry", move |values| {
             // SAFETY: NativeRecord binds T to the registry's C layout for TYPE.
             unsafe { sort(values.as_mut_ptr().cast(), values.len()) };
-        },
-    ))
+        }),
+    )
 }
 
 /// Records the SIMD targets selected on the measuring host.
@@ -230,17 +227,10 @@ mod tests {
                     operation: crate::plan::Operation::Sort {},
                 }),
         );
-        for implementation in crate::plan::catalog()
-            .implementations
-            .iter()
-            .filter(|a| a.adapter == "native")
+        for variant in super::super::list_variants()
+            .into_iter()
+            .filter(|variant| variant.adapter == "native")
         {
-            let variant = Variant {
-                name: &implementation.id,
-                stable: implementation.stable,
-                adapter: &implementation.adapter,
-                parallel_sort: implementation.parallel,
-            };
             for case in &cases {
                 // This independent oracle preserves native capabilities and
                 // verifies that opt-in Reverse keys decline every native kernel.

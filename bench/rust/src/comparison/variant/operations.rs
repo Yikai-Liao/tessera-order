@@ -4,9 +4,7 @@
 //! kernel. Argsort and category grouping retain their allocated outputs until
 //! verification, then discard them before the next timed batch.
 
-use super::{
-    BenchmarkRecord, Kernel, PreparedRecords, TesseraAdapter, Variant, glidesort, prepare_call,
-};
+use super::{BenchmarkRecord, Kernel, PreparedRecords, TesseraAdapter, Variant, glidesort};
 use crate::plan::Operation;
 use std::{hint::black_box, rc::Rc};
 
@@ -54,9 +52,15 @@ impl<T: BenchmarkRecord, F: FnMut(&[T]) -> Vec<usize>> Kernel for IndexKernel<T,
 
 /// Prepares immutable source and independent stable index reference once.
 pub(super) fn indices<T: BenchmarkRecord>(
+    variant: Variant,
     input: Rc<PreparedRecords<T>>,
     call: impl FnMut(&[T]) -> Vec<usize> + 'static,
 ) -> Box<dyn Kernel> {
+    assert!(
+        variant.route_stable(input.operation()),
+        "{} argsort must guarantee the stable index permutation",
+        variant.name,
+    );
     let mut reference: Vec<_> = (0..input.original().len()).collect();
     reference.sort_by(|&a, &b| input.original()[a].order(&input.original()[b]));
     Box::new(IndexKernel {
@@ -141,10 +145,11 @@ impl<T: BenchmarkRecord, F: FnMut(&mut [T]) -> Vec<usize>> Kernel for CategoryKe
 /// the original key; they include boundary construction and are labelled as
 /// compositions, not direct output-buffer partition algorithms.
 pub(super) fn categories<T: BenchmarkRecord>(
-    name: &'static str,
+    variant: Variant,
     input: Rc<PreparedRecords<T>>,
     bucket_count: usize,
 ) -> Option<Box<dyn Kernel>> {
+    let name = variant.name;
     let description = match name {
         "tessera" => "public cached-key category sorting plus boundary construction",
         "tessera-full" => "Tessera by-key category sorting plus boundary construction",
@@ -153,6 +158,10 @@ pub(super) fn categories<T: BenchmarkRecord>(
         "radsort" => "radsort stable category sorting plus boundary construction",
         _ => return None,
     };
+    assert!(
+        variant.route_stable(input.operation()),
+        "{name} bucket partition must guarantee stable grouping",
+    );
     Some(Box::new(CategoryKernel {
         expected: reference_offsets(input.reference(), bucket_count),
         input,
@@ -200,14 +209,14 @@ fn sort_by_category<T: BenchmarkRecord>(name: &str, values: &mut [T], bucket_cou
 
 /// Full stable sorting satisfies the selected identity and both memberships.
 pub(super) fn selection_reference<T: BenchmarkRecord>(
+    variant: Variant,
     input: Rc<PreparedRecords<T>>,
     sort: impl FnMut(&mut [T]) + 'static,
 ) -> Box<dyn Kernel> {
-    prepare_call(
+    variant.prepare_call(
         input,
-        true,
-        sort,
         "complete stable sorting reference for required ranks",
+        sort,
     )
 }
 
@@ -218,10 +227,10 @@ pub(super) fn prepare<T: TesseraAdapter>(
 ) -> Option<Box<dyn Kernel>> {
     match *input.operation() {
         Operation::Sort {} => None,
-        Operation::PartitionBuckets { bucket_count } => categories(v.name, input, bucket_count),
+        Operation::PartitionBuckets { bucket_count } => categories(v, input, bucket_count),
         Operation::Argsort {} => Some(match v.name {
-            "tessera" => indices(input, T::argsort),
-            "std-stable" | "glidesort" | "std-unstable" => indices(input, move |source| {
+            "tessera" => indices(v, input, T::argsort),
+            "std-stable" | "glidesort" | "std-unstable" => indices(v, input, move |source| {
                 let mut indices: Vec<_> = (0..source.len()).collect();
                 let order = |a: &usize, b: &usize| source[*a].order(&source[*b]);
                 match v.name {
@@ -236,22 +245,18 @@ pub(super) fn prepare<T: TesseraAdapter>(
             _ => return None,
         }),
         Operation::SelectNth { index } => Some(match v.name {
-            "tessera" => prepare_call(
+            "tessera" => v.prepare_call(input, "public stable single selection", move |values| {
+                T::select_nth(values, index)
+            }),
+            "tessera-full" => selection_reference(v, input, T::tessera),
+            "std-stable" => selection_reference(v, input, |values| values.sort_by(T::order)),
+            "glidesort" => selection_reference(v, input, glidesort::<T>),
+            "std-unstable" => v.prepare_call(
                 input,
-                true,
-                move |values| T::select_nth(values, index),
-                "public stable single selection",
-            ),
-            "tessera-full" => selection_reference(input, T::tessera),
-            "std-stable" => selection_reference(input, |values| values.sort_by(T::order)),
-            "glidesort" => selection_reference(input, glidesort::<T>),
-            "std-unstable" => prepare_call(
-                input,
-                false,
+                "slice unstable single selection; arbitrary equal-key members",
                 move |values| {
                     values.select_nth_unstable_by(index, T::order);
                 },
-                "slice unstable single selection; arbitrary equal-key members",
             ),
             _ => return None,
         }),
@@ -263,8 +268,43 @@ mod tests {
     use super::*;
     use crate::{
         comparison::{CaseInput, list_variants},
-        plan::InputCase,
+        plan::{Execution, InputCase},
     };
+
+    fn variant(name: &str) -> Variant {
+        list_variants()
+            .into_iter()
+            .find(|v| v.name == name)
+            .unwrap()
+    }
+
+    #[test]
+    fn std_unstable_argsort_verifies_exact_tie_order() {
+        let variant = variant("std-unstable");
+        let operation = Operation::Argsort {};
+        assert!(variant.route_stable(&operation));
+        assert!(!variant.route_stable(&Operation::Sort {}));
+        assert!(!variant.route_stable(&Operation::SelectNth { index: 0 }));
+
+        let input = CaseInput::new(&InputCase {
+            ty: "row_u64".into(),
+            distribution: "equal".into(),
+            len: 64,
+            operation,
+        });
+        let mut kernel = variant.prepare(&input, Execution::Serial, 0).unwrap();
+        kernel.restore(1);
+        kernel.run_batch();
+        kernel.check().unwrap();
+
+        let CaseInput::Row64(records) = input else {
+            unreachable!();
+        };
+        let mut reordered = indices(variant, records, |source| (0..source.len()).rev().collect());
+        reordered.restore(1);
+        reordered.run_batch();
+        assert!(reordered.check().is_err());
+    }
 
     #[test]
     fn complete_operations_restore_validate_and_decline_unsupported_tasks() {
@@ -344,7 +384,7 @@ mod tests {
             unreachable!()
         };
         let retained = (bucket_count + 1) * size_of::<usize>();
-        let mut kernel = categories("tessera", input, bucket_count).unwrap();
+        let mut kernel = categories(variant("tessera"), input, bucket_count).unwrap();
         assert_eq!(kernel.buffer_bytes(), size_of::<u32>() + retained);
         kernel.restore(3);
         kernel.run_batch();
@@ -401,7 +441,7 @@ mod tests {
         let CaseInput::U64(input) = CaseInput::new(&case) else {
             unreachable!()
         };
-        let mut wrong = indices(input, |source| vec![0; source.len()]);
+        let mut wrong = indices(variant("tessera"), input, |source| vec![0; source.len()]);
         wrong.restore(1);
         wrong.run_batch();
         assert!(wrong.check().is_err());

@@ -40,6 +40,16 @@ impl Default for Operation {
 }
 
 impl Operation {
+    /// The catalog key shared by all parameterizations of this operation.
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            Self::Sort {} => "sort",
+            Self::Argsort {} => "argsort",
+            Self::PartitionBuckets { .. } => "partition-buckets",
+            Self::SelectNth { .. } => "select_nth",
+        }
+    }
+
     /// Whether this is complete sorting.
     pub fn is_sort(&self) -> bool {
         matches!(self, Self::Sort {})

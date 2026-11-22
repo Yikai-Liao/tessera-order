@@ -20,6 +20,7 @@ import {
   parseExecution,
   referenceColumn,
   referenceLabel,
+  routeStable,
   SORT,
 } from "./catalog.ts";
 import { decodeConfig } from "./config.ts";
@@ -42,6 +43,12 @@ const fixture = decodeConfig(
   readFileSync(new URL("./plans/selection.fixture.toml", import.meta.url), "utf8"),
   "selection.fixture.toml",
 ) as unknown as Fixture;
+
+test("std-unstable guarantees stable argsort through its original-index tie-break", () => {
+  assert.equal(routeStable("std-unstable", { kind: "argsort" }), true);
+  assert.equal(routeStable("std-unstable", SORT), false);
+  assert.equal(routeStable("std-unstable", { kind: "select_nth", index: 0 }), false);
+});
 
 test("identities match the shared language fixture in both directions", () => {
   for (const entry of fixture.identities) {

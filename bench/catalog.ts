@@ -23,7 +23,7 @@ const inputDefaults = z.object({ lengths: z.array(z.number().int().positive()) }
 /** Language-neutral benchmark identities, presentation metadata and plan order. */
 export const catalog = z
   .object({
-    schema: z.literal(2),
+    schema: z.literal(3),
     pairedBlocks: z.object({ short: blockBudget, extended: blockBudget }),
     revisionSampling: z
       .array(
@@ -45,7 +45,9 @@ export const catalog = z
         detail: z.string().optional(),
         description: z.string().optional(),
         /** The call each listed operation makes, where the label names only the sort. */
-        routes: z.record(z.string(), z.string()).default({}),
+        routes: z
+          .record(z.string(), z.strictObject({ call: z.string(), stable: z.boolean().optional() }))
+          .default({}),
       }),
     ),
     types: z.array(
@@ -379,7 +381,13 @@ export function referenceLabel(operation: Operation, execution: Execution) {
 
 /** The call an implementation makes for an operation, where its label names only the sort. */
 export function route(id: string, operation: Operation): string | undefined {
-  return implementation(id).routes[operation.kind];
+  return implementation(id).routes[operation.kind]?.call;
+}
+
+/** The stability contract for this operation, inheriting the implementation default. */
+export function routeStable(id: string, operation: Operation): boolean {
+  const entry = implementation(id);
+  return entry.routes[operation.kind]?.stable ?? entry.stable;
 }
 
 /** An implementation's display name for an operation: its label, with the route if it has one. */

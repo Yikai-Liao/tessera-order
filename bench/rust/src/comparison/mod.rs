@@ -246,7 +246,8 @@ fn create_manifest(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> 
         )
     ));
     provenance["plan_name"] = json!(options.plan_name);
-    if !options.operation().is_sort() {
+    let operation = options.operation();
+    if !operation.is_sort() {
         provenance["index_bytes"] = json!(size_of::<usize>());
     }
     provenance["plan"] = json!(options.plan);
@@ -288,7 +289,15 @@ fn create_manifest(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> 
                 measured
                     .iter()
                     .filter(|(name, _)| *name == v.name)
-                    .map(|&(_, e)| json!({"id":run::column_id(*v, e),"implementation":v.name,"execution":e,"stable":v.stable,"adapter":v.adapter}))
+                    .map(|&(_, e)| {
+                        json!({
+                            "id": run::column_id(*v, e),
+                            "implementation": v.name,
+                            "execution": e,
+                            "stable": v.route_stable(&operation),
+                            "adapter": v.adapter,
+                        })
+                    })
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>()
@@ -545,6 +554,8 @@ pub fn main(memory: bool) -> Result<()> {
         "list" => {
             // One row per adapter, planned execution and distinct route, with
             // the types that take that route.
+            let operation = options.operation();
+            let probe_operation = operation.probe();
             let executions: BTreeSet<_> =
                 cases.iter().flat_map(|(_, e)| e.iter().copied()).collect();
             for v in variant::list_variants() {
@@ -555,7 +566,7 @@ pub fn main(memory: bool) -> Result<()> {
                             ty: ty.id.clone(),
                             distribution: "random".into(),
                             len: 32,
-                            operation: options.operation().probe(),
+                            operation: probe_operation.clone(),
                         });
                         if !v.supports(&probe, execution) {
                             continue;
@@ -570,7 +581,11 @@ pub fn main(memory: bool) -> Result<()> {
                         println!(
                             "{}\t{}\t{}\t{}",
                             run::column_id(v, execution),
-                            if v.stable { "stable" } else { "unstable" },
+                            if v.route_stable(&operation) {
+                                "stable"
+                            } else {
+                                "unstable"
+                            },
                             types.join(","),
                             route
                         );

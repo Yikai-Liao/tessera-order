@@ -769,6 +769,7 @@ test("each operation gets its own section against its own reference", () => {
     "select_nth/row_u64/d16/65536/s1/32768": ns,
     "select_nth/u64/random/65536/s1/0": ns,
     "argsort/u64/random/65536/s1": ns,
+    "argsort/row_u32/d16/65536/s1": ns,
   });
   const runs = new Map([
     ["tessera", [tracked(cases(10))]],
@@ -791,6 +792,18 @@ test("each operation gets its own section against its own reference", () => {
     ],
   );
   const section = (id: string) => data.operations.find((entry) => entry.id === id)!;
+  const argsort = section("argsort").figures[0];
+  assert.equal(argsort.title, "Fastest of 3 stable argsorts");
+  const argsortGroups = (argsort.chart as RowChart).groups;
+  assert.deepEqual(
+    argsortGroups.map((group) => group.title),
+    ["Stable argsorts"],
+  );
+  assert.ok(
+    argsortGroups[0].rows.some(
+      (row) => row.name.sub === "sort_unstable_by on indices, index tie-break",
+    ),
+  );
   // Rows name the call each implementation makes.
   assert.deepEqual(
     section("select_nth").runs.map((entry) => entry.label),

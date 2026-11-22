@@ -11,13 +11,15 @@ import {
   distribution,
   type Execution,
   executionThreads,
-  implementation,
+  type Operation,
   operationDescription,
+  operationKinds,
   parseCaseId,
   parseColumnId,
   parseCriterionId,
   referenceColumn,
   referenceLabel,
+  routeLabel,
   SORT,
 } from "../catalog.ts";
 import {
@@ -60,13 +62,24 @@ export function latestRuns(runs: Map<string, TrackingRun[]>) {
   return { spec: tessera.spec, runs: chosen };
 }
 
-/** The implementations whose columns divide serial and parallel sorting speeds. */
-const SERIAL_REFERENCE = referenceColumn(SORT, "serial")!.implementation;
+/** The implementation whose columns divide parallel sorting speeds. */
 const PARALLEL_REFERENCE = referenceColumn(SORT, "t1")!.implementation;
 
-/** The figures' view of serial sort columns: speeds against the sort reference's run, peaks as
- * recorded. Runs also hold other operations' cases, which their own sections read. */
-export function trackingField(runs: Map<string, TrackingRun>): Field {
+/** An operation's serial reference implementation. */
+const serialReference = (operation: Operation) =>
+  referenceColumn(operation, "serial")!.implementation;
+
+/**
+ * The figures' view of one operation in serial columns: speeds against the operation's
+ * reference, peaks as recorded. An operation with parameters, such as selection's rank, shows
+ * the parameter values with the most cases that both Tessera and the reference measured, the
+ * smallest on a tie, because a figure compares implementations on the same call. Null without
+ * such a case.
+ */
+export function trackingField(
+  runs: Map<string, TrackingRun>,
+  kind: Operation["kind"] = SORT.kind,
+): Field | null {
   const serial = (name: string) =>
     runs.get(columnId({ implementation: name, execution: "serial" }));
   const value = (id: string, name: string) => timed(serial(name), id, "serial")?.[0] ?? null;
@@ -75,18 +88,42 @@ export function trackingField(runs: Map<string, TrackingRun>): Field {
     if (parseColumnId(column).execution !== "serial") continue;
     for (const key of Object.keys(run.values)) {
       const input = parseCriterionId(key);
-      if (input.operation.kind === SORT.kind) cases.set(caseId(input), input);
+      if (input.operation.kind === kind) cases.set(caseId(input), input);
     }
   }
+  const measured = [...cases.values()].filter(
+    (input) =>
+      value(caseId(input), "tessera") !== null &&
+      value(caseId(input), serialReference(input.operation)) !== null,
+  );
+  // Parameter values in identity order; JSON keeps the parsed key order, so it names a group.
+  const parameters = (operation: Operation) => Object.values(operation).slice(1) as number[];
+  const lexical = (a: number[], b: number[]) => {
+    const at = a.findIndex((value, index) => value !== b[index]);
+    return at < 0 ? 0 : a[at] - b[at];
+  };
+  const [chosen] = [...Map.groupBy(measured, (input) => JSON.stringify(input.operation)).values()]
+    .toSorted(
+      (a, b) =>
+        b.length - a.length || lexical(parameters(a[0].operation), parameters(b[0].operation)),
+    )
+    .map((group) => group[0].operation);
+  const same = (input: CaseIdentity) => JSON.stringify(input.operation) === JSON.stringify(chosen);
+  if (!chosen) return null;
+  const reference = serialReference(chosen);
   return {
+    operation: chosen,
+    // An implementation without this operation's route has no cases and no row.
     implementations: trackingImplementations
-      .filter((entry) => serial(entry.id))
+      .filter((entry) =>
+        [...cases.values()].some((input) => same(input) && value(caseId(input), entry.id) !== null),
+      )
       .map((entry) => ({ name: entry.id, stable: entry.stable })),
-    cases: [...cases.values()],
+    cases: [...cases.values()].filter(same),
     speed: (id, name) => {
-      const reference = value(id, SERIAL_REFERENCE),
+      const base = value(id, reference),
         own = value(id, name);
-      return reference === null || own === null ? null : reference / own;
+      return base === null || own === null ? null : base / own;
     },
     nsPerKey: (id, name) => {
       const own = value(id, name);
@@ -109,7 +146,8 @@ const RANKING_TYPE = "row_u32";
  */
 export function trackingCohort(field: Field): Cohort | null {
   const measured = (id: string) =>
-    field.speed(id, "tessera") !== null && field.nsPerKey(id, SERIAL_REFERENCE) !== null;
+    field.speed(id, "tessera") !== null &&
+    field.nsPerKey(id, serialReference(field.operation)) !== null;
   const order = catalog.distributions.map((entry) => entry.id);
   const widest = (ty: string) => {
     const cases = field.cases.filter((entry) => entry.ty === ty && measured(caseId(entry)));
@@ -223,6 +261,7 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
 /** The growth sweep in the figures' terms: implementations with a serial entry, in catalog order. */
 export function trackingGrowth(record: GrowthRecord): Growth {
   return {
+    operation: SORT,
     ty: record.type,
     distribution: record.distribution,
     lengths: record.lengths,
@@ -234,66 +273,69 @@ export function trackingGrowth(record: GrowthRecord): Growth {
 }
 
 /**
- * Build the published comparison from every implementation's journals and the growth sweep.
- * Without a cohort, such as before the sort reference has a run on Tessera's latest hardware,
- * it has no sections, so the site never shows an earlier comparison as the latest one.
+ * Build the published comparison from every implementation's journals and the growth sweep:
+ * one section per operation with a cohort, in catalog order. An operation has no section
+ * before its reference has a run on Tessera's latest hardware, so the site never shows an
+ * earlier comparison as the latest one.
  */
 export function comparisonData(
   runs: Map<string, TrackingRun[]>,
   growth?: GrowthRecord,
 ): ComparisonData {
   const latest = latestRuns(runs);
-  const field = trackingField(latest?.runs ?? new Map());
-  const cohort = trackingCohort(field);
-  // The site renders each chart itself; the table names every plotted value.
-  const scaling = latest && cohort ? trackingScaling(latest.runs) : null;
-  const parallel = scaling ? renderParallel(scaling) : null;
-  // Parallel sorting follows the serial figures and precedes memory.
-  const all = cohort
-    ? comparisonFigures(
-        field,
-        cohort,
-        true,
-        growth?.operation === SORT.kind ? trackingGrowth(growth) : undefined,
-      )
-    : [];
-  const memory = all.findIndex((figure) => figure.name === "memory");
-  if (parallel) all.splice(memory < 0 ? all.length : memory, 0, parallel);
-  const figures = all.map(({ name, subject, summary, title, kind, chart, table }) => ({
-    name,
-    subject,
-    summary,
-    title,
-    ...(kind ? { kind } : {}),
-    chart,
-    table,
-  }));
-  const runsOf = field.implementations.map(({ name }) => {
-    const run = latest!.runs.get(columnId({ implementation: name, execution: "serial" }))!;
-    return {
-      implementation: name,
-      label: implementation(name).label,
-      hash: run.hash,
-      time: run.time,
-      workflow: run.workflow,
-      memory: run.memory !== undefined,
-    };
+  const operations = operationKinds.flatMap((kind) => {
+    const field = latest && trackingField(latest.runs, kind);
+    const cohort = field && trackingCohort(field);
+    if (!cohort) return [];
+    // Only full sorting has a parallel figure and a growth sweep.
+    const sort = kind === SORT.kind;
+    const scaling = sort ? trackingScaling(latest.runs) : null;
+    const parallel = scaling ? renderParallel(scaling) : null;
+    // The site renders each chart itself; the table names every plotted value.
+    const all = comparisonFigures(
+      field,
+      cohort,
+      true,
+      sort && growth?.operation === SORT.kind ? trackingGrowth(growth) : undefined,
+    );
+    // Parallel sorting follows the serial figures and precedes memory.
+    const memory = all.findIndex((figure) => figure.name === "memory");
+    if (parallel) all.splice(memory < 0 ? all.length : memory, 0, parallel);
+    return [
+      {
+        id: kind,
+        label: operationDescription(field.operation),
+        reference: referenceLabel(field.operation, "serial"),
+        runs: field.implementations.map(({ name }) => {
+          const run = latest.runs.get(columnId({ implementation: name, execution: "serial" }))!;
+          return {
+            implementation: name,
+            label: routeLabel(name, field.operation),
+            hash: run.hash,
+            time: run.time,
+            workflow: run.workflow,
+            memory: run.memory !== undefined,
+          };
+        }),
+        figures: all.map(({ name, subject, summary, title, kind, chart, table }) => ({
+          name,
+          subject,
+          summary,
+          title,
+          ...(kind ? { kind } : {}),
+          chart,
+          table,
+        })),
+      },
+    ];
   });
   return comparisonSchema.parse({
     spec: latest?.spec ?? null,
-    overview: figures.find((figure) => figure.name === "overview") ?? null,
-    // Only sorting has a cohort and figures so far; other operations' cases wait in the runs.
-    operations: cohort
-      ? [
-          {
-            id: SORT.kind,
-            label: operationDescription(SORT),
-            reference: referenceLabel(SORT, "serial"),
-            runs: runsOf,
-            figures,
-          },
-        ]
-      : [],
+    overview:
+      operations
+        .find((section) => section.id === SORT.kind)
+        ?.figures.find((figure) => figure.name === "overview") ?? null,
+    operations,
   });
 }
 

@@ -751,6 +751,66 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
   assert.match(types!.chart.guide, /on the random input$/);
 });
 
+test("each operation gets its own section against its own reference", () => {
+  const tracked = (values: Record<string, number>) =>
+    runSchema.parse({
+      ...run,
+      id: crypto.randomUUID(),
+      values: Object.fromEntries(
+        Object.entries(values).map(([id, ns]) => [`rust/${id}/serial`, [ns, ns, ns]]),
+      ),
+    });
+  // Sort, selection at two ranks and argsort; rank 32768 has more measured cases than rank 0.
+  const cases = (ns: number) => ({
+    "sort/u64/random/65536/s1": ns,
+    "select_nth/u64/random/65536/s1/32768": ns,
+    "select_nth/u64/far_swaps/65536/s1/32768": ns,
+    // Shares no pattern with u64, so the element-type figure has nothing to compare.
+    "select_nth/row_u64/d16/65536/s1/32768": ns,
+    "select_nth/u64/random/65536/s1/0": ns,
+    "argsort/u64/random/65536/s1": ns,
+  });
+  const runs = new Map([
+    ["tessera", [tracked(cases(10))]],
+    ["std-stable", [tracked(cases(40))]],
+    ["std-unstable", [tracked(cases(20))]],
+    // A sort-only opponent has no row in the other sections.
+    ["radsort", [tracked({ "sort/u64/random/65536/s1": 15 })]],
+  ]);
+  const data = comparisonData(runs);
+  assert.deepEqual(
+    data.operations.map((section) => [section.id, section.label, section.reference]),
+    [
+      ["sort", "Full sort", "slice::sort"],
+      ["argsort", "Stable argsort", "slice::sort · sort_by on indices"],
+      [
+        "select_nth",
+        "Stable selection · rank 32,768",
+        "slice::sort_unstable · select_nth_unstable",
+      ],
+    ],
+  );
+  const section = (id: string) => data.operations.find((entry) => entry.id === id)!;
+  // Rows name the call each implementation makes.
+  assert.deepEqual(
+    section("select_nth").runs.map((entry) => entry.label),
+    ["Tessera", "slice::sort · full sort", "slice::sort_unstable · select_nth_unstable"],
+  );
+  const ranking = section("select_nth").figures[0];
+  assert.equal(ranking.title, "Fastest of 3 selections");
+  const rows = (ranking.chart as RowChart).groups.flatMap((group) => group.rows);
+  // Speeds divide by the selection reference: 20 ns over Tessera's 10 ns.
+  assert.deepEqual(rows.find((row) => row.strong)!.cells[0], "2×");
+  // Stable implementations group before unstable ones.
+  assert.deepEqual(
+    rows.map((row) => row.name.sub),
+    ["", "full sort", "select_nth_unstable"],
+  );
+  assert.ok(!section("select_nth").figures.some((figure) => figure.name === "types"));
+  // The home page keeps the sort ranking.
+  assert.deepEqual(data.overview, section("sort").figures[0]);
+});
+
 test("tracking columns fit the tracking hardware and a selection keeps PR coverage", () => {
   const ids = trackingColumns.map(columnId);
   assert.ok(

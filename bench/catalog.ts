@@ -389,6 +389,11 @@ export function routeStable(id: string, operation: Operation): boolean {
   return entry.routes[operation.kind]?.stable ?? entry.stable;
 }
 
+/** Whether an implementation is a Tessera composition baseline, marked by the `reference` adapter. */
+export function isComposition(id: string): boolean {
+  return implementation(id).adapter === "reference";
+}
+
 /** An implementation's display name for an operation: its label, with the route if it has one. */
 export function routeLabel(id: string, operation: Operation) {
   return [implementation(id).label, route(id, operation)].filter(Boolean).join(" · ");

@@ -4,9 +4,9 @@ import { appendFile } from "node:fs/promises";
 import { type Column, catalog, columnId, type Execution } from "../catalog.ts";
 import { TRACKING_SPEC } from "./result.ts";
 
-/** Track production sort adapters, not revision or operation controls. */
+/** Track implementations and composition controls with independent absolute times. */
 export const trackingImplementations = catalog.implementations.filter(
-  (entry) => entry.adapter !== "revision" && entry.adapter !== "reference",
+  (entry) => entry.adapter !== "revision",
 );
 
 /**

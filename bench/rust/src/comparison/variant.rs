@@ -30,6 +30,8 @@ pub(super) trait TesseraAdapter: BenchmarkRecord {
     #[cfg(feature = "operations")]
     fn argsort(records: &[Self]) -> Vec<usize>;
     #[cfg(feature = "operations")]
+    fn sort_index_rows(records: &[Self]) -> Vec<usize>;
+    #[cfg(feature = "operations")]
     fn select_nth(records: &mut [Self], index: usize);
 
     /// Sorts through the independently named baseline crate.
@@ -106,6 +108,10 @@ macro_rules! tessera_keys {
             }
 
             slice_operations!(argsort, select_nth);
+            #[cfg(feature = "operations")]
+            fn sort_index_rows(records: &[Self]) -> Vec<usize> {
+                operations::sort_index_rows(records, |r| *r)
+            }
 
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort);
@@ -134,6 +140,10 @@ macro_rules! tessera_records {
             }
 
             slice_operations!(argsort_by_key, select_nth_by_key, |r| r.key);
+            #[cfg(feature = "operations")]
+            fn sort_index_rows(records: &[Self]) -> Vec<usize> {
+                operations::sort_index_rows(records, |r| r.key)
+            }
 
             #[cfg(tessera_bench_revisions)]
             revision_sorts!(stable_sort_by_key, |r| r.key);
@@ -276,11 +286,16 @@ fn prepare_radsort<T: BenchmarkRecord, K: radsort::Key>(
                 .expect("category sorting supported");
         }
         Operation::Argsort {} => {
-            return operations::indices(variant, input, move |source| {
-                let mut indices: Vec<_> = (0..source.len()).collect();
-                radsort::sort_by_key(&mut indices, |&index| key(&source[index]));
-                indices
-            });
+            return operations::indices(
+                variant,
+                input,
+                "radsort::sort_by_key on indices",
+                move |source| {
+                    let mut indices: Vec<_> = (0..source.len()).collect();
+                    radsort::sort_by_key(&mut indices, |&index| key(&source[index]));
+                    indices
+                },
+            );
         }
         Operation::SelectNth { .. } => {
             return operations::selection_reference(variant, input, move |values| {
@@ -339,7 +354,7 @@ fn try_prepare_common<T: TesseraAdapter>(
         return None;
     }
     Some(match v.name {
-        "tessera" => v.prepare_call(input, T::SORT_ROUTE, T::tessera),
+        "tessera" | "tessera-full" => v.prepare_call(input, T::SORT_ROUTE, T::tessera),
 
         #[cfg(tessera_bench_revisions)]
         "tessera-baseline" => v.prepare_call(input, T::SORT_ROUTE, T::baseline),
@@ -451,9 +466,7 @@ impl Variant {
             unreachable!("parallel execution without the rayon feature: {threads}");
         }
         if input.operation().is_sort() {
-            if self.adapter == "reference"
-                || self.parallel_sort == Some(crate::plan::ParallelSort::Only)
-            {
+            if self.parallel_sort == Some(crate::plan::ParallelSort::Only) {
                 return None;
             }
         } else if !cfg!(feature = "operations")
@@ -654,8 +667,13 @@ mod tests {
                     for variant in list_variants() {
                         let kernel = variant.prepare(&input, Execution::Serial, 32768);
                         let supported = ["common", "revision"].contains(&variant.adapter)
-                            || ["glidesort", "glidesort-sqrt", "std-unstable"]
-                                .contains(&variant.name);
+                            || [
+                                "tessera-full",
+                                "glidesort",
+                                "glidesort-sqrt",
+                                "std-unstable",
+                            ]
+                            .contains(&variant.name);
                         assert_eq!(kernel.is_some(), supported, "{ty}/{}", variant.name);
                         if let Some(mut kernel) = kernel {
                             kernel.restore(2);

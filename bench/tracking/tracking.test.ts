@@ -16,7 +16,7 @@ import {
   SORT,
 } from "../catalog.ts";
 import { loadPlan, planOperations } from "../plan.ts";
-import type { RowChart } from "../plot/rows.ts";
+import { type RowChart, renderRows } from "../plot/rows.ts";
 import { columnPlan, trackingMemory } from "./build.ts";
 import {
   comparisonData,
@@ -92,12 +92,14 @@ const run: TrackingRun = {
   execution: "serial",
 };
 
-test("tracking excludes revision controls and operation-only references", () => {
+test("tracking admits composition references and excludes revision controls", () => {
   assert.ok(trackingImplementations.some((entry) => entry.id === "tessera"));
-  assert.ok(
-    trackingImplementations.every((entry) => !["revision", "reference"].includes(entry.adapter)),
-  );
-  for (const id of ["tessera-full", "tessera-copy", "tessera-baseline"]) {
+  assert.deepEqual(trackingSelection("tessera-full", ["serial", "t4"]).map(columnId), [
+    "tessera-full/serial",
+  ]);
+  assert.equal(trackingBranch("tessera-full"), "implementation-tessera-full");
+  assert.ok(trackingImplementations.every((entry) => entry.adapter !== "revision"));
+  for (const id of ["tessera-copy", "tessera-baseline"]) {
     assert.throws(() => trackingImplementation(id), /Unknown tracking implementation/);
     assert.throws(() => trackingBranch(id), /Unknown tracking implementation/);
   }
@@ -771,6 +773,8 @@ test("each operation gets its own section against its own reference", () => {
   });
   const runs = new Map([
     ["tessera", [tracked(cases(10))]],
+    // Even a faster composition stays outside the competitor ranks.
+    ["tessera-full", [tracked(cases(1))]],
     ["std-stable", [tracked(cases(40))]],
     ["std-unstable", [tracked(cases(20))]],
     // A sort-only opponent has no row in the other sections.
@@ -795,7 +799,7 @@ test("each operation gets its own section against its own reference", () => {
   const argsortGroups = (argsort.chart as RowChart).groups;
   assert.deepEqual(
     argsortGroups.map((group) => group.title),
-    ["Stable argsorts"],
+    ["Stable argsorts", "Composition"],
   );
   assert.ok(
     argsortGroups[0].rows.some(
@@ -805,7 +809,12 @@ test("each operation gets its own section against its own reference", () => {
   // Rows name the call each implementation makes.
   assert.deepEqual(
     section("select_nth").runs.map((entry) => entry.label),
-    ["Tessera", "slice::sort · full sort", "slice::sort_unstable · select_nth_unstable"],
+    [
+      "Tessera",
+      "Tessera sort · full sort",
+      "slice::sort · full sort",
+      "slice::sort_unstable · select_nth_unstable",
+    ],
   );
   const ranking = section("select_nth").figures[0];
   assert.equal(ranking.title, "Fastest of 3 selections");
@@ -815,8 +824,23 @@ test("each operation gets its own section against its own reference", () => {
   // Stable implementations group before unstable ones.
   assert.deepEqual(
     rows.map((row) => row.name.sub),
-    ["", "full sort", "select_nth_unstable"],
+    ["", "full sort", "select_nth_unstable", "full sort"],
   );
+  for (const kind of ["argsort", "select_nth"]) {
+    const figure = section(kind).figures[0];
+    const group = (figure.chart as RowChart).groups.find(({ title }) => title === "Composition");
+    assert.equal(group?.rows[0].name.input, "Tessera sort");
+    assert.equal(
+      group?.rows[0].name.sub,
+      kind === "argsort" ? "sort (key, index) rows" : "full sort",
+    );
+    assert.equal(group?.rows[0].marks[0].tone, "composition");
+    assert.equal(renderRows(figure.chart as RowChart).match(/Tessera composition/g)?.length, 1);
+    assert.match(figure.table, /Tessera sort .* \| Composition \| stable/);
+    const inputs = section(kind).figures.find((entry) => entry.name === "inputs")!;
+    assert.doesNotMatch(inputs.table, /Tessera sort/);
+    assert.doesNotMatch(renderRows(inputs.chart as RowChart), /Tessera composition/);
+  }
   assert.ok(!section("select_nth").figures.some((figure) => figure.name === "types"));
   // Argsort's one input pattern keeps its figure, titled for one row.
   assert.equal(
@@ -825,6 +849,7 @@ test("each operation gets its own section against its own reference", () => {
   );
   // The home page keeps the sort ranking.
   assert.deepEqual(data.overview, section("sort").figures[0]);
+  assert.doesNotMatch(data.overview!.table, /Composition/);
 });
 
 test("parameter figures compare matching inputs against the operation's reference", () => {
@@ -973,6 +998,21 @@ test("each tracking column measures its own slice of the continuous plan", async
   assert.deepEqual(kinds(serial), new Set(["sort", "argsort", "partition-buckets", "select_nth"]));
 });
 
+test("composition tracking times operation controls and measures parallel inputs once in serial", async () => {
+  const plan = await loadPlan("continuous");
+  const derived = columnPlan(plan, trackingColumn("tessera-full/serial"));
+  const expected = plan.include
+    .filter((rule) =>
+      (rule.operation?.kind ?? "sort") === "sort"
+        ? rule.executions?.includes("t4")
+        : !rule.executions || rule.executions.includes("serial"),
+    )
+    .map((rule) => ({ ...rule, executions: ["serial"] }));
+  assert.deepEqual(derived.include, expected);
+  assert.deepEqual(derived.implementations, ["tessera-full"]);
+  assert.deepEqual(plan.implementations, ["tessera"]);
+});
+
 test("the comparison ranks 32-bit-key records and adds parallel scaling", () => {
   const tracked = (values: Record<string, number>, execution = "serial") =>
     runSchema.parse({
@@ -1008,6 +1048,24 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   const figure = data.operations[0].figures.find((entry) => entry.name === "parallel")!;
   // The table names every input in the aggregate.
   assert.match(figure.table, /\| u64 · random \| 4× \| 8× \| 1.00× \| 2× \|/);
+  assert.doesNotMatch(figure.table, /composition/);
+  assert.doesNotMatch(renderRows(figure.chart as RowChart), /Tessera composition/);
+  const withComposition = comparisonData(
+    new Map([
+      ...runs,
+      ["tessera-full", [tracked({ "rust/sort/u64/random/1000000/s1/serial": 10 })]],
+    ]),
+  ).operations[0].figures.find((entry) => entry.name === "parallel")!;
+  assert.equal(withComposition.title, figure.title);
+  const composition = (withComposition.chart as RowChart).groups.at(-1)!;
+  assert.equal(composition.title, "Composition");
+  assert.equal(composition.rows[0].marks[0].tone, "composition");
+  assert.equal(
+    renderRows(withComposition.chart as RowChart).match(/Tessera composition/g)?.length,
+    1,
+  );
+  assert.deepEqual(composition.rows[0].cells, ["20×", ""]);
+  assert.match(withComposition.table, /\| u64 · random \| 4× \| 8× \| 1.00× \| 2× \| 20× \|/);
   const names = data.operations[0].figures.map((figure) => figure.name);
   assert.ok(names.includes("parallel"));
   // Without Rayon on one thread there is no baseline.

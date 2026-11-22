@@ -7,8 +7,15 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parseHTML } from "linkedom/worker";
 import { z } from "zod";
-import { columnId, executionThreads, parseCriterionId } from "../catalog.ts";
-import { loadPlan } from "../plan.ts";
+import {
+  caseId,
+  columnId,
+  executionThreads,
+  type Operation,
+  parseCriterionId,
+  SORT,
+} from "../catalog.ts";
+import { loadPlan, planOperations } from "../plan.ts";
 import type { RowChart } from "../plot/rows.ts";
 import { columnPlan, trackingMemory } from "./build.ts";
 import {
@@ -19,7 +26,7 @@ import {
   writeComparison,
 } from "./comparison.ts";
 import { explainFailure } from "./failure.ts";
-import { growthPeaks } from "./growth.ts";
+import { growthPeaks, growthPlans, growthSchema } from "./growth.ts";
 import {
   comparableRuns,
   formatTimestamp,
@@ -42,8 +49,6 @@ import { remoteJobs } from "./jobs.ts";
 import { appendRun, trackingCases, trackingFacets } from "./publish.ts";
 import {
   combineReports,
-  type GrowthRecord,
-  growthSchema,
   indexSchema,
   parseRuns,
   runSchema,
@@ -1010,18 +1015,60 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   assert.equal(trackingScaling(latest), null);
 });
 
-test("the growth sweep keeps one peak per implementation and length", () => {
+test("growth uses one serial plan per operation and its supported routes", async () => {
+  const preset = await loadPlan("growth");
+  const plans = growthPlans(preset);
+  const expected = [
+    [SORT, preset.implementations],
+    [{ kind: "argsort" }, ["tessera", "std-stable", "radsort", "glidesort", "std-unstable"]],
+    [
+      { kind: "select_nth", index: 512 },
+      ["tessera", "std-stable", "radsort", "glidesort", "std-unstable"],
+    ],
+    [
+      { kind: "partition-buckets", bucket_count: 16 },
+      ["tessera", "std-stable", "radsort", "glidesort"],
+    ],
+  ] as const;
+  assert.equal(plans.length, expected.length);
+  for (const [index, [operation, implementations]] of expected.entries()) {
+    const plan = plans[index];
+    assert.deepEqual(planOperations(plan), [operation]);
+    assert.deepEqual(plan.implementations, implementations);
+    assert.deepEqual(plan.include, [preset.include[index]]);
+  }
+  const restricted = growthPlans({
+    ...preset,
+    implementations: ["std-unstable", "tessera", "rayon-stable", "rdst"],
+  });
+  assert.deepEqual(
+    restricted.map((plan) => plan.implementations),
+    [
+      ["std-unstable", "tessera", "rdst"],
+      ["std-unstable", "tessera"],
+      ["std-unstable", "tessera"],
+      ["tessera"],
+    ],
+  );
+});
+
+test("a growth sweep keys verified peaks by exact operation, implementation and length", () => {
+  const operation = { kind: "select_nth", index: 512 } as const;
   const plan = {
     schema: 3 as const,
-    implementations: ["tessera", "glidesort"],
-    include: [
-      { types: ["row_u32" as const], distributions: ["random" as const], lengths: [1024, 4096] },
-    ],
+    implementations: ["tessera", "std-unstable"],
+    include: [{ types: ["row_u32"], distributions: ["random"], lengths: [1024, 4096], operation }],
     exclude: [],
   };
-  const row = (len: number, implementation: string, peak: number, execution = "serial") =>
+  const row = (
+    len: number,
+    implementation: string,
+    peak: number,
+    measured: Operation = operation,
+    execution = "serial",
+  ) =>
     JSON.stringify({
-      case_id: `sort/row_u32/random/${len}/s1`,
+      case_id: caseId({ ty: "row_u32", distribution: "random", len, operation: measured }),
       column: `${implementation}/${execution}`,
       build: "default",
       peak_extra_bytes: peak,
@@ -1030,80 +1077,110 @@ test("the growth sweep keeps one peak per implementation and length", () => {
   const journal = [
     row(1024, "tessera", 10),
     row(4096, "tessera", 20),
-    row(4096, "glidesort", 0),
-    // Parallel columns answer a different memory question and stay out of the sweep.
-    row(4096, "tessera", 99, "t4"),
+    row(4096, "std-unstable", 0),
+    row(4096, "tessera", 98, { kind: "select_nth", index: 0 }),
+    row(4096, "tessera", 99, operation, "t4"),
   ];
   assert.deepEqual(growthPeaks(journal.join("\n"), plan), {
-    operation: "sort",
+    operation,
     type: "row_u32",
     distribution: "random",
     lengths: [1024, 4096],
-    peaks: { tessera: [10, 20], glidesort: [null, 0] },
+    peaks: { tessera: [10, 20], "std-unstable": [null, 0] },
   });
   assert.throws(() => growthPeaks([...journal, journal[0]].join("\n"), plan), /Duplicate/);
   assert.throws(() => growthPeaks(journal.slice(1).join("\n"), plan), /every length/);
   assert.throws(() => growthPeaks(row(1024, "radsort", 1), plan), /Unplanned implementation/);
 });
 
-test("the growth sweep replaces the memory figure with curves over length", async (t) => {
-  const tracked = (values: Record<string, number>) =>
+test("publication requires sweeps and preserves the sort figure alongside other operations", async (t) => {
+  const ids = [
+    "rust/sort/u64/random/65536/s1/serial",
+    "rust/argsort/u64/random/4096/s1/serial",
+    "rust/argsort/u64/random/65536/s1/serial",
+    "rust/select_nth/u64/random/65536/s1/32768/serial",
+    "rust/partition-buckets/u64/random/65536/s1/16/serial",
+  ];
+  const tracked = (ns: number) =>
     runSchema.parse({
       ...run,
       id: crypto.randomUUID(),
-      values: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, [v, v, v]])),
+      values: Object.fromEntries(ids.map((id) => [id, [ns, ns, ns]])),
+      memory: Object.fromEntries(ids.map((id) => [id, 999])),
     });
   const runs = new Map([
-    ["tessera", [tracked({ "rust/sort/u64/random/1000000/s1/serial": 100 })]],
-    ["std-stable", [tracked({ "rust/sort/u64/random/1000000/s1/serial": 400 })]],
+    ["tessera", [tracked(100)]],
+    ["std-stable", [tracked(400)]],
+    ["std-unstable", [tracked(200)]],
   ]);
-  const growth: GrowthRecord = growthSchema.parse({
+  const provenance = {
     time: run.time,
     hash: source,
     workflow: run.workflow,
     rustc: "rustc",
     native: { cc: "clang", cxx: "clang++", build: {} },
-    operation: "sort",
+  };
+  const input = {
     type: "row_u32",
     distribution: "random",
     lengths: [1 << 20, 1 << 22, 1 << 24],
+  };
+  const sort = {
+    ...input,
     // Tessera doubles when the input quadruples: √n.
     peaks: { tessera: [2e6, 4e6, 8e6], "std-stable": [8e6, 32e6, 128e6], crumsort: [0, 0, 0] },
-  });
-  assert.equal(
-    comparisonData(runs).operations[0].figures.find((figure) => figure.name === "memory")?.kind,
-    undefined,
+  };
+  const sweeps = [
+    { ...sort, operation: SORT },
+    { ...input, operation: { kind: "argsort" }, peaks: { tessera: [8e6, 32e6, 128e6] } },
+    { ...input, operation: { kind: "select_nth", index: 512 }, peaks: { tessera: [50, 10, 0] } },
+    {
+      ...input,
+      operation: { kind: "partition-buckets", bucket_count: 16 },
+      peaks: { tessera: [4e6, 16e6, 64e6] },
+    },
+  ];
+  const figures = (data: ReturnType<typeof comparisonData>) =>
+    Object.fromEntries(
+      data.operations.map((section) => [
+        section.id,
+        section.figures.find((figure) => figure.name === "memory"),
+      ]),
+    );
+  assert.ok(Object.values(figures(comparisonData(runs))).every((figure) => figure === undefined));
+  assert.throws(() => growthSchema.parse({ ...provenance, sweeps: [sweeps[0], sweeps[0]] }));
+  assert.throws(() =>
+    growthSchema.parse({ ...provenance, sweeps: [{ ...sweeps[0], peaks: { tessera: [0] } }] }),
   );
-  const figure = comparisonData(runs, growth).operations[0].figures.find(
-    (entry) => entry.name === "memory",
-  )!;
+  const growth = growthSchema.parse({ ...provenance, sweeps });
+  const plotted = figures(comparisonData(runs, growth));
+  const figure = plotted.sort!;
   assert.equal(figure.kind, "curves");
   assert.equal(figure.subject, "Extra memory by input length");
   assert.equal(figure.title, "Grows as √n, to 8 MB at 16M records");
   assert.match(figure.chart.guide, /Tessera at aaaaaaa/);
-  // A sort that never reaches the axis is named in the note and keeps its values in the table.
   assert.match(JSON.stringify(figure.chart), /Below 1 kB at every length: crumsort \(0 B\)/);
   assert.match(figure.table, /\| crumsort \| 0 B \| 0 B \| 0 B \|/);
   assert.match(figure.table, /\| Tessera \| 2 MB \| 4 MB \| 8 MB \|/);
-  // A sweep of another operation stays out of the sort section.
-  assert.equal(
-    comparisonData(runs, { ...growth, operation: "argsort" }).operations[0].figures.find(
-      (entry) => entry.name === "memory",
-    )?.kind,
-    undefined,
-  );
+  assert.match(plotted.argsort!.table, /\| Tessera \| 8 MB \| 32 MB \| 128 MB \|/);
+  assert.match(plotted.select_nth!.chart.guide, /rank 512/);
+  assert.match(plotted.select_nth!.table, /\| Tessera \| 50 B \| 10 B \| 0 B \|/);
+  assert.match(plotted["partition-buckets"]!.chart.guide, /categories · 16/);
+  assert.match(plotted["partition-buckets"]!.table, /\| Tessera .*?\| 4 MB \| 16 MB \| 64 MB \|/);
 
-  // Publication reads the sweep from the data root.
   const root = await mkdtemp(join(tmpdir(), "tessera-growth-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   for (const [id, list] of runs) {
     await mkdir(join(root, id));
     await writeFile(join(root, id, "2026-11.jsonl"), `${JSON.stringify(list[0])}\n`);
   }
-  await writeFile(join(root, GROWTH_FILE), JSON.stringify(growth));
-  const written = await writeComparison(root);
-  assert.equal(
-    written.operations[0].figures.find((entry) => entry.name === "memory")?.kind,
-    "curves",
-  );
+  const path = join(root, GROWTH_FILE);
+  await writeFile(path, JSON.stringify({ ...provenance, ...sort, operation: "sort" }));
+  await assert.rejects(writeComparison(root), z.ZodError);
+  await writeFile(path, JSON.stringify({ ...provenance, sweeps: [sweeps[0]] }));
+  const sortOnly = figures(await writeComparison(root));
+  assert.equal(JSON.stringify(sortOnly.sort), JSON.stringify(figure));
+  assert.equal(sortOnly.argsort, undefined);
+  await writeFile(path, JSON.stringify(growth));
+  assert.deepEqual(figures(await writeComparison(root)), plotted);
 });

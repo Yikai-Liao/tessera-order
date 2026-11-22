@@ -33,15 +33,9 @@ import {
   renderParallel,
   type Scaling,
 } from "../report/charts.ts";
+import { type GrowthRecord, growthSchema } from "./growth.ts";
 import { trackingImplementations } from "./implementations.ts";
-import {
-  type ComparisonData,
-  comparisonSchema,
-  type GrowthRecord,
-  growthSchema,
-  parseRuns,
-  type TrackingRun,
-} from "./result.ts";
+import { type ComparisonData, comparisonSchema, parseRuns, type TrackingRun } from "./result.ts";
 
 /** A column's value on a case, keyed as Criterion names it. */
 const timed = (run: TrackingRun | undefined, id: string, execution: Execution) =>
@@ -259,16 +253,16 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
 }
 
 /** The growth sweep in the figures' terms: implementations with a serial entry, in catalog order. */
-export function trackingGrowth(record: GrowthRecord): Growth {
+function trackingGrowth(sweep: GrowthRecord["sweeps"][number], hash: string): Growth {
   return {
-    operation: SORT,
-    ty: record.type,
-    distribution: record.distribution,
-    lengths: record.lengths,
+    operation: sweep.operation,
+    ty: sweep.type,
+    distribution: sweep.distribution,
+    lengths: sweep.lengths,
     peaks: trackingImplementations
-      .filter((entry) => entry.parallel !== "only" && entry.id in record.peaks)
-      .map((entry) => ({ name: entry.id, values: record.peaks[entry.id] })),
-    source: `Tessera at ${record.hash.slice(0, 7)}`,
+      .filter((entry) => entry.parallel !== "only" && Object.hasOwn(sweep.peaks, entry.id))
+      .map((entry) => ({ name: entry.id, values: sweep.peaks[entry.id] })),
+    source: `Tessera at ${hash.slice(0, 7)}`,
   };
 }
 
@@ -290,19 +284,14 @@ export function comparisonData(
     const axes = parameters ? parameterFigures(parameters) : [];
     const cohort = trackingCohort(field);
     if (!cohort && !axes.length) return [];
-    // Only full sorting has a parallel figure and a growth sweep.
+    // Only full sorting has a parallel figure.
     const sort = kind === SORT.kind;
     const scaling = sort ? trackingScaling(latest.runs) : null;
     const parallel = scaling ? renderParallel(scaling) : null;
+    const sweep = growth?.sweeps.find((entry) => entry.operation.kind === kind);
+    const growthFigure = growth && sweep ? trackingGrowth(sweep, growth.hash) : null;
     // The site renders each chart itself; the table names every plotted value.
-    const all = cohort
-      ? comparisonFigures(
-          field,
-          cohort,
-          true,
-          sort && growth?.operation === SORT.kind ? trackingGrowth(growth) : undefined,
-        )
-      : [];
+    const all = cohort ? comparisonFigures(field, cohort, true, growthFigure) : [];
     // Parameter axes and parallel scaling follow the fixed-parameter speed figures.
     const memory = all.findIndex((figure) => figure.name === "memory");
     all.splice(memory < 0 ? all.length : memory, 0, ...axes, ...(parallel ? [parallel] : []));

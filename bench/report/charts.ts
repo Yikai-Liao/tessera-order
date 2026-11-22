@@ -9,6 +9,7 @@ import {
   executionThreads,
   implementation,
   type Operation,
+  operationDescription,
   operationNoun,
   operationParts,
   recordType,
@@ -796,11 +797,17 @@ export function renderGrowth(growth: Growth): Figure | null {
   const plotted = sorts.filter((entry) => entry.points.some(([, y]) => y >= MEMORY_FLOOR));
   const small = sorts.filter((entry) => !plotted.includes(entry));
   const last = own.at(-1)!;
-  const order = exponent(own.at(-2)!, last);
-  const growthName = Math.abs(order - 0.5) <= 0.1 ? "√n" : `n^${order.toFixed(2)}`;
+  const before = own.at(-2)!;
+  const order = before[1] > 0 && last[1] > 0 ? exponent(before, last) : null;
+  const growthName =
+    order === null ? null : Math.abs(order - 0.5) <= 0.1 ? "√n" : `n^${order.toFixed(2)}`;
+  // When every peak is below the floor, still mark the observations and keep their exact values.
+  const visible = plotted.length ? plotted : sorts;
   // Half a decade of headroom above the largest value keeps the top line inside the plot.
-  const high = Math.max(...plotted.flatMap((e) => e.points.map(([, y]) => y))) * Math.sqrt(10);
-  const title = `Grows as ${growthName}, to ${formatBytes(last[1])} at ${countLabel(last[0])} records`;
+  const high =
+    Math.max(MEMORY_FLOOR, ...visible.flatMap((e) => e.points.map(([, y]) => y))) * Math.sqrt(10);
+  const endpoint = `${formatBytes(last[1])} at ${countLabel(last[0])} records`;
+  const title = growthName ? `Grows as ${growthName}, to ${endpoint}` : endpoint;
   const decades = Array.from(
     { length: Math.floor(Math.log10(high / MEMORY_FLOOR)) + 1 },
     (_, index) => MEMORY_FLOOR * 10 ** index,
@@ -827,9 +834,14 @@ export function renderGrowth(growth: Growth): Figure | null {
       .toSorted((a, b) => (b.values.at(-1) ?? 0) - (a.values.at(-1) ?? 0))
       .map((e) => [t.table(e.name), ...e.values.map((v) => (v === null ? "–" : formatBytes(v)))]),
   );
+  const measurement =
+    growth.operation.kind === "select_nth" || growth.operation.kind === "partition-buckets"
+      ? `${operationDescription(growth.operation)} · peak heap allocation beyond the input`
+      : `peak heap allocation during one ${t.one}, beyond the input`;
+  const showReference = last[1] >= MEMORY_FLOOR;
   const chart: CurveChart = {
     title,
-    guide: `${elements(ty)}, ${distribution(growth.distribution).label} input · peak heap allocation during one ${t.one}, beyond the input${growth.source ? ` · ${growth.source}` : ""}`,
+    guide: `${elements(ty)}, ${distribution(growth.distribution).label} input · ${measurement}${growth.source ? ` · ${growth.source}` : ""}`,
     x: {
       low: lengths[0],
       high: lengths.at(-1)!,
@@ -842,24 +854,29 @@ export function renderGrowth(growth: Growth): Figure | null {
       ticks: decades.map((value) => ({ value, label: formatBytes(value) })),
       label: "extra memory",
     },
-    curves: plotted.map((e) => ({
+    curves: visible.map((e) => ({
       name: displayName(e.name),
       tone: toneOf(e.name),
       points: e.points,
     })),
-    references: [
-      {
-        dotted: true,
-        points: lengths.map((n) => [n, last[1] * Math.sqrt(n / last[0])] as [number, number]),
-      },
-    ],
-    legend: [...kindLegend, [["dotted"], "√n slope through Tessera"]],
+    references: showReference
+      ? [
+          {
+            dotted: true,
+            points: lengths.map((n) => [n, last[1] * Math.sqrt(n / last[0])] as [number, number]),
+          },
+        ]
+      : [],
+    legend: showReference ? [...kindLegend, [["dotted"], "√n slope through Tessera"]] : kindLegend,
     ...(note ? { note } : {}),
   };
   return {
     name: "memory",
     subject: "Extra memory by input length",
-    summary: `How much memory each ${t.one} allocates beyond its input as the input grows. Both axes are logarithmic, so memory proportional to a power of n is a straight line, and a steeper line grows faster: ${t.many} that copy their input rise with the input itself, and the dotted line has the slope of √n.`,
+    summary:
+      growth.operation.kind === "sort"
+        ? `How much memory each ${t.one} allocates beyond its input as the input grows. Both axes are logarithmic, so memory proportional to a power of n is a straight line, and a steeper line grows faster: ${t.many} that copy their input rise with the input itself, and the dotted line has the slope of √n.`
+        : "Peak heap allocation beyond the input, including any retained output. Both axes are logarithmic.",
     title,
     kind: "curves",
     chart,
@@ -1036,12 +1053,13 @@ const RELEASE: Cohort = {
 /**
  * Every comparison figure the field supports for one cohort, in reading order. With
  * `memory`, the ranking adds an extra-memory column and becomes the `overview` figure.
+ * A null growth sweep omits the memory curve until a dedicated sweep is available.
  */
 export function comparisonFigures(
   field: Field,
   cohort: Cohort,
   memory = false,
-  growth?: Growth,
+  growth?: Growth | null,
 ): Figure[] {
   return [
     renderRanking(field, cohort, memory),
@@ -1053,7 +1071,7 @@ export function comparisonFigures(
       .map((ty) => renderInputs(field, cohort, `inputs-${ty}`, ty)),
     renderShort(field, cohort),
     renderTypes(field, cohort),
-    renderGrowth(growth ?? fieldGrowth(field, "u64")),
+    growth === null ? null : renderGrowth(growth ?? fieldGrowth(field, "u64")),
   ].filter((f): f is Figure => f !== null);
 }
 

@@ -160,7 +160,7 @@ mod tests {
             (1 << 127) | 1
         );
         assert!(matches!(
-            plan_tile::<u64>(48, u64::MAX as u128),
+            plan_tile::<u64>(16, u64::MAX as u128),
             TilePlan::Insertion
         ));
     }

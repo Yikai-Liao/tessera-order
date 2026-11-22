@@ -147,7 +147,7 @@ impl<T> Scratch<T> {
             return;
         }
         match plan_tile::<T>(len, varying) {
-            TilePlan::Insertion => super::order::sort_short(records, extractor),
+            TilePlan::Insertion => extractor.finish_insertion(records),
             TilePlan::Msd(digit) => {
                 self.partition_tile::<_>(records, digit, varying, extractor);
             }
@@ -201,7 +201,7 @@ impl<T> Scratch<T> {
             let varying = scan_varying_bits(records, candidate, extractor);
             self.sort::<_>(records, varying, extractor);
         } else {
-            super::order::sort_short(records, extractor);
+            extractor.finish_insertion(records);
         }
     }
 
@@ -323,7 +323,9 @@ impl<T> Scratch<T> {
         for &end in ends {
             let end = end as usize;
             debug_assert!(start <= end && end <= len);
-            self.finish_child::<_>(&mut records[start..end], candidate, extractor);
+            if end > start + 1 {
+                self.finish_child::<_>(&mut records[start..end], candidate, extractor);
+            }
             start = end;
         }
     }

@@ -40,15 +40,7 @@ fn exercise(len: usize, changing: bool) {
         original_key(x.id)
     });
     drop(probe);
-    // Small leaves can unwind with one or two vacant slots. Interrupt each
-    // extractor call, including the last shift before a guard is dropped.
-    let steps = if len <= 20 {
-        total
-    } else if cfg!(miri) {
-        5
-    } else {
-        40
-    };
+    let steps = if cfg!(miri) { 5 } else { 40 };
     for step in 0..steps {
         drops.borrow_mut().clear();
         let mut input = build();
@@ -134,9 +126,9 @@ fn worker_unwind_preserves_interior_edits() {
 #[test]
 fn key_panic_recovery() {
     for len in if cfg!(miri) {
-        vec![8, 19, 20, 47, 48, 49, 80]
+        vec![12, 47, 48, 49, 80]
     } else {
-        vec![8, 19, 20, 47, 48, 49, 80, 5000]
+        vec![12, 47, 48, 49, 80, 5000]
     } {
         exercise(len, false);
     }

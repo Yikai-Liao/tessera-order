@@ -2,17 +2,13 @@
 
 //! Internal engine budgets and representation limits, also exposed to benchmarks.
 
-/// Largest leaf finished by stable insertion.
+/// Count ceiling for stable insertion, before accounting for record movement.
 pub const INSERTION_MAX: usize = 48;
-/// Largest leaf finished one record at a time before pair insertion pays off.
-pub(crate) const SINGLE_INSERTION_MAX: usize = 16;
 
-/// On unordered input the shift work per record scales with length times
-/// inline record width. Convert the crossover bytes to a record count,
-/// keeping tiny leaves on insertion and bounding comparisons on narrow keys. See the cost model in docs/explain/tiles.md.
+/// Charge each inversion one comparison plus the inline bytes moved.
 pub(crate) fn insertion_limit<T>() -> usize {
-    const CROSSOVER_BYTES: usize = 2 * 1024;
-    (CROSSOVER_BYTES / size_of::<T>().max(1)).clamp(SINGLE_INSERTION_MAX, INSERTION_MAX)
+    const COMPARISON_BYTES: usize = size_of::<u64>();
+    (INSERTION_MAX * COMPARISON_BYTES / (COMPARISON_BYTES + size_of::<T>())).max(8)
 }
 
 /// Default tile budget, in bytes of records.

@@ -36,8 +36,8 @@ test("wide tiles partition without sampling and short tiles retain insertion", (
   const varying = (1n << 64n) - 1n;
   assert.equal(chooseTileLeaf(1024, varying, 12, 64), "msd");
   assert.equal(chooseTileLeaf(8192, 0n, 14, 64), "done");
-  assert.equal(chooseTileLeaf(48, varying, 6, 64), "insertion");
-  assert.equal(chooseTileLeaf(48, varying, 6, 64, 128), "msd");
+  assert.equal(chooseTileLeaf(16, varying, 6, 64), "insertion");
+  assert.equal(chooseTileLeaf(16, varying, 6, 64, 128), "msd");
   assert.deepEqual(planDigits(varying, 12, 64), [{ shift: 52, width: 12 }]);
 });
 

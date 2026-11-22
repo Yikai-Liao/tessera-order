@@ -35,7 +35,7 @@ The sample stride is at least 128 records, which bounds what an ordered input pa
 
 **Idea.** Run insertion sort with a **swap budget** and give up when the budget runs out.
 
-- A serial refinement of at most 16 records that fits in one tile goes directly to single-record insertion. Larger unordered roots within the [short-leaf limit](tiles.md#three-leaves) use pair insertion. It shifts a predecessor larger than both new keys by two slots in one move. Both paths finish without a budget.
+- An unsorted input of at most [the width-dependent insertion limit](tiles.md#three-leaves) is insertion-sorted without a budget; that is its leaf anyway.
 - An input that fits in one [tile](tiles.md) gets one swap per four records.
 - A larger input first insertion-sorts a copy of one tile's worth of keys. The swaps it needed, scaled to the whole input, become the budget, capped at one swap per four records. A window that needed no swaps proves nothing, because the inversions may be elsewhere, so the radix path continues.
 

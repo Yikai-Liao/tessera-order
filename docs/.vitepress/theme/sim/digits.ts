@@ -75,7 +75,7 @@ export function chooseTileLeaf(
   recordBytes = bits / 8,
 ): TileLeaf {
   if (records < 2 || varying === 0n) return "done";
-  const insertionLimit = Math.max(16, Math.min(48, Math.floor(2048 / recordBytes)));
+  const insertionLimit = Math.max(8, Math.floor((48 * 8) / (8 + recordBytes)));
   if (records <= insertionLimit) return "insertion";
   const remaining = varying & ~topWindow(varying, tableWidth, bits).window;
   return remaining === 0n || topWindow(remaining, bits, bits).digit.width <= tableWidth

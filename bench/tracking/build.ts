@@ -4,8 +4,8 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { command } from "../../tools/process.ts";
 import { repositoryRoot, runTask } from "../../tools/tasks.ts";
-import { type Column, columnId, continuous, criterionId, parseCaseId } from "../catalog.ts";
-import { loadPlan, type Plan } from "../plan.ts";
+import { type Column, columnId, continuous, criterionId, parseCaseId, SORT } from "../catalog.ts";
+import { loadPlan, type Plan, plansByOperation } from "../plan.ts";
 import { withComparisonWorkspace } from "../release.ts";
 import {
   benchmarkEnvironment,
@@ -135,16 +135,20 @@ if (import.meta.main) {
           implementation.id === "glidesort-sqrt"
             ? ["tessera", implementation.id]
             : [implementation.id];
-        await writeFile(
-          join(out, "memory-plan.json"),
-          JSON.stringify({ ...plan, implementations: memoryImplementations }),
-        );
-        await command(memory.executable, [
-          "--plan",
-          join(out, "memory-plan.json"),
-          "--out",
-          join(context, "scratch"),
-        ]);
+        // The worker measures one operation per session. The sort session's directory is the
+        // image's scratch evidence; every session's rows give the peaks.
+        const journals: string[] = [];
+        for (const [index, part] of plansByOperation(plan).entries()) {
+          const sort = (part.include[0].operation ?? SORT).kind === SORT.kind;
+          const directory = sort ? join(context, "scratch") : join(out, `memory-${index}`);
+          const partPlan = join(out, `memory-plan-${index}.json`);
+          await writeFile(
+            partPlan,
+            JSON.stringify({ ...part, implementations: memoryImplementations }),
+          );
+          await command(memory.executable, ["--plan", partPlan, "--out", directory]);
+          journals.push(await readFile(join(directory, "memory.jsonl"), "utf8"));
+        }
         const ids = (
           await command(built.executable, [], {
             capture: true,
@@ -155,11 +159,7 @@ if (import.meta.main) {
           .filter(Boolean);
         if (!ids.length) throw new Error("Tracking plan selects no supported cases");
         await writeFile(join(context, "cases.ids"), ids.join("\n") + "\n");
-        const peaks = trackingMemory(
-          await readFile(join(context, "scratch/memory.jsonl"), "utf8"),
-          column,
-          ids,
-        );
+        const peaks = trackingMemory(journals.join("\n"), column, ids);
         const jobs = remoteJobs(ids);
         for (const [index, job] of jobs.entries())
           await writeFile(join(context, `job-${index + 1}.ids`), job.join("\n") + "\n");

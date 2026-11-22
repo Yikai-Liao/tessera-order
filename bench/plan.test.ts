@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { decodeConfig } from "./config.ts";
-import { loadPlan, parsePlan, planSchema, selectCaseIds } from "./plan.ts";
+import { loadPlan, parsePlan, planSchema, plansByOperation, selectCaseIds } from "./plan.ts";
 
 const fixture = decodeConfig(
   readFileSync(new URL("./plans/selection.fixture.toml", import.meta.url), "utf8"),
@@ -195,4 +195,23 @@ test("plan CLI defaults to JSON and retains explicit TOML export", async () => {
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(parsePlan(decodeConfig(result.stdout, `plan.${format}`)), expected);
   }
+});
+
+test("a plan splits into one session plan per operation instance", async () => {
+  const plan = await loadPlan("continuous");
+  const parts = plansByOperation(plan);
+  // Every rule lands in exactly one part, and each part selects one operation instance.
+  assert.equal(
+    parts.reduce((total, part) => total + part.include.length, 0),
+    plan.include.length,
+  );
+  const keys = parts.map((part) => {
+    const operations = new Set(part.include.map((rule) => JSON.stringify(rule.operation ?? null)));
+    assert.equal(operations.size, 1);
+    return [...operations][0];
+  });
+  assert.equal(new Set(keys).size, parts.length);
+  // Selection at two ranks is two sessions.
+  assert.ok(keys.filter((key) => key.includes("select_nth")).length >= 2);
+  assert.equal(keys[0], "null");
 });

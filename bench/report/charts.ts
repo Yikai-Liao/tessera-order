@@ -395,6 +395,10 @@ function fieldTitle(standings: Standing[], unit: string) {
     top3 = standings.filter((s) => s.rank <= 3).length;
   // "All" reads naturally only past two; two cases read as "both".
   const all = (count: number) => (count === 2 ? `both ${unit}` : `all ${count} ${unit}`);
+  // One row states its rank on the only measured one: "Fastest on the only input".
+  const only = `the only ${unit.slice(0, -1)}`;
+  if (total === 1)
+    return first ? `Fastest on ${only}` : `Ranked ${ordinal(standings[0].rank)} on ${only}`;
   if (first === total) return `Fastest on ${all(total)}`;
   // A podium needs more than three implementations in the field.
   const field = Math.max(...standings.map((s) => s.speeds.length + 1));
@@ -452,9 +456,8 @@ function renderInputs(field: Field, cohort: Cohort, name: string, ty = "u64"): F
         return [fieldRow(t, { input: label, sub: "", tag: "" }, s)];
       }),
   })).filter((g) => g.rows.length);
-  // Comparing patterns needs two; the element-type figure already shows another type's shared
-  // pattern, so its panel needs a few more.
-  if (plotted.length < (ty === "u64" ? 2 : 3)) return null;
+  // The element-type figure already shows a type's shared pattern; a panel needs a few more.
+  if (plotted.length < (ty === "u64" ? 1 : 3)) return null;
   const standings = plotted.map(([, s]) => s);
   const title = fieldTitle(standings, "inputs");
   return {

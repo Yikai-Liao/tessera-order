@@ -86,8 +86,8 @@ An independent track binding the Rust crate; see the [design](docs/design/python
 
 ## Benchmark tooling and investigations
 
-- Finish the [CI scaling proposal](docs/design/ci-scaling-proposal.md). Cache hygiene, lane reuse and continuous operation cases are implemented. Next come per-operation cross-implementation plans, after the comparison model below.
-- Land the [comparison model](docs/design/comparison-model-proposal.md#stages) publication stage: it is done when the rewritten data branch loads on the site with per-operation sections, and no measured algorithm, input or sampling changes.
+- Finish the [CI scaling proposal](docs/design/ci-scaling-proposal.md). Cache hygiene, lane reuse and continuous operation cases are implemented. Next come per-operation cross-implementation plans.
+- Populate argsort and selection sections of the implementation comparison under the [comparison model](docs/design/comparison-model-proposal.md#plan): done when each has tracked runs, figures against its catalog reference and route-aware row labels on the site.
 
 - Fix the sample duration and prepared-memory cap of local paired sessions from the test machine's memory and the time a 10M-record case takes.
 - Investigate benchmark build invalidation without weakening provenance. Missing watched paths can force repeated rebuilds, but the existing watches do not cover every file that can affect Git dirty state. A solution must reliably detect dirty-state changes outside the benchmark source trees, optional revision file transitions and packed or detached Git references. Validate actual Cargo builds and snapshot workflows before changing the watches.
@@ -104,7 +104,7 @@ An independent track binding the Rust crate; see the [design](docs/design/python
 - Retain raw paired evidence beyond Actions' 14-day artifacts if longer-term offline regeneration is needed.
 - Investigate near-order, sparse-digit and skewed-key deficits with general mechanisms, not per-distribution tuning, against current-head continuous feedback.
 - Add cold-cache experiments, more seeds and threshold cases, and native-CPU placement controls for source A/B studies (existing CGU, alignment and engine-order screens are process-level). Validate alignment's dispersion across hosted CPU models; revisit multi-layout sampling only with held-out false-alert, detection and whole-job cost evidence.
-- Accept manual implementation tracking: run Bare Metal pilots for every production adapter, especially the slowest wide/random and adverse cases, and confirm each implementation's single remote job completes within 300 seconds with headroom. Verify native runtime images, glidesort-sqrt scratch evidence, per-algorithm Git publication and browser loading. Workflow plumbing and local functional checks alone do not satisfy remote timeout acceptance. Populate the [algorithm comparison](docs/benchmarks/algorithms.md) with a run of every opponent after memory tracking lands, and check that its cohort covers the opponents' u64 inputs.
+- Accept manual implementation tracking: run Bare Metal pilots for every production adapter, especially the slowest wide/random and adverse cases, and confirm each implementation's single remote job completes within 300 seconds with headroom. Verify native runtime images, glidesort-sqrt scratch evidence, per-implementation Git publication and browser loading. Workflow plumbing and local functional checks alone do not satisfy remote timeout acceptance. Populate the [implementation comparison](docs/benchmarks/implementations.md) with a run of every opponent after memory tracking lands, and check that its cohort covers the opponents' u64 inputs.
 
 ## Documentation figures
 

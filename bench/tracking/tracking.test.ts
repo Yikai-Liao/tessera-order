@@ -681,7 +681,7 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
   assert.equal(latest.runs.get("glidesort/serial")?.time, "2026-11-03T00:00:00Z");
   const data = comparisonData(runs)!;
   assert.deepEqual(
-    data.runs.map((entry) => [entry.algorithm, entry.memory]),
+    data.operations[0].runs.map((entry) => [entry.implementation, entry.memory]),
     [
       ["tessera", true],
       ["std-stable", true],
@@ -689,7 +689,11 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
       ["glidesort", false],
     ],
   );
-  assert.deepEqual(data.overview, data.figures[0]);
+  assert.deepEqual(data.overview, data.operations[0].figures[0]);
+  assert.deepEqual(
+    [data.operations[0].id, data.operations[0].label, data.operations[0].reference],
+    ["sort", "Full sort", "slice::sort"],
+  );
   const overview = data.overview!.chart as RowChart;
   assert.match(overview.guide, /the 2 measured input patterns/);
   assert.deepEqual(overview.columns, ["Speed", "Extra memory"]);
@@ -700,7 +704,8 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
   assert.ok(!JSON.stringify(rows).includes("radsort"));
   // Lengths with a single pattern per type are threshold probes: the length figure and the
   // short-input figure use only lengths where some type has several patterns.
-  const chart = (name: string) => data.figures.find((figure) => figure.name === name)!;
+  const chart = (name: string) =>
+    data.operations[0].figures.find((figure) => figure.name === name)!;
   const rowsOf = (name: string) =>
     (chart(name).chart as RowChart).groups.map((group) => [
       group.title,
@@ -717,7 +722,7 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
   assert.deepEqual(rowsOf("short"), [["1,000 u64 keys", ["random", "sorted"]]]);
   // Without a cohort, the comparison is published empty, replacing any earlier one.
   const alone = comparisonData(new Map([["tessera", runs.get("tessera")!]]));
-  assert.deepEqual([alone.spec, alone.runs, alone.overview, alone.figures], [uuid, [], null, []]);
+  assert.deepEqual([alone.spec, alone.overview, alone.operations], [uuid, null, []]);
   assert.equal(comparisonData(new Map()).spec, null);
   // Element types compare over the patterns every type has: here only random.
   const types = comparisonData(
@@ -742,7 +747,7 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
         ],
       ],
     ]),
-  ).figures.find((figure) => figure.name === "types");
+  ).operations[0].figures.find((figure) => figure.name === "types");
   assert.match(types!.chart.guide, /on the random input$/);
 });
 
@@ -819,10 +824,10 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   const scaling = trackingScaling(latest)!;
   assert.deepEqual([scaling.n, scaling.threads], [1000000, [1, 2]]);
   assert.deepEqual(scaling.inputs, [{ label: "u64 · random", tessera: [4, 8], rayon: [1, 2] }]);
-  const figure = data.figures.find((entry) => entry.name === "parallel")!;
+  const figure = data.operations[0].figures.find((entry) => entry.name === "parallel")!;
   // The table names every input in the aggregate.
   assert.match(figure.table, /\| u64 · random \| 4× \| 8× \| 1.00× \| 2× \|/);
-  const names = data.figures.map((figure) => figure.name);
+  const names = data.operations[0].figures.map((figure) => figure.name);
   assert.ok(names.includes("parallel"));
   // Without Rayon on one thread there is no baseline.
   latest.delete("rayon-stable/t1");
@@ -854,6 +859,7 @@ test("the growth sweep keeps one peak per implementation and length", () => {
     row(4096, "tessera", 99, "t4"),
   ];
   assert.deepEqual(growthPeaks(journal.join("\n"), plan), {
+    operation: "sort",
     type: "row_u32",
     distribution: "random",
     lengths: [1024, 4096],
@@ -881,6 +887,7 @@ test("the growth sweep replaces the memory figure with curves over length", asyn
     workflow: run.workflow,
     rustc: "rustc",
     native: { cc: "clang", cxx: "clang++", build: {} },
+    operation: "sort",
     type: "row_u32",
     distribution: "random",
     lengths: [1 << 20, 1 << 22, 1 << 24],
@@ -888,10 +895,12 @@ test("the growth sweep replaces the memory figure with curves over length", asyn
     peaks: { tessera: [2e6, 4e6, 8e6], "std-stable": [8e6, 32e6, 128e6], crumsort: [0, 0, 0] },
   });
   assert.equal(
-    comparisonData(runs).figures.find((figure) => figure.name === "memory")?.kind,
+    comparisonData(runs).operations[0].figures.find((figure) => figure.name === "memory")?.kind,
     undefined,
   );
-  const figure = comparisonData(runs, growth).figures.find((entry) => entry.name === "memory")!;
+  const figure = comparisonData(runs, growth).operations[0].figures.find(
+    (entry) => entry.name === "memory",
+  )!;
   assert.equal(figure.kind, "curves");
   assert.equal(figure.subject, "Extra memory by input length");
   assert.equal(figure.title, "Grows as √n, to 8 MB at 16M records");
@@ -900,6 +909,13 @@ test("the growth sweep replaces the memory figure with curves over length", asyn
   assert.match(JSON.stringify(figure.chart), /Below 1 kB at every length: crumsort \(0 B\)/);
   assert.match(figure.table, /\| crumsort \| 0 B \| 0 B \| 0 B \|/);
   assert.match(figure.table, /\| Tessera \| 2 MB \| 4 MB \| 8 MB \|/);
+  // A sweep of another operation stays out of the sort section.
+  assert.equal(
+    comparisonData(runs, { ...growth, operation: "argsort" }).operations[0].figures.find(
+      (entry) => entry.name === "memory",
+    )?.kind,
+    undefined,
+  );
 
   // Publication reads the sweep from the data root.
   const root = await mkdtemp(join(tmpdir(), "tessera-growth-"));
@@ -910,5 +926,8 @@ test("the growth sweep replaces the memory figure with curves over length", asyn
   }
   await writeFile(join(root, GROWTH_FILE), JSON.stringify(growth));
   const written = await writeComparison(root);
-  assert.equal(written.figures.find((entry) => entry.name === "memory")?.kind, "curves");
+  assert.equal(
+    written.operations[0].figures.find((entry) => entry.name === "memory")?.kind,
+    "curves",
+  );
 });

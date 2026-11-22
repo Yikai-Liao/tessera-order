@@ -197,7 +197,7 @@ bun run --silent tools plan --schema > benchmark-plan.schema.json               
 
 ## Choosing references and cases
 
-These rules decide which implementations and cases a cross-implementation comparison measures, for sorting and every other operation. The [comparison model proposal](../design/comparison-model-proposal.md) plans how operations, execution and implementations are identified and published.
+These rules decide which implementations and cases a cross-implementation comparison measures, for sorting and every other operation. The [comparison model proposal](../design/comparison-model-proposal.md) plans published comparisons of operations beyond full sorting.
 
 Every reference has one role for the operation it is compared on; an implementation without a role is not added.
 

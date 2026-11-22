@@ -12,10 +12,12 @@ import {
   type Execution,
   executionThreads,
   implementation,
+  operationDescription,
   parseCaseId,
   parseColumnId,
   parseCriterionId,
   referenceColumn,
+  referenceLabel,
   SORT,
 } from "../catalog.ts";
 import {
@@ -229,9 +231,9 @@ export function trackingGrowth(record: GrowthRecord): Growth {
 }
 
 /**
- * Build the published comparison from every implementation's journals and the growth sweep. Without a cohort, such as
- * before `slice::sort` has a run on Tessera's latest hardware, it has no figures, so the site
- * never shows an earlier comparison as the latest one.
+ * Build the published comparison from every implementation's journals and the growth sweep.
+ * Without a cohort, such as before the sort reference has a run on Tessera's latest hardware,
+ * it has no sections, so the site never shows an earlier comparison as the latest one.
  */
 export function comparisonData(
   runs: Map<string, TrackingRun[]>,
@@ -245,7 +247,12 @@ export function comparisonData(
   const parallel = scaling ? renderParallel(scaling) : null;
   // Parallel sorting follows the serial figures and precedes memory.
   const all = cohort
-    ? comparisonFigures(field, cohort, true, growth && trackingGrowth(growth))
+    ? comparisonFigures(
+        field,
+        cohort,
+        true,
+        growth?.operation === SORT.kind ? trackingGrowth(growth) : undefined,
+      )
     : [];
   const memory = all.findIndex((figure) => figure.name === "memory");
   if (parallel) all.splice(memory < 0 ? all.length : memory, 0, parallel);
@@ -258,27 +265,32 @@ export function comparisonData(
     chart,
     table,
   }));
+  const runsOf = field.implementations.map(({ name }) => {
+    const run = latest!.runs.get(columnId({ implementation: name, execution: "serial" }))!;
+    return {
+      implementation: name,
+      label: implementation(name).label,
+      hash: run.hash,
+      time: run.time,
+      workflow: run.workflow,
+      memory: run.memory !== undefined,
+    };
+  });
   return comparisonSchema.parse({
     spec: latest?.spec ?? null,
-    runs: field.implementations
-      .filter(() => cohort)
-      .map(
-        ({ name }) =>
-          [
-            name,
-            latest!.runs.get(columnId({ implementation: name, execution: "serial" }))!,
-          ] as const,
-      )
-      .map(([id, run]) => ({
-        algorithm: id,
-        label: implementation(id).label,
-        hash: run.hash,
-        time: run.time,
-        workflow: run.workflow,
-        memory: run.memory !== undefined,
-      })),
     overview: figures.find((figure) => figure.name === "overview") ?? null,
-    figures,
+    // Main tracking measures sorting only; another operation adds its section when tracked.
+    operations: cohort
+      ? [
+          {
+            id: SORT.kind,
+            label: operationDescription(SORT),
+            reference: referenceLabel(SORT, "serial"),
+            runs: runsOf,
+            figures,
+          },
+        ]
+      : [],
   });
 }
 

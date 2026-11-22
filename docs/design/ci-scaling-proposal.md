@@ -40,6 +40,6 @@ Comparisons with other implementations answer "how does Tessera compare", not "d
 1. Cache hygiene: workflow-only and immediately measurable on preparation time.
 2. Fingerprint reuse for the existing lanes.
 3. Operation cases in the continuous plan (implemented; entry-ownership selection deferred).
-4. Per-operation cross-implementation plans and their release coverage, after the [comparison model](comparison-model-proposal.md#stages) identifies operations and execution in plans and results.
+4. Per-operation cross-implementation plans and their release coverage, following the [comparison model](comparison-model-proposal.md#plan).
 
 Each step records its measured critical path and runner-minutes in its PR. The [roadmap](../../ROADMAP.md) tracks the steps.

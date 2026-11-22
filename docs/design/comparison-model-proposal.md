@@ -1,19 +1,14 @@
 # Comparison model proposal
 
-Status: the vocabulary stage has landed; the remaining stages are proposed. The benchmark tooling grew around one operation, complete serial sorting, and now also measures argsort, selection and Rayon sorting; 0.2 adds parallel argsort. This page owns the planned identity model, names, plan and data formats, and the per-operation comparison pages until they land. The rules for choosing references and cases are current and belong to the [benchmark protocol](../development/benchmarking.md#choosing-references-and-cases); current module boundaries belong to [benchmark tooling](benchmark-tooling.md). When a stage lands, move its facts to those owners and delete it here.
+Status: the vocabulary and identity stages have landed; routes in results and publication are proposed. The benchmark tooling grew around one operation, complete serial sorting, and now also measures argsort, selection and Rayon sorting; 0.2 adds parallel argsort. Current identities, plans and the CLI belong to the [benchmark protocol](../development/benchmarking.md#case-identities). This page owns the planned routes, published data formats and the per-operation comparison pages until they land. The rules for choosing references and cases are current and belong to the [benchmark protocol](../development/benchmarking.md#choosing-references-and-cases); current module boundaries belong to [benchmark tooling](benchmark-tooling.md). When a stage lands, move its facts to those owners and delete it here.
 
 ## Problem
 
-A measurement has four independent dimensions, but the tooling encodes them in overlapping places, each defaulting to serial full sorting:
+Cases, columns and plans now name operation and execution explicitly ([identities](../development/benchmarking.md#case-identities)). The remaining problems are in results and publication:
 
-- **Execution is encoded three times.** Thread counts are part of implementation IDs (`tessera-par-4`, `rayon-stable-8`), of a separate `[[parallel]]` plan rule kind and of catalog `modes` (`par`, `par-1` … `par-8`). Each new thread count or parallel opponent adds catalog IDs, so identities grow as implementations × thread counts. Parallel rules cannot carry an operation, so a plan cannot express `par_argsort`.
-- **Operation is encoded twice.** Plans carry `operation`, while `modes` are named after the sort entry point their full sorts call (`sort`, `sort_unstable`, `par_sort`). A plan's `schema` number also discriminates the operation: sorting plans use schema 1, other operations schema 2, and schema 1 include rules may carry their own operation that implementation comparisons reject.
-- **Case IDs are asymmetric.** Full sorts have no operation component (`type/distribution/length/seed`); other operations append one (`…/select/32768`); Criterion IDs add a `rust/` prefix and a trailing mode. Execution has no component, so readers recover it from the implementation ID or from the last path segment.
-- **One concept has several names.** The measured result is called operation or mode (and `types.task` means keys versus records). Selection is `select` in plans and IDs, `select_nth` in the API and figures, and "Stable selection" in reports.
 - **Published data still says "algorithm".** The `benchmark-data/<algorithm>/` directories and the `algorithm` field of `comparison.json` runs identify who implements a result, while the code and CLI say implementation.
 - **Implementation entries carry sort semantics.** `std-stable` is labelled `slice::sort`, although its argsort route sorts an index vector by key and its selection route sorts the whole input. `stable` and `family` describe a route: `std-unstable` selects with `select_nth_unstable`. `tessera-full` is a route (a full sort used as a selection reference) with its own identity.
-- **Reports and publication assume sorting.** The report charts fix "speed vs slice::sort" as the denominator, `catalog.comparison` holds only the sort ranking cohort, and tracking runs, `comparison.json` and `growth.json` have no operation or execution field. Retired operations (`top-k`, `segments` and others) share the live operation union because retained results still decode them.
-- **Thread counts multiply identities.** Each thread count is a catalog entry per parallel implementation and a mode, while revision comparisons recognize only `par-4`.
+- **Reports and publication assume sorting.** The report charts fix "speed vs slice::sort" as the denominator, only `sort` has a ranking cohort, tracking runs have no operation field, and `comparison.json` and `growth.json` have neither operation nor execution.
 
 ## Model
 
@@ -23,7 +18,7 @@ column      = implementation × execution         what is measured on a case
 measurement = column × case, carried out by a route
 ```
 
-Paired statistics compare every column measured on one case in the same blocks, so a four-thread Tessera call and serial Tessera share a case and their ratio stays paired. Execution therefore belongs to the column, not to the case; the current problem is only that it is encoded once per catalog entry and again in modes and plan rule kinds.
+Paired statistics compare every column measured on one case in the same blocks, so a four-thread Tessera call and serial Tessera share a case and their ratio stays paired. Execution therefore belongs to the column, not to the case.
 
 | Concept | Meaning | Owner |
 |---|---|---|
@@ -35,36 +30,14 @@ Paired statistics compare every column measured on one case in the same blocks, 
 
 Consequences:
 
-- The catalog loses `modes` and thread-suffixed IDs: `tessera-par-4` becomes column `tessera` at `t4`, and `rayon-stable-8` becomes `rayon-stable` at `t8`. `par_argsort` is `argsort` at `tN`, not a separate operation.
+- `par_argsort` is `argsort` at `tN`, not a separate operation.
 - `tessera-full` remains a separate implementation: a selection comparison measures Tessera's selection and Tessera's full sort on the same case, and one column per implementation and execution cannot hold two routes. Its label names the composition ("Tessera sort"). Revision builds (`tessera-baseline`, `tessera-copy`) remain separate identities because they are different source trees.
 - A displayed row name combines the implementation label and the route detail when they differ, such as "slice::sort_unstable · select_nth_unstable". Section titles derive from the operation's entry labels and execution ("argsort", "par_argsort · 8 threads"), always naming the worker count.
 - Stability is a property of the route; the existing rule that unstable record results never enter a stable ranking applies per route.
 
-## Identities
-
-Every identity names every dimension, with no implicit default:
-
-```text
-case         operation/type/distribution/length/seed[/parameters]
-column       implementation/execution
-Criterion    rust/case/execution
-             sort/u64/random/65536/s1
-             select_nth/u64/random/65536/s1/32768
-             tessera/t4, std-stable/serial
-             rust/argsort/row_u64/random/1000000/s1/t4
-```
-
-One formatter and decoder pair per identity owns the grammar in TypeScript and in Rust, checked by the shared fixture; no consumer splits IDs itself. A resumable group is `operation/type/distribution[/parameters]`.
-
-Existing IDs are not migrated. The tooling has no compatibility requirement before a release, and a translation table would be a second grammar to maintain. Tessera's Bencher history therefore restarts at the new IDs, and the [main tracking](../development/continuous-benchmarks.md#main-long-term-tracking) data branch is rewritten when the new IDs reach main. Results retained by earlier tooling are regenerated with that tooling revision, so current decoders accept only current operations and retired operations leave the code.
-
-## Plans and CLI
-
-- **Plan schema 3.** `schema` is a format version only. A plan names `implementations`; every include rule carries input axes and may carry `operation` (default `sort`) and `executions` (default `["serial"]`); `exclude` rules may exclude any of those axes. The `[[parallel]]` rule kind and the plan-level operation are removed. A column is measured on a rule's case when its implementation supports that operation and execution; Tessera and `std-stable` remain required serial controls for every case of an implementation comparison. `compare implementations` still measures one operation per session.
-- **CLI.** `--operation` takes the operation names above. `--executions` selects execution like `--lengths`. `--group` takes the group ID above. Direct executables take a plan instead of `--suite`.
-- **Cohorts.** `catalog.comparison` moves into each operation's entry, so each operation names its own ranking types and patterns.
-
 ## Results and publication
+
+Results keep the current identities. Tessera's Bencher history restarts at them, and the [main tracking](../development/continuous-benchmarks.md#main-long-term-tracking) data branch is rewritten, because a translation table from earlier IDs would be a second grammar to maintain; results from earlier tooling regenerate with that tooling revision.
 
 - **Names.** The `benchmark-data/<implementation>/` directories, the `implementation` field of `comparison.json` runs, the page `docs/benchmarks/algorithms.md` with its URL and `AlgorithmComparison.vue` are renamed with the data branch. No old name is kept as an alias; a rename that leaves the previous term in use somewhere is not finished.
 - **Run records** in `<implementation>/YYYY-MM.jsonl` add `operation`, `execution` and `routes` (route per case group, from the runner's listing). A tracking job measures one implementation, operation and execution, so each job keeps its own time budget, and the comparison takes the latest run per (implementation, operation, execution). An aggregate comes from one run; it never combines cases from different runs.
@@ -92,6 +65,5 @@ The strongest public implementations for selection and argsort are still to be s
 
 Each stage is a separate PR and changes no measured algorithm, input or sampling.
 
-1. **Catalog, IDs and plans.** Add the `operations` table, the execution axis, the identity owners and plan schema 3 together, because removing thread-suffixed IDs needs plans that can select execution; remove `modes`, thread-suffixed IDs and retired operations. Compare complete serial and parallel listings before and after, and check shard partitioning.
-2. **Routes in results.** The runner lists routes, manifests retain them and reports take the denominator from the operation.
-3. **Publication.** Rewrite tracking records, `comparison.json` and `growth.json` (including their remaining `algorithm` fields), rename the comparison page and its component, reset the data branch and Tessera's Bencher history, and render per-operation sections. Then populate argsort and selection comparisons under the [CI scaling proposal](ci-scaling-proposal.md#keep-cross-implementation-comparisons-out-of-pr-timing).
+1. **Routes in results.** The runner lists routes, manifests retain them and reports take the denominator from the operation.
+2. **Publication.** Rewrite tracking records, `comparison.json` and `growth.json` (including their remaining `algorithm` fields), rename the comparison page and its component, reset the data branch and Tessera's Bencher history, and render per-operation sections. Then populate argsort and selection comparisons under the [CI scaling proposal](ci-scaling-proposal.md#keep-cross-implementation-comparisons-out-of-pr-timing).

@@ -115,7 +115,7 @@ This measures whole calls, not scan throughput, code generation or attribution; 
 
 `compare commit [COMMIT]` and `compare implementations` snapshot staged, unstaged and untracked sources without touching the checkout, build under `~/code/tessera-bench/` (`TESSERA_BENCH_WORK`) and clean up afterwards. Builds reuse `target/tessera-bench` (`TESSERA_BENCH_TARGET_DIR`, relative to the repository root); remove it for a cold build and never share it across trust boundaries. Internal symlinks are materialized; escaping or dangling links and cycles are rejected, and baseline links must resolve inside the selected commit's archive.
 
-`compare commit` accepts any local commit compatible with the current crate API, harness and lockfile: both revisions use the current harness, lockfile and toolchain, and the baseline substitutes only `rust/tessera-order`. Linux workers run under `setarch -R` (checked before building). Timed IDs must match between revisions. The `local` plan measures only `rust/u64/random/65536/s1/api`; override its axes instead of running the full continuous inventory, and narrow IDs with `--filter`.
+`compare commit` accepts any local commit compatible with the current crate API, harness and lockfile: both revisions use the current harness, lockfile and toolchain, and the baseline substitutes only `rust/tessera-order`. Linux workers run under `setarch -R` (checked before building). Timed IDs must match between revisions. The `local` plan measures only `rust/sort/u64/random/65536/s1/serial`; override its axes instead of running the full continuous inventory, and narrow IDs with `--filter`.
 
 Fresh worker pairs measure adjacent A/B samples, reversing startup, warm-up and measurement order on alternate pairs. The catalog owns each revision's warm-up and sampling budget, divided across samples. Input preparation repeats in each process outside the clock. The report gives the median B/A ratio and its distribution-free 99% median interval; only an interval entirely outside 0.95–1.05 alerts. Coverage is nominal, per case and assumes independent pairs; the [continuous protocol](continuous-benchmarks.md#within-job-scheduling) defines batching and clocks. This is a development screen, not a placement-controlled claim.
 
@@ -153,20 +153,20 @@ If the host libc needs instructions Valgrind lacks, build the baseline-ISA conta
 
 ## Experiment plans
 
-Plans in [`bench/plans/`](../../bench/plans/) use TOML or JSON and decode into one validated selection. Repository sorting presets retain schema 1; explicit non-sort operations use [schema 2](#serial-operation-comparisons). They describe what to measure; the harness owns input generation and the protocol.
+Plans in [`bench/plans/`](../../bench/plans/) use TOML or JSON and decode into one validated selection. Every plan uses schema 3. They describe what to measure; the harness owns input generation and the protocol.
 
 | Preset | Default selection |
 |---|---|
-| `local` | Tessera, random `u64`, 65,536 records, `api` |
-| `continuous` / `main` | One shared PR/main selection and explicit serial/four-thread Tessera implementations; see the [cases](continuous-benchmarks.md#cases) |
+| `local` | Tessera, random `u64`, 65,536 records, serial |
+| `continuous` / `main` | One shared PR/main selection of Tessera, serial and `t4`; see the [cases](continuous-benchmarks.md#cases) |
 | `smoke` | Rust competitors, 125 inputs at 1,000 records |
 | `release` | Rust and native competitors, 381 inputs across four lengths |
-| `parallel` | Serial controls, Tessera-8 and Rayon stable-8; 16 inputs at 1M records |
+| `parallel` | Serial controls, Tessera and Rayon stable at `t8`; 16 inputs at 1M records |
 
 A plan is a union of `include` products followed by `exclude` products:
 
 ```toml [my-plan.toml]
-schema = 1
+schema = 3
 implementations = ["glidesort", "radsort"]
 
 [[include]]
@@ -180,9 +180,9 @@ distributions = ["zipf2"]
 lengths = [1_000_000]
 ```
 
-Values within an axis are alternatives, axes within a rule form a Cartesian product, each included input is measured once, and any matching exclusion removes a combination. Omitted axes use catalog defaults when including and match everything when excluding. Empty choices and unknown fields or identities are errors. The axes are `types`, `distributions` and `lengths`: positive record counts, or `"insertion-max"`, `"insertion-next"` and `"tile-next"`, resolved from the measured library's thresholds and record width. Case IDs keep the resolved number, and a commit comparison rejects differing IDs.
+Values within an axis are alternatives, axes within a rule form a Cartesian product, each included input is measured once, and any matching exclusion removes a combination. Omitted axes use catalog defaults when including and match everything when excluding. Empty choices and unknown fields or identities are errors. The input axes are `types`, `distributions` and `lengths`: positive record counts, or `"insertion-max"`, `"insertion-next"` and `"tile-next"`, resolved from the measured library's thresholds and record width. Case IDs keep the resolved number, and a commit comparison rejects differing IDs. A rule may also set `operation` ([operation comparisons](#serial-operation-comparisons)), defaulting to `sort`, and `executions`, defaulting to `["serial"]`; an exclusion with either matches only those values.
 
-There is no `harness` field: all plans use the same catalog, input generator and sorting adapters. Parsing retains exactly the requested implementations. The Criterion/paired worker requires one implementation per API mode because its IDs identify input and mode, not implementation; tracking stores implementations in separate directories. Serial adapters use `include`; parallel adapters use the separate `parallel` rules when present, otherwise `include`, with their actual thread count in the ID. The continuous plan explicitly selects `tessera` and `tessera-par-4`; a Tessera selection does not implicitly add another implementation. Paired implementation blocks instead use the union of both selections as a common input cohort and preparation adds `tessera` and `std-stable` controls to the frozen plan, with a separate Tessera A/A call during sampling. Inputs use seed 1, and an empty selection fails before timing. Native implementations add pinned source acquisition and native compilation. Unsupported adapter/type pairs are never measured or reported as zero.
+There is no `harness` field: all plans use the same catalog, input generator and sorting adapters. Parsing retains exactly the requested implementations. An implementation measures an execution only through an entry point it has: `serial` unless the catalog marks it parallel-only, and `tN` only for a parallel full sort, in a pool of N workers. The Criterion/paired worker measures one implementation because its [Criterion IDs](#case-identities) name case and execution, not implementation; tracking stores implementations in separate directories. The continuous plan selects `tessera` serially and at `t4`; a Tessera selection does not implicitly add another implementation. Paired implementation blocks instead use the union of both selections as a common input cohort and preparation adds `tessera` and `std-stable` controls to the frozen plan, with a separate Tessera A/A call during sampling. Inputs use seed 1, and an empty selection fails before timing. Native implementations add pinned source acquisition and native compilation. Unsupported adapter/type pairs are never measured or reported as zero.
 
 ```sh
 bun run --silent tools plan local --types u32,u64 --distributions random,zipf2           # preview
@@ -193,7 +193,7 @@ bun run tools compare implementations --plan smoke --implementations glidesort,r
 bun run --silent tools plan --schema > benchmark-plan.schema.json                         # editor schema
 ```
 
-`--plan` takes a preset name or a `.toml`/`.json` path. Comma-separated CLI axes replace that axis in every inclusion rule; exclusions stay. `--implementations` (only `compare implementations` and `plan`) replaces the implementation selection; only implementation-block preparation adds its required controls. Presets are not different execution routes: use `local` or `continuous` for revision/counter work, and `smoke`, `release` or `parallel` for implementation comparisons. Revision comparisons measure only `tessera`, `tessera-par-4` or both, because their builds replace only the Tessera library; counters require a serial-only selection. These are operation constraints, not plan formats. `--group` runs one resumable group and marks the report partial. Every result keeps its frozen `plan.json`.
+`--plan` takes a preset name or a `.toml`/`.json` path. Comma-separated CLI axes replace that axis in every inclusion rule; exclusions stay. `--implementations` (only `compare implementations` and `plan`) replaces the implementation selection; only implementation-block preparation adds its required controls. `--executions serial,t4` replaces every inclusion rule's executions. Presets are not different execution routes: use `local` or `continuous` for revision/counter work, and `smoke`, `release` or `parallel` for implementation comparisons. Revision comparisons measure only `tessera`, at any executions, because their builds replace only the Tessera library; their operation rules run serially, and counters require a serial-only selection. These are operation constraints, not plan formats. `--group` runs one resumable group and marks the report partial. Every result keeps its frozen `plan.json`.
 
 ## Choosing references and cases
 
@@ -227,19 +227,19 @@ New plans admit four operations. Admission is for a caller-visible result worth 
 |---|---|---|
 | `sort` (default) | None | Complete in-place sorting. |
 | `argsort` | None | Exact stable index permutation of an immutable input, including creation of the index vector. |
-| `select` | `--index I` | One zero-based ranked member and correct membership on either side. Stable variants preserve the input order of ties throughout the slice. |
+| `select_nth` | `--index I` | One zero-based ranked member and correct membership on either side. Stable variants preserve the input order of ties throughout the slice. |
 | `partition-buckets` | `--bucket-count R` | Stable grouping into R categories and all R+1 offsets, including empty categories. |
 
 - **Argsort.** Tessera calls `argsort` or `argsort_by_key`. The reference constructs indices and sorts them by key; `std-unstable` breaks ties by original index to return the same stable permutation.
 - **Selection.** Tessera calls `select_nth` or `select_nth_by_key`. `std-stable`, Glidesort, Radsort and the optional `tessera-full` control sort the whole input as semantic references, not as partial selectors. `std-unstable` uses partial selection and may choose arbitrary equal-key members, including on payload records. It must still return the correct ranked key, partition membership by key and preserve every record. Stable routes also preserve the exact stable member identities at the rank and on each side. Ratios between these routes do not isolate the cost of stability.
 - **Bucket partition.** The category is the encoded key modulo R, not the complete original key. Tessera calls `sort_by_cached_key` using the narrowest unsigned key width that represents the categories, then computes offsets. On inputs of at least two records, the cached-key sort evaluates the classifier once per record; the offset pass evaluates it again. `std-stable`, Glidesort, Radsort and `tessera-full` stably sort by the same category and compute the same offsets. These are sorting compositions, not dedicated output-buffer partition implementations. The checker verifies stable category order and every offset.
 
-`compare implementations` measures one operation at a time. Typed Rust preparation admits only supported adapter/input pairs and records each implementation route and omission. Tessera and `std-stable` are required controls for every selected case, even in a restricted group; an unsupported control fails the run before it writes measurement journals.
+`compare implementations` measures one operation at a time; parallel executions apply only to full sorting. Typed Rust preparation admits only supported adapter/input pairs and records each implementation route and omission. Tessera and `std-stable` are required controls for every selected case, even in a restricted group; an unsupported control fails the run before it writes measurement journals.
 
 ```sh
-bun run --silent tools plan smoke --operation select --index 32768 \
+bun run --silent tools plan smoke --operation select_nth --index 32768 \
   --types u64,row_u64 --distributions random,d16 --lengths 65536
-bun run tools compare implementations --operation select --index 32768 \
+bun run tools compare implementations --operation select_nth --index 32768 \
   --implementations std-stable,std-unstable,glidesort,radsort,tessera-full \
   --types u64,row_u64 --distributions random,d16 --lengths 65536 --cpu 2
 bun run tools compare implementations --operation argsort \
@@ -247,15 +247,15 @@ bun run tools compare implementations --operation argsort \
   --types u64,record128 --distributions random --lengths 65536 --cpu 2
 ```
 
-A custom non-sort plan uses `schema = 2` with, for example, `operation = { kind = "select", index = 32768 }`. The bucket operation uses `bucket_count`. Non-sort plans require literal positive input lengths. The selection index must be a nonnegative integer smaller than every surviving input length, and the bucket count must be positive. Unrelated parameter flags are errors.
+A rule selects an operation with, for example, `operation = { kind = "select_nth", index = 32768 }`. The bucket operation uses `bucket_count`. Non-sort plans require literal positive input lengths. The selection index must be a nonnegative integer smaller than every surviving input length, and the bucket count must be positive. Unrelated parameter flags are errors.
 
-Revision plans can instead mix sorting and serial operations by setting `operation` on individual include rules in schema 1, as the [PR plan](continuous-benchmarks.md#cases) does. The operation applies only to that rule's inputs and follows the same parameter checks. Exclude and parallel rules cannot carry operations. An explicit `--operation` drops rules with their own operation and applies the requested operation to the remaining rules, using schema 1 for `sort` and schema 2 otherwise. Implementation comparisons reject per-rule operations; linked revision and counter studies are full-sort only. [Main tracking](continuous-benchmarks.md#main-long-term-tracking) uses only the sorting cases.
+Revision plans can mix sorting and serial operations across rules, as the [PR plan](continuous-benchmarks.md#cases) does. An explicit `--operation` drops rules with their own operation and applies the requested operation to the remaining rules. Implementation comparisons require a single operation, because a report's sections and denominator belong to one; linked revision and counter studies are full-sort only. [Main tracking](continuous-benchmarks.md#main-long-term-tracking) uses only the sorting cases.
 
 The timer covers each complete call, including scratch allocation, classification where applicable, and mandatory output construction. Argsort and bucket partition retain their newly allocated results until checking; discarding earlier results, restoring mutable inputs and verification are outside the clock. The prepared batch-memory cap includes mutable record/payload buffers and retained output; shared originals/references and transient call workspace are separate. Implementation comparisons use the same paired blocks and A/A statistic as sorting, and report time per input record, not per retained index, selected rank or bucket.
 
 The separate allocation worker verifies one complete call for every admitted case and variant. Peak extra heap includes output: O(n) indices for argsort, O(R) offsets for bucket partition and no heap output for in-place selection. Memory rows retain peak extra heap and output bytes separately; reports estimate workspace by subtracting retained output bytes from peak extra heap.
 
-Full-sort IDs remain unchanged. Other comparison IDs append the operation and parameters, for example `u64/random/65536/s1/select/32768` with resumable group `u64/random/select/32768`. The manifest keeps the exact operation and frozen plan. `tools report` still regenerates retained results for retired operations with the original IDs. Retired operations cannot be selected or resumed with the current CLI. Non-sort implementation reports remain tables and JSON; the full-sort figures keep their existing cohorts and meaning.
+The manifest keeps the exact operation and frozen plan. Non-sort implementation reports remain tables and JSON; the full-sort figures keep their cohorts and meaning.
 
 ## Local parallel comparisons
 
@@ -267,9 +267,9 @@ bun run tools compare implementations --plan parallel \
   --cpu 0,2,4,6,8,10,12,14 --out /tmp/tessera-parallel
 ```
 
-The defaults are `tessera-par-8` and `rayon-stable-8` plus the serial controls; one-, two- and four-worker adapters are `--implementations` choices. Each adapter owns a pool of its width, built and warmed outside timing and allocation counting; each sort includes `ThreadPool::install` and the public call. Workers inherit the affinity mask, and Linux thread checks allow only the pool's workers plus the caller. Oversubscribed runs are not scaling evidence.
+The plan measures `tessera` and `rayon-stable` at `t8` beside the serial controls; `--executions serial,t1,t2,t4` chooses other pool sizes. Each adapter owns a pool of its width, built and warmed outside timing and allocation counting; each sort includes `ThreadPool::install` and the public call. Workers inherit the affinity mask, and Linux thread checks allow only the pool's workers plus the caller. Oversubscribed runs are not scaling evidence.
 
-The ratio is variant time over paired serial Tessera time; its inverse is the whole-call speedup. The A/A range controls the serial baseline, not parallel variability, and there is no placement control. Peak extra heap excludes pool storage and thread stacks. Inputs below the parallel cutoff and one-worker pools only check the serial fallback.
+The ratio is a column's time over paired serial Tessera time; its inverse is the whole-call speedup. The A/A range controls the serial baseline, not parallel variability, and there is no placement control. Peak extra heap excludes pool storage and thread stacks. Inputs below the parallel cutoff and one-worker pools only check the serial fallback.
 
 ## Native prerequisites
 
@@ -299,13 +299,29 @@ taskset -c 2 target/compare-default/release/compare run --plan release --out ben
 bun run tools report bench/results/release
 ```
 
-`compare list` and `compare validate --plan smoke|release` check support and correctness. Direct binaries default to nine blocks (`--blocks 3` for a short screen, for timing and memory alike); a retained manifest fixes the budget. `compare run` first runs the sibling `memory` executable, which repairs its journal and measures missing rows. `--group TYPE/DISTRIBUTION` (for example `u64/random`) selects one group; a repeated run skips completed groups and replaces an interrupted one. A changed executable, provenance, plan or host fingerprint needs a new directory. Directories with matching hosts and manifests report together (`bun run tools report DIR1 DIR2`, written to the first). The report needs the complete plan unless `--partial` is given, and writes `bmf.json` for the Bencher CLI.
+`compare list` and `compare validate --plan smoke|release` check support and correctness. Direct binaries default to nine blocks (`--blocks 3` for a short screen, for timing and memory alike); a retained manifest fixes the budget. `compare run` first runs the sibling `memory` executable, which repairs its journal and measures missing rows. `--group OPERATION/TYPE/DISTRIBUTION[/PARAMS]` (for example `sort/u64/random`) selects one group; a repeated run skips completed groups and replaces an interrupted one. A changed executable, provenance, plan or host fingerprint needs a new directory. Directories with matching hosts and manifests report together (`bun run tools report DIR1 DIR2`, written to the first). The report needs the complete plan unless `--partial` is given, and writes `bmf.json` for the Bencher CLI.
 
 Every build uses the SIMD backend. Revisions without it, dual-build results and schema-1 sessions are rejected; report them with their original tooling revision.
 
 ## Cases and plans
 
-Case IDs are `type/distribution/length/s1`. A group is all lengths of one type and distribution. The release plan has 381 inputs: the original 260-case cross-type matrix and 121 cases using the high-value distributions from continuous tracking; `smoke` validates the same 125 type/distribution pairs at 1,000 records.
+### Case identities
+
+A case is one operation on one input; a column is one implementation at one execution. [`catalog.ts`](../../bench/catalog.ts) and [`plan.rs`](../../bench/rust/src/plan.rs) own the formatters and decoders, checked against a shared fixture:
+
+| Identity | Grammar | Example |
+|---|---|---|
+| Case | `operation/type/distribution/length/s1[/params]` | `select_nth/u64/random/65536/s1/32768` |
+| Group | `operation/type/distribution[/params]`: all lengths of one input | `sort/u64/random` |
+| Execution | `serial`, or `tN` for the parallel entry point in an N-worker pool; `t1` is not `serial` | `t4` |
+| Column | `implementation/execution` | `rayon-stable/t4` |
+| Criterion ID | `rust/case/execution` | `rust/sort/u64/random/65536/s1/serial` |
+
+Results with earlier IDs regenerate with their original tooling revision.
+
+### Input coverage
+
+The release plan has 381 inputs: the original 260-case cross-type matrix and 121 cases using the high-value distributions from continuous tracking; `smoke` validates the same 125 type/distribution pairs at 1,000 records.
 
 | Type | Task | Representation |
 |---|---|---|
@@ -327,7 +343,7 @@ Payloads encode the original index and fill every remaining byte deterministical
 | `sparse_digits`, `bimodal` | Sparse digit occupancy; two distant high-cardinality clusters | `u64`, `row_u64`, `record128`, `owned` | 65,536; 1M |
 | `finite_signed` | Finite signed floats with bounded magnitudes | `f64` | 1,000; 65,536; 1M; 10M |
 
-All nine added integer distributions also run on `u64` at 10M. Type restrictions keep each generator meaningful (narrowing `bimodal` to `u32` would discard its cluster bit). Memory is measured for every supported variant on inputs up to 128 MiB of records, which includes `u64` at 10M; serial Tessera's peak is also measured on larger inputs to size `glidesort-sqrt`, and selected `tessera-par-*` adapters on every selected case.
+All nine added integer distributions also run on `u64` at 10M. Type restrictions keep each generator meaningful (narrowing `bimodal` to `u32` would discard its cluster bit). Memory is measured for every supported variant on inputs up to 128 MiB of records, which includes `u64` at 10M; serial Tessera's peak is also measured on larger inputs to size `glidesort-sqrt`, and parallel columns on every selected case.
 
 ### Input generation
 

@@ -37,7 +37,7 @@ features:
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 
 <script setup lang="ts">
-import AlgorithmComparison from "./.vitepress/theme/components/AlgorithmComparison.vue";
+import ImplementationComparison from "./.vitepress/theme/components/ImplementationComparison.vue";
 </script>
 
 ## In three lines
@@ -58,6 +58,6 @@ The key is an integer up to 128 bits, an `f32` or `f64`, or `Reverse` of one of 
 
 ## Measured against other sorts
 
-<AlgorithmComparison view="overview" />
+<ImplementationComparison view="overview" />
 
 [Use the library](guide/getting-started.md), [learn the algorithm](explain/index.md), or [choose a development task](README.md).

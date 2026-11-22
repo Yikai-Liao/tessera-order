@@ -127,7 +127,7 @@ export default defineConfig({
         activeMatch: "^/benchmarks/",
         items: [
           { text: "Overview and history", link: "/benchmarks/" },
-          { text: "Algorithm comparison", link: "/benchmarks/algorithms" },
+          { text: "Implementation comparison", link: "/benchmarks/implementations" },
         ],
       },
       {
@@ -159,7 +159,7 @@ export default defineConfig({
           text: "Performance",
           items: [
             { text: "Overview and history", link: "/benchmarks/" },
-            { text: "Algorithm comparison", link: "/benchmarks/algorithms" },
+            { text: "Implementation comparison", link: "/benchmarks/implementations" },
           ],
         },
       ],

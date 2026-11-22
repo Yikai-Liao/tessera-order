@@ -103,6 +103,8 @@ export const growthSchema = z
     workflow: runSchema.shape.workflow,
     rustc: z.string(),
     native: z.object({ cc: z.string(), cxx: z.string(), build: z.json() }),
+    /** The kind of the one operation the growth plan measures; that section shows the sweep. */
+    operation: z.string().min(1),
     type: z.string().min(1),
     distribution: z.string().min(1),
     lengths: z
@@ -206,21 +208,36 @@ const figureSchema = z.object({
   /** Markdown table of every plotted value, naming each sort, including values beyond the axis. */
   table: z.string(),
 });
-/** Cross-implementation figures from each implementation's latest run, published as `comparison.json`. */
+/**
+ * Cross-implementation figures from each implementation's latest run, published as
+ * `comparison.json`: one section per operation with figures, in catalog order.
+ */
 export const comparisonSchema = z.object({
   // Null before Tessera has a run.
   spec: z.uuid().nullable(),
-  runs: z.array(
+  /** The home page's sort ranking, also the first figure of the sort section. */
+  overview: figureSchema.nullable(),
+  operations: z.array(
     z.object({
-      algorithm: z.string().min(1),
+      /** The operation kind, such as `sort`. */
+      id: z.string().min(1),
+      /** The section title, such as "Stable sort". */
       label: z.string().min(1),
-      hash: z.string().regex(/^[a-f0-9]{40}$/),
-      time: z.iso.datetime(),
-      workflow: z.url(),
-      memory: z.boolean(),
+      /** The display label of the implementation every speed in the section divides by. */
+      reference: z.string().min(1),
+      /** The serial run behind each implementation's row. */
+      runs: z.array(
+        z.object({
+          implementation: z.string().min(1),
+          label: z.string().min(1),
+          hash: z.string().regex(/^[a-f0-9]{40}$/),
+          time: z.iso.datetime(),
+          workflow: z.url(),
+          memory: z.boolean(),
+        }),
+      ),
+      figures: z.array(figureSchema).min(1),
     }),
   ),
-  overview: figureSchema.nullable(),
-  figures: z.array(figureSchema),
 });
 export type ComparisonData = z.infer<typeof comparisonSchema>;

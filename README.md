@@ -81,7 +81,7 @@ The optional `rayon` feature adds `par_sort` and `par_sort_by_key` (0.1: `par_st
 
 Track Rust benchmark trends on the [public Bencher dashboard](https://bencher.dev/perf/yikai-liao-s-project). These continuous measurements flag changes to investigate; use the [benchmark protocol](https://github.com/Yikai-Liao/tessera-order/blob/main/docs/development/benchmarking.md#command-capabilities) for paired implementation comparisons and source-change attribution.
 
-The [algorithm comparison](https://yikai-liao.github.io/tessera-order/benchmarks/algorithms.html) ranks Tessera among other sorts by speed and extra memory. The preview below tracks Tessera alone on main.
+The [implementation comparison](https://yikai-liao.github.io/tessera-order/benchmarks/implementations.html) ranks Tessera among other sorts by speed and extra memory. The preview below tracks Tessera alone on main.
 
 Main trend: the geometric mean of each mode's run-time change since the first run on the current runner specification; lower is faster. The [interactive page](https://yikai-liao.github.io/tessera-order/benchmarks/) filters cases by type, distribution, length and mode, compares cases over any time range and lists absolute times.
 

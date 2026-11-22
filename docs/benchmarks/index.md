@@ -7,7 +7,7 @@ pageClass: performance-page
 # Performance
 
 <script setup lang="ts">
-import AlgorithmComparison from "../.vitepress/theme/components/AlgorithmComparison.vue";
+import ImplementationComparison from "../.vitepress/theme/components/ImplementationComparison.vue";
 import PerformanceHistory from "../.vitepress/theme/components/PerformanceHistory.vue";
 </script>
 
@@ -18,9 +18,9 @@ In the current measurements:
 - **Weak spots:** reversed input, a sorted run followed by a random tail, heavily skewed (Zipf) keys and very short random inputs can be slower than `slice::sort`. [Engine evidence](../design/evidence.md#landed-with-open-losses) tracks these losses.
 - **Memory:** a serial `sort` needs extra memory that grows as √n, while `slice::sort`, radsort and glidesort allocate buffers proportional to the input. Parallel sorting, argsort and cached-key sorting have [their own bounds](../../conformance/semantics.md#space).
 
-The [algorithm comparison](algorithms.md) shows every figure behind these statements.
+The [implementation comparison](implementations.md) shows every figure behind these statements.
 
-<AlgorithmComparison view="overview" />
+<ImplementationComparison view="overview" />
 
 ## Main history
 

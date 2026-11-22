@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { command } from "../../tools/process.ts";
 import { repositoryRoot, runTask } from "../../tools/tasks.ts";
 import { parseCaseId, parseColumnId } from "../catalog.ts";
-import { loadPlan, type Plan } from "../plan.ts";
+import { loadPlan, type Plan, planOperations } from "../plan.ts";
 import { withComparisonWorkspace } from "../release.ts";
 import {
   benchmarkEnvironment,
@@ -19,7 +19,7 @@ import { type GrowthRecord, growthSchema } from "./result.ts";
 /**
  * Arrange the memory worker's serial full-sort rows as one peak per implementation and length.
  *
- * The growth plan selects one type and one input pattern; an implementation that does not support
+ * The growth plan selects one operation, type and input pattern; an implementation that does not support
  * the type has no rows and no entry, and a missing length is null.
  */
 export function growthPeaks(journal: string, plan: Plan) {
@@ -27,8 +27,14 @@ export function growthPeaks(journal: string, plan: Plan) {
   const [type] = rule.types ?? [];
   const [distribution] = rule.distributions ?? [];
   const lengths = (rule.lengths ?? []).filter((n): n is number => typeof n === "number");
-  if (plan.include.length !== 1 || rule.types?.length !== 1 || rule.distributions?.length !== 1)
-    throw new Error("The growth plan selects exactly one type and one input pattern");
+  const operations = planOperations(plan);
+  if (
+    plan.include.length !== 1 ||
+    rule.types?.length !== 1 ||
+    rule.distributions?.length !== 1 ||
+    operations.length !== 1
+  )
+    throw new Error("The growth plan selects exactly one operation, type and input pattern");
   const peaks: Record<string, (number | null)[]> = {};
   for (const line of journal.split("\n").filter(Boolean)) {
     const row = JSON.parse(line) as {
@@ -61,7 +67,7 @@ export function growthPeaks(journal: string, plan: Plan) {
   }
   if (!peaks.tessera?.every((value) => value !== null))
     throw new Error("Tessera needs a peak at every length");
-  return { type, distribution, lengths, peaks };
+  return { operation: operations[0].kind, type, distribution, lengths, peaks };
 }
 
 // CI-only, without credentials: measure every implementation's extra memory across the growth plan's

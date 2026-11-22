@@ -1,68 +1,27 @@
 # Comparison model proposal
 
-Status: the vocabulary, identity and route stages have landed; publication is proposed. The benchmark tooling grew around one operation, complete serial sorting, and now also measures argsort, selection and Rayon sorting; 0.2 adds parallel argsort. Current identities, plans and the CLI belong to the [benchmark protocol](../development/benchmarking.md#case-identities). This page owns the planned published data formats and the per-operation comparison pages until they land. The rules for choosing references and cases are current and belong to the [benchmark protocol](../development/benchmarking.md#choosing-references-and-cases); current module boundaries belong to [benchmark tooling](benchmark-tooling.md). When a stage lands, move its facts to those owners and delete it here.
+Status: identities, routes and per-operation publication have landed; populating comparisons beyond full sorting is proposed. Current vocabulary and module boundaries belong to [benchmark tooling](benchmark-tooling.md), identities, plans and the rules for choosing references and cases to the [benchmark protocol](../development/benchmarking.md#choosing-references-and-cases), and published data formats to [continuous benchmarks](../development/continuous-benchmarks.md#main-long-term-tracking). This page owns the plan for the remaining operations until it lands; move each landed fact to those owners and delete it here.
 
 ## Problem
 
-Cases, columns and plans name operation and execution explicitly ([identities](../development/benchmarking.md#case-identities)), manifests retain each column's route, and reports divide by the operation's catalog reference. The remaining problems are in publication:
+The [implementation comparison](../benchmarks/implementations.md) renders one section per operation of `comparison.json`, but only full sorting has a section:
 
-- **Published data still says "algorithm".** The `benchmark-data/<algorithm>/` directories and the `algorithm` field of `comparison.json` runs identify who implements a result, while the code and CLI say implementation.
-- **Implementation entries carry sort semantics.** `std-stable` is labelled `slice::sort`, although its argsort route sorts an index vector by key and its selection route sorts the whole input. `stable` and `family` describe a route: `std-unstable` selects with `select_nth_unstable`. `tessera-full` is a route (a full sort used as a selection reference) with its own identity.
-- **Publication assumes sorting.** Only `sort` has figures and a ranking cohort, tracking runs have no operation field, and `comparison.json` and `growth.json` have neither operation nor execution.
+- **Only sorting has a cohort and figures.** Tracking measures only the sorting cases, `comparison.ts` chooses a sort cohort, and the figure templates assume the sort reference.
+- **Implementation entries carry sort semantics.** `std-stable` is labelled `slice::sort`, although its argsort route sorts an index vector by key and its selection route sorts the whole input. A selection section would show `std-unstable` as "slice::sort_unstable" while it calls `select_nth_unstable`.
 
-## Model
+## Plan
 
-```text
-case        = operation × input                  the pairing unit
-column      = implementation × execution         what is measured on a case
-measurement = column × case, carried out by a route
-```
+- **Labels.** A displayed row name combines the implementation label and the route detail when they differ, such as "slice::sort_unstable · select_nth_unstable". Section titles derive from the operation's entry labels and execution ("argsort", "par_argsort · 8 threads"), always naming the worker count. Stability is a property of the route; unstable record results never enter a stable ranking.
+- **Tracking.** A tracking job measures one implementation, operation and execution, so each job keeps its own time budget; the comparison takes the latest run per (implementation, operation, execution), and an aggregate never combines cases from different runs. `growth.json` gains a section per operation, because argsort's retained index output and in-place selection answer different memory questions.
+- **Figures.** Each published operation has a ranking with memory, a pattern figure and a length figure, plus one figure per parameter axis (such as rank position for selection), from the existing row and curve templates with the operation's own reference. A new template needs a new question. The home page keeps the sort ranking. A summary of Tessera's speed per operation is deferred: each operation has its own reference, and the figure would have to prevent reading ratios across references as comparable.
 
-Paired statistics compare every column measured on one case in the same blocks, so a four-thread Tessera call and serial Tessera share a case and their ratio stays paired. Execution therefore belongs to the column, not to the case.
+The catalog names each operation's reference. The composition baselines answer whether a dedicated route beats composing the result from a sort:
 
-| Concept | Meaning | Owner |
-|---|---|---|
-| **Operation** | The caller-visible result, named by the public API where one exists (`sort`, `argsort`, `select_nth`), otherwise by the result (`partition-buckets`). Parameters such as the selected rank belong to it. | A catalog `operations` table: name, serial and parallel entry labels, parameters, reference column, ranking cohort and section order |
-| **Input** | Record type, distribution, length and seed, generated by `case.rs`. | Unchanged |
-| **Implementation** | Who provides the result: `tessera`, `std-stable`, `glidesort`, `rayon-stable`, `ips4o`. It is an identity and a display name only. | The catalog `implementations` table |
-| **Execution** | `serial`, or `tN`: the `par_` entry in an N-worker pool. `t1` is not `serial`; it measures the parallel entry's fallback. | One axis shared by every implementation; plans select it per rule |
-| **Route** | What one column calls for one operation, whether it is stable, its family (radix, comparison, SIMD) and whether it is a semantic reference rather than a dedicated solver. | `Variant::route` and the runner's `list`; manifests record it |
-
-Consequences:
-
-- `par_argsort` is `argsort` at `tN`, not a separate operation.
-- `tessera-full` remains a separate implementation: a selection comparison measures Tessera's selection and Tessera's full sort on the same case, and one column per implementation and execution cannot hold two routes. Its label names the composition ("Tessera sort"). Revision builds (`tessera-baseline`, `tessera-copy`) remain separate identities because they are different source trees.
-- A displayed row name combines the implementation label and the route detail when they differ, such as "slice::sort_unstable · select_nth_unstable". Section titles derive from the operation's entry labels and execution ("argsort", "par_argsort · 8 threads"), always naming the worker count.
-- Stability is a property of the route; the existing rule that unstable record results never enter a stable ranking applies per route.
-
-## Results and publication
-
-Results keep the current identities. The [main tracking](../development/continuous-benchmarks.md#main-long-term-tracking) data branch and Tessera's Bencher history restarted at them, because a translation table from earlier IDs would be a second grammar to maintain; results from earlier tooling regenerate with that tooling revision.
-
-- **Names.** The `benchmark-data/<implementation>/` directories, the `implementation` field of `comparison.json` runs, the page `docs/benchmarks/algorithms.md` with its URL and `AlgorithmComparison.vue` are renamed with the data branch. No old name is kept as an alias; a rename that leaves the previous term in use somewhere is not finished.
-- **Run records** in `<implementation>/YYYY-MM.jsonl` add `operation`, `execution` and `routes` (route per case group, from the runner's listing). A tracking job measures one implementation, operation and execution, so each job keeps its own time budget, and the comparison takes the latest run per (implementation, operation, execution). An aggregate comes from one run; it never combines cases from different runs.
-- **Index.** `<implementation>/index.json` gains `operation` and `execution` facets.
-- **Growth.** `growth.json` is keyed by operation, because argsort's retained index output and in-place selection answer different memory questions.
-- **Comparison.** `comparison.json` replaces its top-level `figures` with `operations: [{ id, label, reference, cohort, runs, figures }]`, ordered as the [figure guide](../development/benchmark-figures.md#fixed-visual-decisions) orders calls. `overview` remains the sort ranking.
-- **Reports.** Non-sort operations use the existing row and curve templates, with the denominator the catalog names for the operation; a new template needs a new question.
-
-## Pages
-
-`AlgorithmComparison` takes an `operation` and execution and renders that section of `comparison.json`. Each published operation has a ranking with memory, a pattern figure and a length figure, plus one figure per parameter axis (such as rank position for selection). The home page keeps the sort ranking. A summary of Tessera's speed per operation is deferred: each operation has its own denominator, and the figure would have to prevent reading ratios across denominators as comparable.
-
-Per-operation references follow the [reference roles](../development/benchmarking.md#choosing-references-and-cases). The planned denominators are the standard library's direct precedent for each result:
-
-| Operation | Denominator | Composition baseline |
+| Operation | Reference | Composition baseline |
 |---|---|---|
 | `sort` | `slice::sort` | — |
 | `argsort` | Index vector sorted with `sort_by_key` | Tessera sort of (key, index) rows |
-| `select_nth` | `select_nth_unstable` | Tessera full sort |
-| `par_sort`, `par_argsort` | Rayon's stable sort of the same records or indices | Serial Tessera |
+| `select_nth` | `select_nth_unstable` | Tessera full sort (`tessera-full`) |
+| `sort`, `argsort` at `tN` | Rayon's stable sort of the same records or indices | Serial Tessera |
 
-The strongest public implementations for selection and argsort are still to be surveyed; name them in this table only after their adapters verify.
-
-## Stages
-
-Each stage is a separate PR and changes no measured algorithm, input or sampling.
-
-1. **Publication.** Rewrite tracking records, `comparison.json` and `growth.json` (including their remaining `algorithm` fields), rename the comparison page and its component, and render per-operation sections. Then populate argsort and selection comparisons under the [CI scaling proposal](ci-scaling-proposal.md#keep-cross-implementation-comparisons-out-of-pr-timing).
+The strongest public implementations for selection and argsort are still to be surveyed; name them in this table only after their adapters verify. The work follows the [CI scaling proposal](ci-scaling-proposal.md#keep-cross-implementation-comparisons-out-of-pr-timing) and changes no measured algorithm, input or sampling.

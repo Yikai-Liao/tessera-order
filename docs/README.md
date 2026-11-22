@@ -33,7 +33,7 @@ Every fact has one owner. Other pages link to it and never restate its numbers o
 | Benchmark module ownership and change paths | [tooling design](design/benchmark-tooling.md) | A module boundary moves |
 | CI lanes and routing, release procedure | [CI](development/ci.md), [releasing](../RELEASING.md) | A workflow changes |
 | Planned CI reuse, operation benchmark selection and cache policy | [CI scaling proposal](design/ci-scaling-proposal.md) | A planned step changes or lands; move landed facts to CI or continuous benchmarks |
-| Planned published benchmark data formats and per-operation comparison pages | [comparison model proposal](design/comparison-model-proposal.md) | A planned stage changes or lands; move landed facts to the benchmark protocol, tooling design or continuous benchmarks |
+| Planned comparisons of operations beyond full sorting | [comparison model proposal](design/comparison-model-proposal.md) | The plan changes or lands; move landed facts to the benchmark protocol, tooling design or continuous benchmarks |
 | How to choose comparison references and cases | [benchmark protocol](development/benchmarking.md#choosing-references-and-cases) | A selection rule changes |
 
 An algorithm change normally edits the Rust code, its explanation page and that page's model, plus semantics only when a guarantee changes. If a page needs a number it does not own, it links to the owner.

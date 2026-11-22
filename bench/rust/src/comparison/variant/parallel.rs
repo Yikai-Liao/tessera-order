@@ -2,7 +2,7 @@
 
 //! Caller-owned Rayon pools prepared outside the timed and counted region.
 
-use super::{BatchKernel, CaseInput, Kernel, PreparedRecords, TesseraAdapter};
+use super::{BatchKernel, CaseInput, Kernel, PreparedRecords, TesseraAdapter, Variant};
 use crate::pool::BenchmarkPool;
 use rayon::prelude::*;
 use std::rc::Rc;
@@ -10,22 +10,23 @@ use std::rc::Rc;
 /// Prepares a verified parallel batch with no global pool or timed pool creation.
 fn prepare<T: TesseraAdapter>(
     input: Rc<PreparedRecords<T>>,
-    implementation: &'static str,
+    variant: Variant,
     threads: usize,
 ) -> Box<dyn Kernel> {
-    let description = route::<T>(implementation);
+    let description = route::<T>(variant.name);
+    let stable = variant.route_stable(input.operation());
     let pool = BenchmarkPool::new(threads);
     Box::new(BatchKernel {
         input,
         buffers: Vec::new(),
         sort: move |records: &mut [T]| {
-            pool.install(|| match implementation {
+            pool.install(|| match variant.name {
                 "tessera" => T::tessera_parallel(records),
                 "rayon-stable" => records.par_sort_by(T::order),
                 _ => unreachable!("validated parallel implementation"),
             })
         },
-        stable: true,
+        stable,
         description,
         worker_threads: threads,
     })
@@ -58,22 +59,18 @@ impl CaseInput {
     }
 
     /// Prepares an implementation's parallel full sort in a `threads`-worker pool.
-    pub(super) fn prepare_parallel(
-        &self,
-        implementation: &'static str,
-        threads: usize,
-    ) -> Box<dyn Kernel> {
+    pub(super) fn prepare_parallel(&self, variant: Variant, threads: usize) -> Box<dyn Kernel> {
         match self {
-            Self::U32(v) => prepare(Rc::clone(v), implementation, threads),
-            Self::U64(v) => prepare(Rc::clone(v), implementation, threads),
-            Self::U128(v) => prepare(Rc::clone(v), implementation, threads),
-            Self::F64(v) => prepare(Rc::clone(v), implementation, threads),
-            Self::ReverseU64(v) => prepare(Rc::clone(v), implementation, threads),
-            Self::ReverseF64(v) => prepare(Rc::clone(v), implementation, threads),
-            Self::Row32(v) => prepare(Rc::clone(v), implementation, threads),
-            Self::Row64(v) => prepare(Rc::clone(v), implementation, threads),
-            Self::WideRecord(v) => prepare(Rc::clone(v), implementation, threads),
-            Self::OwnedRecord(v) => prepare(Rc::clone(v), implementation, threads),
+            Self::U32(v) => prepare(Rc::clone(v), variant, threads),
+            Self::U64(v) => prepare(Rc::clone(v), variant, threads),
+            Self::U128(v) => prepare(Rc::clone(v), variant, threads),
+            Self::F64(v) => prepare(Rc::clone(v), variant, threads),
+            Self::ReverseU64(v) => prepare(Rc::clone(v), variant, threads),
+            Self::ReverseF64(v) => prepare(Rc::clone(v), variant, threads),
+            Self::Row32(v) => prepare(Rc::clone(v), variant, threads),
+            Self::Row64(v) => prepare(Rc::clone(v), variant, threads),
+            Self::WideRecord(v) => prepare(Rc::clone(v), variant, threads),
+            Self::OwnedRecord(v) => prepare(Rc::clone(v), variant, threads),
         }
     }
 }

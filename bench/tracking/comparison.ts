@@ -20,6 +20,7 @@ import {
   referenceColumn,
   referenceLabel,
   routeLabel,
+  routeStable,
   SORT,
 } from "../catalog.ts";
 import {
@@ -118,7 +119,7 @@ export function trackingField(
       .filter((entry) =>
         [...cases.values()].some((input) => same(input) && value(caseId(input), entry.id) !== null),
       )
-      .map((entry) => ({ name: entry.id, stable: entry.stable })),
+      .map((entry) => ({ name: entry.id, stable: routeStable(entry.id, chosen) })),
     cases: [...cases.values()].filter(same),
     speed: (id, name) => {
       const base = value(id, reference),

@@ -1,20 +1,18 @@
 # Comparison model proposal
 
-Status: identities, routes, per-operation publication and a section per tracked operation have landed; the parts below remain proposed. Current vocabulary and module boundaries belong to [benchmark tooling](benchmark-tooling.md), identities, plans and the rules for choosing references and cases to the [benchmark protocol](../development/benchmarking.md#choosing-references-and-cases), and published data formats and section rules to [continuous benchmarks](../development/continuous-benchmarks.md#data-and-site-publication). This page owns the plan for the remaining parts until they land; move each landed fact to those owners and delete it here.
+Status: identities, routes and their stability, per-operation publication and a section per tracked operation have landed; the parts below remain proposed. Current vocabulary and module boundaries belong to [benchmark tooling](benchmark-tooling.md), identities, plans and the rules for choosing references and cases to the [benchmark protocol](../development/benchmarking.md#choosing-references-and-cases), and published data formats and section rules to [continuous benchmarks](../development/continuous-benchmarks.md#data-and-site-publication). This page owns the plan for the remaining parts until they land; move each landed fact to those owners and delete it here.
 
 ## Problem
 
 The [implementation comparison](../benchmarks/implementations.md) has a section per tracked operation, each against its own reference with rows named by route, but it still answers less for other operations than for sorting:
 
 - **One parameter value per section.** A selection section shows the rank with the most measured cases; how speed changes with rank position is not shown.
-- **Stability belongs to the implementation.** `std-unstable` is marked unstable in every section, although its argsort route breaks ties by index and returns the stable permutation. The section ranks it among unstable argsorts, which is conservative but not exact.
 - **Memory covers only sorting.** `growth.json` sweeps full sorts; other sections plot the peaks their tracking runs recorded, when a type has several lengths.
 - **No composition baseline.** Sections do not show Tessera's full sort beside its dedicated route, so they do not show the work a route saves.
 
 ## Plan
 
 - **Parameter axes.** One figure per parameter axis, such as rank position for selection, from the existing row template with the operation's own reference. A new template needs a new question.
-- **Route stability.** Stability becomes a property of the (implementation, operation) route, owned beside the route detail in the catalog and checked against the Rust kernel's verification mode, so unstable record results still never enter a stable ranking.
 - **Growth.** `growth.json` gains a sweep per operation, because argsort's retained index output and in-place selection answer different memory questions.
 - **Composition baselines.** Tracking measures the baselines below, and each section marks them as compositions rather than competitors.
 - **Parallel sections.** Section titles for parallel operations derive from the operation's entry labels and always name the worker count ("par_argsort · 8 threads").

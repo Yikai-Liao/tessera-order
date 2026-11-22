@@ -76,19 +76,35 @@ pub fn revision_sampling(len: usize) -> &'static RevisionSampling {
         .expect("revision sampling budget")
 }
 
-/// An implementation's identity, stability and executable adapter family.
+/// An implementation's identity, route contracts and executable adapter family.
 #[derive(Deserialize)]
 pub(crate) struct Implementation {
     pub(crate) id: String,
-    pub(crate) stable: bool,
+    stable: bool,
     pub(crate) adapter: String,
     /// A parallel full-sort entry point, if the implementation has one.
     pub(crate) parallel: Option<ParallelSort>,
-    /// The call each non-sort operation makes, keyed by operation kind, when the label names
-    /// only the sort; figures print it beside the label. Only the support test reads it.
-    #[cfg(test)]
+    /// Non-sort call metadata, keyed by operation kind.
     #[serde(default)]
-    pub(crate) routes: std::collections::BTreeMap<String, String>,
+    pub(crate) routes: std::collections::BTreeMap<String, Route>,
+}
+impl Implementation {
+    /// Resolves the operation's stability, including routes that inherit the default.
+    pub(crate) fn route_stable(&self, operation: &Operation) -> bool {
+        self.routes
+            .get(operation.kind())
+            .and_then(|route| route.stable)
+            .unwrap_or(self.stable)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Route {
+    /// Display detail used by TypeScript; Rust reports the exact typed call.
+    #[serde(rename = "call")]
+    _call: String,
+    stable: Option<bool>,
 }
 /// Where a parallel full-sort entry point stands beside the serial entry points.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -135,7 +151,7 @@ pub(crate) fn catalog() -> &'static Catalog {
     CATALOG.get_or_init(|| {
         let catalog: Catalog =
             toml::from_str(include_str!("../../catalog.toml")).expect("valid benchmark catalog");
-        assert_eq!(catalog.schema, 2, "unsupported benchmark catalog schema");
+        assert_eq!(catalog.schema, 3, "unsupported benchmark catalog schema");
         catalog
     })
 }
@@ -226,8 +242,7 @@ fn operation_entry(kind: &str) -> Option<&'static OperationEntry> {
 
 /// The implementation every serial case of an operation pairs with Tessera as its control.
 pub(crate) fn operation_reference(operation: &Operation) -> &'static str {
-    let value = serde_json::to_value(operation).expect("operation serializes");
-    &operation_entry(value["kind"].as_str().expect("operation kind"))
+    &operation_entry(operation.kind())
         .expect("catalog operation")
         .reference
 }
@@ -257,8 +272,7 @@ impl InputCase {
     /// The operation kind and its parameters in catalog order.
     fn operation_parts(&self) -> (&'static str, Vec<usize>) {
         let value = serde_json::to_value(&self.operation).expect("operation serializes");
-        let entry = operation_entry(value["kind"].as_str().expect("operation kind"))
-            .expect("catalog operation");
+        let entry = operation_entry(self.operation.kind()).expect("catalog operation");
         let parameters = entry
             .parameters
             .iter()
@@ -698,6 +712,10 @@ mod tests {
             Operation::SelectNth { index: 1 },
             Operation::PartitionBuckets { bucket_count: 2 },
         ] {
+            assert_eq!(
+                serde_json::to_value(&operation).unwrap()["kind"],
+                operation.kind()
+            );
             let case = InputCase {
                 ty: "u64".into(),
                 distribution: "random".into(),

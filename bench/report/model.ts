@@ -31,6 +31,7 @@ export interface ManifestColumn {
   id: string;
   implementation: string;
   execution: Execution;
+  /** Stability of this column's route for the session's operation. */
   stable: boolean;
   adapter: string;
 }
@@ -145,12 +146,12 @@ export function summarize(dataset: Dataset): Map<string, Summary> {
       paired.high = Math.max(...paired.ratios);
     }
     if (column === TESSERA || column === TESSERA_AA) paired.verdict = "within noise";
+    const measuredColumn = column === TESSERA_AA ? TESSERA : column;
     result.set(measurementId(build, id, column), {
       caseId: id,
       build,
       column,
-      stable:
-        column === TESSERA_AA || dataset.manifest.columns.find((c) => c.id === column)!.stable,
+      stable: dataset.manifest.columns.find((c) => c.id === measuredColumn)!.stable,
       ...paired,
       ns: median(samples.map((s) => time(s) / len)),
     });

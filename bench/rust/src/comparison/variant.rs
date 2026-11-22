@@ -263,70 +263,43 @@ impl<T: BenchmarkRecord, F: FnMut(&mut [T])> Kernel for BatchKernel<T, F> {
         self.worker_threads
     }
 }
-/// Creates a typed full-sort kernel; `route` names the public call `sort` makes.
-pub(super) fn prepare_kernel<T: BenchmarkRecord>(
-    input: Rc<PreparedRecords<T>>,
-    stable: bool,
-    route: &'static str,
-    sort: impl FnMut(&mut [T]) + 'static,
-) -> Box<dyn Kernel> {
-    prepare_call(input, stable, sort, route)
-}
-
-/// Prepares one complete in-place call with its result checker and route evidence.
-fn prepare_call<T: BenchmarkRecord>(
-    input: Rc<PreparedRecords<T>>,
-    stable: bool,
-    sort: impl FnMut(&mut [T]) + 'static,
-    description: &'static str,
-) -> Box<dyn Kernel> {
-    Box::new(BatchKernel {
-        description,
-        input,
-        buffers: Vec::new(),
-        sort,
-        stable,
-        worker_threads: 0,
-    })
-}
 /// Adapts radix extraction to index output or an in-place operation.
 fn prepare_radsort<T: BenchmarkRecord, K: radsort::Key>(
+    variant: Variant,
     input: Rc<PreparedRecords<T>>,
     key: impl Fn(&T) -> K + Copy + 'static,
 ) -> Box<dyn Kernel> {
     #[cfg(feature = "operations")]
     match *input.operation() {
         Operation::PartitionBuckets { bucket_count } => {
-            return operations::categories("radsort", input, bucket_count)
+            return operations::categories(variant, input, bucket_count)
                 .expect("category sorting supported");
         }
         Operation::Argsort {} => {
-            return operations::indices(input, move |source| {
+            return operations::indices(variant, input, move |source| {
                 let mut indices: Vec<_> = (0..source.len()).collect();
                 radsort::sort_by_key(&mut indices, |&index| key(&source[index]));
                 indices
             });
         }
         Operation::SelectNth { .. } => {
-            return operations::selection_reference(input, move |values| {
+            return operations::selection_reference(variant, input, move |values| {
                 radsort::sort_by_key(values, key);
             });
         }
         Operation::Sort {} => {}
     }
-    prepare_kernel(input, true, "radsort::sort_by_key", move |values| {
+    variant.prepare_call(input, "radsort::sort_by_key", move |values| {
         radsort::sort_by_key(values, key);
     })
 }
 
-/// An implementation's adapter: its public name, stability contract and the
-/// operations and executions it can call.
+/// A catalog implementation and its executable adapter.
 #[derive(Clone, Copy)]
 pub struct Variant {
     /// Catalog implementation identity.
     pub name: &'static str,
-    /// Whether equal keys retain input order.
-    pub stable: bool,
+    implementation: &'static crate::plan::Implementation,
     /// Catalog adapter family.
     pub adapter: &'static str,
     /// The catalog's parallel full-sort entry point, if any.
@@ -347,7 +320,7 @@ pub fn list_variants() -> Vec<Variant> {
         })
         .map(|implementation| Variant {
             name: &implementation.id,
-            stable: implementation.stable,
+            implementation,
             adapter: &implementation.adapter,
             parallel_sort: implementation.parallel,
         })
@@ -366,24 +339,22 @@ fn try_prepare_common<T: TesseraAdapter>(
         return None;
     }
     Some(match v.name {
-        "tessera" => prepare_kernel(input, true, T::SORT_ROUTE, T::tessera),
+        "tessera" => v.prepare_call(input, T::SORT_ROUTE, T::tessera),
 
         #[cfg(tessera_bench_revisions)]
-        "tessera-baseline" => prepare_kernel(input, true, T::SORT_ROUTE, T::baseline),
+        "tessera-baseline" => v.prepare_call(input, T::SORT_ROUTE, T::baseline),
         #[cfg(tessera_bench_revisions)]
-        "tessera-baseline-copy" => prepare_kernel(input, true, T::SORT_ROUTE, T::baseline_copy),
+        "tessera-baseline-copy" => v.prepare_call(input, T::SORT_ROUTE, T::baseline_copy),
         #[cfg(tessera_bench_revisions)]
-        "tessera-copy" => prepare_kernel(input, true, T::SORT_ROUTE, T::current_copy),
-        "std-stable" => prepare_kernel(input, true, "slice::sort_by", |v| v.sort_by(T::order)),
-        "std-unstable" => prepare_kernel(input, false, "slice::sort_unstable_by", |v| {
+        "tessera-copy" => v.prepare_call(input, T::SORT_ROUTE, T::current_copy),
+        "std-stable" => v.prepare_call(input, "slice::sort_by", |v| v.sort_by(T::order)),
+        "std-unstable" => v.prepare_call(input, "slice::sort_unstable_by", |v| {
             v.sort_unstable_by(T::order);
         }),
-        "glidesort" => prepare_kernel(input, true, "glidesort::sort_by", glidesort::<T>),
-        "glidesort-sqrt" => {
-            prepare_kernel(input, true, "glidesort::sort_with_buffer_by", move |v| {
-                glidesort_sqrt(v, scratch_bytes);
-            })
-        }
+        "glidesort" => v.prepare_call(input, "glidesort::sort_by", glidesort::<T>),
+        "glidesort-sqrt" => v.prepare_call(input, "glidesort::sort_with_buffer_by", move |v| {
+            glidesort_sqrt(v, scratch_bytes);
+        }),
         _ => return None,
     })
 }
@@ -393,18 +364,13 @@ macro_rules! copy_adapter {
         let v = $v;
         let input = $input;
         match v.name {
-            "radsort" => Some(prepare_radsort(input, $key)),
-            "voracious" => Some(prepare_kernel(input, true, "voracious_stable_sort", |v| {
+            "radsort" => Some(prepare_radsort(v, input, $key)),
+            "voracious" => Some(v.prepare_call(input, "voracious_stable_sort", |v| {
                 v.voracious_stable_sort();
             })),
-            "rdst" => Some(prepare_kernel(
-                input,
-                false,
-                "rdst radix_sort_unstable",
-                |v| {
-                    v.radix_sort_unstable();
-                },
-            )),
+            "rdst" => Some(v.prepare_call(input, "rdst radix_sort_unstable", |v| {
+                v.radix_sort_unstable();
+            })),
             #[cfg(feature = "compare-native")]
             _ if v.adapter == "native" => $crate::comparison::native::prepare(v, input),
             _ => try_prepare_common(v, input, $scratch_bytes),
@@ -412,6 +378,29 @@ macro_rules! copy_adapter {
     }};
 }
 impl Variant {
+    /// The tie-order guarantee used for verification and published metadata.
+    pub(super) fn route_stable(self, operation: &Operation) -> bool {
+        self.implementation.route_stable(operation)
+    }
+
+    /// Prepares an in-place call with the route's verification contract.
+    pub(super) fn prepare_call<T: BenchmarkRecord>(
+        self,
+        input: Rc<PreparedRecords<T>>,
+        description: &'static str,
+        sort: impl FnMut(&mut [T]) + 'static,
+    ) -> Box<dyn Kernel> {
+        let stable = self.route_stable(input.operation());
+        Box::new(BatchKernel {
+            description,
+            input,
+            buffers: Vec::new(),
+            sort,
+            stable,
+            worker_threads: 0,
+        })
+    }
+
     /// Whether this adapter calls a parallel entry point for the operation.
     /// The catalog lists which implementations have a parallel full sort.
     fn parallel(self, operation: &Operation) -> bool {
@@ -457,7 +446,7 @@ impl Variant {
                 return None;
             }
             #[cfg(feature = "rayon")]
-            return Some(input.prepare_parallel(self.name, threads));
+            return Some(input.prepare_parallel(self, threads));
             #[cfg(not(feature = "rayon"))]
             unreachable!("parallel execution without the rayon feature: {threads}");
         }
@@ -488,7 +477,7 @@ impl Variant {
         match (self.name, input) {
             ("voracious", input) if !matches!(input, CaseInput::U32(_) | CaseInput::U64(_)) => None,
             ("radsort", CaseInput::OwnedRecord(v)) => {
-                Some(prepare_radsort(Rc::clone(v), |r| r.key))
+                Some(prepare_radsort(self, Rc::clone(v), |r| r.key))
             }
             // External radix and native adapters do not accept Reverse keys.
             // Common comparison sorts use BenchmarkRecord's reversed order;
@@ -498,16 +487,12 @@ impl Variant {
             (_, CaseInput::OwnedRecord(v)) => try_prepare_common(self, Rc::clone(v), scratch_bytes),
             (_, CaseInput::U32(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
             (_, CaseInput::U128(input)) => match self.name {
-                "radsort" if input.operation().is_sort() => Some(prepare_kernel(
+                "radsort" if input.operation().is_sort() => {
+                    Some(self.prepare_call(Rc::clone(input), "radsort::sort", radsort::sort))
+                }
+                "radsort" => Some(prepare_radsort(self, Rc::clone(input), |key| *key)),
+                "rdst" => Some(self.prepare_call(
                     Rc::clone(input),
-                    true,
-                    "radsort::sort",
-                    radsort::sort,
-                )),
-                "radsort" => Some(prepare_radsort(Rc::clone(input), |key| *key)),
-                "rdst" => Some(prepare_kernel(
-                    Rc::clone(input),
-                    false,
                     "rdst radix_sort_unstable",
                     |v| v.radix_sort_unstable(),
                 )),
@@ -632,16 +617,8 @@ mod tests {
             .into_iter()
             .filter(|v| !v.name.starts_with("tessera"))
         {
-            let entry = crate::plan::catalog()
-                .implementations
-                .iter()
-                .find(|entry| entry.id == variant.name)
-                .expect("catalog implementation");
             for operation in &operations {
-                let kind = serde_json::to_value(operation).unwrap()["kind"]
-                    .as_str()
-                    .unwrap()
-                    .to_owned();
+                let kind = operation.kind();
                 let supported = crate::plan::catalog().types.iter().any(|ty| {
                     variant.supports(
                         &CaseInput::new(&InputCase {
@@ -654,7 +631,7 @@ mod tests {
                     )
                 });
                 assert_eq!(
-                    entry.routes.contains_key(&kind),
+                    variant.implementation.routes.contains_key(kind),
                     supported,
                     "{} / {kind}: catalog route and adapter support differ",
                     variant.name,
@@ -696,7 +673,11 @@ mod tests {
     #[test]
     fn batches_restore_shared_input() {
         let input = PreparedRecords::new(vec![3u64, 1, 2]);
-        let mut k = prepare_kernel(Rc::clone(&input), true, "test fixture", |v| {
+        let variant = list_variants()
+            .into_iter()
+            .find(|v| v.name == "tessera")
+            .unwrap();
+        let mut k = variant.prepare_call(Rc::clone(&input), "test fixture", |v| {
             v.fill(0);
         });
         k.restore(3);

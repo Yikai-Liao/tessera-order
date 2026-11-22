@@ -111,19 +111,6 @@ impl Options {
             }
         };
         options.plan = crate::plan::Plan::parse(&text)?;
-        if options.command == "run"
-            && ["tessera", "std-stable"].iter().any(|id| {
-                !options
-                    .plan
-                    .implementations
-                    .iter()
-                    .any(|selected| selected == id)
-            })
-        {
-            return Err(
-                "paired implementation runs require tessera and std-stable controls".into(),
-            );
-        }
         let operations: BTreeSet<_> = options
             .plan
             .cases()?
@@ -132,6 +119,22 @@ impl Options {
             .collect();
         if operations.len() != 1 {
             return Err("an implementation comparison measures one operation per session; split the plan by operation".into());
+        }
+        let reference =
+            crate::plan::operation_reference(operations.first().expect("one operation"));
+        if options.command == "run"
+            && ["tessera", reference].iter().any(|id| {
+                !options
+                    .plan
+                    .implementations
+                    .iter()
+                    .any(|selected| selected == id)
+            })
+        {
+            return Err(format!(
+                "paired implementation runs require tessera and {reference} controls"
+            )
+            .into());
         }
         if !options.operation().is_sort() && !cfg!(feature = "operations") {
             return Err("non-sort operations require the operations benchmark feature; the library APIs are always available".into());
@@ -260,12 +263,9 @@ fn create_manifest(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> 
                 entry["omitted"] = json!(omitted.iter()
                     .map(|&(v, e)| json!({"column":run::column_id(v, e),"reason":"unsupported operation/input/execution combination"}))
                     .collect::<Vec<_>>());
-                if !case.operation.is_sort() {
-                    // Serial non-sort routes do not start pools.
-                    entry["routes"] = json!(supported.iter()
-                        .filter_map(|&(v, e)| v.prepare(&input, e, 0).map(|k| (run::column_id(v, e), k.description())))
-                        .collect::<std::collections::BTreeMap<_, _>>());
-                }
+                entry["routes"] = json!(supported.iter()
+                    .map(|&(v, e)| (run::column_id(v, e), v.route(&input, e)))
+                    .collect::<std::collections::BTreeMap<_, _>>());
                 #[cfg(tessera_bench_revisions)]
                 let entry = {
                     let mut entry = entry;
@@ -543,33 +543,36 @@ pub fn main(memory: bool) -> Result<()> {
     }
     match options.command.as_str() {
         "list" => {
-            // One row per adapter and planned execution with any supported type.
+            // One row per adapter, planned execution and distinct route, with
+            // the types that take that route.
             let executions: BTreeSet<_> =
                 cases.iter().flat_map(|(_, e)| e.iter().copied()).collect();
             for v in variant::list_variants() {
                 for &execution in &executions {
-                    let supported: Vec<_> = catalog()
-                        .types
-                        .iter()
-                        .map(|ty| ty.id.as_str())
-                        .filter(|ty| {
-                            v.supports(
-                                &record::CaseInput::new(&InputCase {
-                                    ty: (*ty).into(),
-                                    distribution: "random".into(),
-                                    len: 32,
-                                    operation: options.operation().probe(),
-                                }),
-                                execution,
-                            )
-                        })
-                        .collect();
-                    if !supported.is_empty() {
+                    let mut routes: Vec<(&str, Vec<&str>)> = Vec::new();
+                    for ty in &catalog().types {
+                        let probe = record::CaseInput::new(&InputCase {
+                            ty: ty.id.clone(),
+                            distribution: "random".into(),
+                            len: 32,
+                            operation: options.operation().probe(),
+                        });
+                        if !v.supports(&probe, execution) {
+                            continue;
+                        }
+                        let route = v.route(&probe, execution);
+                        match routes.iter_mut().find(|(r, _)| *r == route) {
+                            Some((_, types)) => types.push(&ty.id),
+                            None => routes.push((route, vec![&ty.id])),
+                        }
+                    }
+                    for (route, types) in routes {
                         println!(
-                            "{}\t{}\t{}",
+                            "{}\t{}\t{}\t{}",
                             run::column_id(v, execution),
                             if v.stable { "stable" } else { "unstable" },
-                            supported.join(",")
+                            types.join(","),
+                            route
                         );
                     }
                 }

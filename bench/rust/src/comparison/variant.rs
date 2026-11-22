@@ -19,6 +19,11 @@ use voracious_radix_sort::{RadixSort as VoraciousSort, Radixable};
 
 /// Type-specific Tessera entry points, separate from record identity and ordering.
 pub(super) trait TesseraAdapter: BenchmarkRecord {
+    /// The public call [`Self::tessera`] and the revision copies make.
+    const SORT_ROUTE: &'static str;
+    /// The public call [`Self::tessera_parallel`] makes.
+    #[cfg(feature = "rayon")]
+    const PARALLEL_SORT_ROUTE: &'static str;
     /// Sorts scalar keys directly and keyed records through the by-key API.
     fn tessera(records: &mut [Self]);
     /// Current serial slice operations; historical sorting adapters omit these APIs.
@@ -92,6 +97,9 @@ macro_rules! tessera_keys {
     ($($t:ty),+ $(,)?) => {$(
         #[allow(deprecated)]
         impl TesseraAdapter for $t {
+            const SORT_ROUTE: &'static str = "tessera_order::stable_sort";
+            #[cfg(feature = "rayon")]
+            const PARALLEL_SORT_ROUTE: &'static str = "tessera_order::par_stable_sort in a caller-owned pool";
             #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
                 tessera_order::stable_sort(records);
@@ -116,6 +124,10 @@ macro_rules! tessera_records {
     ($($t:ty),+ $(,)?) => {$(
         #[allow(deprecated)]
         impl TesseraAdapter for $t {
+            const SORT_ROUTE: &'static str = "tessera_order::stable_sort_by_key";
+            #[cfg(feature = "rayon")]
+            const PARALLEL_SORT_ROUTE: &'static str =
+                "tessera_order::par_stable_sort_by_key in a caller-owned pool";
             #[cfg_attr(tessera_bench_revisions, inline(never))]
             fn tessera(records: &mut [Self]) {
                 tessera_order::stable_sort_by_key(records, |r| r.key);
@@ -195,7 +207,7 @@ pub trait Kernel {
     fn output_bytes(&self) -> usize {
         0
     }
-    /// Exact implementation route, retained with non-sort capability evidence.
+    /// Exact implementation route, retained in every case's capability evidence.
     fn description(&self) -> &'static str;
 }
 /// Batch buffers and a monomorphized in-place call over one shared input.
@@ -251,13 +263,14 @@ impl<T: BenchmarkRecord, F: FnMut(&mut [T])> Kernel for BatchKernel<T, F> {
         self.worker_threads
     }
 }
-/// Creates a typed batch kernel without cloning its shared reference.
+/// Creates a typed full-sort kernel; `route` names the public call `sort` makes.
 pub(super) fn prepare_kernel<T: BenchmarkRecord>(
     input: Rc<PreparedRecords<T>>,
     stable: bool,
+    route: &'static str,
     sort: impl FnMut(&mut [T]) + 'static,
 ) -> Box<dyn Kernel> {
-    prepare_call(input, stable, sort, "complete sorting call")
+    prepare_call(input, stable, sort, route)
 }
 
 /// Prepares one complete in-place call with its result checker and route evidence.
@@ -301,7 +314,9 @@ fn prepare_radsort<T: BenchmarkRecord, K: radsort::Key>(
         }
         Operation::Sort {} => {}
     }
-    prepare_kernel(input, true, move |values| radsort::sort_by_key(values, key))
+    prepare_kernel(input, true, "radsort::sort_by_key", move |values| {
+        radsort::sort_by_key(values, key);
+    })
 }
 
 /// An implementation's adapter: its public name, stability contract and the
@@ -351,18 +366,24 @@ fn try_prepare_common<T: TesseraAdapter>(
         return None;
     }
     Some(match v.name {
-        "tessera" => prepare_kernel(input, true, T::tessera),
+        "tessera" => prepare_kernel(input, true, T::SORT_ROUTE, T::tessera),
 
         #[cfg(tessera_bench_revisions)]
-        "tessera-baseline" => prepare_kernel(input, true, T::baseline),
+        "tessera-baseline" => prepare_kernel(input, true, T::SORT_ROUTE, T::baseline),
         #[cfg(tessera_bench_revisions)]
-        "tessera-baseline-copy" => prepare_kernel(input, true, T::baseline_copy),
+        "tessera-baseline-copy" => prepare_kernel(input, true, T::SORT_ROUTE, T::baseline_copy),
         #[cfg(tessera_bench_revisions)]
-        "tessera-copy" => prepare_kernel(input, true, T::current_copy),
-        "std-stable" => prepare_kernel(input, true, |v| v.sort_by(T::order)),
-        "std-unstable" => prepare_kernel(input, false, |v| v.sort_unstable_by(T::order)),
-        "glidesort" => prepare_kernel(input, true, glidesort::<T>),
-        "glidesort-sqrt" => prepare_kernel(input, true, move |v| glidesort_sqrt(v, scratch_bytes)),
+        "tessera-copy" => prepare_kernel(input, true, T::SORT_ROUTE, T::current_copy),
+        "std-stable" => prepare_kernel(input, true, "slice::sort_by", |v| v.sort_by(T::order)),
+        "std-unstable" => prepare_kernel(input, false, "slice::sort_unstable_by", |v| {
+            v.sort_unstable_by(T::order);
+        }),
+        "glidesort" => prepare_kernel(input, true, "glidesort::sort_by", glidesort::<T>),
+        "glidesort-sqrt" => {
+            prepare_kernel(input, true, "glidesort::sort_with_buffer_by", move |v| {
+                glidesort_sqrt(v, scratch_bytes);
+            })
+        }
         _ => return None,
     })
 }
@@ -373,8 +394,17 @@ macro_rules! copy_adapter {
         let input = $input;
         match v.name {
             "radsort" => Some(prepare_radsort(input, $key)),
-            "voracious" => Some(prepare_kernel(input, true, |v| v.voracious_stable_sort())),
-            "rdst" => Some(prepare_kernel(input, false, |v| v.radix_sort_unstable())),
+            "voracious" => Some(prepare_kernel(input, true, "voracious_stable_sort", |v| {
+                v.voracious_stable_sort();
+            })),
+            "rdst" => Some(prepare_kernel(
+                input,
+                false,
+                "rdst radix_sort_unstable",
+                |v| {
+                    v.radix_sort_unstable();
+                },
+            )),
             #[cfg(feature = "compare-native")]
             _ if v.adapter == "native" => $crate::comparison::native::prepare(v, input),
             _ => try_prepare_common(v, input, $scratch_bytes),
@@ -395,6 +425,21 @@ impl Variant {
         match execution {
             Execution::Serial => self.prepare(input, execution, 0).is_some(),
             Execution::Threads(_) => self.parallel(input.operation()),
+        }
+    }
+
+    /// The exact call a supported column makes, retained in every manifest
+    /// and printed by `list`. Naming a parallel route starts no pool.
+    pub(super) fn route(self, input: &CaseInput, execution: Execution) -> &'static str {
+        match execution {
+            Execution::Serial => self
+                .prepare(input, execution, 0)
+                .expect("route of a supported column")
+                .description(),
+            #[cfg(feature = "rayon")]
+            Execution::Threads(_) => input.parallel_route(self.name),
+            #[cfg(not(feature = "rayon"))]
+            Execution::Threads(_) => unreachable!("no parallel column without Rayon"),
         }
     }
 
@@ -453,13 +498,19 @@ impl Variant {
             (_, CaseInput::OwnedRecord(v)) => try_prepare_common(self, Rc::clone(v), scratch_bytes),
             (_, CaseInput::U32(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
             (_, CaseInput::U128(input)) => match self.name {
-                "radsort" if input.operation().is_sort() => {
-                    Some(prepare_kernel(Rc::clone(input), true, radsort::sort))
-                }
+                "radsort" if input.operation().is_sort() => Some(prepare_kernel(
+                    Rc::clone(input),
+                    true,
+                    "radsort::sort",
+                    radsort::sort,
+                )),
                 "radsort" => Some(prepare_radsort(Rc::clone(input), |key| *key)),
-                "rdst" => Some(prepare_kernel(Rc::clone(input), false, |v| {
-                    v.radix_sort_unstable()
-                })),
+                "rdst" => Some(prepare_kernel(
+                    Rc::clone(input),
+                    false,
+                    "rdst radix_sort_unstable",
+                    |v| v.radix_sort_unstable(),
+                )),
                 _ => try_prepare_common(self, Rc::clone(input), scratch_bytes),
             },
             (_, CaseInput::U64(v)) => copy_adapter!(self, Rc::clone(v), scratch_bytes, |k| *k),
@@ -599,7 +650,7 @@ mod tests {
     #[test]
     fn batches_restore_shared_input() {
         let input = PreparedRecords::new(vec![3u64, 1, 2]);
-        let mut k = prepare_kernel(Rc::clone(&input), true, |v| {
+        let mut k = prepare_kernel(Rc::clone(&input), true, "test fixture", |v| {
             v.fill(0);
         });
         k.restore(3);

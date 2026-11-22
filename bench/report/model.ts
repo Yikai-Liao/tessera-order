@@ -19,15 +19,13 @@ export const { lengths } = catalog.inputs;
 export const TESSERA = "tessera/serial";
 /** The repeated serial Tessera control, measured in the same blocks. */
 export const TESSERA_AA = "tessera-aa";
-/** The serial standard-library control of every implementation comparison. */
-export const STD_STABLE = "std-stable/serial";
 export interface Case extends CaseIdentity {
   /** Measured column IDs: planned columns whose adapters support this case. */
   columns: string[];
   /** Planned columns whose adapters do not support this case. */
   omitted: { column: string; reason: string }[];
-  /** Non-sort only: each measured column's library route. */
-  routes?: Record<string, string>;
+  /** Each measured column's route: the exact call it makes. */
+  routes: Record<string, string>;
 }
 export interface ManifestColumn {
   id: string;

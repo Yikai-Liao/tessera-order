@@ -109,6 +109,8 @@ struct Distribution {
 #[derive(Deserialize)]
 struct OperationEntry {
     id: String,
+    /// The implementation whose serial column every case of this operation pairs as a control.
+    reference: String,
     #[serde(default)]
     parameters: Vec<Parameter>,
 }
@@ -215,6 +217,14 @@ fn record_bytes(ty: &str) -> usize {
 /// The catalog entry of an operation kind.
 fn operation_entry(kind: &str) -> Option<&'static OperationEntry> {
     catalog().operations.iter().find(|entry| entry.id == kind)
+}
+
+/// The implementation every serial case of an operation pairs with Tessera as its control.
+pub(crate) fn operation_reference(operation: &Operation) -> &'static str {
+    let value = serde_json::to_value(operation).expect("operation serializes");
+    &operation_entry(value["kind"].as_str().expect("operation kind"))
+        .expect("catalog operation")
+        .reference
 }
 
 /// Decodes a canonical nonnegative integer identity component.

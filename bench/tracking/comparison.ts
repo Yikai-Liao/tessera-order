@@ -15,6 +15,8 @@ import {
   parseCaseId,
   parseColumnId,
   parseCriterionId,
+  referenceColumn,
+  SORT,
 } from "../catalog.ts";
 import {
   type Cohort,
@@ -56,7 +58,11 @@ export function latestRuns(runs: Map<string, TrackingRun[]>) {
   return { spec: tessera.spec, runs: chosen };
 }
 
-/** The figures' view of serial columns: speeds against slice::sort's run, peaks as recorded. */
+/** The implementations whose columns divide serial and parallel sorting speeds. */
+const SERIAL_REFERENCE = referenceColumn(SORT, "serial")!.implementation;
+const PARALLEL_REFERENCE = referenceColumn(SORT, "t1")!.implementation;
+
+/** The figures' view of serial columns: speeds against the sort reference's run, peaks as recorded. */
 export function trackingField(runs: Map<string, TrackingRun>): Field {
   const serial = (name: string) =>
     runs.get(columnId({ implementation: name, execution: "serial" }));
@@ -75,9 +81,9 @@ export function trackingField(runs: Map<string, TrackingRun>): Field {
       .map((entry) => ({ name: entry.id, stable: entry.stable })),
     cases: [...cases.values()],
     speed: (id, name) => {
-      const std = value(id, "std-stable"),
+      const reference = value(id, SERIAL_REFERENCE),
         own = value(id, name);
-      return std === null || own === null ? null : std / own;
+      return reference === null || own === null ? null : reference / own;
     },
     nsPerKey: (id, name) => {
       const own = value(id, name);
@@ -94,13 +100,13 @@ const RANKING_TYPE = "row_u32";
 /**
  * The cohort follows the continuous plan instead of fixed lengths. The ranking and the
  * input-pattern figures each use their type's length with the most input patterns that
- * both Tessera and slice::sort measured, the longest on a tie. The length and short-input
+ * both Tessera and the serial reference measured, the longest on a tie. The length and short-input
  * figures use comparison lengths: those where some type has several patterns. Lengths
  * with one pattern per type probe engine thresholds and stay in PR feedback.
  */
 export function trackingCohort(field: Field): Cohort | null {
   const measured = (id: string) =>
-    field.speed(id, "tessera") !== null && field.nsPerKey(id, "std-stable") !== null;
+    field.speed(id, "tessera") !== null && field.nsPerKey(id, SERIAL_REFERENCE) !== null;
   const order = catalog.distributions.map((entry) => entry.id);
   const widest = (ty: string) => {
     const cases = field.cases.filter((entry) => entry.ty === ty && measured(caseId(entry)));
@@ -166,9 +172,9 @@ export function trackingCohort(field: Field): Cohort | null {
 }
 
 /**
- * Tessera's and Rayon's stable parallel columns at every pool size both ran, on each input
- * every one of them measured at their most common length. Rayon in one worker is the
- * baseline: slice::sort has no runs at most parallel lengths.
+ * Tessera's and the parallel reference's columns at every pool size both ran, on each input
+ * every one of them measured at their most common length. The reference in one worker is
+ * the baseline: the serial reference has no runs at most parallel lengths.
  */
 export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null {
   const run = (name: string, t: number) =>
@@ -177,20 +183,20 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
     .map(parseColumnId)
     .filter((column) => column.implementation === "tessera")
     .map((column) => executionThreads(column.execution))
-    .filter((t): t is number => t !== undefined && run("rayon-stable", t) !== undefined)
+    .filter((t): t is number => t !== undefined && run(PARALLEL_REFERENCE, t) !== undefined)
     .toSorted((a, b) => a - b);
   if (counts[0] !== 1) return null;
   const time = (name: string, t: number, id: string) => timed(run(name, t), id, `t${t}`)?.[0];
-  const ids = Object.keys(run("rayon-stable", 1)!.values)
+  const ids = Object.keys(run(PARALLEL_REFERENCE, 1)!.values)
     .map((key) => caseId(parseCriterionId(key)))
-    .filter((id) => counts.every((t) => time("tessera", t, id) && time("rayon-stable", t, id)));
+    .filter((id) => counts.every((t) => time("tessera", t, id) && time(PARALLEL_REFERENCE, t, id)));
   const [found] = [...Map.groupBy(ids, (id) => parseCaseId(id).len)].toSorted(
     (a, b) => b[1].length - a[1].length || b[0] - a[0],
   );
   if (!found) return null;
   const [n, inputs] = found;
   const speed = (name: string, t: number, id: string) =>
-    time("rayon-stable", 1, id)! / time(name, t, id)!;
+    time(PARALLEL_REFERENCE, 1, id)! / time(name, t, id)!;
   const of = (name: string, id: string) => counts.map((t) => speed(name, t, id));
   // Pool sizes outside the continuous plan update only when dispatched, so they name their commits.
   const hashes = [...new Set(counts.map((t) => run("tessera", t)!.hash.slice(0, 7)))];
@@ -203,7 +209,7 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
       return {
         label: `${ty} · ${distribution(distributionId).label}`,
         tessera: of("tessera", id),
-        rayon: of("rayon-stable", id),
+        rayon: of(PARALLEL_REFERENCE, id),
       };
     }),
   };

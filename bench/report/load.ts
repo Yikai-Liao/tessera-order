@@ -8,6 +8,7 @@ import {
   columnId,
   operationSchema,
   parseColumnId,
+  referenceColumn,
   validateOperation,
 } from "../catalog.ts";
 import { parsePlan, planOperations } from "../plan.ts";
@@ -20,7 +21,6 @@ import {
   measurementId,
   type Observation,
   type Sample,
-  STD_STABLE,
   TESSERA,
   TESSERA_AA,
 } from "./model.ts";
@@ -90,6 +90,7 @@ function parseManifest(value: unknown): Manifest {
   if (operations.length !== 1) throw new Error("a measurement session has exactly one operation");
   const [operation] = operations;
   if (operation.kind !== "sort") assertInteger(value.index_bytes, 1);
+  const reference = columnId(referenceColumn(operation, "serial")!);
   const columns = new Set<string>();
   for (const column of value.columns) {
     assertObject(column);
@@ -117,7 +118,7 @@ function parseManifest(value: unknown): Manifest {
     if (
       !Array.isArray(c.columns) ||
       !c.columns.includes(TESSERA) ||
-      !c.columns.includes(STD_STABLE) ||
+      !c.columns.includes(reference) ||
       new Set(c.columns).size !== c.columns.length ||
       c.columns.some((id) => !columns.has(id))
     )
@@ -142,12 +143,10 @@ function parseManifest(value: unknown): Manifest {
       !isDeepStrictEqual(planned.map(columnId).toSorted(), expected.toSorted())
     )
       throw new Error("incomplete unsupported-column evidence");
-    if (operation.kind !== "sort") {
-      assertObject(c.routes);
-      for (const route of Object.values(c.routes)) assertString(route);
-      if (!isDeepStrictEqual(Object.keys(c.routes).sort(), [...(c.columns as string[])].sort()))
-        throw new Error("missing implementation route");
-    } else if (c.routes !== undefined) throw new Error("sort cases have no routes");
+    assertObject(c.routes);
+    for (const route of Object.values(c.routes)) assertString(route);
+    if (!isDeepStrictEqual(Object.keys(c.routes).sort(), [...(c.columns as string[])].sort()))
+      throw new Error("missing implementation route");
     const id = caseId(c as unknown as Manifest["cases"][number]);
     if (ids.has(id)) throw new Error(`duplicate case ${id}`);
     ids.add(id);

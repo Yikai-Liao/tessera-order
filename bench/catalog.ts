@@ -65,6 +65,10 @@ export const catalog = z
     operations: z.array(
       identity.extend({
         parallel_label: z.string().optional(),
+        /** The implementation whose serial column is the speed denominator. */
+        reference: z.string(),
+        /** The implementation whose column at the same pool size is the parallel denominator. */
+        parallel_reference: z.string().optional(),
         description: z.string(),
         parameters: z.array(z.object({ id: z.string(), label: z.string().optional() })).default([]),
         comparison: z
@@ -73,6 +77,20 @@ export const catalog = z
       }),
     ),
   })
+  .refine(
+    (catalog) =>
+      catalog.operations.every(
+        (operation) =>
+          catalog.implementations.some(
+            (entry) => entry.id === operation.reference && entry.parallel !== "only",
+          ) &&
+          (operation.parallel_reference === undefined ||
+            catalog.implementations.some(
+              (entry) => entry.id === operation.parallel_reference && entry.parallel,
+            )),
+      ),
+    "An operation reference must name an implementation with that entry point",
+  )
   .parse(
     decodeConfig(readFileSync(new URL("./catalog.toml", import.meta.url), "utf8"), "catalog.toml"),
   );
@@ -329,6 +347,20 @@ export function executionSection(operation: Operation, execution: Execution) {
     // Worker counts stay below 2^20 for every supported host.
     order: operationKinds.indexOf(operation.kind) * 2 ** 20 + (threads ?? 0),
   };
+}
+
+/** The column every other column on a case is divided by: the operation's reference at the
+ * same execution, or none where the operation has no parallel reference. */
+export function referenceColumn(operation: Operation, execution: Execution): Column | undefined {
+  const entry = operations.get(operation.kind)!;
+  const implementation = execution === "serial" ? entry.reference : entry.parallel_reference;
+  return implementation === undefined ? undefined : { implementation, execution };
+}
+
+/** The display label of an operation's reference implementation at an execution. */
+export function referenceLabel(operation: Operation, execution: Execution) {
+  const column = referenceColumn(operation, execution);
+  return column && catalog.implementations.find((e) => e.id === column.implementation)!.label;
 }
 
 /** The figure section of a Criterion ID; undecodable IDs sort last, untitled. */

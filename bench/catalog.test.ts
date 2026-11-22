@@ -18,6 +18,9 @@ import {
   parseColumnId,
   parseCriterionId,
   parseExecution,
+  referenceColumn,
+  referenceLabel,
+  SORT,
 } from "./catalog.ts";
 import { decodeConfig } from "./config.ts";
 
@@ -115,4 +118,17 @@ test("display fields name sections by operation and execution", () => {
     select,
     "not-an-id",
   ]);
+});
+
+test("each operation names the reference its speeds divide by", () => {
+  assert.deepEqual(referenceColumn(SORT, "serial"), {
+    implementation: "std-stable",
+    execution: "serial",
+  });
+  assert.deepEqual(referenceColumn(SORT, "t4"), {
+    implementation: "rayon-stable",
+    execution: "t4",
+  });
+  assert.equal(referenceLabel({ kind: "select_nth", index: 0 }, "serial"), "slice::sort_unstable");
+  assert.equal(referenceColumn({ kind: "argsort" }, "t4"), undefined);
 });

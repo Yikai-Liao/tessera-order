@@ -6,11 +6,11 @@
 
 | Term | Meaning |
 |---|---|
-| **Operation** | The caller-visible result: `sort`, `argsort`, `select_nth`, `partition-buckets`. A case is one operation on one input. |
+| **Operation** | The caller-visible result: `sort`, `argsort`, `select_nth`, `partition-buckets`. A case is one operation on one input. Its catalog entry names the reference implementations that its speeds divide by. |
 | **Implementation** | Who provides the result: a catalog entry such as `tessera`, `std-stable`, `glidesort` or `ips4o`. Plans, the CLI and tracking select implementations. |
 | **Execution** | How the result is computed: `serial`, or `tN` for the parallel entry point in an N-worker pool. Plan rules select executions. |
 | **Column** | One implementation at one execution, such as `rayon-stable/t4`: what a report column or a tracked history measures. |
-| **Route** | What an implementation calls for one operation. `Variant` owns it. |
+| **Route** | The exact call a column makes for one operation. `Variant::route` owns it; manifests and `list` record it. |
 | **Distribution** | The input pattern of generated keys, such as `random` or `sorted`. |
 | **Plan** | A validated case selection: a preset name or a file, in the CLI and in the direct executables alike. |
 
@@ -45,7 +45,7 @@ Plans decode into one validated selection ([plan grammar](../development/benchma
 
 [Serial operation comparisons](../development/benchmarking.md#serial-operation-comparisons) share the maintained pipeline. Rust's `plan/operation.rs` owns operation parameters, bounds and suffixes. In TypeScript, `catalog.ts` shares the active operation definitions between CLI choices, new plans and the retained-result decoder. `plan.ts` applies the same placement and parameter rules that Rust applies on expansion. Results with earlier identities regenerate with their own tooling revision, so readers decode only the current grammar.
 
-`Variant::prepare` owns capabilities and complete adapters. Sort and select use restorable record buffers. Argsort retains indices over an immutable source; bucket partition restores mutable records and retains offsets. The kernels own result lifetimes and checking, not engine decisions. Manifests preserve exact routes and omissions, and memory evidence distinguishes mandatory output from workspace.
+`Variant::prepare` owns capabilities and complete adapters. Sort and select use restorable record buffers. Argsort retains indices over an immutable source; bucket partition restores mutable records and retains offsets. The kernels own result lifetimes and checking, not engine decisions. Every case's manifest preserves each measured column's route and every omission; a report rejects a case without them. Memory evidence distinguishes mandatory output from workspace.
 
 Implementation comparisons measure one operation and generate tables and JSON for non-sort operations. Revision plans can mix operations and executions on include rules. The catalog's `parallel` field says whether an implementation's parallel full sort stands beside its serial entry points or replaces them; [`tracking/implementations.ts`](../../bench/tracking/implementations.ts) derives the tracked columns from it. The PR plan selects representative cases, while main tracking takes only full sorting.
 

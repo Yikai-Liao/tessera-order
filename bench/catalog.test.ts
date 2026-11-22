@@ -129,6 +129,11 @@ test("each operation names the reference its speeds divide by", () => {
     implementation: "rayon-stable",
     execution: "t4",
   });
-  assert.equal(referenceLabel({ kind: "select_nth", index: 0 }, "serial"), "slice::sort_unstable");
+  // A reference whose label names only its sort also names the call it makes.
+  assert.equal(
+    referenceLabel({ kind: "select_nth", index: 0 }, "serial"),
+    "slice::sort_unstable · select_nth_unstable",
+  );
+  assert.equal(referenceLabel(SORT, "serial"), "slice::sort");
   assert.equal(referenceColumn({ kind: "argsort" }, "t4"), undefined);
 });

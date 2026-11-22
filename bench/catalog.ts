@@ -44,6 +44,8 @@ export const catalog = z
         parallel: z.enum(["also", "only"]).optional(),
         detail: z.string().optional(),
         description: z.string().optional(),
+        /** The call each listed operation makes, where the label names only the sort. */
+        routes: z.record(z.string(), z.string()).default({}),
       }),
     ),
     types: z.array(
@@ -70,6 +72,8 @@ export const catalog = z
         /** The implementation whose column at the same pool size is the parallel denominator. */
         parallel_reference: z.string().optional(),
         description: z.string(),
+        /** One call in figure text: "sort", "selection". */
+        noun: z.string(),
         parameters: z.array(z.object({ id: z.string(), label: z.string().optional() })).default([]),
         comparison: z
           .object({ types: z.array(z.string()), summaryDistributions: z.array(z.string()) })
@@ -90,6 +94,15 @@ export const catalog = z
             )),
       ),
     "An operation reference must name an implementation with that entry point",
+  )
+  .refine(
+    (catalog) =>
+      catalog.implementations.every((entry) =>
+        Object.keys(entry.routes).every((id) =>
+          catalog.operations.some((operation) => operation.id === id && id !== "sort"),
+        ),
+      ),
+    "An implementation route must name a non-sort operation",
   )
   .parse(
     decodeConfig(readFileSync(new URL("./catalog.toml", import.meta.url), "utf8"), "catalog.toml"),
@@ -123,6 +136,7 @@ export function implementation(id: string): (typeof catalog.implementations)[num
       family: "comparison",
       adapter: "unknown",
       stable: false,
+      routes: {},
     }
   );
 }
@@ -360,7 +374,23 @@ export function referenceColumn(operation: Operation, execution: Execution): Col
 /** The display label of an operation's reference implementation at an execution. */
 export function referenceLabel(operation: Operation, execution: Execution) {
   const column = referenceColumn(operation, execution);
-  return column && catalog.implementations.find((e) => e.id === column.implementation)!.label;
+  return column && routeLabel(column.implementation, operation);
+}
+
+/** The call an implementation makes for an operation, where its label names only the sort. */
+export function route(id: string, operation: Operation): string | undefined {
+  return implementation(id).routes[operation.kind];
+}
+
+/** An implementation's display name for an operation: its label, with the route if it has one. */
+export function routeLabel(id: string, operation: Operation) {
+  return [implementation(id).label, route(id, operation)].filter(Boolean).join(" · ");
+}
+
+/** The noun for one call of an operation in figure text, and its plural. */
+export function operationNoun(operation: Operation, count = 1) {
+  const noun = operations.get(operation.kind)!.noun;
+  return count === 1 ? noun : `${noun}s`;
 }
 
 /** The figure section of a Criterion ID; undecodable IDs sort last, untitled. */

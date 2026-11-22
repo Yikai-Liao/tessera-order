@@ -8,9 +8,12 @@ import {
   type Execution,
   executionThreads,
   implementation,
+  type Operation,
+  operationNoun,
   recordType,
   referenceColumn,
   referenceLabel,
+  route,
   SORT,
 } from "../catalog.ts";
 import { type CurveChart, renderCurves } from "../plot/curves.ts";
@@ -33,13 +36,6 @@ import {
   TESSERA,
 } from "./model.ts";
 
-/** The serial column every figure's speed is relative to, and how guides name it. */
-const REFERENCE_IMPLEMENTATION = referenceColumn(SORT, "serial")!.implementation;
-const REFERENCE = columnId({ implementation: REFERENCE_IMPLEMENTATION, execution: "serial" });
-const REFERENCE_LABEL = referenceLabel(SORT, "serial")!;
-/** A sorting comparison case: the figures' only operation. */
-const sortCase = (ty: string, distributionId: string, len: number) =>
-  caseId({ ty, distribution: distributionId, len, operation: SORT });
 /** The serial column through which figures name an implementation. */
 const serial = (name: string) => columnId({ implementation: name, execution: "serial" });
 /** A parallel column's pool size, as a name suffix; empty for serial columns. */
@@ -73,13 +69,15 @@ const rendered = (chart: Chart) => ({ chart, svg: renderRows(chart) });
  * from independent runs. Case IDs are comparison IDs (`u64/random/1000/s1`).
  */
 export interface Field {
+  /** The operation every case performs; its serial reference is the speed denominator. */
+  operation: Operation;
   implementations: { name: string; stable: boolean }[];
   cases: CaseIdentity[];
   /** The reference's time over the implementation's time on one case, or null if either is missing. */
   speed(id: string, implementation: string): number | null;
   /** Nanoseconds per element, or null if unmeasured. */
   nsPerKey(id: string, implementation: string): number | null;
-  /** Peak extra heap bytes of one sort, or null if unmeasured. */
+  /** Peak extra heap bytes of one call, or null if unmeasured. */
   peak(id: string, implementation: string): number | null;
 }
 
@@ -119,17 +117,36 @@ export interface Cohort {
 const RATIO_LIMIT = 32;
 
 const displayName = (id: string) => implementation(id).label;
-// Tables name a sort with its chart subtitle, so a footnote mark such as Block LSD*'s keeps its note.
-const tableName = (id: string) =>
-  implementation(id).detail ? `${displayName(id)} (${implementation(id).detail})` : displayName(id);
 const family = (id: string) =>
   implementation(id).description ?? `${implementation(id).family} sort`;
-const sortName = (id: string): NameCell => ({
-  input: displayName(id),
-  sub: implementation(id).detail ?? "",
-  tag: "",
-  strong: id === "tessera",
-});
+/**
+ * How one operation's figures name things: its reference, its calls and its cases. A row names
+ * an implementation by its label and the operation's route, or the label's detail for a sort.
+ */
+function terms(operation: Operation) {
+  const reference = referenceColumn(operation, "serial")!.implementation;
+  const detail = (id: string) => route(id, operation) ?? implementation(id).detail;
+  const one = operationNoun(operation);
+  return {
+    reference,
+    referenceLabel: referenceLabel(operation, "serial")!,
+    one,
+    many: operationNoun(operation, 2),
+    title: one[0].toUpperCase() + one.slice(1),
+    id: (ty: string, distributionId: string, len: number) =>
+      caseId({ ty, distribution: distributionId, len, operation }),
+    name: (id: string): NameCell => ({
+      input: displayName(id),
+      sub: detail(id) ?? "",
+      tag: "",
+      strong: id === "tessera",
+    }),
+    // Tables name an implementation with its chart subtitle, so a footnote mark such as
+    // Block LSD*'s keeps its note.
+    table: (id: string) => (detail(id) ? `${displayName(id)} (${detail(id)})` : displayName(id)),
+  };
+}
+type Terms = ReturnType<typeof terms>;
 const DISTRIBUTION_GROUPS = [
   ...Map.groupBy(
     catalog.distributions.filter((entry) => entry.group),
@@ -139,17 +156,19 @@ const DISTRIBUTION_GROUPS = [
   title,
   distributions: entries.map((entry) => [entry.id, entry.label] as const),
 }));
-// Keys compare against every sort; records only against stable ones, because stability is
-// observable there. Types follow catalog order.
-const TYPE_GROUPS = [
-  { title: "Keys · against any sort", keys: true },
-  { title: "Records · against stable sorts", keys: false },
-].map((group) => ({
-  ...group,
-  types: catalog.types
-    .filter((type) => (type.task === "keys") === group.keys)
-    .map((type) => [type.id, type.label, type.detail] as const),
-}));
+// Keys compare against every implementation; records only against stable ones, because
+// stability is observable there. Types follow catalog order.
+const typeGroups = (t: Terms) =>
+  [
+    { against: `any ${t.one}`, keys: true },
+    { against: `stable ${t.many}`, keys: false },
+  ].map((group) => ({
+    ...group,
+    title: `${group.keys ? "Keys" : "Records"} · against ${group.against}`,
+    types: catalog.types
+      .filter((type) => (type.task === "keys") === group.keys)
+      .map((type) => [type.id, type.label, type.detail] as const),
+  }));
 
 const LARGE = 1000000;
 const SHORT = 1000;
@@ -187,18 +206,25 @@ const toneOf = (variant: string): Tone =>
 // A symmetric speed axis in doublings around the reference, wide enough for
 // the data. Left of the centre the labels are fractions, so a tick and a
 // value cell read the same way.
-function speedScale(ratios: number[]): Chart["scale"] {
+// The longest centre label that fits between adjacent labelled doublings: "slice::sort" fits.
+const CENTRE_LABEL_CHARS = 12;
+function speedScale(ratios: number[], reference: string): Chart["scale"] {
   const reach = Math.max(2, ...ratios.map((r) => Math.min(RATIO_LIMIT, Math.max(r, 1 / r)) * 1.08));
   const span = Math.min(RATIO_LIMIT, 2 ** Math.ceil(Math.log2(reach)));
   const steps = Math.log2(span);
-  // Every doubling is labelled while there is room; wider axes label every other one.
-  const every = steps <= 3 ? 1 : 2;
-  const ticks = [{ value: 1, label: REFERENCE_LABEL }];
+  // Every doubling is labelled while there is room; wider axes, and centre labels longer than
+  // the gap to the adjacent doubling holds, such as a reference named by its route, label every
+  // other one.
+  const every = steps <= 3 && reference.length <= CENTRE_LABEL_CHARS ? 1 : 2;
+  const ticks = [{ value: 1, label: reference }];
   for (let k = every; k <= steps; k += every) {
     ticks.push({ value: 2 ** k, label: `${2 ** k}×` }, { value: 2 ** -k, label: `1/${2 ** k}×` });
   }
   return { low: 1 / span, high: span, ticks, origin: 1, clamp: true };
 }
+
+// Local report figures compare full sorts only.
+const REFERENCE = columnId(referenceColumn(SORT, "serial")!);
 
 // Speed of one column relative to the reference in the same blocks: the
 // reference's time over the column's, per block, then the median.
@@ -212,6 +238,7 @@ function pairedSpeed(summaries: Map<string, Summary>, id: string, column: string
 /** A local report's field: serial columns' paired speeds and the memory worker's peaks. */
 export function reportField(dataset: Dataset, summaries: Map<string, Summary>): Field {
   return {
+    operation: SORT,
     implementations: dataset.manifest.columns
       .filter((column) => column.execution === "serial")
       .map((column) => ({ name: column.implementation, stable: column.stable })),
@@ -225,13 +252,14 @@ export function reportField(dataset: Dataset, summaries: Map<string, Summary>): 
   };
 }
 
-// The geometric mean of those speeds over cases, or null if one is missing.
+// The geometric mean of those speeds over cases, or null if one is missing or there are none,
+// as when the element types share no input pattern.
 function speedOver(field: Field, ids: string[], variant: string) {
   const values = ids.map((id) => field.speed(id, variant));
-  return values.every((v): v is number => v !== null) ? geomean(values) : null;
+  return values.length && values.every((v): v is number => v !== null) ? geomean(values) : null;
 }
-const rankingCases = ({ ranking }: Cohort, n: number) =>
-  ranking.distributions.map((distributionId) => sortCase(ranking.ty, distributionId, n));
+const rankingCases = (t: Terms, { ranking }: Cohort, n: number) =>
+  ranking.distributions.map((distributionId) => t.id(ranking.ty, distributionId, n));
 /** Elements of one type in a guide: "u64 keys" or "{u32, u32} records". */
 const elements = (ty: string) => `${recordType(ty).label} ${recordType(ty).task}`;
 
@@ -242,20 +270,21 @@ const kindLegend: [Tone[], string][] = [
 ];
 const SPEED_AXIS: [string, string] = ["← slower", "faster →"];
 
-// With `memory`, each sort also shows its largest peak over the ranked inputs,
+// With `memory`, each implementation also shows its largest peak over the ranked inputs,
 // so one figure states both speed and memory.
 function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | null {
+  const t = terms(field.operation);
   const worstPeak = (variant: string) => {
-    const peaks = rankingCases(cohort, cohort.ranking.n).map((id) => field.peak(id, variant));
+    const peaks = rankingCases(t, cohort, cohort.ranking.n).map((id) => field.peak(id, variant));
     return peaks.every((v): v is number => v !== null) ? Math.max(...peaks) : null;
   };
   const entries = field.implementations.map((v) => ({
     name: v.name,
-    cell: sortName(v.name),
+    cell: t.name(v.name),
     kind: family(v.name),
     tone: toneOf(v.name),
     stable: v.stable,
-    speeds: cohort.ranking.lengths.map((n) => speedOver(field, rankingCases(cohort, n), v.name)),
+    speeds: cohort.ranking.lengths.map((n) => speedOver(field, rankingCases(t, cohort, n), v.name)),
     peak: memory ? worstPeak(v.name) : null,
   }));
   const at = cohort.ranking.lengths.indexOf(cohort.ranking.n);
@@ -265,8 +294,8 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
     .sort((a, b) => b.speeds[at] - a.speeds[at]);
   const anchor = complete.find((e) => e.cell.input === "Tessera");
   if (!anchor) return null;
-  // Records rank Tessera among stable sorts only, because stability is observable there;
-  // unstable sorts stay in their own group for context.
+  // Records rank Tessera among stable implementations only, because stability is observable
+  // there; unstable ones stay in their own group for context.
   const records = recordType(cohort.ranking.ty).task === "records";
   const others = complete.filter((e) => !e.cell.strong && (!records || e.stable));
   const rank = 1 + others.filter((e) => e.speeds[at] > anchor.speeds[at]).length;
@@ -276,37 +305,41 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
     cells: [times(e.speeds[at]), ...(memory ? [e.peak === null ? "–" : formatBytes(e.peak)] : [])],
     strong: e.cell.strong,
   });
-  const sorts = `${others.length + 1} ${records ? "stable " : ""}sorts`;
-  const title = rank === 1 ? `Fastest of ${sorts}` : `Ranked ${ordinal(rank)} of ${sorts}`;
+  const contenders = `${others.length + 1} ${records ? "stable " : ""}${t.many}`;
+  const title =
+    rank === 1 ? `Fastest of ${contenders}` : `Ranked ${ordinal(rank)} of ${contenders}`;
   return {
     name: memory ? "overview" : "ranking",
     subject: "Overall ranking",
-    summary: `Every sort on the same ${elements(cohort.ranking.ty)}, ranked by speed relative to ${REFERENCE_LABEL}${memory ? ", with the largest extra memory it allocated" : ""}. ${recordType(cohort.ranking.ty).task === "records" ? "Records rank Tessera among stable sorts; unstable sorts, which may reorder equal keys, are shown separately." : "Stable and unstable sorts are grouped separately."}`,
+    summary: `Every ${t.one} on the same ${elements(cohort.ranking.ty)}, ranked by speed relative to ${t.referenceLabel}${memory ? ", with the largest extra memory it allocated" : ""}. ${records ? `Records rank Tessera among stable ${t.many}; unstable ${t.many}, which may reorder equal keys, are shown separately.` : `Stable and unstable ${t.many} are grouped separately.`}`,
     title,
     ...rendered({
       title,
-      guide: `${formatLength(cohort.ranking.n)} ${elements(cohort.ranking.ty)} · speed vs ${REFERENCE_LABEL}, ${cohort.ranking.label}`,
+      guide: `${formatLength(cohort.ranking.n)} ${elements(cohort.ranking.ty)} · speed vs ${t.referenceLabel}, ${cohort.ranking.label}`,
       columns: ["Speed", ...(memory ? ["Extra memory"] : [])],
       groups: [
-        { title: "Stable sorts", rows: complete.filter((e) => e.stable).map(row) },
-        { title: "Unstable sorts", rows: complete.filter((e) => !e.stable).map(row) },
+        { title: `Stable ${t.many}`, rows: complete.filter((e) => e.stable).map(row) },
+        { title: `Unstable ${t.many}`, rows: complete.filter((e) => !e.stable).map(row) },
       ].filter((g) => g.rows.length),
-      scale: speedScale(complete.map((e) => e.speeds[at])),
+      scale: speedScale(
+        complete.map((e) => e.speeds[at]),
+        t.referenceLabel,
+      ),
       axis: SPEED_AXIS,
       legend: kindLegend,
     }),
     table: markdownTable(
       [
-        "Sort",
+        t.title,
         "Kind",
         "Stability",
         ...cohort.ranking.lengths.map(
-          (n) => `${formatLength(n)} elements, speed vs ${REFERENCE_LABEL}`,
+          (n) => `${formatLength(n)} elements, speed vs ${t.referenceLabel}`,
         ),
         ...(memory ? ["Largest extra memory"] : []),
       ],
       complete.map((e) => [
-        tableName(e.name),
+        t.table(e.name),
         e.kind,
         e.stable ? "stable" : "unstable",
         ...e.speeds.map(times),
@@ -321,7 +354,7 @@ interface Standing {
   tessera: number;
   rank: number;
 }
-// Where Tessera stands among every eligible sort on one row, all measured
+// Where Tessera stands among every eligible implementation on one row, all measured
 // against the reference, which therefore sits at the origin and is not drawn.
 function standing(field: Field, ids: string[], stableOnly: boolean): Standing | null {
   const variants = field.implementations;
@@ -339,13 +372,13 @@ function standing(field: Field, ids: string[], stableOnly: boolean): Standing | 
   };
 }
 
-function fieldRow(name: NameCell, s: Standing): Row {
+function fieldRow(t: Terms, name: NameCell, s: Standing): Row {
   return {
     name,
     swarm: true,
     marks: [
       ...s.speeds
-        .filter((v) => v.variant !== REFERENCE_IMPLEMENTATION)
+        .filter((v) => v.variant !== t.reference)
         .map((v): Mark => ({ value: v.speed, tone: toneOf(v.variant) })),
       { value: s.tessera, tone: "primary" },
     ],
@@ -363,7 +396,7 @@ function fieldTitle(standings: Standing[], unit: string) {
   // "All" reads naturally only past two; two cases read as "both".
   const all = (count: number) => (count === 2 ? `both ${unit}` : `all ${count} ${unit}`);
   if (first === total) return `Fastest on ${all(total)}`;
-  // A podium needs more than three sorts in the field.
+  // A podium needs more than three implementations in the field.
   const field = Math.max(...standings.map((s) => s.speeds.length + 1));
   const podium = top3 > first && field > 3;
   // Without a first place, the podium is the finding.
@@ -372,14 +405,14 @@ function fieldTitle(standings: Standing[], unit: string) {
   return `Fastest on ${first} of ${total} ${unit}${podium ? `, top 3 on ${top3}` : ""}`;
 }
 
-function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
+function fieldTable(t: Terms, rows: [string, Standing][], nsPerKey?: number[]) {
   return markdownTable(
     [
       "Row",
       ...(nsPerKey ? ["Tessera time per key"] : []),
       "Tessera rank",
-      `Tessera speed vs ${REFERENCE_LABEL}`,
-      "Other sorts, fastest first",
+      `Tessera speed vs ${t.referenceLabel}`,
+      `Other ${t.many}, fastest first`,
     ],
     rows.map(([label, s], i) => [
       label,
@@ -388,15 +421,16 @@ function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
       times(s.tessera),
       [...s.speeds]
         .sort((a, b) => b.speed - a.speed)
-        .map((v) => `${tableName(v.variant)} ${times(v.speed)}`)
+        .map((v) => `${t.table(v.variant)} ${times(v.speed)}`)
         .join(", "),
     ]),
   );
 }
 
-// Each measured input pattern of one type. Records admit only stable sorts;
-// for keys, stability is unobservable and every sort competes.
+// Each measured input pattern of one type. Records admit only stable implementations;
+// for keys, stability is unobservable and every implementation competes.
 function renderInputs(field: Field, cohort: Cohort, name: string, ty = "u64"): Figure | null {
+  const t = terms(field.operation);
   const { n } = cohort;
   const patterns = field.cases
     .filter((input) => input.ty === ty && input.len === n)
@@ -409,13 +443,13 @@ function renderInputs(field: Field, cohort: Cohort, name: string, ty = "u64"): F
     rows: g.distributions
       .filter(([distributionId]) => patterns.includes(distributionId))
       .flatMap(([distributionId, label]) => {
-        const id = sortCase(ty, distributionId, n);
+        const id = t.id(ty, distributionId, n);
         const s = standing(field, [id], stableOnly);
         const ns = field.nsPerKey(id, "tessera");
         if (!s || ns === null) return [];
         plotted.push([label, s]);
         nsPerKey.push(ns);
-        return [fieldRow({ input: label, sub: "", tag: "" }, s)];
+        return [fieldRow(t, { input: label, sub: "", tag: "" }, s)];
       }),
   })).filter((g) => g.rows.length);
   // The element-type figure already shows a type's shared pattern; a panel needs a few more.
@@ -425,46 +459,56 @@ function renderInputs(field: Field, cohort: Cohort, name: string, ty = "u64"): F
   return {
     name,
     subject: `${elements(ty)} by input pattern`,
-    summary: `Each row is one input pattern. Each dot is one ${stableOnly ? "stable sort (records keep equal keys in order)" : "sort"}, placed by its speed relative to ${REFERENCE_LABEL}; the columns give Tessera's speed and rank.`,
+    summary: `Each row is one input pattern. Each dot is one ${stableOnly ? `stable ${t.one} (records keep equal keys in order)` : t.one}, placed by its speed relative to ${t.referenceLabel}; the columns give Tessera's speed and rank.`,
     title,
     ...rendered({
       title,
-      guide: `${formatLength(n)} ${elements(ty)} · each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to ${REFERENCE_LABEL}`,
+      guide: `${formatLength(n)} ${elements(ty)} · each dot is one ${stableOnly ? "stable " : ""}${t.one}, placed by its speed relative to ${t.referenceLabel}`,
       columns: ["Speed", "Rank"],
       groups,
-      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
+      scale: speedScale(
+        standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
+        t.referenceLabel,
+      ),
       axis: SPEED_AXIS,
       legend: kindLegend,
     }),
-    table: fieldTable(plotted, nsPerKey),
+    table: fieldTable(t, plotted, nsPerKey),
   };
 }
 
 // One pattern at each sweep length, one group per type, so a reader follows how Tessera's
 // standing changes with length. A type needs two lengths to show a change.
 function renderLengths(field: Field, cohort: Cohort): Figure | null {
+  const t = terms(field.operation);
   const { distributionId, lengths } = cohort.sweep;
   const plotted: [string, Standing][] = [];
   const firsts: [number, boolean][] = [];
-  const groups = TYPE_GROUPS.flatMap((g) =>
-    g.types.map(([ty]) => {
-      const rows = lengths.flatMap((len) => {
-        const s = standing(field, [sortCase(ty, distributionId, len)], !g.keys);
-        return s ? [[len, s] as const] : [];
-      });
-      return {
-        title: `${elements(ty)} · against ${g.keys ? "any sort" : "stable sorts"}`,
-        rows:
-          rows.length < 2
-            ? []
-            : rows.map(([len, s]) => {
-                plotted.push([`${elements(ty)} · ${formatLength(len)}`, s]);
-                firsts.push([len, s.rank === 1]);
-                return fieldRow({ input: `${formatLength(len)} elements`, sub: "", tag: "" }, s);
-              }),
-      };
-    }),
-  ).filter((g) => g.rows.length);
+  const groups = typeGroups(t)
+    .flatMap((g) =>
+      g.types.map(([ty]) => {
+        const rows = lengths.flatMap((len) => {
+          const s = standing(field, [t.id(ty, distributionId, len)], !g.keys);
+          return s ? [[len, s] as const] : [];
+        });
+        return {
+          title: `${elements(ty)} · against ${g.against}`,
+          rows:
+            rows.length < 2
+              ? []
+              : rows.map(([len, s]) => {
+                  plotted.push([`${elements(ty)} · ${formatLength(len)}`, s]);
+                  firsts.push([len, s.rank === 1]);
+                  return fieldRow(
+                    t,
+                    { input: `${formatLength(len)} elements`, sub: "", tag: "" },
+                    s,
+                  );
+                }),
+        };
+      }),
+    )
+    .filter((g) => g.rows.length);
   if (!plotted.length) return null;
   const standings = plotted.map(([, s]) => s);
   // The shortest length from which Tessera leads at every longer measured length, if any.
@@ -477,24 +521,28 @@ function renderLengths(field: Field, cohort: Cohort): Figure | null {
   return {
     name: "lengths",
     subject: "Speed by input length",
-    summary: `Each row is one input length, on the ${input} input. Each dot is one sort, placed by its speed relative to ${REFERENCE_LABEL}; records compare only stable sorts.`,
+    summary: `Each row is one input length, on the ${input} input. Each dot is one ${t.one}, placed by its speed relative to ${t.referenceLabel}; records compare only stable ${t.many}.`,
     title,
     ...rendered({
       title,
-      guide: `${input} input · each dot is one sort, placed by its speed relative to ${REFERENCE_LABEL}`,
+      guide: `${input} input · each dot is one ${t.one}, placed by its speed relative to ${t.referenceLabel}`,
       columns: ["Speed", "Rank"],
       groups,
-      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
+      scale: speedScale(
+        standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
+        t.referenceLabel,
+      ),
       axis: SPEED_AXIS,
       legend: kindLegend,
     }),
-    table: fieldTable(plotted),
+    table: fieldTable(t, plotted),
   };
 }
 
 // Every pattern of the short-input types, grouped by length and type, where fixed per-call
 // costs and fallbacks decide the result.
 function renderShort(field: Field, cohort: Cohort): Figure | null {
+  const t = terms(field.operation);
   const { lengths, types } = cohort.short;
   const plotted: [string, Standing][] = [];
   const nsPerKey: number[] = [];
@@ -506,13 +554,13 @@ function renderShort(field: Field, cohort: Cohort): Figure | null {
         return {
           title: `${formatLength(len)} ${elements(ty)}`,
           rows: distributions.flatMap(([distributionId, label]) => {
-            const id = sortCase(ty, distributionId, len);
+            const id = t.id(ty, distributionId, len);
             const s = standing(field, [id], stableOnly);
             const ns = field.nsPerKey(id, "tessera");
             if (!s || ns === null) return [];
             plotted.push([`${label} · ${formatLength(len)} ${elements(ty)}`, s]);
             nsPerKey.push(ns);
-            return [fieldRow({ input: label, sub: "", tag: "" }, s)];
+            return [fieldRow(t, { input: label, sub: "", tag: "" }, s)];
           }),
         };
       }),
@@ -524,37 +572,43 @@ function renderShort(field: Field, cohort: Cohort): Figure | null {
   return {
     name: "short",
     subject: "Short inputs",
-    summary: `Each row is one input pattern, grouped by length and element type. Each dot is one sort, placed by its speed relative to ${REFERENCE_LABEL}; records compare only stable sorts.`,
+    summary: `Each row is one input pattern, grouped by length and element type. Each dot is one ${t.one}, placed by its speed relative to ${t.referenceLabel}; records compare only stable ${t.many}.`,
     title,
     ...rendered({
       title,
-      guide: `${lengths.map(formatLength).join(" and ")} elements · each dot is one sort, placed by its speed relative to ${REFERENCE_LABEL}`,
+      guide: `${lengths.map(formatLength).join(" and ")} elements · each dot is one ${t.one}, placed by its speed relative to ${t.referenceLabel}`,
       columns: ["Speed", "Rank"],
       groups,
-      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
+      scale: speedScale(
+        standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
+        t.referenceLabel,
+      ),
       axis: SPEED_AXIS,
       legend: kindLegend,
     }),
-    table: fieldTable(plotted, nsPerKey),
+    table: fieldTable(t, plotted, nsPerKey),
   };
 }
 
 // Each element type over the cohort's type patterns. Records admit
-// only stable sorts, because stability is observable there.
+// only stable implementations, because stability is observable there.
 function renderTypes(field: Field, cohort: Cohort): Figure | null {
+  const t = terms(field.operation);
   const plotted: [string, Standing][] = [];
-  const groups = TYPE_GROUPS.map((g) => ({
-    title: g.title,
-    rows: g.types.flatMap(([ty, label, sub]) => {
-      const ids = cohort.typeDistributions.map((distributionId) =>
-        sortCase(ty, distributionId, cohort.n),
-      );
-      const s = standing(field, ids, !g.keys);
-      if (!s) return [];
-      plotted.push([label, s]);
-      return [fieldRow({ input: label, sub, tag: "" }, s)];
-    }),
-  })).filter((g) => g.rows.length);
+  const groups = typeGroups(t)
+    .map((g) => ({
+      title: g.title,
+      rows: g.types.flatMap(([ty, label, sub]) => {
+        const ids = cohort.typeDistributions.map((distributionId) =>
+          t.id(ty, distributionId, cohort.n),
+        );
+        const s = standing(field, ids, !g.keys);
+        if (!s) return [];
+        plotted.push([label, s]);
+        return [fieldRow(t, { input: label, sub, tag: "" }, s)];
+      }),
+    }))
+    .filter((g) => g.rows.length);
   // A comparison of element types needs at least two of them.
   if (plotted.length < 2) return null;
   const standings = plotted.map(([, s]) => s);
@@ -562,23 +616,27 @@ function renderTypes(field: Field, cohort: Cohort): Figure | null {
   return {
     name: "types",
     subject: "Element types",
-    summary: `Each row is one key or record type. Each dot is one sort, placed by its speed relative to ${REFERENCE_LABEL}; records compare only stable sorts.`,
+    summary: `Each row is one key or record type. Each dot is one ${t.one}, placed by its speed relative to ${t.referenceLabel}; records compare only stable ${t.many}.`,
     title,
     ...rendered({
       title,
-      guide: `${formatLength(cohort.n)} elements · speed relative to ${REFERENCE_LABEL}, ${cohort.typeDistributionsLabel}`,
+      guide: `${formatLength(cohort.n)} elements · speed relative to ${t.referenceLabel}, ${cohort.typeDistributionsLabel}`,
       columns: ["Speed", "Rank"],
       groups,
-      scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
+      scale: speedScale(
+        standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
+        t.referenceLabel,
+      ),
       axis: SPEED_AXIS,
       legend: kindLegend,
     }),
-    table: fieldTable(plotted),
+    table: fieldTable(t, plotted),
   };
 }
 
-/** Each sort's peak extra memory on one input pattern at several lengths. */
+/** Each implementation's peak extra memory for one operation on one input pattern at several lengths. */
 export interface Growth {
+  operation: Operation;
   ty: string;
   distribution: string;
   /** Increasing record counts. */
@@ -591,7 +649,7 @@ export interface Growth {
 
 /** A field's peaks on one type's random input, at every length Tessera's peak was measured. */
 export function fieldGrowth(field: Field, ty: string): Growth {
-  const id = (len: number) => sortCase(ty, "random", len);
+  const id = (len: number) => terms(field.operation).id(ty, "random", len);
   const lengths = [
     ...new Set(
       field.cases
@@ -602,6 +660,7 @@ export function fieldGrowth(field: Field, ty: string): Growth {
     .filter((len) => field.peak(id(len), "tessera") !== null)
     .toSorted((a, b) => a - b);
   return {
+    operation: field.operation,
     ty,
     distribution: "random",
     lengths,
@@ -629,6 +688,7 @@ const exponent = ([n1, y1]: [number, number], [n2, y2]: [number, number]) =>
   Math.log(y2 / y1) / Math.log(n2 / n1);
 
 export function renderGrowth(growth: Growth): Figure | null {
+  const t = terms(growth.operation);
   const { ty, lengths } = growth;
   const tessera = growth.peaks.find((entry) => entry.name === "tessera");
   const measured = (values: (number | null)[]) =>
@@ -640,7 +700,7 @@ export function renderGrowth(growth: Growth): Figure | null {
   const sorts = growth.peaks
     .map((entry) => ({ ...entry, points: measured(entry.values) }))
     .filter((entry) => entry.points.length);
-  // Sorts that never reach the axis are named in a note; the table keeps their values.
+  // Implementations that never reach the axis are named in a note; the table keeps their values.
   const plotted = sorts.filter((entry) => entry.points.some(([, y]) => y >= MEMORY_FLOOR));
   const small = sorts.filter((entry) => !plotted.includes(entry));
   const last = own.at(-1)!;
@@ -670,14 +730,14 @@ export function renderGrowth(growth: Growth): Figure | null {
     ...footnotes,
   ].join(" ");
   const table = markdownTable(
-    ["Sort", ...lengths.map(formatLength)],
+    [t.title, ...lengths.map(formatLength)],
     sorts
       .toSorted((a, b) => (b.values.at(-1) ?? 0) - (a.values.at(-1) ?? 0))
-      .map((e) => [tableName(e.name), ...e.values.map((v) => (v === null ? "–" : formatBytes(v)))]),
+      .map((e) => [t.table(e.name), ...e.values.map((v) => (v === null ? "–" : formatBytes(v)))]),
   );
   const chart: CurveChart = {
     title,
-    guide: `${elements(ty)}, ${distribution(growth.distribution).label} input · peak heap allocation during one sort, beyond the input${growth.source ? ` · ${growth.source}` : ""}`,
+    guide: `${elements(ty)}, ${distribution(growth.distribution).label} input · peak heap allocation during one ${t.one}, beyond the input${growth.source ? ` · ${growth.source}` : ""}`,
     x: {
       low: lengths[0],
       high: lengths.at(-1)!,
@@ -707,7 +767,7 @@ export function renderGrowth(growth: Growth): Figure | null {
   return {
     name: "memory",
     subject: "Extra memory by input length",
-    summary: `How much memory each sort allocates beyond its input as the input grows. Both axes are logarithmic, so memory proportional to a power of n is a straight line, and a steeper line grows faster: sorts that copy their input rise with the input itself, and the dotted line has the slope of √n.`,
+    summary: `How much memory each ${t.one} allocates beyond its input as the input grows. Both axes are logarithmic, so memory proportional to a power of n is a straight line, and a steeper line grows faster: ${t.many} that copy their input rise with the input itself, and the dotted line has the slope of √n.`,
     title,
     kind: "curves",
     chart,
@@ -740,7 +800,10 @@ export function renderParallel({ n, threads, tessera, inputs }: Scaling): Figure
   }));
   const widest = rows.at(-1)!;
   const title = `${times(widest.tessera / widest.rayon)} Rayon's speed on ${named(widest.threads)}`;
-  const scale = speedScale(rows.flatMap((row) => [row.tessera, row.rayon]));
+  const scale = speedScale(
+    rows.flatMap((row) => [row.tessera, row.rayon]),
+    "",
+  );
   scale.ticks = scale.ticks.map((tick) =>
     tick.value === 1 ? { ...tick, label: "Rayon · 1" } : tick,
   );
@@ -810,7 +873,7 @@ function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figu
         rows: entries.map(
           ({ summary, implementation: name, execution }): Row => ({
             name: {
-              ...sortName(name),
+              ...terms(SORT).name(name),
               sub: [implementation(name).detail, threadsLabel(execution)]
                 .filter(Boolean)
                 .join(" · "),
@@ -827,7 +890,7 @@ function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figu
       },
     ];
     const bounds = groups.flatMap((group) => group.rows.flatMap((row) => row.span!));
-    const scale = speedScale(bounds);
+    const scale = speedScale(bounds, "");
     scale.ticks = scale.ticks.map((tick) =>
       tick.value === 1 ? { ...tick, label: "Tessera" } : tick,
     );
@@ -906,7 +969,7 @@ export function renderFigures(dataset: Dataset, summaries: Map<string, Summary>)
   const field = reportField(dataset, summaries);
   // Release figures need the release ranking's cases. A smaller selection shows each of its
   // cases instead, so no case loses its paired ranges to a partial release panel.
-  const release = rankingCases(RELEASE, RELEASE.ranking.n).every((id) =>
+  const release = rankingCases(terms(SORT), RELEASE, RELEASE.ranking.n).every((id) =>
     field.cases.some((input) => caseId(input) === id),
   );
   return release ? comparisonFigures(field, RELEASE) : renderSelected(dataset, summaries);

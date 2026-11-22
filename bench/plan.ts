@@ -150,6 +150,17 @@ export function planOperations(plan: Plan) {
   return operations;
 }
 
+/**
+ * The plan split into one plan per operation, in `planOperations` order. A measurement session
+ * measures one operation, so a plan that selects several runs one session per part.
+ */
+export function plansByOperation(plan: Plan): Plan[] {
+  return planOperations(plan).map((operation) => ({
+    ...plan,
+    include: plan.include.filter((rule) => sameOperation(rule.operation ?? SORT, operation)),
+  }));
+}
+
 /** Every execution an include rule selects, serial first, then ascending worker counts. */
 export function planExecutions(plan: Plan): Execution[] {
   return [

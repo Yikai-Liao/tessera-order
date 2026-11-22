@@ -476,6 +476,15 @@ test("the columns of one commit form one link of the aggregate", () => {
   assert.equal(headline(runs), "+10.0%");
   // A later commit measuring only t4 moves the aggregate by t4 alone, inventing no serial value.
   assert.equal(headline([...runs, column(4, 3, { [parallel]: 121 })]), "+21.0%");
+  // A rerun of the first commit chains like a commit: 100, rerun 110, then 120 is +20%.
+  assert.equal(
+    headline([
+      column(0, 1, { [serial]: 100 }),
+      column(1, 1, { [serial]: 110 }),
+      column(2, 2, { [serial]: 120 }),
+    ]),
+    "+20.0%",
+  );
 });
 
 test("the latest measured environment is selected before commit-time ordering", () => {

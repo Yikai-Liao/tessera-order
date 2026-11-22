@@ -82,6 +82,7 @@ function caseChanges(runs: TrackingRun[], id: string) {
  * missing from a run contributes its change across the gap when it returns.
  * The runs of one commit form one link: each tracked column is a separate run,
  * so chaining them one after another would compound their independent changes.
+ * A rerun of a case already in the link starts the next link.
  */
 function chainedChanges(runs: TrackingRun[], ids: string[]) {
   let level = 1;
@@ -91,14 +92,15 @@ function chainedChanges(runs: TrackingRun[], ids: string[]) {
   const current = new Map<string, number>();
   const logs = new Map<string, number>();
   return runs.map((run) => {
-    if (run.hash !== hash) {
+    const measured = ids.filter((id) => estimate(run, id) !== undefined);
+    // A rerun repeats a case already in the link, so it chains against that measurement.
+    if (run.hash !== hash || measured.some((id) => current.has(id))) {
       hash = run.hash;
       base = level;
       for (const [id, value] of current) previous.set(id, value);
       current.clear();
       logs.clear();
     }
-    const measured = ids.filter((id) => estimate(run, id) !== undefined);
     if (!measured.length) return null;
     for (const id of measured) {
       const value = estimate(run, id)!;

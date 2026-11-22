@@ -455,6 +455,29 @@ test("missing compared cases retain shared slots, independent baselines and gaps
   assert.ok(!result.svg.includes("NaN"));
 });
 
+test("the columns of one commit form one link of the aggregate", () => {
+  const serial = "rust/sort/u64/random/65536/s1/serial",
+    parallel = "rust/sort/u64/random/65536/s1/t4";
+  // Each commit records its serial and t4 columns as separate runs.
+  const column = (index: number, commit: number, values: Record<string, number>) => ({
+    ...at(index, values),
+    hash: String(commit).repeat(40),
+    commit_time: `2026-11-0${commit}T00:00:00Z`,
+  });
+  const runs = [
+    column(0, 1, { [serial]: 100 }),
+    column(1, 1, { [parallel]: 100 }),
+    column(2, 2, { [serial]: 110 }),
+    column(3, 2, { [parallel]: 110 }),
+  ];
+  // Both executions slow down by 10%: the aggregate is 10%, not the compounded 21%.
+  const headline = (input: TrackingRun[]) =>
+    renderMainTrend(input, trackingCases([serial, parallel])).match(/Tessera (\S+) run time/)?.[1];
+  assert.equal(headline(runs), "+10.0%");
+  // A later commit measuring only t4 moves the aggregate by t4 alone, inventing no serial value.
+  assert.equal(headline([...runs, column(4, 3, { [parallel]: 121 })]), "+21.0%");
+});
+
 test("the latest measured environment is selected before commit-time ordering", () => {
   const old = { ...at(0, { [PREVIEW_CASE]: 100 }), commit_time: "2026-12-01T00:00:00Z" };
   const newerEnvironment = {

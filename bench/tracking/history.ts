@@ -80,18 +80,33 @@ function caseChanges(runs: TrackingRun[], id: string) {
  * equals the geometric mean of each case's change from the first run. A case
  * entering the plan does not move the aggregate by its own level, and a case
  * missing from a run contributes its change across the gap when it returns.
+ * The runs of one commit form one link: each tracked column is a separate run,
+ * so chaining them one after another would compound their independent changes.
  */
 function chainedChanges(runs: TrackingRun[], ids: string[]) {
   let level = 1;
+  let base = 1;
+  let hash: string | undefined;
   const previous = new Map<string, number>();
+  const current = new Map<string, number>();
+  const logs = new Map<string, number>();
   return runs.map((run) => {
+    if (run.hash !== hash) {
+      hash = run.hash;
+      base = level;
+      for (const [id, value] of current) previous.set(id, value);
+      current.clear();
+      logs.clear();
+    }
     const measured = ids.filter((id) => estimate(run, id) !== undefined);
     if (!measured.length) return null;
-    const logs = measured
-      .filter((id) => previous.has(id))
-      .map((id) => Math.log(estimate(run, id)! / previous.get(id)!));
-    if (logs.length) level *= Math.exp(logs.reduce((sum, value) => sum + value, 0) / logs.length);
-    for (const id of measured) previous.set(id, estimate(run, id)!);
+    for (const id of measured) {
+      const value = estimate(run, id)!;
+      if (previous.has(id)) logs.set(id, Math.log(value / previous.get(id)!));
+      current.set(id, value);
+    }
+    if (logs.size)
+      level = base * Math.exp([...logs.values()].reduce((a, b) => a + b, 0) / logs.size);
     return level - 1;
   });
 }

@@ -64,7 +64,8 @@ export function latestRuns(runs: Map<string, TrackingRun[]>) {
 const SERIAL_REFERENCE = referenceColumn(SORT, "serial")!.implementation;
 const PARALLEL_REFERENCE = referenceColumn(SORT, "t1")!.implementation;
 
-/** The figures' view of serial columns: speeds against the sort reference's run, peaks as recorded. */
+/** The figures' view of serial sort columns: speeds against the sort reference's run, peaks as
+ * recorded. Runs also hold other operations' cases, which their own sections read. */
 export function trackingField(runs: Map<string, TrackingRun>): Field {
   const serial = (name: string) =>
     runs.get(columnId({ implementation: name, execution: "serial" }));
@@ -74,7 +75,7 @@ export function trackingField(runs: Map<string, TrackingRun>): Field {
     if (parseColumnId(column).execution !== "serial") continue;
     for (const key of Object.keys(run.values)) {
       const input = parseCriterionId(key);
-      cases.set(caseId(input), input);
+      if (input.operation.kind === SORT.kind) cases.set(caseId(input), input);
     }
   }
   return {
@@ -190,7 +191,9 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
   if (counts[0] !== 1) return null;
   const time = (name: string, t: number, id: string) => timed(run(name, t), id, `t${t}`)?.[0];
   const ids = Object.keys(run(PARALLEL_REFERENCE, 1)!.values)
-    .map((key) => caseId(parseCriterionId(key)))
+    .map(parseCriterionId)
+    .filter((input) => input.operation.kind === SORT.kind)
+    .map(caseId)
     .filter((id) => counts.every((t) => time("tessera", t, id) && time(PARALLEL_REFERENCE, t, id)));
   const [found] = [...Map.groupBy(ids, (id) => parseCaseId(id).len)].toSorted(
     (a, b) => b[1].length - a[1].length || b[0] - a[0],
@@ -279,7 +282,7 @@ export function comparisonData(
   return comparisonSchema.parse({
     spec: latest?.spec ?? null,
     overview: figures.find((figure) => figure.name === "overview") ?? null,
-    // Main tracking measures sorting only; another operation adds its section when tracked.
+    // Only sorting has a cohort and figures so far; other operations' cases wait in the runs.
     operations: cohort
       ? [
           {

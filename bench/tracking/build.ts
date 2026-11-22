@@ -4,7 +4,7 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { command } from "../../tools/process.ts";
 import { repositoryRoot, runTask } from "../../tools/tasks.ts";
-import { type Column, columnId, criterionId, parseCaseId } from "../catalog.ts";
+import { type Column, columnId, continuous, criterionId, parseCaseId } from "../catalog.ts";
 import { loadPlan, type Plan } from "../plan.ts";
 import { withComparisonWorkspace } from "../release.ts";
 import {
@@ -37,14 +37,13 @@ export type TrackingBuild = {
 };
 
 /**
- * The continuous plan's full-sort inputs for one column: a serial column takes the serial rules,
- * a parallel column the parallel rules at its own pool size. Absolute tracking records full
- * sorting, so the PR plan's operation rules stay out.
+ * The continuous plan's inputs for one column: a serial column takes the serial rules, including
+ * every operation's, and a parallel column the parallel rules at its own pool size. An
+ * implementation lists only the cases its adapter supports.
  */
 export function columnPlan(plan: Plan, column: Column): Plan {
   const parallel = column.execution !== "serial";
   const include = plan.include
-    .filter((rule) => !rule.operation)
     .filter((rule) => (rule.executions ?? ["serial"]).some((e) => (e !== "serial") === parallel))
     .map((rule) => ({ ...rule, executions: [column.execution] }));
   if (!include.length) throw new Error(`The continuous plan has no rules for ${columnId(column)}`);
@@ -105,7 +104,7 @@ if (import.meta.main) {
           targetTriple: "x86_64-unknown-linux-gnu",
           env: { CC: "clang", CXX: "clang++" },
         });
-        const features = ["rayon", ...(native ? ["compare-native"] : [])];
+        const features = [...continuous.features, ...(native ? ["compare-native"] : [])];
         const built = await buildBenchmark(tree, target, "smoke", features, {
           targetTriple: "x86_64-unknown-linux-gnu",
           env,

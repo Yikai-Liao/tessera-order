@@ -785,11 +785,10 @@ test("each tracking column measures its own slice of the continuous plan", async
     [parallel, "t2"],
   ] as const) {
     assert.ok(column.include.length > 0);
-    for (const rule of column.include) {
-      assert.equal(rule.operation, undefined);
-      assert.deepEqual(rule.executions, [execution]);
-    }
+    for (const rule of column.include) assert.deepEqual(rule.executions, [execution]);
   }
+  // A serial column also measures the plan's other operations.
+  assert.ok(serial.include.some((rule) => rule.operation));
 });
 
 test("the comparison ranks 32-bit-key records and adds parallel scaling", () => {

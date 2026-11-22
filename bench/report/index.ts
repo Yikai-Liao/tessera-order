@@ -128,12 +128,11 @@ function renderCapabilities(dataset: Dataset) {
   ]);
   let out = `## Capabilities\n\n${renderTable(["Column", "Sort contract", "Pool workers", ...types], rows)}\n`;
   const { kind } = manifest.cases[0].operation;
-  if (kind === "sort")
-    return (
-      out +
-      "Unstable sorts on records are listed as a separate task: their permutation check allows equal keys to change order. A dash means the adapter does not support the task.\n\n"
-    );
   switch (kind) {
+    case "sort":
+      out +=
+        "Unstable sorts on records are listed as a separate task: their permutation check allows equal keys to change order. A dash means the adapter does not support the task. ";
+      break;
     case "argsort":
       out +=
         "Every route must return the exact stable index permutation. Standard unstable argsort explicitly breaks ties by original index. ";
@@ -147,16 +146,23 @@ function renderCapabilities(dataset: Dataset) {
         "Ranked stable routes require exact stable ranked membership. Standard-library unstable partial routes instead require the same ranked keys with arbitrary equal-key members, including on payload records. Full-sort references do more work than selection; ratios to arbitrary-tie routes compare different guarantees, not the isolated cost of stability. ";
   }
   out += "Each admitted route or omission is retained below.\n\n";
-  const routes = new Map<string, string[]>();
+  // One row per column and call, listing the input types that share it.
+  const routes = new Map<string, { column: string; call: string; types: Set<string> }>();
+  const add = (column: string, call: string, ty: string) => {
+    const key = `${column}\t${call}`;
+    if (!routes.has(key)) routes.set(key, { column, call, types: new Set() });
+    routes.get(key)!.types.add(ty);
+  };
   for (const c of manifest.cases) {
-    for (const [column, route] of Object.entries(c.routes ?? {}))
-      routes.set(`${c.ty}/${column}`, [c.ty, column, route]);
-    for (const omitted of c.omitted)
-      routes.set(`${c.ty}/${omitted.column}`, [c.ty, omitted.column, `omitted: ${omitted.reason}`]);
+    for (const [column, route] of Object.entries(c.routes)) add(column, route, c.ty);
+    for (const omitted of c.omitted) add(omitted.column, `omitted: ${omitted.reason}`, c.ty);
   }
   return (
     out +
-    renderTable(["Input type", "Column", "Complete call / omission"], [...routes.values()]) +
+    renderTable(
+      ["Column", "Complete call / omission", "Input types"],
+      [...routes.values()].map((row) => [row.column, row.call, [...row.types].join(", ")]),
+    ) +
     "\n"
   );
 }

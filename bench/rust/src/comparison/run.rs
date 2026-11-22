@@ -64,7 +64,7 @@ pub(super) fn column_id(variant: Variant, execution: Execution) -> String {
 }
 
 /// Rejects unsupported required controls before journals or memory measurement.
-/// Every case pairs its columns with serial Tessera and `std-stable` controls.
+/// Every case pairs its columns with serial Tessera and its operation's reference controls.
 /// Capability probes retain the operation but never generate the full input.
 pub(super) fn validate_controls(
     cases: &[(InputCase, Vec<Execution>)],
@@ -73,13 +73,13 @@ pub(super) fn validate_controls(
     for (case, executions) in cases {
         if !executions.contains(&Execution::Serial) {
             return Err(format!(
-                "{} lacks the serial execution that its tessera and std-stable controls need",
+                "{} lacks the serial execution that its Tessera and reference controls need",
                 case.id()
             )
             .into());
         }
         let input = super::record::CaseInput::new(&case.probe());
-        for name in ["tessera", "std-stable"] {
+        for name in ["tessera", crate::plan::operation_reference(&case.operation)] {
             let control = variants
                 .iter()
                 .find(|v| v.name == name)

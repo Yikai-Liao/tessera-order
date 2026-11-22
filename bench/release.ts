@@ -3,7 +3,7 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { command, diagnostic } from "../tools/process.ts";
-import { catalog, parseColumnId } from "./catalog.ts";
+import { catalog, parseColumnId, referenceColumn } from "./catalog.ts";
 import { loadPlan, type Plan, parsePlan, planExecutions, planOperations } from "./plan.ts";
 import { writeReport } from "./report/index.ts";
 import { prepareRevisions, type Revisions } from "./revisions.ts";
@@ -171,7 +171,15 @@ async function prepareComparison(options: ReleaseOptions) {
   // Controls belong to this measurement operation, not the shared selection parser.
   const plan = parsePlan({
     ...options.plan,
-    implementations: [...new Set(["tessera", "std-stable", ...options.plan.implementations])],
+    implementations: [
+      ...new Set([
+        "tessera",
+        ...planOperations(options.plan).map(
+          (operation) => referenceColumn(operation, "serial")!.implementation,
+        ),
+        ...options.plan.implementations,
+      ]),
+    ],
   });
   if (cpu) await command("taskset", ["-c", cpu, "true"]);
   const native = plan.implementations.some((id) =>

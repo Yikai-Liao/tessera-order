@@ -35,17 +35,21 @@ export function createFixture(blocks = 9): Dataset {
     distributions.flatMap((distribution) =>
       lengths
         .filter((n) => n <= 1000000 || !["record128", "owned"].includes(ty))
-        .map((len) => ({
-          ty,
-          distribution,
-          len,
-          operation: SORT,
-          columns: columns
+        .map((len) => {
+          const measured = columns
             .filter((c) => c.implementation !== "vqsort" || ["u32", "u64"].includes(ty))
             .filter((c) => c.implementation !== "radsort" || ty !== "owned")
-            .map((c) => c.id),
-          omitted: [],
-        })),
+            .map((c) => c.id);
+          return {
+            ty,
+            distribution,
+            len,
+            operation: SORT,
+            columns: measured,
+            omitted: [],
+            routes: Object.fromEntries(measured.map((id) => [id, "complete sorting call"])),
+          };
+        }),
     ),
   );
   const m: Manifest = {

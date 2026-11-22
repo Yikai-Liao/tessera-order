@@ -25,7 +25,7 @@ fn prepare<T: TesseraAdapter>(
             })
         },
         stable: true,
-        description: "caller-owned pool and public sorting call",
+        description: super::PARALLEL_SORT_ROUTE,
         worker_threads: threads,
     })
 }

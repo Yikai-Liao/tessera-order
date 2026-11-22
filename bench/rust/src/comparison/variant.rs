@@ -195,7 +195,7 @@ pub trait Kernel {
     fn output_bytes(&self) -> usize {
         0
     }
-    /// Exact implementation route, retained with non-sort capability evidence.
+    /// Exact implementation route, retained in every case's capability evidence.
     fn description(&self) -> &'static str;
 }
 /// Batch buffers and a monomorphized in-place call over one shared input.
@@ -251,6 +251,9 @@ impl<T: BenchmarkRecord, F: FnMut(&mut [T])> Kernel for BatchKernel<T, F> {
         self.worker_threads
     }
 }
+/// The route of every parallel column: a public parallel sort in a warmed pool.
+const PARALLEL_SORT_ROUTE: &str = "caller-owned pool and public sorting call";
+
 /// Creates a typed batch kernel without cloning its shared reference.
 pub(super) fn prepare_kernel<T: BenchmarkRecord>(
     input: Rc<PreparedRecords<T>>,
@@ -395,6 +398,18 @@ impl Variant {
         match execution {
             Execution::Serial => self.prepare(input, execution, 0).is_some(),
             Execution::Threads(_) => self.parallel(input.operation()),
+        }
+    }
+
+    /// The exact call a supported column makes, retained in every manifest
+    /// and printed by `list`. Naming a parallel route starts no pool.
+    pub(super) fn route(self, input: &CaseInput, execution: Execution) -> &'static str {
+        match execution {
+            Execution::Serial => self
+                .prepare(input, execution, 0)
+                .expect("route of a supported column")
+                .description(),
+            Execution::Threads(_) => PARALLEL_SORT_ROUTE,
         }
     }
 

@@ -111,19 +111,6 @@ impl Options {
             }
         };
         options.plan = crate::plan::Plan::parse(&text)?;
-        if options.command == "run"
-            && ["tessera", "std-stable"].iter().any(|id| {
-                !options
-                    .plan
-                    .implementations
-                    .iter()
-                    .any(|selected| selected == id)
-            })
-        {
-            return Err(
-                "paired implementation runs require tessera and std-stable controls".into(),
-            );
-        }
         let operations: BTreeSet<_> = options
             .plan
             .cases()?
@@ -132,6 +119,22 @@ impl Options {
             .collect();
         if operations.len() != 1 {
             return Err("an implementation comparison measures one operation per session; split the plan by operation".into());
+        }
+        let reference =
+            crate::plan::operation_reference(operations.first().expect("one operation"));
+        if options.command == "run"
+            && ["tessera", reference].iter().any(|id| {
+                !options
+                    .plan
+                    .implementations
+                    .iter()
+                    .any(|selected| selected == id)
+            })
+        {
+            return Err(format!(
+                "paired implementation runs require tessera and {reference} controls"
+            )
+            .into());
         }
         if !options.operation().is_sort() && !cfg!(feature = "operations") {
             return Err("non-sort operations require the operations benchmark feature; the library APIs are always available".into());
@@ -260,12 +263,9 @@ fn create_manifest(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> 
                 entry["omitted"] = json!(omitted.iter()
                     .map(|&(v, e)| json!({"column":run::column_id(v, e),"reason":"unsupported operation/input/execution combination"}))
                     .collect::<Vec<_>>());
-                if !case.operation.is_sort() {
-                    // Serial non-sort routes do not start pools.
-                    entry["routes"] = json!(supported.iter()
-                        .filter_map(|&(v, e)| v.prepare(&input, e, 0).map(|k| (run::column_id(v, e), k.description())))
-                        .collect::<std::collections::BTreeMap<_, _>>());
-                }
+                entry["routes"] = json!(supported.iter()
+                    .map(|&(v, e)| (run::column_id(v, e), v.route(&input, e)))
+                    .collect::<std::collections::BTreeMap<_, _>>());
                 #[cfg(tessera_bench_revisions)]
                 let entry = {
                     let mut entry = entry;
@@ -565,11 +565,19 @@ pub fn main(memory: bool) -> Result<()> {
                         })
                         .collect();
                     if !supported.is_empty() {
+                        // Routes do not differ by record type, so the random u64 probe names it.
+                        let probe = record::CaseInput::new(&InputCase {
+                            ty: supported[0].into(),
+                            distribution: "random".into(),
+                            len: 32,
+                            operation: options.operation().probe(),
+                        });
                         println!(
-                            "{}\t{}\t{}",
+                            "{}\t{}\t{}\t{}",
                             run::column_id(v, execution),
                             if v.stable { "stable" } else { "unstable" },
-                            supported.join(",")
+                            supported.join(","),
+                            v.route(&probe, execution)
                         );
                     }
                 }

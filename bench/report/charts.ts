@@ -9,6 +9,8 @@ import {
   executionThreads,
   implementation,
   recordType,
+  referenceColumn,
+  referenceLabel,
   SORT,
 } from "../catalog.ts";
 import { type CurveChart, renderCurves } from "../plot/curves.ts";
@@ -27,11 +29,14 @@ import {
   distributions,
   lengths,
   measurementId,
-  STD_STABLE,
   type Summary,
   TESSERA,
 } from "./model.ts";
 
+/** The serial column every figure's speed is relative to, and how guides name it. */
+const REFERENCE_IMPLEMENTATION = referenceColumn(SORT, "serial")!.implementation;
+const REFERENCE = columnId({ implementation: REFERENCE_IMPLEMENTATION, execution: "serial" });
+const REFERENCE_LABEL = referenceLabel(SORT, "serial")!;
 /** A sorting comparison case: the figures' only operation. */
 const sortCase = (ty: string, distributionId: string, len: number) =>
   caseId({ ty, distribution: distributionId, len, operation: SORT });
@@ -70,7 +75,7 @@ const rendered = (chart: Chart) => ({ chart, svg: renderRows(chart) });
 export interface Field {
   implementations: { name: string; stable: boolean }[];
   cases: CaseIdentity[];
-  /** slice::sort time over the implementation's time on one case, or null if either is missing. */
+  /** The reference's time over the implementation's time on one case, or null if either is missing. */
   speed(id: string, implementation: string): number | null;
   /** Nanoseconds per element, or null if unmeasured. */
   nsPerKey(id: string, implementation: string): number | null;
@@ -83,7 +88,7 @@ export interface Cohort {
   /**
    * The ranking's element type, length and input patterns. Lengths are tabulated next to
    * the ranking, which admits sorts measured at all of them; `label` follows
-   * "speed vs slice::sort, " in its guide.
+   * "speed vs <reference>, " in its guide.
    */
   ranking: { ty: string; n: number; lengths: number[]; distributions: string[]; label: string };
   /** Length of the input-pattern and element-type figures. */
@@ -96,7 +101,7 @@ export interface Cohort {
   distributions: string[];
   /** Input patterns the element-type figure compares; every type must have each of them. */
   typeDistributions: string[];
-  /** How the element-type figure combines them, after "speed relative to slice::sort, ". */
+  /** How the element-type figure combines them, after "speed relative to <reference>, ". */
   typeDistributionsLabel: string;
 }
 
@@ -179,7 +184,7 @@ const toneOf = (variant: string): Tone =>
     : implementation(variant).family === "radix"
       ? "radix"
       : "comparison";
-// A symmetric speed axis in doublings around slice::sort, wide enough for
+// A symmetric speed axis in doublings around the reference, wide enough for
 // the data. Left of the centre the labels are fractions, so a tick and a
 // value cell read the same way.
 function speedScale(ratios: number[]): Chart["scale"] {
@@ -188,17 +193,17 @@ function speedScale(ratios: number[]): Chart["scale"] {
   const steps = Math.log2(span);
   // Every doubling is labelled while there is room; wider axes label every other one.
   const every = steps <= 3 ? 1 : 2;
-  const ticks = [{ value: 1, label: "slice::sort" }];
+  const ticks = [{ value: 1, label: REFERENCE_LABEL }];
   for (let k = every; k <= steps; k += every) {
     ticks.push({ value: 2 ** k, label: `${2 ** k}×` }, { value: 2 ** -k, label: `1/${2 ** k}×` });
   }
   return { low: 1 / span, high: span, ticks, origin: 1, clamp: true };
 }
 
-// Speed of one column relative to slice::sort in the same blocks: the
-// slice::sort time over the column's, per block, then the median.
+// Speed of one column relative to the reference in the same blocks: the
+// reference's time over the column's, per block, then the median.
 function pairedSpeed(summaries: Map<string, Summary>, id: string, column: string) {
-  const std = summaries.get(measurementId("default", id, STD_STABLE)),
+  const std = summaries.get(measurementId("default", id, REFERENCE)),
     s = summaries.get(measurementId("default", id, column));
   if (!std || !s) return null;
   return column === TESSERA ? std.ratio : median(std.ratios.map((r, i) => r / s.ratios[i]));
@@ -276,11 +281,11 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
   return {
     name: memory ? "overview" : "ranking",
     subject: "Overall ranking",
-    summary: `Every sort on the same ${elements(cohort.ranking.ty)}, ranked by speed relative to slice::sort${memory ? ", with the largest extra memory it allocated" : ""}. ${recordType(cohort.ranking.ty).task === "records" ? "Records rank Tessera among stable sorts; unstable sorts, which may reorder equal keys, are shown separately." : "Stable and unstable sorts are grouped separately."}`,
+    summary: `Every sort on the same ${elements(cohort.ranking.ty)}, ranked by speed relative to ${REFERENCE_LABEL}${memory ? ", with the largest extra memory it allocated" : ""}. ${recordType(cohort.ranking.ty).task === "records" ? "Records rank Tessera among stable sorts; unstable sorts, which may reorder equal keys, are shown separately." : "Stable and unstable sorts are grouped separately."}`,
     title,
     ...rendered({
       title,
-      guide: `${formatLength(cohort.ranking.n)} ${elements(cohort.ranking.ty)} · speed vs slice::sort, ${cohort.ranking.label}`,
+      guide: `${formatLength(cohort.ranking.n)} ${elements(cohort.ranking.ty)} · speed vs ${REFERENCE_LABEL}, ${cohort.ranking.label}`,
       columns: ["Speed", ...(memory ? ["Extra memory"] : [])],
       groups: [
         { title: "Stable sorts", rows: complete.filter((e) => e.stable).map(row) },
@@ -295,7 +300,9 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
         "Sort",
         "Kind",
         "Stability",
-        ...cohort.ranking.lengths.map((n) => `${formatLength(n)} elements, speed vs slice::sort`),
+        ...cohort.ranking.lengths.map(
+          (n) => `${formatLength(n)} elements, speed vs ${REFERENCE_LABEL}`,
+        ),
         ...(memory ? ["Largest extra memory"] : []),
       ],
       complete.map((e) => [
@@ -315,7 +322,7 @@ interface Standing {
   rank: number;
 }
 // Where Tessera stands among every eligible sort on one row, all measured
-// against slice::sort, which therefore sits at the origin and is not drawn.
+// against the reference, which therefore sits at the origin and is not drawn.
 function standing(field: Field, ids: string[], stableOnly: boolean): Standing | null {
   const variants = field.implementations;
   const speedOf = (variant: string) => speedOver(field, ids, variant);
@@ -338,7 +345,7 @@ function fieldRow(name: NameCell, s: Standing): Row {
     swarm: true,
     marks: [
       ...s.speeds
-        .filter((v) => v.variant !== "std-stable")
+        .filter((v) => v.variant !== REFERENCE_IMPLEMENTATION)
         .map((v): Mark => ({ value: v.speed, tone: toneOf(v.variant) })),
       { value: s.tessera, tone: "primary" },
     ],
@@ -371,7 +378,7 @@ function fieldTable(rows: [string, Standing][], nsPerKey?: number[]) {
       "Row",
       ...(nsPerKey ? ["Tessera time per key"] : []),
       "Tessera rank",
-      "Tessera speed vs slice::sort",
+      `Tessera speed vs ${REFERENCE_LABEL}`,
       "Other sorts, fastest first",
     ],
     rows.map(([label, s], i) => [
@@ -418,11 +425,11 @@ function renderInputs(field: Field, cohort: Cohort, name: string, ty = "u64"): F
   return {
     name,
     subject: `${elements(ty)} by input pattern`,
-    summary: `Each row is one input pattern. Each dot is one ${stableOnly ? "stable sort (records keep equal keys in order)" : "sort"}, placed by its speed relative to slice::sort; the columns give Tessera's speed and rank.`,
+    summary: `Each row is one input pattern. Each dot is one ${stableOnly ? "stable sort (records keep equal keys in order)" : "sort"}, placed by its speed relative to ${REFERENCE_LABEL}; the columns give Tessera's speed and rank.`,
     title,
     ...rendered({
       title,
-      guide: `${formatLength(n)} ${elements(ty)} · each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to slice::sort`,
+      guide: `${formatLength(n)} ${elements(ty)} · each dot is one ${stableOnly ? "stable " : ""}sort, placed by its speed relative to ${REFERENCE_LABEL}`,
       columns: ["Speed", "Rank"],
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
@@ -470,11 +477,11 @@ function renderLengths(field: Field, cohort: Cohort): Figure | null {
   return {
     name: "lengths",
     subject: "Speed by input length",
-    summary: `Each row is one input length, on the ${input} input. Each dot is one sort, placed by its speed relative to slice::sort; records compare only stable sorts.`,
+    summary: `Each row is one input length, on the ${input} input. Each dot is one sort, placed by its speed relative to ${REFERENCE_LABEL}; records compare only stable sorts.`,
     title,
     ...rendered({
       title,
-      guide: `${input} input · each dot is one sort, placed by its speed relative to slice::sort`,
+      guide: `${input} input · each dot is one sort, placed by its speed relative to ${REFERENCE_LABEL}`,
       columns: ["Speed", "Rank"],
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
@@ -517,12 +524,11 @@ function renderShort(field: Field, cohort: Cohort): Figure | null {
   return {
     name: "short",
     subject: "Short inputs",
-    summary:
-      "Each row is one input pattern, grouped by length and element type. Each dot is one sort, placed by its speed relative to slice::sort; records compare only stable sorts.",
+    summary: `Each row is one input pattern, grouped by length and element type. Each dot is one sort, placed by its speed relative to ${REFERENCE_LABEL}; records compare only stable sorts.`,
     title,
     ...rendered({
       title,
-      guide: `${lengths.map(formatLength).join(" and ")} elements · each dot is one sort, placed by its speed relative to slice::sort`,
+      guide: `${lengths.map(formatLength).join(" and ")} elements · each dot is one sort, placed by its speed relative to ${REFERENCE_LABEL}`,
       columns: ["Speed", "Rank"],
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),
@@ -556,12 +562,11 @@ function renderTypes(field: Field, cohort: Cohort): Figure | null {
   return {
     name: "types",
     subject: "Element types",
-    summary:
-      "Each row is one key or record type. Each dot is one sort, placed by its speed relative to slice::sort; records compare only stable sorts.",
+    summary: `Each row is one key or record type. Each dot is one sort, placed by its speed relative to ${REFERENCE_LABEL}; records compare only stable sorts.`,
     title,
     ...rendered({
       title,
-      guide: `${formatLength(cohort.n)} elements · speed relative to slice::sort, ${cohort.typeDistributionsLabel}`,
+      guide: `${formatLength(cohort.n)} elements · speed relative to ${REFERENCE_LABEL}, ${cohort.typeDistributionsLabel}`,
       columns: ["Speed", "Rank"],
       groups,
       scale: speedScale(standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)])),

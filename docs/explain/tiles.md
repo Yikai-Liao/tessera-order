@@ -10,7 +10,17 @@ A **tile** holds at most 64 KiB of records and at most 65,535 records, so that a
 | <span id="tile-lsd">**Tile LSD**</span> | the varying bits fit in one or two counting passes | one counting pass per digit, lowest digit first, alternating between the tile and scratch |
 | <span id="tile-msd">**Tile MSD**</span> | otherwise | one counting pass on the top digit, then each bucket is finished on its own: by insertion if it fits the short-leaf limit, otherwise by another tile leaf |
 
-The short-leaf limit is the number of whole records that fit in 2 KiB, clamped to 16–48 records. A 16-byte row gets 48 slots and a 128-byte row gets 16. The record ceiling bounds comparison work on narrow keys. The byte budget sends wide records to distribution sooner, where each pass moves each record once. See the [short-leaf measurements](../design/evidence.md#short-insertion-leaves).
+For a record occupying $w$ bytes in the slice, the insertion limit in records is
+
+$$
+L(w) = \operatorname{clamp}\!\left(\left\lfloor \frac{2048}{w} \right\rfloor, 16, 48\right).
+$$
+
+Only the inline record width counts. For example, moving a string handle leaves its heap allocation in place. Zero-sized records finish before this decision.
+
+A random permutation of $n$ distinct keys has $n(n-1)/4$ inversions on average. Inserting two records together can resolve two inversions with one shift, but movement per input record still grows roughly as $n w$. In one radix pass, classification and counting cost roughly the same per record at any payload width, and scattering moves each record once. Where repeated shifts compete with classification, doubling the width therefore roughly halves the length at which insertion pays. The 2 KiB coefficient calibrates that crossover in units of length times width. A sort may move the same bytes many times.
+
+The ceiling of 48 limits quadratic comparison work even when shifts are cheap. The floor of 16 keeps small leaves on insertion, where setting up the radix pass and moving each wide record once can already cost more. The two count bounds and the byte coefficient are tuning parameters. The measured crossovers vary with key distribution and the machine. See the [short-leaf measurements](../design/evidence.md#short-insertion-leaves).
 
 ## Digit planning
 

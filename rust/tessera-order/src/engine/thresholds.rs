@@ -7,11 +7,12 @@ pub const INSERTION_MAX: usize = 48;
 /// Largest leaf finished one record at a time before pair insertion pays off.
 pub(crate) const SINGLE_INSERTION_MAX: usize = 16;
 
-/// Limit full-record shifts on wide leaves. The record ceiling bounds
-/// comparisons on narrow keys, the byte budget bounds movement on wide rows.
+/// On unordered input the shift work per record scales with length times
+/// inline record width. Convert the crossover bytes to a record count,
+/// keeping tiny leaves on insertion and bounding comparisons on narrow keys. See the cost model in docs/explain/tiles.md.
 pub(crate) fn insertion_limit<T>() -> usize {
-    const INSERTION_BYTES: usize = 2 * 1024;
-    (INSERTION_BYTES / size_of::<T>().max(1)).clamp(SINGLE_INSERTION_MAX, INSERTION_MAX)
+    const CROSSOVER_BYTES: usize = 2 * 1024;
+    (CROSSOVER_BYTES / size_of::<T>().max(1)).clamp(SINGLE_INSERTION_MAX, INSERTION_MAX)
 }
 
 /// Default tile budget, in bytes of records.

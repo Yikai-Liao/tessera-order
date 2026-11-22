@@ -112,7 +112,7 @@ test("display fields name sections by operation and execution", () => {
   // Operation cases keep the plain input name and get their own figure section.
   assert.equal(caseParts(select).input, caseParts(sort).input);
   assert.equal(caseSection(sort).title, "sort");
-  assert.match(caseSection(parallel).title, /4 threads$/);
+  assert.equal(caseSection(parallel).title, "par_sort · 4 threads");
   assert.match(caseSection(select).title, /16,384/);
   assert.ok(caseSection(sort).order < caseSection(parallel).order);
   assert.ok(caseSection(parallel).order < caseSection(select).order);

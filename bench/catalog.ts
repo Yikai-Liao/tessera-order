@@ -182,7 +182,7 @@ export function validateOperation(operation: Operation, len: number) {
 }
 
 /** An operation's catalog entry and its parameter values in identity order. */
-function operationParts(operation: Operation) {
+export function operationParts(operation: Operation) {
   const entry = operations.get(operation.kind)!;
   const values = entry.parameters.map(
     (parameter) => (operation as Record<string, unknown>)[parameter.id] as number,
@@ -349,9 +349,8 @@ export function compareCases(a: string, b: string) {
   return x.reduce((order, value, i) => order || value - (y[i] ?? 0), 0) || a.localeCompare(b);
 }
 
-/** Name a figure section by the entry point it measures. A serial section is the operation's
- * title; a parallel one is `${parallel_label} · N threads`. Sections follow catalog operation
- * order, serial first, then ascending worker counts. */
+/** Name a figure section by its catalog entry point and, for parallel calls, worker count.
+ * Sections follow catalog operation order, serial first, then ascending worker counts. */
 export function executionSection(operation: Operation, execution: Execution) {
   const entry = operations.get(operation.kind)!;
   const threads = executionThreads(execution);
@@ -359,7 +358,7 @@ export function executionSection(operation: Operation, execution: Execution) {
     title:
       threads === undefined
         ? operationTitle(operation)
-        : `${entry.parallel_label ?? entry.label} · ${threads} threads`,
+        : `${entry.parallel_label ?? entry.label} · ${threads} ${threads === 1 ? "thread" : "threads"}`,
     // Worker counts stay below 2^20 for every supported host.
     order: operationKinds.indexOf(operation.kind) * 2 ** 20 + (threads ?? 0),
   };

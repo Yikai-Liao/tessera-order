@@ -16,9 +16,11 @@ fn category_batches_budget_and_measure_retained_offsets() {
     fs::write(
         &plan,
         serde_json::to_vec(&serde_json::json!({
-            "schema": 2, "implementations": ["tessera", "std-stable"],
-            "operation": { "kind": "partition-buckets", "bucket_count": bucket_count },
-            "include": [{ "types": ["u32"], "distributions": ["random"], "lengths": [1] }]
+            "schema": 3, "implementations": ["tessera", "std-stable"],
+            "include": [{
+                "types": ["u32"], "distributions": ["random"], "lengths": [1],
+                "operation": { "kind": "partition-buckets", "bucket_count": bucket_count }
+            }]
         }))
         .unwrap(),
     )
@@ -72,17 +74,29 @@ fn memory_resumes_missing_adapters() {
     fs::create_dir_all(&directory).unwrap();
     let plan = directory.join("plan.json");
     let mut implementations = vec!["tessera", "std-stable"];
+    let mut columns = vec!["tessera/serial", "std-stable/serial"];
+    let mut executions = vec!["serial"];
     if cfg!(tessera_bench_revisions) {
         implementations.extend(["tessera-baseline", "tessera-baseline-copy", "tessera-copy"]);
+        columns.extend([
+            "tessera-baseline/serial",
+            "tessera-baseline-copy/serial",
+            "tessera-copy/serial",
+        ]);
     }
     if cfg!(feature = "rayon") {
-        implementations.extend(["tessera-par-8", "rayon-stable-8"]);
+        implementations.push("rayon-stable");
+        columns.extend(["tessera/t8", "rayon-stable/t8"]);
+        executions.push("t8");
     }
     fs::write(
         &plan,
         serde_json::to_vec(&serde_json::json!({
-            "schema": 1,  "implementations": implementations,
-            "include": [{"types": ["u64"], "distributions": ["random"], "lengths": [49]}]
+            "schema": 3,  "implementations": implementations,
+            "include": [{
+                "types": ["u64"], "distributions": ["random"], "lengths": [49],
+                "executions": executions
+            }]
         }))
         .unwrap(),
     )
@@ -110,8 +124,17 @@ fn memory_resumes_missing_adapters() {
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .collect();
-    assert_eq!(rows.len(), implementations.len());
-    let tessera = rows.iter().find(|row| row["variant"] == "tessera").unwrap();
+    let mut measured: Vec<_> = rows
+        .iter()
+        .map(|row| row["column"].as_str().unwrap())
+        .collect();
+    measured.sort_unstable();
+    columns.sort_unstable();
+    assert_eq!(measured, columns);
+    let tessera = rows
+        .iter()
+        .find(|row| row["column"] == "tessera/serial")
+        .unwrap();
     fs::write(&journal, format!("{tessera}\n{{\"partial\":")).unwrap();
     let records = |path| {
         fs::read_to_string(path)
@@ -148,7 +171,7 @@ fn short_budget_is_retained_and_fixed() {
     fs::write(
         &plan,
         serde_json::to_vec(&serde_json::json!({
-            "schema": 1,  "implementations": ["tessera", "std-stable"],
+            "schema": 3,  "implementations": ["tessera", "std-stable"],
             "include": [{"types": ["u64"], "distributions": ["random"], "lengths": [49]}]
         }))
         .unwrap(),
@@ -223,11 +246,12 @@ fn large_parallel_memory_is_measured() {
     fs::write(
         &plan,
         serde_json::to_vec(&serde_json::json!({
-            "schema": 1,
-            "implementations": ["tessera-par-8"],
+            "schema": 3,
+            "implementations": ["tessera"],
             "include": [{
                 "types": ["u32", "row_u32"],
-                "distributions": ["equal"], "lengths": [1_000_001]
+                "distributions": ["equal"], "lengths": [1_000_001],
+                "executions": ["t8"]
             }]
         }))
         .unwrap(),
@@ -252,8 +276,8 @@ fn large_parallel_memory_is_measured() {
         .collect();
     for ty in ["u32", "row_u32"] {
         assert!(rows.iter().any(|row| {
-            row["case_id"] == format!("{ty}/equal/1000001/s1")
-                && row["variant"] == "tessera-par-8"
+            row["case_id"] == format!("sort/{ty}/equal/1000001/s1")
+                && row["column"] == "tessera/t8"
                 && row["verified"] == true
         }));
     }
@@ -270,11 +294,12 @@ fn parallel_adapters_validate_records() {
     fs::write(
         &plan,
         serde_json::to_vec(&serde_json::json!({
-            "schema": 1,
-            "implementations": ["tessera-par-8", "rayon-stable-8"],
+            "schema": 3,
+            "implementations": ["tessera", "rayon-stable"],
             "include": [{
                 "types": ["f64", "reverse_u64", "reverse_f64", "row_u64", "record128", "owned"],
-                "distributions": ["random", "d16"], "lengths": [131_073]
+                "distributions": ["random", "d16"], "lengths": [131_073],
+                "executions": ["t8"]
             }]
         }))
         .unwrap(),

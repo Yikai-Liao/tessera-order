@@ -5,9 +5,12 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   catalog,
-  liveOperationSchema,
+  compareExecutions,
+  type Execution,
   type Operation,
   operationSchema,
+  parseExecution,
+  SORT,
   validateOperation,
 } from "./catalog.ts";
 import { decodeConfig } from "./config.ts";
@@ -18,7 +21,18 @@ const choices = <T extends z.ZodType>(schema: T) =>
     .array(schema)
     .min(1)
     .refine((values) => new Set(values).size === values.length, "duplicate choices");
-const axesSchema = z.strictObject({
+const execution = z
+  .union([z.literal("serial"), z.templateLiteral(["t", z.number().int().positive()])])
+  .refine((text) => {
+    try {
+      return parseExecution(text) === text;
+    } catch {
+      return false;
+    }
+  }, "expected serial or tN with N >= 1");
+/** A product of case and execution axes. Absent include axes use the catalog,
+ * `sort` and `serial`; absent exclude axes match every value. */
+const ruleSchema = z.strictObject({
   types: choices(ids(catalog.types)).optional(),
   distributions: choices(ids(catalog.distributions)).optional(),
   lengths: choices(
@@ -27,145 +41,125 @@ const axesSchema = z.strictObject({
       z.enum(["insertion-max", "insertion-next", "tile-next"]),
     ]),
   ).optional(),
+  operation: operationSchema.optional(),
+  executions: choices(execution).optional(),
+});
+const schema = z.strictObject({
+  $comment: z.string().optional(),
+  schema: z.literal(3, { error: "unsupported plan schema; regenerate the plan for schema 3" }),
+  implementations: choices(ids(catalog.implementations)),
+  include: z.array(ruleSchema).min(1),
+  exclude: z.array(ruleSchema).default([]),
 });
 
-function selectionSchema<T extends z.ZodType<Operation>>(operation: T) {
-  // Include rules of a sorting plan may measure an operation instead (revision plans).
-  const rule = axesSchema.extend({ operation: operation.optional() });
-  return z
-    .strictObject({
-      $comment: z.string().optional(),
-      schema: z.union([z.literal(1), z.literal(2)]),
-      operation: operation.optional(),
-      implementations: choices(ids(catalog.implementations)),
-      include: z.array(rule).min(1),
-      exclude: z.array(rule).default([]),
-      parallel: z.array(rule).optional(),
-    })
-    .superRefine((plan, ctx) => {
-      if (
-        plan.schema === 1
-          ? plan.operation !== undefined
-          : !plan.operation || plan.operation.kind === "sort"
-      )
-        ctx.addIssue({
-          code: "custom",
-          message: "schema 2 requires an explicit non-sort plan operation",
-        });
-      if (
-        [...plan.exclude, ...(plan.parallel ?? [])].some((r) => r.operation) ||
-        (plan.operation && plan.include.some((r) => r.operation))
-      )
-        ctx.addIssue({
-          code: "custom",
-          message: "rule operations belong to include rules of a sorting plan",
-        });
-    });
-}
-
-const schema = selectionSchema(liveOperationSchema);
-const retainedSchema = selectionSchema(operationSchema);
-
-/** A product of optional axes; omitted axes match every supported value. */
-type Axes = z.infer<typeof axesSchema>;
+type Rule = z.infer<typeof ruleSchema>;
 /** A validated experiment selection, independent of its measurement protocol. */
 export type Plan = z.infer<typeof schema>;
-/** A frozen plan may describe an operation that is no longer executable. */
-export type RetainedPlan = z.infer<typeof retainedSchema>;
-export type SelectionOptions = Axes & {
+export type SelectionOptions = Pick<Rule, "types" | "distributions" | "lengths"> & {
   implementations?: string[];
-  operation?: z.infer<typeof liveOperationSchema>["kind"];
+  /** Keeps the rules without an operation and gives them this one. */
+  operation?: Operation["kind"];
   index?: number;
   bucketCount?: number;
+  /** Replaces every include rule's executions. */
+  executions?: Execution[];
 };
 
-/** Validate a new selection without choosing a measurement protocol or adding implementations. */
+/** Validate a selection without choosing a measurement protocol or adding implementations. */
 export function parsePlan(value: unknown): Plan {
   const plan = schema.parse(value);
-  validateLengths(plan);
+  validateOperations(plan);
   return plan;
 }
 
-/** Validate a frozen result's plan, including operations no longer admitted for new runs. */
-export function parseRetainedPlan(value: unknown): RetainedPlan {
-  const plan = retainedSchema.parse(value);
-  validateLengths(plan);
-  return plan;
-}
+const sameOperation = (a: Operation, b: Operation) =>
+  JSON.stringify(a, Object.keys(a).sort()) === JSON.stringify(b, Object.keys(b).sort());
 
-function validateLengths(plan: RetainedPlan) {
-  // Operation parameters are checked against literal counts.
-  // Engine-relative boundaries remain resolved by Rust for sorting plans.
-  type Rule = (typeof plan.include)[number];
-  const effective = (rule: Rule) => rule.operation ?? plan.operation;
-  const isOperation = (rule: Rule) => {
-    const operation = effective(rule);
-    return operation !== undefined && operation.kind !== "sort";
-  };
-  const checked =
-    plan.operation && plan.operation.kind !== "sort"
-      ? [...plan.include, ...plan.exclude, ...(plan.parallel ?? [])]
-      : plan.include.filter(isOperation);
-  if (checked.some((r) => r.lengths?.some((n) => typeof n !== "number")))
-    throw new Error("Non-sort plans require literal record counts");
-  for (const rule of [...plan.include, ...(plan.parallel ?? [])].filter(isOperation)) {
-    const operation = effective(rule)!;
-    for (const len of rule.lengths ?? catalog.inputs.lengths) {
-      const includedTypes = rule.types ?? catalog.types.map((t) => t.id);
-      const includedDistributions = rule.distributions ?? catalog.distributions.map((d) => d.id);
-      const survives = includedTypes.some((ty) =>
-        includedDistributions.some(
-          (distribution) =>
-            !plan.exclude.some(
-              (r) =>
-                (!r.types || r.types.includes(ty)) &&
-                (!r.distributions || r.distributions.includes(distribution)) &&
-                (!r.lengths || r.lengths.includes(len)),
-            ),
+/** Check operation parameters on every surviving literal count, as Rust does on its
+ * expanded cases; engine-relative boundaries resolve only in Rust, for sorting. */
+function validateOperations(plan: Plan) {
+  const nonSort = plan.include.filter((rule) => rule.operation && rule.operation.kind !== "sort");
+  if (nonSort.some((rule) => rule.lengths?.some((n) => typeof n !== "number")))
+    throw new Error("Non-sort rules require literal record counts");
+  for (const rule of nonSort) {
+    const operation = rule.operation!;
+    const executions = rule.executions ?? ["serial"];
+    for (const len of (rule.lengths ?? catalog.inputs.lengths) as number[]) {
+      const survives = (rule.types ?? catalog.types.map((t) => t.id)).some((ty) =>
+        (rule.distributions ?? catalog.distributions.map((d) => d.id)).some((distribution) =>
+          executions.some(
+            (execution) =>
+              !plan.exclude.some(
+                (r) =>
+                  (!r.types || r.types.includes(ty)) &&
+                  (!r.distributions || r.distributions.includes(distribution)) &&
+                  (!r.lengths || r.lengths.includes(len)) &&
+                  (!r.operation || sameOperation(r.operation, operation)) &&
+                  (!r.executions || r.executions.includes(execution)),
+              ),
+          ),
         ),
       );
-      if (survives) validateOperation(operation, len as number);
+      if (survives) validateOperation(operation, len);
     }
   }
 }
 
+const PRESETS = ["local", "continuous", "smoke", "release", "parallel", "growth"];
+
 /** Load a TOML preset or a JSON/TOML file, then apply explicit axis overrides. */
 export async function loadPlan(name: string, options: SelectionOptions = {}): Promise<Plan> {
-  const path = ["local", "continuous", "smoke", "release", "parallel", "growth"].includes(name)
+  const path = PRESETS.includes(name)
     ? fileURLToPath(new URL(`./plans/${name}.toml`, import.meta.url))
     : name;
   const plan = schema.parse(decodeConfig(await readFile(path, "utf8"), path));
-  const { implementations, operation, index, bucketCount, ...axes } = options;
-  const parameters = {
-    ...(index === undefined ? {} : { index }),
-    ...(bucketCount === undefined ? {} : { bucket_count: bucketCount }),
-  };
-  let selected = plan;
-  if (operation !== undefined || Object.keys(parameters).length) {
-    const kind = operation ?? plan.operation?.kind;
-    if (!kind) throw new Error("Operation parameters require --operation");
-    const previous = plan.operation?.kind === kind ? plan.operation : { kind };
-    const requested = liveOperationSchema.parse({ ...previous, ...parameters });
-    // The requested operation is the plan's only one, replacing any include-rule operations.
-    const { operation: _previous, ...rest } = plan;
-    const include = plan.include.filter((rule) => !rule.operation);
-    if (!include.length) throw new Error("The plan has no inputs outside its operation rules");
-    selected =
-      requested.kind === "sort"
-        ? { ...rest, schema: 1, include }
-        : { ...rest, schema: 2, operation: requested, include };
-  }
+  const { implementations, operation, index, bucketCount, executions, ...axes } = options;
+  if (operation === undefined && (index !== undefined || bucketCount !== undefined))
+    throw new Error("Operation parameters require --operation");
+  const requested =
+    operation === undefined
+      ? undefined
+      : operationSchema.parse({
+          kind: operation,
+          ...(index === undefined ? {} : { index }),
+          ...(bucketCount === undefined ? {} : { bucket_count: bucketCount }),
+        });
+  // A requested operation replaces the plan's operation rules: it applies to the sorting rules,
+  // whose inputs every operation shares.
+  const include = requested ? plan.include.filter((rule) => !rule.operation) : plan.include;
+  if (!include.length) throw new Error("The plan has no inputs outside its operation rules");
   return parsePlan({
-    ...selected,
+    ...plan,
     implementations: implementations ?? plan.implementations,
-    include: selected.include.map((entry) => ({ ...entry, ...axes })),
-    ...(plan.parallel ? { parallel: plan.parallel.map((entry) => ({ ...entry, ...axes })) } : {}),
+    include: include.map((rule) => ({
+      ...rule,
+      ...axes,
+      ...(requested && requested.kind !== "sort" ? { operation: requested } : {}),
+      ...(executions ? { executions } : {}),
+    })),
   });
+}
+
+/** Every operation an include rule selects, defaulting to sort. */
+export function planOperations(plan: Plan) {
+  const operations: Operation[] = [];
+  for (const rule of plan.include) {
+    const operation = rule.operation ?? SORT;
+    if (!operations.some((known) => sameOperation(known, operation))) operations.push(operation);
+  }
+  return operations;
+}
+
+/** Every execution an include rule selects, serial first, then ascending worker counts. */
+export function planExecutions(plan: Plan): Execution[] {
+  return [
+    ...new Set(plan.include.flatMap((rule) => rule.executions ?? ["serial" as const])),
+  ].toSorted(compareExecutions);
 }
 
 /** Export the same validation rules for editor completion and external tooling. */
 export function planSchema() {
-  return z.toJSONSchema(schema);
+  return z.toJSONSchema(schema, { io: "input" });
 }
 
 /** Apply an optional CLI pattern to IDs resolved by the native harness. */

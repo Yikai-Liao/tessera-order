@@ -1,51 +1,59 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
-schema = 1
-implementations = [ "tessera", "tessera-par-4" ]
+schema = 3
+implementations = [ "tessera" ]
 exclude = []
 
 # Small random inputs exercise parallel-entry overhead and serial fallback;
 # million-record inputs exercise root scatter and bucket scheduling.
-[[parallel]]
+[[include]]
 types = [ "u32", "row_u32", "u64", "row_u64" ]
 distributions = [ "random" ]
 lengths = [ 65536 ]
+executions = [ "t4" ]
 
-[[parallel]]
+[[include]]
 types = [ "u32", "u64", "u128", "f64", "row_u32", "row_u64", "rec128_u64" ]
 distributions = [ "random" ]
 lengths = [ 1000000 ]
+executions = [ "t4" ]
 
-[[parallel]]
+[[include]]
 types = [ "u64" ]
 distributions = [ "sorted", "reverse", "sorted99", "equal", "far_swaps", "d16", "d4096", "sparse_digits", "zipf2", "skew99", "two_values", "sorted_tail", "runs", "bimodal" ]
 lengths = [ 1000000 ]
+executions = [ "t4" ]
 
 # Keyed rows retain payload stability across fast paths and uneven buckets.
-[[parallel]]
+[[include]]
 types = [ "row_u64" ]
 distributions = [ "sorted", "reverse", "equal", "d16", "hot50", "skew99", "sorted_tail" ]
 lengths = [ 1000000 ]
+executions = [ "t4" ]
 
-[[parallel]]
+[[include]]
 types = [ "row_u32" ]
 distributions = [ "skew99" ]
 lengths = [ 1000000 ]
+executions = [ "t4" ]
 
-[[parallel]]
+[[include]]
 types = [ "u128" ]
 distributions = [ "sparse8" ]
 lengths = [ 1000000 ]
+executions = [ "t4" ]
 
-[[parallel]]
+[[include]]
 types = [ "f64" ]
 distributions = [ "finite_signed" ]
 lengths = [ 1000000 ]
+executions = [ "t4" ]
 
-[[parallel]]
+[[include]]
 types = [ "rec128_u64" ]
 distributions = [ "sparse_digits" ]
 lengths = [ 1000000 ]
+executions = [ "t4" ]
 
 [[include]]
 types = [ "u64", "row_u64" ]
@@ -89,7 +97,7 @@ lengths = [ 65536 ]
 
 [[include]]
 types = [ "u64" ]
-# Specialized direct-key distributions stay at 65k to leave room for the parallel tail.
+# Specialized direct-key distributions stay at 65k to leave room for the t4 tail.
 distributions = [ "sorted", "reverse", "sorted99", "equal", "far_swaps", "d16", "d4096", "sparse_digits", "zipf2", "skew99", "two_values", "sorted_tail", "runs" ]
 lengths = [ 65536 ]
 
@@ -160,7 +168,7 @@ operation = { kind = "partition-buckets", bucket_count = 16 }
 types = [ "u64", "row_u64" ]
 distributions = [ "random" ]
 lengths = [ 65536 ]
-operation = { kind = "select", index = 32768 }
+operation = { kind = "select_nth", index = 32768 }
 
 # The wider category range exercises the cached-key index-permutation fallback.
 [[include]]
@@ -180,32 +188,32 @@ operation = { kind = "argsort" }
 types = [ "row_u64" ]
 distributions = [ "d16" ]
 lengths = [ 65536 ]
-operation = { kind = "select", index = 32768 }
+operation = { kind = "select_nth", index = 32768 }
 
 # Endpoints exercise one-rank placement on wide records and on ties.
 [[include]]
 types = [ "rec128_u64" ]
 distributions = [ "random" ]
 lengths = [ 65536 ]
-operation = { kind = "select", index = 0 }
+operation = { kind = "select_nth", index = 0 }
 
 [[include]]
 types = [ "rec128_u64" ]
 distributions = [ "random" ]
 lengths = [ 65536 ]
-operation = { kind = "select", index = 65535 }
+operation = { kind = "select_nth", index = 65535 }
 
 [[include]]
 types = [ "row_u64" ]
 distributions = [ "d16" ]
 lengths = [ 65536 ]
-operation = { kind = "select", index = 0 }
+operation = { kind = "select_nth", index = 0 }
 
 [[include]]
 types = [ "row_u64" ]
 distributions = [ "d16" ]
 lengths = [ 65536 ]
-operation = { kind = "select", index = 65535 }
+operation = { kind = "select_nth", index = 65535 }
 
 # Longer index lists pack a key prefix beside each index. One million-record
 # case guards the packed bands without doubling the long serial phase.
@@ -220,7 +228,7 @@ operation = { kind = "argsort" }
 types = [ "u64", "row_u64" ]
 distributions = [ "random" ]
 lengths = [ 65536 ]
-operation = { kind = "select", index = 4 }
+operation = { kind = "select_nth", index = 4 }
 
 # Nearly ordered inputs exercise source-order spans for full sorts and
 # argsort; selection must keep its radix passes there.
@@ -234,7 +242,7 @@ operation = { kind = "argsort" }
 types = [ "u64", "rec128_u64" ]
 distributions = [ "far_swaps" ]
 lengths = [ 65536 ]
-operation = { kind = "select", index = 32768 }
+operation = { kind = "select_nth", index = 32768 }
 
 # Wide records change the exception budget for source-order spans.
 [[include]]

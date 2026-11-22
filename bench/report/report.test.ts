@@ -5,7 +5,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { comparisonGroup, comparisonId, type Operation } from "../catalog.ts";
+import { caseGroup, caseId, type Operation } from "../catalog.ts";
 import { renderFigures } from "./charts.ts";
 import { createFixture } from "./fixture.ts";
 import { collectWarnings, writeReport } from "./index.ts";
@@ -33,33 +33,37 @@ async function writeFixture(directory: string, dataset = createFixture()) {
 test("paired ratios respect noise", () => {
   const dataset = createFixture();
   validateRun(dataset);
-  const s = summarize(dataset).get(measurementId("default", "u64/random/1000/s1", "std-stable"))!;
+  const s = summarize(dataset).get(
+    measurementId("default", "sort/u64/random/1000/s1", "std-stable/serial"),
+  )!;
   assert.equal(s.verdict, "slower");
   assert.ok(Math.abs(s.ratio - 2.6) < 0.01);
   const aa = summarize(dataset).get(measurementId("default", s.caseId, "tessera-aa"))!;
   assert.ok(aa.low < 1 && aa.high > 1);
-  const rows = dataset.samples.filter((r) => r.case_id === s.caseId && r.variant === "std-stable");
+  const rows = dataset.samples.filter(
+    (r) => r.case_id === s.caseId && r.column === "std-stable/serial",
+  );
   for (const row of rows) {
     const baseline = dataset.samples.find(
-      (r) => r.case_id === s.caseId && r.block === row.block && r.variant === "tessera",
+      (r) => r.case_id === s.caseId && r.block === row.block && r.column === "tessera/serial",
     )!;
     row.elapsed_ns = Math.round(baseline.elapsed_ns * (row.block < 7 ? 0.8 : 1.2));
   }
   assert.equal(
-    summarize(dataset).get(measurementId("default", s.caseId, "std-stable"))!.verdict,
+    summarize(dataset).get(measurementId("default", s.caseId, "std-stable/serial"))!.verdict,
     "within noise",
   );
   rows[7].elapsed_ns = Math.round(rows[7].elapsed_ns * 0.5);
   assert.equal(
-    summarize(dataset).get(measurementId("default", s.caseId, "std-stable"))!.verdict,
+    summarize(dataset).get(measurementId("default", s.caseId, "std-stable/serial"))!.verdict,
     "faster",
   );
   for (const row of rows)
     row.elapsed_ns = dataset.samples.find(
-      (r) => r.case_id === s.caseId && r.block === row.block && r.variant === "tessera",
+      (r) => r.case_id === s.caseId && r.block === row.block && r.column === "tessera/serial",
     )!.elapsed_ns;
   assert.equal(
-    summarize(dataset).get(measurementId("default", s.caseId, "std-stable"))!.verdict,
+    summarize(dataset).get(measurementId("default", s.caseId, "std-stable/serial"))!.verdict,
     "within noise",
   );
 });
@@ -68,11 +72,13 @@ test("a partial release selection shows each case rather than partial release pa
   const full = createFixture();
   assert.ok(renderFigures(full, summarize(full)).some((figure) => figure.name === "lengths"));
   // A shared f64 case and u64 random lengths would fill a pattern panel and the length figure.
-  const kept = ["f64/random/1000000/s1", "u64/random/1000/s1", "u64/random/1000000/s1"];
+  const kept = [
+    "sort/f64/random/1000000/s1",
+    "sort/u64/random/1000/s1",
+    "sort/u64/random/1000000/s1",
+  ];
   const dataset = createFixture();
-  dataset.manifest.cases = dataset.manifest.cases.filter((input) =>
-    kept.includes(comparisonId(input)),
-  );
+  dataset.manifest.cases = dataset.manifest.cases.filter((input) => kept.includes(caseId(input)));
   dataset.samples = dataset.samples.filter((sample) => kept.includes(sample.case_id));
   dataset.memory = dataset.memory.filter((sample) => kept.includes(sample.case_id));
   validateRun(dataset);
@@ -83,11 +89,17 @@ test("a partial release selection shows each case rather than partial release pa
 
 test("revision placements retain their own measured verdict", () => {
   const dataset = createFixture();
-  dataset.manifest.variants.push({ name: "tessera-baseline", stable: true, adapter: "revision" });
+  dataset.manifest.columns.push({
+    id: "tessera-baseline/serial",
+    implementation: "tessera-baseline",
+    execution: "serial",
+    stable: true,
+    adapter: "revision",
+  });
   for (const row of dataset.samples)
-    if (row.variant === "std-stable") row.variant = "tessera-baseline";
+    if (row.column === "std-stable/serial") row.column = "tessera-baseline/serial";
   const result = summarize(dataset).get(
-    measurementId("default", "u64/random/1000/s1", "tessera-baseline"),
+    measurementId("default", "sort/u64/random/1000/s1", "tessera-baseline/serial"),
   )!;
   assert.equal(result.verdict, "slower");
   assert.equal(result.stable, true);
@@ -95,18 +107,25 @@ test("revision placements retain their own measured verdict", () => {
 
 test("parallel Tessera is an opponent, not an A/A control", () => {
   const dataset = createFixture();
-  const id = "u64/random/1000/s1";
-  dataset.manifest.variants.push({ name: "tessera-par-8", stable: true, threads: 8 });
+  const id = "sort/u64/random/1000/s1";
+  dataset.manifest.columns.push({
+    id: "tessera/t8",
+    implementation: "tessera",
+    execution: "t8",
+    stable: true,
+    adapter: "common",
+  });
   for (const sample of dataset.samples) {
-    if (sample.variant !== "std-stable") continue;
-    sample.variant = "tessera-par-8";
+    if (sample.column !== "std-stable/serial") continue;
+    sample.column = "tessera/t8";
     const baseline = dataset.samples.find(
-      (s) => s.variant === "tessera" && s.case_id === sample.case_id && s.block === sample.block,
+      (s) =>
+        s.column === "tessera/serial" && s.case_id === sample.case_id && s.block === sample.block,
     )!;
     sample.elapsed_ns = Math.round(baseline.elapsed_ns / 4);
     sample.batch = baseline.batch;
   }
-  const summary = summarize(dataset).get(measurementId("default", id, "tessera-par-8"))!;
+  const summary = summarize(dataset).get(measurementId("default", id, "tessera/t8"))!;
   assert.equal(summary.stable, true);
   assert.equal(summary.verdict, "faster");
   dataset.host.affinity = "0,2,4,6,8,10,12,14";
@@ -117,9 +136,9 @@ test("parallel Tessera is an opponent, not an A/A control", () => {
 
 test("A/A verdicts use the paired mean and survive swapping control labels", () => {
   const dataset = createFixture();
-  const id = "u64/random/1000/s1";
+  const id = "sort/u64/random/1000/s1";
   dataset.samples = dataset.samples.filter((s) => s.case_id === id);
-  const key = measurementId("default", id, "std-stable");
+  const key = measurementId("default", id, "std-stable/serial");
   for (const [opponent, verdict] of [
     [109, "within noise"],
     [99, "faster"],
@@ -129,7 +148,7 @@ test("A/A verdicts use the paired mean and survive swapping control labels", () 
     [121, "slower"],
   ] as const) {
     for (const s of dataset.samples) {
-      const time = s.variant === "tessera" ? 100 : s.variant === "tessera-aa" ? 120 : opponent;
+      const time = s.column === "tessera/serial" ? 100 : s.column === "tessera-aa" ? 120 : opponent;
       s.elapsed_ns = s.batch * time;
     }
     const summaries = summarize(dataset);
@@ -140,8 +159,8 @@ test("A/A verdicts use the paired mean and survive swapping control labels", () 
     assert.equal(summary.aaHigh, 120 / 110);
     assert.equal(summaries.get(measurementId("default", id, "tessera-aa"))!.ratio, 120 / 100);
     for (const s of dataset.samples) {
-      if (s.variant === "tessera") s.variant = "tessera-aa";
-      else if (s.variant === "tessera-aa") s.variant = "tessera";
+      if (s.column === "tessera/serial") s.column = "tessera-aa";
+      else if (s.column === "tessera-aa") s.column = "tessera/serial";
     }
     const swapped = summarize(dataset);
     assert.deepEqual(swapped.get(key), summary);
@@ -156,7 +175,7 @@ test("invalid samples fail validation", () => {
     },
     (d: ReturnType<typeof createFixture>) => {
       d.partial = true;
-      d.samples = d.samples.filter((sample) => sample.case_id !== "u64/random/1000/s1");
+      d.samples = d.samples.filter((sample) => sample.case_id !== "sort/u64/random/1000/s1");
     },
     (d: ReturnType<typeof createFixture>) => {
       d.samples.push(d.samples[0]);
@@ -171,7 +190,7 @@ test("invalid samples fail validation", () => {
       d.samples[0].batch = 0;
     },
     (d: ReturnType<typeof createFixture>) => {
-      d.samples[0].case_id = "u64/random/1001/s1";
+      d.samples[0].case_id = "sort/u64/random/1001/s1";
     },
     (d: ReturnType<typeof createFixture>) => {
       d.memory.pop();
@@ -221,10 +240,10 @@ test("raw results round trip", async () => {
     assert.equal(summary.focus.length, 5);
     assert.ok(summary.omittedChanges > 0);
     const bmf = JSON.parse(await readFile(join(dir, "bmf.json"), "utf8"));
-    const s = bmf["compare/u64/random/1000/s1/std-stable/default"];
+    const s = bmf["compare/sort/u64/random/1000/s1/std-stable/serial/default"];
     assert.ok(Math.abs(s.latency.value - 10.816) < 0.01);
     assert.ok(s.ratio.lower_value <= s.ratio.value && s.ratio.upper_value >= s.ratio.value);
-    assert.ok(bmf["compare/u64/random/1000/s1/tessera-aa/default"]);
+    assert.ok(bmf["compare/sort/u64/random/1000/s1/tessera-aa/default"]);
     assert.match(await readFile(join(dir, "report/index.md"), "utf8"), /synthetic fixture/);
     await assert.rejects(loadRun([dir, dir]), /duplicate/);
     await writeFile(join(dir, "manifest-portable-simd.json"), "{}");
@@ -270,51 +289,46 @@ test("optimization and debug settings must agree across timing and memory", asyn
 /** Small boundary fixture, derived from the existing paired-run fixture. */
 function operationFixture(operation: Operation) {
   const dataset = createFixture(3);
-  const payloadRanks = !["argsort", "segments", "partition", "partition-buckets"].includes(
-    operation.kind,
-  );
+  const payloadRanks = !["argsort", "partition-buckets"].includes(operation.kind);
   const ty = payloadRanks ? "row_u64" : "u64";
   const source = dataset.manifest.cases.find(
     (c) => c.ty === ty && c.distribution === "random" && c.len === 1000,
   )!;
-  const oldId = comparisonId(source),
-    oldGroup = comparisonGroup(source);
-  const variants = payloadRanks
-    ? ["tessera", "std-stable", "std-unstable"]
-    : ["tessera", "std-stable"];
+  const oldId = caseId(source),
+    oldGroup = caseGroup(source);
+  const columns = payloadRanks
+    ? ["tessera/serial", "std-stable/serial", "std-unstable/serial"]
+    : ["tessera/serial", "std-stable/serial"];
+  const implementations = [...columns.map((id) => id.split("/")[0]), "rdst"];
   const c = {
     ...source,
     operation,
-    variants,
-    implementations: Object.fromEntries(
-      variants.map((name) => [name, "synthetic complete operation"]),
-    ),
-    omitted: [{ variant: "rdst", reason: "unsupported operation/input combination" }],
+    columns,
+    routes: Object.fromEntries(columns.map((id) => [id, "synthetic complete operation"])),
+    omitted: [
+      { column: "rdst/serial", reason: "unsupported operation/input/execution combination" },
+    ],
   };
-  const id = comparisonId(c),
-    group = comparisonGroup(c);
+  const id = caseId(c),
+    group = caseGroup(c);
   Object.assign(dataset.manifest, {
-    plan_version: 2,
     index_bytes: 8,
     cases: [c],
-    variants: [
-      ...dataset.manifest.variants.filter((v) => variants.includes(v.name)),
-      { name: "rdst", stable: false },
-    ],
+    columns: dataset.manifest.columns.filter((column) => columns.includes(column.id)),
     plan: {
-      schema: 2,
-      operation,
-      implementations: [...variants, "rdst"],
-      include: [{ types: [c.ty], distributions: [c.distribution], lengths: [c.len] }],
+      schema: 3,
+      implementations,
+      include: [{ types: [c.ty], distributions: [c.distribution], lengths: [c.len], operation }],
+      exclude: [],
     },
   });
   dataset.samples = dataset.samples
-    .filter((s) => s.case_id === oldId && [...variants, "tessera-aa"].includes(s.variant))
+    .filter((s) => s.case_id === oldId && [...columns, "tessera-aa"].includes(s.column))
     .map((s) => ({
       ...s,
       case_id: id,
       group,
-      slot: [...variants, "tessera-aa"].indexOf(s.variant),
+      slot: [...columns, "tessera-aa"].indexOf(s.column),
     }));
   dataset.observations = dataset.observations
     .filter((o) => o.group === oldGroup)
@@ -326,7 +340,7 @@ function operationFixture(operation: Operation) {
         ? (operation.bucket_count + 1) * 8
         : 0;
   dataset.memory = dataset.memory
-    .filter((m) => m.case_id === oldId && variants.includes(m.variant))
+    .filter((m) => m.case_id === oldId && columns.includes(m.column))
     .map((m) => ({
       ...m,
       case_id: id,
@@ -336,17 +350,11 @@ function operationFixture(operation: Operation) {
   return dataset;
 }
 
-test("live and retired operation runs regenerate with exact IDs and output-aware memory", async (t) => {
+test("operation runs regenerate with exact IDs and output-aware memory", async (t) => {
   for (const operation of [
     { kind: "argsort" },
-    { kind: "partition" },
     { kind: "partition-buckets", bucket_count: 7 },
-    { kind: "segments", segment_len: 73 },
-    { kind: "top-k", k: 99 },
-    { kind: "prefix", prefix_len: 99 },
-    { kind: "select", index: 499 },
-    { kind: "rank-range", start: 99, end: 199 },
-    { kind: "select-many", indices: [999, 0, 999] },
+    { kind: "select_nth", index: 499 },
   ] satisfies Operation[]) {
     const directory = await mkdtemp(join(tmpdir(), "tessera-operation-report-"));
     t.after(() => rm(directory, { recursive: true, force: true }));
@@ -357,14 +365,15 @@ test("live and retired operation runs regenerate with exact IDs and output-aware
     const report = await readFile(join(directory, "report/index.md"), "utf8");
     assert.match(report, /synthetic complete operation/);
     if (dataset.manifest.cases[0].ty === "row_u64") {
-      assert.ok(report.includes("| row_u64 | std-unstable | synthetic complete operation |"));
+      assert.ok(
+        report.includes("| row_u64 | std-unstable/serial | synthetic complete operation |"),
+      );
       assert.match(report, /partial routes.*payload records/);
-      assert.doesNotMatch(report, /selection remains scalar-only/);
     }
     assert.ok(report.includes(JSON.stringify(operation)));
     assert.ok((await readdir(join(directory, "report"))).every((name) => !name.endsWith(".svg")));
     const regenerated = await loadRun([directory]);
-    assert.equal(regenerated.samples[0].case_id, comparisonId(dataset.manifest.cases[0]));
+    assert.equal(regenerated.samples[0].case_id, caseId(dataset.manifest.cases[0]));
     assert.equal(
       regenerated.memory[0].output_bytes,
       operation.kind === "argsort"
@@ -382,20 +391,37 @@ test("live and retired operation runs regenerate with exact IDs and output-aware
   }
   for (const mutation of [
     (d: ReturnType<typeof operationFixture>) => {
-      delete d.manifest.cases[0].operation;
+      (d.manifest.cases[0] as { operation?: Operation }).operation = undefined;
     },
     (d: ReturnType<typeof operationFixture>) => {
       d.manifest.cases[0].operation = { kind: "argsort" };
     },
     (d: ReturnType<typeof operationFixture>) => {
-      d.manifest.cases[0].implementations = {};
+      d.manifest.cases[0].routes = {};
     },
     (d: ReturnType<typeof operationFixture>) => {
-      d.manifest.cases[0].omitted = [];
+      // A planned execution must account for every implementation.
+      d.manifest.cases[0].omitted.push({ column: "tessera/t4", reason: "unsupported" });
     },
   ]) {
-    const dataset = operationFixture({ kind: "top-k", k: 99 });
+    const dataset = operationFixture({ kind: "select_nth", index: 99 });
+    validateRun(structuredClone(dataset));
     mutation(dataset);
     assert.throws(() => validateRun(dataset));
+  }
+});
+
+test("measurements from an earlier schema must be regenerated by their own revision", () => {
+  for (const mutation of [
+    (d: ReturnType<typeof createFixture>) => {
+      Object.assign(d.manifest, { schema: 1, plan_version: 1 });
+    },
+    (d: ReturnType<typeof createFixture>) => {
+      Object.assign(d.manifest, { plan: { ...d.manifest.plan, schema: 2 } });
+    },
+  ]) {
+    const dataset = createFixture(3);
+    mutation(dataset);
+    assert.throws(() => validateRun(dataset), /regenerate/);
   }
 });

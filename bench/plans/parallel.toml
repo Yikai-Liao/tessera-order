@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
-schema = 1
-implementations = [
-  "tessera", "std-stable",
-  "tessera-par-8", "rayon-stable-8",
-]
+schema = 3
+# Serial controls pair with each adapter's eight-worker parallel entry.
+implementations = [ "tessera", "std-stable", "rayon-stable" ]
 
 [[include]]
 types = ["u64", "row_u64", "record128", "owned"]
 distributions = ["random", "d256", "skew99", "reverse"]
 lengths = [1_000_000]
+executions = ["serial", "t8"]

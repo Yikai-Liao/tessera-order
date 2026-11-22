@@ -4,117 +4,115 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
+  caseGroup,
+  caseId,
   caseLabel,
   caseParts,
   caseSection,
-  comparisonGroup,
-  comparisonId,
-  criterionGroup,
+  columnId,
+  compareCases,
   criterionId,
-  operationKinds,
+  type Execution,
   operationSchema,
-  parseComparisonId,
+  parseCaseId,
+  parseColumnId,
   parseCriterionId,
-  rawCaseParts,
+  parseExecution,
 } from "./catalog.ts";
 import { decodeConfig } from "./config.ts";
-import { parsePlan } from "./plan.ts";
 
-test("both benchmark grammars match the shared language fixture", () => {
-  const fixture = decodeConfig(
-    readFileSync(new URL("./plans/selection.fixture.toml", import.meta.url), "utf8"),
-    "selection.fixture.toml",
-  ) as {
-    identities: {
-      type: string;
-      distribution: string;
-      length: number;
-      mode: string;
-      comparison: string;
-      criterion_group: string;
-      criterion: string;
-    }[];
-  };
+interface Fixture {
+  identities: {
+    case: { type: string; distribution: string; length: number; operation: unknown };
+    column: { implementation: string; execution: string };
+    case_id: string;
+    group: string;
+    column_id: string;
+    criterion: string;
+  }[];
+  invalid: { executions: string[]; columns: string[]; case_ids: string[]; criterion: string[] };
+  operation_case: { type: string; distribution: string; length: number };
+  operations: { operation: unknown; case_id?: string }[];
+}
+
+const fixture = decodeConfig(
+  readFileSync(new URL("./plans/selection.fixture.toml", import.meta.url), "utf8"),
+  "selection.fixture.toml",
+) as unknown as Fixture;
+
+test("identities match the shared language fixture in both directions", () => {
   for (const entry of fixture.identities) {
-    const input = { ty: entry.type, distribution: entry.distribution, len: entry.length };
-    assert.equal(comparisonId(input), entry.comparison);
-    assert.equal(criterionId(input, entry.mode), entry.criterion);
-    assert.equal(criterionGroup(entry.criterion), entry.criterion_group);
-    assert.deepEqual(parseComparisonId(entry.comparison), { ...input, seed: "s1" });
-    assert.deepEqual(parseCriterionId(entry.criterion), {
-      ...input,
-      seed: "s1",
-      mode: entry.mode,
-    });
+    const input = {
+      ty: entry.case.type,
+      distribution: entry.case.distribution,
+      len: entry.case.length,
+      operation: operationSchema.parse(entry.case.operation),
+    };
+    const column = {
+      implementation: entry.column.implementation,
+      execution: entry.column.execution as Execution,
+    };
+    assert.equal(caseId(input), entry.case_id);
+    assert.equal(caseGroup(input), entry.group);
+    assert.equal(columnId(column), entry.column_id);
+    assert.equal(criterionId(input, column.execution), entry.criterion);
+    assert.deepEqual(parseCaseId(entry.case_id), input);
+    assert.deepEqual(parseColumnId(entry.column_id), column);
+    assert.deepEqual(parseCriterionId(entry.criterion), { ...input, execution: column.execution });
   }
 });
 
-test("strict identities reject unknown fields without tightening historical labels", () => {
-  const id = "rust/u64/random/65536/s1/api";
-  for (const invalid of [
-    id.replace("rust/", "other/"),
-    id.replace("u64", "future-type"),
-    id.replace("random", "future-distribution"),
-    id.replace("65536", "0"),
-    id.replace("s1", "seed"),
-    id.replace("api", "future-mode"),
-    `${id}/extra`,
-  ])
-    assert.throws(() => parseCriterionId(invalid));
-  assert.throws(() => parseComparisonId(id));
-  assert.throws(() => parseComparisonId("u64/random/not-a-length/s1"));
-  assert.deepEqual(rawCaseParts(id), {
-    input: "u64 · random",
-    sub: "65536 · s1 · api",
-  });
-  assert.deepEqual(rawCaseParts("old/id"), { input: "id", sub: "" });
-  assert.equal(caseParts("not-an-id").input, "not-an-id");
-  // Operation cases keep the plain input name and get their own figure section.
-  const operation = "rust/u64/random/65536/s1/rank-range/16384-24576/api";
-  assert.equal(caseParts(operation).input, caseParts("rust/u64/random/65536/s1/api").input);
-  assert.equal(caseSection(operation).title, "ranks · 16,384–24,576");
-  assert.equal(caseSection("rust/u64/random/65536/s1/api").title, "sort");
-  assert.ok(caseSection(operation).order > caseSection("rust/u64/random/65536/s1/par-4").order);
-  assert.equal(caseLabel(operation), "u64 · random · ranks · 16,384–24,576 · 65,536");
+test("decoders reject noncanonical, unknown or out-of-range components", () => {
+  for (const id of fixture.invalid.executions)
+    assert.throws(() => parseExecution(id), Error, JSON.stringify(id));
+  for (const id of fixture.invalid.columns) assert.throws(() => parseColumnId(id), Error, id);
+  for (const id of fixture.invalid.case_ids) assert.throws(() => parseCaseId(id), Error, id);
+  for (const id of fixture.invalid.criterion) assert.throws(() => parseCriterionId(id), Error, id);
 });
 
-test("operation identities and parameter admission match the shared language fixture", () => {
-  const fixture = decodeConfig(
-    readFileSync(new URL("./plans/selection.fixture.toml", import.meta.url), "utf8"),
-    "selection.fixture.toml",
-  ) as {
-    operation_case: { ty: string; distribution: string; len: number };
-    operations: { operation: unknown; comparison?: string; group?: string }[];
-  };
-  const input = fixture.operation_case;
+test("operation parameters admit exactly the fixture's operations", () => {
+  const { type: ty, distribution, length: len } = fixture.operation_case;
   for (const entry of fixture.operations) {
-    const plan = {
-      schema: 2,
-      implementations: ["tessera"],
-      operation: entry.operation,
-      include: [{ types: [input.ty], distributions: [input.distribution], lengths: [input.len] }],
-    };
-    if (!entry.comparison) {
-      assert.throws(() => parsePlan(plan));
+    const parsed = operationSchema.safeParse(entry.operation);
+    if (!entry.case_id) {
+      // Rejected by the schema or by the input length.
+      assert.ok(
+        !parsed.success ||
+          (() => {
+            try {
+              parseCaseId(caseId({ ty, distribution, len, operation: parsed.data }));
+              return false;
+            } catch {
+              return true;
+            }
+          })(),
+        JSON.stringify(entry.operation),
+      );
       continue;
     }
-    const operation = operationSchema.parse(entry.operation);
-    if (operationKinds.some((kind) => kind === operation.kind)) parsePlan(plan);
-    else assert.throws(() => parsePlan(plan));
-    assert.equal(comparisonId({ ...input, operation }), entry.comparison);
-    assert.equal(comparisonGroup({ ...input, operation }), entry.group);
-    assert.deepEqual(parseComparisonId(entry.comparison), { ...input, seed: "s1", operation });
-    const criterion = criterionId({ ...input, operation }, "api");
-    assert.equal(criterion, `rust/${entry.comparison}/api`);
-    assert.deepEqual(parseCriterionId(criterion), { ...input, seed: "s1", operation, mode: "api" });
-    assert.throws(() => parseCriterionId(`rust/${entry.comparison}/par-4`));
+    assert.ok(parsed.success, JSON.stringify(entry.operation));
+    assert.equal(caseId({ ty, distribution, len, operation: parsed.data }), entry.case_id);
   }
-  for (const invalid of [
-    "u64/random/1000/s1/top-k/1001",
-    "u64/random/1000/s1/argsort/extra",
-    "u64/random/1000/s1/select/01",
-    "u64/random/1000/s1/rank-range/8-7",
-    "u64/random/1000/s1/select-many/0,1000",
-  ])
-    assert.throws(() => parseComparisonId(invalid));
+});
+
+test("display fields name sections by operation and execution", () => {
+  const sort = "rust/sort/u64/random/65536/s1/serial";
+  const parallel = "rust/sort/u64/random/65536/s1/t4";
+  const select = "rust/select_nth/u64/random/65536/s1/16384/serial";
+  // Operation cases keep the plain input name and get their own figure section.
+  assert.equal(caseParts(select).input, caseParts(sort).input);
+  assert.equal(caseSection(sort).title, "sort");
+  assert.match(caseSection(parallel).title, /4 threads$/);
+  assert.match(caseSection(select).title, /16,384/);
+  assert.ok(caseSection(sort).order < caseSection(parallel).order);
+  assert.ok(caseSection(parallel).order < caseSection(select).order);
+  assert.ok(caseLabel(select).includes("65,536"));
+  assert.equal(caseParts("not-an-id").input, "not-an-id");
+  assert.equal(caseSection("not-an-id").title, "");
+  assert.deepEqual([select, "not-an-id", parallel, sort].sort(compareCases), [
+    sort,
+    parallel,
+    select,
+    "not-an-id",
+  ]);
 });

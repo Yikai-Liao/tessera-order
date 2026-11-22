@@ -6,16 +6,27 @@ import {
   caseLabel,
   caseParts,
   continuous,
+  type Execution,
   parseCriterionId,
   revisionSampling,
 } from "../catalog.ts";
 import { type LocalRun, readPrepared, shardCases, summarizeLocal } from "../local/model.ts";
-import { parseRetainedPlan } from "../plan.ts";
+import { parsePlan } from "../plan.ts";
 import { type BencherReport, type Row, summarizeRows } from "./report.ts";
 
 /** Hosted matrix width. More shards shorten the slowest measurement at the
  * cost of another runner setup per shard and more concurrent slots. */
 export const CONTINUOUS_SHARDS = 8;
+
+/** Worker count of a hosted runner's parallel measurements: each hosted shard reserves four
+ * CPUs, so continuous history admits only serial and `t4` executions. */
+export const HOSTED_THREADS = 4;
+
+/** Reject an execution that the hosted runners cannot reserve. */
+export function assertHostedExecution(execution: Execution) {
+  if (execution !== "serial" && execution !== `t${HOSTED_THREADS}`)
+    throw new Error(`Hosted measurements support serial and t${HOSTED_THREADS} executions only`);
+}
 
 /** Exact source identity captured by this CI run. */
 export interface PairedSource {
@@ -52,9 +63,7 @@ export async function readPaired(directory: string, source: PairedSource, prepar
     throw new Error("Expected this run’s unmeasured prepared pair");
   for (const name of await readdir(directory)) {
     if (!name.startsWith("paired-")) continue;
-    const plan = parseRetainedPlan(
-      JSON.parse(await readFile(join(directory, name, "plan.json"), "utf8")),
-    );
+    const plan = parsePlan(JSON.parse(await readFile(join(directory, name, "plan.json"), "utf8")));
     if (JSON.stringify(plan) !== expectedPlan) throw new Error("Unexpected continuous plan");
     const run = JSON.parse(await readFile(join(directory, name, "local.json"), "utf8")) as LocalRun;
     runs.push(run);
@@ -102,8 +111,8 @@ export async function readPaired(directory: string, source: PairedSource, prepar
     )
       throw new Error("Missing source or configuration provenance");
     for (const id of run.cases) {
-      const { mode, len } = parseCriterionId(id);
-      if (mode !== "api" && mode !== "par-4") throw new Error("Unsupported measurement mode");
+      const { execution, len } = parseCriterionId(id);
+      assertHostedExecution(execution);
       if (run.sampleCounts?.[id] !== revisionSampling(len).samples)
         throw new Error("Untrusted measurement budget");
     }

@@ -4,7 +4,7 @@ import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { type Command, InvalidArgumentError, Option } from "commander";
 import { stringify as stringifyToml } from "smol-toml";
-import { catalog, operationKinds } from "../bench/catalog.ts";
+import { catalog, operationKinds, parseExecution } from "../bench/catalog.ts";
 import { compareCounters, probeCounters, reportCounters } from "../bench/local/counters.ts";
 import { LAYOUT_CONTROLS, type LayoutControl, parseLayoutSeeds } from "../bench/local/layout.ts";
 import { renderLocalReport } from "../bench/local/report.ts";
@@ -86,12 +86,34 @@ function addSelectionOptions(command: Command, presets: string) {
       "finite categories for partition-buckets",
       parsePositiveInteger,
     )
-    .option("--index <rank>", "zero-based rank for select", parseCount);
+    .option("--index <rank>", "zero-based rank for select_nth", parseCount)
+    .option(
+      "--executions <ids>",
+      "comma-separated executions: serial or tN for an N-worker pool",
+      parseExecutions,
+    );
+}
+
+function parseExecutions(value: string) {
+  try {
+    return parseList(value).map(parseExecution);
+  } catch (error) {
+    throw new InvalidArgumentError((error as Error).message);
+  }
 }
 
 function selectAxes(options: MeasurementOptions): SelectionOptions {
   return Object.fromEntries(
-    ["implementations", "types", "distributions", "lengths", "operation", "index", "bucketCount"]
+    [
+      "implementations",
+      "types",
+      "distributions",
+      "lengths",
+      "operation",
+      "index",
+      "bucketCount",
+      "executions",
+    ]
       .filter((key) => options[key as keyof MeasurementOptions] !== undefined)
       .map((key) => [key, options[key as keyof MeasurementOptions]]),
   );
@@ -255,7 +277,10 @@ export function experimentCommands(program: Command) {
       parsePositiveInteger,
       256,
     )
-    .option("--group <type/distribution>", "measure one complete group and report it as partial")
+    .option(
+      "--group <id>",
+      "measure one complete group (operation/type/distribution[/parameters]) and report it as partial",
+    )
     .action(
       async (
         options: MeasurementOptions & {

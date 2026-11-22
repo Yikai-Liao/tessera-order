@@ -3,9 +3,13 @@
 import {
   type CaseIdentity,
   catalog,
+  columnId,
   distribution,
+  type Execution,
+  executionThreads,
   implementation,
   recordType,
+  SORT,
 } from "../catalog.ts";
 import { type CurveChart, renderCurves } from "../plot/curves.ts";
 import type { NameCell } from "../plot/layout.ts";
@@ -23,8 +27,21 @@ import {
   distributions,
   lengths,
   measurementId,
+  STD_STABLE,
   type Summary,
+  TESSERA,
 } from "./model.ts";
+
+/** A sorting comparison case: the figures' only operation. */
+const sortCase = (ty: string, distributionId: string, len: number) =>
+  caseId({ ty, distribution: distributionId, len, operation: SORT });
+/** The serial column through which figures name an implementation. */
+const serial = (name: string) => columnId({ implementation: name, execution: "serial" });
+/** A parallel column's pool size, as a name suffix; empty for serial columns. */
+const threadsLabel = (execution: Execution) => {
+  const threads = executionThreads(execution);
+  return threads ? `${threads} thread${threads === 1 ? "" : "s"}` : "";
+};
 
 export interface Figure {
   name: string;
@@ -178,25 +195,28 @@ function speedScale(ratios: number[]): Chart["scale"] {
   return { low: 1 / span, high: span, ticks, origin: 1, clamp: true };
 }
 
-// Speed of one variant relative to slice::sort in the same blocks: the
-// slice::sort time over the variant's, per block, then the median.
-function pairedSpeed(summaries: Map<string, Summary>, id: string, variant: string) {
-  const std = summaries.get(measurementId("default", id, "std-stable")),
-    s = summaries.get(measurementId("default", id, variant));
+// Speed of one column relative to slice::sort in the same blocks: the
+// slice::sort time over the column's, per block, then the median.
+function pairedSpeed(summaries: Map<string, Summary>, id: string, column: string) {
+  const std = summaries.get(measurementId("default", id, STD_STABLE)),
+    s = summaries.get(measurementId("default", id, column));
   if (!std || !s) return null;
-  return variant === "tessera" ? std.ratio : median(std.ratios.map((r, i) => r / s.ratios[i]));
+  return column === TESSERA ? std.ratio : median(std.ratios.map((r, i) => r / s.ratios[i]));
 }
 
-/** A local report's field: paired speeds and the memory worker's peaks. */
+/** A local report's field: serial columns' paired speeds and the memory worker's peaks. */
 export function reportField(dataset: Dataset, summaries: Map<string, Summary>): Field {
   return {
-    implementations: dataset.manifest.variants,
+    implementations: dataset.manifest.columns
+      .filter((column) => column.execution === "serial")
+      .map((column) => ({ name: column.implementation, stable: column.stable })),
     cases: dataset.manifest.cases,
-    speed: (id, variant) => pairedSpeed(summaries, id, variant),
-    nsPerKey: (id, variant) => summaries.get(measurementId("default", id, variant))?.ns ?? null,
-    peak: (id, variant) =>
-      dataset.memory.find((m) => m.build === "default" && m.variant === variant && m.case_id === id)
-        ?.peak_extra_bytes ?? null,
+    speed: (id, name) => pairedSpeed(summaries, id, serial(name)),
+    nsPerKey: (id, name) => summaries.get(measurementId("default", id, serial(name)))?.ns ?? null,
+    peak: (id, name) =>
+      dataset.memory.find(
+        (m) => m.build === "default" && m.column === serial(name) && m.case_id === id,
+      )?.peak_extra_bytes ?? null,
   };
 }
 
@@ -206,9 +226,7 @@ function speedOver(field: Field, ids: string[], variant: string) {
   return values.every((v): v is number => v !== null) ? geomean(values) : null;
 }
 const rankingCases = ({ ranking }: Cohort, n: number) =>
-  ranking.distributions.map((distributionId) =>
-    caseId({ ty: ranking.ty, distribution: distributionId, len: n }),
-  );
+  ranking.distributions.map((distributionId) => sortCase(ranking.ty, distributionId, n));
 /** Elements of one type in a guide: "u64 keys" or "{u32, u32} records". */
 const elements = (ty: string) => `${recordType(ty).label} ${recordType(ty).task}`;
 
@@ -384,7 +402,7 @@ function renderInputs(field: Field, cohort: Cohort, name: string, ty = "u64"): F
     rows: g.distributions
       .filter(([distributionId]) => patterns.includes(distributionId))
       .flatMap(([distributionId, label]) => {
-        const id = caseId({ ty, distribution: distributionId, len: n });
+        const id = sortCase(ty, distributionId, n);
         const s = standing(field, [id], stableOnly);
         const ns = field.nsPerKey(id, "tessera");
         if (!s || ns === null) return [];
@@ -424,7 +442,7 @@ function renderLengths(field: Field, cohort: Cohort): Figure | null {
   const groups = TYPE_GROUPS.flatMap((g) =>
     g.types.map(([ty]) => {
       const rows = lengths.flatMap((len) => {
-        const s = standing(field, [caseId({ ty, distribution: distributionId, len })], !g.keys);
+        const s = standing(field, [sortCase(ty, distributionId, len)], !g.keys);
         return s ? [[len, s] as const] : [];
       });
       return {
@@ -481,7 +499,7 @@ function renderShort(field: Field, cohort: Cohort): Figure | null {
         return {
           title: `${formatLength(len)} ${elements(ty)}`,
           rows: distributions.flatMap(([distributionId, label]) => {
-            const id = caseId({ ty, distribution: distributionId, len });
+            const id = sortCase(ty, distributionId, len);
             const s = standing(field, [id], stableOnly);
             const ns = field.nsPerKey(id, "tessera");
             if (!s || ns === null) return [];
@@ -523,7 +541,7 @@ function renderTypes(field: Field, cohort: Cohort): Figure | null {
     title: g.title,
     rows: g.types.flatMap(([ty, label, sub]) => {
       const ids = cohort.typeDistributions.map((distributionId) =>
-        caseId({ ty, distribution: distributionId, len: cohort.n }),
+        sortCase(ty, distributionId, cohort.n),
       );
       const s = standing(field, ids, !g.keys);
       if (!s) return [];
@@ -568,7 +586,7 @@ export interface Growth {
 
 /** A field's peaks on one type's random input, at every length Tessera's peak was measured. */
 export function fieldGrowth(field: Field, ty: string): Growth {
-  const id = (len: number) => caseId({ ty, distribution: "random", len });
+  const id = (len: number) => sortCase(ty, "random", len);
   const lengths = [
     ...new Set(
       field.cases
@@ -776,18 +794,23 @@ export function renderParallel({ n, threads, tessera, inputs }: Scaling): Figure
 function renderSelected(dataset: Dataset, summaries: Map<string, Summary>): Figure[] {
   return dataset.manifest.cases.flatMap((input) => {
     const id = caseId(input);
-    const entries = dataset.manifest.variants.flatMap((variant) => {
-      const summary = summaries.get(measurementId("default", id, variant.name));
-      return summary ? [summary] : [];
+    const entries = dataset.manifest.columns.flatMap((column) => {
+      const summary = summaries.get(measurementId("default", id, column.id));
+      return summary ? [{ summary, ...column }] : [];
     });
     if (!entries.length) return [];
     const groups = [
       {
         title: `Implementations · ${dataset.manifest.blocks} blocks`,
         rows: entries.map(
-          (summary): Row => ({
-            name: sortName(summary.variant),
-            marks: [{ value: summary.ratio, tone: toneOf(summary.variant) }],
+          ({ summary, implementation: name, execution }): Row => ({
+            name: {
+              ...sortName(name),
+              sub: [implementation(name).detail, threadsLabel(execution)]
+                .filter(Boolean)
+                .join(" · "),
+            },
+            marks: [{ value: summary.ratio, tone: toneOf(name) }],
             span: [summary.low, summary.high],
             cells: [
               times(summary.ratio),

@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { command } from "../../tools/process.ts";
 import { repositoryRoot, runTask } from "../../tools/tasks.ts";
+import { parseCaseId, parseColumnId } from "../catalog.ts";
 import { loadPlan, type Plan } from "../plan.ts";
 import { withComparisonWorkspace } from "../release.ts";
 import {
@@ -16,7 +17,7 @@ import { reportFailure } from "./failure.ts";
 import { type GrowthRecord, growthSchema } from "./result.ts";
 
 /**
- * Arrange the memory worker's rows as one peak per implementation and length.
+ * Arrange the memory worker's serial full-sort rows as one peak per implementation and length.
  *
  * The growth plan selects one type and one input pattern; an implementation that does not support
  * the type has no rows and no entry, and a missing length is null.
@@ -32,22 +33,30 @@ export function growthPeaks(journal: string, plan: Plan) {
   for (const line of journal.split("\n").filter(Boolean)) {
     const row = JSON.parse(line) as {
       case_id: string;
-      variant: string;
+      column: string;
       build: string;
       peak_extra_bytes: number;
       verified: boolean;
     };
-    const [ty, rowDistribution, len] = row.case_id.split("/");
-    const at = lengths.indexOf(Number(len));
-    if (row.build !== "default" || ty !== type || rowDistribution !== distribution || at < 0)
+    const { ty, distribution: rowDistribution, len, operation } = parseCaseId(row.case_id);
+    const { implementation, execution } = parseColumnId(row.column);
+    const at = lengths.indexOf(len);
+    if (
+      row.build !== "default" ||
+      execution !== "serial" ||
+      operation.kind !== "sort" ||
+      ty !== type ||
+      rowDistribution !== distribution ||
+      at < 0
+    )
       continue;
-    if (!plan.implementations.includes(row.variant))
-      throw new Error(`Unplanned variant: ${row.variant}`);
+    if (!plan.implementations.includes(implementation))
+      throw new Error(`Unplanned implementation: ${implementation}`);
     if (!row.verified || !Number.isSafeInteger(row.peak_extra_bytes) || row.peak_extra_bytes < 0)
-      throw new Error(`Invalid memory row: ${row.case_id} ${row.variant}`);
-    peaks[row.variant] ??= lengths.map(() => null);
-    const values = peaks[row.variant];
-    if (values[at] !== null) throw new Error(`Duplicate memory row: ${row.case_id} ${row.variant}`);
+      throw new Error(`Invalid memory row: ${row.case_id} ${row.column}`);
+    peaks[implementation] ??= lengths.map(() => null);
+    const values = peaks[implementation];
+    if (values[at] !== null) throw new Error(`Duplicate memory row: ${row.case_id} ${row.column}`);
     values[at] = row.peak_extra_bytes;
   }
   if (!peaks.tessera?.every((value) => value !== null))

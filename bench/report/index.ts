@@ -2,12 +2,26 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { catalog, operationLabel } from "../catalog.ts";
+import { catalog, executionThreads, operationDescription } from "../catalog.ts";
 import { median, pairedBudget } from "../statistics.ts";
 import { resultSummary } from "../summary.ts";
 import { renderFigures } from "./charts.ts";
 import { loadRun } from "./load.ts";
-import { caseId, type Dataset, measurementId, type Summary, summarize, types } from "./model.ts";
+import {
+  caseId,
+  type Dataset,
+  measurementId,
+  type Summary,
+  summarize,
+  TESSERA,
+  TESSERA_AA,
+  types,
+} from "./model.ts";
+
+/** Whether any measured column runs inside a worker pool. */
+function measuresParallel(dataset: Dataset) {
+  return dataset.manifest.columns.some((column) => executionThreads(column.execution));
+}
 
 function formatCell(value: unknown) {
   return String(value ?? "unavailable")
@@ -27,7 +41,7 @@ export function collectWarnings(dataset: Dataset): string[] {
     if (dataset.host[field] !== expected)
       warnings.push(`${field}: ${formatCell(dataset.host[field])}; recommended ${expected}`);
   }
-  const parallel = dataset.manifest.variants.some((v) => v.threads);
+  const parallel = measuresParallel(dataset);
   if (!parallel && !/^\d+$/.test(String(dataset.host.affinity)))
     warnings.push(
       `CPU affinity: ${formatCell(dataset.host.affinity)}; recommended one logical CPU`,
@@ -66,29 +80,29 @@ export function collectWarnings(dataset: Dataset): string[] {
 }
 function renderResults(dataset: Dataset, summaries: Map<string, Summary>): string {
   let output =
-    "## Full results\n\nTimes include each complete call's scratch and mandatory output allocation. Ratios divide the variant's time by the mean of Tessera's paired samples in the same block. Bounds are per-block minima and maxima. The A/A noise range spans both Tessera samples divided by their block mean, across all blocks. Faster/slower describes the variant relative to Tessera; it requires the declared budget's direction agreement and a median outside that range (see Measurement budget). A short screen is inconclusive when either condition fails. The tessera-aa row separately reports A2 / A1.\n\n";
-  const variants = [...new Set(dataset.manifest.variants.map((v) => v.name)), "tessera-aa"];
+    "## Full results\n\nTimes include each complete call's scratch and mandatory output allocation. Ratios divide the column's time by the mean of Tessera's paired samples in the same block. Bounds are per-block minima and maxima. The A/A noise range spans both Tessera samples divided by their block mean, across all blocks. Faster/slower describes the column relative to Tessera; it requires the declared budget's direction agreement and a median outside that range (see Measurement budget). A short screen is inconclusive when either condition fails. The tessera-aa row separately reports A2 / A1.\n\n";
+  const columns = [...dataset.manifest.columns.map((column) => column.id), TESSERA_AA];
   output +=
-    "Each cell gives ratio, ns / input record, per-block ratio bounds, verdict and peak extra heap bytes. A dash means the variant is outside that build or task. Full-precision values are in [summaries.json](summaries.json).\n\n";
+    "Each cell gives ratio, ns / input record, per-block ratio bounds, verdict and peak extra heap bytes. A dash means the column is outside that build or task. Full-precision values are in [summaries.json](summaries.json).\n\n";
   for (const ty of new Set([...types, ...dataset.manifest.cases.map((c) => c.ty)])) {
     const rows: string[][] = [];
     const manifest = dataset.manifest;
     const build = "default";
     for (const c of manifest.cases.filter((c) => c.ty === ty)) {
-      const baseline = summaries.get(measurementId(build, caseId(c), "tessera"));
+      const baseline = summaries.get(measurementId(build, caseId(c), TESSERA));
       if (!baseline) continue;
       rows.push([
         c.distribution,
         c.len.toLocaleString("en-US"),
         build,
         `${baseline.aaLow.toFixed(4)}–${baseline.aaHigh.toFixed(4)}`,
-        ...variants.map((variant) => {
-          const s = summaries.get(measurementId(build, caseId(c), variant));
+        ...columns.map((column) => {
+          const s = summaries.get(measurementId(build, caseId(c), column));
           if (!s) return "—";
           const memory = dataset.memory.find(
             (m) =>
-              measurementId(m.build, m.case_id, m.variant) ===
-              measurementId(build, caseId(c), variant),
+              measurementId(m.build, m.case_id, m.column) ===
+              measurementId(build, caseId(c), column),
           );
           const heap = memory
             ? `${memory.peak_extra_bytes} B peak${memory.output_bytes !== undefined ? `<br>${memory.output_bytes} B output + ${memory.peak_extra_bytes - memory.output_bytes} B workspace peak` : ""}`
@@ -98,38 +112,35 @@ function renderResults(dataset: Dataset, summaries: Map<string, Summary>): strin
       ]);
     }
     if (rows.length)
-      output += `<details>\n<summary>${ty}</summary>\n\n${renderTable(["Distribution", "Length", "Build", "A/A range", ...variants], rows)}\n</details>\n\n`;
+      output += `<details>\n<summary>${ty}</summary>\n\n${renderTable(["Distribution", "Length", "Build", "A/A range", ...columns], rows)}\n</details>\n\n`;
   }
   return output;
 }
 function renderCapabilities(dataset: Dataset) {
   const manifest = dataset.manifest;
-  const rows = manifest.variants.map((v) => [
-    v.name,
-    v.stable ? "stable" : "unstable",
-    v.threads ?? 0,
+  const rows = manifest.columns.map((column) => [
+    column.id,
+    column.stable ? "stable" : "unstable",
+    executionThreads(column.execution) ?? 0,
     ...types.map((ty) =>
-      manifest.cases.some((c) => c.ty === ty && c.variants.includes(v.name)) ? "yes" : "—",
+      manifest.cases.some((c) => c.ty === ty && c.columns.includes(column.id)) ? "yes" : "—",
     ),
   ]);
-  let out = `## Capabilities\n\n${renderTable(["Variant", "Sort contract", "Pool workers", ...types], rows)}\n`;
-  if (manifest.plan_version === 1)
+  let out = `## Capabilities\n\n${renderTable(["Column", "Sort contract", "Pool workers", ...types], rows)}\n`;
+  const { kind } = manifest.cases[0].operation;
+  if (kind === "sort")
     return (
       out +
       "Unstable sorts on records are listed as a separate task: their permutation check allows equal keys to change order. A dash means the adapter does not support the task.\n\n"
     );
-  switch (manifest.cases[0].operation?.kind) {
+  switch (kind) {
     case "argsort":
       out +=
         "Every route must return the exact stable index permutation. Standard unstable argsort explicitly breaks ties by original index. ";
       break;
-    case "partition":
     case "partition-buckets":
       out +=
         "Category routes require exact stable category order and every returned boundary. Sorting references order by category, not the complete original key. ";
-      break;
-    case "segments":
-      out += "Standard unstable segmented sorting is scalar-only. ";
       break;
     default:
       out +=
@@ -138,18 +149,14 @@ function renderCapabilities(dataset: Dataset) {
   out += "Each admitted route or omission is retained below.\n\n";
   const routes = new Map<string, string[]>();
   for (const c of manifest.cases) {
-    for (const [name, route] of Object.entries(c.implementations ?? {}))
-      routes.set(`${c.ty}/${name}`, [c.ty, name, route]);
-    for (const omitted of c.omitted ?? [])
-      routes.set(`${c.ty}/${omitted.variant}`, [
-        c.ty,
-        omitted.variant,
-        `omitted: ${omitted.reason}`,
-      ]);
+    for (const [column, route] of Object.entries(c.routes ?? {}))
+      routes.set(`${c.ty}/${column}`, [c.ty, column, route]);
+    for (const omitted of c.omitted)
+      routes.set(`${c.ty}/${omitted.column}`, [c.ty, omitted.column, `omitted: ${omitted.reason}`]);
   }
   return (
     out +
-    renderTable(["Input type", "Variant", "Complete call / omission"], [...routes.values()]) +
+    renderTable(["Input type", "Column", "Complete call / omission"], [...routes.values()]) +
     "\n"
   );
 }
@@ -190,15 +197,16 @@ function renderProvenance(dataset: Dataset) {
 export async function writeReport(directories: string[], partial = false) {
   const dataset = await loadRun(directories, partial),
     summaries = summarize(dataset),
-    charts = dataset.manifest.plan_version === 1 ? renderFigures(dataset, summaries) : [];
+    operation = dataset.manifest.cases[0].operation,
+    sort = operation.kind === "sort",
+    charts = sort ? renderFigures(dataset, summaries) : [];
   const out = join(directories[0], "report");
   await mkdir(out, { recursive: true });
-  const operation = dataset.manifest.cases[0].operation;
-  let markdown = `# ${operation ? operationLabel(operation) : "Sorting comparison"}\n\n${partial ? "Partial plan; only completed groups are shown." : `${dataset.manifest.plan_name} plan, version ${dataset.manifest.plan_version}.`} Every value is regenerated from the accompanying manifests, host fingerprint, blocks and memory samples.\n\n`;
-  if (operation)
+  let markdown = `# ${sort ? "Sorting comparison" : operationDescription(operation)}\n\n${partial ? "Partial plan; only completed groups are shown." : `${dataset.manifest.plan_name} plan.`} Every value is regenerated from the accompanying manifests, host fingerprint, blocks and memory samples.\n\n`;
+  if (!sort)
     markdown += `Operation: \`${JSON.stringify(operation)}\`. Times are complete-call latency divided by input length, not by output count.\n\n`;
   markdown +=
-    "All blocks reuse each case's seed-one input. Their range measures execution variability on that input; it does not measure variability across random inputs. Calibration can choose different batch sizes for different variants, changing the prepared-buffer working set and cache behavior.\n\n";
+    "All blocks reuse each case's seed-one input. Their range measures execution variability on that input; it does not measure variability across random inputs. Calibration can choose different batch sizes for different columns, changing the prepared-buffer working set and cache behavior.\n\n";
   markdown += "## Measurement budget\n\n";
   const { count, agreement } = pairedBudget(dataset.manifest.blocks);
   markdown += `**${count} blocks per case${count === catalog.pairedBlocks.short.count ? " (short screen)" : ""}**; ${agreement} of ${count} must agree.\n`;
@@ -208,17 +216,17 @@ export async function writeReport(directories: string[], partial = false) {
   const revisions = dataset.manifest.revisions;
   if (revisions) {
     markdown +=
-      "## Linked revision controls\n\nTwo named crates represent each revision, alongside the repeated primary-current A/A call. Ratios divide each placement by the current A/A mean: a slower baseline row indicates a current improvement. Compare both baseline copies and the second current copy, not only one favorable placement. Adapter entry offsets prove distinct call boundaries, not distinct internal sort bodies; inspect the retained executable before source attribution. This is a serial comparison; parallel revision process screens use the shared worker with explicit four-thread implementations.\n\n";
+      "## Linked revision controls\n\nTwo named crates represent each revision, alongside the repeated primary-current A/A call. Ratios divide each placement by the current A/A mean: a slower baseline row indicates a current improvement. Compare both baseline copies and the second current copy, not only one favorable placement. Adapter entry offsets prove distinct call boundaries, not distinct internal sort bodies; inspect the retained executable before source attribution. This is a serial comparison; parallel revision screens measure Tessera's planned thread-count columns in the shared worker.\n\n";
     markdown += "```json\n" + JSON.stringify(revisions, null, 2) + "\n```\n\n";
   }
   const conditions = collectWarnings(dataset);
   if (conditions.length)
     markdown += `## Observed conditions\n\n${conditions.map((w) => `- ${w}`).join("\n")}\n\n`;
   markdown += renderCapabilities(dataset);
-  if (dataset.manifest.variants.some((v) => v.threads))
+  if (measuresParallel(dataset))
     markdown +=
-      "## Parallel measurement scope\n\nPools are started and warmed before timing and allocation counting; each timed call includes pool dispatch and sort scratch allocation. Peak heap bytes exclude pre-existing pool/runtime storage and thread stacks. All workers exit before the next adapter. Ratios use the serial Tessera A/A pair, not a separate parallel A/A pair. The inverse ratio is whole-call speedup over serial Tessera, not source-change attribution or parallel-only noise control.\n\n";
-  if (!operation)
+      "## Parallel measurement scope\n\nPools are started and warmed before timing and allocation counting; each timed call includes pool dispatch and sort scratch allocation. Peak heap bytes exclude pre-existing pool/runtime storage and thread stacks. All workers exit before the next column. Ratios use the serial Tessera A/A pair, not a separate parallel A/A pair. The inverse ratio is whole-call speedup over serial Tessera, not source-change attribution or parallel-only noise control.\n\n";
+  if (sort)
     markdown +=
       "## Figure scope\n\nStandard panels show fixed slices and aggregates, not every measured case. The 1M input panels include all selected distributions for each type, including the new skew, key-structure, disorder and finite-float cases. Record panels rank stable sorts only. Ranking and cross-type aggregate panels retain the ten baseline distributions for a common comparison; they do not summarize the whole expanded plan. The memory panel takes the worst across all selected 10M u64 distributions. The selected-input panel is a fallback used only when no standard panel can be drawn. All completed cases, including custom lengths absent from the figures, remain in [Full results](#full-results) and [summaries.json](summaries.json).\n\n";
   for (const chart of charts) {
@@ -228,7 +236,7 @@ export async function writeReport(directories: string[], partial = false) {
   markdown += renderResults(dataset, summaries);
   markdown +=
     "## Memory accounting\n\nThe memory executable measures one complete call after preparing its input and verification reference. Rust-only builds count requested allocation sizes. Native builds count allocator usable sizes at the wrapped C allocation functions and C++ new/delete; allocator rounding is included. Fixed stack storage is unmeasured. Input buffers and owned payloads are excluded.\n";
-  if (operation)
+  if (!sort)
     markdown +=
       "Mandatory heap output is allocated inside the measured call and included in peak extra heap bytes. Estimated workspace is the recorded peak minus retained output bytes. Calls without a heap-allocated result have zero output bytes. No sorting figures are generated for these result shapes.\n";
   await writeFile(join(out, "index.md"), markdown);
@@ -238,7 +246,7 @@ export async function writeReport(directories: string[], partial = false) {
   );
   const bmf = Object.fromEntries(
     [...summaries.values()].map((s) => [
-      `compare/${s.caseId}/${s.variant}/${s.build}`,
+      `compare/${s.caseId}/${s.column}/${s.build}`,
       {
         ratio: { value: s.ratio, lower_value: s.low, upper_value: s.high },
         latency: { value: s.ns },
@@ -257,8 +265,8 @@ export async function writeReport(directories: string[], partial = false) {
     // Ratios name the opponent: an opponent faster than Tessera is the actionable loss.
     ...resultSummary(
       [...summaries.values()]
-        .filter((row) => row.variant !== "tessera" && row.variant !== "tessera-aa")
-        .map((row) => ({ ...row, id: `${row.caseId}/${row.variant}` })),
+        .filter((row) => row.column !== TESSERA && row.column !== TESSERA_AA)
+        .map((row) => ({ ...row, id: `${row.caseId}/${row.column}` })),
       "faster",
     ),
   };

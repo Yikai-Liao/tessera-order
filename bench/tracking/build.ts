@@ -4,8 +4,8 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { command } from "../../tools/process.ts";
 import { repositoryRoot, runTask } from "../../tools/tasks.ts";
-import { implementation as catalogImplementation } from "../catalog.ts";
-import { loadPlan } from "../plan.ts";
+import { type Column, columnId, criterionId, parseCaseId } from "../catalog.ts";
+import { loadPlan, type Plan } from "../plan.ts";
 import { withComparisonWorkspace } from "../release.ts";
 import {
   benchmarkEnvironment,
@@ -14,16 +14,17 @@ import {
   workingTreeDirty,
 } from "../workspace.ts";
 import { reportFailure } from "./failure.ts";
-import { trackingImplementation } from "./implementations.ts";
+import { columnSlug, trackingColumn, trackingImplementation } from "./implementations.ts";
 import { remoteJobs } from "./jobs.ts";
 import { runSchema, type TrackingRun } from "./result.ts";
 
 /** Local image name shared by the build and measurement stages; the registry tag is the measurer's. */
-export const localImage = (implementation: string) => `tessera-tracking:${implementation}`;
+export const localImage = (column: Column) => `tessera-tracking:${columnSlug(column)}`;
 
 /** What the build stage hands to measurement, next to the saved image. */
 export type TrackingBuild = {
-  implementation: string;
+  /** The measured column ID. */
+  column: string;
   hash: string;
   commit_time: string;
   rustc: string;
@@ -36,25 +37,39 @@ export type TrackingBuild = {
 };
 
 /**
- * Key the memory worker's rows by timed case ID and require one row per timed case.
- *
- * The worker measures each selected implementation on every input of the plan; rows for an
- * implementation or mode the run does not time are dropped. A row's mode follows its implementation.
+ * The continuous plan's full-sort inputs for one column: a serial column takes the serial rules,
+ * a parallel column the parallel rules at its own pool size. Absolute tracking records full
+ * sorting, so the PR plan's operation rules stay out.
  */
-export function trackingMemory(journal: string, implementations: string[], ids: string[]) {
+export function columnPlan(plan: Plan, column: Column): Plan {
+  const parallel = column.execution !== "serial";
+  const include = plan.include
+    .filter((rule) => !rule.operation)
+    .filter((rule) => (rule.executions ?? ["serial"]).some((e) => (e !== "serial") === parallel))
+    .map((rule) => ({ ...rule, executions: [column.execution] }));
+  if (!include.length) throw new Error(`The continuous plan has no rules for ${columnId(column)}`);
+  return { ...plan, implementations: [column.implementation], include };
+}
+
+/**
+ * Key the memory worker's rows by timed Criterion ID and require one row per timed case.
+ *
+ * The worker measures every column of the plan; rows for a column the run does not time,
+ * such as Tessera's beside `glidesort-sqrt`, are dropped.
+ */
+export function trackingMemory(journal: string, column: Column, ids: string[]) {
   const timed = new Set(ids);
   const peaks: Record<string, number> = {};
   for (const line of journal.split("\n").filter(Boolean)) {
     const row = JSON.parse(line) as {
       case_id: string;
-      variant: string;
+      column: string;
       build: string;
       peak_extra_bytes: number;
       verified: boolean;
     };
-    if (row.build !== "default" || !implementations.includes(row.variant)) continue;
-    const threads = catalogImplementation(row.variant).threads;
-    const id = `rust/${row.case_id}/${threads ? `par-${threads}` : "api"}`;
+    if (row.build !== "default" || row.column !== columnId(column)) continue;
+    const id = criterionId(parseCaseId(row.case_id), column.execution);
     if (!timed.has(id)) continue;
     if (!row.verified || !Number.isSafeInteger(row.peak_extra_bytes) || row.peak_extra_bytes < 0)
       throw new Error("Invalid memory row: " + id);
@@ -70,9 +85,10 @@ export function trackingMemory(journal: string, implementations: string[], ids: 
 // Builds of different implementations run in parallel; measurement (`run.ts`) is serialized.
 if (import.meta.main) {
   const root = await repositoryRoot();
-  const implementation = trackingImplementation(process.env.TRACKING_IMPLEMENTATION ?? "tessera");
+  const column = trackingColumn(process.env.TRACKING_COLUMN ?? "tessera/serial");
+  const implementation = trackingImplementation(column.implementation);
   const out = join(root, "bench/results/tracking-build");
-  await reportFailure(`Build (${implementation.id})`, `${out}.log`, () =>
+  await reportFailure(`Build (${columnId(column)})`, `${out}.log`, () =>
     runTask(out, false, async () => {
       if (await workingTreeDirty(root))
         throw new Error("Tracking requires a clean committed checkout");
@@ -106,12 +122,7 @@ if (import.meta.main) {
         await mkdir(context);
         await copyFile(built.executable, join(context, "benchmark"));
         await command("strip", ["--strip-debug", join(context, "benchmark")]);
-        // Tessera's history keeps both continuous modes; an opponent replaces the implementation selection.
-        // Absolute tracking records full sorting, so the PR plan's operation rules stay out.
-        const plan = await loadPlan("continuous", {
-          operation: "sort",
-          ...(implementation.id === "tessera" ? {} : { implementations: [implementation.id] }),
-        });
+        const plan = columnPlan(await loadPlan("continuous"), column);
         await writeFile(join(context, "plan.json"), JSON.stringify(plan));
         // Peak extra allocation per case, measured by the same instrumented worker as local
         // comparisons. Counts do not depend on the host, so Actions measures them once per build.
@@ -124,7 +135,7 @@ if (import.meta.main) {
         const memoryImplementations =
           implementation.id === "glidesort-sqrt"
             ? ["tessera", implementation.id]
-            : plan.implementations;
+            : [implementation.id];
         await writeFile(
           join(out, "memory-plan.json"),
           JSON.stringify({ ...plan, implementations: memoryImplementations }),
@@ -147,7 +158,7 @@ if (import.meta.main) {
         await writeFile(join(context, "cases.ids"), ids.join("\n") + "\n");
         const peaks = trackingMemory(
           await readFile(join(context, "scratch/memory.jsonl"), "utf8"),
-          plan.implementations,
+          column,
           ids,
         );
         const jobs = remoteJobs(ids);
@@ -155,7 +166,7 @@ if (import.meta.main) {
           await writeFile(join(context, `job-${index + 1}.ids`), job.join("\n") + "\n");
         for (const name of ["Dockerfile", "run.sh"])
           await copyFile(join(root, "bench/tracking", name), join(context, name));
-        const image = localImage(implementation.id);
+        const image = localImage(column);
         await command("docker", [
           "build",
           "--target",
@@ -168,7 +179,7 @@ if (import.meta.main) {
         await command("docker", ["run", "--rm", "--network=none", image, "/app/run.sh", "--test"]);
         await command("docker", ["save", "-o", join(out, "image.tar"), image]);
         const build: TrackingBuild = {
-          implementation: implementation.id,
+          column: columnId(column),
           hash: source,
           commit_time: commitTime,
           rustc: built.provenance.rustc,
@@ -188,7 +199,7 @@ if (import.meta.main) {
         };
         await writeFile(join(out, "build.json"), JSON.stringify(build));
         return {
-          implementation: implementation.id,
+          column: columnId(column),
           hash: source,
           cases: ids.length,
           jobs: jobs.length,

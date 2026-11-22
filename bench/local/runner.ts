@@ -6,8 +6,8 @@ import { arch, cpus, platform, release } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { command, diagnostic } from "../../tools/process.ts";
-import { parseCriterionId } from "../catalog.ts";
-import { type Plan, parsePlan, selectCaseIds } from "../plan.ts";
+import { type Execution, parseCriterionId } from "../catalog.ts";
+import { type Plan, parsePlan, planExecutions, selectCaseIds } from "../plan.ts";
 import {
   ALIGNMENT_RUSTFLAGS,
   benchmarkEnvironment,
@@ -30,6 +30,7 @@ import {
 } from "./layout.ts";
 import {
   isOperation,
+  isParallel,
   type LocalRun,
   type PreparedPair,
   type RevisionPair,
@@ -248,7 +249,7 @@ export async function selectedCases(
   planPath: string,
   pattern: string | undefined,
   cwd: string,
-  parallel = false,
+  executions: Execution[] = [],
 ) {
   const list = async (binary: string) =>
     (
@@ -265,8 +266,9 @@ export async function selectedCases(
       .filter(Boolean)
       .sort();
   const current = await list(binaries.current);
-  if (parallel && !current.some((id) => parseCriterionId(id).mode === "par-4"))
-    throw new Error("Parallel plan did not list any four-thread cases");
+  for (const execution of executions)
+    if (!current.some((id) => parseCriterionId(id).execution === execution))
+      throw new Error(`Plan did not list any ${execution} cases`);
   const cases = selectCaseIds(current, pattern);
   if (
     !cases.length ||
@@ -277,24 +279,24 @@ export async function selectedCases(
   return cases;
 }
 
-/** Select exactly four allowed CPUs for parallel calls and retain their actual mask. */
-export async function comparisonCpus(parallel: boolean, requested?: string) {
-  if (!parallel) return requested;
-  if (platform() !== "linux") throw new Error("Four-thread comparisons require Linux");
+/** Select exactly `threads` allowed CPUs for multi-worker pools and retain their actual mask. */
+export async function comparisonCpus(threads: number, requested?: string) {
+  if (threads === 1) return requested;
+  if (platform() !== "linux") throw new Error("Multi-thread comparisons require Linux");
   const allowed =
     (await readFile("/proc/self/status", "utf8")).match(/^Cpus_allowed_list:\s*(.+)$/m)?.[1] ?? "";
   const selected = new Set<number>();
   for (const range of (requested ?? allowed).split(",")) {
     const [first, last = first] = range.split("-").map(Number);
-    for (let cpu = first; cpu <= last && selected.size < 4; cpu++) selected.add(cpu);
+    for (let cpu = first; cpu <= last && selected.size < threads; cpu++) selected.add(cpu);
   }
   const permits = (cpu: number) =>
     allowed.split(",").some((range) => {
       const [first, last = first] = range.split("-").map(Number);
       return cpu >= first && cpu <= last;
     });
-  if (selected.size !== 4 || [...selected].some((cpu) => !permits(cpu)))
-    throw new Error("Four-thread comparisons require four available CPUs");
+  if (selected.size !== threads || [...selected].some((cpu) => !permits(cpu)))
+    throw new Error(`${threads}-thread comparisons require ${threads} available CPUs`);
   return [...selected].join(",");
 }
 
@@ -353,8 +355,7 @@ export async function comparePrepared(options: {
     pair.source.catalog !== catalogHash
   )
     throw new Error("Prepared pair requires its original harness and catalog");
-  const parallel = revisionThreads(plan) === 4;
-  const cpu = await comparisonCpus(parallel, options.cpu);
+  const cpu = await comparisonCpus(revisionThreads(plan), options.cpu);
   const binaries = { baseline: "", current: "" };
   const preparedRoot = await realpath(prepared);
   await mkdir(out, { recursive: false });
@@ -376,7 +377,13 @@ export async function comparePrepared(options: {
   }
   if (basename(binaries.baseline) !== basename(binaries.current))
     throw new Error("Prepared executables must have identical basenames");
-  const allCases = await selectedCases(binaries, join(out, "plan.json"), undefined, root, parallel);
+  const allCases = await selectedCases(
+    binaries,
+    join(out, "plan.json"),
+    undefined,
+    root,
+    planExecutions(plan),
+  );
   if (JSON.stringify(allCases) !== JSON.stringify(pair.cases))
     throw new Error("Prepared executable inventory differs from its recorded cases");
   const run = measurementRun(pair, cpu, options.shard);
@@ -397,8 +404,8 @@ export async function compareLocal(options: LocalOptions) {
     throw new Error("Preparation requires a complete non-layout revision pair");
   // Probe before compiling; do not silently publish an uncontrolled ASLR run.
   if (platform() === "linux") await command("setarch", ["-R", "true"]);
-  const parallel = revisionThreads(options.plan) === 4;
-  const cpu = await comparisonCpus(parallel, options.cpu);
+  const parallel = isParallel(options.plan);
+  const cpu = await comparisonCpus(revisionThreads(options.plan), options.cpu);
   options = { ...options, cpu };
   if (options.layoutControl && !options.layoutSeeds)
     throw new Error("Layout controls require --layout-seeds");
@@ -452,7 +459,7 @@ export async function compareLocal(options: LocalOptions) {
         planPath,
         options.filter,
         workspace.tree,
-        parallel,
+        planExecutions(options.plan),
       );
       const pair: RevisionPair = {
         schema: 1,

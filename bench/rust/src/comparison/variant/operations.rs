@@ -235,11 +235,11 @@ pub(super) fn prepare<T: TesseraAdapter>(
             }),
             _ => return None,
         }),
-        Operation::Select { index } => Some(match v.name {
+        Operation::SelectNth { index } => Some(match v.name {
             "tessera" => prepare_call(
                 input,
                 true,
-                move |values| T::select(values, index),
+                move |values| T::select_nth(values, index),
                 "public stable single selection",
             ),
             "tessera-full" => selection_reference(input, T::tessera),
@@ -274,9 +274,9 @@ mod tests {
             Operation::PartitionBuckets { bucket_count: 1 },
             Operation::PartitionBuckets { bucket_count: 3 },
             Operation::PartitionBuckets { bucket_count: 257 },
-            Operation::Select { index: 0 },
-            Operation::Select { index: len / 2 },
-            Operation::Select { index: len - 1 },
+            Operation::SelectNth { index: 0 },
+            Operation::SelectNth { index: len / 2 },
+            Operation::SelectNth { index: len - 1 },
         ];
         for ty in crate::plan::catalog().types.iter().map(|ty| ty.id.as_str()) {
             for distribution in ["random", "d16"] {
@@ -298,7 +298,7 @@ mod tests {
                             "std-unstable" => !category_grouping,
                             _ => false,
                         };
-                        let prepared = variant.prepare(&input, 0);
+                        let prepared = variant.prepare(&input, crate::plan::Execution::Serial, 0);
                         assert_eq!(
                             prepared.is_some(),
                             expected,

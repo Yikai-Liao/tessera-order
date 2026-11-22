@@ -7,9 +7,17 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parseHTML } from "linkedom/worker";
 import { z } from "zod";
-import { catalog } from "../catalog.ts";
+import {
+  columnId,
+  type Execution,
+  executionSection,
+  executionThreads,
+  parseCriterionId,
+  SORT,
+} from "../catalog.ts";
+import { loadPlan } from "../plan.ts";
 import type { RowChart } from "../plot/rows.ts";
-import { trackingMemory } from "./build.ts";
+import { columnPlan, trackingMemory } from "./build.ts";
 import {
   comparisonData,
   GROWTH_FILE,
@@ -29,9 +37,13 @@ import {
   renderMainTrend,
 } from "./history.ts";
 import {
+  columnSlug,
   trackingBranch,
+  trackingColumn,
+  trackingColumns,
   trackingImplementation,
   trackingImplementations,
+  trackingSelection,
 } from "./implementations.ts";
 import { remoteJobs } from "./jobs.ts";
 import { appendRun, trackingCases, trackingFacets } from "./publish.ts";
@@ -47,7 +59,7 @@ import {
   type TrackingRun,
 } from "./result.ts";
 
-const PREVIEW_CASE = "rust/u64/random/65536/s1/api";
+const PREVIEW_CASE = "rust/sort/u64/random/65536/s1/serial";
 
 const uuid = "01a1cdb1-9445-76dd-89c4-e4220d49e6f7";
 const source = "a".repeat(40);
@@ -79,6 +91,7 @@ const run: TrackingRun = {
   rustflags: "",
   image: "registry.bencher.dev/example@sha256:" + "b".repeat(64),
   workflow: "https://github.com/test/repo/actions/runs/1",
+  execution: "serial",
 };
 
 test("tracking excludes revision controls and operation-only references", () => {
@@ -207,44 +220,49 @@ const at = (i: number, values: Record<string, number>, spec = uuid): TrackingRun
   values: Object.fromEntries(Object.entries(values).map(([id, v]) => [id, [v, v, v]])),
 });
 
-test("cases follow mode, length, record type and catalog input order", () => {
+test("cases follow execution, length, record type and catalog input order", () => {
   const ids = [
-    "rust/u64/random/1000000/s1/par-4",
-    "rust/u64/sorted/65536/s1/api",
-    "rust/u32/random/1000000/s1/api",
-    "rust/u64/random/65536/s2/api",
-    "rust/u64/random/65536/s1/api",
-    "rust/u64/random/32/s1/api",
+    "rust/sort/u64/random/1000000/s1/t4",
+    "rust/sort/u64/sorted/65536/s1/serial",
+    "rust/sort/u32/random/1000000/s1/serial",
+    "rust/sort/u64/random/1000000/s1/t2",
+    "rust/sort/u64/random/65536/s1/serial",
+    "rust/sort/u64/random/32/s1/serial",
   ];
   const cases = trackingCases(ids);
   assert.deepEqual(
     cases.map((entry) => entry.id),
     [
-      "rust/u64/random/32/s1/api",
-      "rust/u64/random/65536/s1/api",
-      "rust/u64/random/65536/s2/api",
-      "rust/u64/sorted/65536/s1/api",
-      "rust/u32/random/1000000/s1/api",
-      "rust/u64/random/1000000/s1/par-4",
+      "rust/sort/u64/random/32/s1/serial",
+      "rust/sort/u64/random/65536/s1/serial",
+      "rust/sort/u64/sorted/65536/s1/serial",
+      "rust/sort/u32/random/1000000/s1/serial",
+      "rust/sort/u64/random/1000000/s1/t2",
+      "rust/sort/u64/random/1000000/s1/t4",
     ],
   );
-  assert.equal(cases[2].tag, "seed 2");
-  assert.equal(cases[5].group, "par_sort");
+  const groups = ["serial", "t2", "t4"].map(
+    (execution) => executionSection(SORT, execution as Execution).title,
+  );
+  assert.deepEqual(
+    cases.map((entry) => entry.group),
+    [groups[0], groups[0], groups[0], groups[0], groups[1], groups[2]],
+  );
   // Filter values follow the catalog, not the order cases first appear in.
   const facets = trackingFacets(cases);
   assert.deepEqual(facets, {
     type: ["u32", "u64"],
     input: ["random", "sorted"],
     length: ["32", "65,536", "1,000,000"],
-    group: ["sort", "par_sort"],
+    group: groups,
   });
   assert.equal(indexSchema.parse({ months: [], cases, facets }).cases.length, ids.length);
 });
 
 test("the trend aligns gaps and chain-links aggregates across changing case sets", () => {
-  const a = "rust/u64/random/32/s1/api",
-    b = "rust/u64/random/65536/s1/api",
-    c = "rust/u64/sorted/65536/s1/api";
+  const a = "rust/sort/u64/random/32/s1/serial",
+    b = "rust/sort/u64/random/65536/s1/serial",
+    c = "rust/sort/u64/sorted/65536/s1/serial";
   const cases = trackingCases([a, b, c]);
   // c enters at the second run, misses the third and is twice as slow as the others.
   const runs = [
@@ -290,7 +308,7 @@ test("the trend aligns gaps and chain-links aggregates across changing case sets
   const changes = renderComparison(runs, [{ entry: cases[0], color: "violet" }], "change")!;
   assert.ok(axisLabels(changes.svg).every((text) => text.endsWith("%")));
   assert.equal(comparison.frame.start, Date.parse(runs[0].time));
-  // Without links, the overview keeps only the mode aggregate.
+  // Without links, the overview keeps only the execution aggregate.
   const overview = texts(renderMainOverview(runs, cases));
   assert.ok(overview.includes("sort") && !overview.includes("random"));
   assert.deepEqual(
@@ -406,8 +424,8 @@ test("commit times are normalized and survive publication", async (t) => {
 });
 
 test("missing compared cases retain shared slots, independent baselines and gaps", () => {
-  const b = "rust/u64/sorted/65536/s1/api",
-    c = "rust/u32/random/32/s1/api";
+  const b = "rust/sort/u64/sorted/65536/s1/serial",
+    c = "rust/sort/u32/random/32/s1/serial";
   const cases = trackingCases([PREVIEW_CASE, b, c]);
   const entry = (id: string) => cases.find((c) => c.id === id)!;
   const input = [
@@ -469,8 +487,8 @@ test("only runs on the latest hardware specification form the trend", () => {
 });
 
 test("remote jobs split an inventory by catalog budget, in order and balanced", () => {
-  const short = (i: number) => `rust/u64/random/${1000 + i}/s1/api`;
-  const long = (i: number) => `rust/u64/random/${1000000 + i}/s1/par-4`;
+  const short = (i: number) => `rust/sort/u64/random/${1000 + i}/s1/serial`;
+  const long = (i: number) => `rust/sort/u64/random/${1000000 + i}/s1/t4`;
   // Tessera's continuous inventory: 54 short serial cases and 44 million-record cases.
   const tessera = [
     ...Array.from({ length: 54 }, (_, i) => short(i)),
@@ -481,19 +499,19 @@ test("remote jobs split an inventory by catalog budget, in order and balanced", 
   assert.deepEqual(jobs.flat(), tessera);
   // Catalog warm-up plus window: 2 s below a million records, 5 s from there.
   const seconds = (job: string[]) =>
-    job.reduce((sum, id) => sum + (Number(id.split("/")[3]) >= 1_000_000 ? 5 : 2), 0);
+    job.reduce((sum, id) => sum + (parseCriterionId(id).len >= 1_000_000 ? 5 : 2), 0);
   // Midpoint assignment may exceed the 150 s budget by part of one case.
   for (const job of jobs) assert.ok(seconds(job) <= 0.5 * 300 + 5, String(seconds(job)));
-  // An opponent selecting one mode of the same inventory fits one job.
+  // An opponent measuring only the serial cases of the same inputs fits one job.
   const opponent = [
     ...Array.from({ length: 54 }, (_, i) => short(i)),
-    ...Array.from({ length: 8 }, (_, i) => long(i).replace("par-4", "api")),
+    ...Array.from({ length: 8 }, (_, i) => long(i).replace("/t4", "/serial")),
   ];
   assert.deepEqual(remoteJobs(opponent), [opponent]);
 });
 
 test("a run combines its remote jobs only for one source and hardware", () => {
-  const other = "rust/u64/random/1000/s1/api";
+  const other = "rust/sort/u64/random/1000/s1/serial";
   const second = report();
   second.uuid = "01a1cdb1-9445-76dd-89c4-e4220d49e6f8";
   second.results[0][0].benchmark.name = other;
@@ -522,29 +540,43 @@ test("known remote failures are explained once, unknown ones are not guessed", (
   assert.equal(explainFailure("error: linker failed"), null);
 });
 
-test("memory rows key timed cases by mode and must cover every timed case", () => {
-  const row = (case_id: string, variant: string, peak_extra_bytes: number) =>
-    JSON.stringify({ case_id, variant, build: "default", peak_extra_bytes, verified: true });
+test("memory rows key timed cases by column and must cover every timed case", () => {
+  const row = (case_id: string, column: string, peak_extra_bytes: number) =>
+    JSON.stringify({ case_id, column, build: "default", peak_extra_bytes, verified: true });
   const journal = [
-    row("u64/random/65536/s1", "tessera", 4096),
-    row("u64/random/65536/s1", "tessera-par-4", 8192),
-    // Inputs and implementations the run does not time are dropped.
-    row("u64/sorted/1000000/s1", "tessera", 0),
-    row("u64/random/65536/s1", "std-stable", 524288),
+    row("sort/u64/random/65536/s1", "tessera/serial", 4096),
+    row("sort/u64/random/65536/s1", "tessera/t4", 8192),
+    // Inputs and columns the run does not time are dropped.
+    row("sort/u64/sorted/1000000/s1", "tessera/serial", 0),
+    row("sort/u64/random/65536/s1", "std-stable/serial", 524288),
   ].join("\n");
-  const ids = ["rust/u64/random/65536/s1/api", "rust/u64/random/65536/s1/par-4"];
-  assert.deepEqual(trackingMemory(journal, ["tessera", "tessera-par-4"], ids), {
-    "rust/u64/random/65536/s1/api": 4096,
-    "rust/u64/random/65536/s1/par-4": 8192,
+  const serial = { implementation: "tessera", execution: "serial" as const };
+  const parallel = { implementation: "tessera", execution: "t4" as const };
+  const ids = ["rust/sort/u64/random/65536/s1/serial"];
+  assert.deepEqual(trackingMemory(journal, serial, ids), { [ids[0]]: 4096 });
+  assert.deepEqual(trackingMemory(journal, parallel, ["rust/sort/u64/random/65536/s1/t4"]), {
+    "rust/sort/u64/random/65536/s1/t4": 8192,
   });
-  assert.throws(() => trackingMemory(journal, ["tessera"], ids), /Missing memory rows/);
-  assert.throws(() =>
-    trackingMemory(
-      journal + "\n" + row("u64/random/65536/s1", "tessera", 1),
-      ["tessera"],
-      [ids[0]],
-    ),
+  assert.throws(
+    () => trackingMemory(journal, serial, [...ids, "rust/sort/u64/d16/65536/s1/serial"]),
+    /Missing memory rows/,
   );
+  assert.throws(
+    () =>
+      trackingMemory(
+        journal + "\n" + row("sort/u64/random/65536/s1", "tessera/serial", 1),
+        serial,
+        ids,
+      ),
+    /Duplicate/,
+  );
+});
+
+test("a run's values carry its own execution", () => {
+  assert.ok(!runSchema.safeParse({ ...run, execution: "t4" }).success);
+  assert.ok(!runSchema.safeParse({ ...run, execution: "api" }).success);
+  const { execution: _, ...missing } = run;
+  assert.ok(!runSchema.safeParse(missing).success);
 });
 
 test("a run's memory covers exactly its timed cases", () => {
@@ -563,7 +595,7 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
     memory?: Record<string, number>,
   ): TrackingRun => {
     const values = Object.fromEntries(
-      Object.entries(ns).map(([id, value]) => [`rust/${id}/api`, [value, value, value]]),
+      Object.entries(ns).map(([id, value]) => [`rust/${id}/serial`, [value, value, value]]),
     );
     return runSchema.parse({
       ...run,
@@ -574,18 +606,18 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
       ...(memory
         ? {
             memory: Object.fromEntries(
-              Object.entries(memory).map(([id, bytes]) => [`rust/${id}/api`, bytes]),
+              Object.entries(memory).map(([id, bytes]) => [`rust/${id}/serial`, bytes]),
             ),
           }
         : {}),
     });
   };
   const cases = [
-    "u64/random/65536/s1",
-    "u64/reverse/65536/s1",
-    "u64/random/1048576/s1",
-    "u64/random/1000/s1",
-    "u64/sorted/1000/s1",
+    "sort/u64/random/65536/s1",
+    "sort/u64/reverse/65536/s1",
+    "sort/u64/random/1048576/s1",
+    "sort/u64/random/1000/s1",
+    "sort/u64/sorted/1000/s1",
   ];
   const at = (values: number[]) => Object.fromEntries(cases.map((id, i) => [id, values[i]]));
   const runs = new Map([
@@ -614,15 +646,15 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
   assert.equal(latestRuns(new Map())?.spec, undefined);
   const latest = latestRuns(runs)!;
   assert.equal(latest.spec, uuid);
-  assert.equal(latest.runs.get("glidesort")?.time, "2026-11-03T00:00:00Z");
+  assert.equal(latest.runs.get("glidesort/serial")?.time, "2026-11-03T00:00:00Z");
   const data = comparisonData(runs)!;
   assert.deepEqual(
     data.runs.map((entry) => [entry.algorithm, entry.memory]),
     [
       ["tessera", true],
       ["std-stable", true],
-      ["glidesort", false],
       ["radsort", false],
+      ["glidesort", false],
     ],
   );
   assert.deepEqual(data.overview, data.figures[0]);
@@ -664,7 +696,7 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
         [
           tracked(uuid, "2026-11-06T00:00:00Z", {
             ...at([10, 20, 100, 1, 1]),
-            "f64/random/65536/s1": 10,
+            "sort/f64/random/65536/s1": 10,
           }),
         ],
       ],
@@ -673,7 +705,7 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
         [
           tracked(uuid, "2026-11-06T00:00:00Z", {
             ...at([40, 20, 800, 2, 1]),
-            "f64/random/65536/s1": 30,
+            "sort/f64/random/65536/s1": 30,
           }),
         ],
       ],
@@ -682,35 +714,67 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
   assert.match(types!.chart.guide, /on the random input$/);
 });
 
-test("tracking schedules only variants that fit the tracking hardware", () => {
-  assert.ok(trackingImplementations.every((entry) => (entry.threads ?? 1) <= TRACKING_SPEC.cpus));
-  // Wider catalog variants stay available to local comparisons.
-  assert.ok(catalog.implementations.some((entry) => (entry.threads ?? 1) > TRACKING_SPEC.cpus));
-  assert.ok(!trackingImplementations.some((entry) => entry.id === "tessera-par-8"));
+test("tracking columns fit the tracking hardware and a selection keeps PR coverage", () => {
+  const ids = trackingColumns.map(columnId);
+  assert.ok(
+    trackingColumns.every(
+      (column) => (executionThreads(column.execution) ?? 1) <= TRACKING_SPEC.cpus,
+    ),
+  );
+  assert.ok(ids.includes("tessera/serial") && ids.includes("tessera/t1"));
+  // A parallel-only implementation has no serial column.
+  assert.ok(ids.includes("rayon-stable/t1") && !ids.includes("rayon-stable/serial"));
+  assert.ok(!ids.includes("std-stable/t1"));
+  assert.deepEqual(trackingSelection("tessera", ["serial", "t4"]).map(columnId), [
+    "tessera/serial",
+    "tessera/t4",
+  ]);
+  assert.deepEqual(trackingSelection("tessera/t2", ["serial"]).map(columnId), ["tessera/t2"]);
+  assert.deepEqual(trackingSelection("all", []), trackingColumns);
+  assert.throws(() => trackingSelection("rayon-stable", ["serial"]), /no column/);
+  assert.throws(() => trackingSelection("tessera/t3", ["serial"]), /Unknown tracking column/);
+  assert.equal(columnSlug(trackingColumn("tessera/t4")), "tessera-t4");
+  // An implementation's columns share its Cloud branch.
+  assert.equal(trackingBranch("rayon-stable"), "implementation-rayon-stable");
+});
+
+test("each tracking column measures its own slice of the continuous plan", async () => {
+  const plan = await loadPlan("continuous");
+  const serial = columnPlan(plan, { implementation: "std-stable", execution: "serial" });
+  const parallel = columnPlan(plan, { implementation: "tessera", execution: "t2" });
+  assert.deepEqual(serial.implementations, ["std-stable"]);
+  for (const [column, execution] of [
+    [serial, "serial"],
+    [parallel, "t2"],
+  ] as const) {
+    assert.ok(column.include.length > 0);
+    for (const rule of column.include) {
+      assert.equal(rule.operation, undefined);
+      assert.deepEqual(rule.executions, [execution]);
+    }
+  }
 });
 
 test("the comparison ranks 32-bit-key records and adds parallel scaling", () => {
-  const tracked = (values: Record<string, number>) =>
+  const tracked = (values: Record<string, number>, execution = "serial") =>
     runSchema.parse({
       ...run,
       id: crypto.randomUUID(),
+      execution,
       values: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, [v, v, v]])),
     });
   const serial = (ns: number[]) =>
     tracked({
-      "rust/u64/random/65536/s1/api": ns[0],
-      "rust/row_u32/random/49/s1/api": ns[1],
-      "rust/row_u32/random/1000000/s1/api": ns[2],
+      "rust/sort/u64/random/65536/s1/serial": ns[0],
+      "rust/sort/row_u32/random/49/s1/serial": ns[1],
+      "rust/sort/row_u32/random/1000000/s1/serial": ns[2],
     });
   const parallel = (threads: number, ns: number) =>
-    tracked({ [`rust/u64/random/1000000/s1/par-${threads}`]: ns });
+    tracked({ [`rust/sort/u64/random/1000000/s1/t${threads}`]: ns }, `t${threads}`);
   const runs = new Map([
-    ["tessera", [serial([10, 1, 100])]],
+    ["tessera", [serial([10, 1, 100]), parallel(1, 50), parallel(2, 25)]],
     ["std-stable", [serial([20, 1, 400])]],
-    ["tessera-par-1", [parallel(1, 50)]],
-    ["tessera-par-2", [parallel(2, 25)]],
-    ["rayon-stable-1", [parallel(1, 200)]],
-    ["rayon-stable-2", [parallel(2, 100)]],
+    ["rayon-stable", [parallel(1, 200), parallel(2, 100)]],
   ]);
   const data = comparisonData(runs);
   // Equal pattern counts take the longest length.
@@ -719,7 +783,7 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   // A faster unstable sort does not displace Tessera among stable record sorts.
   const unstable = comparisonData(new Map([...runs, ["std-unstable", [serial([1, 1, 1])]]]));
   assert.equal(unstable.overview!.title, "Fastest of 2 stable sorts");
-  const latest = new Map([...runs].map(([id, list]) => [id, list[0]]));
+  const latest = latestRuns(runs)!.runs;
   const scaling = trackingScaling(latest)!;
   assert.deepEqual([scaling.n, scaling.threads], [1000000, [1, 2]]);
   assert.deepEqual(scaling.inputs, [{ label: "u64 · random", tessera: [4, 8], rayon: [1, 2] }]);
@@ -729,28 +793,34 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   const names = data.figures.map((figure) => figure.name);
   assert.ok(names.includes("parallel"));
   // Without Rayon on one thread there is no baseline.
-  latest.delete("rayon-stable-1");
+  latest.delete("rayon-stable/t1");
   assert.equal(trackingScaling(latest), null);
 });
 
 test("the growth sweep keeps one peak per implementation and length", () => {
   const plan = {
-    schema: 1 as const,
+    schema: 3 as const,
     implementations: ["tessera", "glidesort"],
     include: [
       { types: ["row_u32" as const], distributions: ["random" as const], lengths: [1024, 4096] },
     ],
     exclude: [],
   };
-  const row = (len: number, variant: string, peak: number) =>
+  const row = (len: number, implementation: string, peak: number, execution = "serial") =>
     JSON.stringify({
-      case_id: `row_u32/random/${len}/s1`,
-      variant,
+      case_id: `sort/row_u32/random/${len}/s1`,
+      column: `${implementation}/${execution}`,
       build: "default",
       peak_extra_bytes: peak,
       verified: true,
     });
-  const journal = [row(1024, "tessera", 10), row(4096, "tessera", 20), row(4096, "glidesort", 0)];
+  const journal = [
+    row(1024, "tessera", 10),
+    row(4096, "tessera", 20),
+    row(4096, "glidesort", 0),
+    // Parallel columns answer a different memory question and stay out of the sweep.
+    row(4096, "tessera", 99, "t4"),
+  ];
   assert.deepEqual(growthPeaks(journal.join("\n"), plan), {
     type: "row_u32",
     distribution: "random",
@@ -759,7 +829,7 @@ test("the growth sweep keeps one peak per implementation and length", () => {
   });
   assert.throws(() => growthPeaks([...journal, journal[0]].join("\n"), plan), /Duplicate/);
   assert.throws(() => growthPeaks(journal.slice(1).join("\n"), plan), /every length/);
-  assert.throws(() => growthPeaks(row(1024, "radsort", 1), plan), /Unplanned/);
+  assert.throws(() => growthPeaks(row(1024, "radsort", 1), plan), /Unplanned implementation/);
 });
 
 test("the growth sweep replaces the memory figure with curves over length", async (t) => {
@@ -770,8 +840,8 @@ test("the growth sweep replaces the memory figure with curves over length", asyn
       values: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, [v, v, v]])),
     });
   const runs = new Map([
-    ["tessera", [tracked({ "rust/u64/random/1000000/s1/api": 100 })]],
-    ["std-stable", [tracked({ "rust/u64/random/1000000/s1/api": 400 })]],
+    ["tessera", [tracked({ "rust/sort/u64/random/1000000/s1/serial": 100 })]],
+    ["std-stable", [tracked({ "rust/sort/u64/random/1000000/s1/serial": 400 })]],
   ]);
   const growth: GrowthRecord = growthSchema.parse({
     time: run.time,

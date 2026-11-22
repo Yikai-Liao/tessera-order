@@ -75,8 +75,8 @@ test("resume rejects incomplete or altered experiments before execution", async 
   }
 });
 
-test("resume rejects even an unchanged frozen plan for a retired operation", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "tessera-retired-session-"));
+test("resume rejects even an unchanged frozen plan from an earlier schema", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "tessera-old-session-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const session = await prepared(directory);
   const path = join(directory, "plan.json");
@@ -91,7 +91,7 @@ test("resume rejects even an unchanged frozen plan for a retired operation", asy
   );
   session.planSha256 = await fileHash(path);
   await writeFile(join(directory, "session.json"), JSON.stringify(session));
-  await assert.rejects(loadSession(directory), /No matching discriminator/);
+  await assert.rejects(loadSession(directory), /regenerate the plan for schema 3/);
 });
 
 test("session writes are exclusive and failures release the lock", async (t) => {

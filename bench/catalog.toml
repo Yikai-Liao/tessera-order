@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
-schema = 1
+schema = 2
 
 pairedBlocks = { short = { count = 3, agreement = 3 }, extended = { count = 9, agreement = 8 } }
 # Descending length floors; one budget per revision, not per outer repetition.
@@ -10,9 +10,12 @@ revisionSampling = [
   { min_len = 1, warm_ms = 500, window_ms = 1500, samples = 30 },
 ]
 
+# `parallel` marks a parallel full-sort entry point, beside the serial one ("also") or
+# instead of it ("only"); other implementations and operations are serial.
 implementations = [
-  { id = "tessera", label = "Tessera", stable = true, family = "radix", adapter = "common" },
-  { id = "tessera-full", label = "Tessera full-sort reference", stable = true, family = "radix", adapter = "reference", detail = "complete stable sorting", description = "full-sort reference for required ranks or stable category grouping" },
+  { id = "tessera", label = "Tessera", stable = true, family = "radix", adapter = "common", parallel = "also" },
+  # A selection or category comparison measures Tessera's dedicated route and its full sort on the same case.
+  { id = "tessera-full", label = "Tessera sort", stable = true, family = "radix", adapter = "reference", detail = "full sort as a composition reference", description = "full-sort reference for required ranks or stable category grouping" },
   { id = "tessera-baseline", label = "Tessera baseline A", stable = true, family = "radix", adapter = "revision" },
   { id = "tessera-baseline-copy", label = "Tessera baseline B", stable = true, family = "radix", adapter = "revision" },
   { id = "tessera-copy", label = "Tessera current B", stable = true, family = "radix", adapter = "revision" },
@@ -31,14 +34,7 @@ implementations = [
   { id = "x86simdsort", label = "x86simdsort", stable = false, family = "SIMD", adapter = "native" },
   { id = "crumsort", label = "crumsort", stable = false, family = "comparison", adapter = "native" },
   { id = "duckdb", label = "DuckDB 1.4.0 kernel", stable = false, family = "radix", adapter = "native", detail = "Vergesort + Ska + pdqsort", description = "single-threaded raw-key kernel; no SQL encoding or external merge" },
-  { id = "tessera-par-1", label = "Tessera · 1 thread", stable = true, family = "radix", adapter = "tessera-par", threads = 1 },
-  { id = "tessera-par-2", label = "Tessera · 2 threads", stable = true, family = "radix", adapter = "tessera-par", threads = 2 },
-  { id = "tessera-par-4", label = "Tessera · 4 threads", stable = true, family = "radix", adapter = "tessera-par", threads = 4 },
-  { id = "tessera-par-8", label = "Tessera · 8 threads", stable = true, family = "radix", adapter = "tessera-par", threads = 8 },
-  { id = "rayon-stable-1", label = "Rayon stable · 1 thread", stable = true, family = "comparison", adapter = "rayon-stable", threads = 1 },
-  { id = "rayon-stable-2", label = "Rayon stable · 2 threads", stable = true, family = "comparison", adapter = "rayon-stable", threads = 2 },
-  { id = "rayon-stable-4", label = "Rayon stable · 4 threads", stable = true, family = "comparison", adapter = "rayon-stable", threads = 4 },
-  { id = "rayon-stable-8", label = "Rayon stable · 8 threads", stable = true, family = "comparison", adapter = "rayon-stable", threads = 8 },
+  { id = "rayon-stable", label = "Rayon stable", stable = true, family = "comparison", adapter = "rayon", parallel = "only" },
 ]
 
 types = [
@@ -78,30 +74,40 @@ distributions = [
   { id = "sorted_tail", label = "sorted + tail", group = "Presorted" },
 ]
 
-# Each mode is named by the entry point its full sorts call. CI runs four
-# threads, so only other thread counts carry a suffix.
-modes = [
-  { id = "api", label = "sort" },
-  { id = "unstable", label = "sort_unstable" },
-  { id = "par", label = "par_sort" },
-  { id = "par-1", label = "par_sort · 1 thread" },
-  { id = "par-2", label = "par_sort · 2 threads" },
-  { id = "par-4", label = "par_sort" },
-  { id = "par-8", label = "par_sort · 8 threads" },
-  { id = "par_unstable", label = "par_sort_unstable" },
-]
-
 [continuous]
 # One required SIMD backend; Cloud history lives under this Testbed.
 testbed = "ci"
-# The continuous plan's four-thread and operation cases select these harness features.
+# The continuous plan's parallel and operation cases select these harness features.
 features = ["operations", "rayon"]
 
 [inputs]
 lengths = [1000,65536,1000000,10000000]
 
+# Operations in report section order. `label` names the serial entry point and
+# `parallel_label` the parallel one, where the library has it; parameters are
+# integers, in identity order, shown with their optional label.
+[[operations]]
+id = "sort"
+label = "sort"
+parallel_label = "par_sort"
+description = "Full sort"
 # Release report types and baseline patterns; independent of input generation and adapter support.
-[comparison]
-types = ["u32","u64","f64","row_u64","record128","owned","row_u32","reverse_u64","reverse_f64"]
 # Fixed cross-type aggregates; targeted inputs are plotted separately.
-summaryDistributions = ["random","d256","d16","zipf1.1","zipf2","skew99","sorted","reverse","sorted99","runs"]
+comparison = { types = ["u32","u64","f64","row_u64","record128","owned","row_u32","reverse_u64","reverse_f64"], summaryDistributions = ["random","d256","d16","zipf1.1","zipf2","skew99","sorted","reverse","sorted99","runs"] }
+
+[[operations]]
+id = "argsort"
+label = "argsort"
+description = "Stable argsort"
+
+[[operations]]
+id = "select_nth"
+label = "select_nth"
+description = "Stable selection"
+parameters = [{ id = "index", label = "rank" }]
+
+[[operations]]
+id = "partition-buckets"
+label = "categories"
+description = "Stable partition into categories"
+parameters = [{ id = "bucket_count" }]

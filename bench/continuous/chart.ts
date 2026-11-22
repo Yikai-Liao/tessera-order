@@ -26,7 +26,7 @@ function nameCell(row: ComparedRow, strong: boolean): NameCell {
 export function chartSvg(summary: ReportSummary, base = "main") {
   if (!summary.rows.length) return null;
   // Rows arrive worst slowdown first, then best speedup; a stable sort by
-  // section keeps that order within each mode or operation.
+  // section keeps that order within each operation and execution.
   const changed = summary.rows
     .filter(
       (row): row is ComparedRow => row.verdict === "regression" || row.verdict === "improvement",

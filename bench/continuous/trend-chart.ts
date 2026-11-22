@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { caseName, caseSection, modeName, modeOrder } from "../catalog.ts";
+import { caseName, caseSection, type Execution, executionSection, SORT } from "../catalog.ts";
 import { renderTrends, type TrendChart } from "../plot/trends.ts";
 import { MIN_SWING, type TrendSummary } from "./history.ts";
 import { BUILD, caseParts, formatChange, MAJOR, short } from "./report.ts";
@@ -23,20 +23,18 @@ export function trendSvg(trend: TrendSummary, base = "main") {
     .sort(
       (a, b) => swing(series.get(b)!.changes) - swing(series.get(a)!.changes) || a.localeCompare(b),
     );
-  const apiModes = [...trend.modes].sort(
-    (a, b) => modeOrder(a) - modeOrder(b) || a.localeCompare(b),
-  );
-  const aggregate = (mode: string) => {
-    // Operations have their own sections, so a mode's aggregate covers full sorting only.
-    const inMode = trend.series.filter((entry) => {
+  const aggregate = (execution: Execution) => {
+    // Operations have their own sections, so an execution's aggregate covers full sorting only.
+    const inExecution = trend.series.filter((entry) => {
       const parts = caseParts(entry.name);
-      return parts.mode === mode && !parts.operation;
+      return parts.execution === execution && !parts.operation;
     });
-    if (!inMode.length) return undefined;
+    if (!inExecution.length) return undefined;
     return trend.runs.map(
       (_, i) =>
         Math.exp(
-          inMode.reduce((sum, entry) => sum + Math.log1p(entry.changes[i]), 0) / inMode.length,
+          inExecution.reduce((sum, entry) => sum + Math.log1p(entry.changes[i]), 0) /
+            inExecution.length,
         ) - 1,
     );
   };
@@ -50,18 +48,20 @@ export function trendSvg(trend: TrendSummary, base = "main") {
   };
   const sorting = (name: string) => !caseParts(name).operation;
   const groups: TrendChart["groups"] = [
-    ...apiModes.map((mode) => ({
-      title: modeName(mode),
+    ...trend.executions.map((execution) => ({
+      title: executionSection(SORT, execution).title,
       rows: [
         {
           name: { input: "Overall", tag: "", sub: "geometric mean", strong: true },
           aggregate: true,
-          cells: [cell(aggregate(mode))],
+          cells: [cell(aggregate(execution))],
         },
-        ...selected.filter((name) => sorting(name) && caseParts(name).mode === mode).map(row),
+        ...selected
+          .filter((name) => sorting(name) && caseParts(name).execution === execution)
+          .map(row),
       ],
     })),
-    // Each operation keeps its focused cases under its own heading, after the sorting modes.
+    // Each operation keeps its focused cases under its own heading, after the sorting sections.
     ...[
       ...Map.groupBy(
         selected

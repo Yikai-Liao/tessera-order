@@ -88,7 +88,8 @@ fn main() {
         .collect();
     features.sort();
     let mut value = json!({
-        "schema": 1,
+        // Schema 2 keys cases, samples and memory rows by case and column IDs.
+        "schema": 2,
         "commit": read_command_output("git", &["rev-parse", "HEAD"]),
         "dirty": !read_command_output("git", &["status", "--porcelain"]).is_empty(),
         "rustc": read_command_output(&env::var("RUSTC").unwrap_or_else(|_| "rustc".into()), &["-vV"]),

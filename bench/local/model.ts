@@ -2,32 +2,39 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parseCriterionId, revisionSampling } from "../catalog.ts";
-import { type Plan, parseRetainedPlan, type RetainedPlan } from "../plan.ts";
+import { executionThreads, parseCriterionId, revisionSampling } from "../catalog.ts";
+import { type Plan, parsePlan, planExecutions, planOperations } from "../plan.ts";
 import { summarizeRatios } from "../statistics.ts";
 import type { BuildProvenance } from "../workspace.ts";
 
-/** Revision builds replace only the Tessera library, so a revision comparison measures exactly
- * Tessera's serial API, its four-thread API, or both; any other implementation would be identical
- * code in both builds. Other operations are serial. Returns the worker threads the scheduler
- * must reserve. */
-export function revisionThreads(plan: RetainedPlan): 1 | 4 {
-  if (plan.operation && plan.operation.kind !== "sort") {
-    if (plan.implementations.join() !== "tessera")
-      throw new Error("Revision comparisons of an operation measure only serial tessera");
-    return 1;
-  }
-  if (!plan.implementations.every((id) => id === "tessera" || id === "tessera-par-4"))
-    throw new Error("Revision comparisons measure only tessera and tessera-par-4");
-  return plan.implementations.includes("tessera-par-4") ? 4 : 1;
+/** Revision builds replace only the Tessera library, so a revision comparison measures only
+ * Tessera, at the plan's executions; any other implementation would be identical code in both
+ * builds. Parallel executions measure sorting only. Returns the CPUs the scheduler must reserve:
+ * the largest planned worker count, or one for serial-only plans. */
+export function revisionThreads(plan: Plan): number {
+  if (plan.implementations.join() !== "tessera")
+    throw new Error("Revision comparisons measure only tessera; select executions instead");
+  if (
+    plan.include.some(
+      (rule) =>
+        rule.operation &&
+        rule.operation.kind !== "sort" &&
+        rule.executions?.some((execution) => execution !== "serial"),
+    )
+  )
+    throw new Error("Revision comparisons of an operation measure only serial executions");
+  return Math.max(1, ...planExecutions(plan).map((execution) => executionThreads(execution) ?? 1));
 }
 
 /** Whether a plan measures any operation other than full sorting, which needs the harness's
  * `operations` feature in both builds; baselines before 0.2 do not compile with it. */
 export function isOperation(plan: Plan) {
-  return [plan.operation, ...plan.include.map((rule) => rule.operation)].some(
-    (operation) => operation !== undefined && operation.kind !== "sort",
-  );
+  return planOperations(plan).some((operation) => operation.kind !== "sort");
+}
+
+/** Whether a plan measures any parallel entry point, which needs Rayon in both builds. */
+export function isParallel(plan: Plan) {
+  return planExecutions(plan).some((execution) => execution !== "serial");
 }
 
 /** One deterministic partition of a complete timed-ID listing. */
@@ -84,7 +91,7 @@ export interface RevisionPair {
 /** Complete build inventory and plan; no measurement host, samples or shard. */
 export interface PreparedPair extends RevisionPair {
   kind: "prepared-revisions";
-  plan: RetainedPlan;
+  plan: Plan;
 }
 
 /** Measurement state; empty samples are incomplete, never a prepared build. */
@@ -121,7 +128,7 @@ export async function readPrepared(directory: string): Promise<PreparedPair> {
     !pair.binaryPaths?.current
   )
     throw new Error("Expected an unmeasured prepared revision pair");
-  pair.plan = parseRetainedPlan(pair.plan);
+  pair.plan = parsePlan(pair.plan);
   revisionThreads(pair.plan);
   return pair;
 }

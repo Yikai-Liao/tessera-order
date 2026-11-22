@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import { z } from "zod";
+import { parseExecution } from "../execution.ts";
 import type { CurveChart } from "../plot/curves.ts";
 import type { RowChart } from "../plot/rows.ts";
 
@@ -58,6 +59,15 @@ export const runSchema = z
       .regex(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+(?:\/attempts\/\d+)?$/),
     rustc: z.string(),
     rustflags: z.string(),
+    // The run measures one column: its implementation is the data directory, and every value's
+    // Criterion ID ends in this execution.
+    execution: z.string().refine((text) => {
+      try {
+        return parseExecution(text) === text;
+      } catch {
+        return false;
+      }
+    }, "expected serial or tN with N >= 1"),
     // C++ adapters only: the compilers and flags that built the measured code.
     native: z.object({ cc: z.string(), cxx: z.string(), build: z.json() }).optional(),
     values: z.record(
@@ -74,6 +84,10 @@ export const runSchema = z
       (Object.keys(run.memory).length === Object.keys(run.values).length &&
         Object.keys(run.memory).every((id) => id in run.values)),
     "Memory must cover exactly the timed cases",
+  )
+  .refine(
+    (run) => Object.keys(run.values).every((id) => id.endsWith(`/${run.execution}`)),
+    "Every value must measure the run's execution",
   );
 export type TrackingRun = z.infer<typeof runSchema>;
 
@@ -115,9 +129,9 @@ export const caseSchema = z.object({
   length: z.string().min(1),
 });
 export type TrackingCase = z.infer<typeof caseSchema>;
-/** Months with journals, cases in display order (grouped by mode, serial first)
- * and, for each case field a reader filters by, its values in catalog order.
- * `input` is the distribution and `group` the API mode. */
+/** Months with journals, cases in display order (grouped by section: operation, then
+ * execution, serial first) and, for each case field a reader filters by, its values in
+ * catalog order. `input` is the distribution and `group` the section title. */
 export const indexSchema = z.object({
   months: z.array(z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)),
   cases: z.array(caseSchema),

@@ -2,7 +2,8 @@
 
 //! Batch timing and paired block scheduling.
 
-use super::{InputCase, variant::Kernel};
+use super::{InputCase, variant::Kernel, variant::Variant};
+use crate::plan::{Column, Execution};
 use serde::Serialize;
 
 /// Fixed block budget and limits for calibrating each verified sample.
@@ -17,7 +18,8 @@ pub(super) struct Sample {
     pub kind: &'static str,
     pub case_id: String,
     pub group: String,
-    pub variant: String,
+    /// Column ID, or `tessera-aa` for the repeated serial Tessera control.
+    pub column: String,
     pub build: String,
     pub block: usize,
     pub slot: usize,
@@ -52,57 +54,77 @@ pub(super) fn shuffle_variants(n: usize, block: usize, c: &InputCase) -> Vec<usi
     order
 }
 
+/// Formats the column an adapter measures at one execution.
+pub(super) fn column_id(variant: Variant, execution: Execution) -> String {
+    Column {
+        implementation: variant.name.into(),
+        execution,
+    }
+    .to_string()
+}
+
 /// Rejects unsupported required controls before journals or memory measurement.
+/// Every case pairs its columns with serial Tessera and `std-stable` controls.
 /// Capability probes retain the operation but never generate the full input.
 pub(super) fn validate_controls(
-    cases: &[InputCase],
-    variants: &[super::variant::Variant],
+    cases: &[(InputCase, Vec<Execution>)],
+    variants: &[Variant],
 ) -> super::Result<()> {
-    for case in cases {
+    for (case, executions) in cases {
+        if !executions.contains(&Execution::Serial) {
+            return Err(format!(
+                "{} lacks the serial execution that its tessera and std-stable controls need",
+                case.id()
+            )
+            .into());
+        }
         let input = super::record::CaseInput::new(&case.probe());
         for name in ["tessera", "std-stable"] {
             let control = variants
                 .iter()
                 .find(|v| v.name == name)
                 .ok_or_else(|| format!("missing required control: {name}"))?;
-            if !control.supports(&input) {
-                return Err(
-                    format!("required control {name} does not support {}", case.id()).into(),
-                );
+            if !control.supports(&input, Execution::Serial) {
+                return Err(format!(
+                    "required control {name}/serial does not support {}",
+                    case.id()
+                )
+                .into());
             }
         }
     }
     Ok(())
 }
 
-/// Publishes the requested shuffled blocks with a separate Tessera A/A sample.
+/// Publishes the requested shuffled blocks with a separate serial Tessera A/A sample.
 pub(super) fn measure_case(
     case: &InputCase,
-    variants: &[super::variant::Variant],
+    columns: &[(Variant, Execution)],
     scratch_bytes: usize,
     sampling: &Sampling,
     build: &str,
     mut publish: impl FnMut(Sample) -> super::Result<()>,
 ) -> super::Result<()> {
     let input = super::record::CaseInput::new(case);
-    let mut active: Vec<_> = variants
-        .iter()
-        .filter(|v| v.supports(&input))
-        .copied()
-        .collect();
+    let mut active = columns.to_vec();
     let control = active
         .iter()
-        .find(|v| v.name == "tessera")
+        .find(|(v, e)| v.name == "tessera" && *e == Execution::Serial)
         .copied()
-        .ok_or_else(|| format!("required control tessera does not support {}", case.id()))?;
+        .ok_or_else(|| {
+            format!(
+                "required control tessera/serial does not support {}",
+                case.id()
+            )
+        })?;
     active.push(control);
     for block in 0..sampling.blocks {
         for (slot, index) in shuffle_variants(active.len(), block, case)
             .into_iter()
             .enumerate()
         {
-            let variant = active[index];
-            let mut kernel = variant.prepare(&input, scratch_bytes).unwrap();
+            let (variant, execution) = active[index];
+            let mut kernel = variant.prepare(&input, execution, scratch_bytes).unwrap();
             let batch = calibrate(
                 &mut *kernel,
                 sampling.min_sample_ns,
@@ -110,17 +132,17 @@ pub(super) fn measure_case(
             )?;
             let elapsed_ns = kernel
                 .measure_batch(batch)
-                .map_err(|e| format!("{} {}: {e}", case.id(), variant.name))?
+                .map_err(|e| format!("{} {}: {e}", case.id(), column_id(variant, execution)))?
                 .as_nanos()
                 .max(1) as u64;
             publish(Sample {
                 kind: "sample",
                 case_id: case.id(),
                 group: case.group(),
-                variant: if index == active.len() - 1 {
+                column: if index == active.len() - 1 {
                     "tessera-aa".into()
                 } else {
-                    variant.name.into()
+                    column_id(variant, execution)
                 },
                 build: build.into(),
                 block,

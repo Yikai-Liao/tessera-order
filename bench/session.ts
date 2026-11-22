@@ -71,7 +71,7 @@ export async function retainBuild(out: string, binary: string): Promise<Build> {
   };
 }
 
-/** Load a session for execution; reject retired operations and changed inputs. */
+/** Load a session for execution; reject plans from earlier schemas and changed inputs. */
 export async function loadSession(out: string): Promise<Session> {
   let document: string;
   try {

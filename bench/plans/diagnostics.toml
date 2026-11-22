@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
-schema = 1
+schema = 3
 implementations = ["tessera"]
 
 [[include]]

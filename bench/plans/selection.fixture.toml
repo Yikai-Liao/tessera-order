@@ -1,17 +1,27 @@
 # SPDX-License-Identifier: BSD-2-Clause
+#
+# The shared contract that the TS (catalog.ts, plan.ts) and Rust (plan.rs)
+# formatters, decoders and selectors check independently.
 
 [plan]
-schema = 1
-implementations = [ "tessera" ]
+schema = 3
+implementations = [ "tessera", "rayon-stable" ]
 
 [[plan.include]]
 types = [ "u64", "row_u64" ]
 distributions = [ "random", "zipf2" ]
 lengths = [ 1000, 65536 ]
+executions = [ "serial", "t4" ]
 
 [[plan.include]]
 types = [ "f64" ]
 distributions = [ "sorted" ]
+
+[[plan.include]]
+types = [ "u64" ]
+distributions = [ "random" ]
+lengths = [ 65536 ]
+operation = { kind = "select_nth", index = 7 }
 
 [[plan.exclude]]
 types = [ "row_u64" ]
@@ -20,11 +30,31 @@ distributions = [ "zipf2" ]
 [[plan.exclude]]
 lengths = [ 1000 ]
 
+[[plan.exclude]]
+types = [ "row_u64" ]
+executions = [ "t4" ]
+
+# Absent operation means sort; absent execution means serial. A rule without
+# lengths selects the catalog default lengths.
 [[cases]]
 type = "u64"
 distribution = "random"
 length = 65536
 selected = true
+
+[[cases]]
+type = "u64"
+distribution = "random"
+length = 65536
+execution = "t4"
+selected = true
+
+[[cases]]
+type = "u64"
+distribution = "random"
+length = 65536
+execution = "t1"
+selected = false
 
 [[cases]]
 type = "u64"
@@ -51,15 +81,29 @@ length = 65536
 selected = true
 
 [[cases]]
+type = "row_u64"
+distribution = "random"
+length = 65536
+execution = "t4"
+selected = false
+
+[[cases]]
 type = "f64"
 distribution = "sorted"
-length = 999
+length = 65536
 selected = true
 
 [[cases]]
 type = "f64"
+distribution = "sorted"
+length = 65536
+execution = "t4"
+selected = false
+
+[[cases]]
+type = "f64"
 distribution = "reverse"
-length = 999
+length = 65536
 selected = false
 
 [[cases]]
@@ -69,108 +113,136 @@ length = 1234
 selected = false
 
 [[cases]]
-type = "u64"
-distribution = "reverse"
-length = 65536
-selected = false
-
-[[cases]]
 type = "u32"
 distribution = "random"
 length = 65536
 selected = false
 
-# Both language implementations check these independent formatting examples.
-[[identities]]
+[[cases]]
 type = "u64"
 distribution = "random"
 length = 65536
-mode = "api"
-comparison = "u64/random/65536/s1"
-criterion_group = "rust/u64/random/65536/s1"
-criterion = "rust/u64/random/65536/s1/api"
+operation = { kind = "select_nth", index = 7 }
+selected = true
+
+[[cases]]
+type = "u64"
+distribution = "random"
+length = 65536
+operation = { kind = "select_nth", index = 8 }
+selected = false
+
+[[cases]]
+type = "u64"
+distribution = "random"
+length = 65536
+operation = { kind = "argsort" }
+selected = false
+
+# Independent formatting examples; every ID decodes back to its parts.
+[[identities]]
+case = { type = "u64", distribution = "random", length = 65536, operation = { kind = "sort" } }
+column = { implementation = "tessera", execution = "serial" }
+case_id = "sort/u64/random/65536/s1"
+group = "sort/u64/random"
+column_id = "tessera/serial"
+criterion = "rust/sort/u64/random/65536/s1/serial"
 
 [[identities]]
-type = "row_u64"
-distribution = "random"
-length = 1000000
-mode = "par-4"
-comparison = "row_u64/random/1000000/s1"
-criterion_group = "rust/row_u64/random/1000000/s1"
-criterion = "rust/row_u64/random/1000000/s1/par-4"
+case = { type = "row_u64", distribution = "random", length = 1000000, operation = { kind = "sort" } }
+column = { implementation = "rayon-stable", execution = "t4" }
+case_id = "sort/row_u64/random/1000000/s1"
+group = "sort/row_u64/random"
+column_id = "rayon-stable/t4"
+criterion = "rust/sort/row_u64/random/1000000/s1/t4"
 
-# Operation grammar, bounds and IDs are retained boundary copies in TS/Rust.
+[[identities]]
+case = { type = "u64", distribution = "d16", length = 1000, operation = { kind = "argsort" } }
+column = { implementation = "std-stable", execution = "serial" }
+case_id = "argsort/u64/d16/1000/s1"
+group = "argsort/u64/d16"
+column_id = "std-stable/serial"
+criterion = "rust/argsort/u64/d16/1000/s1/serial"
+
+[[identities]]
+case = { type = "u64", distribution = "random", length = 1000, operation = { kind = "select_nth", index = 999 } }
+column = { implementation = "tessera", execution = "t1" }
+case_id = "select_nth/u64/random/1000/s1/999"
+group = "select_nth/u64/random/999"
+column_id = "tessera/t1"
+criterion = "rust/select_nth/u64/random/1000/s1/999/t1"
+
+[[identities]]
+case = { type = "u64", distribution = "random", length = 1000, operation = { kind = "partition-buckets", bucket_count = 7 } }
+column = { implementation = "tessera", execution = "t16" }
+case_id = "partition-buckets/u64/random/1000/s1/7"
+group = "partition-buckets/u64/random/7"
+column_id = "tessera/t16"
+criterion = "rust/partition-buckets/u64/random/1000/s1/7/t16"
+
+# Every decoder rejects noncanonical, unknown or out-of-range components.
+[invalid]
+executions = [ "", "t0", "t01", "T4", "t", "t-1", "t4x", "par-4", "api", "serial " ]
+columns = [ "tessera", "tessera/", "unknown/serial", "tessera/t0", "tessera/serial/x", "/serial" ]
+case_ids = [
+  "u64/random/65536/s1",
+  "sort/u64/random/65536/s2",
+  "sort/u64/random/065536/s1",
+  "sort/u64/random/0/s1",
+  "sort/u65/random/1000/s1",
+  "sort/u64/unknown/1000/s1",
+  "sort/u64/random/1000/s1/3",
+  "argsort/u64/random/1000/s1/3",
+  "select/u64/random/1000/s1/3",
+  "select_nth/u64/random/1000/s1",
+  "select_nth/u64/random/1000/s1/1000",
+  "select_nth/u64/random/1000/s1/01",
+  "partition-buckets/u64/random/1000/s1/0",
+  "top-k/u64/random/1000/s1/3",
+]
+criterion = [
+  "sort/u64/random/1000/s1/serial",
+  "rust/sort/u64/random/1000/s1",
+  "rust/sort/u64/random/1000/s1/api",
+  "rust/sort/u64/random/1000/s1/par-4",
+  "rust/u64/random/1000/s1/serial",
+]
+
+# Operation grammar and bounds on one input; no case_id means rejection.
 [operation_case]
-ty = "u64"
+type = "u64"
 distribution = "random"
-len = 1000
+length = 1000
+
+[[operations]]
+operation = { kind = "sort" }
+case_id = "sort/u64/random/1000/s1"
 
 [[operations]]
 operation = { kind = "argsort" }
-comparison = "u64/random/1000/s1/argsort"
-group = "u64/random/argsort"
+case_id = "argsort/u64/random/1000/s1"
 
 [[operations]]
-operation = { kind = "partition" }
-comparison = "u64/random/1000/s1/partition"
-group = "u64/random/partition"
+operation = { kind = "select_nth", index = 0 }
+case_id = "select_nth/u64/random/1000/s1/0"
 
 [[operations]]
-operation = { kind = "partition-buckets", bucket_count = 7 }
-comparison = "u64/random/1000/s1/partition-buckets/7"
-group = "u64/random/partition-buckets/7"
+operation = { kind = "partition-buckets", bucket_count = 65537 }
+case_id = "partition-buckets/u64/random/1000/s1/65537"
 
-[[operations]]
-operation = { kind = "segments", segment_len = 73 }
-comparison = "u64/random/1000/s1/segments/73"
-group = "u64/random/segments/73"
-
-[[operations]]
-operation = { kind = "top-k", k = 513 }
-comparison = "u64/random/1000/s1/top-k/513"
-group = "u64/random/top-k/513"
-
-[[operations]]
-operation = { kind = "prefix", prefix_len = 0 }
-comparison = "u64/random/1000/s1/prefix/0"
-group = "u64/random/prefix/0"
-
-[[operations]]
-operation = { kind = "select", index = 999 }
-comparison = "u64/random/1000/s1/select/999"
-group = "u64/random/select/999"
-
-[[operations]]
-operation = { kind = "rank-range", start = 20, end = 20 }
-comparison = "u64/random/1000/s1/rank-range/20-20"
-group = "u64/random/rank-range/20-20"
-
-[[operations]]
-operation = { kind = "select-many", indices = [999, 0, 999] }
-comparison = "u64/random/1000/s1/select-many/999,0,999"
-group = "u64/random/select-many/999,0,999"
-
-[[operations]]
-operation = { kind = "select-many", indices = [] }
-comparison = "u64/random/1000/s1/select-many/none"
-group = "u64/random/select-many/none"
-
-# No comparison field means the plan must be rejected before generation.
 [[operations]]
 operation = { kind = "partition-buckets", bucket_count = 0 }
 [[operations]]
-operation = { kind = "partition", bucket_count = 2 }
+operation = { kind = "select_nth", index = 1000 }
 [[operations]]
-operation = { kind = "segments", segment_len = 0 }
+operation = { kind = "select_nth", index = -1 }
 [[operations]]
-operation = { kind = "top-k", k = 1001 }
+operation = { kind = "select_nth" }
 [[operations]]
-operation = { kind = "prefix", prefix_len = -1 }
+operation = { kind = "select", index = 1 }
 [[operations]]
-operation = { kind = "select", index = 1000 }
+operation = { kind = "partition" }
 [[operations]]
-operation = { kind = "select-many", indices = [0, 1000] }
-[[operations]]
-operation = { kind = "rank-range", start = 9, end = 8 }
+operation = { kind = "top-k", k = 1 }
 [[operations]]
 operation = { kind = "argsort", unexpected = true }

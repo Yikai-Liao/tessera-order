@@ -149,7 +149,7 @@ test("raw paired samples drive configured checks and the existing shared chart",
   assert.ok(body.includes("Median interval"));
   assert.doesNotMatch(body, /1.20 ns|0.800 ns/);
   assert.match(body, /\| sort \|/);
-  assert.match(body, /\| par_sort \|/);
+  assert.match(body, /\| par_sort · 4 threads \|/);
   const images = action.requests
     .filter((request) => request.path.endsWith("/git/trees"))
     .flatMap((request) => request.body.tree as { content: string }[]);
@@ -287,7 +287,7 @@ test("a changed inventory without shared history retains both current figures", 
   previous.results = [
     [
       {
-        benchmark: { name: "rust/u32/random/65536/s1/api", uuid: "other-case" },
+        benchmark: { name: "rust/sort/u32/random/65536/s1/serial", uuid: "other-case" },
         measures: [
           {
             measure: { name: "paired-time-ratio", uuid: "ratio" },

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
-schema = 1
+schema = 3
 implementations = [ "tessera", "std-stable", "radsort", "voracious", "glidesort", "glidesort-sqrt", "std-unstable", "rdst", "clausecker", "fluxsort", "ips2ra", "ips4o", "vqsort", "x86simdsort", "crumsort", "duckdb" ]
 
 # Keep the original cross-type matrix for comparable aggregate figures.

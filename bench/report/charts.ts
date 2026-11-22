@@ -8,6 +8,7 @@ import {
   type Execution,
   executionThreads,
   implementation,
+  isComposition,
   type Operation,
   operationDescription,
   operationNoun,
@@ -25,6 +26,7 @@ import {
   type Mark,
   type PlotRow as Row,
   renderRows,
+  type Swatch,
   type Tone,
 } from "../plot/rows.ts";
 import { geomean, median } from "../statistics.ts";
@@ -203,9 +205,11 @@ function markdownTable(headers: string[], rows: string[][]) {
 const toneOf = (variant: string): Tone =>
   variant === "tessera"
     ? "primary"
-    : implementation(variant).family === "radix"
-      ? "radix"
-      : "comparison";
+    : isComposition(variant)
+      ? "composition"
+      : implementation(variant).family === "radix"
+        ? "radix"
+        : "comparison";
 // A symmetric speed axis in doublings around the reference, wide enough for
 // the data. Left of the centre the labels are fractions, so a tick and a
 // value cell read the same way.
@@ -266,11 +270,11 @@ const rankingCases = (t: Terms, { ranking }: Cohort, n: number) =>
 /** Elements of one type in a guide: "u64 keys" or "{u32, u32} records". */
 const elements = (ty: string) => `${recordType(ty).label} ${recordType(ty).task}`;
 
-const kindLegend: [Tone[], string][] = [
+const kindLegend = [
   [["primary"], "Tessera"],
   [["radix"], "other radix sorts"],
   [["comparison"], "comparison sorts"],
-];
+] satisfies [Swatch[], string][];
 const SPEED_AXIS: [string, string] = ["← slower", "faster →"];
 
 // With `memory`, each implementation also shows its largest peak over the ranked inputs,
@@ -284,7 +288,7 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
   const entries = field.implementations.map((v) => ({
     name: v.name,
     cell: t.name(v.name),
-    kind: family(v.name),
+    composition: isComposition(v.name),
     tone: toneOf(v.name),
     stable: v.stable,
     speeds: cohort.ranking.lengths.map((n) => speedOver(field, rankingCases(t, cohort, n), v.name)),
@@ -300,7 +304,9 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
   // Records rank Tessera among stable implementations only, because stability is observable
   // there; unstable ones stay in their own group for context.
   const records = recordType(cohort.ranking.ty).task === "records";
-  const others = complete.filter((e) => !e.cell.strong && (!records || e.stable));
+  const competitors = complete.filter((e) => !e.composition);
+  const compositions = complete.filter((e) => e.composition);
+  const others = competitors.filter((e) => !e.cell.strong && (!records || e.stable));
   const rank = 1 + others.filter((e) => e.speeds[at] > anchor.speeds[at]).length;
   const row = (e: (typeof complete)[number]): Row => ({
     name: e.cell,
@@ -321,8 +327,9 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
       guide: `${formatLength(cohort.ranking.n)} ${elements(cohort.ranking.ty)} · speed vs ${t.referenceLabel}, ${cohort.ranking.label}`,
       columns: ["Speed", ...(memory ? ["Extra memory"] : [])],
       groups: [
-        { title: `Stable ${t.many}`, rows: complete.filter((e) => e.stable).map(row) },
-        { title: `Unstable ${t.many}`, rows: complete.filter((e) => !e.stable).map(row) },
+        { title: `Stable ${t.many}`, rows: competitors.filter((e) => e.stable).map(row) },
+        { title: `Unstable ${t.many}`, rows: competitors.filter((e) => !e.stable).map(row) },
+        { title: "Composition", rows: compositions.map(row) },
       ].filter((g) => g.rows.length),
       scale: speedScale(
         complete.map((e) => e.speeds[at]),
@@ -341,9 +348,9 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
         ),
         ...(memory ? ["Largest extra memory"] : []),
       ],
-      complete.map((e) => [
+      [...competitors, ...compositions].map((e) => [
         t.table(e.name),
-        e.kind,
+        e.composition ? "Composition" : family(e.name),
         e.stable ? "stable" : "unstable",
         ...e.speeds.map(times),
         ...(memory ? [e.peak === null ? "unmeasured" : formatBytes(e.peak)] : []),
@@ -365,7 +372,7 @@ function standing(field: Field, ids: string[], stableOnly: boolean): Standing | 
   const tessera = speedOf("tessera");
   if (tessera === null) return null;
   const speeds = variants
-    .filter((v) => v.name !== "tessera" && (!stableOnly || v.stable))
+    .filter((v) => v.name !== "tessera" && !isComposition(v.name) && (!stableOnly || v.stable))
     .map((v) => ({ variant: v.name, speed: speedOf(v.name) }))
     .filter((v): v is { variant: string; speed: number } => v.speed !== null);
   return {
@@ -895,9 +902,17 @@ export interface Scaling {
   /** Short commits of the Tessera runs, which may predate its latest serial run. */
   tessera: string[];
   inputs: { label: string; tessera: number[]; rayon: number[] }[];
+  /** Serial full-sort speeds over the same inputs, in input order. */
+  composition?: { hash: string; speeds: number[] };
 }
 
-export function renderParallel({ n, threads, tessera, inputs }: Scaling): Figure | null {
+export function renderParallel({
+  n,
+  threads,
+  tessera,
+  composition,
+  inputs,
+}: Scaling): Figure | null {
   if (!inputs.length || !threads.length) return null;
   const named = (t: number) => `${t} thread${t === 1 ? "" : "s"}`;
   const mean = (pick: (input: Scaling["inputs"][number]) => number[], at: number) =>
@@ -909,8 +924,13 @@ export function renderParallel({ n, threads, tessera, inputs }: Scaling): Figure
   }));
   const widest = rows.at(-1)!;
   const title = `${times(widest.tessera / widest.rayon)} Rayon's speed on ${named(widest.threads)}`;
+  const serialSpeed = composition ? geomean(composition.speeds) : null;
+  const compositionLabel = "Serial Tessera (composition)";
   const scale = speedScale(
-    rows.flatMap((row) => [row.tessera, row.rayon]),
+    [
+      ...rows.flatMap((row) => [row.tessera, row.rayon]),
+      ...(serialSpeed === null ? [] : [serialSpeed]),
+    ],
     "",
   );
   scale.ticks = scale.ticks.map((tick) =>
@@ -941,6 +961,20 @@ export function renderParallel({ n, threads, tessera, inputs }: Scaling): Figure
             }),
           ),
         },
+        ...(composition && serialSpeed !== null
+          ? [
+              {
+                title: "Composition",
+                rows: [
+                  {
+                    name: { input: "Serial Tessera", sub: composition.hash, tag: "" },
+                    marks: [{ value: serialSpeed, tone: "composition" as const }],
+                    cells: [times(serialSpeed), ""],
+                  },
+                ],
+              },
+            ]
+          : []),
       ],
       scale,
       axis: SPEED_AXIS,
@@ -954,13 +988,20 @@ export function renderParallel({ n, threads, tessera, inputs }: Scaling): Figure
         "Input",
         ...threads.map((t) => `Tessera, ${named(t)}`),
         ...threads.map((t) => `Rayon, ${named(t)}`),
+        ...(composition ? [compositionLabel] : []),
       ],
       [
-        ...inputs.map((input) => [input.label, ...cells(input.tessera), ...cells(input.rayon)]),
+        ...inputs.map((input, at) => [
+          input.label,
+          ...cells(input.tessera),
+          ...cells(input.rayon),
+          ...(composition ? [times(composition.speeds[at])] : []),
+        ]),
         [
           "Geometric mean",
           ...cells(rows.map((row) => row.tessera)),
           ...cells(rows.map((row) => row.rayon)),
+          ...(serialSpeed === null ? [] : [times(serialSpeed)]),
         ],
       ],
     ),

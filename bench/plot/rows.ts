@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import * as Plot from "@observablehq/plot";
-import { ink, label, rowName, textWidth } from "./annotations.ts";
+import {
+  compositionDot,
+  compositionLegend,
+  ink,
+  label,
+  rowName,
+  textWidth,
+} from "./annotations.ts";
 import { renderFigure } from "./figure.ts";
 import { type NameCell, nameWidth } from "./layout.ts";
 import { theme } from "./theme.ts";
 
-export type Tone = "primary" | "radix" | "comparison";
+export type Tone = "primary" | "radix" | "comparison" | "composition";
 export interface Mark {
   value: number;
   tone: Tone;
@@ -23,7 +30,7 @@ export interface PlotRow {
   /** The last cell states a lead, such as a first rank, and takes Tessera's colour. */
   lead?: boolean;
 }
-export type Swatch = Tone | "alternate" | "hollow" | "reference" | "edge";
+export type Swatch = Exclude<Tone, "composition"> | "alternate" | "hollow" | "reference" | "edge";
 export interface RowChart {
   id?: string;
   title: string;
@@ -42,8 +49,39 @@ export interface RowChart {
   axis: [string, string];
 }
 
-const depth: Record<Tone, number> = { comparison: 0, radix: 1, primary: 2 };
+const depth: Record<Tone, number> = { comparison: 0, radix: 1, composition: 1.5, primary: 2 };
 const radius = (mark: Mark) => (mark.tone === "primary" ? (mark.hollow ? 5.5 : 6.5) : 4);
+const tickSize = theme.font.tiny;
+
+/** Give the reference its own line when the tick labels would share horizontal space. */
+function referenceOnSeparateLine(scale: RowChart["scale"], x: Plot.ScaleOptions, width: number) {
+  const reference = scale.ticks.find((tick) => tick.value === scale.origin && tick.label);
+  if (!reference) return;
+  const position = Plot.scale({ x }).apply;
+  // Leave room for font fallback and a visible gap between neighbouring labels.
+  const halfWidth = (label: string) => textWidth(label, tickSize) * 0.55 + 2;
+  const centre = position(reference.value);
+  const half = halfWidth(reference.label);
+  if (
+    centre - half < theme.layout.pad ||
+    centre + half > width - theme.layout.pad ||
+    /[\r\n]/.test(reference.label) ||
+    scale.ticks.some(
+      (tick) =>
+        tick !== reference &&
+        tick.label &&
+        Math.abs(position(tick.value) - centre) < half + halfWidth(tick.label),
+    )
+  ) {
+    const available = width - 2 * theme.layout.pad;
+    const inset = theme.layout.pad + Math.min(half, available / 2);
+    return {
+      text: reference.label.replace(/\s+/g, " "),
+      x: Math.min(width - inset, Math.max(inset, centre)),
+      lineWidth: (available - 4) / (tickSize * 1.1),
+    };
+  }
+}
 
 /** Render named rows with a shared logarithmic axis and aligned value columns.
  *
@@ -106,9 +144,7 @@ export function renderRows(spec: RowChart) {
     return { title: group.title, titleY, placed };
   });
   const bottom = y + 4,
-    axisY = bottom + 18,
-    legendY = axisY + 34,
-    height = legendY + 18;
+    axisY = bottom + 18;
   const x: Plot.ScaleOptions = {
     type: "log",
     base: 2,
@@ -117,13 +153,33 @@ export function renderRows(spec: RowChart) {
     clamp: spec.scale.clamp,
     nice: false,
   };
+  const separateReference = referenceOnSeparateLine(spec.scale, x, width);
+  const hasComposition = rows.some((row) => row.marks.some((mark) => mark.tone === "composition"));
+  const directionY = axisY + (separateReference ? 32 : 16);
+  const legendY = directionY + 18;
+  const swatchY = legendY + (!Array.isArray(spec.legend) && hasComposition ? 16 : 0);
+  const height = swatchY + 18;
   const annotations: Plot.Markish[] = [
     label(spec.title, pad, 40, { size: theme.font.title, strong: true }),
     label(spec.guide, pad, 60, { size: 11, tone: ink.muted }),
     Plot.ruleY([headerRule], { x1: pad, x2: width - pad, stroke: ink.rule }),
-    label(spec.axis[0], left, axisY + 16, { size: 11, tone: ink.muted }),
-    label(spec.axis[1], right, axisY + 16, { size: 11, tone: ink.muted, anchor: "end" }),
+    label(spec.axis[0], left, directionY, { size: 11, tone: ink.muted }),
+    label(spec.axis[1], right, directionY, { size: 11, tone: ink.muted, anchor: "end" }),
   ];
+  if (separateReference) {
+    annotations.push(
+      Plot.text([separateReference], {
+        x: "x",
+        y: axisY + 16,
+        text: "text",
+        lineAnchor: "bottom",
+        fontSize: tickSize,
+        fill: ink.text,
+        lineWidth: separateReference.lineWidth,
+        textOverflow: "ellipsis-end",
+      }),
+    );
+  }
   spec.columns.forEach((heading, index) => {
     annotations.push(
       label(heading.toUpperCase(), columns[index], layout[0].titleY, {
@@ -145,17 +201,22 @@ export function renderRows(spec: RowChart) {
           stroke: (tick: { value: number }) =>
             tick.value === spec.scale.origin ? ink.axis : ink.rule,
         }),
-        Plot.axisX(spec.scale.ticks, {
-          x: "value",
-          text: "label",
-          y: bottom,
-          tickSize: 0,
-          tickPadding: 11,
-          fontSize: 10,
-          label: null,
-          fill: (tick: { value: number }) =>
-            tick.value === spec.scale.origin ? ink.text : ink.muted,
-        }),
+        Plot.axisX(
+          separateReference
+            ? spec.scale.ticks.filter((tick) => tick.value !== spec.scale.origin)
+            : spec.scale.ticks,
+          {
+            x: "value",
+            text: "label",
+            y: bottom,
+            tickSize: 0,
+            tickPadding: 11,
+            fontSize: tickSize,
+            label: null,
+            fill: (tick: { value: number }) =>
+              tick.value === spec.scale.origin ? ink.text : ink.muted,
+          },
+        ),
         ...(spec.marker
           ? [
               Plot.ruleX([spec.marker.value], {
@@ -227,9 +288,9 @@ export function renderRows(spec: RowChart) {
               symbol: "triangle",
               rotate: (value: number) => (value < spec.scale.low ? 270 : 90),
               r: 4.5,
-              fill: ink[row.marks[0].tone],
-              stroke: ink.panel,
-              strokeWidth: 2,
+              ...(row.marks[0].tone === "composition"
+                ? compositionDot
+                : { fill: ink[row.marks[0].tone], stroke: ink.panel, strokeWidth: 2 }),
             }),
           ],
         });
@@ -255,8 +316,18 @@ export function renderRows(spec: RowChart) {
                 r: (mark: Mark) => (edge(mark) ? 4.5 : radius(mark)),
                 symbol: (mark: Mark) => (edge(mark) ? "triangle" : "circle"),
                 rotate: (mark: Mark) => (edge(mark) ? (mark.value < spec.scale.low ? 270 : 90) : 0),
-                fill: (mark: Mark) => (mark.tone === "primary" ? "none" : ink[mark.tone]),
-                stroke: (mark: Mark) => (mark.tone === "primary" ? "none" : ink.panel),
+                fill: (mark: Mark) =>
+                  mark.tone === "composition"
+                    ? compositionDot.fill
+                    : mark.tone === "primary"
+                      ? "none"
+                      : ink[mark.tone],
+                stroke: (mark: Mark) =>
+                  mark.tone === "composition"
+                    ? compositionDot.stroke
+                    : mark.tone === "primary"
+                      ? "none"
+                      : ink.panel,
                 strokeWidth: 2,
               }),
             ),
@@ -271,6 +342,7 @@ export function renderRows(spec: RowChart) {
           fill: ink[mark.tone],
           stroke: ink.panel,
           strokeWidth: 2,
+          ...(mark.tone === "composition" ? compositionDot : {}),
         };
         layers.push({
           x,
@@ -302,42 +374,53 @@ export function renderRows(spec: RowChart) {
   const clipped = rows.some(
     (row) => row.marks.some((mark) => outside(mark.value)) || (row.span ?? []).some(outside),
   );
-  if (Array.isArray(spec.legend)) {
-    const legend: [Swatch[], string][] = clipped
-      ? [...spec.legend, [["edge"], "off-scale, value in table"]]
-      : spec.legend;
+  if (!Array.isArray(spec.legend)) {
+    annotations.push(label(spec.legend.note, pad, legendY, { size: 11, tone: ink.muted }));
+  }
+  if (Array.isArray(spec.legend) || hasComposition) {
+    const legend: [(Swatch | "composition")[], string][] = Array.isArray(spec.legend)
+      ? [...spec.legend]
+      : [];
+    if (hasComposition) legend.push([["composition"], compositionLegend]);
+    if (clipped && Array.isArray(spec.legend)) legend.push([["edge"], "off-scale, value in table"]);
     let left = pad;
     for (const [swatches, text] of legend) {
       for (const swatch of swatches) {
         annotations.push(
-          swatch === "edge"
-            ? Plot.dot([[left + 4, legendY - 4]], {
-                symbol: "triangle",
-                rotate: 90,
-                r: 4.5,
-                fill: ink.muted,
-              })
-            : swatch === "reference"
-              ? Plot.ruleX([left + 4], {
-                  y1: legendY - 11,
-                  y2: legendY + 3,
-                  stroke: ink.axis,
-                  strokeDasharray: "3 3",
+          swatch === "composition"
+            ? Plot.dot([[left + 4, swatchY - 4]], { r: 3.5, ...compositionDot })
+            : swatch === "edge"
+              ? Plot.dot([[left + 4, swatchY - 4]], {
+                  symbol: "triangle",
+                  rotate: 90,
+                  r: 4.5,
+                  fill: ink.muted,
                 })
-              : Plot.dot([[left + 4, legendY - 4]], {
-                  r: swatch === "alternate" || swatch === "hollow" ? 3.5 : 4,
-                  fill: swatch === "alternate" || swatch === "hollow" ? ink.panel : ink[swatch],
-                  stroke:
-                    swatch === "alternate" ? ink.primary : swatch === "hollow" ? ink.axis : "none",
-                  strokeWidth: 1.5,
-                }),
+              : swatch === "reference"
+                ? Plot.ruleX([left + 4], {
+                    y1: swatchY - 11,
+                    y2: swatchY + 3,
+                    stroke: ink.axis,
+                    strokeDasharray: "3 3",
+                  })
+                : Plot.dot([[left + 4, swatchY - 4]], {
+                    r: swatch === "alternate" || swatch === "hollow" ? 3.5 : 4,
+                    fill: swatch === "alternate" || swatch === "hollow" ? ink.panel : ink[swatch],
+                    stroke:
+                      swatch === "alternate"
+                        ? ink.primary
+                        : swatch === "hollow"
+                          ? ink.axis
+                          : "none",
+                    strokeWidth: 1.5,
+                  }),
         );
         left += 10;
       }
-      annotations.push(label(text, left + 4, legendY, { size: 11, tone: ink.muted }));
+      annotations.push(label(text, left + 4, swatchY, { size: 11, tone: ink.muted }));
       left += 4 + textWidth(text, 11) + 18;
     }
-  } else annotations.push(label(spec.legend.note, pad, legendY, { size: 11, tone: ink.muted }));
+  }
   layers.push({ marks: annotations });
   return `<!-- SPDX-License-Identifier: BSD-2-Clause -->\n${renderFigure(
     {

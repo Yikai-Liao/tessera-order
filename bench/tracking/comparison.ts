@@ -11,6 +11,7 @@ import {
   distribution,
   type Execution,
   executionThreads,
+  isComposition,
   type Operation,
   operationDescription,
   operationKinds,
@@ -107,6 +108,7 @@ function trackingFields(runs: Map<string, TrackingRun>, kind: Operation["kind"])
     operation: chosen,
     // An implementation without this operation's route has no cases and no row.
     implementations: trackingImplementations
+      .filter((entry) => kind !== SORT.kind || !isComposition(entry.id))
       .filter((entry) => cases.some((input) => value(caseId(input), entry.id) !== null))
       .map((entry) => ({ name: entry.id, stable: routeStable(entry.id, chosen) })),
     cases,
@@ -232,6 +234,11 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
   );
   if (!found) return null;
   const [n, inputs] = found;
+  const serial = runs.get(columnId({ implementation: "tessera-full", execution: "serial" }));
+  const composition = inputs.map((id) => {
+    const ns = timed(serial, id, "serial")?.[0];
+    return ns === undefined ? null : time(PARALLEL_REFERENCE, 1, id)! / ns;
+  });
   const speed = (name: string, t: number, id: string) =>
     time(PARALLEL_REFERENCE, 1, id)! / time(name, t, id)!;
   const of = (name: string, id: string) => counts.map((t) => speed(name, t, id));
@@ -241,6 +248,9 @@ export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null 
     n,
     threads: counts,
     tessera: hashes,
+    ...(serial && composition.every((speed) => speed !== null)
+      ? { composition: { hash: serial.hash.slice(0, 7), speeds: composition } }
+      : {}),
     inputs: inputs.map((id) => {
       const { ty, distribution: distributionId } = parseCaseId(id);
       return {

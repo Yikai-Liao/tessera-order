@@ -10,12 +10,17 @@ export const ink = {
   primary: theme.palette.blue,
   radix: theme.palette.orange,
   comparison: theme.palette.grey,
+  composition: theme.palette.blue,
   text: "var(--ink)",
   muted: "var(--muted)",
   rule: "var(--rule)",
   axis: "var(--axis)",
   panel: "var(--panel)",
 } as const;
+
+/** Tessera composition uses the same open mark in plots and legends. */
+export const compositionDot = { fill: ink.panel, stroke: ink.composition, strokeWidth: 2 };
+export const compositionLegend = "Tessera composition";
 
 /** Format a relative change as a signed percentage; missing values print as a dash. */
 export function formatChange(change: number | null) {

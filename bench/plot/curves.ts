@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 import * as Plot from "@observablehq/plot";
-import { ink, label, textWidth } from "./annotations.ts";
+import { compositionDot, compositionLegend, ink, label, textWidth } from "./annotations.ts";
 import { renderFigure } from "./figure.ts";
 import type { Tone } from "./rows.ts";
 import { theme } from "./theme.ts";
@@ -35,7 +35,7 @@ export interface CurveChart {
 }
 
 /** A legend key: a sort kind's line, a reference's dash pattern, or the off-axis triangle. */
-export type CurveSwatch = Tone | "dashed" | "dotted" | "edge";
+export type CurveSwatch = Exclude<Tone, "composition"> | "dashed" | "dotted" | "edge";
 
 const LABEL_GAP = 14;
 
@@ -145,13 +145,14 @@ export function renderCurves(spec: CurveChart) {
     label(spec.y.label, left - 8, top - 10, { size: 11, tone: ink.muted }),
   ];
 
-  const depth: Record<Tone, number> = { comparison: 0, radix: 1, primary: 2 };
+  const depth: Record<Tone, number> = { comparison: 0, radix: 1, composition: 1.5, primary: 2 };
   const curves = spec.curves.toSorted((a, b) => depth[a.tone] - depth[b.tone]);
   for (const curve of curves) {
     const points = curve.points.map(([x, y]) => [px(x), py(y)]);
-    // Tessera is the subject: a heavy line with its measured points. Other sorts are context,
-    // thin lines without points, still coloured by kind.
+    // Tessera is the subject: a heavy line with its measured points. The composition uses
+    // rings on a thin line; the other sorts use thin lines alone.
     const focus = curve.tone === "primary";
+    const composition = curve.tone === "composition";
     marks.push(
       Plot.line(points, {
         stroke: ink[curve.tone],
@@ -160,12 +161,24 @@ export function renderCurves(spec: CurveChart) {
         strokeLinejoin: "round",
       }),
       Plot.dot(
-        focus ? curve.points.filter(([, y]) => !below(y)).map(([x, y]) => [px(x), py(y)]) : [],
-        { r: 4, fill: ink[curve.tone], stroke: ink.panel, strokeWidth: 1.5 },
+        focus || composition
+          ? curve.points.filter(([, y]) => !below(y)).map(([x, y]) => [px(x), py(y)])
+          : [],
+        {
+          r: 4,
+          ...(composition
+            ? compositionDot
+            : { fill: ink[curve.tone], stroke: ink.panel, strokeWidth: 1.5 }),
+        },
       ),
       Plot.dot(
         curve.points.filter(([, y]) => below(y)).map(([x]) => [px(x), bottom]),
-        { symbol: "triangle", rotate: 180, r: 4.5, fill: ink[curve.tone], stroke: ink.panel },
+        {
+          symbol: "triangle",
+          rotate: 180,
+          r: 4.5,
+          ...(composition ? compositionDot : { fill: ink[curve.tone], stroke: ink.panel }),
+        },
       ),
     );
   }
@@ -215,42 +228,46 @@ export function renderCurves(spec: CurveChart) {
     });
   });
 
-  const legend: [CurveSwatch[], string][] = clipped
-    ? [...spec.legend, [["edge"], "below the axis, value in table"]]
-    : spec.legend;
+  const legend: [(CurveSwatch | "composition")[], string][] = [...spec.legend];
+  if (curves.some((curve) => curve.tone === "composition")) {
+    legend.push([["composition"], compositionLegend]);
+  }
+  if (clipped) legend.push([["edge"], "below the axis, value in table"]);
   let x = pad;
   for (const [swatches, text] of legend) {
     for (const swatch of swatches) {
       marks.push(
-        swatch === "edge"
-          ? Plot.dot([[x + 4, legendY - 4]], {
-              symbol: "triangle",
-              rotate: 180,
-              r: 4.5,
-              fill: ink.muted,
-            })
-          : swatch === "dashed" || swatch === "dotted"
-            ? Plot.line(
-                [
-                  [x - 2, legendY - 4],
-                  [x + 12, legendY - 4],
-                ],
-                {
-                  stroke: ink.axis,
-                  strokeWidth: 1.25,
-                  strokeDasharray: swatch === "dotted" ? "1 4" : "4 4",
-                  strokeLinecap: "round",
-                },
-              )
-            : Plot.line(
-                [
-                  [x - 2, legendY - 4],
-                  [x + 12, legendY - 4],
-                ],
-                { stroke: ink[swatch], strokeWidth: 3 },
-              ),
+        swatch === "composition"
+          ? Plot.dot([[x + 4, legendY - 4]], { r: 3.5, ...compositionDot })
+          : swatch === "edge"
+            ? Plot.dot([[x + 4, legendY - 4]], {
+                symbol: "triangle",
+                rotate: 180,
+                r: 4.5,
+                fill: ink.muted,
+              })
+            : swatch === "dashed" || swatch === "dotted"
+              ? Plot.line(
+                  [
+                    [x - 2, legendY - 4],
+                    [x + 12, legendY - 4],
+                  ],
+                  {
+                    stroke: ink.axis,
+                    strokeWidth: 1.25,
+                    strokeDasharray: swatch === "dotted" ? "1 4" : "4 4",
+                    strokeLinecap: "round",
+                  },
+                )
+              : Plot.line(
+                  [
+                    [x - 2, legendY - 4],
+                    [x + 12, legendY - 4],
+                  ],
+                  { stroke: ink[swatch], strokeWidth: 3 },
+                ),
       );
-      x += swatch === "edge" ? 10 : 18;
+      x += swatch === "edge" || swatch === "composition" ? 10 : 18;
     }
     marks.push(label(text, x + 4, legendY, { size: 11, tone: ink.muted }));
     x += 4 + textWidth(text, 11) + 18;

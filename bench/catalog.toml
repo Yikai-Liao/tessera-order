@@ -16,8 +16,9 @@ revisionSampling = [
 # show its call beside the label. A route's `stable` replaces the implementation's for that operation.
 implementations = [
   { id = "tessera", label = "Tessera", stable = true, family = "radix", adapter = "common", parallel = "also", routes = { partition-buckets = { call = "sort_by_cached_key" } } },
-  # A selection or category comparison measures Tessera's dedicated route and its full sort on the same case.
-  { id = "tessera-full", label = "Tessera sort", stable = true, family = "radix", adapter = "reference", detail = "full sort as a composition reference", description = "full-sort reference for required ranks or stable category grouping" },
+  # A composition baseline: each result composed from Tessera's full sort, to show the work a
+  # dedicated route saves. The reference adapter marks it in comparison sections.
+  { id = "tessera-full", label = "Tessera sort", stable = true, family = "radix", adapter = "reference", detail = "serial full sort", routes = { argsort = { call = "sort (key, index) rows" }, select_nth = { call = "full sort" }, partition-buckets = { call = "sort_by_key on categories" } } },
   { id = "tessera-baseline", label = "Tessera baseline A", stable = true, family = "radix", adapter = "revision" },
   { id = "tessera-baseline-copy", label = "Tessera baseline B", stable = true, family = "radix", adapter = "revision" },
   { id = "tessera-copy", label = "Tessera current B", stable = true, family = "radix", adapter = "revision" },

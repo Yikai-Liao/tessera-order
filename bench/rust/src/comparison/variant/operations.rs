@@ -13,6 +13,7 @@ struct IndexKernel<T, F> {
     reference: Vec<usize>,
     outputs: Vec<Vec<usize>>,
     call: F,
+    description: &'static str,
 }
 
 impl<T: BenchmarkRecord, F: FnMut(&[T]) -> Vec<usize>> Kernel for IndexKernel<T, F> {
@@ -46,7 +47,7 @@ impl<T: BenchmarkRecord, F: FnMut(&[T]) -> Vec<usize>> Kernel for IndexKernel<T,
             .map_or(0, |v| v.capacity() * size_of::<usize>())
     }
     fn description(&self) -> &'static str {
-        "index construction and stable index sorting"
+        self.description
     }
 }
 
@@ -54,6 +55,7 @@ impl<T: BenchmarkRecord, F: FnMut(&[T]) -> Vec<usize>> Kernel for IndexKernel<T,
 pub(super) fn indices<T: BenchmarkRecord>(
     variant: Variant,
     input: Rc<PreparedRecords<T>>,
+    description: &'static str,
     call: impl FnMut(&[T]) -> Vec<usize> + 'static,
 ) -> Box<dyn Kernel> {
     assert!(
@@ -68,7 +70,23 @@ pub(super) fn indices<T: BenchmarkRecord>(
         reference,
         outputs: Vec::new(),
         call,
+        description,
     })
+}
+
+/// Materializes keys beside their source positions, stably sorts the rows,
+/// and returns a compact vector of source indices.
+pub(super) fn sort_index_rows<T, K: tessera_order::RadixKey>(
+    source: &[T],
+    key: impl Fn(&T) -> K,
+) -> Vec<usize> {
+    let mut rows: Vec<_> = source
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (key(r), i))
+        .collect();
+    tessera_order::sort_by_key(&mut rows, |&(key, _)| key);
+    rows.iter().map(|&(_, index)| index).collect()
 }
 
 /// Finds boundaries from category transitions in the sorted reference,
@@ -229,19 +247,30 @@ pub(super) fn prepare<T: TesseraAdapter>(
         Operation::Sort {} => None,
         Operation::PartitionBuckets { bucket_count } => categories(v, input, bucket_count),
         Operation::Argsort {} => Some(match v.name {
-            "tessera" => indices(v, input, T::argsort),
-            "std-stable" | "glidesort" | "std-unstable" => indices(v, input, move |source| {
-                let mut indices: Vec<_> = (0..source.len()).collect();
-                let order = |a: &usize, b: &usize| source[*a].order(&source[*b]);
-                match v.name {
-                    "std-stable" => indices.sort_by(order),
-                    "glidesort" => glidesort::sort_by(&mut indices, order),
-                    // Original index is an explicit tie-breaker, so this still
-                    // returns the exact stable permutation for payload records.
-                    _ => indices.sort_unstable_by(|a, b| order(a, b).then(a.cmp(b))),
-                }
-                indices
-            }),
+            "tessera" => indices(v, input, "public stable argsort", T::argsort),
+            "tessera-full" => indices(
+                v,
+                input,
+                "Tessera stable sort of (key, index) rows and index extraction",
+                T::sort_index_rows,
+            ),
+            "std-stable" | "glidesort" | "std-unstable" => indices(
+                v,
+                input,
+                "index construction and stable index sorting",
+                move |source| {
+                    let mut indices: Vec<_> = (0..source.len()).collect();
+                    let order = |a: &usize, b: &usize| source[*a].order(&source[*b]);
+                    match v.name {
+                        "std-stable" => indices.sort_by(order),
+                        "glidesort" => glidesort::sort_by(&mut indices, order),
+                        // Original index is an explicit tie-breaker, so this still
+                        // returns the exact stable permutation for payload records.
+                        _ => indices.sort_unstable_by(|a, b| order(a, b).then(a.cmp(b))),
+                    }
+                    indices
+                },
+            ),
             _ => return None,
         }),
         Operation::SelectNth { index } => Some(match v.name {
@@ -300,7 +329,9 @@ mod tests {
         let CaseInput::Row64(records) = input else {
             unreachable!();
         };
-        let mut reordered = indices(variant, records, |source| (0..source.len()).rev().collect());
+        let mut reordered = indices(variant, records, "reversed test adapter", |source| {
+            (0..source.len()).rev().collect()
+        });
         reordered.restore(1);
         reordered.run_batch();
         assert!(reordered.check().is_err());
@@ -332,8 +363,7 @@ mod tests {
                         // An independent capability oracle protects admission,
                         // including no silent full-sort substitution.
                         let expected = match variant.name {
-                            "tessera" | "std-stable" | "glidesort" => true,
-                            "tessera-full" => !matches!(operation, Operation::Argsort {}),
+                            "tessera" | "tessera-full" | "std-stable" | "glidesort" => true,
                             "radsort" => category_grouping || !ty.starts_with("reverse_"),
                             "std-unstable" => !category_grouping,
                             _ => false,
@@ -441,7 +471,12 @@ mod tests {
         let CaseInput::U64(input) = CaseInput::new(&case) else {
             unreachable!()
         };
-        let mut wrong = indices(variant("tessera"), input, |source| vec![0; source.len()]);
+        let mut wrong = indices(
+            variant("tessera"),
+            input,
+            "invalid test adapter",
+            |source| vec![0; source.len()],
+        );
         wrong.restore(1);
         wrong.run_batch();
         assert!(wrong.check().is_err());

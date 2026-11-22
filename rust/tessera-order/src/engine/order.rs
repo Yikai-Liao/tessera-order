@@ -29,25 +29,19 @@ pub(crate) fn by_key<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Opti
 #[inline(always)]
 pub(crate) fn sort_short<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
     if records.len() <= SINGLE_INSERTION_MAX {
-        let len = records.len();
-        // Reverse strict runs once their inversion count can pay for the scan.
-        if len > SINGLE_INSERTION_MAX / 2 && extractor.key(&records[1]) < extractor.key(&records[0])
-        {
-            let start = reverse_prefix(records, extractor);
-            for index in start..len {
-                insert_one(&mut records[..=index], extractor);
-            }
+        let [first, second, rest @ ..] = &mut *records else {
             return;
-        }
-        // Fixed prefix lengths let the compiler remove loop and bound checks.
-        let mut start = 1;
-        if let Some(first) = records.first_chunk_mut::<4>() {
-            for index in 1..4 {
-                insert_one(&mut first[..=index], extractor);
+        };
+        let second_key = extractor.key(second);
+        if extractor.key(first) > second_key {
+            if let Some(third_key) = rest.first().map(|record| extractor.key(record))
+                && third_key < second_key
+            {
+                return finish_descending_prefix(records, extractor, third_key);
             }
-            start = 4;
+            core::mem::swap(first, second);
         }
-        for index in start..records.len() {
+        for index in 2..records.len() {
             insert_one(&mut records[..=index], extractor);
         }
     } else {
@@ -57,10 +51,14 @@ pub(crate) fn sort_short<T, E: Extract<T>>(records: &mut [T], extractor: &mut E)
 
 // Keep the reversal and its record-sized temporary off the ascending path.
 #[inline(never)]
-fn reverse_prefix<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) -> usize {
-    let mut start = 2;
-    let mut previous = extractor.key(&records[1]);
-    for record in &records[2..] {
+fn finish_descending_prefix<T, E: Extract<T>>(
+    records: &mut [T],
+    extractor: &mut E,
+    mut previous: E::Value,
+) {
+    // The caller has already found three strictly decreasing keys.
+    let mut start = 3;
+    for record in &records[3..] {
         let next = extractor.key(record);
         if next >= previous {
             break;
@@ -69,7 +67,9 @@ fn reverse_prefix<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) -> usi
         start += 1;
     }
     records[..start].reverse();
-    start
+    for index in start..records.len() {
+        insert_one(&mut records[..=index], extractor);
+    }
 }
 
 fn sort_pairs<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {

@@ -1,26 +1,33 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Versioned operation parameters, concrete identities and borrowed input facts.
+//! Operation parameters, concrete identities and borrowed input facts.
 //! Public calls own execution and allocation; this module resolves only operation
 //! inputs and independent verification expectations, never engine decisions.
 
 use serde::{Deserialize, Serialize};
 
 /// Operation parameters; admitted routes define stable or arbitrary tie membership.
+///
+/// Variants and their parameter fields follow the catalog `operations` table,
+/// which owns identity order; `catalog_names_every_operation` checks the match.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(tag = "kind", deny_unknown_fields)]
 pub enum Operation {
-    /// Historical complete sorting.
+    /// Complete sorting.
+    #[serde(rename = "sort")]
     Sort {},
     /// Stable sorted indices, including creation of the returned vector.
+    #[serde(rename = "argsort")]
     Argsort {},
     /// Stable category grouping and offsets, including empty categories.
+    #[serde(rename = "partition-buckets")]
     PartitionBuckets {
         /// Classifications are encoded key bits modulo this count.
         bucket_count: usize,
     },
     /// One ranked key and outer memberships; tie identities are route-specific.
-    Select {
+    #[serde(rename = "select_nth")]
+    SelectNth {
         /// Zero-based target rank.
         index: usize,
     },
@@ -33,7 +40,7 @@ impl Default for Operation {
 }
 
 impl Operation {
-    /// Whether this is the historical complete-sorting operation.
+    /// Whether this is complete sorting.
     pub fn is_sort(&self) -> bool {
         matches!(self, Self::Sort {})
     }
@@ -46,7 +53,7 @@ impl Operation {
             Self::PartitionBuckets { bucket_count } => {
                 *bucket_count > 0 && *bucket_count < isize::MAX as usize / size_of::<usize>()
             }
-            Self::Select { index } => *index < len,
+            Self::SelectNth { index } => *index < len,
         };
         if valid {
             Ok(())
@@ -57,20 +64,10 @@ impl Operation {
         }
     }
 
-    /// Extra identity components; full sorting retains historical IDs.
-    pub(crate) fn suffix(&self) -> String {
-        match self {
-            Self::Sort {} => String::new(),
-            Self::Argsort {} => "/argsort".into(),
-            Self::PartitionBuckets { bucket_count } => format!("/partition-buckets/{bucket_count}"),
-            Self::Select { index } => format!("/select/{index}"),
-        }
-    }
-
     /// Keeps the operation class for a small capability probe, not a timed case.
     pub(crate) fn probe(&self) -> Self {
         match self {
-            Self::Select { .. } => Self::Select { index: 0 },
+            Self::SelectNth { .. } => Self::SelectNth { index: 0 },
             other => other.clone(),
         }
     }

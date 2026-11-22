@@ -8,7 +8,7 @@ import { CommandCancelledError, command, diagnostic } from "../../tools/process.
 import { parseCriterionId } from "../catalog.ts";
 import type { Plan } from "../plan.ts";
 import { resolveCommit, withWorkspace, workingTreeDirty } from "../workspace.ts";
-import { revisionThreads } from "./model.ts";
+import { isParallel, revisionThreads } from "./model.ts";
 import { assertWorkerEnvironment, buildRevisions, selectedCases } from "./runner.ts";
 
 /** Own a Docker process through failure/cancellation, including daemon-side cleanup. */
@@ -128,8 +128,8 @@ export async function compareCounters(options: {
   dirty?: boolean;
 }) {
   assertWorkerEnvironment();
-  if (revisionThreads(options.plan) !== 1)
-    throw new Error("Counter comparisons support serial API plans only");
+  revisionThreads(options.plan);
+  if (isParallel(options.plan)) throw new Error("Counter comparisons support serial plans only");
   if (process.platform !== "linux" || process.arch !== "x64")
     throw new Error("Counter comparisons require Linux x86-64 and Valgrind");
   if (!Number.isSafeInteger(options.sorts) || options.sorts < 1 || options.sorts > 1024)
@@ -152,8 +152,8 @@ export async function compareCounters(options: {
   await withWorkspace(root, async (workspace) => {
     const built = await buildRevisions(root, workspace, baseline, ["layout-study"]);
     const selected = await selectedCases(built.binaries, planPath, undefined, workspace.tree);
-    if (selected.some((id) => parseCriterionId(id).mode !== "api"))
-      throw new Error("Counter comparisons support serial API cases only");
+    if (selected.some((id) => parseCriterionId(id).execution !== "serial"))
+      throw new Error("Counter comparisons support serial cases only");
     const run: CounterRun = {
       schema: 1,
       kind: "callgrind-fixed-sorts",

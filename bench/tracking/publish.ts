@@ -2,7 +2,15 @@
 
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { caseLabel, caseName, caseParts, caseSection, catalog, compareCases } from "../catalog.ts";
+import {
+  caseLabel,
+  caseName,
+  caseParts,
+  caseSection,
+  catalog,
+  compareCases,
+  parseCriterionId,
+} from "../catalog.ts";
 import { GROWTH_FILE, writeComparison } from "./comparison.ts";
 import { renderMainOverview } from "./history.ts";
 import { trackingImplementation } from "./implementations.ts";
@@ -36,7 +44,13 @@ export function trackingCases(ids: string[]): TrackingCase[] {
 
 /** Each filterable field's values in catalog order; unknown values follow, in reading order. */
 export function trackingFacets(cases: TrackingCase[]) {
-  const part = (id: string, index: number) => id.split("/")[index] ?? "";
+  const parsed = (id: string) => {
+    try {
+      return parseCriterionId(id);
+    } catch {
+      return undefined;
+    }
+  };
   const rank = (list: { id: string }[], value: string) => {
     const found = list.findIndex((entry) => entry.id === value);
     return found < 0 ? list.length : found;
@@ -48,9 +62,9 @@ export function trackingFacets(cases: TrackingCase[]) {
     return [...first].toSorted((a, b) => a[1] - b[1]).map(([value]) => value);
   };
   return {
-    type: ordered("type", (id) => rank(catalog.types, part(id, 1))),
-    input: ordered("input", (id) => rank(catalog.distributions, part(id, 2))),
-    length: ordered("length", (id) => Number(part(id, 3)) || Number.MAX_SAFE_INTEGER),
+    type: ordered("type", (id) => rank(catalog.types, parsed(id)?.ty ?? "")),
+    input: ordered("input", (id) => rank(catalog.distributions, parsed(id)?.distribution ?? "")),
+    length: ordered("length", (id) => parsed(id)?.len ?? Number.MAX_SAFE_INTEGER),
     group: ordered("group", (id) => caseSection(id).order),
   };
 }

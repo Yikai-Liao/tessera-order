@@ -8,11 +8,16 @@ use std::hint::black_box;
 use std::{collections::BTreeMap, time::Duration};
 use tessera_bench::{
     CaseInput, Kernel, list_variants,
-    plan::{InputCase, Plan, criterion_batch_iterations, criterion_id, revision_sampling},
+    plan::{Execution, InputCase, Plan, criterion_batch_iterations, revision_sampling},
 };
 
 /// All protocols consume the same restorable kernel; only their scheduling differs.
-fn measure(criterion: &mut Criterion, case: &InputCase, mode: &str, kernel: &mut dyn Kernel) {
+fn measure(
+    criterion: &mut Criterion,
+    case: &InputCase,
+    execution: Execution,
+    kernel: &mut dyn Kernel,
+) {
     let args = std::env::args().collect::<Vec<_>>();
     assert!(
         !args.iter().any(|arg| arg == "--bench")
@@ -23,8 +28,7 @@ fn measure(criterion: &mut Criterion, case: &InputCase, mode: &str, kernel: &mut
     kernel.restore(1);
     kernel.run_batch();
     kernel.check().expect("verified output");
-    let group_id = case.criterion_group();
-    let id = criterion_id!(&group_id, mode);
+    let id = case.criterion_id(execution);
     #[cfg(feature = "layout-study")]
     if let Ok(count) = std::env::var("TESSERA_BENCH_FIXED_SORTS") {
         let count: usize = count.parse().expect("integer fixed sort count");
@@ -43,12 +47,12 @@ fn measure(criterion: &mut Criterion, case: &InputCase, mode: &str, kernel: &mut
         tessera_bench::sampling::serve(&id, kernel, case.len, settings);
         return;
     }
-    let mut group = criterion.benchmark_group(group_id);
+    let mut group = criterion.benchmark_group(case.criterion_group());
     group
         .warm_up_time(Duration::from_millis(settings.warm_ms))
         .measurement_time(Duration::from_millis(settings.window_ms))
         .sample_size(settings.samples);
-    group.bench_function(mode, |b| {
+    group.bench_function(execution.to_string(), |b| {
         b.iter_custom(|iterations| {
             let mut remaining = iterations;
             let mut elapsed = Duration::ZERO;
@@ -94,42 +98,30 @@ fn main() {
             .any(|v| v.name == id && v.adapter != "revision")),
         "unavailable implementation"
     );
-    let variants: Vec<_> = available
+    // Criterion IDs name no implementation, so one session measures one.
+    let [variant] = available
         .into_iter()
         .filter(|v| plan.implementations().iter().any(|id| id == v.name))
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("Criterion measures exactly one implementation");
+    };
+    // An adapter's capability decides coverage; unsupported columns are not listed.
+    // Serial IDs precede every worker count, and worker counts ascend.
+    let mut supported: Vec<_> = plan
+        .cases()
+        .unwrap()
+        .into_iter()
+        .flat_map(|(case, executions)| executions.into_iter().map(move |e| (case.clone(), e)))
+        .filter(|(case, e)| variant.supports(&CaseInput::new(&case.probe()), *e))
+        .map(|(case, e)| {
+            let id = case.criterion_id(e);
+            (case, e, id)
+        })
         .collect();
-    assert_eq!(
-        variants
-            .iter()
-            .map(|v| v.threads)
-            .collect::<std::collections::BTreeSet<_>>()
-            .len(),
-        variants.len(),
-        "Criterion requires one implementation per API mode"
-    );
-    // An adapter's capability decides coverage; unsupported cases are simply not listed.
-    let mut supported = Vec::new();
-    for variant in variants {
-        let mode = variant
-            .threads
-            .map_or_else(|| "api".into(), |n| format!("par-{n}"));
-        let mut cases = if variant.threads.is_some() {
-            plan.parallel_inputs().unwrap()
-        } else {
-            Vec::new()
-        };
-        if cases.is_empty() {
-            cases = plan.inputs().unwrap();
-        }
-        for case in cases {
-            let id = criterion_id!(case.criterion_group(), &mode);
-            if variant.supports(&CaseInput::new(&case.probe())) {
-                supported.push((variant, case, mode.clone(), id));
-            }
-        }
-    }
+    supported.sort_by(|(a, ae, _), (b, be, _)| (ae, a).cmp(&(be, b)));
     if std::env::var_os("TESSERA_BENCH_LIST").is_some() {
-        for (_, _, _, id) in &supported {
+        for (_, _, id) in &supported {
             println!("{id}");
         }
         return;
@@ -140,7 +132,7 @@ fn main() {
             !ids.is_empty()
                 && ids
                     .lines()
-                    .all(|id| supported.iter().any(|(_, _, _, expected)| expected == id)),
+                    .all(|id| supported.iter().any(|(_, _, expected)| expected == id)),
             "unknown or unsupported case selection"
         );
     }
@@ -157,7 +149,7 @@ fn main() {
         BTreeMap::new()
     };
     let mut criterion = Criterion::default().without_plots().configure_from_args();
-    for (variant, case, mode, id) in supported {
+    for (case, execution, id) in supported {
         if selected
             .as_ref()
             .is_some_and(|ids| !ids.lines().any(|selected| selected == id))
@@ -170,9 +162,9 @@ fn main() {
             0
         };
         let mut kernel = variant
-            .prepare(&CaseInput::new(&case), bytes)
+            .prepare(&CaseInput::new(&case), execution, bytes)
             .expect("listed capability changed");
-        measure(&mut criterion, &case, &mode, kernel.as_mut());
+        measure(&mut criterion, &case, execution, kernel.as_mut());
     }
     criterion.final_summary();
 }

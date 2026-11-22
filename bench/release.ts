@@ -3,8 +3,8 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { command, diagnostic } from "../tools/process.ts";
-import { catalog } from "./catalog.ts";
-import { loadPlan, type Plan, parsePlan } from "./plan.ts";
+import { catalog, parseColumnId } from "./catalog.ts";
+import { loadPlan, type Plan, parsePlan, planExecutions, planOperations } from "./plan.ts";
 import { writeReport } from "./report/index.ts";
 import { prepareRevisions, type Revisions } from "./revisions.ts";
 import { fetchNative } from "./rust/native/fetch.ts";
@@ -97,8 +97,11 @@ export async function checkImplementations(root: string, out: string, native: bo
       lengths: [32],
     });
     const available = await command(executable, ["list"], { cwd: tree, capture: true });
-    for (const line of available.split("\n").filter(Boolean)) {
-      const id = line.split("\t")[0];
+    const columns = available
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => parseColumnId(line.split("\t")[0]).implementation);
+    for (const id of new Set(columns)) {
       if (catalog.implementations.find((entry) => entry.id === id)?.adapter === "revision")
         continue;
       await writeFile(planPath, JSON.stringify({ ...plan, implementations: [id] }));
@@ -124,7 +127,7 @@ export async function checkImplementations(root: string, out: string, native: bo
     await command(executable, ["validate", "--plan", "smoke"], { cwd: tree });
     await command(
       executable,
-      ["run", "--plan", "smoke", "--group", "u64/random", "--sample-ms", "1", "--out", out],
+      ["run", "--plan", "smoke", "--group", "sort/u64/random", "--sample-ms", "1", "--out", out],
       { cwd: tree },
     );
     await writeReport([out], true);
@@ -146,7 +149,12 @@ export interface ReleaseOptions {
 /** Retain the executable pair, then measure verified batches and report one experiment. */
 export async function compareImplementations(options: ReleaseOptions) {
   pairedBudget(options.blocks);
-  if (options.revisions && options.plan.operation)
+  // A session's report sections and denominator belong to one operation.
+  if (planOperations(options.plan).length !== 1)
+    throw new Error(
+      "An implementation comparison measures one operation; select it with --operation",
+    );
+  if (options.revisions && planOperations(options.plan).some((op) => op.kind !== "sort"))
     throw new Error(
       "Linked revisions support full sorting only; use compare implementations for other operations",
     );
@@ -173,13 +181,9 @@ async function prepareComparison(options: ReleaseOptions) {
   await writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
   const build = await withComparisonWorkspace(root, native, async ({ tree, target }) => {
     const features = [
-      ...(plan.operation ? ["operations"] : []),
+      ...(planOperations(plan).some((op) => op.kind !== "sort") ? ["operations"] : []),
       ...(native ? ["compare-native"] : []),
-      ...(plan.implementations.some((id) =>
-        catalog.implementations.some((entry) => entry.id === id && entry.threads),
-      )
-        ? ["rayon"]
-        : []),
+      ...(planExecutions(plan).some((execution) => execution !== "serial") ? ["rayon"] : []),
     ];
     if (options.revisions) await prepareRevisions(root, tree, options.revisions, features);
     diagnostic("Building comparison workers");

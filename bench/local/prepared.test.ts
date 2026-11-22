@@ -12,7 +12,7 @@ import { sourceHash } from "../workspace.ts";
 import type { LocalRun, PreparedPair } from "./model.ts";
 import { comparePrepared } from "./runner.ts";
 
-const id = "rust/u64/random/48/s1/api";
+const id = "rust/sort/u64/random/48/s1/serial";
 const hash = (bytes: string) => createHash("sha256").update(bytes).digest("hex");
 
 /** Synthetic workers exercise frozen-build execution, never performance claims. */
@@ -49,7 +49,7 @@ require('node:readline').createInterface({input: process.stdin}).on('line', requ
   const run: PreparedPair = {
     kind: "prepared-revisions",
     plan: parsePlan({
-      schema: 1,
+      schema: 3,
       implementations: ["tessera"],
       include: [{ types: ["u64"], distributions: ["random"], lengths: [48] }],
     }),

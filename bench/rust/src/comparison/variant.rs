@@ -12,7 +12,7 @@ use super::{
     record::{BenchmarkRecord, CaseInput, OwnedRecord, PreparedRecords, WideRecord},
 };
 use crate::case::Row;
-use crate::plan::Operation;
+use crate::plan::{Execution, Operation};
 use rdst::RadixSort;
 use std::{cmp::Reverse, hint::black_box, mem::MaybeUninit, rc::Rc};
 use voracious_radix_sort::{RadixSort as VoraciousSort, Radixable};
@@ -25,7 +25,7 @@ pub(super) trait TesseraAdapter: BenchmarkRecord {
     #[cfg(feature = "operations")]
     fn argsort(records: &[Self]) -> Vec<usize>;
     #[cfg(feature = "operations")]
-    fn select(records: &mut [Self], index: usize);
+    fn select_nth(records: &mut [Self], index: usize);
 
     /// Sorts through the independently named baseline crate.
     #[cfg(tessera_bench_revisions)]
@@ -79,7 +79,7 @@ macro_rules! slice_operations {
         #[cfg(feature = "operations")]
         fn argsort(records: &[Self]) -> Vec<usize> { tessera_order::$argsort(records $(, $key)?) }
         #[cfg(feature = "operations")]
-        fn select(records: &mut [Self], index: usize) { tessera_order::$select(records, index $(, $key)?); }
+        fn select_nth(records: &mut [Self], index: usize) { tessera_order::$select(records, index $(, $key)?); }
     };
 }
 
@@ -222,7 +222,7 @@ impl<T: BenchmarkRecord, F: FnMut(&mut [T])> Kernel for BatchKernel<T, F> {
     }
     fn check(&self) -> Result<(), String> {
         for v in &self.buffers {
-            if let Operation::Select { index } = *self.input.operation() {
+            if let Operation::SelectNth { index } = *self.input.operation() {
                 check::selection(
                     v,
                     self.input.original(),
@@ -294,7 +294,7 @@ fn prepare_radsort<T: BenchmarkRecord, K: radsort::Key>(
                 indices
             });
         }
-        Operation::Select { .. } => {
+        Operation::SelectNth { .. } => {
             return operations::selection_reference(input, move |values| {
                 radsort::sort_by_key(values, key);
             });
@@ -304,7 +304,8 @@ fn prepare_radsort<T: BenchmarkRecord, K: radsort::Key>(
     prepare_kernel(input, true, move |values| radsort::sort_by_key(values, key))
 }
 
-/// An adapter's public name and stability contract.
+/// An implementation's adapter: its public name, stability contract and the
+/// operations and executions it can call.
 #[derive(Clone, Copy)]
 pub struct Variant {
     /// Catalog implementation identity.
@@ -313,8 +314,8 @@ pub struct Variant {
     pub stable: bool,
     /// Catalog adapter family.
     pub adapter: &'static str,
-    /// Owned worker count, absent for serial adapters.
-    pub threads: Option<usize>,
+    /// The catalog's parallel full-sort entry point, if any.
+    pub parallel_sort: Option<crate::plan::ParallelSort>,
 }
 /// Lists the adapters measured in the selected executable configuration.
 pub fn list_variants() -> Vec<Variant> {
@@ -324,7 +325,7 @@ pub fn list_variants() -> Vec<Variant> {
         .filter(|implementation| {
             implementation.adapter == "common"
                 || (implementation.adapter == "reference" && cfg!(feature = "operations"))
-                || (cfg!(feature = "rayon") && implementation.threads.is_some())
+                || (implementation.adapter == "rayon" && cfg!(feature = "rayon"))
                 || (implementation.adapter == "revision" && cfg!(tessera_bench_revisions))
                 || implementation.adapter == "rust"
                 || (implementation.adapter == "native" && cfg!(feature = "compare-native"))
@@ -333,7 +334,7 @@ pub fn list_variants() -> Vec<Variant> {
             name: &implementation.id,
             stable: implementation.stable,
             adapter: &implementation.adapter,
-            threads: implementation.threads,
+            parallel_sort: implementation.parallel,
         })
         .collect()
 }
@@ -348,10 +349,6 @@ fn try_prepare_common<T: TesseraAdapter>(
         return operations::prepare(v, input);
         #[cfg(not(feature = "operations"))]
         return None;
-    }
-    #[cfg(feature = "rayon")]
-    if let Some(threads) = v.threads {
-        return Some(parallel::prepare(input, v.adapter, threads));
     }
     Some(match v.name {
         "tessera" => prepare_kernel(input, true, T::tessera),
@@ -385,18 +382,44 @@ macro_rules! copy_adapter {
     }};
 }
 impl Variant {
-    /// Checks capabilities without starting workers for a parallel adapter.
-    pub fn supports(self, input: &CaseInput) -> bool {
-        // Every CaseInput representation implements TesseraAdapter's parallel
-        // operations. Preparing one here would warm and discard a real pool.
-        (input.operation().is_sort() && cfg!(feature = "rayon") && self.threads.is_some())
-            || self.prepare(input, 0).is_some()
+    /// Whether this adapter calls a parallel entry point for the operation.
+    /// The catalog lists which implementations have a parallel full sort.
+    fn parallel(self, operation: &Operation) -> bool {
+        cfg!(feature = "rayon") && operation.is_sort() && self.parallel_sort.is_some()
     }
 
-    /// Prepares an adapter for this input, or declines an unsupported combination.
-    pub fn prepare(self, input: &CaseInput, scratch_bytes: usize) -> Option<Box<dyn Kernel>> {
+    /// Checks capabilities without starting workers for a parallel execution.
+    pub fn supports(self, input: &CaseInput, execution: Execution) -> bool {
+        // Every CaseInput representation implements TesseraAdapter's parallel
+        // operations. Preparing one here would warm and discard a real pool.
+        match execution {
+            Execution::Serial => self.prepare(input, execution, 0).is_some(),
+            Execution::Threads(_) => self.parallel(input.operation()),
+        }
+    }
+
+    /// Prepares an adapter for this input and execution, or declines an
+    /// unsupported combination. A parallel execution starts and warms its
+    /// N-worker pool here, outside every timed and counted region.
+    pub fn prepare(
+        self,
+        input: &CaseInput,
+        execution: Execution,
+        scratch_bytes: usize,
+    ) -> Option<Box<dyn Kernel>> {
+        if let Some(threads) = execution.threads() {
+            if !self.parallel(input.operation()) {
+                return None;
+            }
+            #[cfg(feature = "rayon")]
+            return Some(input.prepare_parallel(self.name, threads));
+            #[cfg(not(feature = "rayon"))]
+            unreachable!("parallel execution without the rayon feature: {threads}");
+        }
         if input.operation().is_sort() {
-            if self.adapter == "reference" {
+            if self.adapter == "reference"
+                || self.parallel_sort == Some(crate::plan::ParallelSort::Only)
+            {
                 return None;
             }
         } else if !cfg!(feature = "operations")
@@ -490,7 +513,7 @@ mod tests {
                     .into_iter()
                     .filter(|v| v.name == "tessera" || v.adapter == "revision")
                 {
-                    let mut kernel = variant.prepare(&input, 0).unwrap();
+                    let mut kernel = variant.prepare(&input, Execution::Serial, 0).unwrap();
                     kernel.restore(2);
                     kernel.run_batch();
                     kernel.check().unwrap_or_else(|error| {
@@ -504,9 +527,7 @@ mod tests {
     #[test]
     fn adapters_follow_features() {
         let names: Vec<_> = list_variants().iter().map(|v| v.name).collect();
-        for id in ["tessera-par-8", "rayon-stable-8"] {
-            assert_eq!(names.contains(&id), cfg!(feature = "rayon"), "{id}");
-        }
+        assert_eq!(names.contains(&"rayon-stable"), cfg!(feature = "rayon"));
         assert!(names.contains(&"tessera"));
         assert!(names.contains(&"std-stable"));
         assert!(names.contains(&"radsort"));
@@ -526,9 +547,18 @@ mod tests {
                 operation: Operation::Sort {},
             });
             for variant in list_variants() {
+                for execution in [Execution::Serial, "t1".parse().unwrap()] {
+                    assert_eq!(
+                        variant.supports(&input, execution),
+                        variant.prepare(&input, execution, 0).is_some(),
+                        "{} / {ty} / {execution}",
+                        variant.name,
+                    );
+                }
+                // Only the full sorts of Tessera and Rayon have parallel entry points.
                 assert_eq!(
-                    variant.supports(&input),
-                    variant.prepare(&input, 0).is_some(),
+                    variant.supports(&input, "t2".parse().unwrap()),
+                    cfg!(feature = "rayon") && ["tessera", "rayon-stable"].contains(&variant.name),
                     "{} / {ty}",
                     variant.name,
                 );
@@ -547,8 +577,8 @@ mod tests {
                         len,
                         operation: Operation::Sort {},
                     });
-                    for variant in list_variants().into_iter().filter(|v| v.threads.is_none()) {
-                        let kernel = variant.prepare(&input, 32768);
+                    for variant in list_variants() {
+                        let kernel = variant.prepare(&input, Execution::Serial, 32768);
                         let supported = ["common", "revision"].contains(&variant.adapter)
                             || ["glidesort", "glidesort-sqrt", "std-unstable"]
                                 .contains(&variant.name);
@@ -621,7 +651,7 @@ mod tests {
             CaseInput::ReverseF64(PreparedRecords::new(reversed)),
         ] {
             for v in list_variants() {
-                let Some(mut k) = v.prepare(&input, 32768) else {
+                let Some(mut k) = v.prepare(&input, Execution::Serial, 32768) else {
                     continue;
                 };
                 k.restore(2);

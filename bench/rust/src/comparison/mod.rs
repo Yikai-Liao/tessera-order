@@ -13,7 +13,7 @@ mod variant;
 pub use record::CaseInput;
 pub use variant::{Kernel, Variant, list_variants};
 
-use crate::plan::{InputCase, catalog};
+use crate::plan::{Execution, InputCase, Operation, catalog};
 use serde_json::{Value, json};
 use std::{
     collections::BTreeSet,
@@ -124,10 +124,16 @@ impl Options {
                 "paired implementation runs require tessera and std-stable controls".into(),
             );
         }
-        if options.plan.has_rule_operations() {
-            return Err("implementation comparisons take one plan-level operation; rule operations are for revision plans".into());
+        let operations: BTreeSet<_> = options
+            .plan
+            .cases()?
+            .into_iter()
+            .map(|(case, _)| case.operation)
+            .collect();
+        if operations.len() != 1 {
+            return Err("an implementation comparison measures one operation per session; split the plan by operation".into());
         }
-        if !options.plan.operation().is_sort() && !cfg!(feature = "operations") {
+        if !options.operation().is_sort() && !cfg!(feature = "operations") {
             return Err("non-sort operations require the operations benchmark feature; the library APIs are always available".into());
         }
         let available = variant::list_variants();
@@ -142,22 +148,34 @@ impl Options {
         Ok(options)
     }
 
-    /// Selects all supported cases before applying a resumable group restriction.
-    fn cases(&self, group: Option<&str>) -> Result<Vec<InputCase>> {
-        // Ratios require a common cohort, including separately selected parallel inputs.
+    /// The session's single operation, checked by [`Self::parse`].
+    fn operation(&self) -> Operation {
+        let (case, _) = &self.plan.cases().expect("validated plan")[0];
+        case.operation.clone()
+    }
+
+    /// Selects all cases before applying a resumable group restriction.
+    fn cases(&self, group: Option<&str>) -> Result<Vec<(InputCase, Vec<Execution>)>> {
         let cases: Vec<_> = self
             .plan
-            .inputs()?
+            .cases()?
             .into_iter()
-            .chain(self.plan.parallel_inputs()?)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .filter(|case| group.is_none_or(|group| case.group() == group))
+            .filter(|(case, _)| group.is_none_or(|group| case.group() == group))
             .collect();
         if cases.is_empty() {
             return Err("the benchmark plan selects no supported cases".into());
         }
         Ok(cases)
+    }
+
+    /// The planned columns whose adapters support this case, in catalog and
+    /// execution order, and the planned columns they omit.
+    fn columns(&self, case: &InputCase, executions: &[Execution]) -> (Columns, Columns) {
+        let input = record::CaseInput::new(&case.probe());
+        self.variants()
+            .into_iter()
+            .flat_map(|v| executions.iter().map(move |&e| (v, e)))
+            .partition(|(v, e)| v.supports(&input, *e))
     }
 
     /// Retains the selected implementations available in this build configuration.
@@ -168,6 +186,9 @@ impl Options {
             .collect()
     }
 }
+/// Implementation adapters, each at one execution.
+type Columns = Vec<(Variant, Execution)>;
+
 /// Holds a kernel lock until this worker exits, including after its Node parent dies.
 ///
 /// The comparison and memory workers lock their own roles. Before touching timing
@@ -210,7 +231,7 @@ fn append_record(file: &mut File, value: &impl serde::Serialize) -> Result<()> {
     Ok(())
 }
 /// Combines build provenance with the plan and adapter capabilities.
-fn create_manifest(options: &Options, cases: &[InputCase]) -> Value {
+fn create_manifest(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> Value {
     let mut provenance: Value =
         serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/provenance.json")))
             .expect("build provenance is valid JSON");
@@ -222,36 +243,28 @@ fn create_manifest(options: &Options, cases: &[InputCase]) -> Value {
         )
     ));
     provenance["plan_name"] = json!(options.plan_name);
-    provenance["plan_version"] = json!(if options.plan.operation().is_sort() {
-        1
-    } else {
-        2
-    });
-    if !options.plan.operation().is_sort() {
+    if !options.operation().is_sort() {
         provenance["index_bytes"] = json!(size_of::<usize>());
     }
     provenance["plan"] = json!(options.plan);
+    let mut measured = BTreeSet::new();
     provenance["cases"] = json!(
         cases
             .iter()
-            .map(|case| {
-                let probe = case.probe();
-                let input = record::CaseInput::new(&probe);
-                let supported: Vec<_> = options.variants()
-                    .iter()
-                    .filter(|v| v.supports(&input))
-                    .map(|v| v.name)
-                    .collect();
+            .map(|(case, executions)| {
+                let input = record::CaseInput::new(&case.probe());
+                let (supported, omitted) = options.columns(case, executions);
+                measured.extend(supported.iter().map(|&(v, e)| (v.name, e)));
                 let mut entry = json!(case);
-                entry["variants"] = json!(supported);
+                entry["columns"] = json!(supported.iter().map(|&(v, e)| run::column_id(v, e)).collect::<Vec<_>>());
+                entry["omitted"] = json!(omitted.iter()
+                    .map(|&(v, e)| json!({"column":run::column_id(v, e),"reason":"unsupported operation/input/execution combination"}))
+                    .collect::<Vec<_>>());
                 if !case.operation.is_sort() {
-                    entry["implementations"] = json!(options.variants().iter()
-                        .filter_map(|v| v.prepare(&input, 0).map(|k| (v.name, k.description())))
+                    // Serial non-sort routes do not start pools.
+                    entry["routes"] = json!(supported.iter()
+                        .filter_map(|&(v, e)| v.prepare(&input, e, 0).map(|k| (run::column_id(v, e), k.description())))
                         .collect::<std::collections::BTreeMap<_, _>>());
-                    entry["omitted"] = json!(options.variants().iter()
-                        .filter(|v| !supported.contains(&v.name))
-                        .map(|v| json!({"variant":v.name,"reason":"unsupported operation/input combination"}))
-                        .collect::<Vec<_>>());
                 }
                 #[cfg(tessera_bench_revisions)]
                 let entry = {
@@ -267,13 +280,17 @@ fn create_manifest(options: &Options, cases: &[InputCase]) -> Value {
     provenance["min_sample_ns"] = json!(options.sampling.min_sample_ns);
     provenance["prepared_cap_bytes"] = json!(options.sampling.prepared_cap_bytes);
     provenance["blocks"] = json!(options.sampling.blocks);
-    provenance["variants"] = json!(
+    provenance["columns"] = json!(
         options
             .variants()
             .iter()
-            .map(
-                |v| json!({"name":v.name,"stable":v.stable,"adapter":v.adapter,"threads":v.threads})
-            )
+            .flat_map(|v| {
+                measured
+                    .iter()
+                    .filter(|(name, _)| *name == v.name)
+                    .map(|&(_, e)| json!({"id":run::column_id(*v, e),"implementation":v.name,"execution":e,"stable":v.stable,"adapter":v.adapter}))
+                    .collect::<Vec<_>>()
+            })
             .collect::<Vec<_>>()
     );
     #[cfg(feature = "compare-native")]
@@ -383,7 +400,7 @@ pub fn read_scratch(directory: &Path) -> Result<std::collections::BTreeMap<Strin
     verify_memory_build(directory)?;
     let mut scratch = std::collections::BTreeMap::new();
     for row in read_block_records(&directory.join("memory.jsonl"))? {
-        if row["variant"] != "tessera" || row["build"] != BUILD {
+        if row["column"] != TESSERA_SERIAL || row["build"] != BUILD {
             continue;
         }
         let id = row["case_id"]
@@ -400,16 +417,19 @@ pub fn read_scratch(directory: &Path) -> Result<std::collections::BTreeMap<Strin
     Ok(scratch)
 }
 
-/// Finds Tessera's measured peak allocation size for a case.
+/// The serial Tessera control, whose memory sizes `glidesort-sqrt`'s buffer.
+const TESSERA_SERIAL: &str = "tessera/serial";
+
+/// Finds serial Tessera's measured peak allocation size for a case.
 fn find_scratch_bytes(case: &InputCase, rows: &[Value]) -> Option<usize> {
     rows.iter()
-        .find(|r| r["case_id"] == case.id() && r["variant"] == "tessera" && r["build"] == BUILD)
+        .find(|r| r["case_id"] == case.id() && r["column"] == TESSERA_SERIAL && r["build"] == BUILD)
         .and_then(|r| r["peak_extra_bytes"].as_u64())
         .map(|n| n as usize)
 }
 /// Checks every supported adapter against each case's shared reference.
-fn validate_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
-    for (index, case) in cases.iter().enumerate() {
+fn validate_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> Result<()> {
+    for (index, (case, executions)) in cases.iter().enumerate() {
         eprintln!(
             "Validating {}/{}: {} ({BUILD})",
             index + 1,
@@ -417,10 +437,10 @@ fn validate_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
             case.id()
         );
         let input = record::CaseInput::new(case);
-        for v in options.variants() {
-            if let Some(mut k) = v.prepare(&input, 32_768) {
+        for (v, e) in options.columns(case, executions).0 {
+            if let Some(mut k) = v.prepare(&input, e, 32_768) {
                 k.measure_batch(1)
-                    .map_err(|e| format!("{} {}: {e}", case.id(), v.name))?;
+                    .map_err(|error| format!("{} {}: {error}", case.id(), run::column_id(v, e)))?;
             }
         }
     }
@@ -428,7 +448,7 @@ fn validate_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
     Ok(())
 }
 /// Resumes completed groups and records the missing paired measurements.
-fn measure_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
+fn measure_cases(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> Result<()> {
     prepare_output(options)?;
     // The memory worker owns completeness for every adapter, not just Tessera.
     // It repairs an interrupted write and skips every row already committed.
@@ -466,7 +486,7 @@ fn measure_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
         .collect();
     rewrite_journal(&path, &retained)?;
     let mut f = OpenOptions::new().create(true).append(true).open(path)?;
-    let groups: BTreeSet<_> = cases.iter().map(InputCase::group).collect();
+    let groups: BTreeSet<_> = cases.iter().map(|(case, _)| case.group()).collect();
     for group in groups {
         if completed.contains(&group) {
             continue;
@@ -475,13 +495,13 @@ fn measure_cases(options: &Options, cases: &[InputCase]) -> Result<()> {
         let mut start = host::observe_group(&group, "start");
         start["build"] = json!(BUILD);
         append_record(&mut f, &start)?;
-        for case in cases.iter().filter(|case| case.group() == group) {
+        for (case, executions) in cases.iter().filter(|(case, _)| case.group() == group) {
             let bytes = *scratch
                 .get(&case.id())
                 .ok_or_else(|| format!("missing Tessera memory measurement: {}", case.id()))?;
             run::measure_case(
                 case,
-                &options.variants(),
+                &options.columns(case, executions).0,
                 bytes,
                 &options.sampling,
                 BUILD,
@@ -511,7 +531,7 @@ pub fn main(memory: bool) -> Result<()> {
             "compare <list|validate|run>"
         };
         println!(
-            "{command} [--plan smoke|release|FILE] [--group TYPE/DISTRIBUTION] [--out DIR] [--sample-ms N] [--memory-mib N] [--blocks 3|9]"
+            "{command} [--plan smoke|release|FILE] [--group OPERATION/TYPE/DISTRIBUTION[/PARAMETERS]] [--out DIR] [--sample-ms N] [--memory-mib N] [--blocks 3|9]"
         );
         return Ok(());
     }
@@ -523,26 +543,36 @@ pub fn main(memory: bool) -> Result<()> {
     }
     match options.command.as_str() {
         "list" => {
+            // One row per adapter and planned execution with any supported type.
+            let executions: BTreeSet<_> =
+                cases.iter().flat_map(|(_, e)| e.iter().copied()).collect();
             for v in variant::list_variants() {
-                let supported: Vec<_> = catalog()
-                    .types
-                    .iter()
-                    .map(|ty| ty.id.as_str())
-                    .filter(|ty| {
-                        v.supports(&record::CaseInput::new(&InputCase {
-                            ty: (*ty).into(),
-                            distribution: "random".into(),
-                            len: 32,
-                            operation: options.plan.operation().probe(),
-                        }))
-                    })
-                    .collect();
-                println!(
-                    "{}\t{}\t{}",
-                    v.name,
-                    if v.stable { "stable" } else { "unstable" },
-                    supported.join(",")
-                );
+                for &execution in &executions {
+                    let supported: Vec<_> = catalog()
+                        .types
+                        .iter()
+                        .map(|ty| ty.id.as_str())
+                        .filter(|ty| {
+                            v.supports(
+                                &record::CaseInput::new(&InputCase {
+                                    ty: (*ty).into(),
+                                    distribution: "random".into(),
+                                    len: 32,
+                                    operation: options.operation().probe(),
+                                }),
+                                execution,
+                            )
+                        })
+                        .collect();
+                    if !supported.is_empty() {
+                        println!(
+                            "{}\t{}\t{}",
+                            run::column_id(v, execution),
+                            if v.stable { "stable" } else { "unstable" },
+                            supported.join(",")
+                        );
+                    }
+                }
             }
             Ok(())
         }
@@ -567,13 +597,13 @@ pub fn main(memory: bool) -> Result<()> {
 /// Tessera only, which sizes glidesort-sqrt; 10M u64 keys and 16M 8-byte rows fit.
 const OPPONENT_MEMORY_INPUT_BYTES: usize = 128 << 20;
 
-fn measure_memory(options: &Options, cases: &[InputCase]) -> Result<()> {
+fn measure_memory(options: &Options, cases: &[(InputCase, Vec<Execution>)]) -> Result<()> {
     prepare_output(options)?;
     let path = options.output_dir.join("memory.jsonl");
     let mut rows = read_block_records(&path)?;
     rewrite_journal(&path, &rows)?;
     let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
-    for (index, case) in cases.iter().enumerate() {
+    for (index, (case, executions)) in cases.iter().enumerate() {
         eprintln!(
             "Measuring memory {}/{}: {} ({BUILD})",
             index + 1,
@@ -581,29 +611,30 @@ fn measure_memory(options: &Options, cases: &[InputCase]) -> Result<()> {
             case.id()
         );
         let input = record::CaseInput::new(case);
-        for v in options.variants() {
+        for (v, e) in options.columns(case, executions).0 {
             if case.operation.is_sort()
                 && case.input_bytes() > OPPONENT_MEMORY_INPUT_BYTES
                 && v.name != "tessera"
-                && v.adapter != "tessera-par"
             {
                 continue;
             }
+            let column = run::column_id(v, e);
             if rows
                 .iter()
-                .any(|r| r["case_id"] == case.id() && r["variant"] == v.name && r["build"] == BUILD)
+                .any(|r| r["case_id"] == case.id() && r["column"] == column && r["build"] == BUILD)
             {
                 continue;
             }
-            if let Some(mut k) = v.prepare(&input, find_scratch_bytes(case, &rows).unwrap_or(0)) {
+            if let Some(mut k) = v.prepare(&input, e, find_scratch_bytes(case, &rows).unwrap_or(0))
+            {
                 k.restore(1);
                 super::allocation::begin();
                 k.run_batch();
                 let peak = super::allocation::end();
                 k.check()
-                    .map_err(|e| format!("{} {}: {e}", case.id(), v.name))?;
+                    .map_err(|error| format!("{} {column}: {error}", case.id()))?;
                 host::check_threads(k.worker_threads())?;
-                let mut row = json!({"case_id":case.id(),"variant":v.name,"build":BUILD,"peak_extra_bytes":peak,"verified":true});
+                let mut row = json!({"case_id":case.id(),"column":column,"build":BUILD,"peak_extra_bytes":peak,"verified":true});
                 if !case.operation.is_sort() {
                     row["output_bytes"] = json!(k.output_bytes());
                 }
@@ -721,10 +752,10 @@ mod tests {
         }
         std::fs::write(&path, serde_json::to_vec(&timing).unwrap()).unwrap();
         let journal = output_dir.join("memory.jsonl");
-        let row = serde_json::json!({"case_id":"u64/random/49/s1", "variant":"tessera", "build":super::BUILD, "verified":true, "peak_extra_bytes":123});
+        let row = serde_json::json!({"case_id":"sort/u64/random/49/s1", "column":"tessera/serial", "build":super::BUILD, "verified":true, "peak_extra_bytes":123});
         std::fs::write(&journal, format!("{row}\n")).unwrap();
         assert_eq!(
-            super::read_scratch(&output_dir).unwrap()["u64/random/49/s1"],
+            super::read_scratch(&output_dir).unwrap()["sort/u64/random/49/s1"],
             123
         );
         std::fs::write(&journal, format!("{row}\n{row}\n")).unwrap();

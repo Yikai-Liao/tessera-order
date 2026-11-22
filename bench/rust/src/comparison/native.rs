@@ -200,14 +200,19 @@ mod tests {
         // Exercise both sides of upstream small-sort and radix thresholds.
         let plan = crate::plan::Plan::parse(
             r#"
-            schema = 1
+            schema = 3
             implementations = ["duckdb"]
             [[include]]
             lengths = [1, 2, 23, 24, 127, 128, 129, 1023, 1024, 1025, 8192]
         "#,
         )
         .unwrap();
-        let mut cases = plan.inputs().unwrap();
+        let mut cases: Vec<_> = plan
+            .cases()
+            .unwrap()
+            .into_iter()
+            .map(|(case, _)| case)
+            .collect();
         // The public plan requires positive lengths; the FFI also accepts empty input.
         cases.extend(
             crate::plan::catalog()
@@ -229,7 +234,7 @@ mod tests {
                 name: &implementation.id,
                 stable: implementation.stable,
                 adapter: &implementation.adapter,
-                threads: None,
+                parallel_sort: implementation.parallel,
             };
             for case in &cases {
                 // This independent oracle preserves native capabilities and
@@ -247,7 +252,7 @@ mod tests {
                     _ => panic!("missing support expectation for record type {}", case.ty),
                 };
                 let input = CaseInput::new(case);
-                let prepared = variant.prepare(&input, 0);
+                let prepared = variant.prepare(&input, crate::plan::Execution::Serial, 0);
                 assert_eq!(
                     prepared.is_some(),
                     expected,

@@ -9,7 +9,9 @@ import { CONTINUOUS_SHARDS } from "../paired.ts";
 import { baseHash, hash } from "./report.ts";
 
 const defaultCases = [48, 49, 1000, 65536, 1000000]
-  .flatMap((len) => ["api", "par-4"].map((mode) => `rust/u64/random/${len}/s1/${mode}`))
+  .flatMap((len) =>
+    ["serial", "t4"].map((execution) => `rust/sort/u64/random/${len}/s1/${execution}`),
+  )
   .sort();
 
 /** Synthetic blocks exercise protocol validation, not measured performance. */

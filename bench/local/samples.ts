@@ -48,7 +48,7 @@ export async function measureSamples(
   run.samples = {};
   await save();
   const mixed = (run.shard?.allCases ?? run.cases).some(
-    (id) => parseCriterionId(id).mode === "par-4",
+    (id) => parseCriterionId(id).execution !== "serial",
   );
   // Concurrent lanes finish in any order; keep each snapshot write whole.
   let saving = Promise.resolve();
@@ -109,9 +109,9 @@ export async function measureSamples(
     run.samples[id] = samples;
     await persist();
   };
-  // Four-thread cases own every reserved CPU; serial lanes start only after them.
-  const parallel = run.cases.filter((id) => parseCriterionId(id).mode === "par-4");
-  const serial = run.cases.filter((id) => parseCriterionId(id).mode !== "par-4");
+  // Parallel cases own every reserved CPU; serial lanes start only after them.
+  const parallel = run.cases.filter((id) => parseCriterionId(id).execution !== "serial");
+  const serial = run.cases.filter((id) => parseCriterionId(id).execution === "serial");
   for (const id of parallel) await measureCase(id, cpu);
   const lanes = mixed && cpu ? await serialLanes(cpu) : [cpu];
   const count = Math.min(lanes.length, serial.length);

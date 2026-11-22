@@ -3,11 +3,18 @@
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  type CaseIdentity,
+  caseId,
   catalog,
-  comparisonId,
+  columnId,
+  criterionId,
   distribution,
+  type Execution,
+  executionThreads,
   implementation,
-  parseComparisonId,
+  parseCaseId,
+  parseColumnId,
+  parseCriterionId,
 } from "../catalog.ts";
 import {
   type Cohort,
@@ -27,43 +34,46 @@ import {
   type TrackingRun,
 } from "./result.ts";
 
-// Opponents run only the serial entry point, so the comparison reads serial cases.
-const SERIAL = "api";
-const key = (id: string) => `rust/${id}/${SERIAL}`;
+/** A column's value on a case, keyed as Criterion names it. */
+const timed = (run: TrackingRun | undefined, id: string, execution: Execution) =>
+  run?.values[criterionId(parseCaseId(id), execution)];
 
 /**
- * Each implementation's latest run on the hardware of Tessera's latest run.
+ * Each column's latest run on the hardware of Tessera's latest serial run, by column ID.
  *
  * Runs are independent: their ratios are descriptive, not paired verdicts.
  */
 export function latestRuns(runs: Map<string, TrackingRun[]>) {
-  const latest = (list: TrackingRun[]) => list.toSorted((a, b) => a.time.localeCompare(b.time));
-  const tessera = latest(runs.get("tessera") ?? []).at(-1);
+  const byTime = (list: TrackingRun[]) => list.toSorted((a, b) => a.time.localeCompare(b.time));
+  const tessera = byTime(
+    (runs.get("tessera") ?? []).filter((entry) => entry.execution === "serial"),
+  ).at(-1);
   if (!tessera) return null;
   const chosen = new Map<string, TrackingRun>();
-  for (const [id, list] of runs) {
-    const run = latest(list.filter((entry) => entry.spec === tessera.spec)).at(-1);
-    if (run) chosen.set(id, run);
-  }
+  for (const [id, list] of runs)
+    for (const run of byTime(list.filter((entry) => entry.spec === tessera.spec)))
+      chosen.set(columnId({ implementation: id, execution: run.execution as Execution }), run);
   return { spec: tessera.spec, runs: chosen };
 }
 
-/** The figures' view of independent runs: speeds against slice::sort's run, peaks as recorded. */
+/** The figures' view of serial columns: speeds against slice::sort's run, peaks as recorded. */
 export function trackingField(runs: Map<string, TrackingRun>): Field {
-  const value = (id: string, name: string) => runs.get(name)?.values[key(id)]?.[0] ?? null;
-  const ids = new Set(
-    [...runs.values()].flatMap((run) =>
-      Object.keys(run.values)
-        .filter((entry) => entry.startsWith("rust/") && entry.endsWith(`/${SERIAL}`))
-        .map((entry) => entry.slice("rust/".length, -`/${SERIAL}`.length)),
-    ),
-  );
+  const serial = (name: string) =>
+    runs.get(columnId({ implementation: name, execution: "serial" }));
+  const value = (id: string, name: string) => timed(serial(name), id, "serial")?.[0] ?? null;
+  const cases = new Map<string, CaseIdentity>();
+  for (const [column, run] of runs) {
+    if (parseColumnId(column).execution !== "serial") continue;
+    for (const key of Object.keys(run.values)) {
+      const input = parseCriterionId(key);
+      cases.set(caseId(input), input);
+    }
+  }
   return {
-    // Serial adapters only; a named parallel variant is not an opponent of serial runs.
     implementations: trackingImplementations
-      .filter((entry) => runs.has(entry.id) && entry.threads === undefined)
+      .filter((entry) => serial(entry.id))
       .map((entry) => ({ name: entry.id, stable: entry.stable })),
-    cases: [...ids].map(parseComparisonId),
+    cases: [...cases.values()],
     speed: (id, name) => {
       const std = value(id, "std-stable"),
         own = value(id, name);
@@ -71,9 +81,9 @@ export function trackingField(runs: Map<string, TrackingRun>): Field {
     },
     nsPerKey: (id, name) => {
       const own = value(id, name);
-      return own === null ? null : own / parseComparisonId(id).len;
+      return own === null ? null : own / parseCaseId(id).len;
     },
-    peak: (id, name) => runs.get(name)?.memory?.[key(id)] ?? null,
+    peak: (id, name) => serial(name)?.memory?.[criterionId(parseCaseId(id), "serial")] ?? null,
   };
 }
 
@@ -93,7 +103,7 @@ export function trackingCohort(field: Field): Cohort | null {
     field.speed(id, "tessera") !== null && field.nsPerKey(id, "std-stable") !== null;
   const order = catalog.distributions.map((entry) => entry.id);
   const widest = (ty: string) => {
-    const cases = field.cases.filter((entry) => entry.ty === ty && measured(comparisonId(entry)));
+    const cases = field.cases.filter((entry) => entry.ty === ty && measured(caseId(entry)));
     const [found] = [...Map.groupBy(cases, (entry) => entry.len)].toSorted(
       (a, b) => b[1].length - a[1].length || b[0] - a[0],
     );
@@ -114,7 +124,7 @@ export function trackingCohort(field: Field): Cohort | null {
   const { n, distributions } = u64;
   // Element types compare over the patterns every measured type shares at that length.
   const types = Map.groupBy(
-    field.cases.filter((entry) => entry.len === n && measured(comparisonId(entry))),
+    field.cases.filter((entry) => entry.len === n && measured(caseId(entry))),
     (entry) => entry.ty,
   );
   const typeDistributions = distributions.filter((distributionId) =>
@@ -122,7 +132,7 @@ export function trackingCohort(field: Field): Cohort | null {
       cases.some((entry) => entry.distribution === distributionId),
     ),
   );
-  const shared = field.cases.filter((entry) => measured(comparisonId(entry)));
+  const shared = field.cases.filter((entry) => measured(caseId(entry)));
   const lengths = [...Map.groupBy(shared, (entry) => entry.len)]
     .filter(([, cases]) =>
       [...Map.groupBy(cases, (entry) => entry.ty).values()].some((of) => of.length > 1),
@@ -156,61 +166,57 @@ export function trackingCohort(field: Field): Cohort | null {
 }
 
 /**
- * Tessera's and Rayon's stable parallel variants at every thread count both ran, on each
- * input every one of them measured at their most common length. Rayon on one thread is the
+ * Tessera's and Rayon's stable parallel columns at every pool size both ran, on each input
+ * every one of them measured at their most common length. Rayon in one worker is the
  * baseline: slice::sort has no runs at most parallel lengths.
  */
 export function trackingScaling(runs: Map<string, TrackingRun>): Scaling | null {
-  const variant = (adapter: string, threads: number) =>
-    trackingImplementations.find((entry) => entry.adapter === adapter && entry.threads === threads);
-  const counts = trackingImplementations
-    .filter((entry) => entry.adapter === "tessera-par" && entry.threads !== undefined)
-    .map((entry) => entry.threads!)
-    .filter((t) =>
-      [variant("tessera-par", t), variant("rayon-stable", t)].every((e) => e && runs.has(e.id)),
-    )
+  const run = (name: string, t: number) =>
+    runs.get(columnId({ implementation: name, execution: `t${t}` }));
+  const counts = [...runs.keys()]
+    .map(parseColumnId)
+    .filter((column) => column.implementation === "tessera")
+    .map((column) => executionThreads(column.execution))
+    .filter((t): t is number => t !== undefined && run("rayon-stable", t) !== undefined)
     .toSorted((a, b) => a - b);
   if (counts[0] !== 1) return null;
-  const time = (adapter: string, t: number, id: string) =>
-    runs.get(variant(adapter, t)!.id)!.values[`rust/${id}/par-${t}`]?.[0];
-  const ids = Object.keys(runs.get(variant("rayon-stable", 1)!.id)!.values)
-    .map((key) => key.slice("rust/".length, key.lastIndexOf("/")))
-    .filter((id) => counts.every((t) => time("tessera-par", t, id) && time("rayon-stable", t, id)));
-  const [found] = [...Map.groupBy(ids, (id) => parseComparisonId(id).len)].toSorted(
+  const time = (name: string, t: number, id: string) => timed(run(name, t), id, `t${t}`)?.[0];
+  const ids = Object.keys(run("rayon-stable", 1)!.values)
+    .map((key) => caseId(parseCriterionId(key)))
+    .filter((id) => counts.every((t) => time("tessera", t, id) && time("rayon-stable", t, id)));
+  const [found] = [...Map.groupBy(ids, (id) => parseCaseId(id).len)].toSorted(
     (a, b) => b[1].length - a[1].length || b[0] - a[0],
   );
   if (!found) return null;
   const [n, inputs] = found;
-  const speed = (adapter: string, t: number, id: string) =>
-    time("rayon-stable", 1, id)! / time(adapter, t, id)!;
-  const of = (adapter: string, id: string) => counts.map((t) => speed(adapter, t, id));
-  // Tessera's parallel journals update only when dispatched, so they name their own commits.
-  const hashes = [
-    ...new Set(counts.map((t) => runs.get(variant("tessera-par", t)!.id)!.hash.slice(0, 7))),
-  ];
+  const speed = (name: string, t: number, id: string) =>
+    time("rayon-stable", 1, id)! / time(name, t, id)!;
+  const of = (name: string, id: string) => counts.map((t) => speed(name, t, id));
+  // Pool sizes outside the continuous plan update only when dispatched, so they name their commits.
+  const hashes = [...new Set(counts.map((t) => run("tessera", t)!.hash.slice(0, 7)))];
   return {
     n,
     threads: counts,
     tessera: hashes,
     inputs: inputs.map((id) => {
-      const { ty, distribution: distributionId } = parseComparisonId(id);
+      const { ty, distribution: distributionId } = parseCaseId(id);
       return {
         label: `${ty} · ${distribution(distributionId).label}`,
-        tessera: of("tessera-par", id),
+        tessera: of("tessera", id),
         rayon: of("rayon-stable", id),
       };
     }),
   };
 }
 
-/** The growth sweep in the figures' terms: serial tracking implementations, in catalog order. */
+/** The growth sweep in the figures' terms: implementations with a serial entry, in catalog order. */
 export function trackingGrowth(record: GrowthRecord): Growth {
   return {
     ty: record.type,
     distribution: record.distribution,
     lengths: record.lengths,
     peaks: trackingImplementations
-      .filter((entry) => entry.threads === undefined && entry.id in record.peaks)
+      .filter((entry) => entry.parallel !== "only" && entry.id in record.peaks)
       .map((entry) => ({ name: entry.id, values: record.peaks[entry.id] })),
     source: `Tessera at ${record.hash.slice(0, 7)}`,
   };
@@ -248,8 +254,15 @@ export function comparisonData(
   }));
   return comparisonSchema.parse({
     spec: latest?.spec ?? null,
-    runs: [...(latest?.runs ?? [])]
-      .filter(([id]) => cohort && field.implementations.some((entry) => entry.name === id))
+    runs: field.implementations
+      .filter(() => cohort)
+      .map(
+        ({ name }) =>
+          [
+            name,
+            latest!.runs.get(columnId({ implementation: name, execution: "serial" }))!,
+          ] as const,
+      )
       .map(([id, run]) => ({
         algorithm: id,
         label: implementation(id).label,

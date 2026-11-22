@@ -34,7 +34,7 @@ import {
 
 const props = withDefaults(defineProps<{ source?: string; caseId?: string }>(), {
   source: "https://raw.githubusercontent.com/Yikai-Liao/tessera-order/benchmark-data/tessera/",
-  caseId: "rust/u64/random/65536/s1/api",
+  caseId: "rust/sort/u64/random/65536/s1/serial",
 });
 type Color = ComparedCase["color"];
 const DAY_MS = 86400000;

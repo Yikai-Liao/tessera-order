@@ -2,12 +2,19 @@
 
 //! Shared experiment selection and expansion, independent of measurement scheduling.
 
+mod execution;
 mod operation;
+pub use execution::Execution;
 pub use operation::Operation;
 
 use serde::{Deserialize, Serialize};
 
-use std::{collections::BTreeSet, sync::OnceLock};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    str::FromStr,
+    sync::OnceLock,
+};
 use tessera_order::thresholds::{INSERTION_MAX, TILE_BYTES};
 
 /// The catalog fields needed to expand and validate experiments.
@@ -19,6 +26,7 @@ pub(crate) struct Catalog {
     pub(crate) implementations: Vec<Implementation>,
     pub(crate) types: Vec<RecordType>,
     distributions: Vec<Distribution>,
+    operations: Vec<OperationEntry>,
     inputs: InputDefaults,
     #[serde(rename = "revisionSampling")]
     revision_sampling: Vec<RevisionSampling>,
@@ -74,8 +82,17 @@ pub(crate) struct Implementation {
     pub(crate) id: String,
     pub(crate) stable: bool,
     pub(crate) adapter: String,
-    #[serde(default)]
-    pub(crate) threads: Option<usize>,
+    /// A parallel full-sort entry point, if the implementation has one.
+    pub(crate) parallel: Option<ParallelSort>,
+}
+/// Where a parallel full-sort entry point stands beside the serial entry points.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ParallelSort {
+    /// Beside the serial entry points.
+    Also,
+    /// Instead of every serial entry point.
+    Only,
 }
 /// A record's identity and storage width.
 #[derive(Deserialize)]
@@ -86,6 +103,18 @@ pub(crate) struct RecordType {
 /// A supported input distribution.
 #[derive(Deserialize)]
 struct Distribution {
+    id: String,
+}
+/// An operation's identity and the order of its identity parameters.
+#[derive(Deserialize)]
+struct OperationEntry {
+    id: String,
+    #[serde(default)]
+    parameters: Vec<Parameter>,
+}
+/// One integer operation parameter, named as in plans and manifests.
+#[derive(Deserialize)]
+struct Parameter {
     id: String,
 }
 /// Default lengths when an inclusion rule omits its record counts.
@@ -99,7 +128,7 @@ pub(crate) fn catalog() -> &'static Catalog {
     CATALOG.get_or_init(|| {
         let catalog: Catalog =
             toml::from_str(include_str!("../../catalog.toml")).expect("valid benchmark catalog");
-        assert_eq!(catalog.schema, 1, "unsupported benchmark catalog schema");
+        assert_eq!(catalog.schema, 2, "unsupported benchmark catalog schema");
         catalog
     })
 }
@@ -132,7 +161,8 @@ impl Length {
     }
 }
 
-/// A product of input axes; absent axes use the shared catalog.
+/// A product of case and execution axes. Absent include axes use the
+/// catalog, `sort` and `serial`; absent exclude axes match every value.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Rule {
@@ -142,25 +172,33 @@ struct Rule {
     distributions: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     lengths: Option<Vec<Length>>,
-    /// An operation for this include rule's cases in a sorting plan, so one
-    /// revision plan measures sorting and selected operations together.
     #[serde(skip_serializing_if = "Option::is_none")]
     operation: Option<Operation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    executions: Option<Vec<Execution>>,
 }
 impl Rule {
     /// Matches all specified axes, resolving code-relative counts for this type.
-    fn matches(&self, ty: &str, distribution: &str, len: usize) -> bool {
+    fn matches(&self, case: &InputCase, execution: Execution) -> bool {
         self.types
             .as_ref()
-            .is_none_or(|values| values.iter().any(|v| v == ty))
+            .is_none_or(|values| values.contains(&case.ty))
             && self
                 .distributions
                 .as_ref()
-                .is_none_or(|values| values.iter().any(|v| v == distribution))
+                .is_none_or(|values| values.contains(&case.distribution))
             && self
                 .lengths
                 .as_ref()
-                .is_none_or(|values| values.iter().any(|v| v.resolve(ty) == len))
+                .is_none_or(|values| values.iter().any(|v| v.resolve(&case.ty) == case.len))
+            && self
+                .operation
+                .as_ref()
+                .is_none_or(|operation| *operation == case.operation)
+            && self
+                .executions
+                .as_ref()
+                .is_none_or(|values| values.contains(&execution))
     }
 }
 
@@ -174,7 +212,20 @@ fn record_bytes(ty: &str) -> usize {
         .bytes
 }
 
-/// One concrete seed-one input, shared by every selected API mode.
+/// The catalog entry of an operation kind.
+fn operation_entry(kind: &str) -> Option<&'static OperationEntry> {
+    catalog().operations.iter().find(|entry| entry.id == kind)
+}
+
+/// Decodes a canonical nonnegative integer identity component.
+fn parse_count(text: &str) -> Option<usize> {
+    (text == "0" || (!text.starts_with('0') && text.bytes().all(|b| b.is_ascii_digit())))
+        .then(|| text.parse().ok())
+        .flatten()
+}
+
+/// One operation on one concrete seed-one input: the pairing unit that every
+/// column of a session measures in the same blocks.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub struct InputCase {
     /// Record representation from the catalog.
@@ -183,38 +234,107 @@ pub struct InputCase {
     pub distribution: String,
     /// Number of records.
     pub len: usize,
-    /// Operation and exact parameters; absent historical inputs mean sorting.
-    #[serde(default, skip_serializing_if = "Operation::is_sort")]
+    /// Operation and exact parameters.
     pub operation: Operation,
 }
 
 impl InputCase {
-    /// Formats the stable identifier used in raw samples and reports.
-    pub fn id(&self) -> String {
-        format!(
-            "{}/{}/{}/s1{}",
-            self.ty,
-            self.distribution,
-            self.len,
-            self.operation.suffix()
-        )
+    /// The operation kind and its parameters in catalog order.
+    fn operation_parts(&self) -> (&'static str, Vec<usize>) {
+        let value = serde_json::to_value(&self.operation).expect("operation serializes");
+        let entry = operation_entry(value["kind"].as_str().expect("operation kind"))
+            .expect("catalog operation");
+        let parameters = entry
+            .parameters
+            .iter()
+            .map(|parameter| value[&parameter.id].as_u64().expect("integer parameter") as usize)
+            .collect();
+        (&entry.id, parameters)
     }
-    /// Names the Criterion group of this case; timed IDs append the API mode.
+
+    /// Formats `operation/type/distribution/length/s1[/parameters]`, used in
+    /// raw samples, memory rows and reports.
+    pub fn id(&self) -> String {
+        let (kind, parameters) = self.operation_parts();
+        let mut id = format!("{kind}/{}/{}/{}/s1", self.ty, self.distribution, self.len);
+        for parameter in parameters {
+            id += &format!("/{parameter}");
+        }
+        id
+    }
+
+    /// Decodes a case ID with catalog identities and valid parameters.
+    ///
+    /// # Errors
+    /// Returns an error for any noncanonical or unknown component.
+    pub fn parse_id(id: &str) -> Result<Self, String> {
+        let invalid = || format!("invalid case ID {id:?}");
+        let parts: Vec<_> = id.split('/').collect();
+        let entry = operation_entry(parts[0]).ok_or_else(invalid)?;
+        if parts.len() != 5 + entry.parameters.len()
+            || !catalog().types.iter().any(|ty| ty.id == parts[1])
+            || !catalog().distributions.iter().any(|d| d.id == parts[2])
+            || parts[4] != "s1"
+        {
+            return Err(invalid());
+        }
+        let len = parse_count(parts[3])
+            .filter(|&len| len > 0)
+            .ok_or_else(invalid)?;
+        let mut operation = serde_json::Map::new();
+        operation.insert("kind".into(), entry.id.clone().into());
+        for (parameter, text) in entry.parameters.iter().zip(&parts[5..]) {
+            operation.insert(
+                parameter.id.clone(),
+                parse_count(text).ok_or_else(invalid)?.into(),
+            );
+        }
+        let case = Self {
+            ty: parts[1].into(),
+            distribution: parts[2].into(),
+            len,
+            operation: serde_json::from_value(operation.into()).map_err(|_| invalid())?,
+        };
+        case.operation.validate(len)?;
+        Ok(case)
+    }
+
+    /// Formats the Criterion group `rust/<case>`, whose functions are executions.
     pub fn criterion_group(&self) -> String {
         format!("rust/{}", self.id())
     }
+
+    /// Formats the Criterion ID `rust/<case>/<execution>`.
+    pub fn criterion_id(&self, execution: Execution) -> String {
+        format!("{}/{execution}", self.criterion_group())
+    }
+
+    /// Decodes a Criterion ID into its case and execution.
+    ///
+    /// # Errors
+    /// Returns an error for a missing prefix or an invalid case or execution.
+    pub fn parse_criterion_id(id: &str) -> Result<(Self, Execution), String> {
+        let (case, execution) = id
+            .strip_prefix("rust/")
+            .and_then(|rest| rest.rsplit_once('/'))
+            .ok_or_else(|| format!("invalid Criterion ID {id:?}"))?;
+        Ok((Self::parse_id(case)?, execution.parse()?))
+    }
+
     /// Bytes of the input records, excluding owned payloads.
     pub fn input_bytes(&self) -> usize {
         self.len * record_bytes(&self.ty)
     }
-    /// Names the resumable group containing this case's lengths.
-    pub(crate) fn group(&self) -> String {
-        format!(
-            "{}/{}{}",
-            self.ty,
-            self.distribution,
-            self.operation.suffix()
-        )
+
+    /// Names the resumable group `operation/type/distribution[/parameters]`,
+    /// which holds every length of one result contract.
+    pub fn group(&self) -> String {
+        let (kind, parameters) = self.operation_parts();
+        let mut group = format!("{kind}/{}/{}", self.ty, self.distribution);
+        for parameter in parameters {
+            group += &format!("/{parameter}");
+        }
+        group
     }
 
     /// Small valid input for typed capability checks, never for measurement.
@@ -228,6 +348,43 @@ impl InputCase {
     }
 }
 
+/// What a session measures on a case: one implementation at one execution.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Column {
+    /// Catalog implementation identity.
+    pub implementation: String,
+    /// Serial or parallel entry point and its worker count.
+    pub execution: Execution,
+}
+
+impl fmt::Display for Column {
+    /// Formats `implementation/execution`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.implementation, self.execution)
+    }
+}
+
+impl FromStr for Column {
+    type Err = String;
+
+    /// Decodes a column with a catalog implementation.
+    fn from_str(id: &str) -> Result<Self, String> {
+        let (implementation, execution) = id
+            .split_once('/')
+            .filter(|(implementation, _)| {
+                catalog()
+                    .implementations
+                    .iter()
+                    .any(|entry| entry.id == *implementation)
+            })
+            .ok_or_else(|| format!("invalid column ID {id:?}"))?;
+        Ok(Self {
+            implementation: implementation.into(),
+            execution: execution.parse()?,
+        })
+    }
+}
+
 /// A versioned experiment selection, independent of its measurement protocol.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -235,16 +392,11 @@ pub struct Plan {
     #[serde(rename = "$comment", skip_serializing_if = "Option::is_none")]
     _comment: Option<String>,
     schema: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    operation: Option<Operation>,
     /// Explicit implementation selection; measurement drivers own their controls.
     pub(crate) implementations: Vec<String>,
     include: Vec<Rule>,
     #[serde(default)]
     exclude: Vec<Rule>,
-    /// Separate parallel input rules; empty rules reuse the primary selection.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    parallel: Vec<Rule>,
 }
 impl Plan {
     /// Reads a JSON or TOML selection without choosing a measurement protocol.
@@ -257,13 +409,14 @@ impl Plan {
                 format!("invalid plan document\nJSON: {json_error}\nTOML: {toml_error}")
             })
         })?;
-        let valid_schema = match (plan.schema, &plan.operation) {
-            (1, None) => true,
-            (2, Some(operation)) => !operation.is_sort(),
-            _ => false,
-        };
-        if !valid_schema || plan.include.is_empty() || plan.implementations.is_empty() {
-            return Err("expected a nonempty schema 1 plan, or schema 2 with an operation".into());
+        if plan.schema != 3 {
+            return Err(format!(
+                "unsupported plan schema {}; regenerate the plan for schema 3",
+                plan.schema
+            ));
+        }
+        if plan.include.is_empty() || plan.implementations.is_empty() {
+            return Err("a plan needs implementations and include rules".into());
         }
         let types: Vec<_> = catalog().types.iter().map(|ty| ty.id.clone()).collect();
         let distributions: Vec<_> = catalog()
@@ -271,13 +424,13 @@ impl Plan {
             .iter()
             .map(|d| d.id.clone())
             .collect();
-        let unique = |values: &[String]| {
+        fn unique<T: PartialEq>(values: &[T]) -> bool {
             !values.is_empty()
                 && values
                     .iter()
                     .enumerate()
                     .all(|(index, id)| !values[..index].contains(id))
-        };
+        }
         if !unique(&plan.implementations)
             || plan.implementations.iter().any(|id| {
                 !catalog()
@@ -288,12 +441,7 @@ impl Plan {
         {
             return Err("unknown or duplicate implementation IDs".into());
         }
-        for rule in plan
-            .include
-            .iter()
-            .chain(&plan.exclude)
-            .chain(&plan.parallel)
-        {
+        for rule in plan.include.iter().chain(&plan.exclude) {
             for (values, supported, field) in [
                 (&rule.types, &types, "types"),
                 (&rule.distributions, &distributions, "distributions"),
@@ -305,60 +453,30 @@ impl Plan {
                 }
             }
             if rule.lengths.as_ref().is_some_and(|values| {
-                values.is_empty()
-                    || values.iter().enumerate().any(|(index, len)| {
-                        matches!(len, Length::Count(0)) || values[..index].contains(len)
-                    })
+                !unique(values) || values.iter().any(|len| matches!(len, Length::Count(0)))
             }) {
                 return Err("length selectors must be unique, nonempty and positive".into());
             }
-        }
-        if plan
-            .exclude
-            .iter()
-            .chain(&plan.parallel)
-            .any(|r| r.operation.is_some())
-            || (plan.operation.is_some() && plan.include.iter().any(|r| r.operation.is_some()))
-        {
-            return Err("rule operations belong to include rules of a sorting plan".into());
-        }
-        let literal = |r: &Rule| {
-            r.lengths
+            if rule
+                .executions
                 .as_ref()
-                .is_none_or(|values| values.iter().all(|n| !matches!(n, Length::Boundary(_))))
-        };
-        let operation_rules = |r: &&Rule| r.operation.as_ref().is_some_and(|o| !o.is_sort());
-        if !plan.operation().is_sort() {
-            if !plan
-                .include
-                .iter()
-                .chain(&plan.exclude)
-                .chain(&plan.parallel)
-                .all(literal)
+                .is_some_and(|values| !unique(values))
             {
-                return Err("non-sort plans require literal record counts".into());
+                return Err("execution selectors must be unique and nonempty".into());
             }
-            plan.inputs()?;
-            plan.parallel_inputs()?;
-        } else if plan.include.iter().any(|r| operation_rules(&r)) {
-            if !plan.include.iter().filter(operation_rules).all(literal) {
-                return Err("non-sort plans require literal record counts".into());
-            }
-            plan.inputs()?;
         }
+        // Operation parameters are checked against literal counts in both languages.
+        if plan.include.iter().any(|rule| {
+            rule.operation.as_ref().is_some_and(|o| !o.is_sort())
+                && rule
+                    .lengths
+                    .as_ref()
+                    .is_some_and(|values| values.iter().any(|n| matches!(n, Length::Boundary(_))))
+        }) {
+            return Err("non-sort rules require literal record counts".into());
+        }
+        plan.cases()?;
         Ok(plan)
-    }
-
-    /// Returns the requested result contract; old plans remain full sorting.
-    pub fn operation(&self) -> Operation {
-        self.operation.clone().unwrap_or_default()
-    }
-
-    /// Whether include rules add operations to a sorting plan. Revision
-    /// plans measure those per case; implementation comparisons take one
-    /// plan-level operation.
-    pub fn has_rule_operations(&self) -> bool {
-        self.include.iter().any(|rule| rule.operation.is_some())
     }
 
     /// Returns exactly the implementations selected in this plan.
@@ -366,37 +484,23 @@ impl Plan {
         &self.implementations
     }
 
-    /// Includes matching products, then removes matching exclusions.
+    /// Whether a case at one execution survives the include and exclude rules.
     #[cfg(test)]
-    fn selects(&self, ty: &str, distribution: &str, len: usize) -> bool {
-        self.include
+    fn selects(&self, case: &InputCase, execution: Execution) -> bool {
+        self.cases()
+            .unwrap()
             .iter()
-            .any(|rule| rule.matches(ty, distribution, len))
-            && !self
-                .exclude
-                .iter()
-                .any(|rule| rule.matches(ty, distribution, len))
+            .any(|(selected, executions)| selected == case && executions.contains(&execution))
     }
 
-    /// Expands products into unique inputs before allocating any records.
+    /// Expands rules into unique cases, each with its selected executions in
+    /// ascending order, before allocating any records.
     ///
-    /// Omitted axes use catalog identities and default lengths. An empty experiment returns an error.
-    pub fn inputs(&self) -> Result<Vec<InputCase>, String> {
-        self.expand(&self.include)
-    }
-
-    /// Expands the separate parallel selection, or returns empty when none is specified.
-    pub fn parallel_inputs(&self) -> Result<Vec<InputCase>, String> {
-        if self.parallel.is_empty() {
-            return Ok(Vec::new());
-        }
-        self.expand(&self.parallel)
-    }
-
-    /// Applies one API selection and the shared exclusions before generation.
-    fn expand(&self, rules: &[Rule]) -> Result<Vec<InputCase>, String> {
-        let mut cases = BTreeSet::new();
-        for rule in rules {
+    /// Omitted axes use catalog identities, default lengths, `sort` and
+    /// `serial`. Invalid operation parameters or an empty experiment return an error.
+    pub fn cases(&self) -> Result<Vec<(InputCase, Vec<Execution>)>, String> {
+        let mut cases = BTreeMap::<InputCase, BTreeSet<Execution>>::new();
+        for rule in &self.include {
             let types = rule
                 .types
                 .clone()
@@ -416,24 +520,28 @@ impl Plan {
                     .map(|&len| Length::Count(len))
                     .collect()
             });
+            let operation = rule.operation.clone().unwrap_or_default();
+            let executions = rule
+                .executions
+                .clone()
+                .unwrap_or_else(|| vec![Execution::Serial]);
             for ty in &types {
                 for distribution in &distribution_ids {
                     for length in &lengths {
-                        let len = length.resolve(ty);
-                        if !self
-                            .exclude
+                        let case = InputCase {
+                            ty: ty.clone(),
+                            distribution: distribution.clone(),
+                            len: length.resolve(ty),
+                            operation: operation.clone(),
+                        };
+                        let surviving: Vec<_> = executions
                             .iter()
-                            .any(|rule| rule.matches(ty, distribution, len))
-                        {
-                            let operation =
-                                rule.operation.clone().unwrap_or_else(|| self.operation());
-                            operation.validate(len)?;
-                            cases.insert(InputCase {
-                                ty: ty.clone(),
-                                distribution: distribution.clone(),
-                                len,
-                                operation,
-                            });
+                            .copied()
+                            .filter(|&e| !self.exclude.iter().any(|rule| rule.matches(&case, e)))
+                            .collect();
+                        if !surviving.is_empty() {
+                            case.operation.validate(case.len)?;
+                            cases.entry(case).or_default().extend(surviving);
                         }
                     }
                 }
@@ -442,91 +550,123 @@ impl Plan {
         if cases.is_empty() {
             return Err("the benchmark plan selects no supported cases".into());
         }
-        Ok(cases.into_iter().collect())
+        Ok(cases
+            .into_iter()
+            .map(|(case, executions)| (case, executions.into_iter().collect()))
+            .collect())
     }
 }
-
-/// Joins a Criterion group and API mode for exact timed-ID selection.
-///
-/// This matches Criterion's identity without parsing or validating its fields.
-///
-/// ```
-/// assert_eq!(tessera_bench::plan::criterion_id!("rust/u64/random/1000/s1", "api"),
-///            "rust/u64/random/1000/s1/api");
-/// ```
-#[macro_export]
-macro_rules! criterion_id {
-    ($group:expr, $mode:expr) => {
-        ::std::format!("{id}/{mode}", id = $group, mode = $mode)
-    };
-}
-
-/// Criterion formatters share this owner with comparison input identities.
-pub use crate::criterion_id;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
+    use serde_json::{Value, json};
+
+    fn fixture() -> Value {
+        toml::from_str(include_str!("../../plans/selection.fixture.toml")).unwrap()
+    }
+
+    /// Builds a fixture case, whose absent operation means sort.
+    fn fixture_case(entry: &Value) -> InputCase {
+        InputCase {
+            ty: entry["type"].as_str().unwrap().into(),
+            distribution: entry["distribution"].as_str().unwrap().into(),
+            len: entry["length"].as_u64().unwrap() as usize,
+            operation: entry.get("operation").map_or_else(Operation::default, |o| {
+                serde_json::from_value(o.clone()).unwrap()
+            }),
+        }
+    }
 
     #[test]
     fn selection_rules_match_contract() {
-        let fixture: Value =
-            toml::from_str(include_str!("../../plans/selection.fixture.toml")).unwrap();
+        let fixture = fixture();
         let plan = Plan::parse(&fixture["plan"].to_string()).unwrap();
-        for input in fixture["cases"].as_array().unwrap() {
+        for entry in fixture["cases"].as_array().unwrap() {
+            let execution = entry
+                .get("execution")
+                .map_or(Execution::Serial, |e| e.as_str().unwrap().parse().unwrap());
             assert_eq!(
-                plan.selects(
-                    input["type"].as_str().unwrap(),
-                    input["distribution"].as_str().unwrap(),
-                    input["length"].as_u64().unwrap() as usize
-                ),
-                input["selected"].as_bool().unwrap(),
-                "{input}"
+                plan.selects(&fixture_case(entry), execution),
+                entry["selected"].as_bool().unwrap(),
+                "{entry}"
             );
         }
     }
 
     #[test]
     fn identities_match_shared_contract() {
-        let fixture: Value =
-            toml::from_str(include_str!("../../plans/selection.fixture.toml")).unwrap();
+        let fixture = fixture();
         for entry in fixture["identities"].as_array().unwrap() {
-            let case = InputCase {
-                ty: entry["type"].as_str().unwrap().into(),
-                distribution: entry["distribution"].as_str().unwrap().into(),
-                len: entry["length"].as_u64().unwrap() as usize,
-                operation: Operation::Sort {},
+            let case = fixture_case(&entry["case"]);
+            let column = Column {
+                implementation: entry["column"]["implementation"].as_str().unwrap().into(),
+                execution: entry["column"]["execution"]
+                    .as_str()
+                    .unwrap()
+                    .parse()
+                    .unwrap(),
             };
-            let group = case.criterion_group();
-            assert_eq!(group, entry["criterion_group"].as_str().unwrap());
+            let id = entry["case_id"].as_str().unwrap();
+            let criterion = entry["criterion"].as_str().unwrap();
+            assert_eq!(case.id(), id);
+            assert_eq!(case.group(), entry["group"].as_str().unwrap());
+            assert_eq!(column.to_string(), entry["column_id"].as_str().unwrap());
+            assert_eq!(case.criterion_id(column.execution), criterion);
+            assert_eq!(InputCase::parse_id(id).unwrap(), case);
             assert_eq!(
-                criterion_id!(&group, entry["mode"].as_str().unwrap()),
-                entry["criterion"].as_str().unwrap()
+                entry["column_id"]
+                    .as_str()
+                    .unwrap()
+                    .parse::<Column>()
+                    .unwrap(),
+                column
             );
-            assert_eq!(case.id(), entry["comparison"].as_str().unwrap());
+            assert_eq!(
+                InputCase::parse_criterion_id(criterion).unwrap(),
+                (case, column.execution)
+            );
+        }
+        let invalid = &fixture["invalid"];
+        let texts = |field: &str| {
+            invalid[field]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+        for text in texts("executions") {
+            assert!(text.parse::<Execution>().is_err(), "{text}");
+        }
+        for text in texts("columns") {
+            assert!(text.parse::<Column>().is_err(), "{text}");
+        }
+        for text in texts("case_ids") {
+            assert!(InputCase::parse_id(&text).is_err(), "{text}");
+        }
+        for text in texts("criterion") {
+            assert!(InputCase::parse_criterion_id(&text).is_err(), "{text}");
         }
     }
 
     #[test]
     fn operation_grammar_and_ids_match_shared_contract() {
-        let fixture: Value =
-            toml::from_str(include_str!("../../plans/selection.fixture.toml")).unwrap();
+        let fixture = fixture();
         let input = &fixture["operation_case"];
         for entry in fixture["operations"].as_array().unwrap() {
-            let plan = serde_json::json!({
-                "schema": 2, "implementations": ["tessera"], "operation": entry["operation"],
-                "include": [{"types": [input["ty"]], "distributions": [input["distribution"]], "lengths": [input["len"]]}]
+            let plan = json!({
+                "schema": 3, "implementations": ["tessera"],
+                "include": [{
+                    "types": [input["type"]], "distributions": [input["distribution"]],
+                    "lengths": [input["length"]], "operation": entry["operation"]
+                }]
             });
             let parsed = Plan::parse(&plan.to_string());
-            let kind = entry["operation"]["kind"].as_str().unwrap();
-            if let ("argsort" | "select" | "partition-buckets", Some(id)) =
-                (kind, entry["comparison"].as_str())
-            {
-                let cases = parsed.unwrap().inputs().unwrap();
+            if let Some(id) = entry["case_id"].as_str() {
+                let cases = parsed.unwrap().cases().unwrap();
                 assert_eq!(cases.len(), 1);
-                assert_eq!(cases[0].id(), id);
-                assert_eq!(cases[0].group(), entry["group"].as_str().unwrap());
+                assert_eq!(cases[0].0.id(), id);
             } else {
                 assert!(parsed.is_err(), "{entry}");
             }
@@ -534,22 +674,61 @@ mod tests {
     }
 
     #[test]
-    fn presets_preserve_coverage() {
-        for (text, expected) in [
-            (include_str!("../../plans/continuous.toml"), 83),
-            (include_str!("../../plans/smoke.toml"), 125),
-            (include_str!("../../plans/release.toml"), 381),
-            (include_str!("../../plans/parallel.toml"), 16),
+    fn catalog_names_every_operation() {
+        let ids: Vec<_> = catalog().operations.iter().map(|o| o.id.as_str()).collect();
+        assert_eq!(ids, ["sort", "argsort", "select_nth", "partition-buckets"]);
+        for operation in [
+            Operation::Sort {},
+            Operation::Argsort {},
+            Operation::SelectNth { index: 1 },
+            Operation::PartitionBuckets { bucket_count: 2 },
         ] {
-            assert_eq!(Plan::parse(text).unwrap().inputs().unwrap().len(), expected);
+            let case = InputCase {
+                ty: "u64".into(),
+                distribution: "random".into(),
+                len: 4,
+                operation,
+            };
+            assert_eq!(InputCase::parse_id(&case.id()).unwrap(), case);
+        }
+    }
+
+    #[test]
+    fn old_schemas_are_rejected() {
+        for schema in [1, 2] {
+            let plan = json!({
+                "schema": schema, "implementations": ["tessera"],
+                "include": [{"types": ["u64"], "distributions": ["random"], "lengths": [1000]}]
+            });
+            let error = Plan::parse(&plan.to_string()).unwrap_err();
+            assert!(error.contains("schema 3"), "{error}");
+        }
+    }
+
+    /// Counts measured (case, execution) pairs per preset.
+    fn measurements(text: &str) -> usize {
+        let plan = Plan::parse(text).unwrap();
+        plan.cases().unwrap().iter().map(|(_, e)| e.len()).sum()
+    }
+
+    #[test]
+    fn presets_preserve_coverage() {
+        for (text, cases, measured) in [
+            (include_str!("../../plans/continuous.toml"), 108, 119),
+            (include_str!("../../plans/smoke.toml"), 125, 125),
+            (include_str!("../../plans/release.toml"), 381, 381),
+            (include_str!("../../plans/parallel.toml"), 16, 32),
+        ] {
+            assert_eq!(Plan::parse(text).unwrap().cases().unwrap().len(), cases);
+            assert_eq!(measurements(text), measured);
         }
         let pairs = |text| {
             Plan::parse(text)
                 .unwrap()
-                .inputs()
+                .cases()
                 .unwrap()
                 .into_iter()
-                .map(|case| (case.ty, case.distribution))
+                .map(|(case, _)| (case.ty, case.distribution))
                 .collect::<BTreeSet<_>>()
         };
         assert_eq!(
@@ -561,13 +740,25 @@ mod tests {
     #[test]
     fn continuous_preserves_required_screens() {
         let continuous = Plan::parse(include_str!("../../plans/continuous.toml")).unwrap();
-        let cases = continuous.inputs().unwrap();
+        let all = continuous.cases().unwrap();
+        let at = |execution: Execution| {
+            all.iter()
+                .filter(|(_, e)| e.contains(&execution))
+                .map(|(case, _)| case.clone())
+                .collect::<Vec<_>>()
+        };
+        let cases = at(Execution::Serial);
+        let parallel = at("t4".parse().unwrap());
+        assert_eq!(cases.len(), 83);
         let require = |inputs: &[InputCase], ty: &str, distribution: &str, len: usize| {
             assert!(
                 inputs.iter().any(|case| {
-                    case.ty == ty && case.distribution == distribution && case.len == len
+                    case.operation.is_sort()
+                        && case.ty == ty
+                        && case.distribution == distribution
+                        && case.len == len
                 }),
-                "missing required continuous input: {ty}/{distribution}/{len}/s1"
+                "missing required continuous input: sort/{ty}/{distribution}/{len}/s1"
             );
         };
         // Policy identities must survive equal-count substitutions in the plan.
@@ -632,22 +823,25 @@ mod tests {
             .find(|variant| variant.name == "tessera")
             .unwrap();
         for id in [
-            "u64/random/65536/s1/partition-buckets/16",
-            "row_u64/random/65536/s1/partition-buckets/16",
-            "u64/random/65536/s1/partition-buckets/65537",
-            "row_u64/random/65536/s1/partition-buckets/65537",
-            "row_u64/d16/65536/s1/argsort",
-            "row_u64/d16/65536/s1/select/32768",
-            "row_u64/d16/65536/s1/select/0",
-            "row_u64/d16/65536/s1/select/65535",
-            "rec128_u64/random/65536/s1/select/0",
-            "rec128_u64/random/65536/s1/select/65535",
+            "partition-buckets/u64/random/65536/s1/16",
+            "partition-buckets/row_u64/random/65536/s1/16",
+            "partition-buckets/u64/random/65536/s1/65537",
+            "partition-buckets/row_u64/random/65536/s1/65537",
+            "argsort/row_u64/d16/65536/s1",
+            "select_nth/row_u64/d16/65536/s1/32768",
+            "select_nth/row_u64/d16/65536/s1/0",
+            "select_nth/row_u64/d16/65536/s1/65535",
+            "select_nth/rec128_u64/random/65536/s1/0",
+            "select_nth/rec128_u64/random/65536/s1/65535",
         ] {
             let case = cases.iter().find(|case| case.id() == id);
             assert!(case.is_some(), "missing required continuous input: {id}");
             #[cfg(feature = "operations")]
             assert!(
-                tessera.supports(&crate::CaseInput::new(&case.unwrap().probe())),
+                tessera.supports(
+                    &crate::CaseInput::new(&case.unwrap().probe()),
+                    Execution::Serial
+                ),
                 "unsupported continuous input: {id}"
             );
         }
@@ -660,8 +854,8 @@ mod tests {
                 && case.len >= 1_000_000
         }));
 
-        let parallel = continuous.parallel_inputs().unwrap();
         assert_eq!(parallel.len(), 36);
+        assert!(parallel.iter().all(|case| case.operation.is_sort()));
         assert_eq!(
             parallel.iter().filter(|case| case.len == 1_000_000).count(),
             32
@@ -722,44 +916,62 @@ mod tests {
     }
 
     #[test]
-    fn include_rules_carry_revision_operations() {
-        let rule = r#"{"types":["u64"],"distributions":["random"],"lengths":[1000]}"#;
-        let select = r#"{"types":["u64"],"distributions":["random"],"lengths":[1000],
-            "operation":{"kind":"select","index":10}}"#;
-        let plan = Plan::parse(&format!(
-            r#"{{"schema":1,"implementations":["tessera"],"include":[{rule},{select}]}}"#
-        ))
-        .unwrap();
-        assert!(plan.has_rule_operations());
-        let ids: Vec<_> = plan.inputs().unwrap().iter().map(InputCase::id).collect();
-        assert_eq!(ids, ["u64/random/1000/s1", "u64/random/1000/s1/select/10"]);
-        for invalid in [
-            format!(
-                r#"{{"schema":1,"implementations":["tessera"],"include":[{rule}],"exclude":[{select}]}}"#
-            ),
-            format!(
-                r#"{{"schema":1,"implementations":["tessera"],"include":[{rule}],"parallel":[{select}]}}"#
-            ),
-            format!(
-                r#"{{"schema":2,"implementations":["tessera"],"operation":{{"kind":"argsort"}},"include":[{select}]}}"#
-            ),
-        ] {
-            assert!(Plan::parse(&invalid).is_err(), "{invalid}");
-        }
-        let short = select.replace("1000", "5");
-        assert!(
-            Plan::parse(&format!(
-                r#"{{"schema":1,"implementations":["tessera"],"include":[{short}]}}"#
-            ))
-            .is_err()
+    fn rules_combine_operations_and_executions() {
+        let rule = json!({"types":["u64"],"distributions":["random"],"lengths":[1000],
+            "executions":["serial","t2"]});
+        let select = json!({"types":["u64"],"distributions":["random"],"lengths":[1000],
+            "operation":{"kind":"select_nth","index":10}});
+        let plan = |include: Value, exclude: Value| {
+            Plan::parse(
+                &json!({"schema":3,"implementations":["tessera"],"include":include,"exclude":exclude})
+                    .to_string(),
+            )
+        };
+        let ids = |plan: Plan| {
+            plan.cases()
+                .unwrap()
+                .iter()
+                .flat_map(|(case, executions)| executions.iter().map(|e| case.criterion_id(*e)))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(plan(json!([rule, select]), json!([])).unwrap()),
+            [
+                "rust/sort/u64/random/1000/s1/serial",
+                "rust/sort/u64/random/1000/s1/t2",
+                "rust/select_nth/u64/random/1000/s1/10/serial",
+            ]
         );
+        // Exclusions may name any axis, including operations and executions.
+        assert_eq!(
+            ids(plan(json!([rule, select]), json!([{"executions":["serial"]}])).unwrap()),
+            ["rust/sort/u64/random/1000/s1/t2"]
+        );
+        assert_eq!(
+            ids(plan(
+                json!([rule, select]),
+                json!([{"operation":{"kind":"sort"}}])
+            )
+            .unwrap()),
+            ["rust/select_nth/u64/random/1000/s1/10/serial"]
+        );
+        let mut short = select.clone();
+        short["lengths"] = json!([5]);
+        assert!(plan(json!([short]), json!([])).is_err());
+        let mut relative = select.clone();
+        relative["lengths"] = json!(["tile-next"]);
+        assert!(plan(json!([relative]), json!([])).is_err());
+        let mut duplicate = rule.clone();
+        duplicate["executions"] = json!(["t2", "t2"]);
+        assert!(plan(json!([duplicate]), json!([])).is_err());
+        assert!(plan(json!([rule]), json!([rule])).is_err());
     }
 
     #[test]
     fn relative_lengths_follow_records() {
-        let plan = Plan::parse(r#"{"schema":1,"implementations":["tessera"],
+        let plan = Plan::parse(r#"{"schema":3,"implementations":["tessera"],
             "include":[{"types":["u64","row_u64"],"distributions":["random"],"lengths":["tile-next"]}]}"#).unwrap();
-        for case in plan.inputs().unwrap() {
+        for (case, _) in plan.cases().unwrap() {
             let bytes = if case.ty == "u64" { 8 } else { 16 };
             assert_eq!(case.len, TILE_BYTES / bytes + 1);
         }

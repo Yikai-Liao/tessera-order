@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { catalog, criterionId } from "../catalog.ts";
+import { catalog, criterionId, SORT } from "../catalog.ts";
 import { pairedRun } from "../continuous/fixtures/paired.ts";
 import { loadPlan } from "../plan.ts";
 import { simdFeatures } from "../workspace.ts";
@@ -45,7 +45,7 @@ test("revision workers alternate adjacent samples, retain evidence and reap fail
   t.after(() => rm(directory, { recursive: true, force: true }));
   const mask =
     process.platform === "linux" && availableParallelism() >= 4
-      ? await comparisonCpus(true)
+      ? await comparisonCpus(4)
       : undefined;
   const binaries = { baseline: join(directory, "a"), current: join(directory, "b") };
   for (const [role, file] of Object.entries(binaries))
@@ -64,7 +64,7 @@ if (${JSON.stringify(process.platform)} === "linux") {
 if (${Boolean(mask)}) {
  const allowed = fs.readFileSync("/proc/self/status", "utf8").match(/^Cpus_allowed_list:\s*(.+)$/m)[1];
  const count = allowed.split(",").reduce((n,r) => {const [a,b=a]=r.split("-").map(Number);return n+b-a+1},0);
- require("node:assert/strict").equal(count, fs.existsSync(dir + "/serial-only") ? 2 : id.endsWith("/par-4") ? 4 : 1);
+ require("node:assert/strict").equal(count, fs.existsSync(dir + "/serial-only") ? 2 : id.endsWith("/t4") ? 4 : 1);
 }
 const rl = readline.createInterface({input:process.stdin});
 rl.on("line", request => {
@@ -81,9 +81,12 @@ rl.on("line", request => {
       { mode: 0o755 },
     );
   const run = pairedRun();
-  run.cases = ["rust/u64/random/48/s1/api", ...(mask ? ["rust/u64/random/49/s1/par-4"] : [])];
+  run.cases = [
+    "rust/sort/u64/random/48/s1/serial",
+    ...(mask ? ["rust/sort/u64/random/49/s1/t4"] : []),
+  ];
   await measureSamples(run, binaries, "unused", mask, async () => {});
-  if (mask) await assert.rejects(comparisonCpus(true, "0"), /four available CPUs/);
+  if (mask) await assert.rejects(comparisonCpus(4, "0"), /require 4 available CPUs/);
   const events = (await readFile(join(directory, "events"), "utf8")).trim().split("\n");
   assert.deepEqual(
     events.filter((s) => s.endsWith(":sample")),
@@ -134,46 +137,53 @@ test("revision selection checks parallel IDs from both binaries", {
 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "tessera-selection-"));
   try {
-    const input = { ty: "u64", distribution: "random", len: 48 };
-    const serial = criterionId(input, "api"),
-      parallel = criterionId(input, "par-4");
+    const input = { ty: "u64", distribution: "random", len: 48, operation: SORT };
+    const serial = criterionId(input, "serial"),
+      parallel = criterionId(input, "t4");
     const binaries = { baseline: join(directory, "baseline"), current: join(directory, "current") };
     const plan = join(directory, "plan.json");
     const source = (withParallel: boolean) => `#!${process.execPath}
 if (process.env.TESSERA_BENCH_LIST !== "1" || process.env.TESSERA_BENCH_PLAN !== ${JSON.stringify(plan)}) process.exit(1);
 const supported = [${JSON.stringify(serial)}];
-if (${withParallel} && JSON.parse(require("node:fs").readFileSync(process.env.TESSERA_BENCH_PLAN)).parallel?.length) supported.push(${JSON.stringify(parallel)});
+if (${withParallel} && JSON.parse(require("node:fs").readFileSync(process.env.TESSERA_BENCH_PLAN)).include?.some((rule) => rule.executions?.includes("t4"))) supported.push(${JSON.stringify(parallel)});
 console.log(supported.join("\\n"));
 `;
     for (const path of Object.values(binaries))
       await writeFile(path, source(true), { mode: 0o755 });
     await writeFile(plan, JSON.stringify({}));
     assert.deepEqual(await selectedCases(binaries, plan, undefined, directory), [serial]);
-    await writeFile(plan, JSON.stringify({ parallel: [{}] }));
-    assert.deepEqual(await selectedCases(binaries, plan, undefined, directory, true), [
+    await writeFile(plan, JSON.stringify({ include: [{ executions: ["serial", "t4"] }] }));
+    assert.deepEqual(await selectedCases(binaries, plan, undefined, directory, ["t4"]), [
       serial,
       parallel,
     ]);
-    assert.deepEqual(await selectedCases(binaries, plan, "/par-4$", directory, true), [parallel]);
+    assert.deepEqual(await selectedCases(binaries, plan, "/t4$", directory, ["t4"]), [parallel]);
     await writeFile(binaries.baseline, source(false));
-    await assert.rejects(selectedCases(binaries, plan, undefined, directory, true), /identical/);
+    await assert.rejects(selectedCases(binaries, plan, undefined, directory, ["t4"]), /identical/);
     await writeFile(binaries.current, source(false));
     await assert.rejects(
-      selectedCases(binaries, plan, undefined, directory, true),
-      /four-thread cases/,
+      selectedCases(binaries, plan, undefined, directory, ["t4"]),
+      /did not list any t4 cases/,
     );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-test("revision scheduling follows selected implementations, not the presence of parallel case rules", async () => {
+test("revision scheduling reserves the largest selected worker count", async () => {
   const local = await loadPlan("local");
   assert.equal(revisionThreads(local), 1);
   assert.equal(revisionThreads(await loadPlan("continuous")), 4);
-  assert.equal(revisionThreads(await loadPlan("local", { implementations: ["tessera-par-4"] })), 4);
-  assert.throws(() => revisionThreads({ ...local, implementations: ["tessera-par-8"] }));
-  for (const implementations of [["tessera", "std-stable"], ["std-stable"], ["rayon-stable-4"]])
+  assert.equal(revisionThreads(await loadPlan("local", { executions: ["serial", "t2"] })), 2);
+  assert.throws(
+    () =>
+      revisionThreads({
+        ...local,
+        include: [{ operation: { kind: "argsort" }, executions: ["t4"] }],
+      }),
+    /only serial/,
+  );
+  for (const implementations of [["tessera", "std-stable"], ["std-stable"], ["rayon-stable"]])
     assert.throws(() => revisionThreads({ ...local, implementations }), /only tessera/);
 });
 

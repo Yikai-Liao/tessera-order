@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-import { catalog } from "../catalog.ts";
+import { caseGroup, catalog, columnId, SORT } from "../catalog.ts";
 import {
   caseId,
   type Dataset,
@@ -8,20 +8,29 @@ import {
   lengths,
   type Manifest,
   type Sample,
+  TESSERA,
+  TESSERA_AA,
   types,
 } from "./model.ts";
 
 /** Builds a synthetic release run with Tessera between faster and slower competitors. */
 export function createFixture(blocks = 9): Dataset {
-  const variants = [
-    { name: "tessera", stable: true },
-    { name: "std-stable", stable: true },
-    { name: "radsort", stable: true },
-    { name: "glidesort-sqrt", stable: true },
-    { name: "long-stable-variant-name", stable: true },
-    { name: "std-unstable", stable: false },
-    { name: "vqsort", stable: false },
+  const implementations = [
+    { name: "tessera", stable: true, adapter: "common" },
+    { name: "std-stable", stable: true, adapter: "common" },
+    { name: "radsort", stable: true, adapter: "rust" },
+    { name: "glidesort-sqrt", stable: true, adapter: "rust" },
+    { name: "voracious", stable: true, adapter: "rust" },
+    { name: "std-unstable", stable: false, adapter: "rust" },
+    { name: "vqsort", stable: false, adapter: "native" },
   ];
+  const columns = implementations.map(({ name, stable, adapter }) => ({
+    id: columnId({ implementation: name, execution: "serial" }),
+    implementation: name,
+    execution: "serial" as const,
+    stable,
+    adapter,
+  }));
   const cases = types.flatMap((ty) =>
     distributions.flatMap((distribution) =>
       lengths
@@ -30,21 +39,28 @@ export function createFixture(blocks = 9): Dataset {
           ty,
           distribution,
           len,
-          variants: variants
-            .filter((v) => v.name !== "vqsort" || ["u32", "u64"].includes(ty))
-            .filter((v) => v.name !== "radsort" || ty !== "owned")
-            .map((v) => v.name),
+          operation: SORT,
+          columns: columns
+            .filter((c) => c.implementation !== "vqsort" || ["u32", "u64"].includes(ty))
+            .filter((c) => c.implementation !== "radsort" || ty !== "owned")
+            .map((c) => c.id),
+          omitted: [],
         })),
     ),
   );
   const m: Manifest = {
-    schema: 1,
+    schema: 2,
     plan_name: "release",
-    plan_version: 1,
+    plan: {
+      schema: 3,
+      implementations: implementations.map((entry) => entry.name),
+      include: [{ types, distributions, lengths }],
+      exclude: [],
+    },
     build: "default",
     blocks,
     cases,
-    variants,
+    columns,
     commit: "fixture-only",
     dirty: false,
     rustc: "synthetic fixture; no performance evidence",
@@ -75,26 +91,26 @@ export function createFixture(blocks = 9): Dataset {
   for (const c of cases) {
     const recordBytes = catalog.types.find((record) => record.id === c.ty)?.bytes;
     if (recordBytes === undefined) throw new Error(`Missing catalog width for ${c.ty}`);
-    const group = `${c.ty}/${c.distribution}`;
+    const group = caseGroup(c);
     groups.add(group);
     const factors: Record<string, number> = {
-      tessera: 1,
-      "std-stable": 2.6,
-      radsort: 1.3,
-      "glidesort-sqrt": 2.62,
-      "long-stable-variant-name": 1.301,
-      "std-unstable": 1.15,
-      vqsort: 0.92,
+      "tessera/serial": 1,
+      "std-stable/serial": 2.6,
+      "radsort/serial": 1.3,
+      "glidesort-sqrt/serial": 2.62,
+      "voracious/serial": 1.301,
+      "std-unstable/serial": 1.15,
+      "vqsort/serial": 0.92,
     };
-    if (c.distribution === "reverse") factors.radsort = 0.7;
-    if (c.distribution === "runs") factors.radsort = 1.001;
+    if (c.distribution === "reverse") factors["radsort/serial"] = 0.7;
+    if (c.distribution === "runs") factors["radsort/serial"] = 1.001;
     for (let block = 0; block < blocks; block++) {
-      for (const [slot, variant] of [...c.variants, "tessera-aa"].entries()) {
-        const factor = variant === "tessera-aa" ? (block % 2 ? 1.005 : 0.995) : factors[variant];
+      for (const [slot, column] of [...c.columns, TESSERA_AA].entries()) {
+        const factor = column === TESSERA_AA ? (block % 2 ? 1.005 : 0.995) : factors[column];
         const sample: Sample = {
           kind: "sample",
           case_id: caseId(c),
-          variant,
+          column,
           build: "default",
           group,
           block,
@@ -106,16 +122,16 @@ export function createFixture(blocks = 9): Dataset {
         dataset.samples.push(sample);
       }
     }
-    for (const variant of c.variants) {
-      if (c.len > 1000000 && c.ty !== "u64" && variant !== "tessera") continue;
+    for (const column of c.columns) {
+      if (c.len > 1000000 && c.ty !== "u64" && column !== TESSERA) continue;
       dataset.memory.push({
         case_id: caseId(c),
-        variant,
+        column,
         build: "default",
         peak_extra_bytes:
-          variant === "tessera" || variant === "glidesort-sqrt"
+          column === TESSERA || column === "glidesort-sqrt/serial"
             ? Math.ceil(Math.sqrt(c.len)) * recordBytes * 16
-            : variant === "vqsort" || variant === "std-unstable"
+            : column === "vqsort/serial" || column === "std-unstable/serial"
               ? 0
               : c.len * recordBytes,
         verified: true,

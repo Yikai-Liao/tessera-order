@@ -3,8 +3,14 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { comparisonGroup, implementation, operationSchema, validateOperation } from "../catalog.ts";
-import { parseRetainedPlan } from "../plan.ts";
+import {
+  caseGroup,
+  columnId,
+  operationSchema,
+  parseColumnId,
+  validateOperation,
+} from "../catalog.ts";
+import { parsePlan, planOperations } from "../plan.ts";
 import { pairedBudget } from "../statistics.ts";
 import {
   caseId,
@@ -14,6 +20,9 @@ import {
   measurementId,
   type Observation,
   type Sample,
+  STD_STABLE,
+  TESSERA,
+  TESSERA_AA,
 } from "./model.ts";
 
 async function readJson(path: string): Promise<unknown> {
@@ -48,12 +57,12 @@ function assertString(value: unknown): asserts value is string {
 }
 function parseManifest(value: unknown): Manifest {
   assertObject(value);
-  if (
-    value.schema !== 1 ||
-    (value.plan_version !== 1 && value.plan_version !== 2) ||
-    !["smoke", "release", "custom"].includes(String(value.plan_name))
-  )
-    throw new Error("unsupported measurement schema or plan");
+  if (value.schema !== 2)
+    throw new Error(
+      "unsupported measurement schema; regenerate with the tooling revision that wrote it",
+    );
+  if (!["smoke", "release", "custom"].includes(String(value.plan_name)))
+    throw new Error("unsupported measurement plan");
   assertInteger(value.blocks, 1);
   pairedBudget(value.blocks);
   if (value.build !== "default")
@@ -74,22 +83,27 @@ function parseManifest(value: unknown): Manifest {
     assertString(value.cc);
     assertString(value.cxx);
   }
-  if (!Array.isArray(value.cases) || !Array.isArray(value.variants))
-    throw new Error("missing case or variant plan");
-  const names = new Set<string>();
-  for (const v of value.variants) {
-    assertObject(v);
-    assertString(v.name);
-    if (typeof v.stable !== "boolean" || names.has(v.name)) throw new Error("invalid variant plan");
-    if (v.threads !== undefined && v.threads !== null) assertInteger(v.threads, 1);
-    if (v.adapter !== undefined) assertString(v.adapter);
-    names.add(v.name);
-  }
-  const operation = value.plan_version === 2 ? parseRetainedPlan(value.plan).operation : undefined;
-  if (value.plan_version === 2) {
-    if (!operation || operation.kind === "sort")
-      throw new Error("schema 2 measurements require an explicit non-sort plan");
-    assertInteger(value.index_bytes, 1);
+  if (!Array.isArray(value.cases) || !Array.isArray(value.columns))
+    throw new Error("missing case or column plan");
+  const plan = parsePlan(value.plan);
+  const operations = planOperations(plan);
+  if (operations.length !== 1) throw new Error("a measurement session has exactly one operation");
+  const [operation] = operations;
+  if (operation.kind !== "sort") assertInteger(value.index_bytes, 1);
+  const columns = new Set<string>();
+  for (const column of value.columns) {
+    assertObject(column);
+    assertString(column.id);
+    const parsed = parseColumnId(column.id);
+    if (
+      column.implementation !== parsed.implementation ||
+      column.execution !== parsed.execution ||
+      typeof column.stable !== "boolean" ||
+      columns.has(column.id)
+    )
+      throw new Error("invalid column plan");
+    assertString(column.adapter);
+    columns.add(column.id);
   }
   const ids = new Set<string>();
   for (const c of value.cases) {
@@ -97,55 +111,53 @@ function parseManifest(value: unknown): Manifest {
     assertString(c.ty);
     assertString(c.distribution);
     assertInteger(c.len, 1);
+    const actual = operationSchema.parse(c.operation);
+    validateOperation(actual, c.len);
+    if (actual.kind !== operation.kind) throw new Error("case operation differs from its plan");
     if (
-      !Array.isArray(c.variants) ||
-      c.variants.length < 2 ||
-      !c.variants.includes("tessera") ||
-      !c.variants.includes("std-stable") ||
-      new Set(c.variants).size !== c.variants.length ||
-      c.variants.some((v) => !names.has(v))
+      !Array.isArray(c.columns) ||
+      !c.columns.includes(TESSERA) ||
+      !c.columns.includes(STD_STABLE) ||
+      new Set(c.columns).size !== c.columns.length ||
+      c.columns.some((id) => !columns.has(id))
     )
-      throw new Error("invalid case capabilities");
-    if (value.plan_version === 1) {
-      if (c.operation !== undefined) throw new Error("schema 1 measurements are sorting only");
-    } else {
-      const actual = operationSchema.parse(c.operation);
-      validateOperation(actual, c.len);
-      if (!isDeepStrictEqual(actual, operation))
-        throw new Error("case operation differs from its plan");
-      assertObject(c.implementations);
-      if (!Array.isArray(c.omitted)) throw new Error("missing unsupported-operation evidence");
-      for (const [name, route] of Object.entries(c.implementations)) {
-        assertString(route);
-        if (!(c.variants as unknown[]).includes(name))
-          throw new Error("implementation outside case capabilities");
-      }
-      if (
-        !isDeepStrictEqual(
-          Object.keys(c.implementations).sort(),
-          [...(c.variants as string[])].sort(),
-        )
-      )
+      throw new Error("invalid case columns");
+    if (!Array.isArray(c.omitted)) throw new Error("missing unsupported-column evidence");
+    const omitted = c.omitted.map((entry) => {
+      assertObject(entry);
+      assertString(entry.column);
+      assertString(entry.reason);
+      return entry.column;
+    });
+    // Each planned execution of a case pairs every available planned implementation; presets
+    // drop implementations this build lacks.
+    const planned = [...(c.columns as string[]), ...omitted].map(parseColumnId);
+    const names = new Set(planned.map((column) => column.implementation));
+    const executions = new Set(planned.map((column) => column.execution));
+    const expected = [...executions].flatMap((execution) =>
+      [...names].map((name) => columnId({ implementation: name, execution })),
+    );
+    if (
+      [...names].some((name) => !plan.implementations.includes(name)) ||
+      !isDeepStrictEqual(planned.map(columnId).toSorted(), expected.toSorted())
+    )
+      throw new Error("incomplete unsupported-column evidence");
+    if (operation.kind !== "sort") {
+      assertObject(c.routes);
+      for (const route of Object.values(c.routes)) assertString(route);
+      if (!isDeepStrictEqual(Object.keys(c.routes).sort(), [...(c.columns as string[])].sort()))
         throw new Error("missing implementation route");
-      const omitted = c.omitted.map((entry) => {
-        assertObject(entry);
-        assertString(entry.variant);
-        assertString(entry.reason);
-        return entry.variant;
-      });
-      if (
-        !isDeepStrictEqual(
-          omitted.sort(),
-          [...names].filter((name) => !(c.variants as string[]).includes(name)).sort(),
-        )
-      )
-        throw new Error("incomplete unsupported-operation evidence");
-    }
+    } else if (c.routes !== undefined) throw new Error("sort cases have no routes");
     const id = caseId(c as unknown as Manifest["cases"][number]);
     if (ids.has(id)) throw new Error(`duplicate case ${id}`);
     ids.add(id);
   }
   return value as unknown as Manifest;
+}
+/** Sort memory beyond a million wide records is measured only for Tessera's columns. */
+function requiresMemory(c: Manifest["cases"][number], column: string) {
+  if (c.operation.kind !== "sort" || c.len <= 1000000 || c.ty === "u64") return true;
+  return parseColumnId(column).implementation === "tessera";
 }
 export function validateRun(dataset: Dataset): void {
   const m = parseManifest(dataset.manifest);
@@ -157,7 +169,7 @@ export function validateRun(dataset: Dataset): void {
   for (const s of dataset.samples) {
     assertObject(s);
     assertString(s.case_id);
-    assertString(s.variant);
+    assertString(s.column);
     assertString(s.build);
     assertString(s.group);
     assertInteger(s.block);
@@ -169,18 +181,18 @@ export function validateRun(dataset: Dataset): void {
       s.build !== build ||
       !c ||
       s.block >= m.blocks ||
-      s.slot >= c.variants.length + 1 ||
+      s.slot >= c.columns.length + 1 ||
       s.verified !== true ||
-      ![...c.variants, "tessera-aa"].includes(s.variant) ||
-      s.group !== comparisonGroup(c)
+      ![...c.columns, TESSERA_AA].includes(s.column) ||
+      s.group !== caseGroup(c)
     )
-      throw new Error(`invalid or unverified sample ${s.case_id}/${s.variant}`);
-    const id = `${measurementId(s.build, s.case_id, s.variant)}:${s.block}`,
+      throw new Error(`invalid or unverified sample ${s.case_id}/${s.column}`);
+    const id = `${measurementId(s.build, s.case_id, s.column)}:${s.block}`,
       slot = `${s.build}:${s.case_id}:${s.block}:${s.slot}`;
     if (identities.has(id) || slots.has(slot)) throw new Error(`duplicate sample or slot ${id}`);
     identities.add(id);
     slots.add(slot);
-    const k = measurementId(s.build, s.case_id, s.variant);
+    const k = measurementId(s.build, s.case_id, s.column);
     if (!samples.has(k)) samples.set(k, []);
     samples.get(k)!.push(s);
   }
@@ -197,10 +209,10 @@ export function validateRun(dataset: Dataset): void {
     observations.set(id, o);
   }
   for (const c of m.cases) {
-    const has = [...c.variants, "tessera-aa"].map((v) =>
-      samples.get(measurementId(build, caseId(c), v)),
+    const has = [...c.columns, TESSERA_AA].map((column) =>
+      samples.get(measurementId(build, caseId(c), column)),
     );
-    const group = `${build}:${comparisonGroup(c)}`;
+    const group = `${build}:${caseGroup(c)}`;
     if (
       dataset.partial &&
       has.every((s) => !s) &&
@@ -222,23 +234,23 @@ export function validateRun(dataset: Dataset): void {
     assertInteger(r.peak_extra_bytes);
 
     assertString(r.case_id);
-    assertString(r.variant);
+    assertString(r.column);
     assertString(r.build);
-    const id = measurementId(r.build, r.case_id, r.variant);
+    const id = measurementId(r.build, r.case_id, r.column);
     const c = m.cases.find((c) => caseId(c) === r.case_id);
     if (
       r.build !== build ||
       r.verified !== true ||
-      !c?.variants.includes(r.variant) ||
+      !c?.columns.includes(r.column) ||
       memories.has(id)
     )
       throw new Error(`invalid or duplicate memory sample ${id}`);
-    if (m.plan_version === 2) {
+    if (c.operation.kind !== "sort") {
       assertInteger(r.output_bytes);
       const expected =
-        c.operation?.kind === "argsort"
+        c.operation.kind === "argsort"
           ? c.len * m.index_bytes!
-          : c.operation?.kind === "partition-buckets"
+          : c.operation.kind === "partition-buckets"
             ? (c.operation.bucket_count + 1) * m.index_bytes!
             : 0;
       if (r.output_bytes !== expected || r.peak_extra_bytes < r.output_bytes)
@@ -249,20 +261,10 @@ export function validateRun(dataset: Dataset): void {
     memories.add(id);
   }
   for (const c of m.cases) {
-    if (dataset.partial && !samples.has(measurementId(build, caseId(c), "tessera"))) continue;
-    for (const v of c.variants) {
-      const adapter =
-        m.variants.find((entry) => entry.name === v)?.adapter ?? implementation(v).adapter;
-      if (
-        (m.plan_version === 2 ||
-          c.len <= 1000000 ||
-          c.ty === "u64" ||
-          v === "tessera" ||
-          adapter === "tessera-par") &&
-        !memories.has(measurementId(build, caseId(c), v))
-      )
-        throw new Error(`missing memory sample ${build}/${caseId(c)}/${v}`);
-    }
+    if (dataset.partial && !samples.has(measurementId(build, caseId(c), TESSERA))) continue;
+    for (const column of c.columns)
+      if (requiresMemory(c, column) && !memories.has(measurementId(build, caseId(c), column)))
+        throw new Error(`missing memory sample ${build}/${caseId(c)}/${column}`);
   }
 }
 /** Load current single-build runs, checking provenance before merging their journals. */
@@ -287,7 +289,7 @@ export async function loadRun(directories: string[], partial = false): Promise<D
     const memory = await readJson(join(directory, "memory-manifest-default.json"));
     assertObject(memory);
     for (const field of [
-      ...(manifest.plan_version === 2 ? ["plan_version", "plan", "cases", "index_bytes"] : []),
+      ...(manifest.index_bytes === undefined ? [] : ["plan", "cases", "index_bytes"]),
       "schema",
       "blocks",
       "source_sha256",

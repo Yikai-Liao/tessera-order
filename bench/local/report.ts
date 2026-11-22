@@ -2,7 +2,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { rawCaseParts } from "../catalog.ts";
+import { caseLabel } from "../catalog.ts";
 import { renderRows } from "../plot/rows.ts";
 import { resultSummary } from "../summary.ts";
 import { type LayoutRun, summarizeLayouts } from "./layout.ts";
@@ -37,7 +37,7 @@ async function writeLayoutFigures(
     const high = Math.max(...rows.map((row) => row.high)) * 1.03;
     const filename = `layout-${index + 1}.svg`;
     const svg = renderRows({
-      title: `Layout times · ${Object.values(rawCaseParts(summary.id)).filter(Boolean).join(" · ")}`,
+      title: `Layout times · ${caseLabel(summary.id)}`,
       guide: "Median time per sort · lines: observed sample ranges, not confidence intervals",
       columns: [`Median (${label})`, `Observed range (${label})`],
       groups: [
@@ -104,10 +104,7 @@ export async function renderLocalReport(directory: string, input?: LocalRun | La
     groups: groups.map(({ title, summaries }) => ({
       title,
       rows: summaries.map((s) => ({
-        name: {
-          ...rawCaseParts(s.id),
-          tag: "",
-        },
+        name: { input: caseLabel(s.id), sub: "", tag: "" },
         marks: [{ value: s.ratio, tone: "primary" }],
         span: [s.low, s.high],
         cells: [`${s.ratio.toFixed(4)}×`, range(s.low, s.high)],

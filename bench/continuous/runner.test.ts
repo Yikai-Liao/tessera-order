@@ -8,10 +8,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parseCriterionId, revisionSampling } from "../catalog.ts";
 import { shardCases } from "../local/model.ts";
-import { comparePrepared } from "../local/runner.ts";
-import { pairedRun, writePaired } from "./fixtures/paired.ts";
+import { writePaired } from "./fixtures/paired.ts";
 import { baseHash, hash } from "./fixtures/report.ts";
-import { CONTINUOUS_SHARDS, pairedBmf, pairedSummary, readPaired } from "./paired.ts";
+import { CONTINUOUS_SHARDS, pairedBmf, readPaired } from "./paired.ts";
 
 const source = { hash, baseHash };
 
@@ -54,7 +53,7 @@ test("rejects a self-consistent but shortened inventory across every shard", asy
   t.after(() => rm(out, { recursive: true, force: true }));
   const runs = await writePaired(out);
   const trusted = runs[0].shard!.allCases;
-  const omitted = trusted.find((id) => id.endsWith("/par-4"));
+  const omitted = trusted.find((id) => id.endsWith("/t4"));
   const shortened = trusted.filter((id) => id !== omitted);
   for (const run of runs) {
     run.shard!.allCases = shortened;
@@ -140,43 +139,4 @@ test("report uses the prepared plan from its own run instead of a publisher pres
   for (const dir of [...Array.from({ length: CONTINUOUS_SHARDS }, (_, i) => `paired-${i + 1}`)])
     await writeFile(join(out, dir, "plan.json"), JSON.stringify(plan));
   assert.equal((await readPaired(out, source, prepared)).length, CONTINUOUS_SHARDS);
-});
-
-test("retired PR cases can be reported from prepared and measured JSON but not executed", async (t) => {
-  const out = await mkdtemp(join(tmpdir(), "tessera-retained-pr-"));
-  t.after(() => rm(out, { recursive: true, force: true }));
-  const id = "rust/u64/random/65536/s1/top-k/1024/api";
-  const prepared = join(out, "prepared");
-  await writePaired(out, 1.2, {
-    cases: [...pairedRun().shard!.allCases, id].sort(),
-    plan: {
-      schema: 1,
-      implementations: ["tessera", "tessera-par-4"],
-      include: [
-        { types: ["u64"], distributions: ["random"], lengths: [48, 49, 1000, 65536, 1000000] },
-        {
-          types: ["u64"],
-          distributions: ["random"],
-          lengths: [65536],
-          operation: { kind: "top-k", k: 1024 },
-        },
-      ],
-      exclude: [],
-    },
-  });
-  const runs = await readPaired(out, source, prepared);
-  assert.equal(pairedBmf(runs)[id]["paired-time-ratio"].value, 1.2);
-  assert.ok(JSON.stringify(pairedSummary(runs)).includes(id));
-  const shard = runs.find((run) => run.cases.includes(id))!.shard!.index;
-  const directory = join(out, `paired-${shard}`);
-  const report = spawnSync(process.execPath, ["tools/index.ts", "report", directory], {
-    encoding: "utf8",
-  });
-  assert.equal(report.status, 0, report.stderr);
-  assert.ok((await readFile(join(directory, "index.md"), "utf8")).includes(id));
-  assert.match(await readFile(join(directory, "local.svg"), "utf8"), /top-k/);
-  await assert.rejects(
-    comparePrepared({ root: out, prepared, out: join(out, "measured") }),
-    /No matching discriminator/,
-  );
 });

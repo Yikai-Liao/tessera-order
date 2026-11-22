@@ -22,7 +22,7 @@ test("presets load through the same validator and overrides replace selection", 
     lengths: [1234],
   });
   assert.deepEqual(plan.include, [{ types: ["u64"], distributions: ["random"], lengths: [1234] }]);
-  assert.deepEqual(parsePlan(fixture.plan).implementations, ["tessera"]);
+  assert.deepEqual(parsePlan(fixture.plan).implementations, ["tessera", "rayon-stable"]);
   assert.deepEqual(
     (await loadPlan("continuous", { implementations: ["glidesort"] })).implementations,
     ["glidesort"],
@@ -50,35 +50,39 @@ test("Reverse direct keys are opt-in comparison inputs", async () => {
 test("malformed and unsupported plans fail before execution", () => {
   for (const invalid of [
     { ...fixture.plan, schema: 2 },
+    { ...fixture.plan, operation: { kind: "argsort" } },
     { ...fixture.plan, harness: "smoke" },
     { ...fixture.plan, unexpected: true },
     { ...fixture.plan, include: [] },
     { ...fixture.plan, include: [{ types: ["u33"] }] },
     { ...fixture.plan, include: [{ lengths: [0] }] },
     { ...fixture.plan, include: [{ modes: ["workspace"] }] },
-    { ...fixture.plan, parallel: [{ types: ["typo"] }] },
+    { ...fixture.plan, parallel: [{ types: ["u64"] }] },
+    { ...fixture.plan, include: [{ executions: ["par-4"] }] },
+    { ...fixture.plan, include: [{ executions: ["t0"] }] },
   ])
     assert.throws(() => parsePlan(invalid));
   assert.throws(() => decodeConfig("{", "plan.json"));
   assert.throws(() => decodeConfig("types = [", "plan.toml"));
-  const ids = ["rust/u64/random/65536/s1/api", "rust/u64/d16/65536/s1/api"];
+  const ids = ["rust/sort/u64/random/65536/s1/serial", "rust/sort/u64/d16/65536/s1/serial"];
   assert.deepEqual(selectCaseIds(ids, "/random/"), [ids[0]]);
   assert.throws(() => selectCaseIds(ids, "^never$"), /no supported cases/);
 });
 
 test("operation overrides retain exact parameters and reject unrelated flags", async () => {
   const selected = await loadPlan("local", {
-    operation: "select",
+    operation: "select_nth",
     index: 99,
     lengths: [100],
   });
-  assert.equal(selected.schema, 2);
-  assert.deepEqual(selected.operation, { kind: "select", index: 99 });
+  assert.ok(selected.include.length > 0);
+  for (const rule of selected.include)
+    assert.deepEqual(rule.operation, { kind: "select_nth", index: 99 });
   for (const invalid of [
     { operation: "argsort" as const, index: 1 },
-    { operation: "select" as const },
-    { operation: "select" as const, index: 100, lengths: [100] },
-    { operation: "select" as const, index: 5, lengths: ["tile-next" as const] },
+    { operation: "select_nth" as const },
+    { operation: "select_nth" as const, index: 100, lengths: [100] },
+    { operation: "select_nth" as const, index: 5, lengths: ["tile-next" as const] },
     { index: 5 },
     { operation: "partition-buckets" as const, bucketCount: 0 },
   ])
@@ -99,13 +103,11 @@ test("operation overrides retain exact parameters and reject unrelated flags", a
     { encoding: "utf8" },
   );
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(parsePlan(JSON.parse(result.stdout)).operation, {
-    kind: "partition-buckets",
-    bucket_count: 7,
-  });
+  for (const rule of parsePlan(JSON.parse(result.stdout)).include)
+    assert.deepEqual(rule.operation, { kind: "partition-buckets", bucket_count: 7 });
 });
 
-test("new plans, the editor schema and the CLI exclude retained-only operations", () => {
+test("plans, the editor schema and the CLI admit only current operations", () => {
   const cli = (...args: string[]) =>
     spawnSync(
       process.execPath,
@@ -117,10 +119,11 @@ test("new plans, the editor schema and the CLI exclude retained-only operations"
   assert.equal(help.status, 0, help.stderr);
   assert.match(
     help.stdout.replace(/\s+/g, " "),
-    /choices: "sort", "argsort", "select", "partition-buckets"/,
+    /choices: "sort", "argsort", "select_nth", "partition-buckets"/,
   );
   for (const operation of [
     { kind: "partition" },
+    { kind: "select", index: 10 },
     { kind: "segments", segment_len: 73 },
     { kind: "top-k", k: 10 },
     { kind: "prefix", prefix_len: 10 },
@@ -128,9 +131,9 @@ test("new plans, the editor schema and the CLI exclude retained-only operations"
     { kind: "select-many", indices: [99, 0, 99] },
   ]) {
     const rule = { lengths: [100] };
-    const base = { implementations: ["tessera"], include: [rule] };
-    assert.throws(() => parsePlan({ ...base, schema: 2, operation }));
-    assert.throws(() => parsePlan({ ...base, schema: 1, include: [{ ...rule, operation }] }));
+    assert.throws(() =>
+      parsePlan({ schema: 3, implementations: ["tessera"], include: [{ ...rule, operation }] }),
+    );
     assert.ok(!schema.includes(JSON.stringify(operation.kind)));
     const result = cli("--operation", operation.kind);
     assert.notEqual(result.status, 0);
@@ -142,16 +145,14 @@ test("new plans, the editor schema and the CLI exclude retained-only operations"
   }
 });
 
-test("revision plans place operations on include rules; an override replaces them", async () => {
+test("plans place operations on rules; an override replaces them", async () => {
   const rule = { types: ["u64"], distributions: ["random"], lengths: [1000] };
-  const select = { ...rule, operation: { kind: "select", index: 10 } };
-  parsePlan({ schema: 1, implementations: ["tessera"], include: [rule, select] });
+  const select = { ...rule, operation: { kind: "select_nth", index: 10 } };
+  parsePlan({ schema: 3, implementations: ["tessera"], include: [rule, select] });
   for (const invalid of [
-    { schema: 1, implementations: ["tessera"], include: [rule], exclude: [select] },
-    { schema: 1, implementations: ["tessera"], include: [rule], parallel: [select] },
-    { schema: 2, implementations: ["tessera"], operation: { kind: "argsort" }, include: [select] },
-    { schema: 1, implementations: ["tessera"], include: [{ ...select, lengths: ["tile-next"] }] },
-    { schema: 1, implementations: ["tessera"], include: [{ ...select, lengths: [5] }] },
+    { schema: 3, implementations: ["tessera"], include: [rule], parallel: [select] },
+    { schema: 3, implementations: ["tessera"], include: [{ ...select, lengths: ["tile-next"] }] },
+    { schema: 3, implementations: ["tessera"], include: [{ ...select, lengths: [5] }] },
   ])
     assert.throws(() => parsePlan(invalid));
   const continuous = await loadPlan("continuous");
@@ -160,18 +161,18 @@ test("revision plans place operations on include rules; an override replaces the
     [
       { kind: "argsort" },
       { kind: "partition-buckets", bucket_count: 16 },
-      { kind: "select", index: 32768 },
+      { kind: "select_nth", index: 32768 },
       { kind: "partition-buckets", bucket_count: 65537 },
       { kind: "argsort" },
-      { kind: "select", index: 32768 },
-      { kind: "select", index: 0 },
-      { kind: "select", index: 65535 },
-      { kind: "select", index: 0 },
-      { kind: "select", index: 65535 },
+      { kind: "select_nth", index: 32768 },
+      { kind: "select_nth", index: 0 },
+      { kind: "select_nth", index: 65535 },
+      { kind: "select_nth", index: 0 },
+      { kind: "select_nth", index: 65535 },
       { kind: "argsort" },
-      { kind: "select", index: 4 },
+      { kind: "select_nth", index: 4 },
       { kind: "argsort" },
-      { kind: "select", index: 32768 },
+      { kind: "select_nth", index: 32768 },
     ],
   );
   const sorting = await loadPlan("continuous", { operation: "sort" });

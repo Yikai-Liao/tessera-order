@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+import { compareExecutions, type Execution } from "../catalog.ts";
 import {
   type BencherReport,
   type ComparedRow,
@@ -26,8 +27,8 @@ export interface TrendSeries {
 export interface TrendSummary {
   // The base commit the latest report compared against; earlier runs may use older ones.
   base: string | null;
-  // Current API groups, including groups without a comparable history yet.
-  modes: string[];
+  // Executions of the current sorting rows, including those without a comparable history yet.
+  executions: Execution[];
   runs: { uuid: string; hash: string | null }[];
   // Geometric mean of the changes against the base, one per PR run.
   overall: number[];
@@ -193,13 +194,16 @@ function summarizeRuns(
   });
   return {
     base: summary.baseHash,
-    modes: [
+    executions: [
       ...new Set(
         summary.rows
-          .filter((row) => row.name.startsWith(`${language}/`))
-          .map((row) => row.parts.mode),
+          .filter(
+            (row) =>
+              row.name.startsWith(`${language}/`) && row.parts.execution && !row.parts.operation,
+          )
+          .map((row) => row.parts.execution as Execution),
       ),
-    ],
+    ].toSorted(compareExecutions),
     runs: runs.map(({ uuid, hash }) => ({ uuid, hash })),
     overall: runs.map(
       (run) =>

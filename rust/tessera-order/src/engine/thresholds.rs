@@ -7,8 +7,8 @@ pub const INSERTION_MAX: usize = 48;
 
 /// Charge each inversion one comparison plus the inline bytes moved.
 pub(crate) fn insertion_limit<T>() -> usize {
-    const COMPARISON_BYTES: usize = size_of::<u64>();
-    (INSERTION_MAX * COMPARISON_BYTES / (COMPARISON_BYTES + size_of::<T>())).max(8)
+    const COMPARISON_BYTES: usize = 16;
+    (INSERTION_MAX * COMPARISON_BYTES / (COMPARISON_BYTES + size_of::<T>())).max(16)
 }
 
 /// Default tile budget, in bytes of records.

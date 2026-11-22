@@ -19,7 +19,7 @@ Branch alignment is not a free speedup: it changed the prototype's own time by �
 
 ## Short insertion leaves
 
-The fixed 48-record cutoff kept random inputs on quadratic adjacent swaps even when a radix pass was cheaper. The [width-based limit](../explain/tiles.md#three-leaves) keeps the existing insertion operation and routes wider records to radix sooner. A separate pair-insertion implementation helped random inputs but added two unwind guards and regressed highly skewed inputs in hosted measurements. Keeping the existing order check also preserves linear-time reversal on short descending inputs.
+The fixed 48-record cutoff kept random inputs on quadratic adjacent swaps even when a radix pass was cheaper. The [width-based limit](../explain/tiles.md#three-leaves) keeps the existing insertion operation and routes wider records to radix sooner. A separate pair-insertion implementation helped random inputs but added two unwind guards and regressed highly skewed inputs in hosted measurements. Keeping the existing order check also preserves linear-time reversal on short descending inputs. In a nine-block linked comparison across seven layouts, random 48-record inputs took 0.62–0.76 times the standard stable sort’s time. Halving both the comparison allowance and the minimum length routed 16 owned records and 32 low-cardinality floats to radix too early. Tiny random keys and nearly sorted inputs remain open.
 
 ## Port parity baseline
 

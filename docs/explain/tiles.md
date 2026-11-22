@@ -10,7 +10,7 @@ A **tile** holds at most 64 KiB of records and at most 65,535 records, so that a
 | <span id="tile-lsd">**Tile LSD**</span> | the varying bits fit in one or two counting passes | one counting pass per digit, lowest digit first, alternating between the tile and scratch |
 | <span id="tile-msd">**Tile MSD**</span> | otherwise | one counting pass on the top digit, then each bucket is finished on its own: by insertion if it fits the short-leaf limit, otherwise by another tile leaf |
 
-For an inline record width of $w$ bytes, the insertion limit is $\max(8, \lfloor 48 \times 8 / (8 + w) \rfloor)$ records. A random permutation of $n$ distinct keys averages $n(n-1)/4$ inversions. Each adjacent swap pays a comparison plus movement proportional to $w$, so insertion work per record grows roughly as $n(8+w)$. The model charges comparison and loop overhead eight equivalent bytes and keeps at least eight records on insertion to amortize radix setup. These are tuning estimates. See [short insertion leaves](../design/evidence.md#short-insertion-leaves).
+For an inline record width of $w$ bytes, the insertion limit is $\max(16, \lfloor 48 \times 16 / (16 + w) \rfloor)$ records. A random permutation of $n$ distinct keys averages $n(n-1)/4$ inversions. Each adjacent swap pays a comparison plus movement proportional to $w$, so insertion work per record grows roughly as $n(16+w)$. The model charges comparison and loop overhead 16 equivalent bytes and keeps at least 16 records on insertion to amortize radix setup. These are tuning estimates. See [short insertion leaves](../design/evidence.md#short-insertion-leaves).
 
 ## Digit planning
 

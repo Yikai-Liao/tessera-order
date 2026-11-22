@@ -1147,7 +1147,13 @@ test("publication requires sweeps and preserves the sort figure alongside other 
         section.figures.find((figure) => figure.name === "memory"),
       ]),
     );
-  assert.ok(Object.values(figures(comparisonData(runs))).every((figure) => figure === undefined));
+  // Without sweeps, only argsort's runs have peaks at two lengths for a memory figure.
+  const fallback = figures(comparisonData(runs));
+  assert.deepEqual(
+    Object.keys(fallback).filter((kind) => fallback[kind]),
+    ["argsort"],
+  );
+  assert.equal(fallback.argsort!.title, "Grows as n^0.00, to 999 B at 64K records");
   assert.throws(() => growthSchema.parse({ ...provenance, sweeps: [sweeps[0], sweeps[0]] }));
   assert.throws(() =>
     growthSchema.parse({ ...provenance, sweeps: [{ ...sweeps[0], peaks: { tessera: [0] } }] }),
@@ -1180,7 +1186,7 @@ test("publication requires sweeps and preserves the sort figure alongside other 
   await writeFile(path, JSON.stringify({ ...provenance, sweeps: [sweeps[0]] }));
   const sortOnly = figures(await writeComparison(root));
   assert.equal(JSON.stringify(sortOnly.sort), JSON.stringify(figure));
-  assert.equal(sortOnly.argsort, undefined);
+  assert.equal(JSON.stringify(sortOnly.argsort), JSON.stringify(fallback.argsort));
   await writeFile(path, JSON.stringify(growth));
   assert.deepEqual(figures(await writeComparison(root)), plotted);
 });

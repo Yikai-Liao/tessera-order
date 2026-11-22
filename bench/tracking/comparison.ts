@@ -289,7 +289,8 @@ export function comparisonData(
     const scaling = sort ? trackingScaling(latest.runs) : null;
     const parallel = scaling ? renderParallel(scaling) : null;
     const sweep = growth?.sweeps.find((entry) => entry.operation.kind === kind);
-    const growthFigure = growth && sweep ? trackingGrowth(sweep, growth.hash) : null;
+    // Without a sweep, the memory figure falls back to the runs' own peaks.
+    const growthFigure = growth && sweep ? trackingGrowth(sweep, growth.hash) : undefined;
     // The site renders each chart itself; the table names every plotted value.
     const all = cohort ? comparisonFigures(field, cohort, true, growthFigure) : [];
     // Parameter axes and parallel scaling follow the fixed-parameter speed figures.

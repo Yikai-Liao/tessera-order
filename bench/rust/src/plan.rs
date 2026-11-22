@@ -84,6 +84,11 @@ pub(crate) struct Implementation {
     pub(crate) adapter: String,
     /// A parallel full-sort entry point, if the implementation has one.
     pub(crate) parallel: Option<ParallelSort>,
+    /// The call each non-sort operation makes, keyed by operation kind, when the label names
+    /// only the sort; figures print it beside the label. Only the support test reads it.
+    #[cfg(test)]
+    #[serde(default)]
+    pub(crate) routes: std::collections::BTreeMap<String, String>,
 }
 /// Where a parallel full-sort entry point stands beside the serial entry points.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]

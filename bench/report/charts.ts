@@ -395,6 +395,10 @@ function fieldTitle(standings: Standing[], unit: string) {
     top3 = standings.filter((s) => s.rank <= 3).length;
   // "All" reads naturally only past two; two cases read as "both".
   const all = (count: number) => (count === 2 ? `both ${unit}` : `all ${count} ${unit}`);
+  // One row states its rank on the only measured one: "Fastest on the only input".
+  const only = `the only ${unit.slice(0, -1)}`;
+  if (total === 1)
+    return first ? `Fastest on ${only}` : `Ranked ${ordinal(standings[0].rank)} on ${only}`;
   if (first === total) return `Fastest on ${all(total)}`;
   // A podium needs more than three implementations in the field.
   const field = Math.max(...standings.map((s) => s.speeds.length + 1));

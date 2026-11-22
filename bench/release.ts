@@ -53,7 +53,7 @@ export async function checkImplementations(root: string, out: string, native: bo
     throw new Error("Native linkage checks require Linux and ldd");
   await mkdir(out, { recursive: false });
   await withComparisonWorkspace(root, native, async ({ tree, target }) => {
-    const features = ["rayon", ...(native ? ["compare-native"] : [])];
+    const features = ["rayon", "operations", ...(native ? ["compare-native"] : [])];
     await prepareRevisions(root, tree, { baseline: "HEAD" }, features);
     await withBuildCache(target, async () => {
       const env = await benchmarkEnvironment(tree);

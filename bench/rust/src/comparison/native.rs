@@ -116,10 +116,15 @@ pub(super) fn prepare<T: NativeRecord>(
     let implementation = NativeImplementation::from_name(v.name)?;
     // SAFETY: The registry returns a static function pointer or NULL for these indices.
     let sort = unsafe { bench_kernel(implementation as u32, T::TYPE as u32) }?;
-    Some(prepare_kernel(input, v.stable, move |values| {
-        // SAFETY: NativeRecord binds T to the registry's C layout for TYPE.
-        unsafe { sort(values.as_mut_ptr().cast(), values.len()) };
-    }))
+    Some(prepare_kernel(
+        input,
+        v.stable,
+        "C++ registry sort entry",
+        move |values| {
+            // SAFETY: NativeRecord binds T to the registry's C layout for TYPE.
+            unsafe { sort(values.as_mut_ptr().cast(), values.len()) };
+        },
+    ))
 }
 
 /// Records the SIMD targets selected on the measuring host.

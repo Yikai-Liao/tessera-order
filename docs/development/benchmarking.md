@@ -255,7 +255,7 @@ The timer covers each complete call, including scratch allocation, classificatio
 
 The separate allocation worker verifies one complete call for every admitted case and variant. Peak extra heap includes output: O(n) indices for argsort, O(R) offsets for bucket partition and no heap output for in-place selection. Memory rows retain peak extra heap and output bytes separately; reports estimate workspace by subtracting retained output bytes from peak extra heap.
 
-The manifest keeps the exact operation and frozen plan. Non-sort implementation reports remain tables and JSON; the full-sort figures keep their cohorts and meaning.
+The manifest keeps the exact operation and frozen plan. Non-sort implementation reports remain tables and JSON; the full-sort figures keep their cohorts and meaning. A non-sort report's speed table divides the operation's serial denominator's median time by each column's on the same case and states the denominator's route and stability; these speeds are not paired, so verdicts stay with the paired Tessera ratios in Full results.
 
 ## Local parallel comparisons
 
@@ -363,7 +363,7 @@ The opt-in `Reverse` inputs wrap the base generator's `!key` (`u64`) or `-key` (
 
 ## Implementations
 
-Rust competitors are pinned dependencies of the benchmark package, not the library. Native sources are pinned by repository, commit, archive SHA-256 and license in `native/sources.toml`, verified by `bench/rust/native/fetch.ts` and the build, and kept in the ignored `bench/vendor/`. The [catalog](../../bench/catalog.toml) owns variant identities, stability and names; adapters in [variant.rs](../../bench/rust/src/comparison/variant.rs) own capabilities and routes, which the runner's `list` reports as tab-separated column, stability, supported types and route for the selected operation.
+Rust competitors are pinned dependencies of the benchmark package, not the library. Native sources are pinned by repository, commit, archive SHA-256 and license in `native/sources.toml`, verified by `bench/rust/native/fetch.ts` and the build, and kept in the ignored `bench/vendor/`. The [catalog](../../bench/catalog.toml) owns variant identities, stability and names; adapters in [variant.rs](../../bench/rust/src/comparison/variant.rs) own capabilities and routes, which the runner's `list` reports for the selected operation as tab-separated column, stability, the types taking a route, and that route, one row per distinct route.
 
 Unsupported tasks: Voracious 1.2.0 records (its stable path fails on duplicate keys) and small floats (partial comparison); VQSort and x86-simd-sort floats (no NaN-payload and signed-zero total order) and rows (different pair layouts). The DuckDB adapter pins the v1.4.0 headers from [Sorting, Again](https://duckdb.org/2025/09/24/sorting-again) (Vergesort over Ska Sort with pdqsort fallback): an **unstable, single-threaded in-memory kernel** on raw integer keys and records, without SQL key encoding, external merging, cancellation checks, floats or owned strings.
 

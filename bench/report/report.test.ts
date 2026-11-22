@@ -5,7 +5,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { caseGroup, caseId, type Operation } from "../catalog.ts";
+import { caseGroup, caseId, columnId, type Operation, referenceColumn } from "../catalog.ts";
 import { renderFigures } from "./charts.ts";
 import { createFixture } from "./fixture.ts";
 import { collectWarnings, writeReport } from "./index.ts";
@@ -371,6 +371,14 @@ test("operation runs regenerate with exact IDs and output-aware memory", async (
       assert.match(report, /partial routes.*payload records/);
     }
     assert.ok(report.includes(JSON.stringify(operation)));
+    const reference = columnId(referenceColumn(operation, "serial")!);
+    assert.ok(report.includes(`The reference is \`${reference}\``));
+    // Speeds divide by the reference's time, not Tessera's.
+    const summaries = summarize(dataset);
+    const id = caseId(dataset.manifest.cases[0]);
+    const ns = (column: string) => summaries.get(measurementId("default", id, column))!.ns;
+    assert.notEqual(ns(reference), ns("tessera/serial"));
+    assert.ok(report.includes(`${(ns(reference) / ns("tessera/serial")).toFixed(3)}×`));
     assert.ok((await readdir(join(directory, "report"))).every((name) => !name.endsWith(".svg")));
     const regenerated = await loadRun([directory]);
     assert.equal(regenerated.samples[0].case_id, caseId(dataset.manifest.cases[0]));

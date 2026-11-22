@@ -2,7 +2,14 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { catalog, executionThreads, operationDescription } from "../catalog.ts";
+import {
+  catalog,
+  columnId,
+  executionThreads,
+  type Operation,
+  operationDescription,
+  referenceColumn,
+} from "../catalog.ts";
 import { median, pairedBudget } from "../statistics.ts";
 import { resultSummary } from "../summary.ts";
 import { renderFigures } from "./charts.ts";
@@ -115,6 +122,38 @@ function renderResults(dataset: Dataset, summaries: Map<string, Summary>): strin
       output += `<details>\n<summary>${ty}</summary>\n\n${renderTable(["Distribution", "Length", "Build", "A/A range", ...columns], rows)}\n</details>\n\n`;
   }
   return output;
+}
+/**
+ * Speed against the operation's serial reference: the reference's median time divided by each
+ * column's, per case. Figures carry this view for sorting; other operations get the table.
+ */
+function renderReferenceSpeeds(
+  dataset: Dataset,
+  summaries: Map<string, Summary>,
+  operation: Operation,
+) {
+  const reference = columnId(referenceColumn(operation, "serial")!);
+  const stable = dataset.manifest.columns.find((column) => column.id === reference)!.stable;
+  const route = dataset.manifest.cases[0].routes[reference];
+  const columns = dataset.manifest.columns.map((column) => column.id);
+  const rows = dataset.manifest.cases.flatMap((c) => {
+    const base = summaries.get(measurementId("default", caseId(c), reference));
+    if (!base) return [];
+    return [
+      [
+        c.ty,
+        c.distribution,
+        c.len.toLocaleString("en-US"),
+        ...columns.map((column) => {
+          const s = summaries.get(measurementId("default", caseId(c), column));
+          return s ? `${(base.ns / s.ns).toFixed(3)}×` : "—";
+        }),
+      ],
+    ];
+  });
+  return `## Speed against the reference
+
+The reference is \`${reference}\`, the catalog's serial reference for this operation; its route is "${route}" and it is ${stable ? "stable" : "unstable, so it guarantees no order among equal keys"}. Each cell divides the reference's median time by the column's on the same case, so 2× takes half as long. Medians come from separately calibrated batches, so these are not paired ratios; the paired, Tessera-relative ratios and verdicts are in [Full results](#full-results).\n\n${renderTable(["Type", "Distribution", "Length", ...columns], rows)}\n`;
 }
 function renderCapabilities(dataset: Dataset) {
   const manifest = dataset.manifest;
@@ -239,6 +278,7 @@ export async function writeReport(directories: string[], partial = false) {
     await writeFile(join(out, `${chart.name}.svg`), chart.svg);
     markdown += `## ${chart.subject}\n\n${chart.summary}\n\n![${chart.title}](${chart.name}.svg)\n\n<details>\n<summary>Plotted values</summary>\n\n${chart.table}\n</details>\n\n`;
   }
+  if (!sort) markdown += renderReferenceSpeeds(dataset, summaries, operation);
   markdown += renderResults(dataset, summaries);
   markdown +=
     "## Memory accounting\n\nThe memory executable measures one complete call after preparing its input and verification reference. Rust-only builds count requested allocation sizes. Native builds count allocator usable sizes at the wrapped C allocation functions and C++ new/delete; allocator rounding is included. Fixed stack storage is unmeasured. Input buffers and owned payloads are excluded.\n";

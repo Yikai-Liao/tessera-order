@@ -543,41 +543,36 @@ pub fn main(memory: bool) -> Result<()> {
     }
     match options.command.as_str() {
         "list" => {
-            // One row per adapter and planned execution with any supported type.
+            // One row per adapter, planned execution and distinct route, with
+            // the types that take that route.
             let executions: BTreeSet<_> =
                 cases.iter().flat_map(|(_, e)| e.iter().copied()).collect();
             for v in variant::list_variants() {
                 for &execution in &executions {
-                    let supported: Vec<_> = catalog()
-                        .types
-                        .iter()
-                        .map(|ty| ty.id.as_str())
-                        .filter(|ty| {
-                            v.supports(
-                                &record::CaseInput::new(&InputCase {
-                                    ty: (*ty).into(),
-                                    distribution: "random".into(),
-                                    len: 32,
-                                    operation: options.operation().probe(),
-                                }),
-                                execution,
-                            )
-                        })
-                        .collect();
-                    if !supported.is_empty() {
-                        // Routes do not differ by record type, so the random u64 probe names it.
+                    let mut routes: Vec<(&str, Vec<&str>)> = Vec::new();
+                    for ty in &catalog().types {
                         let probe = record::CaseInput::new(&InputCase {
-                            ty: supported[0].into(),
+                            ty: ty.id.clone(),
                             distribution: "random".into(),
                             len: 32,
                             operation: options.operation().probe(),
                         });
+                        if !v.supports(&probe, execution) {
+                            continue;
+                        }
+                        let route = v.route(&probe, execution);
+                        match routes.iter_mut().find(|(r, _)| *r == route) {
+                            Some((_, types)) => types.push(&ty.id),
+                            None => routes.push((route, vec![&ty.id])),
+                        }
+                    }
+                    for (route, types) in routes {
                         println!(
                             "{}\t{}\t{}\t{}",
                             run::column_id(v, execution),
                             if v.stable { "stable" } else { "unstable" },
-                            supported.join(","),
-                            v.route(&probe, execution)
+                            types.join(","),
+                            route
                         );
                     }
                 }

@@ -10,6 +10,7 @@ import {
   implementation,
   type Operation,
   operationNoun,
+  operationParts,
   recordType,
   referenceColumn,
   referenceLabel,
@@ -69,7 +70,8 @@ const rendered = (chart: Chart) => ({ chart, svg: renderRows(chart) });
  * from independent runs. Case IDs are comparison IDs (`u64/random/1000/s1`).
  */
 export interface Field {
-  /** The operation every case performs; its serial reference is the speed denominator. */
+  /** The section's operation with its chosen parameters; its serial reference is the speed
+   * denominator. A parameter figure's field also holds cases at other parameter values. */
   operation: Operation;
   implementations: { name: string; stable: boolean }[];
   cases: CaseIdentity[];
@@ -429,6 +431,92 @@ function fieldTable(t: Terms, rows: [string, Standing][], nsPerKey?: number[]) {
         .join(", "),
     ]),
   );
+}
+
+const rankPosition = new Intl.NumberFormat("en-US", {
+  style: "percent",
+  maximumFractionDigits: 2,
+});
+
+/** One speed figure per parameter with at least two measured values on the same input. */
+export function parameterFigures(field: Field): Figure[] {
+  const t = terms(field.operation);
+  const { entry } = operationParts(field.operation);
+  return entry.parameters.flatMap((parameter, axis) => {
+    const label = parameter.label ?? parameter.id.replaceAll("_", " ");
+    const isRank = parameter.id === "index";
+    const fixed = (input: CaseIdentity) =>
+      operationParts(input.operation).values.flatMap((value, index) =>
+        index === axis ? [] : [{ parameter: entry.parameters[index], value }],
+      );
+    const inputs = Map.groupBy(field.cases, (input) =>
+      JSON.stringify([
+        input.ty,
+        input.distribution,
+        input.len,
+        fixed(input).map(({ value }) => value),
+      ]),
+    );
+    const plotted: [string, Standing][] = [];
+    const groups = [...inputs.values()].flatMap((cases) => {
+      const [input] = cases;
+      const stableOnly = recordType(input.ty).task === "records";
+      const rows = cases.flatMap((measured) => {
+        const standingAtValue = standing(field, [caseId(measured)], stableOnly);
+        const value = operationParts(measured.operation).values[axis];
+        return standingAtValue ? [{ value, standing: standingAtValue }] : [];
+      });
+      if (rows.length < 2) return [];
+      const group = [
+        `${formatLength(input.len)} ${elements(input.ty)}`,
+        distribution(input.distribution).label,
+        ...fixed(input).map(
+          ({ parameter, value }) =>
+            `${parameter.label ?? parameter.id.replaceAll("_", " ")} ${value.toLocaleString("en-US")}`,
+        ),
+      ].join(" · ");
+      return [
+        {
+          title: group,
+          rows: rows
+            .toSorted((a, b) => a.value - b.value)
+            .map(({ value, standing }) => {
+              const exact = value.toLocaleString("en-US");
+              // The first and last selectable elements are 0% and 100% at every length.
+              const row = isRank
+                ? `${rankPosition.format(value / (input.len - 1))} (${exact})`
+                : exact;
+              plotted.push([`${group} · ${row}`, standing]);
+              return fieldRow(t, { input: row, sub: "", tag: "" }, standing);
+            }),
+        },
+      ];
+    });
+    if (!plotted.length) return [];
+    const standings = plotted.map(([, s]) => s);
+    const title = fieldTitle(standings, "cases");
+    return [
+      {
+        name: `parameter-${parameter.id}`,
+        subject: `Speed by ${label}`,
+        summary: `Each group holds one input and changes only its ${label}. Each dot is one ${t.one} relative to ${t.referenceLabel}. Record inputs rank only stable ${t.many}.`,
+        title,
+        ...rendered({
+          title,
+          guide: `${isRank ? "Rank position (zero-based index) · " : ""}speed vs ${t.referenceLabel}`,
+          columns: ["Speed", "Rank"],
+          groups,
+          scale: speedScale(
+            standings.flatMap((s) => [s.tessera, ...s.speeds.map((v) => v.speed)]),
+            t.referenceLabel,
+          ),
+          axis: SPEED_AXIS,
+          legend: kindLegend,
+        }),
+        table: fieldTable(t, plotted),
+      },
+    ];
+  });
 }
 
 // Each measured input pattern of one type. Records admit only stable implementations;

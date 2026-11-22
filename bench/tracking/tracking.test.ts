@@ -7,14 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parseHTML } from "linkedom/worker";
 import { z } from "zod";
-import {
-  columnId,
-  type Execution,
-  executionSection,
-  executionThreads,
-  parseCriterionId,
-  SORT,
-} from "../catalog.ts";
+import { columnId, executionThreads, parseCriterionId } from "../catalog.ts";
 import { loadPlan } from "../plan.ts";
 import type { RowChart } from "../plot/rows.ts";
 import { columnPlan, trackingMemory } from "./build.ts";
@@ -225,7 +218,8 @@ test("cases follow execution, length, record type and catalog input order", () =
     "rust/sort/u64/random/1000000/s1/t4",
     "rust/sort/u64/sorted/65536/s1/serial",
     "rust/sort/u32/random/1000000/s1/serial",
-    "rust/sort/u64/random/1000000/s1/t2",
+    "rust/sort/u64/random/1000000/s1/t1",
+    "rust/sort/u64/random/1000000/s1/t8",
     "rust/sort/u64/random/65536/s1/serial",
     "rust/sort/u64/random/32/s1/serial",
   ];
@@ -237,16 +231,15 @@ test("cases follow execution, length, record type and catalog input order", () =
       "rust/sort/u64/random/65536/s1/serial",
       "rust/sort/u64/sorted/65536/s1/serial",
       "rust/sort/u32/random/1000000/s1/serial",
-      "rust/sort/u64/random/1000000/s1/t2",
+      "rust/sort/u64/random/1000000/s1/t1",
       "rust/sort/u64/random/1000000/s1/t4",
+      "rust/sort/u64/random/1000000/s1/t8",
     ],
   );
-  const groups = ["serial", "t2", "t4"].map(
-    (execution) => executionSection(SORT, execution as Execution).title,
-  );
+  const groups = ["sort", "par_sort · 1 thread", "par_sort · 4 threads", "par_sort · 8 threads"];
   assert.deepEqual(
     cases.map((entry) => entry.group),
-    [groups[0], groups[0], groups[0], groups[0], groups[1], groups[2]],
+    [groups[0], groups[0], groups[0], groups[0], groups[1], groups[2], groups[3]],
   );
   // Filter values follow the catalog, not the order cases first appear in.
   const facets = trackingFacets(cases);
@@ -827,6 +820,104 @@ test("each operation gets its own section against its own reference", () => {
   );
   // The home page keeps the sort ranking.
   assert.deepEqual(data.overview, section("sort").figures[0]);
+});
+
+test("parameter figures compare matching inputs against the operation's reference", () => {
+  const tracked = (values: Record<string, number>) =>
+    runSchema.parse({
+      ...run,
+      values: Object.fromEntries(
+        Object.entries(values).map(([id, ns]) => [`rust/${id}/serial`, [ns, ns, ns]]),
+      ),
+    });
+  const first = "select_nth/u64/random/101/s1/0";
+  const middle = "select_nth/u64/random/101/s1/50";
+  const last = "select_nth/u64/random/101/s1/100";
+  const largerFirst = "select_nth/u64/random/201/s1/0";
+  const largerMiddle = "select_nth/u64/random/201/s1/100";
+  const unmatched = "select_nth/u64/sorted/101/s1/50";
+  const smallBuckets = "partition-buckets/u64/random/101/s1/4";
+  const largeBuckets = "partition-buckets/u64/random/101/s1/16";
+  const tessera = tracked({
+    [middle]: 10,
+    [first]: 5,
+    [last]: 2,
+    [largerFirst]: 5,
+    [largerMiddle]: 10,
+    [unmatched]: 7,
+    [largeBuckets]: 15,
+    [smallBuckets]: 10,
+  });
+  const stable = tracked({ [middle]: 40, [smallBuckets]: 30, [largeBuckets]: 30 });
+  const unstable = tracked({
+    [middle]: 20,
+    [first]: 20,
+    [largerFirst]: 20,
+    [largerMiddle]: 10,
+    [unmatched]: 20,
+  });
+  const data = comparisonData(
+    new Map([
+      ["tessera", [tessera]],
+      ["std-stable", [stable]],
+      ["std-unstable", [unstable]],
+    ]),
+  );
+  const axis = (operation: string, parameter: string) => {
+    const figures = data.operations
+      .find((section) => section.id === operation)!
+      .figures.filter((figure) => figure.name.startsWith("parameter-"));
+    assert.deepEqual(
+      figures.map((figure) => figure.name),
+      [`parameter-${parameter}`],
+    );
+    assert.equal(figures[0].kind, undefined);
+    return figures[0];
+  };
+  const ranks = axis("select_nth", "index");
+  assert.equal(ranks.subject, "Speed by rank");
+  assert.match(ranks.table, /Tessera speed vs slice::sort_unstable · select_nth_unstable/);
+  assert.deepEqual(
+    (ranks.chart as RowChart).groups.map((group) => [
+      group.title,
+      group.rows.map((row) => [row.name.input, row.cells[0]]),
+    ]),
+    [
+      [
+        "101 u64 keys · random",
+        [
+          ["0% (0)", "4×"],
+          ["50% (50)", "2×"],
+        ],
+      ],
+      [
+        "201 u64 keys · random",
+        [
+          ["0% (0)", "4×"],
+          ["50% (100)", "1.00×"],
+        ],
+      ],
+    ],
+  );
+  const buckets = axis("partition-buckets", "bucket_count");
+  assert.match(buckets.table, /Tessera speed vs slice::sort · sort_by_key on categories/);
+  assert.deepEqual(
+    (buckets.chart as RowChart).groups[0].rows.map((row) => [row.name.input, row.cells[0]]),
+    [
+      ["4", "3×"],
+      ["16", "2×"],
+    ],
+  );
+
+  // One shared value preserves the selection section and omits its parameter figure.
+  const single = comparisonData(
+    new Map([
+      ["tessera", [tessera]],
+      ["std-unstable", [tracked({ [middle]: 20, [unmatched]: 20 })]],
+    ]),
+  );
+  assert.equal(single.operations[0].id, "select_nth");
+  assert.ok(!single.operations[0].figures.some((figure) => figure.name.startsWith("parameter-")));
 });
 
 test("tracking columns fit the tracking hardware and a selection keeps PR coverage", () => {

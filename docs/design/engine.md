@@ -77,7 +77,7 @@ Node samples choose partitions; they never certify ownership, equality of actual
 
 A stage's rule changes on its page, in the code and in the page's model together. Structural facts across stages:
 
-- `prepare` is shared by the serial and parallel entries. `insertion_probe` owns insertion eligibility, its window and budget, including contract-appropriate finishing for small inputs.
+- Tiny serial refinements finish before the general order probe. Larger roots share the order probe and bounded insertion policy.
 - `finish_ordered` owns ascending completion and strict or stable descending reversal, for the root probe, deferred flat confirmation and partition children.
 - Root, node-child and tile-child variation share `order::scan_varying_bits`; key digit windows have one representation in `key::Digit`.
 - Serial and parallel execution consume one `NodePlan` decision once. Parallel roots shard equality and digit partitions; an existing-run split runs serially without resampling.
@@ -137,7 +137,7 @@ When the root digit covers all remaining variation in at most eight bits, direct
 
 ## Insertion and scans
 
-Every insertion pass, a budgeted probe or the finish of a tile or bucket, runs `order::insertion_loop`: find the first descending adjacent pair, move the later record left, resume after it. A probe returns its swap count and may stop at its budget. `finish_insertion` has no budget and returns `()`, so no unused count crosses a target-feature boundary. The loop receives an inversion scan alongside the extractor: user-key scans use the same mutable extractor, direct-key passes capture the backend selected before entering the loop. No insertion-only extractor carries a SIMD token.
+Short leaves use single or paired insertion. Each vacant slot has a guard that restores its held record on return or unwind. Strict comparisons keep equal predecessors ahead of the new records. Budgeted probes and the final sweep over a tile of distributed short buckets use the adjacent-inversion scanner described below.
 
 | Pass | Implementation |
 |---|---|

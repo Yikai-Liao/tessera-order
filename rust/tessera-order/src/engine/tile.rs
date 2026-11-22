@@ -9,7 +9,7 @@ mod plan;
 
 use crate::engine::key::{self, Digit, Extract, Unsigned};
 use crate::engine::order::scan_varying_bits;
-use crate::engine::thresholds::{INSERTION_MAX, MAX_CURSOR_BYTES, MAX_TILE_RECORDS};
+use crate::engine::thresholds::{MAX_CURSOR_BYTES, MAX_TILE_RECORDS, insertion_limit};
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 use plan::{TilePlan, plan_tile};
@@ -147,7 +147,7 @@ impl<T> Scratch<T> {
             return;
         }
         match plan_tile::<T>(len, varying) {
-            TilePlan::Insertion => extractor.finish_insertion(records),
+            TilePlan::Insertion => super::order::sort_short(records, extractor),
             TilePlan::Msd(digit) => {
                 self.partition_tile::<_>(records, digit, varying, extractor);
             }
@@ -197,11 +197,11 @@ impl<T> Scratch<T> {
         if candidate == 0 || records.len() < 2 {
             return;
         }
-        if records.len() > INSERTION_MAX {
+        if records.len() > insertion_limit::<T>() {
             let varying = scan_varying_bits(records, candidate, extractor);
             self.sort::<_>(records, varying, extractor);
         } else {
-            extractor.finish_insertion(records);
+            super::order::sort_short(records, extractor);
         }
     }
 
@@ -308,7 +308,7 @@ impl<T> Scratch<T> {
         let largest = self.counting_passes(records, &[digit], &mut counts, extractor);
         // With insertion-sized buckets, whole-tile insertion has the same inversion
         // count as separate bucket sorts and skips the boundary walk.
-        if largest as usize <= INSERTION_MAX {
+        if largest as usize <= insertion_limit::<T>() {
             extractor.finish_insertion(records);
             return;
         }

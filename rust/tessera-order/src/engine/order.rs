@@ -5,7 +5,9 @@
 //! Key extractors select the scan; direct-key callers keep the insertion loop
 //! inside their once-per-pass SIMD dispatch. These operations own no routing policy.
 
+use super::thresholds::SINGLE_INSERTION_MAX;
 use crate::engine::key::{Extract, Unsigned};
+use core::mem::ManuallyDrop;
 
 /// Returns the first descending pair, retaining the previous extracted key so
 /// a user callback runs once per scanned record. The callback may panic or
@@ -20,6 +22,146 @@ pub(crate) fn by_key<T, E: Extract<T>>(records: &[T], extractor: &mut E) -> Opti
         previous = current;
         inverted
     })
+}
+
+/// Stable insertion for short leaves. Insert pairs together so a predecessor
+/// greater than both keys moves directly to its final slot for this pair.
+#[inline(always)]
+pub(crate) fn sort_short<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
+    if records.len() <= SINGLE_INSERTION_MAX {
+        let len = records.len();
+        // Reverse strict runs once their inversion count can pay for the scan.
+        if len > SINGLE_INSERTION_MAX / 2 && extractor.key(&records[1]) < extractor.key(&records[0])
+        {
+            let start = reverse_prefix(records, extractor);
+            for index in start..len {
+                insert_one(&mut records[..=index], extractor);
+            }
+            return;
+        }
+        // Fixed prefix lengths let the compiler remove loop and bound checks.
+        let mut start = 1;
+        if let Some(first) = records.first_chunk_mut::<4>() {
+            for index in 1..4 {
+                insert_one(&mut first[..=index], extractor);
+            }
+            start = 4;
+        }
+        for index in start..records.len() {
+            insert_one(&mut records[..=index], extractor);
+        }
+    } else {
+        sort_pairs(records, extractor);
+    }
+}
+
+// Keep the reversal and its record-sized temporary off the ascending path.
+#[inline(never)]
+fn reverse_prefix<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) -> usize {
+    let mut start = 2;
+    let mut previous = extractor.key(&records[1]);
+    for record in &records[2..] {
+        let next = extractor.key(record);
+        if next >= previous {
+            break;
+        }
+        previous = next;
+        start += 1;
+    }
+    records[..start].reverse();
+    start
+}
+
+fn sort_pairs<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
+    let len = records.len();
+
+    // An even suffix leaves no unpaired record at the end.
+    let mut start = if len.is_multiple_of(2) {
+        insert_one(&mut records[..2], extractor);
+        2
+    } else {
+        1
+    };
+    while start < len {
+        let mut low = extractor.key(&records[start]);
+        let mut high = extractor.key(&records[start + 1]);
+        if high < low {
+            records.swap(start, start + 1);
+            core::mem::swap(&mut low, &mut high);
+        }
+        let last = extractor.key(&records[start - 1]);
+        if last > low {
+            // SAFETY: the two guards own the records in adjacent holes.
+            // Moving a predecessor two slots opens the next pair of holes.
+            unsafe {
+                let base = records.as_mut_ptr();
+                let tail = base.add(start);
+                let mut left = InsertionGap {
+                    record: ManuallyDrop::new(tail.read()),
+                    hole: tail,
+                };
+                let mut right = InsertionGap {
+                    record: ManuallyDrop::new(tail.add(1).read()),
+                    hole: tail.add(1),
+                };
+                while left.hole != base && extractor.key(&*left.hole.sub(1)) > high {
+                    let before = left.hole.sub(1);
+                    right.hole.copy_from_nonoverlapping(before, 1);
+                    right.hole = left.hole;
+                    left.hole = before;
+                }
+                drop(right);
+                while left.hole != base && extractor.key(&*left.hole.sub(1)) > low {
+                    let before = left.hole.sub(1);
+                    left.hole.copy_from_nonoverlapping(before, 1);
+                    left.hole = before;
+                }
+            }
+        }
+        start += 2;
+    }
+}
+
+#[inline(always)]
+fn insert_one<T, E: Extract<T>>(records: &mut [T], extractor: &mut E) {
+    let index = records.len() - 1;
+    let key = extractor.key(&records[index]);
+    if key >= extractor.key(&records[index - 1]) {
+        return;
+    }
+    // SAFETY: index and its predecessor are initialized. Each copy moves
+    // the preceding owner into the hole before another callback can run.
+    // On normal return or unwind the guard fills the one remaining hole.
+    unsafe {
+        let base = records.as_mut_ptr();
+        let tail = base.add(index);
+        let mut gap = InsertionGap {
+            record: ManuallyDrop::new(tail.read()),
+            hole: tail,
+        };
+        loop {
+            let before = gap.hole.sub(1);
+            gap.hole.copy_from_nonoverlapping(before, 1);
+            gap.hole = before;
+            if before == base || extractor.key(&*before.sub(1)) <= key {
+                break;
+            }
+        }
+    }
+}
+
+/// Sole owner of one removed record and its unique vacant slot in the slice.
+struct InsertionGap<T> {
+    record: ManuallyDrop<T>,
+    hole: *mut T,
+}
+
+impl<T> Drop for InsertionGap<T> {
+    fn drop(&mut self) {
+        // SAFETY: the guard owns this record and exclusively owns the vacant
+        // slot. Transferring the record back consumes its only live copy.
+        unsafe { self.hole.write(ManuallyDrop::take(&mut self.record)) };
+    }
 }
 
 /// Scans until all candidate bits have appeared in both states, or the input ends.

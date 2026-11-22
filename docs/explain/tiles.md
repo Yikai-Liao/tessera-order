@@ -6,11 +6,11 @@ A **tile** holds at most 64 KiB of records and at most 65,535 records, so that a
 
 | Leaf | Used when | How it works |
 |---|---|---|
-| <span id="insertion">**Insertion sort**</span> | the tile has at most 48 records | stable insertion on encoded keys |
+| <span id="insertion">**Insertion sort**</span> | the tile fits the short-leaf limit below | stable insertion on encoded keys |
 | <span id="tile-lsd">**Tile LSD**</span> | the varying bits fit in one or two counting passes | one counting pass per digit, lowest digit first, alternating between the tile and scratch |
-| <span id="tile-msd">**Tile MSD**</span> | otherwise | one counting pass on the top digit, then each bucket is finished on its own: by insertion if it has at most 48 records, otherwise by another tile leaf |
+| <span id="tile-msd">**Tile MSD**</span> | otherwise | one counting pass on the top digit, then each bucket is finished on its own: by insertion if it fits the short-leaf limit, otherwise by another tile leaf |
 
-Below 48 records, clearing and scanning bucket tables costs more than insertion's shifts.
+The short-leaf limit is the number of whole records that fit in 2 KiB, clamped to 16–48 records. A 16-byte row gets 48 slots and a 128-byte row gets 16. The record ceiling bounds comparison work on narrow keys. The byte budget sends wide records to distribution sooner, where each pass moves each record once. See the [short-leaf measurements](../design/evidence.md#short-insertion-leaves).
 
 ## Digit planning
 
@@ -44,7 +44,7 @@ Tile passes are the classic [counting pass](radix-sort.md#the-counting-pass), wi
 
 A bucket's remaining varying bits are scanned only within the parent's remaining bits. A digit that has been partitioned cannot reappear, even if the key function changes its answers, so each level removes key bits.
 
-An MSD pass reads its bucket boundaries from the finished cursor table instead of recomputing them; recomputing measured 48% slower at about one bucket per record. If every bucket is insertion-sized, one insertion sort over the whole tile does the same work without walking the boundaries.
+An MSD pass reads its bucket boundaries from the finished cursor table instead of recomputing them; recomputing measured 48% slower at about one bucket per record. If every bucket is insertion-sized, one adjacent-inversion sweep over the whole tile finishes it without walking the boundaries.
 
 ## Parallel child allowance
 

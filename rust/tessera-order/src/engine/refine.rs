@@ -26,7 +26,7 @@ mod spans;
 use crate::engine::tile;
 
 use crate::engine::order::scan_varying_bits;
-use crate::engine::thresholds::{INSERTION_MAX, TILE_BYTES};
+use crate::engine::thresholds::{SINGLE_INSERTION_MAX, TILE_BYTES, insertion_limit};
 use crate::engine::workspace::Workspace;
 use plan::{NodePlan, plan_node};
 use tile::capacity as tile_capacity;
@@ -129,6 +129,7 @@ struct Sorter<'a, T, E> {
 }
 
 /// Sorts the complete input through the shared ordered-refinement entry.
+#[inline]
 pub(crate) fn sort<T, E: Extract<T>>(records: &mut [T], extractor: E) {
     refine_with_tile_bytes(records, extractor, Requirement::All, TILE_BYTES);
 }
@@ -148,6 +149,7 @@ pub(crate) fn select_nth<T, E: Extract<T>>(
 
 /// Executes refinement with an explicit budget, shared by the production entry
 /// and ownership tests that need node routes with small inputs.
+#[inline]
 fn refine_with_tile_bytes<T, E: Extract<T>>(
     records: &mut [T],
     mut extractor: E,
@@ -159,6 +161,19 @@ fn refine_with_tile_bytes<T, E: Extract<T>>(
         return;
     }
     let tile_len = tile_capacity::<T>(tile_bytes);
+    if records.len() <= SINGLE_INSERTION_MAX.min(tile_len) {
+        crate::engine::order::sort_short(records, &mut extractor);
+        return;
+    }
+    refine_large(records, extractor, required, tile_len);
+}
+
+fn refine_large<T, E: Extract<T>>(
+    records: &mut [T],
+    mut extractor: E,
+    required: Requirement,
+    tile_len: usize,
+) {
     if let Requirement::Nth(index) = required
         && records.len() > tile_len
         && spans::SourceOrder::finish_cut(records, index, &mut extractor)
@@ -246,10 +261,9 @@ fn insertion_probe<T, E: Extract<T>>(
     tile_len: usize,
 ) -> bool {
     // A failed limited pass on a small leaf would scan varying bits only to
-    // select comparison finishing again. Keep its result unit-returning, so
-    // stable direct insertion discards the unused count inside SIMD dispatch.
-    if records.len() <= INSERTION_MAX && records.len() <= tile_len {
-        extractor.finish_insertion(records);
+    // select comparison finishing again.
+    if records.len() <= insertion_limit::<T>().min(tile_len) {
+        crate::engine::order::sort_short(records, extractor);
         return true;
     }
     let probe_len = tile_len.max(2).min(records.len());

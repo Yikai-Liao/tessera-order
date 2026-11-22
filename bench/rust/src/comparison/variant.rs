@@ -617,6 +617,52 @@ mod tests {
         }
     }
 
+    /// An opponent that supports a non-sort operation names its call in the catalog's
+    /// `routes`, so a figure never shows a sort's label on an index or selection row; a
+    /// named route is one the adapter takes. Tessera's own labels name its calls.
+    #[cfg(feature = "operations")]
+    #[test]
+    fn catalog_routes_name_supported_operations() {
+        let operations = [
+            Operation::Argsort {},
+            Operation::SelectNth { index: 0 },
+            Operation::PartitionBuckets { bucket_count: 16 },
+        ];
+        for variant in list_variants()
+            .into_iter()
+            .filter(|v| !v.name.starts_with("tessera"))
+        {
+            let entry = crate::plan::catalog()
+                .implementations
+                .iter()
+                .find(|entry| entry.id == variant.name)
+                .expect("catalog implementation");
+            for operation in &operations {
+                let kind = serde_json::to_value(operation).unwrap()["kind"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned();
+                let supported = crate::plan::catalog().types.iter().any(|ty| {
+                    variant.supports(
+                        &CaseInput::new(&InputCase {
+                            ty: ty.id.clone(),
+                            distribution: "random".into(),
+                            len: 32,
+                            operation: operation.clone(),
+                        }),
+                        Execution::Serial,
+                    )
+                });
+                assert_eq!(
+                    entry.routes.contains_key(&kind),
+                    supported,
+                    "{} / {kind}: catalog route and adapter support differ",
+                    variant.name,
+                );
+            }
+        }
+    }
+
     #[test]
     fn reverse_adapters_preserve_inputs() {
         for ty in ["reverse_u64", "reverse_f64"] {

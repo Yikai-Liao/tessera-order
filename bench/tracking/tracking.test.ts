@@ -807,6 +807,8 @@ test("each operation gets its own section against its own reference", () => {
     ["", "full sort", "select_nth_unstable"],
   );
   assert.ok(!section("select_nth").figures.some((figure) => figure.name === "types"));
+  // Argsort has one input pattern, which its ranking already shows.
+  assert.ok(!section("argsort").figures.some((figure) => figure.name === "inputs"));
   // The home page keeps the sort ranking.
   assert.deepEqual(data.overview, section("sort").figures[0]);
 });

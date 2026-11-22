@@ -452,8 +452,9 @@ function renderInputs(field: Field, cohort: Cohort, name: string, ty = "u64"): F
         return [fieldRow(t, { input: label, sub: "", tag: "" }, s)];
       }),
   })).filter((g) => g.rows.length);
-  // The element-type figure already shows a type's shared pattern; a panel needs a few more.
-  if (plotted.length < (ty === "u64" ? 1 : 3)) return null;
+  // Comparing patterns needs two; the element-type figure already shows another type's shared
+  // pattern, so its panel needs a few more.
+  if (plotted.length < (ty === "u64" ? 2 : 3)) return null;
   const standings = plotted.map(([, s]) => s);
   const title = fieldTitle(standings, "inputs");
   return {

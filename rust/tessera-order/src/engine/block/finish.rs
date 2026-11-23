@@ -496,13 +496,20 @@ unsafe fn build_completion<T, Owner: MetadataCell<usize>, Free: MetadataCell<Vec
 }
 
 /// Builds the serial completion ledger with one shared free-block stack.
-fn build_serial_completion<T>(
+///
+/// # Safety
+///
+/// `partition` must not be dropped or reused until the returned `Completion`
+/// is dropped, keeping its input slice and scratch allocation exclusively
+/// owned, valid and unresized through normal completion and unwind recovery.
+unsafe fn build_serial_completion<T>(
     partition: &mut Partition<'_, '_, T>,
 ) -> Completion<T, core::cell::RefCell<usize>, core::cell::RefCell<Vec<usize>>> {
     assert!(partition.owns_recovery, "partition already completed");
     let input = partition.input;
     let len = partition.input_len;
-    // SAFETY: the single guard owns this complete scatter and its scratch.
+    // SAFETY: the single guard owns this complete scatter and its scratch,
+    // and the caller guarantees both outlive the returned Completion.
     unsafe {
         build_completion::<T, core::cell::RefCell<usize>, core::cell::RefCell<Vec<usize>>>(
             input,
@@ -519,7 +526,10 @@ pub(super) fn complete_serial<'records, T>(
     partition: &mut Partition<'records, '_, T>,
     mut visit: Option<Visit<'_, 'records, T>>,
 ) -> Vec<usize> {
-    let mut completion = build_serial_completion(partition);
+    // SAFETY: `completion` is dropped before this function returns or unwinds,
+    // and `partition` is not accessed or reused in between, so its input and
+    // scratch stay live and exclusive through completion and unwind recovery.
+    let mut completion = unsafe { build_serial_completion(partition) };
     for bucket in &mut completion.buckets {
         bucket.finish(&completion.storage, visit.as_deref_mut());
     }
@@ -1071,7 +1081,9 @@ mod serial_tests {
         let mut buffers = Buffers::new();
         let mut partition = Partition::new(&mut records, 1 << radix, block_size, &mut buffers);
         let _ = partition.step(|record: &(usize, usize)| record.0);
-        let mut completion = build_serial_completion(&mut partition);
+        // SAFETY: `completion` is dropped before `partition` or `buffers` are
+        // accessed again or dropped, keeping the input and scratch exclusive.
+        let mut completion = unsafe { build_serial_completion(&mut partition) };
         assert_eq!(completion.storage.free.len(), 1);
         let initial_capacity = completion.storage.free[0].borrow().capacity();
         for bucket in &mut completion.buckets {

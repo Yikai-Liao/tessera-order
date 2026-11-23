@@ -137,7 +137,7 @@ When the root digit covers all remaining variation in at most eight bits, direct
 
 ## Insertion and scans
 
-Every insertion pass, a budgeted probe or the finish of a tile or bucket, runs `order::insertion_loop`: find the first descending adjacent pair, lift the later record into a `Hole` guard, shift predecessors right by one slot while their keys exceed it, then drop the guard to write the held record into the sole vacated slot and resume after the original position. A probe returns its logical shift count and may stop at its budget. `finish_insertion` has no budget and returns `()`, so no unused count crosses a target-feature boundary. The loop receives an inversion scan alongside the extractor: user-key scans use the same mutable extractor, direct-key passes capture the backend selected before entering the loop. No insertion-only extractor carries a SIMD token.
+Every insertion pass, a budgeted probe or the finish of a tile or bucket, runs `order::insertion_loop`: find the first descending adjacent pair, lift the later record into a `Hole` guard, shift predecessors right by one slot while their keys exceed it, then drop the guard to write the held record into the sole vacated slot and resume scanning at the lifted record's former slot. A probe returns its logical shift count and may stop at its budget. `finish_insertion` has no budget and returns `()`, so no unused count crosses a target-feature boundary. The loop receives an inversion scan alongside the extractor: user-key scans use the same mutable extractor, direct-key passes capture the backend selected before entering the loop. No insertion-only extractor carries a SIMD token.
 
 | Pass | Implementation |
 |---|---|

@@ -17,6 +17,14 @@ PR builds now combine 64-byte function entries with LLVM’s 32-byte x86 branch-
 
 Branch alignment is not a free speedup: it changed the prototype's own time by −30% to +69% across small cases. Stable Rust has no attribute for function or branch alignment, so a source change that helps one binary can hurt another. The crate has nothing to fix; benchmarks control placement ([source-attribution controls](../development/benchmarking.md#additional-source-attribution-controls)), and CLI builds default to 64-byte loop and block alignment.
 
+## Short insertion leaves
+
+The fixed 48-record cutoff kept random inputs on quadratic adjacent swaps even when a radix pass was cheaper. The [width-based limit](../explain/tiles.md#three-leaves) keeps the existing insertion operation and routes wider records to radix sooner. A separate pair-insertion implementation helped random inputs but added two unwind guards and regressed highly skewed inputs in hosted measurements. Keeping the existing order check also preserves linear-time reversal on short descending inputs. In a nine-block linked comparison across seven layouts, random 48-record inputs took 0.62–0.76 times the standard stable sort’s time. Halving both the comparison allowance and the minimum length routed 16 owned records and 32 low-cardinality floats to radix too early. Open losses from the same comparison, against the standard stable sort or the previous engine:
+
+- Random `u64` at 8, 16 and 32 records still takes 2.07, 1.53 and 1.27 times the standard stable sort's time.
+- Nearly sorted `u32`, `u64` and `{u32, u32}` at 48 records are 18–22% slower than the previous engine in both baseline placements. Their new limits, 38, 32 and 32 records, send them to radix instead of a nearly free insertion pass.
+- Nearly sorted `f64` at 24 records is 19% slower than the previous engine in the primary current placement. The current copy ran 8% faster than the primary, so placement accounts for part of this gap.
+
 ## Port parity baseline
 
 The engine is a Stable Rust port of the research prototype in `sort-research-rs` at `6c0877f0491dc3b8fc052aa529bce44bf8a53fa8`. Measured inside one Nightly binary of the prototype's harness (fixed seed, one pinned core, rotated order, every output checked), the median per-case ratio `port / prototype` was 0.984–1.004 over 27–136 cases per matrix (ranges 0.53–1.23, placement-dominated), for both `sort_by_key` and `sort`, in the default build and with `target-cpu=native` and fat LTO. Cases outside the control range were within 3% of the prototype forced onto cached bucket IDs (`record128` zipf 1.3 n = 128: 1.168 against 1.030), the cost of the caching policy the port adopts on purpose ([record handling](engine.md#record-handling)); replacing it on 8-byte rows was [rejected](#recomputed-tile-buckets-rejected). The harness is Apache-2.0 code and stays outside the repository.

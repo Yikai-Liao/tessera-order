@@ -26,7 +26,7 @@ mod spans;
 use crate::engine::tile;
 
 use crate::engine::order::scan_varying_bits;
-use crate::engine::thresholds::{INSERTION_MAX, TILE_BYTES};
+use crate::engine::thresholds::{TILE_BYTES, insertion_limit};
 use crate::engine::workspace::Workspace;
 use plan::{NodePlan, plan_node};
 use tile::capacity as tile_capacity;
@@ -248,7 +248,7 @@ fn insertion_probe<T, E: Extract<T>>(
     // A failed limited pass on a small leaf would scan varying bits only to
     // select comparison finishing again. Keep its result unit-returning, so
     // stable direct insertion discards the unused count inside SIMD dispatch.
-    if records.len() <= INSERTION_MAX && records.len() <= tile_len {
+    if records.len() <= insertion_limit::<T>().min(tile_len) {
         extractor.finish_insertion(records);
         return true;
     }

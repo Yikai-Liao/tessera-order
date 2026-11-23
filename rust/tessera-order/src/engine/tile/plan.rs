@@ -4,7 +4,7 @@
 
 use super::{Cursor, MAX_DIGIT_BUCKETS};
 use crate::engine::key::Digit;
-use crate::engine::thresholds::INSERTION_MAX;
+use crate::engine::thresholds::insertion_limit;
 
 /// Widest digit supported by the tile cursor representation and budget.
 const MAX_TILE_DIGIT_BITS: usize = MAX_DIGIT_BUCKETS.ilog2() as usize;
@@ -83,7 +83,7 @@ pub(super) enum TilePlan {
 
 /// Chooses a leaf for a nonconstant, nonempty tile without allocating scratch.
 pub(super) fn plan_tile<T>(len: usize, varying: u128) -> TilePlan {
-    if len <= INSERTION_MAX {
+    if len <= insertion_limit::<T>() {
         return TilePlan::Insertion;
     }
     plan_digits(varying, tile_digit_bits(len, core::mem::size_of::<T>()))
@@ -160,7 +160,7 @@ mod tests {
             (1 << 127) | 1
         );
         assert!(matches!(
-            plan_tile::<u64>(48, u64::MAX as u128),
+            plan_tile::<u64>(16, u64::MAX as u128),
             TilePlan::Insertion
         ));
     }

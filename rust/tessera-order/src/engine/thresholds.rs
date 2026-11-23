@@ -2,8 +2,15 @@
 
 //! Internal engine budgets and representation limits, also exposed to benchmarks.
 
-/// Largest leaf finished by stable insertion.
+/// Count ceiling for stable insertion, before accounting for record movement.
 pub const INSERTION_MAX: usize = 48;
+
+/// Charge each inversion one comparison plus the inline bytes moved.
+pub(crate) fn insertion_limit<T>() -> usize {
+    const COMPARISON_BYTES: usize = 16;
+    (INSERTION_MAX * COMPARISON_BYTES / (COMPARISON_BYTES + size_of::<T>())).max(16)
+}
+
 /// Default tile budget, in bytes of records.
 pub const TILE_BYTES: usize = 64 * 1024;
 /// Most records in one tile, so that a `u16` cursor addresses any of them.

@@ -127,7 +127,7 @@ const boxes: Box[] = [
     y: 526,
     w: 190,
     title: "Insertion sort",
-    detail: "≤ 48 records",
+    detail: "limit depends on record width",
     link: "/explain/tiles#insertion",
     kind: "tile",
   },

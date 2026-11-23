@@ -862,11 +862,19 @@ test("each operation gets its own section against its own reference", () => {
     "select_nth/u64/far_swaps/65536/s1/32768": 5,
   });
   const selection = comparisonData(
-    new Map([...runs, ["std-unstable", [fasterSelection]], ["x86simdsort", [fasterSelection]]]),
+    new Map([
+      ...runs,
+      ["std-unstable", [fasterSelection]],
+      ["x86simdsort", [fasterSelection]],
+      ["glidesort", [fasterSelection]],
+    ]),
   ).operations.find((entry) => entry.id === "select_nth")!;
-  assert.equal(selection.figures[0].title, "Ranked 3rd of 4 selections");
-  assert.equal(selection.headline?.rank, 1);
-  assert.equal(selection.headline?.of, 2);
+  // Both unstable selectors stay in the figure, ahead of Tessera's 4×.
+  for (const name of ["select_nth_unstable", "qselect"])
+    assert.match(selection.figures[0].table, new RegExp(`${name}\\).*\\| unstable \\| 8×`));
+  // The figure ranks every selector; the summary ranks only stable ones, so Glidesort alone is ahead.
+  assert.equal(selection.headline?.rank, 2);
+  assert.equal(selection.headline?.of, 3);
   assert.equal(selection.headline?.operation, "Stable selection");
   // The summary shares the section's reference: 40 ns over Tessera's 10 ns.
   assert.ok(Math.abs(selection.headline!.speed - 4) < 1e-9);

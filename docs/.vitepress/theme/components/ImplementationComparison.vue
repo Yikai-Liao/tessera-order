@@ -17,10 +17,16 @@ const props = withDefaults(defineProps<{ view?: "overview" | "all"; source?: str
 
 const data = shallowRef<ComparisonData | null>(null);
 const error = shallowRef("");
+// The headings appear only after the fetch, so the page's outline and a link's fragment are
+// resolved again once they render. `contentUpdatedCallbacks` is a private VitePress 1.6 export
+// (declared in env.d.ts); after a VitePress upgrade, check that both outlines list these headings.
 watch(
   data,
   () => {
-    if (props.view === "all") for (const refresh of contentUpdatedCallbacks) refresh();
+    if (props.view !== "all") return;
+    for (const refresh of contentUpdatedCallbacks) refresh();
+    const target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (target) target.scrollIntoView();
   },
   { flush: "post" },
 );
@@ -162,8 +168,8 @@ function provenance(runs: Run[]) {
         </div>
         <p class="lead">
           <strong>How to read the figures.</strong> Each dot is one implementation, and further right
-          is faster. Speed is relative to the standard library call named in each section, so 2× takes
-          half the time. Tessera is the blue dot. Every figure lists its values in a table below it.
+          is faster. Speed is relative to the reference each figure names, so 2× takes half the time;
+          serial figures compare with the standard library's stable call. Tessera is the blue dot. Every figure lists its values in a table below it.
         </p>
       </template>
       <section v-for="section in sections" :key="section.id" class="operation">
@@ -300,6 +306,10 @@ function provenance(runs: Run[]) {
 }
 .headline-stat .nowrap {
   white-space: nowrap;
+}
+.operation-title,
+.subject {
+  scroll-margin-top: calc(var(--vp-nav-height) + 24px);
 }
 .subject {
   margin: 48px 0 8px;

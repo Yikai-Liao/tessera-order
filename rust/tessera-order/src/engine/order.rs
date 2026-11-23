@@ -56,6 +56,25 @@ pub(crate) fn scan_varying_bits<T, E: Extract<T>>(
     (union.to_u128() ^ intersection.to_u128()) & candidate
 }
 
+/// Holds a moved-out record while insertion shifts predecessors right,
+/// restoring it to the vacated slot on normal completion, budget exit or unwind.
+struct Hole<T> {
+    value: core::mem::ManuallyDrop<T>,
+    dest: *mut T,
+}
+
+impl<T> Drop for Hole<T> {
+    #[inline]
+    fn drop(&mut self) {
+        // SAFETY: `dest` is the single vacated slot in the active slice and
+        // `value` holds the moved-out record that restores ownership.
+        unsafe {
+            self.dest
+                .write(core::mem::ManuallyDrop::take(&mut self.value))
+        };
+    }
+}
+
 /// Stably inserts inverted records until sorted or the swap budget runs out.
 /// A failed pass still leaves a stable permutation of the input.
 ///
@@ -75,25 +94,42 @@ pub(crate) fn insertion_loop<T, E: Extract<T>>(
     let mut start = 0;
     while let Some(offset) = first_inversion(&records[start..], extractor) {
         let index = start + offset + 1;
-        let (prefix, tail) = records.split_at_mut(index);
-        let (mut current, prefix) = prefix.split_last_mut().unwrap();
-        // The scan already compared this pair, so swap without re-reading keys.
-        core::mem::swap(current, &mut tail[0]);
+        let base = records.as_mut_ptr();
+        // SAFETY: `offset < records[start..].len() - 1`, so `0 < index < records.len()`.
+        // Lifting `index` and moving `index - 1` into `index` leaves `index - 1` as
+        // the sole vacated slot, which `Hole::drop` restores on any exit or unwind.
+        let mut hole = unsafe {
+            let dest = base.add(index - 1);
+            let value = core::mem::ManuallyDrop::new(base.add(index).read());
+            core::ptr::copy_nonoverlapping(dest, base.add(index), 1);
+            Hole { value, dest }
+        };
         swaps += 1;
         if swaps > budget {
             return None;
         }
-        for before in prefix.iter_mut().rev() {
-            if extractor.key(before) <= extractor.key(current) {
+        while hole.dest > base {
+            // SAFETY: `hole.dest > base` and stays within `records`, so `prev` is an
+            // initialized slot distinct from `hole.dest`; the borrow ends before writes.
+            let (prev, prev_key) = unsafe {
+                let prev = hole.dest.sub(1);
+                (prev, extractor.key(&*prev))
+            };
+            if prev_key <= extractor.key(&hole.value) {
                 break;
             }
-            core::mem::swap(before, current);
-            current = before;
+            // SAFETY: `prev` is initialized and `hole.dest` (`prev + 1`) is the sole
+            // vacated slot; updating `hole.dest` restores the drop invariant immediately.
+            unsafe {
+                core::ptr::copy_nonoverlapping(prev, hole.dest, 1);
+                hole.dest = prev;
+            }
             swaps += 1;
             if swaps > budget {
                 return None;
             }
         }
+        drop(hole);
         start = index;
     }
     Some(swaps)
@@ -147,6 +183,67 @@ mod tests {
     use super::*;
     use crate::engine::key::ByKey;
     use alloc::vec::Vec;
+
+    #[test]
+    fn hole_shift_restores_records_on_panic_budget_and_zst() {
+        extern crate std;
+        use std::cell::Cell;
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+
+        // Owned and mutable-reference records across panic at every shift depth
+        // and budget exhaustion: every original record must remain live once.
+        let keys = [5u64, 4, 3, 2, 1, 0];
+        for panic_at in 1..=12 {
+            let mut backing: Vec<usize> = (0..keys.len()).collect();
+            let mut records: Vec<_> = backing
+                .iter_mut()
+                .enumerate()
+                .map(|(id, slot)| (id, Cell::new(keys[id]), slot))
+                .collect();
+            let mut calls = 0usize;
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let mut extract = ByKey(|r: &(usize, Cell<u64>, &mut usize)| {
+                    calls += 1;
+                    if calls == panic_at {
+                        r.1.set(99);
+                        std::panic::panic_any(r.0);
+                    }
+                    r.1.get()
+                });
+                let _ = insertion_loop(&mut records, usize::MAX, &mut extract, by_key);
+            }));
+            if let Err(payload) = result {
+                let id = *payload.downcast::<usize>().unwrap();
+                records.sort_unstable_by_key(|r| r.0);
+                for (i, (rec_id, cell, slot)) in records.iter().enumerate() {
+                    assert_eq!(*rec_id, i);
+                    assert_eq!(**slot, i);
+                    assert_eq!(cell.get(), if i == id { 99 } else { keys[i] });
+                }
+            }
+        }
+
+        // Budget exhaustion leaves a valid stable permutation of equal keys.
+        let mut tied: Vec<(u64, usize)> = vec![(3, 0), (3, 1), (1, 2), (2, 3), (1, 4)];
+        let mut extract = ByKey(|r: &(u64, usize)| r.0);
+        assert_eq!(insertion_loop(&mut tied, 2, &mut extract, by_key), None);
+        let mut by_id = tied.clone();
+        by_id.sort_unstable_by_key(|r| r.1);
+        assert_eq!(by_id, vec![(3, 0), (3, 1), (1, 2), (2, 3), (1, 4)]);
+        for key in [1u64, 2, 3] {
+            let ids: Vec<usize> = tied.iter().filter(|r| r.0 == key).map(|r| r.1).collect();
+            assert!(ids.is_sorted(), "stability broken for key {key}: {tied:?}");
+        }
+
+        // Zero-sized records remain sound under pointer arithmetic.
+        let mut zsts = [(); 8];
+        let mut zst_key = 8u8;
+        let mut extract = ByKey(|_: &()| {
+            zst_key = zst_key.saturating_sub(1);
+            zst_key
+        });
+        let _ = insertion_loop(&mut zsts, 4, &mut extract, by_key);
+    }
 
     #[test]
     fn confirmation_checks_group_boundaries_and_preserves_key_order() {

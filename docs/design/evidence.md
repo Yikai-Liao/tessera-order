@@ -19,7 +19,11 @@ Branch alignment is not a free speedup: it changed the prototype's own time by �
 
 ## Short insertion leaves
 
-The fixed 48-record cutoff kept random inputs on quadratic adjacent swaps even when a radix pass was cheaper. The [width-based limit](../explain/tiles.md#three-leaves) keeps the existing insertion operation and routes wider records to radix sooner. A separate pair-insertion implementation helped random inputs but added two unwind guards and regressed highly skewed inputs in hosted measurements. Keeping the existing order check also preserves linear-time reversal on short descending inputs. In a nine-block linked comparison across seven layouts, random 48-record inputs took 0.62–0.76 times the standard stable sort’s time. Halving both the comparison allowance and the minimum length routed 16 owned records and 32 low-cardinality floats to radix too early. Tiny random keys and nearly sorted inputs remain open.
+The fixed 48-record cutoff kept random inputs on quadratic adjacent swaps even when a radix pass was cheaper. The [width-based limit](../explain/tiles.md#three-leaves) keeps the existing insertion operation and routes wider records to radix sooner. A separate pair-insertion implementation helped random inputs but added two unwind guards and regressed highly skewed inputs in hosted measurements. Keeping the existing order check also preserves linear-time reversal on short descending inputs. In a nine-block linked comparison across seven layouts, random 48-record inputs took 0.62–0.76 times the standard stable sort’s time. Halving both the comparison allowance and the minimum length routed 16 owned records and 32 low-cardinality floats to radix too early. Open losses from the same comparison, against the standard stable sort or the previous engine:
+
+- Random `u64` at 8, 16 and 32 records still takes 2.07, 1.53 and 1.27 times the standard stable sort's time.
+- Nearly sorted `u32`, `u64` and `{u32, u32}` at 48 records are 18–22% slower than the previous engine in both baseline placements. Their new limits, 38, 32 and 32 records, send them to radix instead of a nearly free insertion pass.
+- Nearly sorted `f64` at 24 records is 19% slower than the previous engine in the primary current placement. The current copy ran 8% faster than the primary, so placement accounts for part of this gap.
 
 ## Port parity baseline
 

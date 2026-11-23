@@ -23,6 +23,8 @@ Reduce payload movement for dense interior ranks. The root currently moves recor
 
 Cached-key distribution on block-sized inputs still builds per-bucket ends and invokes a no-op finisher through the block operation that full refinement needs for boundaries and child finishing. This change removes only tile boundary output; it does not establish a block speedup. Revisit a complete movement-only block operation if allocation or timing evidence justifies it, keeping the same restoration guarantees.
 
+Close the [short insertion leaf losses](docs/design/evidence.md#short-insertion-leaves): tiny random keys still trail the standard stable sort, and nearly sorted inputs just above the width-based limit lost to the previous engine. Done when those cases match or beat the previous engine and the standard stable sort under placement controls, without returning random 48-record inputs to insertion.
+
 Resolve short-input placement sensitivity for [shared order confirmation](docs/design/evidence.md#shared-order-confirmation-for-serial-operations) before claiming a gain across input sizes.
 
 Next capabilities follow the [engine capability design](docs/design/operation-extensions-proposal.md#further-engine-capabilities), each with a concrete consumer and independent acceptance:

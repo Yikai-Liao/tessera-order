@@ -701,6 +701,15 @@ test("the comparison ranks latest runs on Tessera's hardware over a common cohor
   const tessera = rows.find((row) => row.strong)!;
   // Geometric mean of 40/10 and 20/20; the worst peak over the cohort's cases.
   assert.deepEqual(tessera.cells, ["2×", "100 B"]);
+  assert.deepEqual(data.operations[0].headline, {
+    operation: "Full sort",
+    speed: 2,
+    rank: 1,
+    of: 3,
+    memoryBytes: 100,
+    referenceMemoryBytes: 2,
+    noun: "sorts",
+  });
   assert.ok(!JSON.stringify(rows).includes("radsort"));
   // Lengths with a single pattern per type are threshold probes: the length figure and the
   // short-input figure use only lengths where some type has several patterns.
@@ -796,6 +805,7 @@ test("each operation gets its own section against its own reference", () => {
   const section = (id: string) => data.operations.find((entry) => entry.id === id)!;
   const argsort = section("argsort").figures[0];
   assert.equal(argsort.title, "Fastest of 3 stable argsorts");
+  assert.equal(section("argsort").headline?.of, 3);
   const argsortGroups = (argsort.chart as RowChart).groups;
   assert.deepEqual(
     argsortGroups.map((group) => group.title),
@@ -850,6 +860,21 @@ test("each operation gets its own section against its own reference", () => {
   // The home page keeps the sort ranking.
   assert.deepEqual(data.overview, section("sort").figures[0]);
   assert.doesNotMatch(data.overview!.table, /Composition/);
+
+  const fasterSelection = tracked({
+    "select_nth/u64/random/65536/s1/32768": 5,
+    "select_nth/u64/far_swaps/65536/s1/32768": 5,
+  });
+  const selection = comparisonData(
+    new Map([...runs, ["std-unstable", [fasterSelection]], ["x86simdsort", [fasterSelection]]]),
+  ).operations.find((entry) => entry.id === "select_nth")!;
+  assert.equal(selection.figures[0].title, "Ranked 3rd of 4 selections");
+  assert.equal(selection.headline?.rank, 1);
+  assert.equal(selection.headline?.of, 2);
+  // The summary divides by the standard library's stable call, not the unstable reference.
+  assert.equal(selection.headline?.operation, "Stable selection");
+  // Tessera at 0.5× and slice::sort's full sort at 0.125× of select_nth_unstable.
+  assert.ok(Math.abs(selection.headline!.speed - 4) < 1e-9);
 });
 
 test("parameter figures compare matching inputs against the operation's reference", () => {
@@ -1041,6 +1066,15 @@ test("the comparison ranks 32-bit-key records and adds parallel scaling", () => 
   // A faster unstable sort does not displace Tessera among stable record sorts.
   const unstable = comparisonData(new Map([...runs, ["std-unstable", [serial([1, 1, 1])]]]));
   assert.equal(unstable.overview!.title, "Fastest of 2 stable sorts");
+  assert.deepEqual(unstable.operations[0].headline, {
+    operation: "Full sort",
+    speed: 4,
+    rank: 1,
+    of: 2,
+    memoryBytes: null,
+    referenceMemoryBytes: null,
+    noun: "sorts",
+  });
   const latest = latestRuns(runs)!.runs;
   const scaling = trackingScaling(latest)!;
   assert.deepEqual([scaling.n, scaling.threads], [1000000, [1, 2]]);

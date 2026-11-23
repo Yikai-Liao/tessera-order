@@ -18,6 +18,7 @@ import {
   referenceLabel,
   route,
   SORT,
+  stableReference,
 } from "../catalog.ts";
 import { type CurveChart, renderCurves } from "../plot/curves.ts";
 import type { NameCell } from "../plot/layout.ts";
@@ -30,6 +31,8 @@ import {
   type Tone,
 } from "../plot/rows.ts";
 import { geomean, median } from "../statistics.ts";
+import type { ComparisonHeadline } from "../tracking/result.ts";
+import { formatBytes, ordinal, times } from "./format.ts";
 import {
   caseId,
   type Dataset,
@@ -62,6 +65,7 @@ export interface Figure {
   kind?: "curves";
   svg: string;
   table: string;
+  headline?: ComparisonHeadline;
 }
 
 const rendered = (chart: Chart) => ({ chart, svg: renderRows(chart) });
@@ -135,6 +139,8 @@ function terms(operation: Operation) {
   return {
     reference,
     referenceLabel: referenceLabel(operation, "serial")!,
+    stableReference: stableReference(operation),
+    description: operationParts(operation).entry.description,
     one,
     many: operationNoun(operation, 2),
     title: one[0].toUpperCase() + one.slice(1),
@@ -178,26 +184,8 @@ const typeGroups = (t: Terms) =>
 const LARGE = 1000000;
 const SHORT = 1000;
 
-// Two significant digits, except that values near 1 keep two decimals so a
-// small difference does not print as "1×". Small positive values keep
-// significant digits rather than rounding to zero.
-const times = (v: number) =>
-  `${v < 0.01 ? v.toPrecision(2) : v >= 100 ? v.toFixed(0) : v < 1.095 ? v.toFixed(2) : Number(v.toPrecision(2))}×`;
 const formatLength = (n: number) => n.toLocaleString("en-US");
 const formatNs = (v: number) => `${Number(v.toPrecision(3))} ns`;
-function formatBytes(n: number) {
-  for (const [unit, size] of [
-    ["GB", 1e9],
-    ["MB", 1e6],
-    ["kB", 1e3],
-  ] as const)
-    if (n >= size) return `${Number((n / size).toPrecision(n / size >= 100 ? 3 : 2))} ${unit}`;
-  return `${n} B`;
-}
-const ordinal = (k: number) => {
-  const teen = k % 100 >= 11 && k % 100 <= 13;
-  return `${k}${teen ? "th" : (["th", "st", "nd", "rd"][k % 10] ?? "th")}`;
-};
 function markdownTable(headers: string[], rows: string[][]) {
   return `| ${headers.join(" | ")} |\n| ${headers.map(() => "---").join(" | ")} |\n${rows.map((r) => `| ${r.join(" | ")} |`).join("\n")}\n`;
 }
@@ -306,29 +294,46 @@ function renderRanking(field: Field, cohort: Cohort, memory = false): Figure | n
   const records = recordType(cohort.ranking.ty).task === "records";
   const competitors = complete.filter((e) => !e.composition);
   const compositions = complete.filter((e) => e.composition);
-  const others = competitors.filter((e) => !e.cell.strong && (!records || e.stable));
-  const rank = 1 + others.filter((e) => e.speeds[at] > anchor.speeds[at]).length;
+  const stable = competitors.filter((e) => e.stable);
+  const unstable = competitors.filter((e) => !e.stable);
+  const faster = (e: (typeof complete)[number]) => e.speeds[at] > anchor.speeds[at];
+  const contenders = records ? stable : competitors;
+  const rank = 1 + contenders.filter(faster).length;
+  const input = `${formatLength(cohort.ranking.n)} ${elements(cohort.ranking.ty)}`;
+  // The summary compares Tessera with the standard library's stable call for the same result.
+  const base = complete.find((e) => e.name === t.stableReference);
   const row = (e: (typeof complete)[number]): Row => ({
     name: e.cell,
     marks: [{ value: e.speeds[at], tone: e.tone }],
     cells: [times(e.speeds[at]), ...(memory ? [e.peak === null ? "–" : formatBytes(e.peak)] : [])],
     strong: e.cell.strong,
   });
-  const contenders = `${others.length + 1} ${records ? "stable " : ""}${t.many}`;
-  const title =
-    rank === 1 ? `Fastest of ${contenders}` : `Ranked ${ordinal(rank)} of ${contenders}`;
+  const fieldSize = `${contenders.length} ${records ? "stable " : ""}${t.many}`;
+  const title = rank === 1 ? `Fastest of ${fieldSize}` : `Ranked ${ordinal(rank)} of ${fieldSize}`;
   return {
     name: memory ? "overview" : "ranking",
     subject: "Overall ranking",
     summary: `Every ${t.one} on the same ${elements(cohort.ranking.ty)}, ranked by speed relative to ${t.referenceLabel}${memory ? ", with the largest extra memory it allocated" : ""}. ${records ? `Records rank Tessera among stable ${t.many}; unstable ${t.many}, which may reorder equal keys, are shown separately.` : `Stable and unstable ${t.many} are grouped separately.`}`,
     title,
+    ...(memory &&
+      base && {
+        headline: {
+          operation: t.description,
+          speed: anchor.speeds[at] / base.speeds[at],
+          rank: 1 + stable.filter(faster).length,
+          of: stable.length,
+          memoryBytes: anchor.peak,
+          referenceMemoryBytes: base.peak,
+          noun: t.many,
+        },
+      }),
     ...rendered({
       title,
-      guide: `${formatLength(cohort.ranking.n)} ${elements(cohort.ranking.ty)} · speed vs ${t.referenceLabel}, ${cohort.ranking.label}`,
+      guide: `${input} · speed vs ${t.referenceLabel}, ${cohort.ranking.label}`,
       columns: ["Speed", ...(memory ? ["Extra memory"] : [])],
       groups: [
-        { title: `Stable ${t.many}`, rows: competitors.filter((e) => e.stable).map(row) },
-        { title: `Unstable ${t.many}`, rows: competitors.filter((e) => !e.stable).map(row) },
+        { title: `Stable ${t.many}`, rows: stable.map(row) },
+        { title: `Unstable ${t.many}`, rows: unstable.map(row) },
         { title: "Composition", rows: compositions.map(row) },
       ].filter((g) => g.rows.length),
       scale: speedScale(

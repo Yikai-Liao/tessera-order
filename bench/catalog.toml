@@ -91,7 +91,9 @@ lengths = [1000,65536,1000000,10000000]
 # integers, in identity order, shown with their optional label. `reference` is
 # the implementation whose serial column is the speed denominator: what a Rust
 # user writes today with the standard library for the same result.
-# `parallel_reference` is the denominator at each pool size. `noun` names one call in
+# `stable_reference` is the standard library's stable call for the same result, where
+# `reference` is unstable; the comparison summary divides by it, because Tessera is
+# stable. `parallel_reference` is the denominator at each pool size. `noun` names one call in
 # figure text: "Fastest of 4 selections".
 [[operations]]
 id = "sort"
@@ -117,6 +119,7 @@ id = "select_nth"
 label = "select_nth"
 noun = "selection"
 reference = "std-unstable"
+stable_reference = "std-stable"
 description = "Stable selection"
 parameters = [{ id = "index", label = "rank" }]
 

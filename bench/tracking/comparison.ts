@@ -303,6 +303,7 @@ export function comparisonData(
     const growthFigure = growth && sweep ? trackingGrowth(sweep, growth.hash) : undefined;
     // The site renders each chart itself; the table names every plotted value.
     const all = cohort ? comparisonFigures(field, cohort, true, growthFigure) : [];
+    const headline = all.find((figure) => figure.name === "overview")?.headline;
     // Parameter axes and parallel scaling follow the fixed-parameter speed figures.
     const memory = all.findIndex((figure) => figure.name === "memory");
     all.splice(memory < 0 ? all.length : memory, 0, ...axes, ...(parallel ? [parallel] : []));
@@ -314,6 +315,7 @@ export function comparisonData(
         id: kind,
         label: operationDescription(field.operation),
         reference: referenceLabel(field.operation, "serial"),
+        ...(headline && { headline }),
         runs: trackingImplementations
           .filter(({ id }) => names.has(id))
           .map(({ id: name }) => {

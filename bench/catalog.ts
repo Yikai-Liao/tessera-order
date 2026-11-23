@@ -71,6 +71,8 @@ export const catalog = z
         parallel_label: z.string().optional(),
         /** The implementation whose serial column is the speed denominator. */
         reference: z.string(),
+        /** The standard library's stable call for the same result, where `reference` is unstable. */
+        stable_reference: z.string().optional(),
         /** The implementation whose column at the same pool size is the parallel denominator. */
         parallel_reference: z.string().optional(),
         description: z.string(),
@@ -90,6 +92,10 @@ export const catalog = z
           catalog.implementations.some(
             (entry) => entry.id === operation.reference && entry.parallel !== "only",
           ) &&
+          (operation.stable_reference === undefined ||
+            catalog.implementations.some(
+              (entry) => entry.id === operation.stable_reference && entry.parallel !== "only",
+            )) &&
           (operation.parallel_reference === undefined ||
             catalog.implementations.some(
               (entry) => entry.id === operation.parallel_reference && entry.parallel,
@@ -370,6 +376,12 @@ export function referenceColumn(operation: Operation, execution: Execution): Col
   const entry = operations.get(operation.kind)!;
   const implementation = execution === "serial" ? entry.reference : entry.parallel_reference;
   return implementation === undefined ? undefined : { implementation, execution };
+}
+
+/** The serial reference that keeps equal keys in order: Tessera's summary denominator. */
+export function stableReference(operation: Operation) {
+  const entry = operations.get(operation.kind)!;
+  return entry.stable_reference ?? entry.reference;
 }
 
 /** The display label of an operation's reference implementation at an execution. */

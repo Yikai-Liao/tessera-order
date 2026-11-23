@@ -1,5 +1,4 @@
 ---
-aside: false
 pageClass: performance-page
 ---
 
@@ -9,7 +8,7 @@ pageClass: performance-page
 import ImplementationComparison from "../.vitepress/theme/components/ImplementationComparison.vue";
 </script>
 
-How Tessera compares with other Rust and C++ implementations of the same operation on the same inputs, measured on Bencher's Intel v1 Bare Metal runners. Each operation has its own section: full sorting, argsort, selection and category partitioning. Each implementation's latest run is shown; Tessera runs on every relevant main push and opponents when dispatched.
+How Tessera compares with other Rust and C++ implementations of the same operation, on the same inputs and the same kind of machine. The summary gives each operation's main result; the sections after it break each result down by input length, input pattern, element type and memory.
 
 <ImplementationComparison />
 

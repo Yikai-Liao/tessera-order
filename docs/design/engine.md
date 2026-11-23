@@ -137,7 +137,7 @@ When the root digit covers all remaining variation in at most eight bits, direct
 
 ## Insertion and scans
 
-Every insertion pass, a budgeted probe or the finish of a tile or bucket, runs `order::insertion_loop`: find the first descending adjacent pair, move the later record left, resume after it. A probe returns its swap count and may stop at its budget. `finish_insertion` has no budget and returns `()`, so no unused count crosses a target-feature boundary. The loop receives an inversion scan alongside the extractor: user-key scans use the same mutable extractor, direct-key passes capture the backend selected before entering the loop. No insertion-only extractor carries a SIMD token.
+Every insertion pass, a budgeted probe or the finish of a tile or bucket, runs `order::insertion_loop`: find the first descending adjacent pair, lift the later record into a `Hole` guard, shift predecessors right by one slot while their keys exceed it, then drop the guard to write the held record into the sole vacated slot and resume after the original position. A probe returns its logical shift count and may stop at its budget. `finish_insertion` has no budget and returns `()`, so no unused count crosses a target-feature boundary. The loop receives an inversion scan alongside the extractor: user-key scans use the same mutable extractor, direct-key passes capture the backend selected before entering the loop. No insertion-only extractor carries a SIMD token.
 
 | Pass | Implementation |
 |---|---|
@@ -171,6 +171,7 @@ Key functions are user code and may panic. On a panic:
 
 - the block partition guard retains bucket cursors and input-block progress; on unwind its destructor derives the unread suffix, appends it to bucket 0 without calling the failed classifier, and completes the chains through the source ledger;
 - a tile keeps a pointer to the complete record set of the last finished pass and copies it back if needed;
+- during insertion, `order::Hole` holds the lifted moving record and tracks the sole vacated slot; on normal exit, budget exhaustion or unwind, its destructor writes that record back into the vacancy without calling the key function;
 - ordinary unwinding propagates the panic after the guards restore ownership.
 
 The slice then holds every record once, in an unspecified order. Every build uses this recovery; there is no abort-only variant.

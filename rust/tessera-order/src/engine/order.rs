@@ -235,6 +235,26 @@ mod tests {
             assert!(ids.is_sorted(), "stability broken for key {key}: {tied:?}");
         }
 
+        // Budget exhaustion during a multi-step shift inside a single insertion:
+        // the first shift uses 1 <= 2, and only the inner shift loop exceeds the
+        // budget (3 > 2), restoring the held record and keeping equal keys stable.
+        let mut inner_budget: Vec<(u64, usize)> =
+            vec![(1, 0), (2, 1), (2, 2), (3, 3), (4, 4), (0, 5)];
+        let mut extract = ByKey(|r: &(u64, usize)| r.0);
+        assert_eq!(
+            insertion_loop(&mut inner_budget, 2, &mut extract, by_key),
+            None
+        );
+        let mut by_id = inner_budget.clone();
+        by_id.sort_unstable_by_key(|r| r.1);
+        assert_eq!(by_id, vec![(1, 0), (2, 1), (2, 2), (3, 3), (4, 4), (0, 5)]);
+        let twos: Vec<usize> = inner_budget
+            .iter()
+            .filter(|r| r.0 == 2)
+            .map(|r| r.1)
+            .collect();
+        assert_eq!(twos, vec![1, 2]);
+
         // Zero-sized records remain sound under pointer arithmetic.
         let mut zsts = [(); 8];
         let mut zst_key = 8u8;

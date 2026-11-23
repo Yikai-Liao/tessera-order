@@ -9,7 +9,8 @@ Records move by bitwise copies between the input slice and scratch memory of typ
 At every point, each record has exactly one **live** copy, and the engine always knows which copy it is:
 
 - in the block partition, the bucket chains and then the completion ledger name every live block prefix ([invariants](block-partition.md#invariants));
-- in a tile, the `RestoreTile` guard remembers whether the complete set is in the tile or in scratch.
+- in a tile, the `RestoreTile` guard remembers whether the complete set is in the tile or in scratch;
+- during insertion, the `Hole` guard holds the lifted moving record and points to the single vacated slot while predecessors shift right ([engine reference](../design/engine.md#panic-safety)).
 
 The key function only ever borrows a live record.
 
@@ -29,6 +30,7 @@ A key-function panic propagates only after every live record is back in the inpu
 
 - **During a block scatter**, the partition guard retains the writers and input-block progress. On unwind its destructor works out how far the pass got from the bucket cursors and the number of input blocks consumed. It then finishes the pass **without calling the key function again**, sending every unread record to bucket 0. The result is a valid, unsorted pass, and the [completion ledger](block-partition.md#completion) copies every record back into the input.
 - **During a tile pass**, `RestoreTile` copies the last complete record set back into the tile if it was in scratch. The interrupted pass only wrote stale copies into the other buffer.
+- **During an insertion pass**, `Hole` writes the lifted moving record back into the single vacated slot without calling the key function ([engine reference](../design/engine.md#panic-safety)).
 - **During a completion callback** (a band finished while cache-hot), ordinary unwinding reaches the completion guard after parallel jobs join. The guard completes unpublished bands without callbacks and never accesses a band already lent to a callback.
 
 Afterwards the slice holds every record exactly once, in an unspecified order.

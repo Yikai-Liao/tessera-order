@@ -52,7 +52,7 @@ impl<T: BenchmarkRecord, F: FnMut(&[T]) -> Vec<usize>> Kernel for IndexKernel<T,
 }
 
 /// Prepares immutable source and independent stable index reference once.
-pub(super) fn indices<T: BenchmarkRecord>(
+pub(in crate::comparison) fn indices<T: BenchmarkRecord>(
     variant: Variant,
     input: Rc<PreparedRecords<T>>,
     description: &'static str,
@@ -359,6 +359,7 @@ mod tests {
                         operation: operation.clone(),
                     });
                     let category_grouping = matches!(operation, Operation::PartitionBuckets { .. });
+                    let selection = matches!(operation, Operation::SelectNth { .. });
                     for variant in list_variants() {
                         // An independent capability oracle protects admission,
                         // including no silent full-sort substitution.
@@ -366,6 +367,8 @@ mod tests {
                             "tessera" | "tessera-full" | "std-stable" | "glidesort" => true,
                             "radsort" => category_grouping || !ty.starts_with("reverse_"),
                             "std-unstable" => !category_grouping,
+                            "vqsort" => matches!(ty, "u32" | "u64") && selection,
+                            "x86simdsort" => matches!(ty, "u32" | "u64") && !category_grouping,
                             _ => false,
                         };
                         let prepared = variant.prepare(&input, crate::plan::Execution::Serial, 0);

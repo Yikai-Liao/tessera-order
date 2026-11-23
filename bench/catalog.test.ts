@@ -20,6 +20,7 @@ import {
   parseExecution,
   referenceColumn,
   referenceLabel,
+  route,
   routeStable,
   SORT,
 } from "./catalog.ts";
@@ -48,6 +49,19 @@ test("std-unstable guarantees stable argsort through its original-index tie-brea
   assert.equal(routeStable("std-unstable", { kind: "argsort" }), true);
   assert.equal(routeStable("std-unstable", SORT), false);
   assert.equal(routeStable("std-unstable", { kind: "select_nth", index: 0 }), false);
+});
+
+test("native selections are unstable and repaired x86simdsort argsort is stable", () => {
+  const selection = { kind: "select_nth", index: 0 } as const;
+  const argsort = { kind: "argsort" } as const;
+  assert.equal(route("vqsort", selection), "VQSelect");
+  assert.equal(route("x86simdsort", selection), "qselect");
+  assert.equal(routeStable("vqsort", selection), false);
+  assert.equal(routeStable("x86simdsort", selection), false);
+  assert.equal(route("vqsort", argsort), undefined);
+  assert.equal(route("x86simdsort", argsort), "argsort, ties put in index order");
+  assert.equal(routeStable("x86simdsort", argsort), true);
+  assert.equal(routeStable("x86simdsort", SORT), false);
 });
 
 test("identities match the shared language fixture in both directions", () => {

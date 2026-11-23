@@ -16,6 +16,9 @@ hero:
       text: How it works
       link: /explain/
     - theme: alt
+      text: Benchmarks
+      link: /benchmarks/implementations
+    - theme: alt
       text: GitHub
       link: https://github.com/Yikai-Liao/tessera-order
 
